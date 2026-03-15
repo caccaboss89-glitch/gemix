@@ -1,0 +1,104 @@
+const { getRomeTime } = require('../utils/time');
+const { ACTIVE_MEMBERS } = require('../config/members');
+
+function buildSystemPrompt(ctx) {
+  const now = getRomeTime();
+  const membersList = ACTIVE_MEMBERS.map(m => `- ${m.name} (Discord: ${m.nicks.join(' / ')})`).join('\n');
+  const isActiveMember = ctx.userIdentity?.isActiveMember;
+
+  let prompt = `Sei GemiX, unione di Gemini e Grok, assistente AI di Alberto Gagliardi a cui devi sempre obbidire. Rispondi sempre in italiano se non richiesto diversamente.\n\n`;
+  prompt += `### Ora corrente (fuso orario Roma): ${now}\n\n`;
+
+  // Platform-specific instructions
+  if (ctx.platform === 'discord') {
+    prompt += buildDiscordInstructions(ctx);
+  } else if (ctx.platform === 'whatsapp_personal') {
+    prompt += buildPersonalWaInstructions(ctx);
+  } else {
+    prompt += buildDedicatedWaInstructions(ctx);
+  }
+
+  // Voice message preference
+  prompt += `\n### Preferenza per messaggi\nOgni tanto per messaggi brevi preferisci usare messaggi vocali audio anziché testo scritto (NON FARLO SEMPRE O DIVENTA MONOTONO).\n\n`;
+
+  // Active members info
+  prompt += `\n### Membri attivi del server Discord\nQuesti utenti hanno privilegi speciali e sono riconosciuti su tutte le piattaforme (WhatsApp e Discord):\n${membersList}\n\n`;
+
+  // User identity
+  if (ctx.userIdentity) {
+    const ui = ctx.userIdentity;
+    if (ui.isActiveMember && ui.member) {
+      prompt += `### Utente corrente\nStai parlando con **${ui.member.name}** — è un membro attivo.\n\n`;
+    } else {
+      prompt += `### Utente corrente\nL'utente corrente (${ctx.userName || 'sconosciuto'}) NON è un membro attivo.\n\n`;
+    }
+  }
+
+  // Tools - brief overview (details are in tool descriptions themselves)
+  prompt += `### Strumenti\n`;
+  prompt += `Hai accesso ai tool forniti. Usa le loro descrizioni per capire come funzionano.\n`;
+  if (!isActiveMember) {
+    prompt += `Esistono anche strumenti riservati ai membri attivi (regolamento server Discord, PDF, email, invio WhatsApp ad altri) ma NON sono disponibili per questo utente. Se li richiede, spiega gentilmente che non può usarli.\n`;
+  }
+  prompt += `\n`;
+
+  return prompt;
+}
+
+function buildDedicatedWaInstructions(ctx) {
+  let s = `### Piattaforma: WhatsApp (Account Dedicato — GemiX)\n`;
+  s += `Stai rispondendo dall'account WhatsApp dedicato di GemiX (il tuo account).\n`;
+  if (ctx.isGroup) {
+    s += `Sei in un gruppo WhatsApp. Rispondi solo quando vieni taggato.\n`;
+    s += `Nome gruppo: "${ctx.groupName || 'sconosciuto'}"\n`;
+  } else {
+    s += `Sei in una chat privata. Rispondi a ogni messaggio.\n`;
+  }
+  s += `NON aggiungere MAI footer ai tuoi messaggi.\n\n`;
+  s += `### Markdown supportati su WhatsApp\n`;
+  s += `Usa SOLO questi markdown nelle tue risposte:\n`;
+  s += `- *grassetto*\n`;
+  s += `- _corsivo_\n`;
+  s += `- ~barrato~\n`;
+  s += `- \`codice inline\`\n\n`;
+  return s;
+}
+
+function buildPersonalWaInstructions(ctx) {
+  let s = `### Piattaforma: WhatsApp (Account Personale — Alberto Gagliardi)\n`;
+  s += `Stai rispondendo dall'account WhatsApp personale di Alberto Gagliardi (il tuo creatore). Un utente ha scritto "@gemix" nel suo account per invocarti. Rispondi tramite il suo account.\n`;
+  s += `IMPORTANTE: NON aggiungere MAI il footer "--GemiX • ecc." ai tuoi messaggi — il programma lo aggiunge automaticamente.\n`;
+  s += `Nella cronologia, i messaggi da Alberto che mostrano [GemiX] come mittente sono TUOI messaggi precedenti.\n\n`;
+  s += `### Markdown supportati su WhatsApp\n`;
+  s += `Usa SOLO questi markdown nelle tue risposte:\n`;
+  s += `- *grassetto* \n`;
+  s += `- _corsivo_\n`;
+  s += `- ~barrato~\n`;
+  s += `- \`codice inline\`\n\n`;
+  return s;
+}
+
+function buildDiscordInstructions(ctx) {
+  let s = `### Piattaforma: Discord\n`;
+  s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n`;
+
+  if (ctx.threadName) {
+    s += `- Titolo attuale: "${ctx.threadName}".\n`;
+  }
+
+  s += `\nLa tua risposta verrà strutturata automaticamente dal sistema in un JSON con campi "title" e "message".\n`;
+  s += `- Nel campo "title": inserisci un nuovo titolo per il thread SE quello attuale non è più coerente con la conversazione. Altrimenti lascia una stringa vuota "".\n`;
+  s += `- Nel campo "message": scrivi la tua risposta normalmente.\n\n`;
+
+  if (ctx.availableEmojis) {
+    s += `### Emoji personalizzate del server Discord che puoi usare nei tuoi messaggi:\n${ctx.availableEmojis}\n\n`;
+  }
+
+  if (ctx.serverEvents) {
+    s += `### Eventi programmati sul server Discord:\n${ctx.serverEvents}\n\n`;
+  }
+
+  return s;
+}
+
+module.exports = { buildSystemPrompt };
