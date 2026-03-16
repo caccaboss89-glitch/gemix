@@ -138,7 +138,7 @@ async function downloadCurrentMedia(msg) {
 async function sendWhatsAppResponse(chat, msg, responseData) {
   // Voice message
   if (responseData.isVoiceOnly && responseData.voiceBuffer) {
-    const media = new MessageMedia('audio/mp3', responseData.voiceBuffer.toString('base64'), 'voice.mp3');
+    const media = new MessageMedia('audio/ogg', responseData.voiceBuffer.toString('base64'), 'voice.ogg');
     await chat.sendMessage(media, { sendAudioAsVoice: true });
     return;
   }

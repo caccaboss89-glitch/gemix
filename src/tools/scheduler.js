@@ -19,22 +19,24 @@ if (!fs.existsSync(TASKS_DIR)) {
  */
 function scheduleTasks(tasks, ctx) {
   const now = new Date();
-  const maxDate = new Date(now.getTime() + MAX_TASK_DAYS * 24 * 60 * 60 * 1000);
+  const nowTime = now.getTime();
+  const maxDateMs = nowTime + MAX_TASK_DAYS * 24 * 60 * 60 * 1000;
   const results = [];
 
   for (const task of tasks) {
     const scheduledAt = new Date(task.scheduledAt);
+    const scheduledAtTime = scheduledAt.getTime();
 
     // Validate date
-    if (isNaN(scheduledAt.getTime())) {
+    if (isNaN(scheduledAtTime)) {
       results.push(`❌ Data non valida: "${task.scheduledAt}"`);
       continue;
     }
-    if (scheduledAt <= now) {
+    if (scheduledAtTime <= nowTime) {
       results.push(`❌ La data ${task.scheduledAt} è nel passato.`);
       continue;
     }
-    if (scheduledAt > maxDate) {
+    if (scheduledAtTime > maxDateMs) {
       results.push(`❌ La data ${task.scheduledAt} supera il limite di 1 anno.`);
       continue;
     }

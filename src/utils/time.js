@@ -4,12 +4,21 @@ function getRomeTime() {
 
 function getRomeISO() {
   const now = new Date();
-  const rome = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
-  const offset = rome.getTimezoneOffset();
-  const sign = offset <= 0 ? '+' : '-';
-  const h = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
-  const m = String(Math.abs(offset) % 60).padStart(2, '0');
-  return now.toLocaleString('sv-SE', { timeZone: 'Europe/Rome' }).replace(' ', 'T') + sign + h + ':' + m;
+  // Get the Rome time string in ISO-like format
+  const romeTime = now.toLocaleString('sv-SE', { timeZone: 'Europe/Rome' }).replace(' ', 'T');
+  
+  // Calculate Rome's offset correctly
+  const utcTime = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const romeDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
+  const offsetMs = romeDate.getTime() - utcTime.getTime();
+  const offsetMins = offsetMs / 60000;
+  
+  const sign = offsetMins < 0 ? '-' : '+';
+  const absOffsetMins = Math.abs(offsetMins);
+  const hours = String(Math.floor(absOffsetMins / 60)).padStart(2, '0');
+  const mins = String(Math.floor(absOffsetMins % 60)).padStart(2, '0');
+  
+  return romeTime + sign + hours + ':' + mins;
 }
 
 function formatTimestamp(date) {

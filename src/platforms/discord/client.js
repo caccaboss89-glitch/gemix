@@ -123,7 +123,9 @@ async function onDiscordMessage(msg) {
   try {
     const events = await guild.scheduledEvents.fetch();
     if (events.size > 0) {
-      const upcoming = events.filter(e => new Date(e.scheduledStartAt) > new Date());
+      const now = new Date();
+      const nowTime = now.getTime();
+      const upcoming = events.filter(e => new Date(e.scheduledStartAt).getTime() > nowTime);
       if (upcoming.size > 0) {
         serverEvents = upcoming.map(e => `${e.name} - ${formatTimestamp(e.scheduledStartAt)}`).join('; ');
       }
@@ -174,7 +176,7 @@ async function onDiscordMessage(msg) {
     const sendOptions = {};
 
     if (response.isVoiceOnly && response.voiceBuffer) {
-      const attachment = new AttachmentBuilder(response.voiceBuffer, { name: 'voice.mp3' });
+      const attachment = new AttachmentBuilder(response.voiceBuffer, { name: 'voice.ogg' });
       await channel.send({ files: [attachment] });
       console.log(`   🎤 Vocale inviato`);
       return;

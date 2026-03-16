@@ -6,7 +6,7 @@ const { webSearch } = require('../tools/webSearch');
 const { generatePdf } = require('../tools/pdfGenerator');
 const { sendWhatsAppDirect } = require('../tools/whatsappSender');
 const { sendEmailDirect } = require('../tools/emailSender');
-const { getRomeTime } = require('../utils/time');
+const { getRomeTime, getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
 const { MessageMedia } = require('whatsapp-web.js');
 
@@ -50,7 +50,8 @@ async function checkAndExecuteTasks() {
 
     if (!data.tasks || data.tasks.length === 0) continue;
 
-    const dueTasks = data.tasks.filter(t => new Date(t.scheduledAt) <= now);
+    const nowTime = now.getTime();
+    const dueTasks = data.tasks.filter(t => new Date(t.scheduledAt).getTime() <= nowTime);
     if (dueTasks.length === 0) continue;
 
     for (const task of dueTasks) {
@@ -62,8 +63,10 @@ async function checkAndExecuteTasks() {
       }
     }
 
-    // Remove executed tasks
-    data.tasks = data.tasks.filter(t => new Date(t.scheduledAt) > now);
+    // Remove executed tasks (refresh now time after potential long-running tasks)
+    const nowAfter = new Date();
+    const nowAfterTime = nowAfter.getTime();
+    data.tasks = data.tasks.filter(t => new Date(t.scheduledAt).getTime() > nowAfterTime);
 
     if (data.tasks.length === 0) {
       fs.unlinkSync(filePath);
@@ -97,7 +100,7 @@ async function executeTask(task) {
   }
 
   // Append scheduled footer with creation date
-  const scheduledFooter = buildScheduledFooter(task.createdAt || new Date().toISOString());
+  const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
   messageText += scheduledFooter;
 
   const dest = task.destinations || {};
