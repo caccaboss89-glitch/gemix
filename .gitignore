@@ -3,4 +3,3 @@ node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
 src/data/tasks/
-src/data/regolamento.pdf
