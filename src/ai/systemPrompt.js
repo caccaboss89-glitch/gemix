@@ -56,7 +56,7 @@ function buildDedicatedWaInstructions(ctx) {
   }
   s += `NON aggiungere MAI footer ai tuoi messaggi.\n\n`;
   s += `### Markdown supportati su WhatsApp\n`;
-  s += `Usa SOLO questi markdown nelle tue risposte:\n`;
+  s += `Usa SOLO questi precisi markdown nelle tue risposte (non sono supportati i doppi es. **testo** su WA ma solo i singoli *testo*):\n`;
   s += `- *grassetto*\n`;
   s += `- _corsivo_\n`;
   s += `- ~barrato~\n`;
@@ -70,7 +70,7 @@ function buildPersonalWaInstructions(ctx) {
   s += `IMPORTANTE: NON aggiungere MAI il footer "--GemiX • ecc." ai tuoi messaggi — il programma lo aggiunge automaticamente.\n`;
   s += `Nella cronologia, i messaggi da Alberto che mostrano [GemiX] come mittente sono TUOI messaggi precedenti.\n\n`;
   s += `### Markdown supportati su WhatsApp\n`;
-  s += `Usa SOLO questi markdown nelle tue risposte:\n`;
+  s += `Usa SOLO questi precisi markdown nelle tue risposte  (non sono supportati i doppi es. **testo** su WA ma solo i singoli *testo*):\n`;
   s += `- *grassetto* \n`;
   s += `- _corsivo_\n`;
   s += `- ~barrato~\n`;
