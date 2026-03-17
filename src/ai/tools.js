@@ -36,13 +36,11 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'send_voice_message',
-      description: "Invia un messaggio vocale al posto di un messaggio testuale. Usalo quando richiesto dall'utente o a tua discrezione per risposte brevi/ironiche. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale, il tuo turno finisce col vocale.",
+      description: "Invia un messaggio vocale al posto di un messaggio testuale. Usalo quando richiesto dall'utente o a tua discrezione per risposte brevi/ironiche. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale, il tuo turno finisce col vocale.\n\nLIMITE: il testo deve essere massimo 1000 caratteri. Se supera il limite, rispondi con un normale messaggio testuale.\n\nEFFETTI VOCALI DISPONIBILI:\n\nInline tags (inseriscili nel punto esatto):\n[pause] [long-pause] [hum-tune]\n[laugh] [chuckle] [giggle] [cry]\n[tsk] [tongue-click] [lip-smack]\n[breath] [inhale] [exhale] [sigh]\n\nWrapping tags (avvolgi il testo):\n<soft> <whisper> <loud> <build-intensity> <decrease-intensity>\n<higher-pitch> <lower-pitch> <slow> <fast>\n<sing-song> <singing> <laugh-speak> <emphasis>\n\nEsempio: \"Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!\"",
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'Il testo da convertire in audio vocale' },
-          language: { type: 'string', description: "Codice lingua ISO 639-1. Default 'it' (italiano). Cambia solo se serve un'altra lingua." },
-          speed: { type: 'number', description: "Velocità audio: 1.0 = normale (default). Valori <1.0 = più lento. Non superare 1.0." },
+          text: { type: 'string', description: 'Il testo da convertire in audio vocale (max 1000 caratteri). Può contenere effetti vocali inline e wrapping tags.' },
         },
         required: ['text'],
       },

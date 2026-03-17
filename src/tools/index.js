@@ -1,7 +1,7 @@
 const { isActiveMemberOnlyTool } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
-const { generateVoice } = require('./voiceMessage');
+const { generateVoice, MAX_TTS_CHARS } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
@@ -67,7 +67,14 @@ async function executeTool(toolCall, userCtx, responseCtx) {
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '') // unicode emoji
           .replace(/\s{2,}/g, ' ')                  // collapse extra spaces
           .trim();
-        const voiceBuffer = await generateVoice(cleanText, args.language, args.speed);
+
+        // Enforce 1000 char limit — if exceeded, abort voice and tell AI to send text
+        if (cleanText.length > MAX_TTS_CHARS) {
+          result = `❌ Il testo supera il limite di ${MAX_TTS_CHARS} caratteri (${cleanText.length} caratteri). Non è possibile generare un vocale. Rispondi con un normale messaggio testuale.`;
+          break;
+        }
+
+        const voiceBuffer = await generateVoice(cleanText);
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
         result = 'Messaggio vocale generato con successo. Non inviare alcun messaggio testuale.';
