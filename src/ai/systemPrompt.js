@@ -1,5 +1,6 @@
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
+const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
 
 /**
  * Build the system prompt for GemiX AI based on message context and platform.
@@ -23,9 +24,9 @@ function buildSystemPrompt(ctx) {
   prompt += `### Ora corrente (fuso orario Roma): ${now}\n\n`;
 
   // Platform-specific instructions
-  if (ctx.platform === 'discord') {
+  if (ctx.platform === PLATFORM_DISCORD) {
     prompt += buildDiscordInstructions(ctx);
-  } else if (ctx.platform === 'whatsapp_personal') {
+  } else if (ctx.platform === PLATFORM_WA_PERSONAL) {
     prompt += buildPersonalWaInstructions(ctx);
   } else {
     prompt += buildDedicatedWaInstructions(ctx);

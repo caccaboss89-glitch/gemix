@@ -1,4 +1,5 @@
 const PDFDocument = require('pdfkit');
+const { getRomeTime } = require('../utils/time');
 
 /**
  * Generate a PDF buffer from title and content text.
@@ -35,7 +36,7 @@ function generatePdf(title, content) {
     }
 
     doc.moveDown(2);
-    doc.fontSize(8).fillColor('#999999').text(`Generato da GemiX — ${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}`, { align: 'center' });
+    doc.fontSize(8).fillColor('#999999').text(`Generato da GemiX — ${getRomeTime()}`, { align: 'center' });
 
     doc.end();
   });

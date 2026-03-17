@@ -1,13 +1,16 @@
 const fs = require('fs');
 const path = require('path');
-const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
+const { TASKS_DIR, SCHEDULER_INTERVAL_MS, TASK_TYPE_STATIC, TASK_TYPE_DYNAMIC, MAX_TOOL_ROUNDS } = require('../config/constants');
 const { callGrok } = require('../ai/grok');
-const { webSearch } = require('../tools/webSearch');
+const { getToolsForUser } = require('../ai/tools');
+const { executeTool } = require('../tools');
 const { generatePdf } = require('../tools/pdfGenerator');
 const { sendEmailDirect } = require('../tools/emailSender');
 const { getRomeTime, getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
+const { sanitizeFilename } = require('../utils/text');
+const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 const { MessageMedia } = require('whatsapp-web.js');
 
 let dedicatedClient = null;
@@ -61,15 +64,9 @@ async function checkAndExecuteTasks() {
   const files = fs.readdirSync(TASKS_DIR).filter(f => f.endsWith('.json'));
 
   for (const file of files) {
-    const filePath = path.join(TASKS_DIR, file);
-    let data;
-    try {
-      data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch {
-      continue;
-    }
-
-    if (!data.tasks || data.tasks.length === 0) continue;
+    const fileId = file.replace('.json', '');
+    const data = readTaskFile(fileId);
+    if (!data || !data.tasks || data.tasks.length === 0) continue;
 
     const nowTime = now.getTime();
     const dueTasks = data.tasks.filter(t => new Date(t.scheduledAt).getTime() <= nowTime);
@@ -87,12 +84,7 @@ async function checkAndExecuteTasks() {
     const nowAfter = new Date();
     const nowAfterTime = nowAfter.getTime();
     data.tasks = data.tasks.filter(t => new Date(t.scheduledAt).getTime() > nowAfterTime);
-
-    if (data.tasks.length === 0) {
-      fs.unlinkSync(filePath);
-    } else {
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    }
+    writeTaskFile(fileId, data);
   }
 }
 
@@ -104,23 +96,28 @@ async function checkAndExecuteTasks() {
  */
 async function executeTask(task) {
   let messageText = '';
-  let pdfBuffer = null;
-  let pdfName = null;
+  let attachments = [];
 
-  if (task.type === 'static') {
+  if (task.type === TASK_TYPE_STATIC) {
     messageText = task.content;
-  } else if (task.type === 'dynamic') {
-    const result = await executeDynamicTask(task.content);
+  } else if (task.type === TASK_TYPE_DYNAMIC) {
+    const result = await executeDynamicTask(task.content, task.creatorCtx);
     messageText = result.text;
-    if (result.pdfBuffer) {
-      pdfBuffer = result.pdfBuffer;
-      pdfName = result.pdfName;
+    attachments = result.attachments || [];
+    if (result.voiceBuffer) {
+      attachments.push({
+        name: 'voice.ogg',
+        buffer: result.voiceBuffer,
+        mimetype: 'audio/ogg; codecs=opus',
+        isVoice: true,
+      });
     }
   }
 
-  if (task.pdfContent && !pdfBuffer) {
-    pdfBuffer = await generatePdf(task.pdfTitle || 'Documento', task.pdfContent);
-    pdfName = `${(task.pdfTitle || 'documento').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+  if (task.pdfContent && !attachments.some(a => a.mimetype === 'application/pdf')) {
+    const pdfBuffer = await generatePdf(task.pdfTitle || 'Documento', task.pdfContent);
+    const pdfName = `${sanitizeFilename(task.pdfTitle || 'documento')}.pdf`;
+    attachments.push({ name: pdfName, buffer: pdfBuffer, mimetype: 'application/pdf' });
   }
 
   const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
@@ -131,9 +128,10 @@ async function executeTask(task) {
   if (dest.whatsapp && dedicatedClient) {
     try {
       await dedicatedClient.sendMessage(dest.whatsapp, messageText);
-      if (pdfBuffer) {
-        const media = new MessageMedia('application/pdf', pdfBuffer.toString('base64'), pdfName || 'documento.pdf');
-        await dedicatedClient.sendMessage(dest.whatsapp, media);
+      for (const att of attachments) {
+        const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+        const opts = att.isVoice ? { sendAudioAsVoice: true } : {};
+        await dedicatedClient.sendMessage(dest.whatsapp, media, opts);
       }
     } catch (err) {
       console.error(`[Scheduler] Errore invio WA privato ${dest.whatsapp}:`, err.message);
@@ -143,9 +141,10 @@ async function executeTask(task) {
   if (dest.whatsappGroup && dedicatedClient) {
     try {
       await dedicatedClient.sendMessage(dest.whatsappGroup, messageText);
-      if (pdfBuffer) {
-        const media = new MessageMedia('application/pdf', pdfBuffer.toString('base64'), pdfName || 'documento.pdf');
-        await dedicatedClient.sendMessage(dest.whatsappGroup, media);
+      for (const att of attachments) {
+        const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+        const opts = att.isVoice ? { sendAudioAsVoice: true } : {};
+        await dedicatedClient.sendMessage(dest.whatsappGroup, media, opts);
       }
     } catch (err) {
       console.error(`[Scheduler] Errore invio WA gruppo ${dest.whatsappGroup}:`, err.message);
@@ -154,19 +153,14 @@ async function executeTask(task) {
 
   if (dest.email) {
     try {
-      const attachments = [];
-      if (pdfBuffer) {
-        attachments.push({
-          filename: pdfName || 'documento.pdf',
-          content: pdfBuffer,
-          contentType: 'application/pdf',
-        });
-      }
+      const emailAttachments = attachments
+        .filter(a => !a.isVoice)
+        .map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }));
       await sendEmailDirect(
         dest.email,
         `GemiX — Attività programmata`,
         `<div style="font-family:sans-serif">${messageText.replace(/\n/g, '<br>')}</div>`,
-        attachments
+        emailAttachments
       );
     } catch (err) {
       console.error(`[Scheduler] Errore invio email ${dest.email}:`, err.message);
@@ -175,83 +169,71 @@ async function executeTask(task) {
 }
 
 /**
- * Execute a dynamic task using Grok AI.
- * Grok has access to web_search and generate_pdf tools for real-time data processing.
+ * Execute a dynamic task using Grok AI with full tool access.
+ * Tools are permission-aware based on the creator's access level.
  * @param {string} prompt - The task prompt for Grok AI to execute
- * @returns {Promise<object>} Result object { text: string, pdfBuffer: Buffer|null, pdfName: string|null }
+ * @param {object} creatorCtx - Creator context stored at scheduling time (permissions, identity)
+ * @returns {Promise<object>} Result object { text, attachments, voiceBuffer }
  */
-async function executeDynamicTask(prompt) {
+async function executeDynamicTask(prompt, creatorCtx) {
   const systemMsg = `Sei un assistente AI che esegue task programmati. Ora corrente (Roma): ${getRomeTime()}.\nEsegui il seguente compito e fornisci il risultato come messaggio da inviare all'utente. Rispondi in italiano.`;
 
-  const grokTools = [
-    {
-      type: 'function',
-      function: {
-        name: 'web_search',
-        description: 'Cerca informazioni aggiornate sul web.',
-        parameters: {
-          type: 'object',
-          properties: { query: { type: 'string', description: 'Query di ricerca' } },
-          required: ['query'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'generate_pdf',
-        description: 'Genera un PDF con titolo e contenuto.',
-        parameters: {
-          type: 'object',
-          properties: {
-            title: { type: 'string' },
-            content: { type: 'string' },
-          },
-          required: ['title', 'content'],
-        },
-      },
-    },
-  ];
+  const isActiveMember = creatorCtx?.isActiveMember || false;
+  const isCreatorAdmin = creatorCtx?.isAdmin || false;
+  const tools = getToolsForUser(isActiveMember, isCreatorAdmin);
+
+  const userCtx = {
+    isActiveMember,
+    isAdmin: isCreatorAdmin,
+    member: isActiveMember ? { email: creatorCtx.email, wa: creatorCtx.waJid } : null,
+    taskFileId: creatorCtx?.taskFileId || null,
+    userId: creatorCtx?.userId || null,
+    userName: creatorCtx?.userName || null,
+    waJid: creatorCtx?.waJid || null,
+    email: creatorCtx?.email || null,
+    isGroup: creatorCtx?.isGroup || false,
+    groupId: creatorCtx?.groupId || null,
+  };
+
+  const responseCtx = {
+    attachments: [],
+    voiceBuffer: null,
+    isVoiceOnly: false,
+  };
 
   const messages = [
     { role: 'system', content: systemMsg },
     { role: 'user', content: prompt },
   ];
 
-  let pdfBuffer = null;
-  let pdfName = null;
   let rounds = 0;
 
-  while (rounds < 5) {
+  while (rounds < MAX_TOOL_ROUNDS) {
     rounds++;
-    const response = await callGrok(messages, grokTools);
+    const response = await callGrok(messages, tools);
 
     if (response.tool_calls && response.tool_calls.length > 0) {
+      if (response.content === null || response.content === undefined) {
+        response.content = '';
+      }
       messages.push(response);
 
       for (const tc of response.tool_calls) {
-        let result;
-        const args = JSON.parse(tc.function.arguments || '{}');
-
-        if (tc.function.name === 'web_search') {
-          result = await webSearch(args.query);
-        } else if (tc.function.name === 'generate_pdf') {
-          pdfBuffer = await generatePdf(args.title, args.content);
-          pdfName = `${(args.title || 'documento').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-          result = 'PDF generato con successo.';
-        } else {
-          result = 'Tool non disponibile.';
+        try {
+          console.log(`[Scheduler] 🔧 Tool: ${tc.function.name}`);
+          const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx);
+          messages.push({ role: 'tool', tool_call_id: toolCallId, content: result });
+        } catch (err) {
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: `Errore esecuzione: ${err.message}` });
         }
-
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
       }
       continue;
     }
 
-    return { text: response.content || 'Task completato.', pdfBuffer, pdfName };
+    return { text: response.content || 'Task completato.', attachments: responseCtx.attachments, voiceBuffer: responseCtx.voiceBuffer };
   }
 
-  return { text: 'Task completato (limite iterazioni raggiunto).', pdfBuffer, pdfName };
+  return { text: 'Task completato (limite iterazioni raggiunto).', attachments: responseCtx.attachments, voiceBuffer: responseCtx.voiceBuffer };
 }
 
 module.exports = { startScheduler, setSchedulerWaClient };

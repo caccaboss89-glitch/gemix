@@ -1,4 +1,5 @@
 const { findMemberByWa, findMemberByDiscord } = require('../config/members');
+const { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_WA, TASK_PREFIX_GROUP } = require('../config/constants');
 
 /**
  * Identifies a user across platforms and returns unified identity info.
@@ -13,7 +14,7 @@ const { findMemberByWa, findMemberByDiscord } = require('../config/members');
 function identifyUser(ctx) {
   let member = null;
 
-  if (ctx.platform === 'discord') {
+  if (ctx.platform === PLATFORM_DISCORD) {
     member = findMemberByDiscord(ctx.discordUsername, ctx.discordDisplayName, ctx.discordNickname);
   } else {
     const jid = ctx.userId.includes('@') ? ctx.userId : ctx.userId + '@c.us';
@@ -24,11 +25,11 @@ function identifyUser(ctx) {
 
   let taskFileId;
   if (member) {
-    taskFileId = 'member_' + member.name.toLowerCase().replace(/\s+/g, '_');
-  } else if (ctx.platform === 'discord') {
-    taskFileId = 'dc_' + ctx.userId;
+    taskFileId = TASK_PREFIX_MEMBER + member.name.toLowerCase().replace(/\s+/g, '_');
+  } else if (ctx.platform === PLATFORM_DISCORD) {
+    taskFileId = TASK_PREFIX_DISCORD + ctx.userId;
   } else {
-    taskFileId = 'wa_' + ctx.userId.replace('@c.us', '');
+    taskFileId = TASK_PREFIX_WA + ctx.userId.replace('@c.us', '');
   }
 
   return { member, isActiveMember, taskFileId };
@@ -40,7 +41,7 @@ function identifyUser(ctx) {
  * @returns {string} Normalized group task file ID (e.g., 'group_123456789-1234567890')
  */
 function getGroupTaskFileId(groupId) {
-  return 'group_' + groupId.replace('@g.us', '');
+  return TASK_PREFIX_GROUP + groupId.replace('@g.us', '');
 }
 
 module.exports = { identifyUser, getGroupTaskFileId };

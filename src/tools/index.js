@@ -1,7 +1,7 @@
 const { isActiveMemberOnlyTool } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
-const { generateVoice, MAX_TTS_CHARS } = require('./voiceMessage');
+const { generateVoice } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
@@ -12,6 +12,8 @@ const { sendEmail } = require('./emailSender');
 const { sendWhatsAppMessage } = require('./whatsappSender');
 const { readMusicStats } = require('./musicStats');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
+const { sanitizeFilename } = require('../utils/text');
+const { MAX_TTS_CHARS } = require('../config/constants');
 
 /**
  * Execute a tool call and return the result.
@@ -123,7 +125,7 @@ async function executeTool(toolCall, userCtx, responseCtx) {
 
       case 'generate_pdf': {
         const pdfBuffer = await generatePdf(args.title, args.content);
-        const fileName = `${(args.title || 'documento').replace(/[^a-zA-Z0-9àèéìòù\s]/gi, '').replace(/\s+/g, '_')}.pdf`;
+        const fileName = `${sanitizeFilename(args.title || 'documento')}.pdf`;
         responseCtx.attachments.push({
           name: fileName,
           buffer: pdfBuffer,

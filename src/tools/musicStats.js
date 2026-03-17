@@ -1,4 +1,4 @@
-const { notifyAdmin } = require('../utils/adminNotifier');
+const { fetchExternal } = require('../utils/fetch');
 
 const STATS_URL = 'https://raw.githubusercontent.com/caccaboss89-glitch/MusicBot/main/data/stats.json';
 
@@ -8,12 +8,11 @@ const STATS_URL = 'https://raw.githubusercontent.com/caccaboss89-glitch/MusicBot
  * @returns {Promise<string>} Formatted stats summary
  */
 async function readMusicStats() {
-  const res = await fetch(STATS_URL, {
+  const res = await fetchExternal(STATS_URL, {
     headers: { 'User-Agent': 'GemiX-MusicStats/1.0' },
-  });
+  }, 'Music Stats');
 
   if (!res.ok) {
-    await notifyAdmin('Music Stats', `Errore HTTP ${res.status} nel fetch stats.json`);
     throw new Error(`Impossibile recuperare le statistiche: HTTP ${res.status}`);
   }
 

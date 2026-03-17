@@ -1,14 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { TASKS_DIR, MAX_TASK_DAYS } = require('../config/constants');
+const { TASKS_DIR, MAX_TASK_DAYS, TASK_TYPE_STATIC, TASK_TYPE_DYNAMIC } = require('../config/constants');
 const { getRomeISO } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
-
-if (!fs.existsSync(TASKS_DIR)) {
-  fs.mkdirSync(TASKS_DIR, { recursive: true });
-}
+const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 
 /**
  * Schedule one or more tasks for a user or group.
@@ -90,7 +87,7 @@ function scheduleTasks(tasks, ctx) {
 
     const newTask = {
       id: crypto.randomUUID(),
-      type: task.taskType || 'static',
+      type: task.taskType || TASK_TYPE_STATIC,
       content: task.content,
       scheduledAt: task.scheduledAt,
       createdAt: getRomeISO(),
@@ -100,15 +97,24 @@ function scheduleTasks(tasks, ctx) {
       pdfTitle: task.pdfTitle || null,
     };
 
-    let fileData = { tasks: [] };
-    if (fs.existsSync(filePath)) {
-      try {
-        fileData = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      } catch { fileData = { tasks: [] }; }
+    if (newTask.type === TASK_TYPE_DYNAMIC) {
+      newTask.creatorCtx = {
+        isActiveMember: ctx.isActiveMember,
+        isAdmin: ctx.isAdmin,
+        taskFileId: ctx.taskFileId,
+        userId: ctx.userId,
+        userName: ctx.userName,
+        waJid: ctx.waJid,
+        email: ctx.email,
+        isGroup: ctx.isGroup,
+        groupId: ctx.groupId,
+      };
     }
 
+    let fileData = readTaskFile(fileId) || { tasks: [] };
+
     fileData.tasks.push(newTask);
-    fs.writeFileSync(filePath, JSON.stringify(fileData, null, 2));
+    writeTaskFile(fileId, fileData);
 
     const destStr = Object.keys(destinations).join(', ');
     results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${task.scheduledAt} [${destStr}] (ID: ${newTask.id})`);

@@ -72,6 +72,7 @@ function isFirstOfMonth() {
  */
 async function getLatestCommitHash() {
   try {
+    const { fetchWithTimeout } = require('../utils/fetch');
     const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits?sha=${GITHUB_BRANCH}&per_page=1`;
     
     const headers = {
@@ -84,7 +85,7 @@ async function getLatestCommitHash() {
       headers['Authorization'] = `token ${githubToken}`;
     }
 
-    const response = await fetch(url, { headers });
+    const response = await fetchWithTimeout(url, { headers });
     
     if (!response.ok) {
       console.error(`[MusicWrap] ❌ Errore API GitHub: ${response.status}`);
@@ -157,7 +158,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     }
 
     try {
-      const message = `🎵 *Wrap di ${getPreviousMonthName().charAt(0).toUpperCase() + getPreviousMonthName().slice(1)} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\n\nGoditi le tue statistiche! 🎧📊`;
+      const message = `🎵 *Wrap di ${getPreviousMonthName().charAt(0).toUpperCase() + getPreviousMonthName().slice(1)} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "caccaboss". \n\nGoditi le tue statistiche! 🎧📊`;
       await dedicatedClient.sendMessage(member.wa, message);
       console.log(`[MusicWrap] ✅ Messaggio inviato a ${member.name}`);
       state.lastSentDate[member.wa] = today;

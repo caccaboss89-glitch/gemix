@@ -1,8 +1,7 @@
 const { SERPAPI_KEY } = require('../config/env');
-const { notifyAdmin } = require('../utils/adminNotifier');
-
-const MAX_IMAGES = 4;
-const MAX_IMAGE_BYTES = 7_500_000;
+const { MAX_IMAGES, MAX_IMAGE_BYTES } = require('../config/constants');
+const { fetchExternal, fetchWithTimeout } = require('../utils/fetch');
+const { sanitizeFilename } = require('../utils/text');
 
 /**
  * Generate safe filename from search query.
@@ -10,11 +9,7 @@ const MAX_IMAGE_BYTES = 7_500_000;
  * @returns {string} Sanitized filename (max 50 chars)
  */
 function safeFileBaseName(text) {
-  return (text || 'immagine')
-    .replace(/[^a-zA-Z0-9àèéìòù\s_-]/gi, '')
-    .trim()
-    .replace(/\s+/g, '_')
-    .slice(0, 50) || 'immagine';
+  return sanitizeFilename(text, 50) || 'immagine';
 }
 
 /**
@@ -40,7 +35,7 @@ function extensionFromMime(mimetype) {
  * @returns {Promise<object>} Attachment object { name, buffer, mimetype }
  */
 async function fetchImageAsAttachment(url, query, index) {
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     },
@@ -100,9 +95,8 @@ async function imageSearch(query, requestedCount = 2) {
     gl: 'it',
   });
 
-  const res = await fetch(`https://serpapi.com/search.json?${params}`);
+  const res = await fetchExternal(`https://serpapi.com/search.json?${params}`, {}, 'SerpAPI (Ricerca Immagini)');
   if (!res.ok) {
-    await notifyAdmin('SerpAPI (Ricerca Immagini)', `Errore HTTP ${res.status}`);
     throw new Error(`SerpAPI immagini error: ${res.status}`);
   }
 

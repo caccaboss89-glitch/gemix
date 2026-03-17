@@ -1,6 +1,4 @@
-const fs = require('fs');
-const path = require('path');
-const { TASKS_DIR } = require('../config/constants');
+const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 
 /**
  * Remove tasks by IDs from a user's or group's task file.
@@ -9,28 +7,17 @@ const { TASKS_DIR } = require('../config/constants');
  * @returns {string} Result message
  */
 function removeTasks(taskIds, fileId) {
-  const filePath = path.join(TASKS_DIR, `${fileId}.json`);
+  const data = readTaskFile(fileId);
 
-  if (!fs.existsSync(filePath)) {
+  if (!data) {
     return 'Nessun file task trovato. Non hai task programmati.';
-  }
-
-  let data;
-  try {
-    data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch {
-    return 'Errore nella lettura del file task.';
   }
 
   const before = data.tasks.length;
   data.tasks = data.tasks.filter(t => !taskIds.includes(t.id));
   const removed = before - data.tasks.length;
 
-  if (data.tasks.length === 0) {
-    fs.unlinkSync(filePath);
-  } else {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-  }
+  writeTaskFile(fileId, data);
 
   if (removed === 0) {
     return `Nessun task trovato con gli ID specificati.`;

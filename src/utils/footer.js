@@ -30,7 +30,7 @@ function addFooter(text, modelName) {
  */
 function removeFooter(text) {
   if (!text) return '';
-  return text.replace(/\n+--GemiX •.*$/g, '').trim();
+  return text.replace(/\n+--GemiX\s*•.*$/gi, '').trim();
 }
 
 /**
@@ -41,18 +41,6 @@ function removeFooter(text) {
 function hasFooter(text) {
   if (!text) return false;
   return text.includes('--GemiX •');
-}
-
-/**
- * Strip GemiX footer from response text (alias for removeFooter with consistent naming).
- * @param {string} text - The text potentially containing a footer
- * @returns {string} Text with footer removed and trimmed
- */
-function stripGemixFooterFromResponse(text) {
-  if (!text) return '';
-  return text
-    .replace(/\n+--GemiX\s*•.*$/gi, '')
-    .trim();
 }
 
 /**
@@ -86,4 +74,4 @@ function buildScheduledFooter(createdAt) {
   return `${GEMIX_FOOTER_PREFIX}Messaggio Programmato il ${formatted}`;
 }
 
-module.exports = { addFooter, removeFooter, hasFooter, stripGemixFooterFromResponse, buildScheduledFooter, getModelDisplayName, hasScheduledFooter, removeScheduledFooter };
+module.exports = { addFooter, removeFooter, hasFooter, buildScheduledFooter, getModelDisplayName, hasScheduledFooter, removeScheduledFooter };

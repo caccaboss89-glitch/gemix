@@ -1,5 +1,5 @@
 const { SERPAPI_KEY } = require('../config/env');
-const { notifyAdmin } = require('../utils/adminNotifier');
+const { fetchExternal } = require('../utils/fetch');
 
 /**
  * Perform web search using SerpAPI and format results.
@@ -17,9 +17,8 @@ async function webSearch(query) {
     num: '8',
   });
 
-  const res = await fetch(`https://serpapi.com/search.json?${params}`);
+  const res = await fetchExternal(`https://serpapi.com/search.json?${params}`, {}, 'SerpAPI (Ricerca Web)');
   if (!res.ok) {
-    await notifyAdmin('SerpAPI (Ricerca Web)', `Errore HTTP ${res.status}`);
     throw new Error(`SerpAPI error: ${res.status}`);
   }
 

@@ -1,5 +1,5 @@
 const { MessageMedia } = require('whatsapp-web.js');
-const { MAX_HISTORY } = require('../../config/constants');
+const { MAX_HISTORY, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
 const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag } = require('../../utils/media');
@@ -23,7 +23,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
     let isGemiX = false;
     let isScheduled = false;
 
-    if (platform === 'whatsapp_personal') {
+    if (platform === PLATFORM_WA_PERSONAL) {
       if (msg.fromMe) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';

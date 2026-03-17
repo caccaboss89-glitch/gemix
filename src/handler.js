@@ -3,6 +3,7 @@ const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser } = require('./ai/tools');
 const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
+const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
@@ -88,9 +89,8 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
     };
 
-    const MAX_TOOL_ROUNDS = 10;
     let rounds = 0;
-    const isDiscord = ctx.platform === 'discord';
+    const isDiscord = ctx.platform === PLATFORM_DISCORD;
 
     while (rounds < MAX_TOOL_ROUNDS) {
       rounds++;

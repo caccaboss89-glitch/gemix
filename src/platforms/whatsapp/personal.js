@@ -3,9 +3,10 @@ const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
-const { addFooter, stripGemixFooterFromResponse, getModelDisplayName } = require('../../utils/footer');
+const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
 const { GEMINI_MODEL } = require('../../config/env');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
+const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 
 let client;
 
@@ -20,16 +21,9 @@ function initPersonalWhatsApp() {
     puppeteer: {
       executablePath: '/usr/bin/chromium',
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-zygote',
-        '--single-process'
-      ]
+      args: PUPPETEER_ARGS,
     },
-    qr_timeout: 120000,
+    qr_timeout: WA_QR_TIMEOUT,
   });
 
   client.on('qr', (qr) => {
@@ -88,7 +82,7 @@ async function onPersonalMessage(msg) {
   } catch {}
 
   const userIdentity = identifyUser({
-    platform: 'whatsapp_personal',
+    platform: PLATFORM_WA_PERSONAL,
     userId: phoneJid,
   });
   
@@ -100,7 +94,7 @@ async function onPersonalMessage(msg) {
   let history = [];
   try {
     history = await Promise.race([
-      buildWhatsAppHistory(chat, 'whatsapp_personal', null),
+      buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, null),
       new Promise((_, reject) => 
         setTimeout(() => reject(new Error('History fetch timeout')), 15000)
       )
@@ -140,7 +134,7 @@ async function onPersonalMessage(msg) {
   if (contentParts.length === 0) return;
 
   const ctx = {
-    platform: 'whatsapp_personal',
+    platform: PLATFORM_WA_PERSONAL,
     isGroup: false,
     groupId: null,
     groupName: null,
@@ -155,10 +149,12 @@ async function onPersonalMessage(msg) {
     waJid: senderJid,
   };
 
+  await chat.sendState('typing');
+
   const response = await handleMessage(ctx);
 
   if (response.text) {
-    response.text = stripGemixFooterFromResponse(response.text);
+    response.text = removeFooter(response.text);
     response.text = addFooter(response.text, getModelDisplayName(GEMINI_MODEL));
   }
 
@@ -166,6 +162,7 @@ async function onPersonalMessage(msg) {
     console.log(`\n📤 [WHATSAPP-PERSONALE] Invio risposta...`);
     await sendWhatsAppResponse(chat, msg, response);
     console.log(`   ✅ Messaggio inviato`);
+    await chat.sendState('paused');
   } catch (err) {
     console.error(`\n❌ [WHATSAPP-PERSONALE] Errore invio risposta:`);
     console.error(`   ${err.message}`);

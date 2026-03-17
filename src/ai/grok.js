@@ -1,9 +1,9 @@
-const { API_KEY, API_BASE_URL, GROK_MODEL } = require('../config/env');
-const { notifyAdmin } = require('../utils/adminNotifier');
+const { API_BASE_URL, GROK_MODEL } = require('../config/env');
+const { MAX_TOKENS } = require('../config/constants');
+const { callModel } = require('./apiClient');
 
 /**
  * Call Grok via AIMLAPI (used for dynamic scheduled tasks).
- * Supports tool use for web search and PDF generation during task execution.
  * @param {Array} messages - OpenAI-format messages array
  * @param {Array|null} tools - Tool definitions for function calling
  * @returns {Promise<object>} The assistant message from the response
@@ -12,32 +12,11 @@ async function callGrok(messages, tools = null) {
   const body = {
     model: GROK_MODEL,
     messages,
-    max_tokens: 8192,
+    max_tokens: MAX_TOKENS,
   };
   if (tools && tools.length > 0) body.tools = tools;
 
-  const res = await fetch(`${API_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    await notifyAdmin('AIMLAPI (Grok)', `Errore HTTP ${res.status}: ${err.substring(0, 200)}`);
-    throw new Error(`Grok API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  if (!data.choices || !data.choices[0]) {
-    await notifyAdmin('AIMLAPI (Grok)', 'Nessuna risposta ricevuta dalla API');
-    throw new Error('Grok API: nessuna risposta ricevuta');
-  }
-
-  return data.choices[0].message;
+  return callModel('Grok', `${API_BASE_URL}/chat/completions`, body);
 }
 
 module.exports = { callGrok };

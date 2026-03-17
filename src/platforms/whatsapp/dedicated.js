@@ -5,6 +5,7 @@ const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
+const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 
 let client;
 
@@ -19,16 +20,9 @@ function initDedicatedWhatsApp() {
     puppeteer: {
       executablePath: '/usr/bin/chromium',
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-zygote',
-        '--single-process'
-      ]
+      args: PUPPETEER_ARGS,
     },
-    qr_timeout: 120000,
+    qr_timeout: WA_QR_TIMEOUT,
   });
 
   client.on('qr', (qr) => {
@@ -103,7 +97,7 @@ async function onDedicatedMessage(msg) {
   } catch {}
 
   const userIdentity = identifyUser({
-    platform: 'whatsapp_dedicated',
+    platform: PLATFORM_WA_DEDICATED,
     userId: phoneJid,
   });
   
@@ -114,7 +108,7 @@ async function onDedicatedMessage(msg) {
   console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   console.log(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
-  const history = await buildWhatsAppHistory(chat, 'whatsapp_dedicated', client.info.wid._serialized);
+  const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, client.info.wid._serialized);
 
   const contentParts = [];
   let textBody = msg.body || '';
@@ -147,7 +141,7 @@ async function onDedicatedMessage(msg) {
   if (contentParts.length === 0) return;
 
   const ctx = {
-    platform: 'whatsapp_dedicated',
+    platform: PLATFORM_WA_DEDICATED,
     isGroup,
     groupId: isGroup ? chat.id._serialized : null,
     groupName: isGroup ? chat.name : null,
@@ -162,12 +156,15 @@ async function onDedicatedMessage(msg) {
     waJid: senderJid,
   };
 
+  await chat.sendState('typing');
+
   const response = await handleMessage(ctx);
 
   try {
     console.log(`\n📤 [WHATSAPP-DEDICATO] Invio risposta...`);
     await sendWhatsAppResponse(chat, msg, response);
     console.log(`   ✅ Messaggio inviato`);
+    await chat.sendState('paused');
   } catch (err) {
     console.error(`\n❌ [WHATSAPP-DEDICATO] Errore invio risposta:`);
     console.error(`   ${err.message}`);

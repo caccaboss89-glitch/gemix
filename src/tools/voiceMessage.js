@@ -1,8 +1,9 @@
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
 const { XAI_API_KEY } = require('../config/env');
-
-const MAX_TTS_CHARS = 1000;
+const { MAX_TTS_CHARS } = require('../config/constants');
+const { fetchWithTimeout } = require('../utils/fetch');
+const { notifyAdmin } = require('../utils/adminNotifier');
 
 /**
  * Strip vocal effect tags from text.
@@ -90,6 +91,7 @@ async function generateVoice(text) {
       return convertMp3ToWhatsAppOpus(mp3Buffer);
     } catch (err) {
       console.warn('[TTS] xAI TTS fallito, fallback a Google Translate:', err.message);
+      await notifyAdmin('xAI TTS', err.message);
     }
   }
 
@@ -102,7 +104,7 @@ async function generateVoice(text) {
  * xAI TTS — voice "rex", language "auto", output mp3 44100Hz 128kbps.
  */
 async function xaiTTS(text) {
-  const res = await fetch('https://api.x.ai/v1/tts', {
+  const res = await fetchWithTimeout('https://api.x.ai/v1/tts', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${XAI_API_KEY}`,
@@ -136,7 +138,7 @@ async function googleTranslateTTS(text) {
 
   const buffers = await Promise.all(
     urls.map(async ({ url }) => {
-      const res = await fetch(url);
+      const res = await fetchWithTimeout(url);
       if (!res.ok) throw new Error(`TTS download failed: ${res.status}`);
       return Buffer.from(await res.arrayBuffer());
     })
