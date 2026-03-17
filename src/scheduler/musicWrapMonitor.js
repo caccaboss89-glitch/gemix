@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { ACTIVE_MEMBERS } = require('../config/members');
-const { sendWhatsAppDirect } = require('./whatsappSender');
 
 const MONITOR_STATE_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
 

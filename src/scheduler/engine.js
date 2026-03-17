@@ -8,7 +8,7 @@ const { sendWhatsAppDirect } = require('../tools/whatsappSender');
 const { sendEmailDirect } = require('../tools/emailSender');
 const { getRomeTime, getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
-const { checkAndSendMusicWrap } = require('../tools/musicWrapMonitor');
+const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { MessageMedia } = require('whatsapp-web.js');
 
 let dedicatedClient = null;
