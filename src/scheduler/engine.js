@@ -38,8 +38,9 @@ function startScheduler() {
 async function checkAndExecuteTasks() {
   // Check music wrap once per day (at midnight in Italy)
   const now = new Date();
-  const italyNow = new Date(now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' }));
-  const todayDateString = italyNow.toISOString().split('T')[0];
+  // Use locale string in Swedish format for safe ISO-like parsing
+  const romeTimeStr = now.toLocaleString('sv-SE', { timeZone: 'Europe/Rome' });
+  const todayDateString = romeTimeStr.split(' ')[0]; // Gets YYYY-MM-DD
 
   if (lastMusicWrapCheckDate !== todayDateString) {
     lastMusicWrapCheckDate = todayDateString;
