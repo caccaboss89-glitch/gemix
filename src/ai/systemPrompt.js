@@ -1,6 +1,20 @@
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
 
+/**
+ * Build the system prompt for GemiX AI based on message context and platform.
+ * Includes user identity, platform-specific instructions, available members list, and tool access.
+ * @param {object} ctx - Message context
+ * @param {string} ctx.platform - Platform identifier ('discord', 'whatsapp_personal', 'whatsapp_dedicated')
+ * @param {object} ctx.userIdentity - User identity with member and taskFileId
+ * @param {string} ctx.userName - Username or identifier
+ * @param {boolean} ctx.isGroup - Whether the message is from a group chat
+ * @param {string} [ctx.groupName] - Group name if applicable
+ * @param {string} [ctx.threadName] - Discord thread name if applicable
+ * @param {string} [ctx.availableEmojis] - Available custom emojis for Discord
+ * @param {string} [ctx.serverEvents] - Server events list for Discord
+ * @returns {string} Complete system prompt for the AI model
+ */
 function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const membersList = ACTIVE_MEMBERS.map(m => `- ${m.name} (Discord: ${m.nicks.join(' / ')})`).join('\n');
@@ -64,6 +78,11 @@ function buildDedicatedWaInstructions(ctx) {
   return s;
 }
 
+/**
+ * Build platform-specific instructions for WhatsApp personal account.
+ * @param {object} ctx - Message context with userIdentity and other WhatsApp-specific data
+ * @returns {string} WhatsApp personal platform instructions
+ */
 function buildPersonalWaInstructions(ctx) {
   let s = `### Piattaforma: WhatsApp (Account Personale — Alberto Gagliardi)\n`;
   s += `Stai rispondendo dall'account WhatsApp personale di Alberto Gagliardi (il tuo creatore). Un utente ha scritto "@gemix" nel suo account per invocarti. Rispondi tramite il suo account.\n`;
@@ -78,6 +97,14 @@ function buildPersonalWaInstructions(ctx) {
   return s;
 }
 
+/**
+ * Build platform-specific instructions for Discord.
+ * @param {object} ctx - Message context
+ * @param {string} [ctx.threadName] - Discord thread title
+ * @param {string} [ctx.availableEmojis] - Available custom server emojis
+ * @param {string} [ctx.serverEvents] - Server events list
+ * @returns {string} Discord platform instructions with structured output format
+ */
 function buildDiscordInstructions(ctx) {
   let s = `### Piattaforma: Discord\n`;
   s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n`;

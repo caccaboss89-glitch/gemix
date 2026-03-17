@@ -3,9 +3,10 @@ const { notifyAdmin } = require('../utils/adminNotifier');
 
 /**
  * Call Grok via AIMLAPI (used for dynamic scheduled tasks).
+ * Supports tool use for web search and PDF generation during task execution.
  * @param {Array} messages - OpenAI-format messages array
- * @param {Array|null} tools - Tool definitions
- * @returns {object} The assistant message
+ * @param {Array|null} tools - Tool definitions for function calling
+ * @returns {Promise<object>} The assistant message from the response
  */
 async function callGrok(messages, tools = null) {
   const body = {

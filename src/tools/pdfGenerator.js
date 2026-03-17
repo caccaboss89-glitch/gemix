@@ -15,11 +15,9 @@ function generatePdf(title, content) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    // Title
     doc.fontSize(20).font('Helvetica-Bold').text(title, { align: 'center' });
     doc.moveDown(1);
 
-    // Content - handle line breaks and basic formatting
     doc.fontSize(12).font('Helvetica');
     const lines = content.split('\n');
     for (const line of lines) {
@@ -36,7 +34,6 @@ function generatePdf(title, content) {
       }
     }
 
-    // Footer
     doc.moveDown(2);
     doc.fontSize(8).fillColor('#999999').text(`Generato da GemiX — ${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}`, { align: 'center' });
 

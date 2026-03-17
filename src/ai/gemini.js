@@ -40,8 +40,7 @@ async function callGemini(messages, tools = null, responseFormat = null) {
 
       if (!res.ok) {
         const errBody = await res.text();
-        // Estrai messaggio utile, ignora HTML di Cloudflare
-        const shortErr = errBody.startsWith('<!') ? `Cloudflare error` : errBody.substring(0, 500);
+        const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody.substring(0, 500);
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
 

@@ -27,7 +27,6 @@ function removeTasks(taskIds, fileId) {
   const removed = before - data.tasks.length;
 
   if (data.tasks.length === 0) {
-    // Remove empty file
     fs.unlinkSync(filePath);
   } else {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));

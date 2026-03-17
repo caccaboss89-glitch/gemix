@@ -4,16 +4,16 @@ const { TASKS_DIR } = require('../config/constants');
 const { formatTimestamp } = require('../utils/time');
 
 /**
- * Read tasks for a specific user/group.
- * @param {string} taskFileId - The user's task file ID
- * @param {string|null} groupTaskFileId - The group's task file ID (optional)
- * @param {boolean} includeGroup - Whether to include group tasks
- * @returns {string} Formatted task list
+ * Read tasks for a specific user or group.
+ * Builds a formatted task list with timestamps and IDs for user reference.
+ * @param {string} taskFileId - The user's task file ID (e.g., 'member_alberto' or 'wa_393922348132')
+ * @param {string|null} groupTaskFileId - The group's task file ID for group-specific tasks, or null
+ * @param {boolean} includeGroup - Whether to include group tasks in the result
+ * @returns {string} Formatted task list with emojis and timestamps
  */
 function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
   let result = '';
 
-  // Personal tasks
   const personalPath = path.join(TASKS_DIR, `${taskFileId}.json`);
   if (fs.existsSync(personalPath)) {
     try {
@@ -33,7 +33,6 @@ function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
     result += `📋 Nessun task personale programmato.`;
   }
 
-  // Group tasks
   if (includeGroup && groupTaskFileId) {
     const groupPath = path.join(TASKS_DIR, `${groupTaskFileId}.json`);
     if (fs.existsSync(groupPath)) {

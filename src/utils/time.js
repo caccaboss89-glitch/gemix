@@ -1,13 +1,19 @@
+/**
+ * Get current time in Rome (Europe/Rome timezone) as localized string.
+ * @returns {string} Formatted time string (it-IT locale)
+ */
 function getRomeTime() {
   return new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
 }
 
+/**
+ * Get current time in Rome as ISO 8601 format with timezone offset.
+ * @returns {string} ISO format datetime with +HH:MM offset (Europe/Rome)
+ */
 function getRomeISO() {
   const now = new Date();
-  // Get the Rome time string in ISO-like format
   const romeTime = now.toLocaleString('sv-SE', { timeZone: 'Europe/Rome' }).replace(' ', 'T');
   
-  // Calculate Rome's offset correctly
   const utcTime = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
   const romeDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
   const offsetMs = romeDate.getTime() - utcTime.getTime();
@@ -21,6 +27,11 @@ function getRomeISO() {
   return romeTime + sign + hours + ':' + mins;
 }
 
+/**
+ * Format a date to Italian datetime string (Europe/Rome timezone).
+ * @param {string|Date} date - ISO date string or Date object
+ * @returns {string} Formatted datetime 'DD/MM/YYYY HH:MM'
+ */
 function formatTimestamp(date) {
   if (!date) return '';
   const d = new Date(date);

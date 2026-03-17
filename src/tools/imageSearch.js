@@ -4,6 +4,11 @@ const { notifyAdmin } = require('../utils/adminNotifier');
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 7_500_000;
 
+/**
+ * Generate safe filename from search query.
+ * @param {string} text - The search query or base text
+ * @returns {string} Sanitized filename (max 50 chars)
+ */
 function safeFileBaseName(text) {
   return (text || 'immagine')
     .replace(/[^a-zA-Z0-9àèéìòù\s_-]/gi, '')
@@ -12,6 +17,11 @@ function safeFileBaseName(text) {
     .slice(0, 50) || 'immagine';
 }
 
+/**
+ * Determine file extension from MIME type.
+ * @param {string} mimetype - MIME type string (e.g., 'image/jpeg')
+ * @returns {string|null} File extension or null if not recognized
+ */
 function extensionFromMime(mimetype) {
   if (!mimetype || typeof mimetype !== 'string') return null;
   if (mimetype.includes('jpeg')) return 'jpg';
@@ -22,10 +32,16 @@ function extensionFromMime(mimetype) {
   return null;
 }
 
+/**
+ * Fetch image from URL and convert to attachment buffer.
+ * @param {string} url - Image URL to fetch
+ * @param {string} query - Original search query for filename
+ * @param {number} index - Index number for filename
+ * @returns {Promise<object>} Attachment object { name, buffer, mimetype }
+ */
 async function fetchImageAsAttachment(url, query, index) {
   const res = await fetch(url, {
     headers: {
-      // Helps avoid 403 from some CDNs that block non-browser user agents.
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     },
   });
@@ -59,6 +75,12 @@ async function fetchImageAsAttachment(url, query, index) {
   };
 }
 
+/**
+ * Search for images using SerpAPI and download as attachments.
+ * @param {string} query - Search query for images
+ * @param {number} [requestedCount=2] - Number of images to fetch (1-4)
+ * @returns {Promise<object>} Result object { text, attachments }
+ */
 async function imageSearch(query, requestedCount = 2) {
   const q = (query || '').trim();
   if (!q) {

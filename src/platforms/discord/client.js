@@ -4,10 +4,16 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { isSupportedMedia, mediaToContentPart, mediaTag } = require('../../utils/media');
+const { mediaToContentPart } = require('../../utils/media');
 
 let discordClient;
 
+/**
+ * Initialize Discord bot client.
+ * Sets up event handlers for client ready state and message creation in threads.
+ * Bot will only respond in threads within the "gemix" forum category.
+ * @returns {object} The discord.js Client instance
+ */
 function initDiscord() {
   discordClient = new Client({
     intents: [
@@ -39,25 +45,20 @@ function initDiscord() {
 }
 
 async function onDiscordMessage(msg) {
-  // Ignore bot's own messages
   if (msg.author.id === discordClient.user.id) return;
   if (msg.author.bot) return;
 
-  // Only respond in threads within the "gemix" channel/forum
   const channel = msg.channel;
   if (!channel.isThread()) return;
 
   const parent = channel.parent;
   if (!parent) return;
 
-  // Check if parent channel name is "gemix"
   if (parent.name.toLowerCase() !== DISCORD_THREAD_NAME) return;
 
-  // Check if this is the first message (thread starter) - skip it
   const starterMessage = await channel.fetchStarterMessage().catch(() => null);
   if (starterMessage && msg.id === starterMessage.id) return;
 
-  // Build user identity
   const guild = discordClient.guilds.cache.get(GUILD_ID);
   let guildMember = null;
   try {
@@ -72,35 +73,27 @@ async function onDiscordMessage(msg) {
     discordNickname: guildMember?.nickname,
   });
 
-  // Build history (exclude starter message)
   const history = await buildDiscordHistory(channel, starterMessage?.id);
 
-  // Current message content (multimodal)
   const contentParts = [];
   let textBody = msg.content || '';
 
-  // Extract quoted message content if this is a reply
   if (msg.reference) {
     try {
       const quotedMsg = await channel.messages.fetch(msg.reference.messageId);
       if (quotedMsg) {
-        // If quoted message has attachments (media)
         if (quotedMsg.attachments.size > 0) {
           const filetags = [...quotedMsg.attachments.values()]
             .map(att => `[${att.name}]`)
             .join(' ');
           textBody = `[In reply to: ${filetags}]\n` + textBody;
         } else if (quotedMsg.content) {
-          // If quoted message is text
           textBody = `[In reply to: ${quotedMsg.content}]\n` + textBody;
         }
       }
-    } catch {
-      // Skip if reply fetch fails
-    }
+    } catch {}
   }
 
-  // Handle attachments
   for (const att of msg.attachments.values()) {
     const ext = (att.name || '').split('.').pop().toLowerCase();
     const isImage = att.contentType?.startsWith('image/');
@@ -130,7 +123,6 @@ async function onDiscordMessage(msg) {
 
   if (contentParts.length === 0) return;
 
-  // Get custom emojis
   let availableEmojis = '';
   try {
     const emojis = guild.emojis.cache;
@@ -139,7 +131,6 @@ async function onDiscordMessage(msg) {
     }
   } catch {}
 
-  // Get server events
   let serverEvents = 'Nessun evento in programma.';
   try {
     const events = await guild.scheduledEvents.fetch();
@@ -173,17 +164,14 @@ async function onDiscordMessage(msg) {
     discordChannel: channel,
   };
 
-  // Show typing indicator
   await channel.sendTyping();
 
   try {
     const response = await handleMessage(ctx);
 
-    // Use structured output fields from handler
     let finalText = response.discordMessage || response.text || '';
     let newTitle = response.discordTitle || '';
 
-    // Rename thread if new title is provided
     if (newTitle && newTitle.length > 0) {
       try {
         await channel.setName(newTitle);
@@ -192,9 +180,6 @@ async function onDiscordMessage(msg) {
         console.error('[Discord] Errore rinomina thread:', err.message);
       }
     }
-
-    // Send response
-    const sendOptions = {};
 
     if (response.isVoiceOnly && response.voiceBuffer) {
       const attachment = new AttachmentBuilder(response.voiceBuffer, { name: 'voice.ogg' });
@@ -211,7 +196,6 @@ async function onDiscordMessage(msg) {
     }
 
     if (finalText) {
-      // Discord message limit is 2000 chars
       if (finalText.length > 2000) {
         const chunks = finalText.match(/[\s\S]{1,2000}/g);
         console.log(`   💬 Messaggio diviso in ${chunks.length} parti`);
@@ -256,7 +240,6 @@ async function buildDiscordHistory(channel, starterMessageId) {
     let textContent = m.content || '';
     const mediaParts = [];
 
-    // Handle attachments in history — download supported media
     for (const att of m.attachments.values()) {
       const isImage = att.contentType?.startsWith('image/');
       const isAudio = att.contentType?.startsWith('audio/');
@@ -282,7 +265,6 @@ async function buildDiscordHistory(channel, starterMessageId) {
     const senderName = isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username);
     const prefix = `[${ts}] ${senderName}: `;
 
-    // Build content: multimodal if there are media, otherwise text-only
     if (mediaParts.length > 0) {
       const content = [
         { type: 'text', text: `${prefix}${textContent}` },

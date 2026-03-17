@@ -1,12 +1,14 @@
 const { ACTIVE_MEMBERS } = require('../config/members');
 
-// Reference to WhatsApp dedicated client - set at runtime
 let client = null;
 
-// Cooldown tracking: prevent spamming admin with repeated errors
 const cooldowns = new Map();
-const COOLDOWN_MS = 5 * 60 * 1000; // 5 minuti per tipo di errore
+const COOLDOWN_MS = 5 * 60 * 1000;
 
+/**
+ * Set the WhatsApp dedicated client reference for admin notifications.
+ * @param {object} waClient - The whatsapp-web.js Client instance
+ */
 function setAdminNotifierClient(waClient) {
   client = waClient;
 }

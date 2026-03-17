@@ -1,9 +1,19 @@
 const { SUPPORTED_MEDIA, UNSUPPORTED_MEDIA } = require('../config/constants');
 
+/**
+ * Check if a media type is supported by the AI.
+ * @param {string} type - Media type (e.g., 'image', 'audio')
+ * @returns {boolean} True if media type is supported
+ */
 function isSupportedMedia(type) {
   return SUPPORTED_MEDIA.includes(type);
 }
 
+/**
+ * Check if a media type is explicitly unsupported.
+ * @param {string} type - Media type (e.g., 'video')
+ * @returns {boolean} True if media type is unsupported
+ */
 function isUnsupportedMedia(type) {
   return UNSUPPORTED_MEDIA.includes(type);
 }

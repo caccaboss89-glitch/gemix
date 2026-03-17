@@ -32,11 +32,23 @@ const ACTIVE_MEMBERS = [
   },
 ];
 
+/**
+ * Find a member by WhatsApp JID.
+ * @param {string} jid - WhatsApp JID (e.g., '393922348132@c.us')
+ * @returns {object|null} The member object or null if not found
+ */
 function findMemberByWa(jid) {
   const phone = jid.split('@')[0].split(':')[0];
   return ACTIVE_MEMBERS.find(m => m.wa.split('@')[0] === phone) || null;
 }
 
+/**
+ * Find a member by Discord username, display name, or server nickname.
+ * @param {string} username - Discord username
+ * @param {string} displayName - Discord display name
+ * @param {string} nickname - Discord server nickname
+ * @returns {object|null} The member object or null if not found
+ */
 function findMemberByDiscord(username, displayName, nickname) {
   const candidates = [username, displayName, nickname].filter(Boolean).map(n => n.toLowerCase());
   return ACTIVE_MEMBERS.find(m =>
@@ -44,16 +56,31 @@ function findMemberByDiscord(username, displayName, nickname) {
   ) || null;
 }
 
+/**
+ * Find a member by full name (case-insensitive).
+ * @param {string} name - Full member name
+ * @returns {object|null} The member object or null if not found
+ */
 function findMemberByName(name) {
   if (!name) return null;
   const lower = name.toLowerCase().trim();
   return ACTIVE_MEMBERS.find(m => m.name.toLowerCase() === lower) || null;
 }
 
+/**
+ * Check if a member object is active (non-null).
+ * @param {object|null} member - The member object
+ * @returns {boolean} True if member is active (not null)
+ */
 function isMemberActive(member) {
   return member !== null;
 }
 
+/**
+ * Check if a member has admin privileges.
+ * @param {object|null} member - The member object
+ * @returns {boolean} True if member exists and has admin flag set to true
+ */
 function isAdmin(member) {
   return member !== null && member.admin === true;
 }

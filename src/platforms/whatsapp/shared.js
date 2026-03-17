@@ -6,10 +6,11 @@ const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag } = r
 
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
+ * Includes message context, media handling, and footer cleanup for GemiX messages.
  * @param {object} chat - whatsapp-web.js Chat object
- * @param {string} platform - 'whatsapp_dedicated' | 'whatsapp_personal'
- * @param {string|null} botJid - The bot's own JID (for identifying GemiX messages)
- * @returns {{ historyMessages: Array, currentMediaParts: Array }}
+ * @param {string} platform - Platform identifier ('whatsapp_dedicated' | 'whatsapp_personal')
+ * @param {string|null} botJid - The bot's own JID for identifying GemiX messages to skip footers
+ * @returns {Promise<Array>} Array of history messages with role ('user'|'assistant') and content
  */
 async function buildWhatsAppHistory(chat, platform, botJid) {
   const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
@@ -42,7 +43,6 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
         }
       }
     } else {
-      // Dedicated account
       if (msg.fromMe) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
@@ -72,7 +72,6 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
     }
     const mediaParts = [];
 
-    // Handle special message types
     if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
       textContent = `[Contatto condiviso] ${textContent || ''}`;
     } else if (msg.type === 'poll_creation') {
@@ -83,7 +82,6 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
       }
     }
 
-    // Handle media — download supported types for multimodal history
     if (msg.hasMedia) {
       const mediaType = msg.type;
       const filename = msg._data?.filename || msg._data?.caption || null;
@@ -130,6 +128,8 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
 
 /**
  * Download media from current message if supported.
+ * @param {object} msg - The whatsapp-web.js message object
+ * @returns {Promise<object|null>} Media object { buffer, mimetype, filename } or null if not available/unsupported
  */
 async function downloadCurrentMedia(msg) {
   if (!msg.hasMedia) return null;
@@ -150,9 +150,11 @@ async function downloadCurrentMedia(msg) {
 
 /**
  * Extract quoted message content if this message is a reply.
- * Returns string to prepend to current message content.
- * - If reply is to text: returns the quoted text with [In reply to: ...]
- * - If reply is to media: returns [nomefile.estensione]
+ * Returns string to prepend to current message content with context.
+ * - If reply is to text: returns quoted text with [In reply to: ...] prefix
+ * - If reply is to media: returns filename/tag with [In reply to: ...] prefix
+ * @param {object} msg - The whatsapp-web.js message object
+ * @returns {Promise<string>} Formatted quoted message context or empty string if not a reply
  */
 async function extractQuotedMessageContent(msg) {
   if (!msg.hasQuotedMsg) return '';
@@ -161,18 +163,14 @@ async function extractQuotedMessageContent(msg) {
     const quoted = await msg.getQuotedMessage();
     if (!quoted) return '';
 
-    // If quoted message has media (and is a supported type), return just the filename
     if (quoted.hasMedia) {
-      const mediaType = quoted.type;
       const filename = quoted._data?.filename || quoted._data?.caption || null;
       const tag = mediaTag(filename, quoted._data?.mimetype);
       return `[In reply to: ${tag}]\n`;
     }
 
-    // If quoted message is text, return the text
     if (quoted.body) {
       let quotedText = quoted.body;
-      // Remove GemiX footer if present
       if (hasFooter(quotedText)) {
         quotedText = removeFooter(quotedText);
       }
@@ -187,21 +185,23 @@ async function extractQuotedMessageContent(msg) {
 
 /**
  * Send response back to WhatsApp chat.
+ * Handles text messages, voice messages, and file attachments.
+ * @param {object} chat - The whatsapp-web.js Chat object
+ * @param {object} msg - The original whatsapp-web.js message object
+ * @param {object} responseData - Response data { text, voiceBuffer, isVoiceOnly, attachments }
+ * @returns {Promise<void>}
  */
 async function sendWhatsAppResponse(chat, msg, responseData) {
-  // Voice message
   if (responseData.isVoiceOnly && responseData.voiceBuffer) {
     const media = new MessageMedia('audio/ogg', responseData.voiceBuffer.toString('base64'), 'voice.ogg');
     await chat.sendMessage(media, { sendAudioAsVoice: true });
     return;
   }
 
-  // Text message
   if (responseData.text) {
     await chat.sendMessage(responseData.text);
   }
 
-  // File attachments
   if (responseData.attachments && responseData.attachments.length > 0) {
     for (const att of responseData.attachments) {
       const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);

@@ -4,7 +4,6 @@ const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
 const { callGrok } = require('../ai/grok');
 const { webSearch } = require('../tools/webSearch');
 const { generatePdf } = require('../tools/pdfGenerator');
-const { sendWhatsAppDirect } = require('../tools/whatsappSender');
 const { sendEmailDirect } = require('../tools/emailSender');
 const { getRomeTime, getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
@@ -14,12 +13,20 @@ const { MessageMedia } = require('whatsapp-web.js');
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
 
+/**
+ * Set the WhatsApp dedicated client reference for the scheduler.
+ * @param {object} client - The whatsapp-web.js Client instance
+ */
 function setSchedulerWaClient(client) {
   dedicatedClient = client;
 }
 
+/**
+ * Start the task scheduler.
+ * Initializes the task directory and begins checking for due tasks at regular intervals.
+ * Also triggers daily music wrap monitoring.
+ */
 function startScheduler() {
-  // Ensure tasks directory exists
   if (!fs.existsSync(TASKS_DIR)) {
     fs.mkdirSync(TASKS_DIR, { recursive: true });
   }
@@ -36,11 +43,9 @@ function startScheduler() {
 }
 
 async function checkAndExecuteTasks() {
-  // Check music wrap once per day (at midnight in Italy)
   const now = new Date();
-  // Use locale string in Swedish format for safe ISO-like parsing
   const romeTimeStr = now.toLocaleString('sv-SE', { timeZone: 'Europe/Rome' });
-  const todayDateString = romeTimeStr.split(' ')[0]; // Gets YYYY-MM-DD
+  const todayDateString = romeTimeStr.split(' ')[0];
 
   if (lastMusicWrapCheckDate !== todayDateString) {
     lastMusicWrapCheckDate = todayDateString;
@@ -79,7 +84,6 @@ async function checkAndExecuteTasks() {
       }
     }
 
-    // Remove executed tasks (refresh now time after potential long-running tasks)
     const nowAfter = new Date();
     const nowAfterTime = nowAfter.getTime();
     data.tasks = data.tasks.filter(t => new Date(t.scheduledAt).getTime() > nowAfterTime);
@@ -92,6 +96,12 @@ async function checkAndExecuteTasks() {
   }
 }
 
+/**
+ * Execute a single scheduled task.
+ * Handles static content, dynamic AI-generated content, and multiplatform delivery.
+ * @param {object} task - Task object with type, content, destinations, etc.
+ * @returns {Promise<void>}
+ */
 async function executeTask(task) {
   let messageText = '';
   let pdfBuffer = null;
@@ -100,7 +110,6 @@ async function executeTask(task) {
   if (task.type === 'static') {
     messageText = task.content;
   } else if (task.type === 'dynamic') {
-    // Call Grok with the saved prompt
     const result = await executeDynamicTask(task.content);
     messageText = result.text;
     if (result.pdfBuffer) {
@@ -109,19 +118,16 @@ async function executeTask(task) {
     }
   }
 
-  // Generate PDF if specified in task
   if (task.pdfContent && !pdfBuffer) {
     pdfBuffer = await generatePdf(task.pdfTitle || 'Documento', task.pdfContent);
     pdfName = `${(task.pdfTitle || 'documento').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
   }
 
-  // Append scheduled footer with creation date
   const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
   messageText += scheduledFooter;
 
   const dest = task.destinations || {};
 
-  // Send to WhatsApp private
   if (dest.whatsapp && dedicatedClient) {
     try {
       await dedicatedClient.sendMessage(dest.whatsapp, messageText);
@@ -134,7 +140,6 @@ async function executeTask(task) {
     }
   }
 
-  // Send to WhatsApp group
   if (dest.whatsappGroup && dedicatedClient) {
     try {
       await dedicatedClient.sendMessage(dest.whatsappGroup, messageText);
@@ -147,7 +152,6 @@ async function executeTask(task) {
     }
   }
 
-  // Send email
   if (dest.email) {
     try {
       const attachments = [];
@@ -172,7 +176,9 @@ async function executeTask(task) {
 
 /**
  * Execute a dynamic task using Grok AI.
- * Grok has access to web_search and generate_pdf tools.
+ * Grok has access to web_search and generate_pdf tools for real-time data processing.
+ * @param {string} prompt - The task prompt for Grok AI to execute
+ * @returns {Promise<object>} Result object { text: string, pdfBuffer: Buffer|null, pdfName: string|null }
  */
 async function executeDynamicTask(prompt) {
   const systemMsg = `Sei un assistente AI che esegue task programmati. Ora corrente (Roma): ${getRomeTime()}.\nEsegui il seguente compito e fornisci il risultato come messaggio da inviare all'utente. Rispondi in italiano.`;

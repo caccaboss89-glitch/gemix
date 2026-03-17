@@ -1,14 +1,20 @@
 const { findMemberByName } = require('../config/members');
 
-// whatsappDedicated client reference - set at runtime
 let dedicatedClient = null;
 
+/**
+ * Store reference to WhatsApp dedicated client for message sending.
+ * @param {object} client - The whatsapp-web.js Client instance
+ */
 function setDedicatedClient(client) {
   dedicatedClient = client;
 }
 
 /**
- * Normalize a phone number to WhatsApp JID format.
+ * Normalize phone number to WhatsApp JID format.
+ * Accepts multiple formats: +39123, 0039123, 123, etc.
+ * @param {string} phone - Phone number in any standard format
+ * @returns {string} Normalized WhatsApp JID (phone@c.us)
  */
 function normalizePhoneToJid(phone) {
   let cleaned = phone.replace(/[\s\-\(\)]/g, '');
@@ -31,7 +37,6 @@ async function sendWhatsAppMessage(recipientName, message, options = {}) {
     return 'Errore: client WhatsApp dedicato non disponibile.';
   }
 
-  // Admin with direct phone number → send without member lookup
   if (options.isAdmin && options.recipientPhone) {
     const jid = normalizePhoneToJid(options.recipientPhone);
     try {

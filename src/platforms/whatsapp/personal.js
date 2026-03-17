@@ -9,6 +9,11 @@ const { mediaToContentPart, mediaTag } = require('../../utils/media');
 
 let client;
 
+/**
+ * Initialize personal WhatsApp account client.
+ * Sets up event handlers for QR code, ready state, auth failure, disconnection, and incoming messages.
+ * @returns {object} The whatsapp-web.js Client instance
+ */
 function initPersonalWhatsApp() {
   client = new Client({
     authStrategy: new LocalAuth({ clientId: 'personal' }),
@@ -63,19 +68,15 @@ function initPersonalWhatsApp() {
 async function onPersonalMessage(msg) {
   const chat = await msg.getChat();
 
-  // Only private chats, never groups
   if (chat.isGroup) return;
 
-  // Check if message contains "@gemix" (case-insensitive)
   if (!(msg.body || '').toLowerCase().includes('@gemix')) return;
 
-  // Skip GemiX's own responses (messages with footer that were sent by us)
   if (msg.fromMe && (msg.body || '').includes('--GemiX •')) return;
 
-  // Determine the actual sender
   const senderJid = msg.fromMe ? client.info.wid._serialized : msg.from;
   let userName = senderJid;
-  let phoneJid = senderJid; // fallback
+  let phoneJid = senderJid;
   try {
     const contact = await msg.getContact();
     userName = contact.pushname || contact.name || senderJid;
@@ -91,16 +92,13 @@ async function onPersonalMessage(msg) {
     userId: phoneJid,
   });
   
-  // LOG: Message received
   console.log(`\n📨 [WHATSAPP-PERSONALE] Messaggio ricevuto`);
   console.log(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
   console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   console.log(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
-  // Build history
   const history = await buildWhatsAppHistory(chat, 'whatsapp_personal', null);
 
-  // Current message content
   const contentParts = [];
   let textBody = msg.body || '';
 
@@ -110,7 +108,6 @@ async function onPersonalMessage(msg) {
     textBody = `[Sondaggio] ${textBody}`;
   }
 
-  // Extract quoted message content if this is a reply
   const quotedContent = await extractQuotedMessageContent(msg);
   if (quotedContent) {
     textBody = quotedContent + textBody;
@@ -150,7 +147,6 @@ async function onPersonalMessage(msg) {
 
   const response = await handleMessage(ctx);
 
-  // Add footer to text responses (program enforces this)
   if (response.text) {
     response.text = stripGemixFooterFromResponse(response.text);
     response.text = addFooter(response.text, getModelDisplayName(GEMINI_MODEL));

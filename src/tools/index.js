@@ -13,10 +13,11 @@ const { getGroupTaskFileId } = require('../utils/userIdentifier');
 
 /**
  * Execute a tool call and return the result.
+ * Validates permissions, executes the tool, and collects responses/attachments.
  * @param {object} toolCall - The tool call from Gemini { id, function: { name, arguments } }
- * @param {object} userCtx - User context for permission + task file resolution
+ * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, email, isGroup, groupId }
  * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
- * @returns {{ toolCallId: string, result: string }}
+ * @returns {Promise<object>} { toolCallId: string, result: string }
  */
 async function executeTool(toolCall, userCtx, responseCtx) {
   const name = toolCall.function.name;
@@ -27,7 +28,6 @@ async function executeTool(toolCall, userCtx, responseCtx) {
     args = {};
   }
 
-  // Permission check: active-member-only tools
   if (isActiveMemberOnlyTool(name) && !userCtx.isActiveMember) {
     return {
       toolCallId: toolCall.id,
@@ -54,21 +54,18 @@ async function executeTool(toolCall, userCtx, responseCtx) {
       }
 
       case 'send_voice_message': {
-        // Check if voice was already generated (prevent duplicate calls)
         if (responseCtx.voiceBuffer) {
           return {
             toolCallId: toolCall.id,
             result: '❌ Errore: un messaggio vocale è già stato generato. Non puoi generarne un altro nella stessa richiesta.',
           };
         }
-        // Strip emojis: custom Discord emojis <:name:id> / <a:name:id>, unicode emojis, and misc symbols
         let cleanText = (args.text || '')
-          .replace(/<a?:[\w]+:\d+>/g, '')          // Discord custom emojis
-          .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '') // unicode emoji
-          .replace(/\s{2,}/g, ' ')                  // collapse extra spaces
+          .replace(/<a?:[\w]+:\d+>/g, '')
+          .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
+          .replace(/\s{2,}/g, ' ')
           .trim();
 
-        // Enforce 1000 char limit — if exceeded, abort voice and tell AI to send text
         if (cleanText.length > MAX_TTS_CHARS) {
           result = `❌ Il testo supera il limite di ${MAX_TTS_CHARS} caratteri (${cleanText.length} caratteri). Non è possibile generare un vocale. Rispondi con un normale messaggio testuale.`;
           break;
@@ -130,7 +127,6 @@ async function executeTool(toolCall, userCtx, responseCtx) {
       }
 
       case 'send_email': {
-        // Extra validation: caller must be active member
         if (!userCtx.isActiveMember) {
           result = 'Errore: solo i membri attivi possono inviare email.';
           break;

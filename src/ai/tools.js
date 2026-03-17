@@ -1,6 +1,5 @@
-// Tool definitions for Gemini function calling (OpenAI-compatible format)
-// Le descrizioni dei tool sono la UNICA fonte di istruzioni operative per GemiX.
-// Il system prompt NON ripete queste info.
+// Tool definitions for Gemini AI function calling (OpenAI-compatible format).
+// Tool descriptions are the single source of truth for GemiX operational instructions.
 
 const BASE_TOOLS = [
   {
@@ -168,7 +167,7 @@ const ACTIVE_MEMBER_TOOLS = [
 
 const ACTIVE_MEMBER_TOOL_NAMES = ACTIVE_MEMBER_TOOLS.map(t => t.function.name);
 
-// Admin-only variant: send_whatsapp_message with recipientPhone support
+// Admin-only variant: send_whatsapp_message with extended recipient options
 const ADMIN_SEND_WA_TOOL = {
   type: 'function',
   function: {
@@ -222,6 +221,11 @@ function getToolsForUser(isActiveMember, isAdmin) {
   return tools;
 }
 
+/**
+ * Check if a tool is restricted to active members only.
+ * @param {string} toolName - The tool name to check
+ * @returns {boolean} True if the tool is member-only, false if available to all users
+ */
 function isActiveMemberOnlyTool(toolName) {
   return ACTIVE_MEMBER_TOOL_NAMES.includes(toolName);
 }

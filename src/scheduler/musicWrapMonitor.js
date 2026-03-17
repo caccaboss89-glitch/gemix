@@ -5,14 +5,15 @@ const { ACTIVE_MEMBERS } = require('../config/members');
 
 const MONITOR_STATE_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
 
-// GitHub repo configuration
 const GITHUB_OWNER = 'SitoMusicBot';
 const GITHUB_REPO = 'SitoMusicBot';
 const GITHUB_BRANCH = 'main';
 const MUSIC_WRAP_URL = 'https://sito-music-bot-git-main-albertos-projects-cf648a84.vercel.app/';
 
 /**
- * Load monitor state file
+ * Load monitor state from persistent file.
+ * State tracks last processed commit hash and dates messages were sent to members.
+ * @returns {object} Monitor state { lastCommitHash, lastSentDate }
  */
 function loadMonitorState() {
   if (!fs.existsSync(MONITOR_STATE_FILE)) {
@@ -26,14 +27,17 @@ function loadMonitorState() {
 }
 
 /**
- * Save monitor state file
+ * Save monitor state to persistent file.
+ * @param {object} state - Monitor state object to save
+ * @returns {void}
  */
 function saveMonitorState(state) {
   fs.writeFileSync(MONITOR_STATE_FILE, JSON.stringify(state, null, 2));
 }
 
 /**
- * Get the previous month name
+ * Get the previous/last month name in Italian locale.
+ * @returns {string} Month name (e.g., 'gennaio', 'febbraio')
  */
 function getPreviousMonthName() {
   const now = new Date();
@@ -43,7 +47,8 @@ function getPreviousMonthName() {
 }
 
 /**
- * Get the current date in Italy (DATE only, no time)
+ * Get the current date in Italy formatted as ISO string (YYYY-MM-DD only).
+ * @returns {string} Date string format (e.g., '2026-03-17')
  */
 function getItalyDateString() {
   const now = new Date();
@@ -52,7 +57,8 @@ function getItalyDateString() {
 }
 
 /**
- * Check if today is the first day of the month
+ * Check if today is the first day of the month in Italy timezone.
+ * @returns {boolean} True if today is the 1st of the month
  */
 function isFirstOfMonth() {
   const now = new Date();
@@ -73,7 +79,6 @@ async function getLatestCommitHash() {
       'User-Agent': 'GemiX-MusicWrapMonitor/1.0'
     };
 
-    // Add GitHub token if available (optional, increases rate limit)
     const githubToken = process.env.GITHUB_TOKEN;
     if (githubToken) {
       headers['Authorization'] = `token ${githubToken}`;
@@ -82,7 +87,7 @@ async function getLatestCommitHash() {
     const response = await fetch(url, { headers });
     
     if (!response.ok) {
-      console.error(`[MusicWrap] GitHub API error: ${response.status}`);
+      console.error(`[MusicWrap] ❌ Errore API GitHub: ${response.status}`);
       return null;
     }
 
@@ -93,13 +98,16 @@ async function getLatestCommitHash() {
 
     return data[0].sha;
   } catch (err) {
-    console.error('[MusicWrap] Error fetching commit hash:', err.message);
+    console.error('[MusicWrap] ❌ Errore nel fetch dell\'hash commit:', err.message);
     return null;
   }
 }
 
 /**
- * Check if message was already sent to a member today
+ * Check if message was already sent to a member today.
+ * @param {string} memberWa - WhatsApp JID of the member
+ * @param {object} state - Current monitor state
+ * @returns {boolean} True if message was sent to this member today
  */
 function wasMessageSentToday(memberWa, state) {
   const today = getItalyDateString();
@@ -107,7 +115,10 @@ function wasMessageSentToday(memberWa, state) {
 }
 
 /**
- * Check all conditions and send message if needed
+ * Check conditions and send music wrap notification message to active members.
+ * Triggers on: (1) First day of month (2) New commits detected (3) Not sent today.
+ * @param {object} dedicatedClient - The whatsapp-web.js Client instance
+ * @returns {Promise<void>}
  */
 async function checkAndSendMusicWrap(dedicatedClient) {
   if (!dedicatedClient) {
@@ -115,14 +126,12 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     return;
   }
 
-  // Condition 1: Must be first day of month
   if (!isFirstOfMonth()) {
     return;
   }
 
-  console.log('[MusicWrap] ✅ Heute ist der erste! Prüfung lädt...');
+  console.log('[MusicWrap] ✅ Oggi è il primo! Verifica in corso...');
 
-  // Condition 2: Check if repo was updated
   const latestCommitHash = await getLatestCommitHash();
   if (!latestCommitHash) {
     console.log('[MusicWrap] ⚠️  Impossibile verificare il commit da GitHub');
@@ -131,7 +140,6 @@ async function checkAndSendMusicWrap(dedicatedClient) {
 
   const state = loadMonitorState();
 
-  // If same commit as last time, repo wasn't updated
   if (state.lastCommitHash === latestCommitHash) {
     console.log('[MusicWrap] ℹ️  Nessun nuovo aggiornamento rilevato');
     return;
@@ -139,7 +147,6 @@ async function checkAndSendMusicWrap(dedicatedClient) {
 
   console.log(`[MusicWrap] ✅ Nuovo aggiornamento rilevato (commit: ${latestCommitHash.slice(0, 7)})`);
 
-  // Condition 3: Check if message wasn't already sent today and send
   const today = getItalyDateString();
   let sentCount = 0;
 
@@ -160,7 +167,6 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     }
   }
 
-  // Update state with new commit hash
   state.lastCommitHash = latestCommitHash;
   saveMonitorState(state);
 

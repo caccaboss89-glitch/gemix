@@ -1,6 +1,12 @@
 const { SERPAPI_KEY } = require('../config/env');
 const { notifyAdmin } = require('../utils/adminNotifier');
 
+/**
+ * Perform web search using SerpAPI and format results.
+ * Returns answer box, knowledge graph, and organic search results.
+ * @param {string} query - Search query string
+ * @returns {Promise<string>} Formatted search results with links
+ */
 async function webSearch(query) {
   const params = new URLSearchParams({
     q: query,

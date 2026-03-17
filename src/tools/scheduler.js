@@ -6,16 +6,16 @@ const { getRomeISO } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 
-// Ensure tasks directory exists
 if (!fs.existsSync(TASKS_DIR)) {
   fs.mkdirSync(TASKS_DIR, { recursive: true });
 }
 
 /**
- * Schedule one or more tasks for a user.
- * @param {Array} tasks - Array of task objects from GemiX
- * @param {object} ctx - Context: { taskFileId, groupTaskFileId, userId, userName, waJid, email, isActiveMember, isGroup, groupId }
- * @returns {string} Result message
+ * Schedule one or more tasks for a user or group.
+ * Validates dates, permissions, and destinations before writing to task files.
+ * @param {Array} tasks - Array of task objects from GemiX { taskType, content, scheduledAt, sendToGroup, sendToPrivateWhatsApp, sendToEmail, pdfContent?, pdfTitle?, recipientName?, recipientPhone? }
+ * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, email, isActiveMember, isAdmin, isGroup, groupId }
+ * @returns {string} Result message with task confirmation or error details
  */
 function scheduleTasks(tasks, ctx) {
   const now = new Date();
@@ -27,7 +27,6 @@ function scheduleTasks(tasks, ctx) {
     const scheduledAt = new Date(task.scheduledAt);
     const scheduledAtTime = scheduledAt.getTime();
 
-    // Validate date
     if (isNaN(scheduledAtTime)) {
       results.push(`❌ Data non valida: "${task.scheduledAt}"`);
       continue;
@@ -41,18 +40,15 @@ function scheduleTasks(tasks, ctx) {
       continue;
     }
 
-    // Validate email destination
     if (task.sendToEmail && !ctx.isActiveMember) {
       results.push(`❌ Invio email disponibile solo per membri attivi.`);
       continue;
     }
 
-    // Determine which file to write to
     const isGroupTask = task.sendToGroup && ctx.isGroup && ctx.groupTaskFileId;
     const fileId = isGroupTask ? ctx.groupTaskFileId : ctx.taskFileId;
     const filePath = path.join(TASKS_DIR, `${fileId}.json`);
 
-    // Build destinations
     const destinations = {};
     if (task.sendToPrivateWhatsApp) {
       if (ctx.isAdmin && task.recipientPhone) {
@@ -83,9 +79,7 @@ function scheduleTasks(tasks, ctx) {
       }
     }
 
-    // Need at least one destination
     if (Object.keys(destinations).length === 0) {
-      // Default to private WhatsApp if available
       if (ctx.waJid) {
         destinations.whatsapp = ctx.waJid;
       } else {
@@ -106,7 +100,6 @@ function scheduleTasks(tasks, ctx) {
       pdfTitle: task.pdfTitle || null,
     };
 
-    // Read existing file or create new
     let fileData = { tasks: [] };
     if (fs.existsSync(filePath)) {
       try {

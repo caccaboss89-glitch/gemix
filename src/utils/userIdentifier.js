@@ -16,14 +16,12 @@ function identifyUser(ctx) {
   if (ctx.platform === 'discord') {
     member = findMemberByDiscord(ctx.discordUsername, ctx.discordDisplayName, ctx.discordNickname);
   } else {
-    // WhatsApp - match by JID (strip @c.us if not present, normalize)
     const jid = ctx.userId.includes('@') ? ctx.userId : ctx.userId + '@c.us';
     member = findMemberByWa(jid);
   }
 
   const isActiveMember = member !== null;
 
-  // Task file ID: active members get unified file, others get platform-specific
   let taskFileId;
   if (member) {
     taskFileId = 'member_' + member.name.toLowerCase().replace(/\s+/g, '_');
@@ -37,7 +35,9 @@ function identifyUser(ctx) {
 }
 
 /**
- * Get the group task file ID from a group chat ID
+ * Get the task file ID for a group WhatsApp chat.
+ * @param {string} groupId - WhatsApp group JID (e.g., '123456789-1234567890@g.us')
+ * @returns {string} Normalized group task file ID (e.g., 'group_123456789-1234567890')
  */
 function getGroupTaskFileId(groupId) {
   return 'group_' + groupId.replace('@g.us', '');

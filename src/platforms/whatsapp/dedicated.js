@@ -2,12 +2,17 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
 const { handleMessage } = require('../../handler');
-const { identifyUser, getGroupTaskFileId } = require('../../utils/userIdentifier');
+const { identifyUser } = require('../../utils/userIdentifier');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
 
 let client;
 
+/**
+ * Initialize dedicated WhatsApp account client.
+ * Sets up event handlers for QR code, ready state, auth failure, disconnection, and incoming messages.
+ * @returns {object} The whatsapp-web.js Client instance
+ */
 function initDedicatedWhatsApp() {
   client = new Client({
     authStrategy: new LocalAuth({ clientId: 'dedicated' }),
@@ -64,18 +69,15 @@ async function onDedicatedMessage(msg) {
   const chat = await msg.getChat();
   const isGroup = chat.isGroup;
 
-  // In groups: only respond when mentioned or replied to
   if (isGroup) {
     const botJid = client.info.wid._serialized;
     
-    // 1. Check if bot is mentioned using getMentions()
     let isMentioned = false;
     try {
       const mentions = await msg.getMentions();
       isMentioned = mentions.some(contact => contact.id._serialized === botJid);
     } catch {}
 
-    // 2. Check if it's a direct reply to a bot message
     let isReplyToBot = false;
     if (msg.hasQuotedMsg) {
       try {
@@ -87,15 +89,12 @@ async function onDedicatedMessage(msg) {
     if (!isMentioned && !isReplyToBot) return;
   }
 
-  // Build user identity
-  const senderJid = msg.author || msg.from; // msg.author in groups, msg.from in private
+  const senderJid = msg.author || msg.from;
   let userName = senderJid;
-  let phoneJid = senderJid; // fallback
+  let phoneJid = senderJid;
   try {
     const contact = await msg.getContact();
     userName = contact.pushname || contact.name || senderJid;
-    // LID format (e.g. 124713066090553@lid) doesn't contain phone number.
-    // Resolve via contact.number or contact.id.user when possible.
     if (contact.number) {
       phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
     } else if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
@@ -110,33 +109,27 @@ async function onDedicatedMessage(msg) {
   
   console.log(`   JID: ${senderJid} → phoneJid: ${phoneJid}`);
   
-  // LOG: Message received
   console.log(`\n📨 [WHATSAPP-DEDICATO] Messaggio ricevuto`);
   console.log(`   Utente: ${userName}${isGroup ? ` (Gruppo: ${chat.name})` : ''}`);
   console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   console.log(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
-  // Build history
   const history = await buildWhatsAppHistory(chat, 'whatsapp_dedicated', client.info.wid._serialized);
 
-  // Current message content (multimodal)
   const contentParts = [];
   let textBody = msg.body || '';
 
-  // Handle special types
   if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
     textBody = `[Contatto condiviso] ${textBody}`;
   } else if (msg.type === 'poll_creation') {
     textBody = `[Sondaggio] ${textBody}`;
   }
 
-  // Extract quoted message content if this is a reply
   const quotedContent = await extractQuotedMessageContent(msg);
   if (quotedContent) {
     textBody = quotedContent + textBody;
   }
 
-  // Handle media in current message
   const media = await downloadCurrentMedia(msg);
   if (media) {
     contentParts.push(mediaToContentPart(media.buffer, media.mimetype));
@@ -153,7 +146,6 @@ async function onDedicatedMessage(msg) {
 
   if (contentParts.length === 0) return;
 
-  // Build context
   const ctx = {
     platform: 'whatsapp_dedicated',
     isGroup,
