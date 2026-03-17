@@ -8,9 +8,11 @@ const { sendWhatsAppDirect } = require('../tools/whatsappSender');
 const { sendEmailDirect } = require('../tools/emailSender');
 const { getRomeTime, getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
+const { checkAndSendMusicWrap } = require('../tools/musicWrapMonitor');
 const { MessageMedia } = require('whatsapp-web.js');
 
 let dedicatedClient = null;
+let lastMusicWrapCheckDate = null;
 
 function setSchedulerWaClient(client) {
   dedicatedClient = client;
@@ -34,10 +36,23 @@ function startScheduler() {
 }
 
 async function checkAndExecuteTasks() {
+  // Check music wrap once per day (at midnight in Italy)
+  const now = new Date();
+  const italyNow = new Date(now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' }));
+  const todayDateString = italyNow.toISOString().split('T')[0];
+
+  if (lastMusicWrapCheckDate !== todayDateString) {
+    lastMusicWrapCheckDate = todayDateString;
+    try {
+      await checkAndSendMusicWrap(dedicatedClient);
+    } catch (err) {
+      console.error('[MusicWrap] Errore nel controllo:', err);
+    }
+  }
+
   if (!fs.existsSync(TASKS_DIR)) return;
 
   const files = fs.readdirSync(TASKS_DIR).filter(f => f.endsWith('.json'));
-  const now = new Date();
 
   for (const file of files) {
     const filePath = path.join(TASKS_DIR, file);
