@@ -133,6 +133,43 @@ async function downloadCurrentMedia(msg) {
 }
 
 /**
+ * Extract quoted message content if this message is a reply.
+ * Returns string to prepend to current message content.
+ * - If reply is to text: returns the quoted text with [In reply to: ...]
+ * - If reply is to media: returns [nomefile.estensione]
+ */
+async function extractQuotedMessageContent(msg) {
+  if (!msg.hasQuotedMsg) return '';
+
+  try {
+    const quoted = await msg.getQuotedMessage();
+    if (!quoted) return '';
+
+    // If quoted message has media (and is a supported type), return just the filename
+    if (quoted.hasMedia) {
+      const mediaType = quoted.type;
+      const filename = quoted._data?.filename || quoted._data?.caption || null;
+      const tag = mediaTag(filename, quoted._data?.mimetype);
+      return `[In reply to: ${tag}]\n`;
+    }
+
+    // If quoted message is text, return the text
+    if (quoted.body) {
+      let quotedText = quoted.body;
+      // Remove GemiX footer if present
+      if (hasFooter(quotedText)) {
+        quotedText = removeFooter(quotedText);
+      }
+      return `[In reply to: ${quotedText}]\n`;
+    }
+
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Send response back to WhatsApp chat.
  */
 async function sendWhatsAppResponse(chat, msg, responseData) {
@@ -157,4 +194,4 @@ async function sendWhatsAppResponse(chat, msg, responseData) {
   }
 }
 
-module.exports = { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse };
+module.exports = { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };

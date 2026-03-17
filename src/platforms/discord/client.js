@@ -79,6 +79,27 @@ async function onDiscordMessage(msg) {
   const contentParts = [];
   let textBody = msg.content || '';
 
+  // Extract quoted message content if this is a reply
+  if (msg.reference) {
+    try {
+      const quotedMsg = await channel.messages.fetch(msg.reference.messageId);
+      if (quotedMsg) {
+        // If quoted message has attachments (media)
+        if (quotedMsg.attachments.size > 0) {
+          const filetags = [...quotedMsg.attachments.values()]
+            .map(att => `[${att.name}]`)
+            .join(' ');
+          textBody = `[In reply to: ${filetags}]\n` + textBody;
+        } else if (quotedMsg.content) {
+          // If quoted message is text
+          textBody = `[In reply to: ${quotedMsg.content}]\n` + textBody;
+        }
+      }
+    } catch {
+      // Skip if reply fetch fails
+    }
+  }
+
   // Handle attachments
   for (const att of msg.attachments.values()) {
     const ext = (att.name || '').split('.').pop().toLowerCase();

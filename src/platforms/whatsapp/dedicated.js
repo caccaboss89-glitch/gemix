@@ -1,6 +1,6 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse } = require('./shared');
+const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
 const { handleMessage } = require('../../handler');
 const { identifyUser, getGroupTaskFileId } = require('../../utils/userIdentifier');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
@@ -128,6 +128,12 @@ async function onDedicatedMessage(msg) {
     textBody = `[Contatto condiviso] ${textBody}`;
   } else if (msg.type === 'poll_creation') {
     textBody = `[Sondaggio] ${textBody}`;
+  }
+
+  // Extract quoted message content if this is a reply
+  const quotedContent = await extractQuotedMessageContent(msg);
+  if (quotedContent) {
+    textBody = quotedContent + textBody;
   }
 
   // Handle media in current message
