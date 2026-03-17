@@ -97,7 +97,17 @@ async function onPersonalMessage(msg) {
   console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   console.log(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
-  const history = await buildWhatsAppHistory(chat, 'whatsapp_personal', null);
+  let history = [];
+  try {
+    history = await Promise.race([
+      buildWhatsAppHistory(chat, 'whatsapp_personal', null),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('History fetch timeout')), 15000)
+      )
+    ]);
+  } catch (historyErr) {
+    console.warn(`   ⚠️ History fetch fallito (${historyErr.message}), procedo senza cronologia`);
+  }
 
   const contentParts = [];
   let textBody = msg.body || '';
