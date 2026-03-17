@@ -101,7 +101,7 @@ async function generateVoice(text) {
 }
 
 /**
- * xAI TTS — voice "sal", language "auto", output mp3 44100Hz 128kbps.
+ * xAI TTS — voice "rex", language "auto", output mp3 44100Hz 128kbps.
  */
 async function xaiTTS(text) {
   const res = await fetchWithTimeout('https://api.x.ai/v1/tts', {
@@ -112,7 +112,7 @@ async function xaiTTS(text) {
     },
     body: JSON.stringify({
       text,
-      voice_id: 'sal',
+      voice_id: 'rex',
       language: 'auto',
       output_format: { codec: 'mp3', sample_rate: 44100, bit_rate: 128000 },
     }),
