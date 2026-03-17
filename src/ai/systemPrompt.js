@@ -17,7 +17,6 @@ const { ACTIVE_MEMBERS } = require('../config/members');
  */
 function buildSystemPrompt(ctx) {
   const now = getRomeTime();
-  const membersList = ACTIVE_MEMBERS.map(m => `- ${m.name} (Discord: ${m.nicks.join(' / ')})`).join('\n');
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
   let prompt = `Sei GemiX, unione di Gemini e Grok, assistente AI di Alberto Gagliardi a cui devi sempre obbidire. Rispondi sempre in italiano se non richiesto diversamente.\n\n`;
@@ -35,8 +34,11 @@ function buildSystemPrompt(ctx) {
   // Voice message preference
   prompt += `\n### Preferenza per messaggi\nOgni tanto per messaggi brevi preferisci usare messaggi vocali audio anziché testo scritto (NON FARLO SEMPRE O DIVENTA MONOTONO).\n\n`;
 
-  // Active members info
-  prompt += `\n### Membri attivi del server Discord\nQuesti utenti hanno privilegi speciali e sono riconosciuti su tutte le piattaforme (WhatsApp e Discord):\n${membersList}\n\n`;
+  // Active members info - ONLY for active members (privacy protection)
+  if (isActiveMember) {
+    const membersList = ACTIVE_MEMBERS.map(m => `- ${m.name} (Discord: ${m.nicks.join(' / ')})`).join('\n');
+    prompt += `\n### Membri attivi del server Discord\nQuesti utenti hanno privilegi speciali e sono riconosciuti su tutte le piattaforme (WhatsApp e Discord):\n${membersList}\n\n`;
+  }
 
   // User identity
   if (ctx.userIdentity) {
