@@ -69,7 +69,10 @@ async function checkAndExecuteTasks() {
     if (!data || !data.tasks || data.tasks.length === 0) continue;
 
     const nowTime = now.getTime();
-    const dueTasks = data.tasks.filter(t => new Date(t.scheduledAt).getTime() <= nowTime);
+    const dueTasks = data.tasks.filter(t => {
+      const taskDate = new Date(t.scheduledAt);
+      return !isNaN(taskDate.getTime()) && taskDate.getTime() <= nowTime;
+    });
     if (dueTasks.length === 0) continue;
 
     for (const task of dueTasks) {
@@ -83,7 +86,10 @@ async function checkAndExecuteTasks() {
 
     const nowAfter = new Date();
     const nowAfterTime = nowAfter.getTime();
-    data.tasks = data.tasks.filter(t => new Date(t.scheduledAt).getTime() > nowAfterTime);
+    data.tasks = data.tasks.filter(t => {
+      const taskDate = new Date(t.scheduledAt);
+      return !isNaN(taskDate.getTime()) && taskDate.getTime() > nowAfterTime;
+    });
     writeTaskFile(fileId, data);
   }
 }
