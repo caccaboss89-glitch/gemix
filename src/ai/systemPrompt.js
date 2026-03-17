@@ -36,7 +36,7 @@ function buildSystemPrompt(ctx) {
 
   // Tools - brief overview (details are in tool descriptions themselves)
   prompt += `### Strumenti\n`;
-  prompt += `Hai accesso ai tool forniti. Usa le loro descrizioni per capire come funzionano.\n`;
+  prompt += `Hai accesso ai tool forniti: ricerca web, ricerca immagini, messaggi vocali, programmazione task, ecc. Usa le loro descrizioni per capire come funzionano.\n`;
   if (!isActiveMember) {
     prompt += `Esistono anche strumenti riservati ai membri attivi (regolamento server Discord, PDF, email, invio WhatsApp ad altri) ma NON sono disponibili per questo utente. Se li richiede, spiega gentilmente che non può usarli.\n`;
   }

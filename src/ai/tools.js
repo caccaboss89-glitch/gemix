@@ -20,6 +20,21 @@ const BASE_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'image_search',
+      description: 'Cerca immagini sul web e le invia come allegati nella chat corrente (WhatsApp o Discord). Usalo quando l\'utente chiede immagini/esempi visivi o quando sono utili alla risposta.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Cosa cercare nelle immagini (preferibilmente in inglese per risultati migliori)' },
+          count: { type: 'integer', description: 'Numero immagini da inviare (1-4). Default 2.' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'send_voice_message',
       description: "Invia un messaggio vocale al posto di un messaggio testuale. Usalo quando richiesto dall'utente o a tua discrezione per risposte brevi/ironiche. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale, il tuo turno finisce col vocale.",
       parameters: {

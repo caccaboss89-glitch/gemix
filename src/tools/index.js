@@ -1,5 +1,6 @@
 const { isActiveMemberOnlyTool } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
+const { imageSearch } = require('./imageSearch');
 const { generateVoice } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
@@ -40,6 +41,15 @@ async function executeTool(toolCall, userCtx, responseCtx) {
     switch (name) {
       case 'web_search': {
         result = await webSearch(args.query);
+        break;
+      }
+
+      case 'image_search': {
+        const imageResult = await imageSearch(args.query, args.count);
+        if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
+          responseCtx.attachments.push(...imageResult.attachments);
+        }
+        result = imageResult.text;
         break;
       }
 
