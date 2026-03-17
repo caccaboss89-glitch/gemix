@@ -6,9 +6,11 @@ const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
 const { readServerRules } = require('./serverRules');
+const { readAboutMe } = require('./aboutMe');
 const { generatePdf } = require('./pdfGenerator');
 const { sendEmail } = require('./emailSender');
 const { sendWhatsAppMessage } = require('./whatsappSender');
+const { readMusicStats } = require('./musicStats');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 
 /**
@@ -114,6 +116,11 @@ async function executeTool(toolCall, userCtx, responseCtx) {
         break;
       }
 
+      case 'read_about_me': {
+        result = readAboutMe();
+        break;
+      }
+
       case 'generate_pdf': {
         const pdfBuffer = await generatePdf(args.title, args.content);
         const fileName = `${(args.title || 'documento').replace(/[^a-zA-Z0-9àèéìòù\s]/gi, '').replace(/\s+/g, '_')}.pdf`;
@@ -148,6 +155,11 @@ async function executeTool(toolCall, userCtx, responseCtx) {
           isAdmin: userCtx.isAdmin,
           recipientPhone: args.recipientPhone,
         });
+        break;
+      }
+
+      case 'read_music_stats': {
+        result = await readMusicStats();
         break;
       }
 

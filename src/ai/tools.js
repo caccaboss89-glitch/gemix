@@ -34,6 +34,14 @@ const BASE_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'read_about_me',
+      description: 'Leggi le informazioni personali su GemiX (chi è, chi lo ha creato, cosa può fare). Usalo quando un utente chiede chi sei o di presentarti.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'send_voice_message',
       description: "Invia un messaggio vocale al posto di un messaggio testuale. Usalo quando richiesto dall'utente o a tua discrezione per risposte brevi/ironiche. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale, il tuo turno finisce col vocale.\n\nLIMITE: il testo deve essere massimo 1000 caratteri. Se supera il limite, rispondi con un normale messaggio testuale.\n\nEFFETTI VOCALI DISPONIBILI:\n\nInline tags (inseriscili nel punto esatto):\n[pause] [long-pause] [hum-tune]\n[laugh] [chuckle] [giggle] [cry]\n[tsk] [tongue-click] [lip-smack]\n[breath] [inhale] [exhale] [sigh]\n\nWrapping tags (avvolgi il testo):\n<soft> <whisper> <loud> <build-intensity> <decrease-intensity>\n<higher-pitch> <lower-pitch> <slow> <fast>\n<sing-song> <singing> <laugh-speak> <emphasis>\n\nEsempio: \"Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!\"",
       parameters: {
@@ -161,6 +169,14 @@ const ACTIVE_MEMBER_TOOLS = [
         },
         required: ['recipientName', 'message'],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_music_stats',
+      description: 'Leggi le statistiche aggiornate del Music Bot del server. Mostra: statistiche globali, per ogni utente del Server Discord. Usalo se richiesto',
+      parameters: { type: 'object', properties: {} },
     },
   },
 ];
