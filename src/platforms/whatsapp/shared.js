@@ -1,7 +1,7 @@
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY } = require('../../config/constants');
 const { formatTimestamp } = require('../../utils/time');
-const { hasFooter, removeFooter } = require('../../utils/footer');
+const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
 const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag } = require('../../utils/media');
 
 /**
@@ -20,10 +20,14 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
   for (const msg of messages) {
     let senderName;
     let isGemiX = false;
+    let isScheduled = false;
 
     if (platform === 'whatsapp_personal') {
       if (msg.fromMe) {
-        if (hasFooter(msg.body)) {
+        if (hasScheduledFooter(msg.body)) {
+          senderName = '[System]';
+          isScheduled = true;
+        } else if (hasFooter(msg.body)) {
           senderName = 'GemiX';
           isGemiX = true;
         } else {
@@ -40,8 +44,13 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
     } else {
       // Dedicated account
       if (msg.fromMe) {
-        senderName = 'GemiX';
-        isGemiX = true;
+        if (hasScheduledFooter(msg.body)) {
+          senderName = '[System]';
+          isScheduled = true;
+        } else {
+          senderName = 'GemiX';
+          isGemiX = true;
+        }
       } else {
         try {
           const contact = await msg.getContact();
@@ -53,7 +62,14 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
     }
 
     const ts = formatTimestamp(msg.timestamp * 1000);
-    let textContent = isGemiX ? removeFooter(msg.body || '') : (msg.body || '');
+    let textContent;
+    if (isScheduled) {
+      textContent = removeScheduledFooter(msg.body || '');
+    } else if (isGemiX) {
+      textContent = removeFooter(msg.body || '');
+    } else {
+      textContent = msg.body || '';
+    }
     const mediaParts = [];
 
     // Handle special message types

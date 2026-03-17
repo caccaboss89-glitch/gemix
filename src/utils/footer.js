@@ -32,6 +32,16 @@ function stripGemixFooterFromResponse(text) {
     .trim();
 }
 
+function hasScheduledFooter(text) {
+  if (!text) return false;
+  return text.includes('Messaggio Programmato il');
+}
+
+function removeScheduledFooter(text) {
+  if (!text) return '';
+  return text.replace(/\n+--GemiX •\s*Messaggio Programmato il.*$/g, '').trim();
+}
+
 /**
  * Build the footer for scheduled messages.
  * @param {string} createdAt - ISO date string of when the task was created
@@ -42,4 +52,4 @@ function buildScheduledFooter(createdAt) {
   return `${GEMIX_FOOTER_PREFIX}Messaggio Programmato il ${formatted}`;
 }
 
-module.exports = { addFooter, removeFooter, hasFooter, stripGemixFooterFromResponse, buildScheduledFooter, getModelDisplayName };
+module.exports = { addFooter, removeFooter, hasFooter, stripGemixFooterFromResponse, buildScheduledFooter, getModelDisplayName, hasScheduledFooter, removeScheduledFooter };
