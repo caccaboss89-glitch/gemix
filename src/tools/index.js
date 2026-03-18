@@ -105,33 +105,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       case 'image_search': {
         const imageResult = await imageSearch(args.query, args.count);
         
-        // In dynamic task mode: always accumulate, no direct sending
-        if (dynamicTaskCtx) {
-          if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
-            responseCtx.attachments.push(...imageResult.attachments);
-          }
-          result = imageResult.text;
-          break;
-        }
-        
-        // Se specificato un destinatario, invia le immagini direttamente
-        if (args.recipientName || args.recipientPhone) {
-          if (!userCtx.isActiveMember) {
-            result = 'Errore: solo i membri attivi possono inviare immagini ad altri.';
-            break;
-          }
-          if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
-            result = await sendWhatsAppAttachments(args.recipientName, imageResult.attachments, {
-              isAdmin: userCtx.isAdmin,
-              recipientPhone: args.recipientPhone,
-            });
-          } else {
-            result = imageResult.text;
-          }
-          break;
-        }
-        
-        // Altrimenti, invia nella chat attuale
+        // Always accumulate images - will be sent by send_whatsapp_message or send_email
         if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
           responseCtx.attachments.push(...imageResult.attachments);
         }
@@ -263,29 +237,14 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           mimetype: 'application/pdf',
         };
         
-        // In dynamic task mode: always accumulate
-        if (dynamicTaskCtx) {
-          responseCtx.attachments.push(pdfAttachment);
-          result = `PDF "${args.title}" generato con successo. Verrà allegato al prossimo messaggio di consegna.`;
-          break;
-        }
-        
-        // Se specificato un destinatario, invia il PDF direttamente
-        if (args.recipientName || args.recipientPhone) {
-          if (!userCtx.isActiveMember) {
-            result = 'Errore: solo i membri attivi possono inviare PDF ad altri.';
-            break;
-          }
-          result = await sendWhatsAppAttachments(args.recipientName, [pdfAttachment], {
-            isAdmin: userCtx.isAdmin,
-            recipientPhone: args.recipientPhone,
-          });
-          break;
-        }
-        
-        // Altrimenti, invia nella chat attuale
+        // Always accumulate PDF - will be sent by send_whatsapp_message or send_email
         responseCtx.attachments.push(pdfAttachment);
-        result = `PDF "${args.title}" generato con successo e verrà inviato come allegato.`;
+        
+        if (dynamicTaskCtx || args.recipientName || args.recipientPhone) {
+          result = `PDF "${args.title}" generato con successo. Verrà allegato al prossimo messaggio di consegna.`;
+        } else {
+          result = `PDF "${args.title}" generato con successo e verrà inviato come allegato.`;
+        }
         break;
       }
 
