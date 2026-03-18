@@ -156,38 +156,20 @@ async function onDedicatedMessage(msg) {
     waJid: senderJid,
   };
 
-  // Keep sending typing state periodically while processing and sending to ensure the indicator stays visible
-  let typingInterval = null;
   try {
     if (typeof chat.sendState === 'function') {
-      console.log('[WA-DEDICATO] Invio sendState("typing") iniziale');
       await chat.sendState('typing');
-      typingInterval = setInterval(() => {
-        try {
-          console.log('[WA-DEDICATO] Invio sendState("typing") periodico');
-          chat.sendState('typing');
-        } catch (e) {
-          console.warn('[WA-DEDICATO] sendState periodico fallito:', e.message);
-        }
-      }, 2000);
     }
   } catch (err) {
-    console.warn('[WA-DEDICATO] sendState iniziale fallito:', err.message);
+    // sendState might not be available in this version
   }
 
-  let response = await handleMessage(ctx);
+  const response = await handleMessage(ctx);
 
   try {
     console.log(`\n📤 [WHATSAPP-DEDICATO] Invio risposta...`);
-    try {
-      await sendWhatsAppResponse(chat, msg, response);
-      console.log(`   ✅ Messaggio inviato`);
-    } finally {
-      if (typingInterval) {
-        clearInterval(typingInterval);
-        typingInterval = null;
-      }
-    }
+    await sendWhatsAppResponse(chat, msg, response);
+    console.log(`   ✅ Messaggio inviato`);
     try {
       if (typeof chat.sendState === 'function') {
         await chat.sendState('paused');
