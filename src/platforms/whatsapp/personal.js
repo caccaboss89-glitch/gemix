@@ -149,15 +149,25 @@ async function onPersonalMessage(msg) {
     waJid: senderJid,
   };
 
+  // Keep sending typing state periodically while processing to ensure the indicator stays visible
+  let typingInterval = null;
   try {
     if (typeof chat.sendState === 'function') {
       await chat.sendState('typing');
+      typingInterval = setInterval(() => {
+        try { chat.sendState('typing'); } catch (e) { /* ignore */ }
+      }, 3000);
     }
   } catch (err) {
     // sendState might not be available in this version
   }
 
-  const response = await handleMessage(ctx);
+  let response;
+  try {
+    response = await handleMessage(ctx);
+  } finally {
+    if (typingInterval) clearInterval(typingInterval);
+  }
 
   if (response.text) {
     response.text = removeFooter(response.text);
