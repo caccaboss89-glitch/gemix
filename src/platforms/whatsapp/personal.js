@@ -149,7 +149,13 @@ async function onPersonalMessage(msg) {
     waJid: senderJid,
   };
 
-  await chat.sendState('typing');
+  try {
+    if (typeof chat.sendState === 'function') {
+      await chat.sendState('typing');
+    }
+  } catch (err) {
+    // sendState might not be available in this version
+  }
 
   const response = await handleMessage(ctx);
 
@@ -162,7 +168,13 @@ async function onPersonalMessage(msg) {
     console.log(`\n📤 [WHATSAPP-PERSONALE] Invio risposta...`);
     await sendWhatsAppResponse(chat, msg, response);
     console.log(`   ✅ Messaggio inviato`);
-    await chat.sendState('paused');
+    try {
+      if (typeof chat.sendState === 'function') {
+        await chat.sendState('paused');
+      }
+    } catch (err) {
+      // sendState might not be available in this version
+    }
   } catch (err) {
     console.error(`\n❌ [WHATSAPP-PERSONALE] Errore invio risposta:`);
     console.error(`   ${err.message}`);

@@ -23,11 +23,11 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: 'Cerca informazioni aggiornate sul web. Usa quando serve info in tempo reale o dati specifici non in tua conoscenza.',
+      description: 'Cerca informazioni aggiornate sul web.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'La query di ricerca (preferibilmente in inglese per risultati migliori)' },
+          query: { type: 'string', description: 'La query di ricerca (in inglese per risultati migliori)' },
         },
         required: ['query'],
       },
@@ -37,11 +37,11 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'image_search',
-      description: 'Cerca immagini sul web. Le immagini verranno accumulate come allegati e inviate: nella risposta della chat attuale oppure insieme ai tool di consegna (send_whatsapp_message, send_voice_message, send_email). Usalo quando l\'utente chiede immagini/esempi visivi.',
+      description: 'Cerca immagini sul web. Le immagini verranno accumulate come allegati e inviate: nella risposta della chat attuale oppure insieme ai tool di consegna (send_whatsapp_message, send_voice_message, send_email). Usalo per esempi visivi.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Cosa cercare nelle immagini (preferibilmente in inglese per risultati migliori)' },
+          query: { type: 'string', description: 'Cosa cercare nelle immagini (in inglese per risultati migliori)' },
           count: { type: 'integer', description: 'Numero immagini da inviare (1-4). Default 2.' },
         },
         required: ['query'],
@@ -52,7 +52,7 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'read_about_me',
-      description: 'Leggi le informazioni personali su GemiX (chi è, chi lo ha creato, cosa può fare). Usalo quando un utente chiede chi sei o di presentarti.',
+      description: 'Leggi le informazioni personali su GemiX. Usalo quando un utente chiede chi sei o di presentarti.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -60,7 +60,7 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'send_voice_message',
-      description: `Invia un messaggio vocale come risposta nella chat attuale. Usalo quando richiesto dall'utente o a tua discrezione per risposte brevi/ironiche. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale. REGOLA: puoi generare solo 1 vocale per richiesta.\n\n${VOICE_EFFECTS_DOC}`,
+      description: `Invia un messaggio vocale come risposta nella chat attuale. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale.\n\n${VOICE_EFFECTS_DOC}`,
       parameters: {
         type: 'object',
         properties: {
@@ -74,7 +74,7 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'schedule_tasks',
-      description: "Programma una o più attività future. Due tipi: STATICO (scrivi il testo finale da inviare così com'è) o DINAMICO (scrivi un prompt dettagliato per Grok AI che verrà elaborato al momento dell'esecuzione, es. ricerca meteo). Le date devono essere ISO 8601 con timezone Europe/Rome (es. 2026-03-16T16:00:00+01:00), max 1 anno nel futuro, non nel passato. Destinazioni: WhatsApp privato, gruppo WhatsApp corrente, e/o email (email solo per membri attivi). Ogni utente gestisce SOLO i propri task (privacy assoluta). In un gruppo puoi creare task sia per il gruppo che per l'utente in privato nella stessa chiamata.",
+      description: "Programma una o più attività future. Due tipi: STATICO (scrivi il testo finale da inviare) o DINAMICO (scrivi un prompt dettagliato per Grok AI che verrà elaborato al momento dell'esecuzione, es. ricerche meteo o statistiche). Le date devono essere ISO 8601 con timezone Europe/Rome (es. 2026-03-16T16:00:00+01:00), max 1 anno nel futuro, non nel passato. Destinazioni: WhatsApp privato, gruppo WhatsApp corrente, e/o email (email solo per membri attivi). Ogni utente gestisce SOLO i propri task (privacy assoluta). In un gruppo puoi creare task sia per il gruppo che per l'utente in privato nella stessa chiamata.",
       parameters: {
         type: 'object',
         properties: {
