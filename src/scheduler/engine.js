@@ -179,7 +179,7 @@ async function executeDynamicTask(prompt, creatorCtx) {
   const isActiveMember = creatorCtx?.isActiveMember || false;
   const isCreatorAdmin = creatorCtx?.isAdmin || false;
 
-  const systemMsg = `Sei un assistente AI che esegue task programmati. Ora corrente (Roma): ${getRomeTime()}.
+  const systemMsg = `Sei un assistente AI che esegue task programmati. Ora corrente (Torino): ${getRomeTime()}.
 Esegui il seguente compito. Rispondi in italiano.
 
 WORKFLOW OBBLIGATORIO:
