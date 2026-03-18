@@ -149,7 +149,7 @@ async function onPersonalMessage(msg) {
     waJid: senderJid,
   };
 
-  // Keep sending typing state periodically while processing to ensure the indicator stays visible
+  // Keep sending typing state periodically while processing and sending to ensure the indicator stays visible
   let typingInterval = null;
   try {
     if (typeof chat.sendState === 'function') {
@@ -162,18 +162,13 @@ async function onPersonalMessage(msg) {
         } catch (e) {
           console.warn('[WA-PERSONALE] sendState periodico fallito:', e.message);
         }
-      }, 3000);
+      }, 2000);
     }
   } catch (err) {
     console.warn('[WA-PERSONALE] sendState iniziale fallito:', err.message);
   }
 
-  let response;
-  try {
-    response = await handleMessage(ctx);
-  } finally {
-    if (typingInterval) clearInterval(typingInterval);
-  }
+  let response = await handleMessage(ctx);
 
   if (response.text) {
     response.text = removeFooter(response.text);
@@ -182,8 +177,15 @@ async function onPersonalMessage(msg) {
 
   try {
     console.log(`\n📤 [WHATSAPP-PERSONALE] Invio risposta...`);
-    await sendWhatsAppResponse(chat, msg, response);
-    console.log(`   ✅ Messaggio inviato`);
+    try {
+      await sendWhatsAppResponse(chat, msg, response);
+      console.log(`   ✅ Messaggio inviato`);
+    } finally {
+      if (typingInterval) {
+        clearInterval(typingInterval);
+        typingInterval = null;
+      }
+    }
     try {
       if (typeof chat.sendState === 'function') {
         await chat.sendState('paused');
