@@ -79,6 +79,11 @@ async function sendEmail(recipientName, subject, body, options = {}) {
     }
   }
 
+  // Attach accumulated attachments (from responseCtx)
+  if (options.accumulatedAttachments && Array.isArray(options.accumulatedAttachments)) {
+    mailOptions.attachments.push(...options.accumulatedAttachments);
+  }
+
   await transporter.sendMail(mailOptions);
   return `Email inviata con successo a ${member.name} (${member.email}).`;
 }

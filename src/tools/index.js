@@ -140,7 +140,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       }
 
       case 'send_voice_message': {
-        let cleanText = removeDiscordEmoji(args.text || '').replace(/<a ?: [\w]+:\d+>/g, '')
+        let cleanText = removeDiscordEmoji(args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
           .replace(/\s{2,}/g, ' ')
           .trim();
@@ -326,12 +326,20 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, non usare questo tool.`;
           break;
         }
-        result = await sendEmail(args.recipientName, args.subject, args.body, {
-          attachPdf: args.attachPdf,
-          pdfTitle: args.pdfTitle,
-          pdfContent: args.pdfContent,
-          imageUrls: args.imageUrls,
-        });
+        try {
+          // Build accumulated attachments from responseCtx
+          const accumulatedAttachments = responseCtx.attachments
+            .map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }));
+          result = await sendEmail(args.recipientName, args.subject, args.body, {
+            attachPdf: args.attachPdf,
+            pdfTitle: args.pdfTitle,
+            pdfContent: args.pdfContent,
+            imageUrls: args.imageUrls,
+            accumulatedAttachments,
+          });
+        } catch (err) {
+          result = `Errore invio email: ${err.message}`;
+        }
         break;
       }
 
@@ -373,10 +381,30 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, non usare questo tool.`;
           break;
         }
-        result = await sendWhatsAppMessage(args.recipientName, args.message, {
-          isAdmin: userCtx.isAdmin,
-          recipientPhone: args.recipientPhone,
-        });
+        try {
+          result = await sendWhatsAppMessage(args.recipientName, args.message, {
+            isAdmin: userCtx.isAdmin,
+            recipientPhone: args.recipientPhone,
+          });
+          // Send accumulated attachments if any
+          if (responseCtx.attachments.length > 0) {
+            const member = findMemberByName(args.recipientName);
+            const jid = userCtx.isAdmin && args.recipientPhone 
+              ? require('./whatsappSender').normalizePhoneToJid(args.recipientPhone)
+              : member?.wa;
+            if (jid) {
+              const { MessageMedia } = require('whatsapp-web.js');
+              for (const att of responseCtx.attachments) {
+                if (!att.buffer || !att.mimetype) continue;
+                const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+                await sendWhatsAppDirect(jid, media);
+              }
+              result += ` con ${responseCtx.attachments.length} allegato/i.`;
+            }
+          }
+        } catch (err) {
+          result = `Errore invio WhatsApp: ${err.message}`;
+        }
         break;
       }
 
