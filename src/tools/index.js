@@ -209,22 +209,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         const voiceBuffer = await generateVoice(cleanText);
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
-        
-        // Invia allegati accumulati nella chat attuale se presenti
-        if (responseCtx.attachments.length > 0) {
-          const targetJid = userCtx.isGroup ? userCtx.groupId : userCtx.waJid;
-          try {
-            const { MessageMedia } = require('whatsapp-web.js');
-            for (const att of responseCtx.attachments) {
-              if (!att.buffer || !att.mimetype) continue;
-              const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
-              await sendWhatsAppDirect(targetJid, media);
-            }
-          } catch (err) {
-            console.error(`❌ Errore invio allegati vocale: ${err.message}`);
-          }
-        }
-        
         result = 'Messaggio vocale generato con successo. Non inviare alcun messaggio testuale.';
         break;
       }

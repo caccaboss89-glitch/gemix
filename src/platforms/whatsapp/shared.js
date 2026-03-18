@@ -195,7 +195,7 @@ async function sendWhatsAppResponse(chat, msg, responseData) {
   if (responseData.isVoiceOnly && responseData.voiceBuffer) {
     const media = new MessageMedia('audio/ogg', responseData.voiceBuffer.toString('base64'), 'voice.ogg');
     await chat.sendMessage(media, { sendAudioAsVoice: true });
-    return;
+    // Continue to send attachments below (don't return early)
   }
 
   if (responseData.text) {
