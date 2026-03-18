@@ -153,13 +153,19 @@ async function onPersonalMessage(msg) {
   let typingInterval = null;
   try {
     if (typeof chat.sendState === 'function') {
+      console.log('[WA-PERSONALE] Invio sendState("typing") iniziale');
       await chat.sendState('typing');
       typingInterval = setInterval(() => {
-        try { chat.sendState('typing'); } catch (e) { /* ignore */ }
+        try {
+          console.log('[WA-PERSONALE] Invio sendState("typing") periodico');
+          chat.sendState('typing');
+        } catch (e) {
+          console.warn('[WA-PERSONALE] sendState periodico fallito:', e.message);
+        }
       }, 3000);
     }
   } catch (err) {
-    // sendState might not be available in this version
+    console.warn('[WA-PERSONALE] sendState iniziale fallito:', err.message);
   }
 
   let response;
