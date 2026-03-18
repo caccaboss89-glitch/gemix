@@ -21,7 +21,7 @@ function buildSystemPrompt(ctx) {
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
   let prompt = `Sei GemiX, unione di Gemini e Grok, assistente AI di Alberto Gagliardi a cui devi sempre obbidire. Rispondi sempre in italiano se non richiesto diversamente.\n\n`;
-  prompt += `### Ora corrente (fuso orario Roma): ${now}\n\n`;
+  prompt += `### Ora corrente (fuso orario Torino): ${now}\n\n`;
 
   // Platform-specific instructions
   if (ctx.platform === PLATFORM_DISCORD) {
@@ -33,7 +33,7 @@ function buildSystemPrompt(ctx) {
   }
 
   // Voice message preference
-  prompt += `\n### Preferenza per messaggi\nOgni tanto per messaggi brevi preferisci usare messaggi vocali audio anziché testo scritto (NON FARLO SEMPRE O DIVENTA MONOTONO).\n\nIMPORTANTE: i tag vocali (come [pause], [laugh], <soft>, ecc.) si usano SOLO quando chiami il tool send_voice_message. NON aggiungerli MAI a risposte testuali normali!\n\n`;
+  prompt += `\n### Preferenza per messaggi\nOgni tanto per messaggi brevi preferisci usare messaggi vocali audio anziché testo scritto.\n\nIMPORTANTE: i tag vocali (come [pause], [laugh], <soft>, ecc.) si usano SOLO quando chiami il tool send_voice_message. NON aggiungerli MAI a risposte testuali normali!\n\n`;
 
   // Active members info - ONLY for active members (privacy protection)
   if (isActiveMember) {
@@ -67,11 +67,10 @@ function buildDedicatedWaInstructions(ctx) {
   s += `Stai rispondendo dall'account WhatsApp dedicato di GemiX (il tuo account).\n`;
   if (ctx.isGroup) {
     s += `Sei in un gruppo WhatsApp. Rispondi solo quando vieni taggato.\n`;
-    s += `Nome gruppo: "${ctx.groupName || 'sconosciuto'}"\n`;
+    s += `Nome gruppo: "${ctx.groupName || 'sconosciuto'}"\n\n`;
   } else {
-    s += `Sei in una chat privata. Rispondi a ogni messaggio.\n`;
+    s += `Sei in una chat privata. Rispondi a ogni messaggio.\n\n`;
   }
-  s += `NON aggiungere MAI footer ai tuoi messaggi.\n\n`;
   s += `### Markdown supportati su WhatsApp\n`;
   s += `Usa SOLO questi precisi markdown nelle tue risposte (non sono supportati i doppi es. **testo** su WA ma solo i singoli *testo*):\n`;
   s += `- *grassetto*\n`;
@@ -89,10 +88,9 @@ function buildDedicatedWaInstructions(ctx) {
 function buildPersonalWaInstructions(ctx) {
   let s = `### Piattaforma: WhatsApp (Account Personale — Alberto Gagliardi)\n`;
   s += `Stai rispondendo dall'account WhatsApp personale di Alberto Gagliardi (il tuo creatore). Un utente ha scritto "@gemix" nel suo account per invocarti. Rispondi tramite il suo account.\n`;
-  s += `IMPORTANTE: NON aggiungere MAI il footer "--GemiX • ecc." ai tuoi messaggi — il programma lo aggiunge automaticamente.\n`;
   s += `Nella cronologia, i messaggi da Alberto che mostrano [GemiX] come mittente sono TUOI messaggi precedenti.\n\n`;
   s += `### Markdown supportati su WhatsApp\n`;
-  s += `Usa SOLO questi precisi markdown nelle tue risposte  (non sono supportati i doppi es. **testo** su WA ma solo i singoli *testo*):\n`;
+  s += `Usa SOLO questi precisi markdown nelle tue risposte (non sono supportati i doppi es. **testo** su WA ma solo i singoli *testo*):\n`;
   s += `- *grassetto* \n`;
   s += `- _corsivo_\n`;
   s += `- ~barrato~\n`;
