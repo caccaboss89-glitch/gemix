@@ -7,6 +7,7 @@ const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/fo
 const { GEMINI_MODEL } = require('../../config/env');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
+const responseLock = require('../../utils/responseLock');
 
 let client;
 
@@ -149,6 +150,12 @@ async function onPersonalMessage(msg) {
     waJid: senderJid,
   };
 
+  const lockKey = `wa_personal:${ctx.chatId || ctx.userId}`;
+  if (!responseLock.tryLock(lockKey)) {
+    console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
+    return;
+  }
+
   try {
     if (typeof chat.sendState === 'function') {
       await chat.sendState('typing');
@@ -178,6 +185,8 @@ async function onPersonalMessage(msg) {
   } catch (err) {
     console.error(`\n❌ [WHATSAPP-PERSONALE] Errore invio risposta:`);
     console.error(`   ${err.message}`);
+  } finally {
+    try { responseLock.unlock(lockKey); } catch {}
   }
 }
 

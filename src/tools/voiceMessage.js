@@ -113,7 +113,7 @@ async function xaiTTS(text) {
     body: JSON.stringify({
       text,
       voice_id: 'eve',
-      language: 'auto',
+      language: 'it',
       output_format: { codec: 'mp3', sample_rate: 44100, bit_rate: 128000 },
     }),
   });

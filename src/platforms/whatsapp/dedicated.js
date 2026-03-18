@@ -7,6 +7,8 @@ const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 
+const responseLock = require('../../utils/responseLock');
+
 let client;
 
 /**
@@ -156,30 +158,40 @@ async function onDedicatedMessage(msg) {
     waJid: senderJid,
   };
 
-  try {
-    if (typeof chat.sendState === 'function') {
-      await chat.sendState('typing');
-    }
-  } catch (err) {
-    // sendState might not be available in this version
+  const lockKey = `wa_dedicated:${ctx.chatId || ctx.userId}`;
+  if (!responseLock.tryLock(lockKey)) {
+    console.log(`   ⛔ [WA-DEDICATO] Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
+    return;
   }
 
-  const response = await handleMessage(ctx);
-
   try {
-    console.log(`\n📤 [WHATSAPP-DEDICATO] Invio risposta...`);
-    await sendWhatsAppResponse(chat, msg, response);
-    console.log(`   ✅ Messaggio inviato`);
     try {
       if (typeof chat.sendState === 'function') {
-        await chat.sendState('paused');
+        await chat.sendState('typing');
       }
     } catch (err) {
       // sendState might not be available in this version
     }
-  } catch (err) {
-    console.error(`\n❌ [WHATSAPP-DEDICATO] Errore invio risposta:`);
-    console.error(`   ${err.message}`);
+
+    const response = await handleMessage(ctx);
+
+    try {
+      console.log(`\n📤 [WHATSAPP-DEDICATO] Invio risposta...`);
+      await sendWhatsAppResponse(chat, msg, response);
+      console.log(`   ✅ Messaggio inviato`);
+      try {
+        if (typeof chat.sendState === 'function') {
+          await chat.sendState('paused');
+        }
+      } catch (err) {
+        // sendState might not be available in this version
+      }
+    } catch (err) {
+      console.error(`\n❌ [WHATSAPP-DEDICATO] Errore invio risposta:`);
+      console.error(`   ${err.message}`);
+    }
+  } finally {
+    try { responseLock.unlock(lockKey); } catch {}
   }
 }
 

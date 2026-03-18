@@ -33,7 +33,7 @@ function buildSystemPrompt(ctx) {
   }
 
   // Voice message preference
-  prompt += `\n### Preferenza per messaggi\nOgni tanto per messaggi brevi preferisci usare messaggi vocali audio anziché testo scritto.\n\nIMPORTANTE: i tag vocali (come [pause], [laugh], <soft>, ecc.) si usano SOLO quando chiami il tool send_voice_message. NON aggiungerli MAI a risposte testuali normali!\n\n`;
+  prompt += `\n### Preferenza per messaggi\nOgni tanto per messaggi brevi preferisci usare messaggi vocali audio anziché testo scritto NON SEMPRE SENNO DIVENTI MONOTONO.\n\nIMPORTANTE: i tag vocali (come [pause], [laugh], <soft>, ecc.) si usano SOLO quando chiami il tool send_voice_message. NON aggiungerli MAI a risposte testuali normali!\n\n`;
 
   // Active members info - ONLY for active members (privacy protection)
   if (isActiveMember) {

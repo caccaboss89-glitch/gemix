@@ -5,6 +5,7 @@ const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
 const { mediaToContentPart } = require('../../utils/media');
+const responseLock = require('../../utils/responseLock');
 
 let discordClient;
 
@@ -163,10 +164,15 @@ async function onDiscordMessage(msg) {
     waJid: userIdentity.member ? userIdentity.member.wa : null,
     discordChannel: channel,
   };
-
-  await channel.sendTyping();
+  const lockKey = `discord:${channel.id}`;
+  if (!responseLock.tryLock(lockKey)) {
+    console.log(`   ⛔ [DISCORD] Ignoro messaggio in thread ${channel.id}: GemiX sta già rispondendo`);
+    return;
+  }
 
   try {
+    await channel.sendTyping();
+
     const response = await handleMessage(ctx);
 
     let finalText = response.discordMessage || response.text || '';
@@ -222,6 +228,8 @@ async function onDiscordMessage(msg) {
     try {
       await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
     } catch {}
+  } finally {
+    try { responseLock.unlock(lockKey); } catch {}
   }
 }
 
