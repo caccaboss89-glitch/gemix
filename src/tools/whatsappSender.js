@@ -1,4 +1,5 @@
 const { findMemberByName } = require('../config/members');
+const { removeDiscordEmoji } = require('../utils/discord');
 
 let dedicatedClient = null;
 
@@ -37,6 +38,8 @@ async function sendWhatsAppMessage(recipientName, message, options = {}) {
     return 'Errore: client WhatsApp dedicato non disponibile.';
   }
 
+  message = removeDiscordEmoji(message);
+
   if (options.isAdmin && options.recipientPhone) {
     const jid = normalizePhoneToJid(options.recipientPhone);
     try {
@@ -68,6 +71,7 @@ async function sendWhatsAppMessage(recipientName, message, options = {}) {
  */
 async function sendWhatsAppDirect(chatId, message, options = {}) {
   if (!dedicatedClient) throw new Error('Client WhatsApp dedicato non disponibile');
+  message = removeDiscordEmoji(message);
   await dedicatedClient.sendMessage(chatId, message, options);
 }
 
@@ -135,6 +139,7 @@ async function sendWhatsAppVoice(recipientName, voiceText, options = {}) {
     return 'Errore: client WhatsApp dedicato non disponibile.';
   }
 
+  voiceText = removeDiscordEmoji(voiceText);
   const { generateVoice } = require('./voiceMessage');
   const { MessageMedia } = require('whatsapp-web.js');
 

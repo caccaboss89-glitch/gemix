@@ -3,6 +3,7 @@ const { BOT_EMAIL, BOT_PASS } = require('../config/env');
 const { findMemberByName } = require('../config/members');
 const { generatePdf } = require('./pdfGenerator');
 const { fetchWithTimeout } = require('../utils/fetch');
+const { removeDiscordEmoji } = require('../utils/discord');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -29,6 +30,9 @@ async function sendEmail(recipientName, subject, body, options = {}) {
   if (!member) {
     return `Errore: "${recipientName}" non è un membro attivo. Non posso inviare email a non-membri.`;
   }
+
+  subject = removeDiscordEmoji(subject);
+  body = removeDiscordEmoji(body);
 
   const mailOptions = {
     from: `GemiX <${BOT_EMAIL}>`,
@@ -83,6 +87,8 @@ async function sendEmail(recipientName, subject, body, options = {}) {
  * Send email directly to a specific address (used by scheduler).
  */
 async function sendEmailDirect(toEmail, subject, body, attachments = []) {
+  subject = removeDiscordEmoji(subject);
+  body = removeDiscordEmoji(body);
   await transporter.sendMail({
     from: `GemiX <${BOT_EMAIL}>`,
     to: toEmail,

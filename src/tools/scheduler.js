@@ -5,6 +5,7 @@ const { TASKS_DIR, MAX_TASK_DAYS, TASK_TYPE_STATIC, TASK_TYPE_DYNAMIC } = requir
 const { getRomeISO } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
+const { removeDiscordEmoji } = require('../utils/discord');
 const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 
 /**
@@ -88,7 +89,7 @@ function scheduleTasks(tasks, ctx) {
     const newTask = {
       id: crypto.randomUUID(),
       type: task.taskType || TASK_TYPE_STATIC,
-      content: task.content,
+      content: removeDiscordEmoji(task.content),
       scheduledAt: task.scheduledAt,
       createdAt: getRomeISO(),
       createdBy: ctx.userName || ctx.userId,

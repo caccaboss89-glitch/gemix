@@ -118,6 +118,9 @@ function buildDiscordInstructions(ctx) {
   s += `- Nel campo "title": inserisci un nuovo titolo per il thread SE quello attuale non è più coerente con la conversazione. Altrimenti lascia una stringa vuota "".\n`;
   s += `- Nel campo "message": scrivi la tua risposta normalmente.\n\n`;
 
+  s += `### IMPORTANTE: Emoji e tool di consegna\n`;
+  s += `NON includere emoji personalizzate di Discord nel testo che non invii su Discord: ogni tool in cui puoi scrivere con cui interagisci compreso i messaggi vocali non inserirle!.\n`;
+
   if (ctx.availableEmojis) {
     s += `### Emoji personalizzate del server Discord che puoi usare nei tuoi messaggi:\n${ctx.availableEmojis}\n\n`;
   }

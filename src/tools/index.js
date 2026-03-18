@@ -15,6 +15,7 @@ const { normalizePhoneToJid } = require('./whatsappSender');
 const { readMusicStats } = require('./musicStats');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
+const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 
 /**
@@ -139,8 +140,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       }
 
       case 'send_voice_message': {
-        let cleanText = (args.text || '')
-          .replace(/<a?:[\w]+:\d+>/g, '')
+        let cleanText = removeDiscordEmoji(args.text || '').replace(/<a ?: [\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
           .replace(/\s{2,}/g, ' ')
           .trim();
