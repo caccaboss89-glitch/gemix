@@ -16,6 +16,8 @@ async function handleMessage(ctx) {
     attachments: [],
     voiceBuffer: null,
     isVoiceOnly: false,
+    aboutMeText: null,
+    isAboutMeOnly: false,
   };
 
   try {
@@ -108,6 +110,11 @@ async function handleMessage(ctx) {
         break;
       }
       
+      if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
+        console.log(`   ⚠️ Testo 'Chi sono' già preparato, interruzione ciclo`);
+        break;
+      }
+      
       const responseFormat = isDiscord ? DISCORD_RESPONSE_FORMAT : null;
       
       console.log(`🤖 [${ctx.platform.toUpperCase()}] Chiamata Gemini (round ${rounds}/${MAX_TOOL_ROUNDS})`);
@@ -144,6 +151,17 @@ async function handleMessage(ctx) {
 
       let text = assistantMsg.content || '';
       console.log(`✅ [${ctx.platform.toUpperCase()}] Risposta generata (${text.length} caratteri)`);
+
+      if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
+        console.log(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
+        return {
+          text: responseCtx.aboutMeText,
+          voiceBuffer: null,
+          isVoiceOnly: false,
+          isAboutMeOnly: true,
+          attachments: responseCtx.attachments,
+        };
+      }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         console.log(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
@@ -197,6 +215,17 @@ async function handleMessage(ctx) {
         text: text || null,
         voiceBuffer: null,
         isVoiceOnly: false,
+        attachments: responseCtx.attachments,
+      };
+    }
+
+    if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
+      console.log(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
+      return {
+        text: responseCtx.aboutMeText,
+        voiceBuffer: null,
+        isVoiceOnly: false,
+        isAboutMeOnly: true,
         attachments: responseCtx.attachments,
       };
     }

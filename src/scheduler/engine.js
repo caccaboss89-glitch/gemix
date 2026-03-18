@@ -211,6 +211,8 @@ REGOLE DI CONSEGNA:
     attachments: [],
     voiceBuffer: null,
     isVoiceOnly: false,
+    aboutMeText: null,
+    isAboutMeOnly: false,
   };
 
   const dynamicTaskCtx = {

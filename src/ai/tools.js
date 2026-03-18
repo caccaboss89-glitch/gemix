@@ -52,7 +52,7 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'read_about_me',
-      description: 'Leggi le informazioni personali su GemiX. Usalo quando un utente chiede chi sei o di presentarti.',
+      description: 'Leggi e invia la storia personale di GemiX. IMPORTANTE: quando usi questo tool, il testo della storia verrà inviato direttamente ALL\'UTENTE come tua risposta, interrompendosi senza dare ulteriore risposta. Non fornire commenti aggiuntivi. Usalo quando un utente chiede chi sei, di presentarti, oppure della tua storia.',
       parameters: { type: 'object', properties: {} },
     },
   },

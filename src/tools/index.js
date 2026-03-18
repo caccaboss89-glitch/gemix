@@ -224,7 +224,10 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       }
 
       case 'read_about_me': {
-        result = readAboutMe();
+        const aboutMeContent = readAboutMe();
+        responseCtx.aboutMeText = aboutMeContent;
+        responseCtx.isAboutMeOnly = true;
+        result = 'Testo "Chi sono" preparato. Verrà inviato come risposta interrompendosi.';
         break;
       }
 
