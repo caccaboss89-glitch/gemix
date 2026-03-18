@@ -1,6 +1,23 @@
 // Tool definitions for Gemini AI function calling (OpenAI-compatible format).
 // Tool descriptions are the single source of truth for GemiX operational instructions.
 
+const VOICE_EFFECTS_DOC = `LIMITE: il testo deve essere massimo 1000 caratteri. Se supera il limite, rispondi con un normale messaggio testuale.
+
+EFFETTI VOCALI DISPONIBILI:
+
+Inline tags (inseriscili nel punto esatto):
+[pause] [long-pause] [hum-tune]
+[laugh] [chuckle] [giggle] [cry]
+[tsk] [tongue-click] [lip-smack]
+[breath] [inhale] [exhale] [sigh]
+
+Wrapping tags (avvolgi il testo):
+<soft> <whisper> <loud> <build-intensity> <decrease-intensity>
+<higher-pitch> <lower-pitch> <slow> <fast>
+<sing-song> <singing> <laugh-speak> <emphasis>
+
+Esempio: "Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!"`;
+
 const BASE_TOOLS = [
   {
     type: 'function',
@@ -20,7 +37,7 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'image_search',
-      description: 'Cerca immagini sul web e le invia come allegati nella chat corrente (WhatsApp o Discord). Usalo quando l\'utente chiede immagini/esempi visivi o quando sono utili alla risposta.',
+      description: 'Cerca immagini sul web. Le immagini verranno accumulate come allegati e inviate: nella risposta della chat attuale oppure insieme ai tool di consegna (send_whatsapp_message, send_voice_message, send_email). Usalo quando l\'utente chiede immagini/esempi visivi.',
       parameters: {
         type: 'object',
         properties: {
@@ -43,7 +60,7 @@ const BASE_TOOLS = [
     type: 'function',
     function: {
       name: 'send_voice_message',
-      description: "Invia un messaggio vocale al posto di un messaggio testuale. Usalo quando richiesto dall'utente o a tua discrezione per risposte brevi/ironiche. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale, il tuo turno finisce col vocale.\n\nLIMITE: il testo deve essere massimo 1000 caratteri. Se supera il limite, rispondi con un normale messaggio testuale.\n\nEFFETTI VOCALI DISPONIBILI:\n\nInline tags (inseriscili nel punto esatto):\n[pause] [long-pause] [hum-tune]\n[laugh] [chuckle] [giggle] [cry]\n[tsk] [tongue-click] [lip-smack]\n[breath] [inhale] [exhale] [sigh]\n\nWrapping tags (avvolgi il testo):\n<soft> <whisper> <loud> <build-intensity> <decrease-intensity>\n<higher-pitch> <lower-pitch> <slow> <fast>\n<sing-song> <singing> <laugh-speak> <emphasis>\n\nEsempio: \"Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!\"",
+      description: `Invia un messaggio vocale come risposta nella chat attuale. Usalo quando richiesto dall'utente o a tua discrezione per risposte brevi/ironiche. IMPORTANTE: quando usi questo tool NON fornire anche una risposta testuale. REGOLA: puoi generare solo 1 vocale per richiesta.\n\n${VOICE_EFFECTS_DOC}`,
       parameters: {
         type: 'object',
         properties: {
@@ -126,7 +143,7 @@ const ACTIVE_MEMBER_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_pdf',
-      description: 'Genera un file PDF e lo invia come allegato nella chat. Usalo quando un membro attivo richiede la creazione di un documento PDF.',
+      description: 'Genera un file PDF. Il PDF verrà accumulato come allegato e inviato: nella risposta della chat attuale oppure insieme ai tool di consegna (send_whatsapp_message, send_email). Usalo quando un membro richiede un documento PDF.',
       parameters: {
         type: 'object',
         properties: {
@@ -141,16 +158,13 @@ const ACTIVE_MEMBER_TOOLS = [
     type: 'function',
     function: {
       name: 'send_email',
-      description: "Invia un'email istantaneamente a un membro attivo. Specifica il NOME COMPLETO del destinatario (il programma risolve l'indirizzo email dal nome, non accetta indirizzi forniti dall'utente). Puoi inviare a te stesso o ad altri membri attivi. IMPORTANTE: NON usare markdown nella body dell'email.",
+      description: "Invia un'email a un ALTRO membro attivo (consegna, non risposta nella chat attuale). Tutti gli allegati accumulati (immagini, PDF) verranno inclusi automaticamente. Specifica il NOME COMPLETO del destinatario. IMPORTANTE: NON usare markdown nella body. REGOLA: puoi inviare solo 1 email per indirizzo.",
       parameters: {
         type: 'object',
         properties: {
-          recipientName: { type: 'string', description: 'Nome completo del membro attivo destinatario (es. "Gagliardi Alberto")' },
+          recipientName: { type: 'string', description: 'Nome completo del membro attivo destinatario (es. "Gagliardi Alberto"). DEVE essere diverso da te.' },
           subject: { type: 'string', description: "Oggetto dell'email" },
-          body: { type: 'string', description: "Corpo dell'email (può contenere HTML - ma NON usare markdown)" },
-          attachPdf: { type: 'boolean', description: 'true = genera e allega un PDF' },
-          pdfTitle: { type: 'string', description: 'Titolo del PDF da allegare (richiesto se attachPdf è true)' },
-          pdfContent: { type: 'string', description: 'Contenuto del PDF da allegare (richiesto se attachPdf è true)' },
+          body: { type: 'string', description: "Corpo dell'email (può contenere HTML - NON usare markdown)" },
         },
         required: ['recipientName', 'subject', 'body'],
       },
@@ -160,11 +174,11 @@ const ACTIVE_MEMBER_TOOLS = [
     type: 'function',
     function: {
       name: 'send_whatsapp_message',
-      description: "Invia un messaggio WhatsApp in privato a un altro membro attivo tramite l'account dedicato di GemiX. Specifica il NOME COMPLETO del destinatario (il programma risolve il numero dal nome, non accetta numeri forniti dall'utente). Il destinatario deve essere un membro attivo.",
+      description: "Invia un messaggio WhatsApp a un ALTRO membro attivo tramite l'account dedicato di GemiX (consegna, non risposta nella chat attuale). Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. Specifica il NOME COMPLETO del destinatario. REGOLA: puoi inviare solo 1 messaggio per numero WhatsApp (testuale o vocale, non entrambi).",
       parameters: {
         type: 'object',
         properties: {
-          recipientName: { type: 'string', description: 'Nome completo del membro attivo destinatario (es. "Passante Lorenzo")' },
+          recipientName: { type: 'string', description: 'Nome completo del membro attivo destinatario (es. "Passante Lorenzo"). DEVE essere diverso da te.' },
           message: { type: 'string', description: 'Il messaggio da inviare' },
         },
         required: ['recipientName', 'message'],
@@ -188,15 +202,69 @@ const ADMIN_SEND_WA_TOOL = {
   type: 'function',
   function: {
     name: 'send_whatsapp_message',
-    description: "Invia un messaggio WhatsApp in privato tramite l'account dedicato di GemiX. Puoi inviare a CHIUNQUE: membri attivi (specifica recipientName) o qualsiasi persona (specifica recipientPhone con prefisso internazionale, es. +39...).",
+    description: "Invia un messaggio WhatsApp tramite l'account dedicato di GemiX (consegna, non risposta). Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. Puoi inviare a chiunque: membri attivi (recipientName) o qualsiasi persona (recipientPhone). Se specifichi il TUO nome in recipientName, riceverai un errore: per rispondere nella chat attuale, non usare questo tool. REGOLA: puoi inviare solo 1 messaggio per numero WhatsApp (testuale o vocale, non entrambi).",
     parameters: {
       type: 'object',
       properties: {
-        recipientName: { type: 'string', description: 'Nome completo del destinatario (se membro attivo)' },
-        recipientPhone: { type: 'string', description: 'Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX). Per destinatari non membri attivi.' },
+        recipientName: { type: 'string', description: 'Nome completo del destinatario (se membro attivo). DEVE essere diverso da te.' },
+        recipientPhone: { type: 'string', description: 'Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX). Per destinatari non membri.' },
         message: { type: 'string', description: 'Il messaggio da inviare' },
       },
       required: ['message'],
+    },
+  },
+};
+
+// Member variant: send_voice_message with recipientName for other members
+const MEMBER_VOICE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'send_voice_message',
+    description: `Invia un messaggio vocale. SENZA recipientName: il vocale diventa la TUA RISPOSTA nella chat attuale (unico modo per rispondere con voce). CON recipientName: invia il vocale a un ALTRO membro attivo via WhatsApp privato insieme a tutti gli allegati accumulati (immagini, PDF). IMPORTANTE: quando rispondi nella chat attuale, NON fornire anche una risposta testuale.\n\n${VOICE_EFFECTS_DOC}\n\nREGOLE: 1 solo vocale nella chat attuale per richiesta. Ogni numero WhatsApp può ricevere solo 1 messaggio (testuale o vocale, non entrambi).`,
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Il testo da convertire in audio vocale (max 1000 caratteri). Può contenere effetti vocali inline e wrapping tags.' },
+        recipientName: { type: 'string', description: 'OPZIONALE: Nome del membro attivo a cui inviare il vocale via WhatsApp. Se omesso, invia nella chat attuale.' },
+      },
+      required: ['text'],
+    },
+  },
+};
+
+// Admin variant: send_voice_message with recipientName + recipientPhone
+const ADMIN_VOICE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'send_voice_message',
+    description: `Invia un messaggio vocale. SENZA recipientName/recipientPhone: il vocale diventa la TUA RISPOSTA nella chat attuale (unico modo per rispondere con voce). CON recipientName/recipientPhone: invia il vocale via WhatsApp privato a chiunque, insieme a tutti gli allegati accumulati. Puoi inviare a qualsiasi numero o membro.\n\nIMPORTANTE: quando rispondi nella chat attuale, NON fornire anche una risposta testuale.\n\n${VOICE_EFFECTS_DOC}\n\nREGOLE: 1 solo vocale nella chat attuale per richiesta. Ogni numero WhatsApp può ricevere solo 1 messaggio (testuale o vocale, non entrambi).`,
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Il testo da convertire in audio vocale (max 1000 caratteri). Può contenere effetti vocali inline e wrapping tags.' },
+        recipientName: { type: 'string', description: 'OPZIONALE: Nome del membro attivo a cui inviare il vocale.' },
+        recipientPhone: { type: 'string', description: 'OPZIONALE: Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX).' },
+      },
+      required: ['text'],
+    },
+  },
+};
+
+// Admin-only variant: send_email with extended recipient options
+const ADMIN_SEND_EMAIL_TOOL = {
+  type: 'function',
+  function: {
+    name: 'send_email',
+    description: "Invia un'email (consegna, non risposta). Tutti gli allegati accumulati (immagini, PDF) verranno inclusi automaticamente. Puoi inviare a chiunque: membri attivi (recipientName) o qualsiasi email (recipientEmail). Se specifichi la TUA email in recipientName, riceverai un errore: per rispondere nella chat attuale, non usare questo tool. IMPORTANTE: NON usare markdown nella body. REGOLA: puoi inviare solo 1 email per indirizzo.",
+    parameters: {
+      type: 'object',
+      properties: {
+        recipientName: { type: 'string', description: 'Nome completo del membro attivo destinatario (la email viene risolta dal nome). DEVE essere diverso da te.' },
+        recipientEmail: { type: 'string', description: 'Indirizzo email diretto del destinatario (per qualsiasi persona, incluso se stesso - ma meglio evitare)' },
+        subject: { type: 'string', description: "Oggetto dell'email" },
+        body: { type: 'string', description: "Corpo dell'email (può contenere HTML - NON usare markdown)" },
+      },
+      required: ['subject', 'body'],
     },
   },
 };
@@ -220,7 +288,8 @@ function buildAdminScheduleTool() {
 /**
  * Returns only the tools that l'utente corrente può effettivamente usare.
  * Non-membri: solo BASE_TOOLS. Membri attivi: BASE_TOOLS + ACTIVE_MEMBER_TOOLS.
- * Admin: varianti potenziate di send_whatsapp_message e schedule_tasks.
+ * Admin: varianti potenziate di send_whatsapp_message, send_email, send_voice_message e schedule_tasks.
+ * Usa lo stesso pattern di accumulazione allegati e delivery enforcement dei dynamic task.
  */
 function getToolsForUser(isActiveMember, isAdmin) {
   let tools = isActiveMember ? [...BASE_TOOLS, ...ACTIVE_MEMBER_TOOLS] : [...BASE_TOOLS];
@@ -228,8 +297,15 @@ function getToolsForUser(isActiveMember, isAdmin) {
   if (isAdmin) {
     const adminScheduleTool = buildAdminScheduleTool();
     tools = tools.map(t => {
+      if (t.function.name === 'send_voice_message') return ADMIN_VOICE_TOOL;
       if (t.function.name === 'send_whatsapp_message') return ADMIN_SEND_WA_TOOL;
+      if (t.function.name === 'send_email') return ADMIN_SEND_EMAIL_TOOL;
       if (t.function.name === 'schedule_tasks') return adminScheduleTool;
+      return t;
+    });
+  } else if (isActiveMember) {
+    tools = tools.map(t => {
+      if (t.function.name === 'send_voice_message') return MEMBER_VOICE_TOOL;
       return t;
     });
   }
@@ -246,4 +322,181 @@ function isActiveMemberOnlyTool(toolName) {
   return ACTIVE_MEMBER_TOOL_NAMES.includes(toolName);
 }
 
-module.exports = { getToolsForUser, isActiveMemberOnlyTool, BASE_TOOLS, ACTIVE_MEMBER_TOOLS };
+/**
+ * Returns the restricted tool set for dynamic task execution by Grok.
+ * Only data-gathering + delivery tools. No aboutMe, scheduler, serverRules, taskReader, taskRemover.
+ * Delivery rules are enforced programmatically by the scheduler engine, not by tool definitions.
+ */
+function getDynamicTaskTools(isActiveMember, isAdmin) {
+  // Data-gathering tools (always available, no recipient params)
+  const tools = [
+    BASE_TOOLS.find(t => t.function.name === 'web_search'),
+    {
+      type: 'function',
+      function: {
+        name: 'image_search',
+        description: 'Cerca immagini sul web. Le immagini trovate verranno accumulate come allegati e inviate insieme al messaggio di consegna (WhatsApp o email).',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Cosa cercare nelle immagini (preferibilmente in inglese per risultati migliori)' },
+            count: { type: 'integer', description: 'Numero immagini da cercare (1-4). Default 2.' },
+          },
+          required: ['query'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_pdf',
+        description: 'Genera un file PDF. Il PDF verrà accumulato come allegato e inviato insieme al messaggio di consegna (WhatsApp o email).',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Titolo del PDF' },
+            content: { type: 'string', description: 'Contenuto testuale del PDF. Supporta # e ## per titoli, - per elenchi puntati.' },
+          },
+          required: ['title', 'content'],
+        },
+      },
+    },
+  ];
+
+  // Delivery tools — descriptions vary by permission level
+  if (isAdmin) {
+    // Add music stats for admin
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
+    
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_whatsapp_message',
+        description: "Invia un messaggio testuale WhatsApp. Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. Puoi inviare a qualsiasi numero o membro. REGOLA: puoi inviare solo 1 messaggio per numero WhatsApp (testuale o vocale, non entrambi allo stesso numero).",
+        parameters: {
+          type: 'object',
+          properties: {
+            recipientName: { type: 'string', description: 'Nome completo del destinatario (se membro attivo)' },
+            recipientPhone: { type: 'string', description: 'Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX). Per qualsiasi destinatario.' },
+            message: { type: 'string', description: 'Il messaggio da inviare' },
+          },
+          required: ['message'],
+        },
+      },
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_voice_message',
+        description: "Invia un messaggio vocale WhatsApp. Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. Puoi inviare a qualsiasi numero o membro. REGOLA: puoi inviare solo 1 messaggio per numero WhatsApp (testuale o vocale, non entrambi allo stesso numero). Max 1000 caratteri.",
+        parameters: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', description: 'Il testo da convertire in audio vocale (max 1000 caratteri).' },
+            recipientName: { type: 'string', description: 'Nome completo del destinatario (se membro attivo)' },
+            recipientPhone: { type: 'string', description: 'Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX).' },
+          },
+          required: ['text'],
+        },
+      },
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_email',
+        description: "Invia un'email con tutti gli allegati accumulati (immagini, PDF). Puoi inviare a qualsiasi email o membro. REGOLA: puoi inviare solo 1 email per indirizzo email.",
+        parameters: {
+          type: 'object',
+          properties: {
+            recipientName: { type: 'string', description: 'Nome completo del destinatario (se membro attivo, la email viene risolta dal nome)' },
+            recipientEmail: { type: 'string', description: 'Indirizzo email diretto del destinatario (per qualsiasi persona)' },
+            subject: { type: 'string', description: "Oggetto dell'email" },
+            body: { type: 'string', description: "Corpo dell'email in HTML" },
+          },
+          required: ['subject', 'body'],
+        },
+      },
+    });
+  } else if (isActiveMember) {
+    // Add music stats for active members
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
+    
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_whatsapp_message',
+        description: "Invia un messaggio testuale WhatsApp al creatore del task. Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. Si invia solo a se stessi. REGOLA: puoi inviare solo 1 messaggio WhatsApp (testuale o vocale, non entrambi).",
+        parameters: {
+          type: 'object',
+          properties: {
+            message: { type: 'string', description: 'Il messaggio da inviare' },
+          },
+          required: ['message'],
+        },
+      },
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_voice_message',
+        description: "Invia un messaggio vocale WhatsApp al creatore del task. Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. Si invia solo a se stessi. REGOLA: puoi inviare solo 1 messaggio WhatsApp (testuale o vocale, non entrambi). Max 1000 caratteri.",
+        parameters: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', description: 'Il testo da convertire in audio vocale (max 1000 caratteri).' },
+          },
+          required: ['text'],
+        },
+      },
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_email',
+        description: "Invia un'email al creatore del task con tutti gli allegati accumulati (immagini, PDF). Si invia solo a se stessi. REGOLA: puoi inviare solo 1 email.",
+        parameters: {
+          type: 'object',
+          properties: {
+            subject: { type: 'string', description: "Oggetto dell'email" },
+            body: { type: 'string', description: "Corpo dell'email in HTML" },
+          },
+          required: ['subject', 'body'],
+        },
+      },
+    });
+  } else {
+    // Non-active member: only WA to self
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_whatsapp_message',
+        description: "Invia un messaggio testuale WhatsApp al creatore del task. Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. REGOLA: puoi inviare solo 1 messaggio WhatsApp (testuale o vocale, non entrambi).",
+        parameters: {
+          type: 'object',
+          properties: {
+            message: { type: 'string', description: 'Il messaggio da inviare' },
+          },
+          required: ['message'],
+        },
+      },
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'send_voice_message',
+        description: "Invia un messaggio vocale WhatsApp al creatore del task. Tutti gli allegati accumulati (immagini, PDF) verranno inviati insieme. REGOLA: puoi inviare solo 1 messaggio WhatsApp (testuale o vocale, non entrambi). Max 1000 caratteri.",
+        parameters: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', description: 'Il testo da convertire in audio vocale (max 1000 caratteri).' },
+          },
+          required: ['text'],
+        },
+      },
+    });
+  }
+
+  return tools;
+}
+
+module.exports = { getToolsForUser, getDynamicTaskTools, isActiveMemberOnlyTool, BASE_TOOLS, ACTIVE_MEMBER_TOOLS };

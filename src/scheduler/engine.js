@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS, TASK_TYPE_STATIC, TASK_TYPE_DYNAMIC, MAX_TOOL_ROUNDS } = require('../config/constants');
 const { callGrok } = require('../ai/grok');
-const { getToolsForUser } = require('../ai/tools');
+const { getDynamicTaskTools } = require('../ai/tools');
 const { executeTool } = require('../tools');
 const { generatePdf } = require('../tools/pdfGenerator');
 const { sendEmailDirect } = require('../tools/emailSender');
@@ -101,26 +101,17 @@ async function checkAndExecuteTasks() {
  * @returns {Promise<void>}
  */
 async function executeTask(task) {
-  let messageText = '';
-  let attachments = [];
-
-  if (task.type === TASK_TYPE_STATIC) {
-    messageText = task.content;
-  } else if (task.type === TASK_TYPE_DYNAMIC) {
-    const result = await executeDynamicTask(task.content, task.creatorCtx);
-    messageText = result.text;
-    attachments = result.attachments || [];
-    if (result.voiceBuffer) {
-      attachments.push({
-        name: 'voice.ogg',
-        buffer: result.voiceBuffer,
-        mimetype: 'audio/ogg; codecs=opus',
-        isVoice: true,
-      });
-    }
+  if (task.type === TASK_TYPE_DYNAMIC) {
+    // Dynamic tasks: Grok handles all delivery via tools, no post-delivery
+    await executeDynamicTask(task.content, task.creatorCtx);
+    return;
   }
 
-  if (task.pdfContent && !attachments.some(a => a.mimetype === 'application/pdf')) {
+  // Static tasks: old behavior — deliver via destinations
+  let messageText = task.content || '';
+  let attachments = [];
+
+  if (task.pdfContent) {
     const pdfBuffer = await generatePdf(task.pdfTitle || 'Documento', task.pdfContent);
     const pdfName = `${sanitizeFilename(task.pdfTitle || 'documento')}.pdf`;
     attachments.push({ name: pdfName, buffer: pdfBuffer, mimetype: 'application/pdf' });
@@ -175,18 +166,33 @@ async function executeTask(task) {
 }
 
 /**
- * Execute a dynamic task using Grok AI with full tool access.
- * Tools are permission-aware based on the creator's access level.
+ * Execute a dynamic task using Grok AI with restricted tools.
+ * Grok only gets data-gathering + delivery tools. Delivery is enforced programmatically:
+ * - Non-member: WA to self only (text or voice, not both)
+ * - Active member: WA to self (text or voice) + email to self
+ * - Admin: WA/voice to any number + email to any address, 1 message per destination
  * @param {string} prompt - The task prompt for Grok AI to execute
  * @param {object} creatorCtx - Creator context stored at scheduling time (permissions, identity)
- * @returns {Promise<object>} Result object { text, attachments, voiceBuffer }
+ * @returns {Promise<void>}
  */
 async function executeDynamicTask(prompt, creatorCtx) {
-  const systemMsg = `Sei un assistente AI che esegue task programmati. Ora corrente (Roma): ${getRomeTime()}.\nEsegui il seguente compito e fornisci il risultato come messaggio da inviare all'utente. Rispondi in italiano.`;
-
   const isActiveMember = creatorCtx?.isActiveMember || false;
   const isCreatorAdmin = creatorCtx?.isAdmin || false;
-  const tools = getToolsForUser(isActiveMember, isCreatorAdmin);
+
+  const systemMsg = `Sei un assistente AI che esegue task programmati. Ora corrente (Roma): ${getRomeTime()}.
+Esegui il seguente compito. Rispondi in italiano.
+
+WORKFLOW OBBLIGATORIO:
+1. Prima raccogli le informazioni necessarie (web_search, image_search, generate_pdf, read_music_stats)
+2. Poi usa i tool di consegna per inviare il risultato (send_whatsapp_message, send_voice_message, send_email)
+
+REGOLE DI CONSEGNA:
+- Ogni numero WhatsApp può ricevere solo 1 messaggio (testuale O vocale, non entrambi)
+- Ogni indirizzo email può ricevere solo 1 email
+- Gli allegati accumulati (immagini, PDF) verranno automaticamente inclusi in ogni consegna
+- DEVI usare almeno un tool di consegna per recapitare il risultato`;
+
+  const tools = getDynamicTaskTools(isActiveMember, isCreatorAdmin);
 
   const userCtx = {
     isActiveMember,
@@ -205,6 +211,14 @@ async function executeDynamicTask(prompt, creatorCtx) {
     attachments: [],
     voiceBuffer: null,
     isVoiceOnly: false,
+  };
+
+  const dynamicTaskCtx = {
+    contactedWA: new Set(),
+    contactedEmail: new Set(),
+    creatorJid: creatorCtx?.waJid || null,
+    creatorEmail: creatorCtx?.email || null,
+    isDynamic: true,
   };
 
   const messages = [
@@ -227,7 +241,7 @@ async function executeDynamicTask(prompt, creatorCtx) {
       for (const tc of response.tool_calls) {
         try {
           console.log(`[Scheduler] 🔧 Tool: ${tc.function.name}`);
-          const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx);
+          const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, dynamicTaskCtx);
           messages.push({ role: 'tool', tool_call_id: toolCallId, content: result });
         } catch (err) {
           messages.push({ role: 'tool', tool_call_id: tc.id, content: `Errore esecuzione: ${err.message}` });
@@ -236,10 +250,16 @@ async function executeDynamicTask(prompt, creatorCtx) {
       continue;
     }
 
-    return { text: response.content || 'Task completato.', attachments: responseCtx.attachments, voiceBuffer: responseCtx.voiceBuffer };
+    // Grok finished without using delivery tools — log warning
+    if (dynamicTaskCtx.contactedWA.size === 0 && dynamicTaskCtx.contactedEmail.size === 0) {
+      console.warn(`[Scheduler] ⚠️ Dynamic task completato ma nessuna consegna effettuata. Testo Grok: ${(response.content || '').substring(0, 200)}`);
+    }
+    return;
   }
 
-  return { text: 'Task completato (limite iterazioni raggiunto).', attachments: responseCtx.attachments, voiceBuffer: responseCtx.voiceBuffer };
+  if (dynamicTaskCtx.contactedWA.size === 0 && dynamicTaskCtx.contactedEmail.size === 0) {
+    console.warn(`[Scheduler] ⚠️ Dynamic task raggiunto limite iterazioni senza consegna.`);
+  }
 }
 
 module.exports = { startScheduler, setSchedulerWaClient };

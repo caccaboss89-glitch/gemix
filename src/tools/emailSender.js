@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const { BOT_EMAIL, BOT_PASS } = require('../config/env');
 const { findMemberByName } = require('../config/members');
 const { generatePdf } = require('./pdfGenerator');
+const { fetchWithTimeout } = require('../utils/fetch');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -20,6 +21,7 @@ const transporter = nodemailer.createTransport({
  * @param {boolean} [options.attachPdf]
  * @param {string} [options.pdfTitle]
  * @param {string} [options.pdfContent]
+ * @param {string[]} [options.imageUrls] - Array of image URLs to attach
  * @returns {Promise<string>} Result message
  */
 async function sendEmail(recipientName, subject, body, options = {}) {
@@ -43,6 +45,34 @@ async function sendEmail(recipientName, subject, body, options = {}) {
       content: pdfBuffer,
       contentType: 'application/pdf',
     });
+  }
+
+  // Attach images from URLs
+  if (options.imageUrls && Array.isArray(options.imageUrls) && options.imageUrls.length > 0) {
+    for (let i = 0; i < options.imageUrls.length; i++) {
+      try {
+        const url = options.imageUrls[i];
+        if (!url) continue;
+        
+        const res = await fetchWithTimeout(url);
+        if (!res.ok) {
+          console.warn(`Errore download immagine ${url}: ${res.status}`);
+          continue;
+        }
+        
+        const buffer = Buffer.from(await res.arrayBuffer());
+        const contentType = res.headers.get('content-type') || 'image/jpeg';
+        const filename = `image_${i + 1}.${contentType.split('/')[1] || 'jpg'}`;
+        
+        mailOptions.attachments.push({
+          filename,
+          content: buffer,
+          contentType,
+        });
+      } catch (err) {
+        console.warn(`Errore allegato immagine ${i + 1}:`, err.message);
+      }
+    }
   }
 
   await transporter.sendMail(mailOptions);

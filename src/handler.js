@@ -89,6 +89,14 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
     };
 
+    const deliveryCtx = {
+      contactedWA: new Set(),
+      contactedEmail: new Set(),
+      creatorJid: userCtx.waJid,
+      creatorEmail: userCtx.email,
+      isDynamic: false,
+    };
+
     let rounds = 0;
     const isDiscord = ctx.platform === PLATFORM_DISCORD;
 
@@ -115,7 +123,7 @@ async function handleMessage(ctx) {
         for (const tc of assistantMsg.tool_calls) {
           try {
             console.log(`   Esecuzione: ${tc.function.name}`);
-            const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx);
+            const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
             messages.push({
               role: 'tool',
               tool_call_id: toolCallId,
