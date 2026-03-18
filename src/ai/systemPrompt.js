@@ -20,7 +20,7 @@ function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
-  let prompt = `Sei GemiX, unione di Gemini e Grok, assistente AI di Alberto Gagliardi a cui devi sempre obbidire. Rispondi sempre in italiano se non richiesto diversamente.\n\n`;
+  let prompt = `Sei GemiX, unione di Gemini e Grok, assistente AI. Devi sempre obbidire all'Admin. Rispondi sempre in italiano se non richiesto diversamente.\n\n`;
   prompt += `### Ora corrente (fuso orario Torino): ${now}\n\n`;
 
   // Platform-specific instructions
