@@ -87,16 +87,27 @@ async function onPersonalMessage(msg) {
     platform: PLATFORM_WA_PERSONAL,
     userId: phoneJid,
   });
-  // Prevent loop: if this chat/message comes from the dedicated account, ignore it
+  // Prevent loop between dedicated <-> personal accounts by normalizing and comparing numeric JIDs.
   try {
     const dedicatedClient = getDedicatedClient && getDedicatedClient();
     const dedicatedJid = dedicatedClient && dedicatedClient.info && dedicatedClient.info.wid && dedicatedClient.info.wid._serialized;
-    if (dedicatedJid && (chat.id && chat.id._serialized === dedicatedJid || senderJid === dedicatedJid)) {
-      console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio proveniente dall'account dedicato (${dedicatedJid}) per evitare loop`);
+    const normalize = (j) => (j || '').toString().replace(/[^0-9]/g, '');
+    const dedNorm = normalize(dedicatedJid);
+    const senderNorm = normalize(senderJid);
+    const chatNorm = normalize(chat.id && chat.id._serialized);
+    // also try contact id if available
+    let contactNorm = '';
+    try {
+      const contactObj = await msg.getContact();
+      contactNorm = normalize(contactObj.id && contactObj.id._serialized);
+    } catch {}
+
+    if (dedNorm && (senderNorm === dedNorm || chatNorm === dedNorm || contactNorm === dedNorm)) {
+      console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio tra account bot (dedicated=${dedicatedJid}) per evitare loop`);
       return;
     }
   } catch (e) {
-    // ignore errors in detection
+    // ignore errors in detection — fallback to normal behavior
   }
   
   console.log(`\n📨 [WHATSAPP-PERSONALE] Messaggio ricevuto`);
