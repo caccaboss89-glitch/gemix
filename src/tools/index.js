@@ -129,6 +129,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
 
         // Delivery to a specific recipient (or dynamic task forced delivery)
         if (dynamicTaskCtx && (args.recipientName || args.recipientPhone || dynamicTaskCtx.isDynamic)) {
+          const includeAttachments = args.includeAttachments !== false;
+          const clearAttachments = args.clearAttachmentsAfterSend !== false;
+
           if (args.recipientName && !dynamicTaskCtx.isDynamic) {
             const member = findMemberByName(args.recipientName);
             if (member && member.wa === userCtx.waJid) {
@@ -147,16 +150,23 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             const { MessageMedia } = require('whatsapp-web.js');
             const voiceMedia = new MessageMedia('audio/ogg', voiceBuf.toString('base64'), 'voice.ogg');
             await sendWhatsAppDirect(targetJid.jid, voiceMedia, { sendAudioAsVoice: true });
+
             // Send accumulated attachments
-            if (responseCtx.attachments.length > 0) {
+            if (includeAttachments && responseCtx.attachments.length > 0) {
               for (const att of responseCtx.attachments) {
                 if (!att.buffer || !att.mimetype) continue;
                 const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
                 await sendWhatsAppDirect(targetJid.jid, media);
               }
             }
+
+            const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
+            if (clearAttachments) {
+              responseCtx.attachments = [];
+            }
+
             dynamicTaskCtx.contactedWA.add(targetJid.jid);
-            result = `Messaggio vocale inviato con successo a ${targetJid.display}${responseCtx.attachments.length > 0 ? ` con ${responseCtx.attachments.length} allegato/i` : ''}.`;
+            result = `Messaggio vocale inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
           } catch (err) {
             result = `Errore invio vocale: ${err.message}`;
           }
@@ -257,6 +267,8 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       case 'send_email': {
         // Dynamic task mode: enforce delivery rules
         if (dynamicTaskCtx) {
+          const includeAttachments = args.includeAttachments !== false;
+          const clearAttachments = args.clearAttachmentsAfterSend !== false;
           const targetEmail = _resolveDynamicEmail(args, userCtx, dynamicTaskCtx);
           if (targetEmail.error) { result = targetEmail.error; break; }
           if (dynamicTaskCtx.contactedEmail.has(targetEmail.email)) {
@@ -264,15 +276,19 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             break;
           }
           try {
-            // Build nodemailer attachments from responseCtx
-            const emailAttachments = responseCtx.attachments
-              .map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }));
+            // Build nodemailer attachments from responseCtx (if requested)
+            const emailAttachments = includeAttachments
+              ? responseCtx.attachments.map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }))
+              : [];
             await sendEmailDirect(
               targetEmail.email,
               args.subject,
               `<div style="font-family:sans-serif">${(args.body || '').replace(/\n/g, '<br>')}</div>`,
               emailAttachments
             );
+            if (clearAttachments) {
+              responseCtx.attachments = [];
+            }
             dynamicTaskCtx.contactedEmail.add(targetEmail.email);
             result = `Email inviata con successo a ${targetEmail.display}${emailAttachments.length > 0 ? ` con ${emailAttachments.length} allegato/i` : ''}.`;
           } catch (err) {
@@ -292,9 +308,14 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           break;
         }
         try {
-          // Build accumulated attachments from responseCtx
-          const accumulatedAttachments = responseCtx.attachments
-            .map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }));
+          const includeAttachments = args.includeAttachments !== false;
+          const clearAttachments = args.clearAttachmentsAfterSend !== false;
+
+          // Build accumulated attachments from responseCtx (if requested)
+          const accumulatedAttachments = includeAttachments
+            ? responseCtx.attachments.map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }))
+            : [];
+
           result = await sendEmail(args.recipientName, args.subject, args.body, {
             attachPdf: args.attachPdf,
             pdfTitle: args.pdfTitle,
@@ -302,6 +323,10 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             imageUrls: args.imageUrls,
             accumulatedAttachments,
           });
+
+          if (clearAttachments) {
+            responseCtx.attachments = [];
+          }
         } catch (err) {
           result = `Errore invio email: ${err.message}`;
         }
@@ -311,6 +336,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       case 'send_whatsapp_message': {
         // Dynamic task mode: enforce delivery rules
         if (dynamicTaskCtx) {
+          const includeAttachments = args.includeAttachments !== false;
+          const clearAttachments = args.clearAttachmentsAfterSend === true;
+
           const targetJid = _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx);
           if (targetJid.error) { result = targetJid.error; break; }
           if (dynamicTaskCtx.contactedWA.has(targetJid.jid)) {
@@ -320,7 +348,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           try {
             await sendWhatsAppDirect(targetJid.jid, args.message);
             // Send accumulated attachments
-            if (responseCtx.attachments.length > 0) {
+            if (includeAttachments && responseCtx.attachments.length > 0) {
               const { MessageMedia } = require('whatsapp-web.js');
               for (const att of responseCtx.attachments) {
                 if (!att.buffer || !att.mimetype) continue;
@@ -328,8 +356,14 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
                 await sendWhatsAppDirect(targetJid.jid, media);
               }
             }
+
+            const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
+            if (clearAttachments) {
+              responseCtx.attachments = [];
+            }
+
             dynamicTaskCtx.contactedWA.add(targetJid.jid);
-            result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${responseCtx.attachments.length > 0 ? ` con ${responseCtx.attachments.length} allegato/i` : ''}.`;
+            result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
           } catch (err) {
             result = `Errore invio WhatsApp: ${err.message}`;
           }
@@ -351,16 +385,20 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             isAdmin: userCtx.isAdmin,
             recipientPhone: args.recipientPhone,
           });
-          // Send accumulated attachments if any
-          if (responseCtx.attachments.length > 0) {
+
+          const includeAttachments = args.includeAttachments !== false;
+          const clearAttachments = args.clearAttachmentsAfterSend !== false;
+          let attachmentsSent = 0;
+
+          // Send accumulated attachments if requested
+          if (includeAttachments && responseCtx.attachments.length > 0) {
             const member = findMemberByName(args.recipientName);
-            const jid = userCtx.isAdmin && args.recipientPhone 
+            const jid = userCtx.isAdmin && args.recipientPhone
               ? normalizePhoneToJid(args.recipientPhone)
               : member?.wa;
             if (!jid) {
               result += ` ⚠️ Non è stato possibile risolvere il destinatario per i ${responseCtx.attachments.length} allegato/i.`;
             } else {
-              let attachmentsSent = 0;
               const { MessageMedia } = require('whatsapp-web.js');
               for (const att of responseCtx.attachments) {
                 if (!att.buffer || !att.mimetype) continue;
@@ -378,6 +416,10 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
                 result += ` ❌ Errore nell'invio degli ${responseCtx.attachments.length} allegato/i.`;
               }
             }
+          }
+
+          if (clearAttachments) {
+            responseCtx.attachments = [];
           }
         } catch (err) {
           result = `Errore invio WhatsApp: ${err.message}`;

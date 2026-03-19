@@ -28,11 +28,12 @@ const TOOL_INSTRUCTIONS = {
   remove_my_tasks: `Rimuovi task programmati dell'utente corrente usando gli ID forniti.`,
   read_server_rules: `Leggi il regolamento del server Discord.`,
   generate_pdf: `Genera un PDF da testo. Fornisci titolo e contenuto.`,
-  send_email: `Invia email a un membro attivo; allegati accumulati (immagini, PDF) verranno inclusi automaticamente. Fornisci recipientName, subject e body.`,
-  send_whatsapp_message: `Invia messaggio WhatsApp a un membro attivo; allegati accumulati verranno inclusi. Fornisci recipientName e message.`,
+  send_email: `Invia email a un membro attivo; allegati accumulati (immagini, PDF) verranno inclusi automaticamente. Fornisci recipientName, subject e body. Usa includeAttachments=false per evitare di allegare il buffer.`,
+  send_whatsapp_message: `Invia messaggio WhatsApp a un membro attivo; allegati accumulati verranno inclusi. Fornisci recipientName e message. Usa includeAttachments=false per evitare di allegare il buffer. Usa clearAttachmentsAfterSend=true per evitare che il buffer venga inviato nella chat corrente.`,
   read_music_stats: `Leggi statistiche musicali del bot (MusicWrap).`,
-  // Varianti admin/membro aggiuntive saranno usate per impostare i parametri che possono cambiare.
 };
+// Varianti admin/membro aggiuntive saranno usate per impostare i parametri che possono cambiare.
+
 
 function getToolInstructions(name) {
   return TOOL_INSTRUCTIONS[name] || null;
@@ -69,6 +70,14 @@ function makeVoiceTool({ includeRecipientName = false, includeRecipientPhone = f
       type: 'string',
       description: 'Il testo da convertire in audio vocale (max 1000 caratteri). Può contenere effetti vocali inline e wrapping tags.',
     },
+    includeAttachments: {
+      type: 'boolean',
+      description: 'Se false, non allegare al messaggio gli eventuali file accumulati in buffer.',
+    },
+    clearAttachmentsAfterSend: {
+      type: 'boolean',
+      description: 'Se true, cancella il buffer degli allegati dopo l\'invio (non verranno inviati nella chat corrente).',
+    },
   };
 
   if (includeRecipientName) {
@@ -96,6 +105,14 @@ function makeVoiceTool({ includeRecipientName = false, includeRecipientPhone = f
 function makeWhatsAppTool({ includeRecipientName = false, includeRecipientPhone = false, required = ['message'] } = {}) {
   const properties = {
     message: { type: 'string', description: 'Il messaggio da inviare' },
+    includeAttachments: {
+      type: 'boolean',
+      description: 'Se false, non allegare al messaggio gli eventuali file accumulati in buffer.',
+    },
+    clearAttachmentsAfterSend: {
+      type: 'boolean',
+      description: 'Se true, cancella il buffer degli allegati dopo l\'invio (non verranno inviati nella chat corrente).',
+    },
   };
 
   if (includeRecipientName) {
@@ -114,7 +131,7 @@ function makeWhatsAppTool({ includeRecipientName = false, includeRecipientPhone 
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Invia un messaggio WhatsApp.',
+    description: 'Invia un messaggio WhatsApp con il tuo account dedicato.',
     properties,
     required,
   });
@@ -124,6 +141,14 @@ function makeEmailTool({ includeRecipientName = false, includeRecipientEmail = f
   const properties = {
     subject: { type: 'string', description: "Oggetto dell'email" },
     body: { type: 'string', description: "Corpo dell'email (può contenere HTML - NON usare markdown)" },
+    includeAttachments: {
+      type: 'boolean',
+      description: 'Se false, non allegare all\'email gli eventuali file accumulati in buffer.',
+    },
+    clearAttachmentsAfterSend: {
+      type: 'boolean',
+      description: 'Se true, cancella il buffer degli allegati dopo l\'invio (non verranno inviati nella chat corrente).',
+    },
   };
 
   if (includeRecipientName) {
