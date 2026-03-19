@@ -241,7 +241,7 @@ const BASE_TOOLS = [
   }),
   makeTool({
     name: 'read_about_me',
-    description: 'Restituisce il testo "Chi sono" di GemiX.',
+    description: 'Restituisce il testo della storia di GemiX, utile per presentarti e dire chi sei.',
     properties: {},
   }),
   makeVoiceTool(),
