@@ -3,6 +3,7 @@ const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
+const { getDedicatedClient } = require('./dedicated');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
 const { GEMINI_MODEL } = require('../../config/env');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
@@ -81,6 +82,20 @@ async function onPersonalMessage(msg) {
       phoneJid = contact.id.user + '@c.us';
     }
   } catch {}
+
+  // Prevent API calls from the personal account when the message originates
+  // from the dedicated account—this avoids triggering a loop when the
+  // dedicated account mentions @gemix in a chat with the personal account.
+  try {
+    const dedClient = getDedicatedClient && getDedicatedClient();
+    const dedJid = dedClient?.info?.wid?._serialized;
+    if (dedJid && senderJid === dedJid) {
+      console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio da account dedicato (${senderJid}) per evitare loop`);
+      return;
+    }
+  } catch (e) {
+    // If anything goes wrong retrieving the dedicated client, proceed normally.
+  }
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
