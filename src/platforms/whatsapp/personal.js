@@ -101,10 +101,15 @@ async function onPersonalMessage(msg) {
       const contactObj = await msg.getContact();
       contactNorm = normalize(contactObj.id && contactObj.id._serialized);
     } catch {}
+    const phoneNorm = normalize(phoneJid);
 
-    if (dedNorm && (senderNorm === dedNorm || chatNorm === dedNorm || contactNorm === dedNorm)) {
+    if (dedNorm && (senderNorm === dedNorm || chatNorm === dedNorm || contactNorm === dedNorm || phoneNorm === dedNorm)) {
       console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio tra account bot (dedicated=${dedicatedJid}) per evitare loop`);
       return;
+    }
+    // If message is sent by this personal client but detection didn't match, log minimal diagnostic to help debug
+    if (msg.fromMe && dedNorm) {
+      console.warn(`   ⚠️ [WA-PERSONALE] Loop detection: ded=${dedNorm}, sender=${senderNorm}, chat=${chatNorm}, contact=${contactNorm}, phone=${phoneNorm}`);
     }
   } catch (e) {
     // ignore errors in detection — fallback to normal behavior
