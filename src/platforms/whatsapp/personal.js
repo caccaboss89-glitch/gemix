@@ -1,12 +1,12 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
+const { getDedicatedClient } = require('./dedicated');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
 const { GEMINI_MODEL } = require('../../config/env');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
-const { getDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const responseLock = require('../../utils/responseLock');
 
@@ -66,6 +66,13 @@ async function onPersonalMessage(msg) {
 
   if (chat.isGroup) return;
 
+  const dedicatedClient = getDedicatedClient && getDedicatedClient();
+  const dedicatedJid = dedicatedClient?.info?.wid?._serialized;
+  if (dedicatedJid && chat.id._serialized === dedicatedJid) {
+    console.log(`   🔕 [WHATSAPP-PERSONALE] Ignoro chat personale<->dedicata (non rispondo)`);
+    return;
+  }
+
   if (!(msg.body || '').toLowerCase().includes('@gemix')) return;
 
   if (msg.fromMe && (msg.body || '').includes('--GemiX •')) return;
@@ -83,65 +90,19 @@ async function onPersonalMessage(msg) {
     }
   } catch {}
 
+  // In the special case where the personal account is chatting with the dedicated account,
+  // do not process messages at all (prevents loops when both accounts mention @gemix).
+  const isDedicatedContact = !dedicatedJid && userName && userName.toLowerCase() === 'gemix';
+  if (isDedicatedContact) {
+    console.log(`   🔕 [WHATSAPP-PERSONALE] Ignoro chat personale<->dedicata (contatto: ${userName})`);
+    return;
+  }
+
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
     userId: phoneJid,
   });
   
-  // If this chat is a private conversation between personal and dedicated accounts,
-  // completely disable the personal account here to avoid reply loops.
-  try {
-    const dedicatedClientRef = getDedicatedClient && getDedicatedClient();
-    const dedicatedJid = dedicatedClientRef && dedicatedClientRef.info && dedicatedClientRef.info.wid && dedicatedClientRef.info.wid._serialized;
-    if (dedicatedJid) {
-      // Collect candidate fields that may contain the other party JID in different message scenarios
-      const candidates = new Set();
-      try { if (senderJid) candidates.add(senderJid); } catch {}
-      try { if (phoneJid) candidates.add(phoneJid); } catch {}
-      try { if (chat && chat.id && chat.id._serialized) candidates.add(chat.id._serialized); } catch {}
-      try { if (msg.to) candidates.add(msg.to); } catch {}
-      try { if (msg._data && msg._data.to) candidates.add(msg._data.to); } catch {}
-      try { if (msg._data && msg._data.author) candidates.add(msg._data.author); } catch {}
-      // Additional places where whatsapp-web.js may put recipient info for outgoing messages
-      try { if (msg._data && msg._data.id && msg._data.id.remote) candidates.add(msg._data.id.remote); } catch {}
-      try { if (msg._data && msg._data.id && msg._data.id._serialized) candidates.add(msg._data.id._serialized); } catch {}
-      try { if (msg._data && msg._data.recipient) candidates.add(msg._data.recipient); } catch {}
-
-      const hasDedicated = Array.from(candidates).some(c => c && (c === dedicatedJid || (typeof c === 'string' && c.includes(dedicatedJid))));
-      if (hasDedicated) {
-        console.log(`   ⛔ [WA-PERSONALE] Chat personale–dedicato rilevata (dedicated=${dedicatedJid}); account personale disabilitato per questa conversazione.`);
-        return;
-      }
-
-      // If still not detected and this message was sent by the personal client (fromMe),
-      // try a last-resort heuristic: check common nested fields and, optionally, log them
-      if (msg.fromMe) {
-        const debug = process.env.WA_PERSONAL_DEDICATED_DEBUG;
-        const inspected = {
-          chatId: chat && chat.id && chat.id._serialized,
-          senderJid,
-          phoneJid,
-          msgTo: msg.to || null,
-          dataTo: msg._data && msg._data.to || null,
-          dataAuthor: msg._data && msg._data.author || null,
-          dataIdRemote: msg._data && msg._data.id && msg._data.id.remote || null,
-          dataIdSerialized: msg._data && msg._data.id && msg._data.id._serialized || null,
-          dataRecipient: msg._data && msg._data.recipient || null,
-        };
-        const anyMatch = Object.values(inspected).some(v => v && (v === dedicatedJid || (typeof v === 'string' && v.includes(dedicatedJid))));
-        if (anyMatch) {
-          console.log(`   ⛔ [WA-PERSONALE] Chat personale–dedicato rilevata via heuristic (dedicated=${dedicatedJid}); account personale disabilitato.`);
-          return;
-        }
-        if (debug) {
-          console.log('   ⚠️ [WA-PERSONALE] Heuristic inspection fields:', inspected);
-        }
-      }
-    }
-  } catch (e) {
-    // best-effort detection; if anything fails continue normally
-  }
-
   console.log(`\n📨 [WHATSAPP-PERSONALE] Messaggio ricevuto`);
   console.log(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
   console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
