@@ -46,6 +46,10 @@ function buildSystemPrompt(ctx) {
     }
   }
 
+  prompt += `### Uso degli strumenti\n`;
+  prompt += `- Se devi eseguire qualsiasi azione (es. invio di messaggi, invio di vocali, invio di email), devi assicurarti di farlo prima di fornire la risposta finale, dopo non ti sarà più permesso utilizzarli.\n`;
+  prompt += `- Ogni tanto (non troppo spesso) rispondi spontaneamente con un vocale quando il messaggio è breve e non tecnico.\n\n`;
+
   prompt += `### Tool\nUsa i tool disponibili (web_search, image_search, send_voice_message, schedule_tasks, ecc.).\n`;
   if (!isActiveMember) {
     prompt += `Alcuni tool (PDF, email, invio WhatsApp a terzi) NON sono disponibili per questo utente. Se li chiede, spiegalo brevemente.\n`;
