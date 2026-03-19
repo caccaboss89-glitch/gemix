@@ -68,8 +68,34 @@ async function onPersonalMessage(msg) {
 
   const dedicatedClient = getDedicatedClient && getDedicatedClient();
   const dedicatedJid = dedicatedClient?.info?.wid?._serialized;
-  if (dedicatedJid && chat.id._serialized === dedicatedJid) {
-    console.log(`   🔕 [WHATSAPP-PERSONALE] Ignoro chat personale<->dedicata (non rispondo)`);
+
+  const normalizeDigits = (jidOrPhone) => {
+    if (!jidOrPhone) return null;
+    const digits = jidOrPhone.toString().replace(/\D/g, '');
+    return digits || null;
+  };
+
+  const dedicatedDigits = normalizeDigits(dedicatedJid);
+
+  let otherDigits = null;
+  try {
+    const otherContact = await chat.getContact();
+    if (otherContact) {
+      if (otherContact.number) {
+        otherDigits = normalizeDigits(otherContact.number);
+      } else if (otherContact.id && otherContact.id.user) {
+        otherDigits = normalizeDigits(otherContact.id.user);
+      }
+    }
+  } catch {}
+
+  // Fallback: use chat id when contact lookup isn't available (possible for outgoing messages).
+  if (!otherDigits && chat.id && chat.id._serialized) {
+    otherDigits = normalizeDigits(chat.id._serialized);
+  }
+
+  if (dedicatedDigits && otherDigits && dedicatedDigits === otherDigits) {
+    console.log(`   🔕 [WHATSAPP-PERSONALE] Ignoro chat personale<->dedicata (numero: ${otherDigits})`);
     return;
   }
 
@@ -90,13 +116,6 @@ async function onPersonalMessage(msg) {
     }
   } catch {}
 
-  // In the special case where the personal account is chatting with the dedicated account,
-  // do not process messages at all (prevents loops when both accounts mention @gemix).
-  const isDedicatedContact = !dedicatedJid && userName && userName.toLowerCase() === 'gemix';
-  if (isDedicatedContact) {
-    console.log(`   🔕 [WHATSAPP-PERSONALE] Ignoro chat personale<->dedicata (contatto: ${userName})`);
-    return;
-  }
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
