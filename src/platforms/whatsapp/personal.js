@@ -6,9 +6,9 @@ const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
 const { GEMINI_MODEL } = require('../../config/env');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
+const { getDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const responseLock = require('../../utils/responseLock');
-const { getDedicatedClient } = require('../../tools/whatsappSender');
 
 let client;
 
@@ -87,34 +87,23 @@ async function onPersonalMessage(msg) {
     platform: PLATFORM_WA_PERSONAL,
     userId: phoneJid,
   });
-  // Prevent loop between dedicated <-> personal accounts by normalizing and comparing numeric JIDs.
+  
+  // If this chat is a private conversation between personal and dedicated accounts,
+  // completely disable the personal account here to avoid reply loops.
   try {
-    const dedicatedClient = getDedicatedClient && getDedicatedClient();
-    const dedicatedJid = dedicatedClient && dedicatedClient.info && dedicatedClient.info.wid && dedicatedClient.info.wid._serialized;
-    const normalize = (j) => (j || '').toString().replace(/[^0-9]/g, '');
-    const dedNorm = normalize(dedicatedJid);
-    const senderNorm = normalize(senderJid);
-    const chatNorm = normalize(chat.id && chat.id._serialized);
-    // also try contact id if available
-    let contactNorm = '';
-    try {
-      const contactObj = await msg.getContact();
-      contactNorm = normalize(contactObj.id && contactObj.id._serialized);
-    } catch {}
-    const phoneNorm = normalize(phoneJid);
-
-    if (dedNorm && (senderNorm === dedNorm || chatNorm === dedNorm || contactNorm === dedNorm || phoneNorm === dedNorm)) {
-      console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio tra account bot (dedicated=${dedicatedJid}) per evitare loop`);
-      return;
-    }
-    // If message is sent by this personal client but detection didn't match, log minimal diagnostic to help debug
-    if (msg.fromMe && dedNorm) {
-      console.warn(`   ⚠️ [WA-PERSONALE] Loop detection: ded=${dedNorm}, sender=${senderNorm}, chat=${chatNorm}, contact=${contactNorm}, phone=${phoneNorm}`);
+    const dedicatedClientRef = getDedicatedClient && getDedicatedClient();
+    const dedicatedJid = dedicatedClientRef && dedicatedClientRef.info && dedicatedClientRef.info.wid && dedicatedClientRef.info.wid._serialized;
+    if (dedicatedJid) {
+      const partnerJids = [senderJid, phoneJid, (chat && chat.id && chat.id._serialized)].filter(Boolean);
+      if (partnerJids.includes(dedicatedJid)) {
+        console.log(`   ⛔ [WA-PERSONALE] Chat personale–dedicato rilevata (dedicated=${dedicatedJid}); account personale disabilitato per questa conversazione.`);
+        return;
+      }
     }
   } catch (e) {
-    // ignore errors in detection — fallback to normal behavior
+    // best-effort detection; if anything fails continue normally
   }
-  
+
   console.log(`\n📨 [WHATSAPP-PERSONALE] Messaggio ricevuto`);
   console.log(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
   console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
