@@ -94,8 +94,17 @@ async function onPersonalMessage(msg) {
     const dedicatedClientRef = getDedicatedClient && getDedicatedClient();
     const dedicatedJid = dedicatedClientRef && dedicatedClientRef.info && dedicatedClientRef.info.wid && dedicatedClientRef.info.wid._serialized;
     if (dedicatedJid) {
-      const partnerJids = [senderJid, phoneJid, (chat && chat.id && chat.id._serialized)].filter(Boolean);
-      if (partnerJids.includes(dedicatedJid)) {
+      // Collect candidate fields that may contain the other party JID in different message scenarios
+      const candidates = new Set();
+      try { if (senderJid) candidates.add(senderJid); } catch {}
+      try { if (phoneJid) candidates.add(phoneJid); } catch {}
+      try { if (chat && chat.id && chat.id._serialized) candidates.add(chat.id._serialized); } catch {}
+      try { if (msg.to) candidates.add(msg.to); } catch {}
+      try { if (msg._data && msg._data.to) candidates.add(msg._data.to); } catch {}
+      try { if (msg._data && msg._data.author) candidates.add(msg._data.author); } catch {}
+
+      const hasDedicated = Array.from(candidates).some(c => c && (c === dedicatedJid || (typeof c === 'string' && c.includes(dedicatedJid))));
+      if (hasDedicated) {
         console.log(`   ⛔ [WA-PERSONALE] Chat personale–dedicato rilevata (dedicated=${dedicatedJid}); account personale disabilitato per questa conversazione.`);
         return;
       }
