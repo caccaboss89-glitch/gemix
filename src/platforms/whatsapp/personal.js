@@ -3,12 +3,12 @@ const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
-const { getDedicatedClient } = require('./dedicated');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
 const { GEMINI_MODEL } = require('../../config/env');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const responseLock = require('../../utils/responseLock');
+const { getDedicatedClient } = require('../../tools/whatsappSender');
 
 let client;
 
@@ -83,24 +83,21 @@ async function onPersonalMessage(msg) {
     }
   } catch {}
 
-  // Prevent API calls from the personal account when the message originates
-  // from the dedicated account—this avoids triggering a loop when the
-  // dedicated account mentions @gemix in a chat with the personal account.
-  try {
-    const dedClient = getDedicatedClient && getDedicatedClient();
-    const dedJid = dedClient?.info?.wid?._serialized;
-    if (dedJid && senderJid === dedJid) {
-      console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio da account dedicato (${senderJid}) per evitare loop`);
-      return;
-    }
-  } catch (e) {
-    // If anything goes wrong retrieving the dedicated client, proceed normally.
-  }
-
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
     userId: phoneJid,
   });
+  // Prevent loop: if this chat/message comes from the dedicated account, ignore it
+  try {
+    const dedicatedClient = getDedicatedClient && getDedicatedClient();
+    const dedicatedJid = dedicatedClient && dedicatedClient.info && dedicatedClient.info.wid && dedicatedClient.info.wid._serialized;
+    if (dedicatedJid && (chat.id && chat.id._serialized === dedicatedJid || senderJid === dedicatedJid)) {
+      console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio proveniente dall'account dedicato (${dedicatedJid}) per evitare loop`);
+      return;
+    }
+  } catch (e) {
+    // ignore errors in detection
+  }
   
   console.log(`\n📨 [WHATSAPP-PERSONALE] Messaggio ricevuto`);
   console.log(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);

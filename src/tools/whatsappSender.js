@@ -171,4 +171,12 @@ async function sendWhatsAppVoice(recipientName, voiceText, options = {}) {
   }
 }
 
-module.exports = { sendWhatsAppMessage, sendWhatsAppDirect, sendWhatsAppVoice, sendWhatsAppAttachments, setDedicatedClient, normalizePhoneToJid };
+/**
+ * Get the currently stored dedicated client (or null).
+ * Useful for other modules to detect the dedicated account JID.
+ */
+function getDedicatedClient() {
+  return dedicatedClient;
+}
+
+module.exports = { sendWhatsAppMessage, sendWhatsAppDirect, sendWhatsAppVoice, sendWhatsAppAttachments, setDedicatedClient, normalizePhoneToJid, getDedicatedClient };
