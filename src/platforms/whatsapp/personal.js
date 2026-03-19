@@ -102,11 +102,40 @@ async function onPersonalMessage(msg) {
       try { if (msg.to) candidates.add(msg.to); } catch {}
       try { if (msg._data && msg._data.to) candidates.add(msg._data.to); } catch {}
       try { if (msg._data && msg._data.author) candidates.add(msg._data.author); } catch {}
+      // Additional places where whatsapp-web.js may put recipient info for outgoing messages
+      try { if (msg._data && msg._data.id && msg._data.id.remote) candidates.add(msg._data.id.remote); } catch {}
+      try { if (msg._data && msg._data.id && msg._data.id._serialized) candidates.add(msg._data.id._serialized); } catch {}
+      try { if (msg._data && msg._data.recipient) candidates.add(msg._data.recipient); } catch {}
 
       const hasDedicated = Array.from(candidates).some(c => c && (c === dedicatedJid || (typeof c === 'string' && c.includes(dedicatedJid))));
       if (hasDedicated) {
         console.log(`   ⛔ [WA-PERSONALE] Chat personale–dedicato rilevata (dedicated=${dedicatedJid}); account personale disabilitato per questa conversazione.`);
         return;
+      }
+
+      // If still not detected and this message was sent by the personal client (fromMe),
+      // try a last-resort heuristic: check common nested fields and, optionally, log them
+      if (msg.fromMe) {
+        const debug = process.env.WA_PERSONAL_DEDICATED_DEBUG;
+        const inspected = {
+          chatId: chat && chat.id && chat.id._serialized,
+          senderJid,
+          phoneJid,
+          msgTo: msg.to || null,
+          dataTo: msg._data && msg._data.to || null,
+          dataAuthor: msg._data && msg._data.author || null,
+          dataIdRemote: msg._data && msg._data.id && msg._data.id.remote || null,
+          dataIdSerialized: msg._data && msg._data.id && msg._data.id._serialized || null,
+          dataRecipient: msg._data && msg._data.recipient || null,
+        };
+        const anyMatch = Object.values(inspected).some(v => v && (v === dedicatedJid || (typeof v === 'string' && v.includes(dedicatedJid))));
+        if (anyMatch) {
+          console.log(`   ⛔ [WA-PERSONALE] Chat personale–dedicato rilevata via heuristic (dedicated=${dedicatedJid}); account personale disabilitato.`);
+          return;
+        }
+        if (debug) {
+          console.log('   ⚠️ [WA-PERSONALE] Heuristic inspection fields:', inspected);
+        }
       }
     }
   } catch (e) {
