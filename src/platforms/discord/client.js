@@ -6,6 +6,9 @@ const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
 const { mediaToContentPart } = require('../../utils/media');
 const responseLock = require('../../utils/responseLock');
+const { createLogger } = require('../../utils/logger');
+
+const log = createLogger('DISCORD');
 
 let discordClient;
 
@@ -28,16 +31,16 @@ function initDiscord() {
   });
 
   discordClient.on('clientReady', () => {
-    console.log(`[Discord] ✅ Bot pronto: ${discordClient.user.tag}`);
+    log.info(`✅ Bot pronto: ${discordClient.user.tag}`);
   });
 
   discordClient.on('messageCreate', async (msg) => {
     try {
       await onDiscordMessage(msg);
     } catch (err) {
-      console.error(`\n❌ [DISCORD] ERRORE critico:`);
-      console.error(`   ${err.message}`);
-      console.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
+      log.error(`\n❌ ERRORE critico:`);
+      log.error(`   ${err.message}`);
+      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
   });
 
@@ -166,7 +169,7 @@ async function onDiscordMessage(msg) {
   };
   const lockKey = `discord:${channel.id}`;
   if (!responseLock.tryLock(lockKey)) {
-    console.log(`   ⛔ [DISCORD] Ignoro messaggio in thread ${channel.id}: GemiX sta già rispondendo`);
+    log.warn(`   ⛔ Ignoro messaggio in thread ${channel.id}: GemiX sta già rispondendo`);
     return;
   }
 
@@ -181,16 +184,16 @@ async function onDiscordMessage(msg) {
     if (newTitle && newTitle.length > 0) {
       try {
         await channel.setName(newTitle);
-        console.log(`   📝 Thread rinominato: "${newTitle}"`);
+        log.info(`   📝 Thread rinominato: "${newTitle}"`);
       } catch (err) {
-        console.error('[Discord] Errore rinomina thread:', err.message);
+        log.error('Errore rinomina thread:', err.message);
       }
     }
 
     if (response.isVoiceOnly && response.voiceBuffer) {
       const attachment = new AttachmentBuilder(response.voiceBuffer, { name: 'voice.ogg' });
       await channel.send({ files: [attachment] });
-      console.log(`   🎤 Vocale inviato`);
+      log.info(`   🎤 Vocale inviato`);
       return;
     }
 
@@ -204,7 +207,7 @@ async function onDiscordMessage(msg) {
     if (finalText) {
       if (finalText.length > 2000) {
         const chunks = finalText.match(/[\s\S]{1,2000}/g);
-        console.log(`   💬 Messaggio diviso in ${chunks.length} parti`);
+        log.info(`   💬 Messaggio diviso in ${chunks.length} parti`);
         for (let i = 0; i < chunks.length; i++) {
           if (i === chunks.length - 1 && files.length > 0) {
             await channel.send({ content: chunks[i], files });
@@ -215,16 +218,16 @@ async function onDiscordMessage(msg) {
       } else {
         await channel.send({ content: finalText, files });
       }
-      console.log(`   ✅ Messaggio Discord inviato (${finalText.length} char)`);
+      log.info(`   ✅ Messaggio Discord inviato (${finalText.length} char)`);
     } else if (files.length > 0) {
       await channel.send({ files });
-      console.log(`   ✅ File inviati`);
+      log.info(`   ✅ File inviati`);
     } else {
-      console.warn(`   ⚠️ Nessun contenuto o file da inviare`);
+      log.warn(`   ⚠️ Nessun contenuto o file da inviare`);
     }
   } catch (err) {
-    console.error(`\n❌ [DISCORD] Errore invio risposta:`);
-    console.error(`   ${err.message}`);
+    log.error(`\n❌ Errore invio risposta:`);
+    log.error(`   ${err.message}`);
     try {
       await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
     } catch {}

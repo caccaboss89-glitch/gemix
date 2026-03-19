@@ -4,6 +4,9 @@ const { XAI_API_KEY } = require('../config/env');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin } = require('../utils/adminNotifier');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('TTS');
 
 /**
  * Strip vocal effect tags from text.
@@ -90,7 +93,7 @@ async function generateVoice(text) {
       const mp3Buffer = await xaiTTS(text);
       return convertMp3ToWhatsAppOpus(mp3Buffer);
     } catch (err) {
-      console.warn('[TTS] xAI TTS fallito, fallback a Google Translate:', err.message);
+      log.warn('[TTS] xAI TTS fallito, fallback a Google Translate:', err.message);
       await notifyAdmin('xAI TTS', err.message);
     }
   }

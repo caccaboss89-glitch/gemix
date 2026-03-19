@@ -4,6 +4,9 @@ const { findMemberByName } = require('../config/members');
 const { generatePdf } = require('./pdfGenerator');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { removeDiscordEmoji } = require('../utils/discord');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('EmailSender');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -60,7 +63,7 @@ async function sendEmail(recipientName, subject, body, options = {}) {
         
         const res = await fetchWithTimeout(url);
         if (!res.ok) {
-          console.warn(`Errore download immagine ${url}: ${res.status}`);
+          log.warn(`Errore download immagine ${url}: ${res.status}`);
           continue;
         }
         
@@ -74,7 +77,7 @@ async function sendEmail(recipientName, subject, body, options = {}) {
           contentType,
         });
       } catch (err) {
-        console.warn(`Errore allegato immagine ${i + 1}:`, err.message);
+        log.warn(`Errore allegato immagine ${i + 1}:`, err.message);
       }
     }
   }

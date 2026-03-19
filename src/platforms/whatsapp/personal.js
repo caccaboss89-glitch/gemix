@@ -8,6 +8,9 @@ const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/fo
 const { GEMINI_MODEL } = require('../../config/env');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
+const { createLogger } = require('../../utils/logger');
+
+const log = createLogger('WA-PERSONALE');
 const responseLock = require('../../utils/responseLock');
 
 let client;
@@ -29,21 +32,21 @@ function initPersonalWhatsApp() {
   });
 
   client.on('qr', (qr) => {
-    console.log('[WA-Personale] Scansiona il QR code:');
+    log.info('Scansiona il QR code:');
     qrcode.generate(qr, { small: true });
   });
 
   client.on('ready', () => {
-    console.log('[WA-Personale] ✅ Client pronto:', client.info.wid._serialized);
+    log.info('✅ Client pronto:', client.info.wid._serialized);
   });
 
   client.on('auth_failure', (msg) => {
-    console.error('[WA-Personale] ❌ Errore autenticazione:', msg);
+    log.error('❌ Errore autenticazione:', msg);
   });
 
   client.on('disconnected', (reason) => {
-    console.warn('[WA-Personale] ⚠️ Disconnesso:', reason);
-    console.log('[WA-Personale] Tentativo riconnessione...');
+    log.warn('⚠️ Disconnesso:', reason);
+    log.info('Tentativo riconnessione...');
     client.initialize();
   });
 
@@ -51,9 +54,9 @@ function initPersonalWhatsApp() {
     try {
       await onPersonalMessage(msg);
     } catch (err) {
-      console.error(`\n❌ [WA-PERSONALE] Errore critico:`);
-      console.error(`   ${err.message}`);
-      console.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
+      log.error(`\n❌ Errore critico:`);
+      log.error(`   ${err.message}`);
+      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
   });
 
@@ -89,13 +92,12 @@ async function onPersonalMessage(msg) {
     }
   } catch {}
 
-  // Fallback: use chat id when contact lookup isn't available (possible for outgoing messages).
   if (!otherDigits && chat.id && chat.id._serialized) {
     otherDigits = normalizeDigits(chat.id._serialized);
   }
 
   if (dedicatedDigits && otherDigits && dedicatedDigits === otherDigits) {
-    console.log(`   🔕 [WHATSAPP-PERSONALE] Ignoro chat personale<->dedicata (numero: ${otherDigits})`);
+    log.info(`   Ignoro chat personale<->dedicata (numero: ${otherDigits})`);
     return;
   }
 
@@ -122,10 +124,10 @@ async function onPersonalMessage(msg) {
     userId: phoneJid,
   });
   
-  console.log(`\n📨 [WHATSAPP-PERSONALE] Messaggio ricevuto`);
-  console.log(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
-  console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
-  console.log(`   Membro attivo: ${userIdentity.isActiveMember}`);
+  log.info(`\n📨 Messaggio ricevuto`);
+  log.info(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
+  log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
+  log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
   let history = [];
   try {
@@ -136,7 +138,7 @@ async function onPersonalMessage(msg) {
       )
     ]);
   } catch (historyErr) {
-    console.warn(`   ⚠️ History fetch fallito (${historyErr.message}), procedo senza cronologia`);
+    log.warn(`   ⚠️ History fetch fallito (${historyErr.message}), procedo senza cronologia`);
   }
 
   const contentParts = [];
@@ -187,7 +189,7 @@ async function onPersonalMessage(msg) {
 
   const lockKey = `wa_personal:${ctx.chatId || ctx.userId}`;
   if (!responseLock.tryLock(lockKey)) {
-    console.log(`   ⛔ [WA-PERSONALE] Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
+    log.warn(`   ⛔ Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
     return;
   }
 
@@ -207,9 +209,9 @@ async function onPersonalMessage(msg) {
   }
 
   try {
-    console.log(`\n📤 [WHATSAPP-PERSONALE] Invio risposta...`);
+    log.info(`\n📤 Invio risposta...`);
     await sendWhatsAppResponse(chat, msg, response);
-    console.log(`   ✅ Messaggio inviato`);
+    log.info(`   ✅ Messaggio inviato`);
     try {
       if (typeof chat.sendState === 'function') {
         await chat.sendState('paused');
@@ -218,8 +220,8 @@ async function onPersonalMessage(msg) {
       // sendState might not be available in this version
     }
   } catch (err) {
-    console.error(`\n❌ [WHATSAPP-PERSONALE] Errore invio risposta:`);
-    console.error(`   ${err.message}`);
+    log.error(`\n❌ Errore invio risposta:`);
+    log.error(`   ${err.message}`);
   } finally {
     try { responseLock.unlock(lockKey); } catch {}
   }

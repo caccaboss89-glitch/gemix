@@ -1,5 +1,8 @@
 const { notifyAdmin } = require('../utils/adminNotifier');
 const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('API');
 
 /**
  * Unified API client with retry and timeout logic.
@@ -34,7 +37,7 @@ async function callApiWithRetry(modelName, apiUrl, body) {
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
 
-      console.log(`   Modello: ${modelName} - ${duration}ms${attempt > 1 ? ` (tentativo ${attempt})` : ''}`);
+      log.debug(`   Modello: ${modelName} - ${duration}ms${attempt > 1 ? ` (tentativo ${attempt})` : ''}`);
       return res;
     } catch (err) {
       const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
@@ -43,12 +46,12 @@ async function callApiWithRetry(modelName, apiUrl, body) {
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
         const delay = attempt * 3000;
-        console.warn(`   ⚠️ API tentativo ${attempt}/${MAX_API_RETRIES} fallito: ${errMsg} — retry in ${delay / 1000}s...`);
+        log.warn(`   ⚠️ API tentativo ${attempt}/${MAX_API_RETRIES} fallito: ${errMsg} — retry in ${delay / 1000}s...`);
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
 
-      console.error(`   ❌ API Error: ${errMsg}`);
+      log.error(`   ❌ API Error: ${errMsg}`);
       await notifyAdmin(`AIMLAPI (${modelName})`, `Errore dopo ${attempt} tentativi: ${errMsg}`);
       throw new Error(`${modelName} API non raggiungibile dopo ${attempt} tentativ${attempt > 1 ? 'i' : 'o'}: ${errMsg}`);
     }

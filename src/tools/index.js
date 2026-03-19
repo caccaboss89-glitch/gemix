@@ -17,6 +17,9 @@ const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('Tools');
 
 /**
  * Resolve the target WhatsApp JID for delivery.
@@ -227,7 +230,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         const aboutMeContent = readAboutMe();
         responseCtx.aboutMeText = aboutMeContent;
         responseCtx.isAboutMeOnly = true;
-        result = 'Testo "Chi sono" preparato. Verrà inviato come risposta interrompendosi.';
+        result = 'Messaggio inviato all\'utente.';
         break;
       }
 
@@ -366,7 +369,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
                   await sendWhatsAppDirect(jid, media);
                   attachmentsSent++;
                 } catch (attErr) {
-                  console.error(`[send_whatsapp_message] Errore invio allegato ${att.name}:`, attErr.message);
+                  log.error(`[send_whatsapp_message] Errore invio allegato ${att.name}:`, attErr.message);
                 }
               }
               if (attachmentsSent > 0) {

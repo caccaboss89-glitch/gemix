@@ -6,7 +6,9 @@ const { identifyUser } = require('../../utils/userIdentifier');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
+const { createLogger } = require('../../utils/logger');
 
+const log = createLogger('WA-DEDICATO');
 const responseLock = require('../../utils/responseLock');
 
 let client;
@@ -28,22 +30,22 @@ function initDedicatedWhatsApp() {
   });
 
   client.on('qr', (qr) => {
-    console.log('[WA-Dedicato] Scansiona il QR code:');
+    log.info('Scansiona il QR code:');
     qrcode.generate(qr, { small: true });
   });
 
   client.on('ready', () => {
-    console.log('[WA-Dedicato] ✅ Client pronto:', client.info.wid._serialized);
+    log.info('✅ Client pronto:', client.info.wid._serialized);
     setDedicatedClient(client);
   });
 
   client.on('auth_failure', (msg) => {
-    console.error('[WA-Dedicato] ❌ Errore autenticazione:', msg);
+    log.error('❌ Errore autenticazione:', msg);
   });
 
   client.on('disconnected', (reason) => {
-    console.warn('[WA-Dedicato] ⚠️ Disconnesso:', reason);
-    console.log('[WA-Dedicato] Tentativo riconnessione...');
+    log.warn('⚠️ Disconnesso:', reason);
+    log.info('Tentativo riconnessione...');
     client.initialize();
   });
 
@@ -51,9 +53,9 @@ function initDedicatedWhatsApp() {
     try {
       await onDedicatedMessage(msg);
     } catch (err) {
-      console.error(`\n❌ [WA-DEDICATO] Errore critico:`);
-      console.error(`   ${err.message}`);
-      console.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
+      log.error(`\n❌ Errore critico:`);
+      log.error(`   ${err.message}`);
+      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
   });
 
@@ -103,12 +105,12 @@ async function onDedicatedMessage(msg) {
     userId: phoneJid,
   });
   
-  console.log(`   JID: ${senderJid} → phoneJid: ${phoneJid}`);
+  log.debug(`   JID: ${senderJid} → phoneJid: ${phoneJid}`);
   
-  console.log(`\n📨 [WHATSAPP-DEDICATO] Messaggio ricevuto`);
-  console.log(`   Utente: ${userName}${isGroup ? ` (Gruppo: ${chat.name})` : ''}`);
-  console.log(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
-  console.log(`   Membro attivo: ${userIdentity.isActiveMember}`);
+  log.info(`\n📨 Messaggio ricevuto`);
+  log.info(`   Utente: ${userName}${isGroup ? ` (Gruppo: ${chat.name})` : ''}`);
+  log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
+  log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
   const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, client.info.wid._serialized);
 
@@ -160,7 +162,7 @@ async function onDedicatedMessage(msg) {
 
   const lockKey = `wa_dedicated:${ctx.chatId || ctx.userId}`;
   if (!responseLock.tryLock(lockKey)) {
-    console.log(`   ⛔ [WA-DEDICATO] Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
+    log.warn(`   ⛔ Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
     return;
   }
 
@@ -176,9 +178,9 @@ async function onDedicatedMessage(msg) {
     const response = await handleMessage(ctx);
 
     try {
-      console.log(`\n📤 [WHATSAPP-DEDICATO] Invio risposta...`);
+      log.info(`\n📤 Invio risposta...`);
       await sendWhatsAppResponse(chat, msg, response);
-      console.log(`   ✅ Messaggio inviato`);
+      log.info(`   ✅ Messaggio inviato`);
       try {
         if (typeof chat.sendState === 'function') {
           await chat.sendState('paused');
@@ -187,8 +189,8 @@ async function onDedicatedMessage(msg) {
         // sendState might not be available in this version
       }
     } catch (err) {
-      console.error(`\n❌ [WHATSAPP-DEDICATO] Errore invio risposta:`);
-      console.error(`   ${err.message}`);
+      log.error(`\n❌ Errore invio risposta:`);
+      log.error(`   ${err.message}`);
     }
   } finally {
     try { responseLock.unlock(lockKey); } catch {}

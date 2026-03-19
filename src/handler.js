@@ -1,9 +1,12 @@
 const { callGemini, DISCORD_RESPONSE_FORMAT } = require('./ai/gemini');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
-const { getToolsForUser } = require('./ai/tools');
+const { getToolsForUser, getToolInstructions } = require('./ai/tools');
 const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
+const { createLogger } = require('./utils/logger');
+
+const log = createLogger('Handler');
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
@@ -106,30 +109,42 @@ async function handleMessage(ctx) {
       rounds++;
       
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        console.log(`   ⚠️ Vocale già generato, interruzione ciclo`);
+        log.warn(`   ⚠️ Vocale già generato, interruzione ciclo`);
         break;
       }
       
       if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
-        console.log(`   ⚠️ Testo 'Chi sono' già preparato, interruzione ciclo`);
+        log.warn(`   ⚠️ Testo 'Chi sono' già preparato, interruzione ciclo`);
         break;
       }
       
       const responseFormat = isDiscord ? DISCORD_RESPONSE_FORMAT : null;
       
-      console.log(`🤖 [${ctx.platform.toUpperCase()}] Chiamata Gemini (round ${rounds}/${MAX_TOOL_ROUNDS})`);
+      log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata Gemini (round ${rounds}/${MAX_TOOL_ROUNDS})`);
       const assistantMsg = await callGemini(messages, tools, responseFormat);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-        console.log(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
+        log.info(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
         if (assistantMsg.content === null || assistantMsg.content === undefined) {
           assistantMsg.content = '';
         }
         messages.push(assistantMsg);
 
+        const usedToolInstructions = new Set();
         for (const tc of assistantMsg.tool_calls) {
+          const toolName = tc.function.name;
+          if (!usedToolInstructions.has(toolName)) {
+            const toolInstr = getToolInstructions(toolName);
+            if (toolInstr) {
+              messages.push({
+                role: 'assistant',
+                content: `ISTRUZIONI per lo strumento ${toolName}: ${toolInstr}`,
+              });
+            }
+            usedToolInstructions.add(toolName);
+          }
           try {
-            console.log(`   Esecuzione: ${tc.function.name}`);
+            log.info(`   Esecuzione: ${tc.function.name}`);
             const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
             messages.push({
               role: 'tool',
@@ -137,7 +152,7 @@ async function handleMessage(ctx) {
               content: result,
             });
           } catch (toolErr) {
-            console.error(`   ❌ Errore tool "${tc.function.name}": ${toolErr.message}`);
+            log.error(`   ❌ Errore tool "${tc.function.name}": ${toolErr.message}`);
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -150,10 +165,10 @@ async function handleMessage(ctx) {
       }
 
       let text = assistantMsg.content || '';
-      console.log(`✅ [${ctx.platform.toUpperCase()}] Risposta generata (${text.length} caratteri)`);
+      log.info(`✅ [${ctx.platform.toUpperCase()}] Risposta generata (${text.length} caratteri)`);
 
       if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
-        console.log(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
+        log.info(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
         return {
           text: responseCtx.aboutMeText,
           voiceBuffer: null,
@@ -164,7 +179,7 @@ async function handleMessage(ctx) {
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        console.log(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
+        log.info(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
         let discordTitle = '';
         if (isDiscord && text) {
           try { discordTitle = JSON.parse(text).title || ''; } catch {}
@@ -220,7 +235,7 @@ async function handleMessage(ctx) {
     }
 
     if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
-      console.log(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
+      log.info(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
       return {
         text: responseCtx.aboutMeText,
         voiceBuffer: null,
@@ -231,7 +246,7 @@ async function handleMessage(ctx) {
     }
 
     if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-      console.log(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
+      log.info(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
       return {
         text: null,
         voiceBuffer: responseCtx.voiceBuffer,
@@ -248,9 +263,9 @@ async function handleMessage(ctx) {
     };
 
   } catch (err) {
-    console.error(`\n❌ [${ctx.platform.toUpperCase().padEnd(10)}] ERRORE nel handler:`);
-    console.error(`   ${err.message}`);
-    console.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
+    log.error(`\n❌ [${ctx.platform.toUpperCase().padEnd(10)}] ERRORE nel handler:`);
+    log.error(`   ${err.message}`);
+    log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
     return {
       text: 'Si è verificato un errore. Riprova tra poco.',
       voiceBuffer: null,

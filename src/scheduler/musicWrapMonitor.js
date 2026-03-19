@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { ACTIVE_MEMBERS } = require('../config/members');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('MusicWrap');
 
 const MONITOR_STATE_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
 
@@ -88,7 +91,7 @@ async function getLatestCommitHash() {
     const response = await fetchWithTimeout(url, { headers });
     
     if (!response.ok) {
-      console.error(`[MusicWrap] ❌ Errore API GitHub: ${response.status}`);
+      log.error(`❌ Errore API GitHub: ${response.status}`);
       return null;
     }
 
@@ -99,7 +102,7 @@ async function getLatestCommitHash() {
 
     return data[0].sha;
   } catch (err) {
-    console.error('[MusicWrap] ❌ Errore nel fetch dell\'hash commit:', err.message);
+    log.error('❌ Errore nel fetch dell\'hash commit:', err.message);
     return null;
   }
 }
@@ -123,7 +126,7 @@ function wasMessageSentToday(memberWa, state) {
  */
 async function checkAndSendMusicWrap(dedicatedClient) {
   if (!dedicatedClient) {
-    console.log('[MusicWrap] ⚠️  Dedicated WhatsApp client not available');
+    log.warn('⚠️  Dedicated WhatsApp client not available');
     return;
   }
 
@@ -131,40 +134,40 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     return;
   }
 
-  console.log('[MusicWrap] ✅ Oggi è il primo! Verifica in corso...');
+  log.info('✅ Oggi è il primo! Verifica in corso...');
 
   const latestCommitHash = await getLatestCommitHash();
   if (!latestCommitHash) {
-    console.log('[MusicWrap] ⚠️  Impossibile verificare il commit da GitHub');
+    log.warn('⚠️  Impossibile verificare il commit da GitHub');
     return;
   }
 
   const state = loadMonitorState();
 
   if (state.lastCommitHash === latestCommitHash) {
-    console.log('[MusicWrap] ℹ️  Nessun nuovo aggiornamento rilevato');
+    log.info('ℹ️  Nessun nuovo aggiornamento rilevato');
     return;
   }
 
-  console.log(`[MusicWrap] ✅ Nuovo aggiornamento rilevato (commit: ${latestCommitHash.slice(0, 7)})`);
+  log.info(`✅ Nuovo aggiornamento rilevato (commit: ${latestCommitHash.slice(0, 7)})`);
 
   const today = getItalyDateString();
   let sentCount = 0;
 
   for (const member of ACTIVE_MEMBERS) {
     if (wasMessageSentToday(member.wa, state)) {
-      console.log(`[MusicWrap] ℹ️  Messaggio già inviato a ${member.name} oggi`);
+      log.info(`ℹ️  Messaggio già inviato a ${member.name} oggi`);
       continue;
     }
 
     try {
       const message = `🎵 *Wrap di ${getPreviousMonthName().charAt(0).toUpperCase() + getPreviousMonthName().slice(1)} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "caccaboss". \n\nGoditi le tue statistiche! 🎧📊`;
       await dedicatedClient.sendMessage(member.wa, message);
-      console.log(`[MusicWrap] ✅ Messaggio inviato a ${member.name}`);
+      log.info(`✅ Messaggio inviato a ${member.name}`);
       state.lastSentDate[member.wa] = today;
       sentCount++;
     } catch (err) {
-      console.error(`[MusicWrap] ❌ Errore per ${member.name}:`, err.message);
+      log.error(`❌ Errore per ${member.name}:`, err.message);
     }
   }
 
@@ -172,7 +175,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   saveMonitorState(state);
 
   if (sentCount > 0) {
-    console.log(`[MusicWrap] ✅ Completato: ${sentCount} messaggi inviati`);
+    log.info(`✅ Completato: ${sentCount} messaggi inviati`);
   }
 }
 

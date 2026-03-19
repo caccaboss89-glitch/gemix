@@ -12,6 +12,9 @@ const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { sanitizeFilename } = require('../utils/text');
 const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 const { MessageMedia } = require('whatsapp-web.js');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('Scheduler');
 
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
@@ -34,13 +37,13 @@ function startScheduler() {
     fs.mkdirSync(TASKS_DIR, { recursive: true });
   }
 
-  console.log('[Scheduler] ✅ Avviato. Controlla ogni', SCHEDULER_INTERVAL_MS / 1000, 'secondi.');
+  log.info('✅ Avviato. Controlla ogni', SCHEDULER_INTERVAL_MS / 1000, 'secondi.');
 
   setInterval(async () => {
     try {
       await checkAndExecuteTasks();
     } catch (err) {
-      console.error('[Scheduler] Errore nel ciclo:', err);
+      log.error('Errore nel ciclo:', err);
     }
   }, SCHEDULER_INTERVAL_MS);
 }
@@ -55,7 +58,7 @@ async function checkAndExecuteTasks() {
     try {
       await checkAndSendMusicWrap(dedicatedClient);
     } catch (err) {
-      console.error('[MusicWrap] Errore nel controllo:', err);
+      log.error('MusicWrap - errore nel controllo:', err);
     }
   }
 
@@ -78,9 +81,9 @@ async function checkAndExecuteTasks() {
     for (const task of dueTasks) {
       try {
         await executeTask(task);
-        console.log(`[Scheduler] ✅ Task eseguito: ${task.id} (${task.type})`);
+        log.info(`✅ Task eseguito: ${task.id} (${task.type})`);
       } catch (err) {
-        console.error(`[Scheduler] ❌ Errore task ${task.id}:`, err.message);
+        log.error(`❌ Errore task ${task.id}:`, err.message);
       }
     }
 
@@ -131,7 +134,7 @@ async function executeTask(task) {
         await dedicatedClient.sendMessage(dest.whatsapp, media, opts);
       }
     } catch (err) {
-      console.error(`[Scheduler] Errore invio WA privato ${dest.whatsapp}:`, err.message);
+      log.error(`Errore invio WA privato ${dest.whatsapp}:`, err.message);
     }
   }
 
@@ -144,7 +147,7 @@ async function executeTask(task) {
         await dedicatedClient.sendMessage(dest.whatsappGroup, media, opts);
       }
     } catch (err) {
-      console.error(`[Scheduler] Errore invio WA gruppo ${dest.whatsappGroup}:`, err.message);
+      log.error(`Errore invio WA gruppo ${dest.whatsappGroup}:`, err.message);
     }
   }
 
@@ -160,7 +163,7 @@ async function executeTask(task) {
         emailAttachments
       );
     } catch (err) {
-      console.error(`[Scheduler] Errore invio email ${dest.email}:`, err.message);
+      log.error(`Errore invio email ${dest.email}:`, err.message);
     }
   }
 }
@@ -179,18 +182,17 @@ async function executeDynamicTask(prompt, creatorCtx) {
   const isActiveMember = creatorCtx?.isActiveMember || false;
   const isCreatorAdmin = creatorCtx?.isAdmin || false;
 
-  const systemMsg = `Sei un assistente AI che esegue task programmati. Ora corrente (Torino): ${getRomeTime()}.
-Esegui il seguente compito. Rispondi in italiano.
+  const systemMsg = `Sei un assistente AI per task programmati. Ora (Torino): ${getRomeTime()}.
+Rispondi in italiano.
 
-WORKFLOW OBBLIGATORIO:
-1. Prima raccogli le informazioni necessarie (web_search, image_search, generate_pdf, read_music_stats)
-2. Poi usa i tool di consegna per inviare il risultato (send_whatsapp_message, send_voice_message, send_email)
+1) Raccogli info (web_search, image_search, generate_pdf, read_music_stats).
+2) Usa un tool di consegna (send_whatsapp_message, send_voice_message, send_email).
 
-REGOLE DI CONSEGNA:
-- Ogni numero WhatsApp può ricevere solo 1 messaggio (testuale O vocale, non entrambi)
-- Ogni indirizzo email può ricevere solo 1 email
-- Gli allegati accumulati (immagini, PDF) verranno automaticamente inclusi in ogni consegna
-- DEVI usare almeno un tool di consegna per recapitare il risultato`;
+Regole:
+- 1 messaggio per numero WhatsApp (testo o voce).
+- 1 email per indirizzo.
+- Allegati (immagini, PDF) vanno inclusi in ogni consegna.
+- DEVI usare almeno un tool di consegna.`;
 
   const tools = getDynamicTaskTools(isActiveMember, isCreatorAdmin);
 
@@ -242,7 +244,7 @@ REGOLE DI CONSEGNA:
 
       for (const tc of response.tool_calls) {
         try {
-          console.log(`[Scheduler] 🔧 Tool: ${tc.function.name}`);
+          log.info(`🔧 Tool: ${tc.function.name}`);
           const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, dynamicTaskCtx);
           messages.push({ role: 'tool', tool_call_id: toolCallId, content: result });
         } catch (err) {
@@ -254,13 +256,13 @@ REGOLE DI CONSEGNA:
 
     // Grok finished without using delivery tools — log warning
     if (dynamicTaskCtx.contactedWA.size === 0 && dynamicTaskCtx.contactedEmail.size === 0) {
-      console.warn(`[Scheduler] ⚠️ Dynamic task completato ma nessuna consegna effettuata. Testo Grok: ${(response.content || '').substring(0, 200)}`);
+      log.warn(`⚠️ Dynamic task completato ma nessuna consegna effettuata. Testo Grok: ${(response.content || '').substring(0, 200)}`);
     }
     return;
   }
 
   if (dynamicTaskCtx.contactedWA.size === 0 && dynamicTaskCtx.contactedEmail.size === 0) {
-    console.warn(`[Scheduler] ⚠️ Dynamic task raggiunto limite iterazioni senza consegna.`);
+    log.warn(`⚠️ Dynamic task raggiunto limite iterazioni senza consegna.`);
   }
 }
 
