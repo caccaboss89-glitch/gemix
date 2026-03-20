@@ -11,7 +11,7 @@ const MONITOR_STATE_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
 const GITHUB_OWNER = 'SitoMusicBot';
 const GITHUB_REPO = 'SitoMusicBot';
 const GITHUB_BRANCH = 'main';
-const MUSIC_WRAP_URL = 'https://sito-music-bot-git-main-albertos-projects-cf648a84.vercel.app/';
+const MUSIC_WRAP_URL = 'https://sito-music-bot.vercel.app/';
 
 /**
  * Load monitor state from persistent file.

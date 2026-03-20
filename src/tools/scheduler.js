@@ -15,6 +15,32 @@ const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, email, isActiveMember, isAdmin, isGroup, groupId }
  * @returns {string} Result message with task confirmation or error details
  */
+function resolveTaskRecipient(task, ctx) {
+  if (ctx.isAdmin && task.recipientPhone) {
+    return normalizePhoneToJid(task.recipientPhone);
+  }
+
+  if (task.recipientName) {
+    const member = findMemberByName(task.recipientName);
+    if (member) return member.wa;
+
+    const normalized = String(task.recipientName || '').toLowerCase().trim();
+    const candidates = ctx.groupParticipantsByName?.[normalized] || [];
+    if (candidates.length === 1) {
+      return candidates[0];
+    }
+    if (candidates.length > 1) {
+      return null; // ambiguous
+    }
+  }
+
+  if (ctx.userPhone) {
+    return normalizePhoneToJid(ctx.userPhone);
+  }
+
+  return ctx.waJid || null;
+}
+
 function scheduleTasks(tasks, ctx) {
   const now = new Date();
   const nowTime = now.getTime();
@@ -49,19 +75,16 @@ function scheduleTasks(tasks, ctx) {
 
     const destinations = {};
     if (task.sendToPrivateWhatsApp) {
-      if (ctx.isAdmin && task.recipientPhone) {
-        destinations.whatsapp = normalizePhoneToJid(task.recipientPhone);
-      } else if (ctx.isAdmin && task.recipientName) {
-        const recipient = findMemberByName(task.recipientName);
-        if (recipient) {
-          destinations.whatsapp = recipient.wa;
+      const resolvedWa = resolveTaskRecipient(task, ctx);
+      if (!resolvedWa) {
+        if (task.recipientName) {
+          results.push(`❌ "${task.recipientName}" è ambiguo o non trovato. Usa recipientPhone.`);
         } else {
-          results.push(`❌ "${task.recipientName}" non trovato tra i membri. Usa recipientPhone per non-membri.`);
-          continue;
+          results.push(`❌ Impossibile risolvere il destinatario WhatsApp. Usa recipientPhone o recipientName.`);
         }
-      } else {
-        destinations.whatsapp = ctx.waJid || null;
+        continue;
       }
+      destinations.whatsapp = resolvedWa;
     }
     if (isGroupTask) {
       destinations.whatsappGroup = ctx.groupId || null;

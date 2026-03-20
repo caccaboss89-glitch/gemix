@@ -3,6 +3,7 @@ const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
+const { findMemberByWa } = require('../../config/members');
 const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
@@ -112,6 +113,44 @@ async function onDedicatedMessage(msg) {
   log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
+  const groupParticipants = {};
+  const groupParticipantsByName = {};
+
+  if (isGroup) {
+    try {
+      const participants = Array.isArray(chat.participants)
+        ? chat.participants
+        : chat.participants && typeof chat.participants[Symbol.iterator] === 'function'
+          ? Array.from(chat.participants)
+          : [];
+
+      for (const participant of participants) {
+        const jid = participant?.id?._serialized || participant?.id || null;
+        if (!jid) continue;
+        const phone = jid.replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/\D/g, '');
+        const name = participant?.notifyName || participant?.name || participant?.pushname || phone;
+
+        const member = findMemberByWa(jid);
+
+        const item = {
+          jid,
+          phone,
+          name,
+          isActive: !!member,
+          member: member || null,
+        };
+
+        groupParticipants[jid] = item;
+
+        const normalized = String(name).toLowerCase().trim();
+        if (!groupParticipantsByName[normalized]) groupParticipantsByName[normalized] = [];
+        groupParticipantsByName[normalized].push(jid);
+      }
+    } catch (err) {
+      log.warn('Impossibile calcolare i partecipanti di gruppo:', err.message);
+    }
+  }
+
   const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, client.info.wid._serialized);
 
   const contentParts = [];
@@ -153,6 +192,8 @@ async function onDedicatedMessage(msg) {
     userId: senderJid,
     userName,
     userIdentity,
+    groupParticipants,
+    groupParticipantsByName,
     content: contentParts.length === 1 && contentParts[0].type === 'text'
       ? contentParts[0].text
       : contentParts,

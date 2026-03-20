@@ -69,12 +69,36 @@ async function sendWhatsAppMessage(recipientName, message, options = {}) {
 /**
  * Send a WhatsApp message directly to a JID (used by scheduler).
  */
+async function resolveMentionContacts(mentionJids) {
+  if (!dedicatedClient) throw new Error('Client WhatsApp dedicato non disponibile');
+  const mentionContacts = [];
+  for (const jid of mentionJids || []) {
+    if (!jid || typeof jid !== 'string') continue;
+    try {
+      const contact = await dedicatedClient.getContactById(jid);
+      if (contact) mentionContacts.push(contact);
+    } catch {
+      // ignore invalid mentions
+    }
+  }
+  return mentionContacts;
+}
+
 async function sendWhatsAppDirect(chatId, message, options = {}) {
   if (!dedicatedClient) throw new Error('Client WhatsApp dedicato non disponibile');
   // Only clean text messages; MessageMedia objects must be passed through untouched
   if (typeof message === 'string') {
     message = removeDiscordEmoji(message);
   }
+
+  if (Array.isArray(options.mentionJids) && options.mentionJids.length > 0) {
+    const mentionContacts = await resolveMentionContacts(options.mentionJids);
+    if (mentionContacts.length > 0) {
+      options = { ...options, mentions: mentionContacts };
+    }
+    delete options.mentionJids;
+  }
+
   await dedicatedClient.sendMessage(chatId, message, options);
 }
 

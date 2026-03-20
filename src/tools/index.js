@@ -25,24 +25,59 @@ const log = createLogger('Tools');
  * Resolve the target WhatsApp JID for delivery.
  * Admin: can target anyone. Active member (non-dynamic): can target other members. Otherwise: self.
  */
-function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
-  if (userCtx.isAdmin) {
-    if (args.recipientPhone) {
-      const jid = normalizePhoneToJid(args.recipientPhone);
-      return { jid, display: args.recipientPhone };
-    }
-    if (args.recipientName) {
-      const member = findMemberByName(args.recipientName);
-      if (!member) return { error: `❌ "${args.recipientName}" non trovato tra i membri attivi. Specifica recipientPhone per non-membri.` };
-      return { jid: member.wa, display: member.name };
-    }
-  } else if (userCtx.isActiveMember && args.recipientName && !dynamicTaskCtx.isDynamic) {
-    const member = findMemberByName(args.recipientName);
-    if (!member) return { error: `❌ "${args.recipientName}" non trovato tra i membri attivi.` };
-    return { jid: member.wa, display: member.name };
+function normalizePersonName(name) {
+  return String(name || '').toLowerCase().trim();
+}
+
+function resolveRecipientFromName(recipientName, userCtx) {
+  if (!recipientName) return { error: '❌ recipientName non fornito.' };
+  const normalized = normalizePersonName(recipientName);
+  if (!normalized) return { error: '❌ recipientName invalido.' };
+
+  const member = findMemberByName(recipientName);
+  if (member) {
+    return { jid: member.wa, display: member.name, member };
   }
-  if (!dynamicTaskCtx.creatorJid) return { error: '❌ Nessun numero WhatsApp del creatore disponibile.' };
+
+  const byName = userCtx.groupParticipantsByName?.[normalized] || [];
+  if (byName.length === 1) {
+    const item = userCtx.groupParticipants?.[byName[0]];
+    if (item) {
+      return { jid: item.jid, display: item.name, member: item.member };
+    }
+  }
+  if (byName.length > 1) {
+    return { error: `❌ Trovati ${byName.length} utenti con il nome "${recipientName}". Usa recipientPhone o un identificatore univoco.` };
+  }
+
+  return { error: `❌ "${recipientName}" non trovato tra i membri attivi o i partecipanti del gruppo.` };
+}
+
+function resolveRecipientJid(args, userCtx, dynamicTaskCtx) {
+  if (args.recipientPhone) {
+    const jid = normalizePhoneToJid(args.recipientPhone);
+    return { jid, display: args.recipientPhone };
+  }
+
+  if (args.recipientName) {
+    const resolved = resolveRecipientFromName(args.recipientName, userCtx);
+    if (resolved.error) return resolved;
+    return { jid: resolved.jid, display: resolved.display, member: resolved.member };
+  }
+
+  if (userCtx.waJid) {
+    return { jid: userCtx.waJid, display: 'te stesso' };
+  }
+
+  if (!dynamicTaskCtx.creatorJid) {
+    return { error: '❌ Nessun numero WhatsApp del creatore disponibile.' };
+  }
+
   return { jid: dynamicTaskCtx.creatorJid, display: 'te stesso' };
+}
+
+function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
+  return resolveRecipientJid(args, userCtx, dynamicTaskCtx);
 }
 
 /**
@@ -334,11 +369,11 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       }
 
       case 'send_whatsapp_message': {
-        // Dynamic task mode: enforce delivery rules
-        if (dynamicTaskCtx) {
-          const includeAttachments = args.includeAttachments !== false;
-          const clearAttachments = args.clearAttachmentsAfterSend === true;
+        const includeAttachments = args.includeAttachments !== false;
+        const clearAttachments = args.clearAttachmentsAfterSend !== false;
+        const mentionJids = (Array.isArray(args.mentions) ? args.mentions : []);
 
+        if (dynamicTaskCtx) {
           const targetJid = _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx);
           if (targetJid.error) { result = targetJid.error; break; }
           if (dynamicTaskCtx.contactedWA.has(targetJid.jid)) {
@@ -346,7 +381,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             break;
           }
           try {
-            await sendWhatsAppDirect(targetJid.jid, args.message);
+            await sendWhatsAppDirect(targetJid.jid, args.message, { mentionJids });
             // Send accumulated attachments
             if (includeAttachments && responseCtx.attachments.length > 0) {
               const { MessageMedia } = require('whatsapp-web.js');
@@ -369,53 +404,44 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           }
           break;
         }
-        
+
         if (!userCtx.isActiveMember) {
           result = 'Errore: solo i membri attivi possono inviare messaggi WhatsApp ad altri.';
           break;
         }
-        // Check that user is not sending to themselves
-        const targetMember = findMemberByName(args.recipientName);
-        if (targetMember && targetMember.wa === userCtx.waJid) {
+
+        const target = resolveRecipientJid(args, userCtx, dynamicTaskCtx);
+        if (target.error) {
+          result = target.error;
+          break;
+        }
+
+        if (target.jid === userCtx.waJid) {
           result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, non usare questo tool.`;
           break;
         }
-        try {
-          result = await sendWhatsAppMessage(args.recipientName, args.message, {
-            isAdmin: userCtx.isAdmin,
-            recipientPhone: args.recipientPhone,
-          });
 
-          const includeAttachments = args.includeAttachments !== false;
-          const clearAttachments = args.clearAttachmentsAfterSend !== false;
+        try {
+          await sendWhatsAppDirect(target.jid, args.message, { mentionJids });
           let attachmentsSent = 0;
 
-          // Send accumulated attachments if requested
           if (includeAttachments && responseCtx.attachments.length > 0) {
-            const member = findMemberByName(args.recipientName);
-            const jid = userCtx.isAdmin && args.recipientPhone
-              ? normalizePhoneToJid(args.recipientPhone)
-              : member?.wa;
-            if (!jid) {
-              result += ` ⚠️ Non è stato possibile risolvere il destinatario per i ${responseCtx.attachments.length} allegato/i.`;
-            } else {
-              const { MessageMedia } = require('whatsapp-web.js');
-              for (const att of responseCtx.attachments) {
-                if (!att.buffer || !att.mimetype) continue;
-                try {
-                  const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
-                  await sendWhatsAppDirect(jid, media);
-                  attachmentsSent++;
-                } catch (attErr) {
-                  log.error(`[send_whatsapp_message] Errore invio allegato ${att.name}:`, attErr.message);
-                }
-              }
-              if (attachmentsSent > 0) {
-                result += ` ✅ ${attachmentsSent} allegato/i inviato/i.`;
-              } else if (responseCtx.attachments.length > 0) {
-                result += ` ❌ Errore nell'invio degli ${responseCtx.attachments.length} allegato/i.`;
+            const { MessageMedia } = require('whatsapp-web.js');
+            for (const att of responseCtx.attachments) {
+              if (!att.buffer || !att.mimetype) continue;
+              try {
+                const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+                await sendWhatsAppDirect(target.jid, media);
+                attachmentsSent++;
+              } catch (attErr) {
+                log.error(`[send_whatsapp_message] Errore invio allegato ${att.name}:`, attErr.message);
               }
             }
+            if (attachmentsSent > 0) {
+              result = `Messaggio WhatsApp inviato con successo a ${target.display} ✅ ${attachmentsSent} allegato/i inviato/i.`;
+            }
+          } else {
+            result = `Messaggio WhatsApp inviato con successo a ${target.display}.`;
           }
 
           if (clearAttachments) {

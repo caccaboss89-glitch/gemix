@@ -108,16 +108,25 @@ async function onPersonalMessage(msg) {
   const senderJid = msg.fromMe ? client.info.wid._serialized : msg.from;
   let userName = senderJid;
   let phoneJid = senderJid;
+  let userPhone = null;
+
   try {
     const contact = await msg.getContact();
     userName = contact.pushname || contact.name || senderJid;
     if (contact.number) {
-      phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
+      userPhone = contact.number.replace(/\D/g, '');
+      phoneJid = userPhone + '@c.us';
     } else if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
-      phoneJid = contact.id.user + '@c.us';
+      userPhone = contact.id.user;
+      phoneJid = userPhone + '@c.us';
     }
   } catch {}
 
+  // Fallback: estrarre il numero dal JID quando possibile
+  if (!userPhone && senderJid) {
+    const digits = senderJid.replace('@c.us', '').replace(/\D/g, '');
+    if (digits) userPhone = digits;
+  }
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
@@ -126,6 +135,7 @@ async function onPersonalMessage(msg) {
   
   log.info(`\n📨 Messaggio ricevuto`);
   log.info(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
+  if (userPhone) log.info(`   Numero: ${userPhone}`);
   log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
@@ -179,6 +189,7 @@ async function onPersonalMessage(msg) {
     chatId: chat.id._serialized,
     userId: senderJid,
     userName,
+    userPhone,
     userIdentity,
     content: contentParts.length === 1 && contentParts[0].type === 'text'
       ? contentParts[0].text

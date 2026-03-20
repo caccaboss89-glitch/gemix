@@ -129,6 +129,12 @@ function makeWhatsAppTool({ includeRecipientName = false, includeRecipientPhone 
     };
   }
 
+  properties.mentions = {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Elenco di nomi, numeri o JID da menzionare nel messaggio (gruppo).',
+  };
+
   return makeTool({
     name: 'send_whatsapp_message',
     description: 'Invia un messaggio WhatsApp con il tuo account dedicato.',

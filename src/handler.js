@@ -88,10 +88,13 @@ async function handleMessage(ctx) {
       taskFileId: ui.taskFileId,
       userId: ctx.userId,
       userName: ctx.userName,
+      userPhone: ctx.userPhone || null,
       waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
       email: ui.member ? ui.member.email : null,
       isGroup: ctx.isGroup,
       groupId: ctx.groupId,
+      groupParticipants: ctx.groupParticipants || {},
+      groupParticipantsByName: ctx.groupParticipantsByName || {},
     };
 
     const deliveryCtx = {
