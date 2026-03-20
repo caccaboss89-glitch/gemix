@@ -72,10 +72,11 @@ function buildDedicatedWaInstructions(ctx) {
   if (ctx.isGroup && ctx.groupParticipants && ctx.groupParticipants.length > 0) {
     const activeCount = ctx.groupParticipants.filter(p => p.isActive).length;
     const names = ctx.groupParticipants
-      .map(p => p.name || p.phone || p.jid)
+      .map(p => p.name || 'sconosciuto')
       .slice(0, 30);
-    s += `Partecipanti in chat: ${ctx.groupParticipants.length} (attivi: ${activeCount}). Usa recipientName o recipientPhone per inviare/promemoria.\n`;
+    s += `Partecipanti conosciuti in chat: ${ctx.groupParticipants.length} (attivi: ${activeCount}). Usa recipientName o recipientPhone per inviare/promemoria.\n`;
     s += `Elenco partecipanti (nomi): ${names.join(', ')}\n\n`;
+    s += `Non includere numeri di telefono o JID nel prompt, usa i nomi soltanto e lascia che il codice associ i numeri in tool o scheduler.\n\n`;
   }
 
   s += `Usa markdown WA (non sono supportati i doppi es. ** testo ** su WA ma solo i singoli *testo*): *bold* _italic_ ~strike~ \`code\`.\n\n`;
