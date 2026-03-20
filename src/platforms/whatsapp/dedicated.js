@@ -68,9 +68,9 @@ async function onDedicatedMessage(msg) {
   const chat = await msg.getChat();
   const isGroup = chat.isGroup;
 
+  const botJid = client.info.wid._serialized;
+
   if (isGroup) {
-    const botJid = client.info.wid._serialized;
-    
     let isMentioned = false;
     try {
       const mentions = await msg.getMentions();
@@ -113,7 +113,7 @@ async function onDedicatedMessage(msg) {
   log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
-  const groupParticipants = {};
+  const groupParticipants = [];
   const groupParticipantsByName = {};
 
   if (isGroup) {
@@ -140,7 +140,7 @@ async function onDedicatedMessage(msg) {
           member: member || null,
         };
 
-        groupParticipants[jid] = item;
+        groupParticipants.push(item);
 
         const normalized = String(name).toLowerCase().trim();
         if (!groupParticipantsByName[normalized]) groupParticipantsByName[normalized] = [];

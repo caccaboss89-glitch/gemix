@@ -69,15 +69,9 @@ function buildDedicatedWaInstructions(ctx) {
     ? `Gruppo: "${ctx.groupName || 'sconosciuto'}". Rispondi solo se taggato.\n\n`
     : `Chat privata: rispondi a ogni messaggio.\n\n`;
 
-  if (ctx.isGroup && ctx.groupParticipants) {
-    const participants = Object.values(ctx.groupParticipants)
-      .map(p => `${p.name}${p.isActive ? ' (attivo)' : ''}`)
-      .slice(0, 40)
-      .join(', ');
-    if (participants) {
-      s += `Partecipanti gruppo: ${participants}.\n`;
-      s += `Puoi menzionare con args.mentions o se l'Admin chiede di inviare messaggi/promemoria a uno di questi.\n\n`;
-    }
+  if (ctx.isGroup && ctx.groupParticipants && ctx.groupParticipants.length > 0) {
+    const activeCount = ctx.groupParticipants.filter(p => p.isActive).length;
+    s += `Partecipanti conosciuti in chat: ${ctx.groupParticipants.length} (attivi: ${activeCount}). Usa recipientName o recipientPhone per inviare/promemoria.\n\n`;
   }
 
   s += `Usa markdown WA (non sono supportati i doppi es. ** testo ** su WA ma solo i singoli *testo*): *bold* _italic_ ~strike~ \`code\`.\n\n`;

@@ -15,32 +15,6 @@ const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, email, isActiveMember, isAdmin, isGroup, groupId }
  * @returns {string} Result message with task confirmation or error details
  */
-function resolveTaskRecipient(task, ctx) {
-  if (ctx.isAdmin && task.recipientPhone) {
-    return normalizePhoneToJid(task.recipientPhone);
-  }
-
-  if (task.recipientName) {
-    const member = findMemberByName(task.recipientName);
-    if (member) return member.wa;
-
-    const normalized = String(task.recipientName || '').toLowerCase().trim();
-    const candidates = ctx.groupParticipantsByName?.[normalized] || [];
-    if (candidates.length === 1) {
-      return candidates[0];
-    }
-    if (candidates.length > 1) {
-      return null; // ambiguous
-    }
-  }
-
-  if (ctx.userPhone) {
-    return normalizePhoneToJid(ctx.userPhone);
-  }
-
-  return ctx.waJid || null;
-}
-
 function scheduleTasks(tasks, ctx) {
   const now = new Date();
   const nowTime = now.getTime();
@@ -75,16 +49,32 @@ function scheduleTasks(tasks, ctx) {
 
     const destinations = {};
     if (task.sendToPrivateWhatsApp) {
-      const resolvedWa = resolveTaskRecipient(task, ctx);
-      if (!resolvedWa) {
-        if (task.recipientName) {
-          results.push(`❌ "${task.recipientName}" è ambiguo o non trovato. Usa recipientPhone.`);
-        } else {
-          results.push(`❌ Impossibile risolvere il destinatario WhatsApp. Usa recipientPhone o recipientName.`);
+      if (ctx.isAdmin && task.recipientPhone) {
+        destinations.whatsapp = normalizePhoneToJid(task.recipientPhone);
+      } else if (ctx.isAdmin && task.recipientName) {
+        let recipient = findMemberByName(task.recipientName);
+        if (!recipient && ctx.groupParticipants) {
+          const normalized = String(task.recipientName).toLowerCase().trim();
+          const matches = ctx.groupParticipants.filter(p => String(p.name || '').toLowerCase().trim() === normalized);
+          if (matches.length === 1) {
+            recipient = { wa: normalizePhoneToJid(matches[0].phone || matches[0].jid) };
+          } else if (matches.length > 1) {
+            results.push(`❌ Nome ambiguità: trovati ${matches.length} contatti con nome "${task.recipientName}". Specifica recipientPhone.`);
+            continue;
+          }
         }
-        continue;
+
+        if (recipient) {
+          destinations.whatsapp = recipient.wa;
+        } else {
+          results.push(`❌ "${task.recipientName}" non trovato tra i membri o tra i partecipanti del gruppo. Usa recipientPhone.`);
+          continue;
+        }
+      } else if (ctx.userPhone) {
+        destinations.whatsapp = normalizePhoneToJid(ctx.userPhone);
+      } else {
+        destinations.whatsapp = ctx.waJid || null;
       }
-      destinations.whatsapp = resolvedWa;
     }
     if (isGroupTask) {
       destinations.whatsappGroup = ctx.groupId || null;
