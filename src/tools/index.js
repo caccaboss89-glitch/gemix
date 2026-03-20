@@ -76,6 +76,36 @@ function resolveRecipientJid(args, userCtx, dynamicTaskCtx) {
   return { jid: dynamicTaskCtx.creatorJid, display: 'te stesso' };
 }
 
+function resolveMentionJids(args, userCtx) {
+  const mentionSet = new Set();
+
+  if (Array.isArray(args.mentions)) {
+    for (const entry of args.mentions) {
+      if (typeof entry === 'string' && entry.trim()) {
+        let jid = entry.trim();
+        if (!jid.includes('@')) {
+          // try to resolve partial phone number
+          jid = normalizePhoneToJid(jid);
+        }
+        mentionSet.add(jid);
+      }
+    }
+  }
+
+  if (args.recipientPhone) {
+    mentionSet.add(normalizePhoneToJid(args.recipientPhone));
+  }
+
+  if (args.recipientName) {
+    const resolved = resolveRecipientFromName(args.recipientName, userCtx);
+    if (!resolved.error && resolved.jid) {
+      mentionSet.add(resolved.jid);
+    }
+  }
+
+  return Array.from(mentionSet);
+}
+
 function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
   return resolveRecipientJid(args, userCtx, dynamicTaskCtx);
 }
@@ -163,7 +193,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         }
 
         // Delivery to a specific recipient (or dynamic task forced delivery)
-        if (dynamicTaskCtx && (args.recipientName || args.recipientPhone || dynamicTaskCtx.isDynamic)) {
+        if ((dynamicTaskCtx && dynamicTaskCtx.isDynamic) && (args.recipientName || args.recipientPhone || dynamicTaskCtx.isDynamic)) {
           const includeAttachments = args.includeAttachments !== false;
           const clearAttachments = args.clearAttachmentsAfterSend !== false;
 
@@ -301,7 +331,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
 
       case 'send_email': {
         // Dynamic task mode: enforce delivery rules
-        if (dynamicTaskCtx) {
+        if (dynamicTaskCtx && dynamicTaskCtx.isDynamic) {
           const includeAttachments = args.includeAttachments !== false;
           const clearAttachments = args.clearAttachmentsAfterSend !== false;
           const targetEmail = _resolveDynamicEmail(args, userCtx, dynamicTaskCtx);
@@ -371,15 +401,35 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       case 'send_whatsapp_message': {
         const includeAttachments = args.includeAttachments !== false;
         const clearAttachments = args.clearAttachmentsAfterSend !== false;
-        const mentionJids = (Array.isArray(args.mentions) ? args.mentions : []);
+        let mentionJids = resolveMentionJids(args, userCtx);
 
-        if (dynamicTaskCtx) {
+        if (dynamicTaskCtx && dynamicTaskCtx.isDynamic) {
           const targetJid = _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx);
           if (targetJid.error) { result = targetJid.error; break; }
           if (dynamicTaskCtx.contactedWA.has(targetJid.jid)) {
             result = `❌ Hai già inviato un messaggio WhatsApp a questo numero. Ogni numero può ricevere solo 1 messaggio per task.`;
             break;
           }
+
+          // If group context and no recipientName/phone, send to group chat with mentions
+          if (userCtx.isGroup && !args.recipientName && !args.recipientPhone) {
+            try {
+              await sendWhatsAppDirect(userCtx.groupId, args.message, { mentionJids });
+              for (const att of (includeAttachments ? responseCtx.attachments : [])) {
+                if (!att.buffer || !att.mimetype) continue;
+                const { MessageMedia } = require('whatsapp-web.js');
+                const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+                await sendWhatsAppDirect(userCtx.groupId, media);
+              }
+              if (clearAttachments) responseCtx.attachments = [];
+              dynamicTaskCtx.contactedWA.add(userCtx.groupId);
+              result = `Messaggio WhatsApp inviato con successo al gruppo (${userCtx.groupName || userCtx.groupId}).`;
+            } catch (err) {
+              result = `Errore invio WhatsApp gruppo: ${err.message}`;
+            }
+            break;
+          }
+
           try {
             await sendWhatsAppDirect(targetJid.jid, args.message, { mentionJids });
             // Send accumulated attachments
@@ -410,19 +460,44 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           break;
         }
 
-        const target = resolveRecipientJid(args, userCtx, dynamicTaskCtx);
-        if (target.error) {
-          result = target.error;
-          break;
-        }
+        let destinationJid;
+        let destinationDisplay;
 
-        if (target.jid === userCtx.waJid) {
-          result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, non usare questo tool.`;
-          break;
+        if (userCtx.isGroup) {
+          // In group mode, invia nel gruppo con menzioni piuttosto che a una singola chat personale
+          destinationJid = userCtx.groupId;
+          destinationDisplay = `gruppo ${userCtx.groupName || userCtx.groupId}`;
+
+          if (args.recipientName || args.recipientPhone) {
+            const resolved = resolveRecipientJid(args, userCtx, dynamicTaskCtx);
+            if (resolved.error) {
+              result = resolved.error;
+              break;
+            }
+            if (resolved.jid && resolved.jid !== userCtx.groupId) {
+              if (!mentionJids.includes(resolved.jid)) mentionJids.push(resolved.jid);
+            }
+          }
+
+          // Avoid self-targeting at group level: no rigid check
+        } else {
+          const target = resolveRecipientJid(args, userCtx, dynamicTaskCtx);
+          if (target.error) {
+            result = target.error;
+            break;
+          }
+
+          if (target.jid === userCtx.waJid) {
+            result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, non usare questo tool.`;
+            break;
+          }
+
+          destinationJid = target.jid;
+          destinationDisplay = target.display;
         }
 
         try {
-          await sendWhatsAppDirect(target.jid, args.message, { mentionJids });
+          await sendWhatsAppDirect(destinationJid, args.message, { mentionJids });
           let attachmentsSent = 0;
 
           if (includeAttachments && responseCtx.attachments.length > 0) {
@@ -431,17 +506,17 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
               if (!att.buffer || !att.mimetype) continue;
               try {
                 const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
-                await sendWhatsAppDirect(target.jid, media);
+                await sendWhatsAppDirect(destinationJid, media);
                 attachmentsSent++;
               } catch (attErr) {
                 log.error(`[send_whatsapp_message] Errore invio allegato ${att.name}:`, attErr.message);
               }
             }
             if (attachmentsSent > 0) {
-              result = `Messaggio WhatsApp inviato con successo a ${target.display} ✅ ${attachmentsSent} allegato/i inviato/i.`;
+              result = `Messaggio WhatsApp inviato con successo a ${destinationDisplay} ✅ ${attachmentsSent} allegato/i inviato/i.`;
             }
           } else {
-            result = `Messaggio WhatsApp inviato con successo a ${target.display}.`;
+            result = `Messaggio WhatsApp inviato con successo a ${destinationDisplay}.`;
           }
 
           if (clearAttachments) {
