@@ -71,7 +71,11 @@ function buildDedicatedWaInstructions(ctx) {
 
   if (ctx.isGroup && ctx.groupParticipants && ctx.groupParticipants.length > 0) {
     const activeCount = ctx.groupParticipants.filter(p => p.isActive).length;
-    s += `Partecipanti conosciuti in chat: ${ctx.groupParticipants.length} (attivi: ${activeCount}). Usa recipientName o recipientPhone per inviare/promemoria.\n\n`;
+    const names = ctx.groupParticipants
+      .map(p => p.name || p.phone || p.jid)
+      .slice(0, 30);
+    s += `Partecipanti in chat: ${ctx.groupParticipants.length} (attivi: ${activeCount}). Usa recipientName o recipientPhone per inviare/promemoria.\n`;
+    s += `Elenco partecipanti (nomi): ${names.join(', ')}\n\n`;
   }
 
   s += `Usa markdown WA (non sono supportati i doppi es. ** testo ** su WA ma solo i singoli *testo*): *bold* _italic_ ~strike~ \`code\`.\n\n`;
