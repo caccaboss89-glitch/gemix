@@ -22,7 +22,7 @@ const TOOL_INSTRUCTIONS = {
   web_search: `Cerca informazioni aggiornate sul web. Usa questo tool quando devi rispondere a domande che richiedono fatti attuali o dettagli non presenti nella tua memoria. Parametro: query (string).`,
   image_search: `Cerca immagini sul web. Le immagini trovate vengono accumulate come allegati e inviate insieme alla risposta o tramite i tool di consegna (WhatsApp/email). Parametri: query (string), count (1-4).`,
   read_about_me: `Restituisce il contenuto del file "aboutme" di GemiX. Quando usi questo tool, invia quel testo come unica risposta finale (nessun commento aggiuntivo).`,
-  send_voice_message: `(Azioni) Rispondi solo con la chiamata al tool. Genera un messaggio vocale (OGG/Opus). Il parametro "text" è il contenuto da convertire (max 1000 caratteri). Usa i tag vocali per effetti. Non inviare altra risposta testuale quando chiami questo tool. ${VOICE_EFFECTS_DOC}`,
+  send_voice_message: `(Azioni) Rispondi solo con la chiamata al tool. Genera un messaggio vocale. Il parametro "text" è il contenuto da convertire (max 1000 caratteri). Usa i tag vocali per effetti. Includi nel testo tutto quello che devi dire nella chat in cui lo usi. Non inviare altra risposta testuale quando chiami questo tool. ${VOICE_EFFECTS_DOC}`,
   schedule_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Programma attività future. Ogni task include taskType (static/dynamic), content, scheduledAt (ISO 8601 Europe/Rome) e destinazioni (WhatsApp privato, gruppo, email). In modalità dynamic, content è un prompt per Grok.`,
   read_my_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Mostra i task programmati dell'utente corrente (e opzionalmente del gruppo corrente).`,
   remove_my_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Rimuovi task programmati dell'utente corrente usando gli ID forniti.`,
@@ -96,7 +96,7 @@ function makeVoiceTool({ includeRecipientName = false, includeRecipientPhone = f
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Invia un messaggio vocale (max 1000 caratteri).',
+    description: 'Invia un messaggio vocale (max 1000 caratteri). ',
     properties,
     required: ['text'],
   });
