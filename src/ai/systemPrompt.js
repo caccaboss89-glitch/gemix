@@ -72,7 +72,7 @@ function buildDedicatedWaInstructions(ctx) {
   if (ctx.isGroup && ctx.groupParticipants && ctx.groupParticipants.length > 0) {
     const activeCount = ctx.groupParticipants.filter(p => p.isActive).length;
     const names = ctx.groupParticipants
-      .map(p => p.name || 'sconosciuto')
+      .map(p => p.displayName || 'sconosciuto')
       .slice(0, 30);
     s += `Partecipanti conosciuti in chat: ${ctx.groupParticipants.length} (attivi: ${activeCount}). Usa recipientName o recipientPhone per inviare/promemoria.\n`;
     s += `Elenco partecipanti (nomi): ${names.join(', ')}\n\n`;

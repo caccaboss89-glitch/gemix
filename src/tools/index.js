@@ -17,7 +17,7 @@ const { readMusicStats } = require('./musicStats');
 function _findGroupParticipantJidByName(name, userCtx) {
   if (!name || !userCtx.groupParticipants) return null;
   const normalized = String(name).toLowerCase().trim();
-  const matches = userCtx.groupParticipants.filter(p => String(p.name || '').toLowerCase().trim() === normalized);
+  const matches = userCtx.groupParticipants.filter(p => String(p.displayName || '').toLowerCase().trim() === normalized);
   if (matches.length === 1) return matches[0].jid;
   if (matches.length > 1) return { error: `❌ Nome ambiguità: trovati ${matches.length} contatti con nome "${name}". Usa recipientPhone o recipientJid.` };
   return null;

@@ -124,25 +124,28 @@ async function onDedicatedMessage(msg) {
           ? Array.from(chat.participants)
           : [];
 
+      let noNameIndex = 1;
       for (const participant of participants) {
         const jid = participant?.id?._serialized || participant?.id || null;
         if (!jid) continue;
         const phone = jid.replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/\D/g, '');
-        const name = participant?.notifyName || participant?.name || participant?.pushname || phone;
+        const rawName = participant?.notifyName || participant?.name || participant?.pushname || '';
+        const displayName = rawName.trim() || `Utente sconosciuto ${noNameIndex}`;
+        if (!rawName.trim()) noNameIndex += 1;
 
         const member = findMemberByWa(jid);
 
         const item = {
           jid,
           phone,
-          name,
+          displayName,
           isActive: !!member,
           member: member || null,
         };
 
         groupParticipants.push(item);
 
-        const normalized = String(name).toLowerCase().trim();
+        const normalized = String(displayName).toLowerCase().trim();
         if (!groupParticipantsByName[normalized]) groupParticipantsByName[normalized] = [];
         groupParticipantsByName[normalized].push(jid);
       }

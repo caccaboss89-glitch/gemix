@@ -55,7 +55,7 @@ function scheduleTasks(tasks, ctx) {
         let recipient = findMemberByName(task.recipientName);
         if (!recipient && ctx.groupParticipants) {
           const normalized = String(task.recipientName).toLowerCase().trim();
-          const matches = ctx.groupParticipants.filter(p => String(p.name || '').toLowerCase().trim() === normalized);
+          const matches = ctx.groupParticipants.filter(p => String(p.displayName || '').toLowerCase().trim() === normalized);
           if (matches.length === 1) {
             recipient = { wa: normalizePhoneToJid(matches[0].phone || matches[0].jid) };
           } else if (matches.length > 1) {
