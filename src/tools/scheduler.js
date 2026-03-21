@@ -52,22 +52,11 @@ function scheduleTasks(tasks, ctx) {
       if (ctx.isAdmin && task.recipientPhone) {
         destinations.whatsapp = normalizePhoneToJid(task.recipientPhone);
       } else if (ctx.isAdmin && task.recipientName) {
-        let recipient = findMemberByName(task.recipientName);
-        if (!recipient && ctx.groupParticipants) {
-          const normalized = String(task.recipientName).toLowerCase().trim();
-          const matches = ctx.groupParticipants.filter(p => String(p.displayName || '').toLowerCase().trim() === normalized);
-          if (matches.length === 1) {
-            recipient = { wa: normalizePhoneToJid(matches[0].phone || matches[0].jid) };
-          } else if (matches.length > 1) {
-            results.push(`❌ Nome ambiguità: trovati ${matches.length} contatti con nome "${task.recipientName}". Specifica recipientPhone.`);
-            continue;
-          }
-        }
-
+        const recipient = findMemberByName(task.recipientName);
         if (recipient) {
           destinations.whatsapp = recipient.wa;
         } else {
-          results.push(`❌ "${task.recipientName}" non trovato tra i membri o tra i partecipanti del gruppo. Usa recipientPhone.`);
+          results.push(`❌ "${task.recipientName}" non trovato tra i membri. Usa recipientPhone per non-membri.`);
           continue;
         }
       } else if (ctx.userPhone) {

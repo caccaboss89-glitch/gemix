@@ -13,16 +13,6 @@ const { sendWhatsAppMessage, sendWhatsAppVoice, sendWhatsAppAttachments, sendWha
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { readMusicStats } = require('./musicStats');
-
-function _findGroupParticipantJidByName(name, userCtx) {
-  if (!name || !userCtx.groupParticipants) return null;
-  const normalized = String(name).toLowerCase().trim();
-  const matches = userCtx.groupParticipants.filter(p => String(p.displayName || '').toLowerCase().trim() === normalized);
-  if (matches.length === 1) return matches[0].jid;
-  if (matches.length > 1) return { error: `❌ Nome ambiguità: trovati ${matches.length} contatti con nome "${name}". Usa recipientPhone o recipientJid.` };
-  return null;
-}
-
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -41,22 +31,11 @@ function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
       const jid = normalizePhoneToJid(args.recipientPhone);
       return { jid, display: args.recipientPhone };
     }
-
     if (args.recipientName) {
       const member = findMemberByName(args.recipientName);
-      if (member) return { jid: member.wa, display: member.name };
-
-      const groupResult = _findGroupParticipantJidByName(args.recipientName, userCtx);
-      if (groupResult && groupResult.error) {
-        return groupResult;
-      }
-      if (groupResult) {
-        return { jid: normalizePhoneToJid(groupResult), display: args.recipientName };
-      }
-
-      return { error: `❌ "${args.recipientName}" non trovato. Specifica recipientPhone per contatto esterno o recipientJid per ambiguità.` };
+      if (!member) return { error: `❌ "${args.recipientName}" non trovato tra i membri attivi. Specifica recipientPhone per non-membri.` };
+      return { jid: member.wa, display: member.name };
     }
-
     if (userCtx.userPhone) {
       const jid = normalizePhoneToJid(userCtx.userPhone);
       return { jid, display: userCtx.userName || userCtx.userPhone };
@@ -66,7 +45,6 @@ function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
     if (!member) return { error: `❌ "${args.recipientName}" non trovato tra i membri attivi.` };
     return { jid: member.wa, display: member.name };
   }
-
   if (!dynamicTaskCtx.creatorJid) return { error: '❌ Nessun numero WhatsApp del creatore disponibile.' };
   return { jid: dynamicTaskCtx.creatorJid, display: 'te stesso' };
 }

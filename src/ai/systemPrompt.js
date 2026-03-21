@@ -51,7 +51,7 @@ function buildSystemPrompt(ctx) {
   }
 
   prompt += `### Uso degli strumenti\n`;
-  prompt += `- Se devi eseguire qualsiasi azione di invio di messaggi ad altre persone (es. invio di messaggi, invio di vocali, invio di email), devi assicurarti di farlo prima di fornire la risposta finale, dopo non ti sarà più permesso utilizzarli.\n`;
+  prompt += `- Se devi eseguire qualsiasi azione (es. invio di messaggi, invio di vocali, invio di email), devi assicurarti di farlo prima di fornire la risposta finale, dopo non ti sarà più permesso utilizzarli.\n`;
   prompt += `- Ogni tanto (non troppo spesso) rispondi spontaneamente con un vocale quando il messaggio è breve e non tecnico.\n\n`;
 
   prompt += `### Tool\nUsa i tool disponibili (web_search, image_search, send_voice_message, schedule_tasks, ecc.).\n`;
@@ -68,17 +68,6 @@ function buildDedicatedWaInstructions(ctx) {
   s += ctx.isGroup
     ? `Gruppo: "${ctx.groupName || 'sconosciuto'}". Rispondi solo se taggato.\n\n`
     : `Chat privata: rispondi a ogni messaggio.\n\n`;
-
-  if (ctx.isGroup && ctx.groupParticipants && ctx.groupParticipants.length > 0) {
-    const activeCount = ctx.groupParticipants.filter(p => p.isActive).length;
-    const names = ctx.groupParticipants
-      .map(p => p.displayName || 'sconosciuto')
-      .slice(0, 30);
-    s += `Partecipanti conosciuti in chat: ${ctx.groupParticipants.length} (attivi: ${activeCount}). Usa recipientName o recipientPhone per inviare/promemoria.\n`;
-    s += `Elenco partecipanti (nomi): ${names.join(', ')}\n\n`;
-    s += `Non includere numeri di telefono o JID nel prompt, usa i nomi soltanto e lascia che il codice associ i numeri in tool o scheduler.\n\n`;
-  }
-
   s += `Usa markdown WA (non sono supportati i doppi es. ** testo ** su WA ma solo i singoli *testo*): *bold* _italic_ ~strike~ \`code\`.\n\n`;
   return s;
 }
