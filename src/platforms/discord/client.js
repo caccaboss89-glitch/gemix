@@ -1,7 +1,8 @@
-const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, AttachmentBuilder, MessageType } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
 const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 const { handleMessage } = require('../../handler');
+const { formatDiscordPollText } = require('../../utils/pollParser');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
 const { mediaToContentPart } = require('../../utils/media');
@@ -120,6 +121,8 @@ async function onDiscordMessage(msg) {
       textBody = `[${att.name}] ${textBody}`.trim();
     }
   }
+
+  textBody = formatDiscordPollText(msg, textBody);
 
   if (textBody) {
     contentParts.unshift({ type: 'text', text: textBody });

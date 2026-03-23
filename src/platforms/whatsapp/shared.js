@@ -1,5 +1,6 @@
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL } = require('../../config/constants');
+const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
 const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag } = require('../../utils/media');
@@ -76,7 +77,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
       textContent = `[Contatto condiviso] ${textContent || ''}`;
     } else if (msg.type === 'poll_creation') {
       try {
-        textContent = `[Sondaggio] ${msg.body || ''}`;
+        textContent = formatWhatsAppPollText(msg, `[Sondaggio] ${msg.body || ''}`);
       } catch {
         textContent = '[Sondaggio]';
       }

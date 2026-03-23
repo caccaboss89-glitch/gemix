@@ -1,6 +1,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
+const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { findMemberByWa } = require('../../config/members');
@@ -162,7 +163,7 @@ async function onDedicatedMessage(msg) {
   if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
     textBody = `[Contatto condiviso] ${textBody}`;
   } else if (msg.type === 'poll_creation') {
-    textBody = `[Sondaggio] ${textBody}`;
+    textBody = formatWhatsAppPollText(msg, `[Sondaggio] ${textBody}`);
   }
 
   const quotedContent = await extractQuotedMessageContent(msg);
