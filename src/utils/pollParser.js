@@ -1,5 +1,3 @@
-const { MessageType } = require('discord.js');
-
 function extractWhatsAppPollOptions(msg) {
   const options = [];
 
@@ -53,52 +51,6 @@ function formatWhatsAppPollText(msg, textBody) {
   return `${pollQuestion}\nOpzioni:\n${normalized}`.trim();
 }
 
-function formatDiscordPollText(msg, textBody) {
-  const isPollType = msg.type === MessageType.Poll;
-
-  const base = textBody || msg.content || '';
-
-  const options = [];
-
-  // prova a leggere da componenti (bottoni/select menu) se disponibili
-  if (Array.isArray(msg.components) && msg.components.length > 0) {
-    for (const row of msg.components) {
-      if (!row || !Array.isArray(row.components)) continue;
-      for (const comp of row.components) {
-        if (!comp) continue;
-        if (comp.type === 3 && Array.isArray(comp.options)) {
-          // select menu
-          comp.options.forEach(opt => {
-            if (opt?.label) options.push(opt.label);
-          });
-        } else if (comp.label) {
-          options.push(comp.label);
-        }
-      }
-    }
-  }
-
-  // modalità reazioni, comune ai sondaggi di Discord
-  if (msg.reactions?.cache?.size > 0) {
-    for (const reaction of msg.reactions.cache.values()) {
-      const emojiName = reaction.emoji?.name || reaction.emoji?.id || String(reaction.emoji);
-      const count = reaction.count || 0;
-      options.push(`${emojiName}${count ? ` (${count})` : ''}`);
-    }
-  }
-
-  if (!isPollType && options.length === 0) {
-    return base;
-  }
-
-  const pollPrefix = isPollType ? '[Sondaggio Discord]' : '[Reazioni Discord]';
-
-  const optionsText = options.map((option, idx) => `${idx + 1}. ${option}`).join('\n');
-
-  return `${pollPrefix} ${base}`.trim() + (optionsText ? `\nOpzioni:\n${optionsText}` : '');
-}
-
 module.exports = {
   formatWhatsAppPollText,
-  formatDiscordPollText,
 };
