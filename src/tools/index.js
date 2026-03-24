@@ -21,6 +21,9 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('Tools');
 
+// Tracking consecutive voice usage per WhatsApp chat (non-active members only)
+const voiceConsecutiveByChat = new Map();
+
 /**
  * Resolve the target WhatsApp JID for delivery.
  * Admin: can target anyone. Active member (non-dynamic): can target other members. Otherwise: self.
@@ -47,6 +50,19 @@ function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
   }
   if (!dynamicTaskCtx.creatorJid) return { error: '❌ Nessun numero WhatsApp del creatore disponibile.' };
   return { jid: dynamicTaskCtx.creatorJid, display: 'te stesso' };
+}
+
+function _getVoiceLimitChatKey(userCtx) {
+  return userCtx?.chatId || userCtx?.groupId || userCtx?.waJid || userCtx?.userId || 'unknown';
+}
+
+function _incrementVoiceCount(chatKey) {
+  const count = voiceConsecutiveByChat.get(chatKey) || 0;
+  voiceConsecutiveByChat.set(chatKey, count + 1);
+}
+
+function _resetVoiceCount(chatKey) {
+  voiceConsecutiveByChat.delete(chatKey);
 }
 
 /**
@@ -86,6 +102,13 @@ function _resolveDynamicEmail(args, userCtx, dynamicTaskCtx) {
  */
 async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null) {
   const name = toolCall.function.name;
+  const chatKey = _getVoiceLimitChatKey(userCtx);
+
+  // Reset consecutive voice counter on any non-voice tool call (non-active members only)
+  if (name !== 'send_voice_message') {
+    _resetVoiceCount(chatKey);
+  }
+
   let args;
   try {
     args = JSON.parse(toolCall.function.arguments || '{}');
@@ -125,6 +148,15 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
           .replace(/\s{2,}/g, ' ')
           .trim();
+
+        if (!userCtx.isActiveMember) {
+          const currentCount = voiceConsecutiveByChat.get(chatKey) || 0;
+          if (currentCount >= 3) {
+            log.warn(`Limite vocali WA superato in chat ${chatKey}: counter=${currentCount}`);
+            result = '❌ Limite vocali superato: in questa chat hai già inviato 3 messaggi vocali consecutivi. Rispondi con un messaggio testuale normale, senza vocali.';
+            break;
+          }
+        }
 
         if (cleanText.length > MAX_TTS_CHARS) {
           result = `❌ Il testo supera il limite di ${MAX_TTS_CHARS} caratteri (${cleanText.length} caratteri). Non è possibile generare un vocale. Rispondi con un normale messaggio testuale.`;
@@ -171,6 +203,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
 
             dynamicTaskCtx.contactedWA.add(targetJid.jid);
             result = `Messaggio vocale inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
+            if (!userCtx.isActiveMember) {
+              _incrementVoiceCount(chatKey);
+            }
           } catch (err) {
             result = `Errore invio vocale: ${err.message}`;
           }
@@ -187,6 +222,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             isAdmin: userCtx.isAdmin,
             recipientPhone: args.recipientPhone,
           });
+          if (!userCtx.isActiveMember && result && result.includes('Messaggio vocale inviato con successo')) {
+            _incrementVoiceCount(chatKey);
+          }
           break;
         }
 
@@ -201,6 +239,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
         result = 'Messaggio vocale generato con successo. Non inviare alcun messaggio testuale.';
+        if (!userCtx.isActiveMember) {
+          _incrementVoiceCount(chatKey);
+        }
         break;
       }
 

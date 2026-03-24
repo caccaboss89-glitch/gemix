@@ -93,6 +93,7 @@ async function handleMessage(ctx) {
       email: ui.member ? ui.member.email : null,
       isGroup: ctx.isGroup,
       groupId: ctx.groupId,
+      chatId: ctx.chatId || null,
     };
 
     const deliveryCtx = {
