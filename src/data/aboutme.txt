@@ -6,7 +6,7 @@ Sono GemiX, unione di:
 
 Sono stato realizzato da Alberto Gagliardi e posso rispondere a domande sia su WhatsApp in privato, su gruppi (taggandomi o rispondendo a un mio messaggio), tramite l'account di Alberto in privato (se chiamato con @gemix) e sia da un ristretto Discord. Posso fare piccole ricerche su web, cercare immagini, fare vocali, ricordare promemoria a chi me lo richiede e per alcune persone posso anche generare pdf, inviare email, rispondere a domande sul regolamento del Server e visualizzare statistiche del bot musicale personalizzato dei suoi membri.
 
-Per gli smanettoni, anche se il mio codice sorgente è custodito ben segreto, Alberto è anche autore del Music Bot utilizzato su Server Discord che ha una repository pubblica visibile su "https://github.com/caccaboss89-glitch/MusicBot/tree/main" su cui è più propenso a confronti sul codice. 😉
+Il mio codice sorgente non è pubblicamente disponibile ma è possibile vedere un altro suo progetto su una repository visibile su "https://github.com/caccaboss89-glitch/MusicBot/tree/main".
 
 
 Speriamo di esservi d'aiuto insieme, Grok-4.1-Fast & Gemini-3-Flash!
