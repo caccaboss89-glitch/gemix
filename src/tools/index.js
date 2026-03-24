@@ -1,4 +1,4 @@
-const { isActiveMemberOnlyTool } = require('../ai/tools');
+const { isActiveMemberOnlyTool, _markReadAboutMeUsed } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
 const { generateVoice } = require('./voiceMessage');
@@ -286,6 +286,11 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         responseCtx.aboutMeText = aboutMeContent;
         responseCtx.isAboutMeOnly = true;
         result = 'Messaggio inviato all\'utente.';
+
+        // One-shot per chat: non mostrare più read_about_me nella lista strumenti.
+        const chatKey = userCtx.chatId || userCtx.groupId || userCtx.waJid || userCtx.userId || 'unknown';
+        _markReadAboutMeUsed(chatKey);
+
         break;
       }
 

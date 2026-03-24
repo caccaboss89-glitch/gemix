@@ -30,7 +30,22 @@ async function handleMessage(ctx) {
 
     const systemPrompt = buildSystemPrompt(ctx);
 
-    const tools = getToolsForUser(isActiveMember, userIsAdmin);
+    const userCtx = {
+      isActiveMember,
+      isAdmin: userIsAdmin,
+      member: ui.member,
+      taskFileId: ui.taskFileId,
+      userId: ctx.userId,
+      userName: ctx.userName,
+      userPhone: ctx.userPhone || null,
+      waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
+      email: ui.member ? ui.member.email : null,
+      isGroup: ctx.isGroup,
+      groupId: ctx.groupId,
+      chatId: ctx.chatId || null,
+    };
+
+    const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -80,21 +95,6 @@ async function handleMessage(ctx) {
     }
 
     messages.push({ role: 'user', content: ctx.content });
-
-    const userCtx = {
-      isActiveMember,
-      isAdmin: userIsAdmin,
-      member: ui.member,
-      taskFileId: ui.taskFileId,
-      userId: ctx.userId,
-      userName: ctx.userName,
-      userPhone: ctx.userPhone || null,
-      waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
-      email: ui.member ? ui.member.email : null,
-      isGroup: ctx.isGroup,
-      groupId: ctx.groupId,
-      chatId: ctx.chatId || null,
-    };
 
     const deliveryCtx = {
       contactedWA: new Set(),

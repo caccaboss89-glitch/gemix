@@ -1,3 +1,7 @@
+const fs = require('fs');
+const path = require('path');
+const { DATA_DIR } = require('../config/constants');
+
 // Tool definitions for Gemini AI function calling (OpenAI-compatible format).
 // Tool descriptions are kept minimal; detailed instructions are provided when a tool is actually invoked.
 
@@ -34,6 +38,53 @@ const TOOL_INSTRUCTIONS = {
 };
 // Varianti admin/membro aggiuntive saranno usate per impostare i parametri che possono cambiare.
 
+// Per chat specifica, read_about_me è allowed una sola volta
+const readAboutMeUsedByChat = new Set();
+const READ_ABOUT_ME_STATE_FILE = path.join(DATA_DIR, 'readAboutMeUsedByChat.json');
+
+function _loadReadAboutMeState() {
+  try {
+    if (!fs.existsSync(READ_ABOUT_ME_STATE_FILE)) return;
+    const raw = fs.readFileSync(READ_ABOUT_ME_STATE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      parsed.forEach(chatKey => {
+        if (chatKey) readAboutMeUsedByChat.add(chatKey);
+      });
+    }
+  } catch (err) {
+    // Silenzioso: stato di uso read_about_me non persistente in caso di file corrotto
+  }
+}
+
+function _saveReadAboutMeState() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const arr = [...readAboutMeUsedByChat];
+    fs.writeFileSync(READ_ABOUT_ME_STATE_FILE, JSON.stringify(arr, null, 2), 'utf-8');
+  } catch (err) {
+    // Silenzioso su errori di scrittura per non bloccare il flusso
+  }
+}
+
+function _getChatKey(userCtx) {
+  return userCtx?.chatId || userCtx?.groupId || userCtx?.waJid || userCtx?.userId || 'unknown';
+}
+
+function _markReadAboutMeUsed(chatKey) {
+  if (!chatKey) return;
+  readAboutMeUsedByChat.add(chatKey);
+  _saveReadAboutMeState();
+}
+
+function _isReadAboutMeUsed(chatKey) {
+  return chatKey && readAboutMeUsedByChat.has(chatKey);
+}
+
+// Carica lo stato persistente all'avvio del modulo
+_loadReadAboutMeState();
 
 function getToolInstructions(name) {
   return TOOL_INSTRUCTIONS[name] || null;
@@ -334,8 +385,13 @@ const ACTIVE_MEMBER_TOOLS = [
 
 const ACTIVE_MEMBER_TOOL_NAMES = ACTIVE_MEMBER_TOOLS.map(t => t.function.name);
 
-function getToolsForUser(isActiveMember, isAdmin) {
+function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
+  const chatKey = _getChatKey(userCtx);
   let tools = isActiveMember ? [...BASE_TOOLS, ...ACTIVE_MEMBER_TOOLS] : [...BASE_TOOLS];
+
+  if (_isReadAboutMeUsed(chatKey)) {
+    tools = tools.filter(t => t.function.name !== 'read_about_me');
+  }
 
   if (isAdmin) {
     const adminScheduleTool = makeScheduleTasksTool({ includeRecipientName: true, includeRecipientPhone: true });
@@ -361,9 +417,10 @@ function isActiveMemberOnlyTool(toolName) {
   return ACTIVE_MEMBER_TOOL_NAMES.includes(toolName);
 }
 
-function getDynamicTaskTools(isActiveMember, isAdmin) {
+function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
+  const chatKey = _getChatKey(userCtx);
   // Data-gathering tools (always available, no recipient params)
-  const tools = [
+  let tools = [
     BASE_TOOLS.find(t => t.function.name === 'web_search'),
     makeTool({
       name: 'image_search',
@@ -416,4 +473,6 @@ module.exports = {
   getToolInstructions,
   BASE_TOOLS,
   ACTIVE_MEMBER_TOOLS,
+  _markReadAboutMeUsed: _markReadAboutMeUsed,
+  _isReadAboutMeUsed: _isReadAboutMeUsed,
 };
