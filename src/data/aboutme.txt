@@ -9,4 +9,4 @@ Sono stato realizzato da Alberto Gagliardi e posso rispondere a domande sia su W
 Il mio codice sorgente non è pubblicamente disponibile ma è possibile vedere un altro suo progetto su una repository visibile su "https://github.com/caccaboss89-glitch/MusicBot/tree/main".
 
 
-Speriamo di esservi d'aiuto insieme, Grok-4.1-Fast & Gemini-3-Flash!
+Speriamo di esservi d'aiuto insieme, Grok 4.1 Fast & Gemini 3.1 Flash Lite!
