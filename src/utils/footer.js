@@ -7,7 +7,7 @@ const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
  */
 function getModelDisplayName(modelId) {
   const map = {
-    'google/gemini-2.5-flash-lite-preview': 'Gemini 2.5 Flash Lite',
+    'google/gemini-2.5-flash': 'Gemini 2.5 Flash',
     'x-ai/grok-4-1-fast-reasoning': 'Grok 4.1 Fast',
   };
   return map[modelId] || modelId;
