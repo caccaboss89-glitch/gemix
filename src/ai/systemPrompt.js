@@ -52,7 +52,7 @@ function buildSystemPrompt(ctx) {
 
   prompt += `### Uso degli strumenti\n`;
   prompt += `- Se devi eseguire qualsiasi azione (es. invio di messaggi, invio di vocali, invio di email), devi assicurarti di farlo prima di fornire la risposta finale, dopo non ti sarà più permesso utilizzarli.\n`;
-  prompt += `- Ogni tanto (NON troppo spesso sennò diventa monotono) rispondi spontaneamente con un vocale se il messaggio è breve e non tecnico.\n\n`;
+  prompt += `- Puoi rispondere in testo o con messaggio vocale. Alterna i due formati in modo equilibrato durante la conversazione.\n\n`;
 
   prompt += `### Tool\nUsa i tool disponibili (web_search, image_search, send_voice_message, schedule_tasks, ecc.).\n`;
   if (!isActiveMember) {
