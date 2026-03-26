@@ -317,7 +317,7 @@ const BASE_TOOLS = [
     description: 'Cerca immagini sul web.',
     properties: {
       query: { type: 'string', description: 'Cosa cercare nelle immagini (in inglese per risultati migliori)' },
-      count: { type: 'integer', description: 'Numero immagini da inviare (1-4). Default 2.' },
+      count: { type: 'integer', description: 'Numero immagini da inviare (1-4). Default 1.' },
     },
     required: ['query'],
   }),
@@ -427,7 +427,7 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
       description: 'Cerca immagini sul web. Le immagini trovate verranno accumulate come allegati e inviate insieme al messaggio di consegna (WhatsApp o email).',
       properties: {
         query: { type: 'string', description: 'Cosa cercare nelle immagini (preferibilmente in inglese per risultati migliori)' },
-        count: { type: 'integer', description: 'Numero immagini da cercare (1-4). Default 2.' },
+        count: { type: 'integer', description: 'Numero immagini da cercare (1-4). Default 1.' },
       },
       required: ['query'],
     }),

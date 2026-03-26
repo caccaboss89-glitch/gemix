@@ -73,10 +73,10 @@ async function fetchImageAsAttachment(url, query, index) {
 /**
  * Search for images using SerpAPI and download as attachments.
  * @param {string} query - Search query for images
- * @param {number} [requestedCount=2] - Number of images to fetch (1-4)
+ * @param {number} [requestedCount=1] - Number of images to fetch (1-4)
  * @returns {Promise<object>} Result object { text, attachments }
  */
-async function imageSearch(query, requestedCount = 2) {
+async function imageSearch(query, requestedCount = 1) {
   const q = (query || '').trim();
   if (!q) {
     return {
@@ -85,7 +85,7 @@ async function imageSearch(query, requestedCount = 2) {
     };
   }
 
-  const count = Math.max(1, Math.min(MAX_IMAGES, Number(requestedCount) || 2));
+  const count = Math.max(1, Math.min(MAX_IMAGES, Number(requestedCount) || 1));
 
   const params = new URLSearchParams({
     engine: 'google_images',
