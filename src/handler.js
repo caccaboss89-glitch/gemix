@@ -172,6 +172,17 @@ async function handleMessage(ctx) {
               tool_call_id: toolCallId,
               content: result,
             });
+
+            if (responseCtx.previewImages && responseCtx.previewImages.length > 0) {
+              messages.push({
+                role: 'user',
+                content: [
+                  { type: 'text', text: '[Immagini caricate dalla cronologia per ispezione, NON inviate]' },
+                  ...responseCtx.previewImages.map(img => ({ type: 'image_url', image_url: { url: img.image_url.url } })),
+                ],
+              });
+              // Non svuotare qui: rimane a disposizione del round finale per eventuale invio esplicito
+            }
           } catch (toolErr) {
             log.error(`   ❌ Errore tool "${tc.function.name}": ${toolErr.message}`);
             messages.push({

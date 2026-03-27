@@ -222,7 +222,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         }
 
         const selected = imageEntries.slice(-count);
-        let attachedCount = 0;
+        let extractedCount = 0;
+
+        responseCtx.previewImages = [];
 
         for (let i = 0; i < selected.length; i++) {
           const part = selected[i];
@@ -231,21 +233,25 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           if (!parsed) continue;
           const ext = _mimeToExtension(parsed.mimetype);
           const fileName = `history_image_${i + 1}.${ext}`;
-          responseCtx.attachments.push({
+
+          responseCtx.previewImages.push({
+            type: 'image_url',
+            image_url: { url: dataUri },
             name: fileName,
-            buffer: parsed.buffer,
             mimetype: parsed.mimetype,
+            buffer: parsed.buffer,
           });
-          attachedCount++;
+          extractedCount++;
         }
 
-        if (attachedCount === 0) {
-          result = 'Nessuna immagine valida trovata/allegabile in cronologia.';
+        if (extractedCount === 0) {
+          result = 'Nessuna immagine valida trovata in cronologia.';
         } else {
-          result = `✅ ${attachedCount} immagine${attachedCount !== 1 ? 'i' : ''} dalla cronologia aggiunta come allegato per il prossimo round.`;
-          if (attachedCount < count) {
-            result += ` (richieste ${count}, trovate ${attachedCount})`;
+          result = `✅ ${extractedCount} immagine${extractedCount !== 1 ? 'i' : ''} dalla cronologia pronte per il prossimo round (non inviate).`;
+          if (extractedCount < count) {
+            result += ` (richieste ${count}, trovate ${extractedCount})`;
           }
+          result += ' Usa il tool di consegna (es. send_whatsapp_message con includeAttachments=true) solo quando vuoi inviare esplicitamente.';
         }
         break;
       }
