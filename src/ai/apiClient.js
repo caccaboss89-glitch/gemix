@@ -95,6 +95,21 @@ async function callApiWithRetry(modelName, apiUrl, body) {
 async function callModel(modelName, apiUrl, body) {
   const res = await callApiWithRetry(modelName, apiUrl, body);
   const data = await res.json();
+
+  try {
+    ensureLogDir();
+    const responseLogFile = path.resolve(__dirname, '..', 'logs', 'api-response-log.txt');
+    const entry = {
+      timestamp: new Date().toISOString(),
+      model: modelName,
+      apiUrl,
+      responseBody: data,
+    };
+    fs.appendFileSync(responseLogFile, JSON.stringify(entry) + '\n');
+  } catch (err) {
+    log.warn(`Impossibile scrivere log API response su file: ${err.message}`);
+  }
+
   if (!data.choices || !data.choices[0]) {
     throw new Error(`${modelName} API: nessuna risposta ricevuta`);
   }
