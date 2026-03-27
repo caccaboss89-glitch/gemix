@@ -130,9 +130,13 @@ async function handleMessage(ctx) {
       }
       
       const responseFormat = isDiscord ? buildDiscordResponseFormat(ctx.threadName || '') : null;
-      
+
+      const roundTools = (responseCtx.attachments && responseCtx.attachments.length > 0)
+        ? tools
+        : tools.filter(t => t.function.name !== 'clear_attachments');
+
       log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata Gemini (round ${rounds}/${MAX_TOOL_ROUNDS})`);
-      const assistantMsg = await callGemini(messages, tools, responseFormat);
+      const assistantMsg = await callGemini(messages, roundTools, responseFormat);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
         log.info(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
