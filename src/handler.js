@@ -37,26 +37,6 @@ async function handleMessage(ctx) {
 
     const systemPrompt = buildSystemPrompt(ctx);
 
-    const historyImages = [];
-    if (Array.isArray(ctx.history) && ctx.history.length > 0) {
-      for (const h of ctx.history) {
-        if (Array.isArray(h.content)) {
-          for (const part of h.content) {
-            if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
-              const match = /^data:([^;]+);base64,(.+)$/.exec(part.image_url.url);
-              if (match) {
-                const mimetype = match[1];
-                const dataBase64 = match[2];
-                if (mimetype.startsWith('image/') && dataBase64) {
-                  historyImages.push({ mimetype, base64: dataBase64 });
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
     const userCtx = {
       isActiveMember,
       isAdmin: userIsAdmin,
@@ -71,7 +51,6 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      historyImages,
     };
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
@@ -84,27 +63,16 @@ async function handleMessage(ctx) {
       const historyLines = [];
       const userMultimodalEntries = [];
 
-      const isImageContentPart = (part) => {
-        if (!part || part.type !== 'image_url' || !part.image_url?.url) return false;
-        const dataUrl = part.image_url.url;
-        const match = /^data:([^;]+);base64,/.exec(dataUrl);
-        if (!match) return false;
-        const mimetype = match[1];
-        return mimetype.startsWith('image/');
-      };
-
       for (const h of ctx.history) {
         if (typeof h.content === 'string') {
           historyLines.push(h.content);
         } else if (Array.isArray(h.content)) {
           const textPart = h.content.find(p => p.type === 'text');
           const mediaParts = h.content.filter(p => p.type !== 'text');
-          const imageParts = mediaParts.filter(isImageContentPart);
-          const nonImageParts = mediaParts.filter(p => !isImageContentPart(p));
           const textLine = textPart ? textPart.text : '[media]';
           historyLines.push(textLine);
 
-          if (nonImageParts.length > 0) {
+          if (mediaParts.length > 0) {
             const label = h.role === 'assistant'
               ? `[File dalla cronologia inviato da GemiX: ${textLine}]`
               : (textPart ? textPart.text : '[File dalla cronologia]');
@@ -112,14 +80,10 @@ async function handleMessage(ctx) {
               role: 'user',
               content: [
                 { type: 'text', text: label },
-                ...nonImageParts,
+                ...mediaParts,
               ],
             });
           }
-
-          // Images are not inserite come mediaParts diretti per risparmiare token,
-          // ma rimangono nel testo con tag [file.ext] e possono essere caricate con read_history_images.
-          // Se serve il tool, il bot lo userà in seguito.
         }
       }
 

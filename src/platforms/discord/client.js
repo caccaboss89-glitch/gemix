@@ -4,7 +4,7 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { mediaToContentPart } = require('../../utils/media');
+const { mediaToContentPart, limitHistoryMediaAttachments } = require('../../utils/media');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
 
@@ -293,7 +293,7 @@ async function buildDiscordHistory(channel, starterMessageId) {
     }
   }
 
-  return history;
+  return limitHistoryMediaAttachments(history, 3, 3);
 }
 
 module.exports = { initDiscord };

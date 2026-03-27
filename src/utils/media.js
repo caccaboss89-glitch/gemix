@@ -44,4 +44,70 @@ function mediaTag(filename, mimetype) {
   return `[file.${ext}]`;
 }
 
-module.exports = { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag };
+function _getMediaTypeFromContentPart(part) {
+  if (!part || !part.image_url || !part.image_url.url) return null;
+  const m = /^data:([^;]+);base64,/.exec(part.image_url.url);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('audio/')) return 'audio';
+  return null;
+}
+
+function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios = 3) {
+  if (!Array.isArray(historyMessages)) return historyMessages;
+
+  const remain = {
+    image: maxImages,
+    audio: maxAudios,
+  };
+
+  // We iterate from newest to oldest to retain the latest attachments.
+  for (let i = historyMessages.length - 1; i >= 0; i -= 1) {
+    const message = historyMessages[i];
+    if (!message || !Array.isArray(message.content)) continue;
+
+    const parts = message.content;
+    const keepFlags = new Array(parts.length).fill(false);
+
+    for (let j = parts.length - 1; j >= 0; j -= 1) {
+      const part = parts[j];
+      if (!part || part.type === 'text') {
+        keepFlags[j] = true;
+        continue;
+      }
+
+      const mediaType = _getMediaTypeFromContentPart(part);
+      if (mediaType === 'image' || mediaType === 'audio') {
+        if (remain[mediaType] > 0) {
+          keepFlags[j] = true;
+          remain[mediaType] -= 1;
+        } else {
+          keepFlags[j] = false;
+        }
+      } else {
+        // Keep other media types (video/document/etc.) unchanged.
+        keepFlags[j] = true;
+      }
+    }
+
+    const filtered = parts.filter((_, idx) => keepFlags[idx]);
+    if (filtered.length === 0) {
+      historyMessages.splice(i, 1);
+    } else if (filtered.length === 1 && filtered[0].type === 'text') {
+      historyMessages[i].content = filtered[0].text;
+    } else {
+      historyMessages[i].content = filtered;
+    }
+  }
+
+  return historyMessages;
+}
+
+module.exports = {
+  isSupportedMedia,
+  isUnsupportedMedia,
+  mediaToContentPart,
+  mediaTag,
+  limitHistoryMediaAttachments,
+};

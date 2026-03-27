@@ -143,34 +143,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         break;
       }
 
-      case 'read_history_images': {
-        const requested = Number(args.count || 0);
-        const historyImages = Array.isArray(userCtx.historyImages) ? userCtx.historyImages : [];
-
-        if (historyImages.length === 0) {
-          result = 'Nessuna immagine disponibile nella cronologia.';
-          break;
-        }
-
-        const count = requested <= 0 ? historyImages.length : Math.min(requested, historyImages.length);
-        const start = Math.max(0, historyImages.length - count);
-        const selected = historyImages.slice(start);
-
-        for (let i = 0; i < selected.length; i++) {
-          const img = selected[i];
-          const buffer = Buffer.from(img.base64, 'base64');
-          const ext = (img.mimetype.split('/')[1] || 'jpg').split(';')[0] || 'jpg';
-          responseCtx.attachments.push({
-            buffer,
-            mimetype: img.mimetype,
-            name: `history_image_${start + i + 1}.${ext}`,
-          });
-        }
-
-        result = `Immagini recuperate: ${selected.length}. ${count < historyImages.length ? `Ultime ${count} in ordine cronologico.` : 'Tutte le immagini disponibili.'}`;
-        break;
-      }
-
       case 'send_voice_message': {
         let cleanText = removeDiscordEmoji(args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')

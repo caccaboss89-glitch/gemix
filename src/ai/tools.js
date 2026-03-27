@@ -34,7 +34,6 @@ const TOOL_INSTRUCTIONS = {
   send_whatsapp_message: `Rispondi solo con la chiamata al tool. È possibile allegare eventuali file nel buffer.`,
   clear_attachments: `Rispondi solo con la chiamata al tool.`,
   read_music_stats: `Rispondi solo con la chiamata al tool.`,
-  read_history_images: `Rispondi solo con la chiamata al tool.`,
 };
 // Varianti admin/membro aggiuntive saranno usate per impostare i parametri che possono cambiare.
 
@@ -337,14 +336,6 @@ const BASE_TOOLS = [
     description: 'Invia sulla chat corrente il testo della storia di GemiX, utile per presentarti e dire chi sei.',
     properties: {},
   }),
-  makeTool({
-    name: 'read_history_images',
-    description: 'Recupera fino a N ultime immagini dalla cronologia e preparale come allegati.',
-    properties: {
-      count: { type: 'integer', description: 'Numero di immagini da recuperare (1 = più recente, 0 = tutte).', minimum: 0 },
-    },
-    required: ['count'],
-  }),
   makeVoiceTool(),
   makeScheduleTasksTool(),
   makeTool({
@@ -465,11 +456,6 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools = tools.filter(t => t.function.name !== 'read_about_me');
   }
 
-  const hasHistoryImages = Array.isArray(userCtx.historyImages) && userCtx.historyImages.length > 0;
-  if (!hasHistoryImages) {
-    tools = tools.filter(t => t.function.name !== 'read_history_images');
-  }
-
   // Disabilita il tool vocale su Discord
   if (isDiscord) {
     tools = tools.filter(t => t.function.name !== 'send_voice_message');
@@ -528,14 +514,6 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
         count: { type: 'integer', description: 'Numero immagini da cercare (1-4). Default 1.' },
       },
       required: ['query'],
-    }),
-    makeTool({
-      name: 'read_history_images',
-      description: 'Recupera fino a N ultime immagini dalla cronologia e preparale come allegati.',
-      properties: {
-        count: { type: 'integer', description: 'Numero di immagini da recuperare (1 = più recente, 0 = tutte).', minimum: 0 },
-      },
-      required: ['count'],
     }),
     makeTool({
       name: 'generate_pdf',

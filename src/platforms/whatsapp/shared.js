@@ -3,7 +3,7 @@ const { MAX_HISTORY, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
-const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag } = require('../../utils/media');
+const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, limitHistoryMediaAttachments } = require('../../utils/media');
 
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
@@ -124,7 +124,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
     }
   }
 
-  return historyMessages;
+  return limitHistoryMediaAttachments(historyMessages, 3, 3);
 }
 
 /**
