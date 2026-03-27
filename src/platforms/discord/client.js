@@ -293,7 +293,7 @@ async function buildDiscordHistory(channel, starterMessageId) {
     }
   }
 
-  return limitHistoryMediaAttachments(history, 3, 3);
+  return limitHistoryMediaAttachments(history, Number.MAX_SAFE_INTEGER, 3);
 }
 
 module.exports = { initDiscord };

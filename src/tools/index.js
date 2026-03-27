@@ -12,6 +12,7 @@ const { sendEmail, sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppMessage, sendWhatsAppVoice, sendWhatsAppAttachments, sendWhatsAppDirect } = require('./whatsappSender');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
+const { extractLastNImages } = require('../utils/media');
 const { readMusicStats } = require('./musicStats');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
@@ -140,6 +141,25 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           responseCtx.attachments.push(...imageResult.attachments);
         }
         result = imageResult.text;
+        break;
+      }
+
+      case 'include_history_images': {
+        const count = Number(args.count || 0);
+        if (!Number.isInteger(count) || count <= 0) {
+          result = '❌ count deve essere un intero positivo.';
+          break;
+        }
+
+        const images = extractLastNImages(userCtx.historyFull || [], count);
+
+        if (!images || images.length === 0) {
+          result = '❌ Non ci sono immagini nella cronologia da includere.';
+          break;
+        }
+
+        responseCtx.historyImagesToInclude = images;
+        result = `✅ Includo le ultime ${images.length} immagine/i nella prossima chiamata API.`;
         break;
       }
 

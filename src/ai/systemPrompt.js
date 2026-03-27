@@ -57,7 +57,7 @@ function buildSystemPrompt(ctx) {
   }
 
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-    prompt += `- Preferisci risposte vocali se il messaggio e breve e non tecnico.\n`;
+    prompt += `- Preferisci risposte vocali se il messaggio e breve (non esagere però), preferisci per leggibilità risposte testuali se il messaggio medio/lungo o è tecnico o include dati.\n`;
   }
   prompt += `\n`;
 

@@ -54,6 +54,42 @@ function _getMediaTypeFromContentPart(part) {
   return null;
 }
 
+function hasHistoryImages(historyMessages) {
+  if (!Array.isArray(historyMessages)) return false;
+
+  for (const message of historyMessages) {
+    if (!message || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (_getMediaTypeFromContentPart(part) === 'image') return true;
+    }
+  }
+
+  return false;
+}
+
+function extractLastNImages(historyMessages, count = 0) {
+  if (!Array.isArray(historyMessages) || count <= 0) return [];
+
+  const imageParts = [];
+
+  for (let i = historyMessages.length - 1; i >= 0; i -= 1) {
+    const message = historyMessages[i];
+    if (!message || !Array.isArray(message.content)) continue;
+
+    for (let j = message.content.length - 1; j >= 0; j -= 1) {
+      const part = message.content[j];
+      if (_getMediaTypeFromContentPart(part) === 'image') {
+        imageParts.push(part);
+        if (imageParts.length >= count) break;
+      }
+    }
+
+    if (imageParts.length >= count) break;
+  }
+
+  return imageParts.reverse();
+}
+
 function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios = 3) {
   if (!Array.isArray(historyMessages)) return historyMessages;
 

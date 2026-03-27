@@ -5,6 +5,7 @@ const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
+const { hasHistoryImages, limitHistoryMediaAttachments, extractLastNImages } = require('./utils/media');
 
 const log = createLogger('Handler');
 
@@ -28,6 +29,7 @@ async function handleMessage(ctx) {
     isVoiceOnly: false,
     aboutMeText: null,
     isAboutMeOnly: false,
+    historyImagesToInclude: [],
   };
 
   try {
@@ -51,6 +53,8 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
+      hasHistoryImages,
+      historyFull: ctx.history || [],
     };
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
@@ -59,11 +63,16 @@ async function handleMessage(ctx) {
       { role: 'system', content: systemPrompt },
     ];
 
-    if (ctx.history && ctx.history.length > 0) {
+    const historyHasImages = hasHistoryImages(ctx.history);
+    const filteredHistory = ctx.history && ctx.history.length > 0
+      ? limitHistoryMediaAttachments(JSON.parse(JSON.stringify(ctx.history)), 0, 3)
+      : [];
+
+    if (filteredHistory.length > 0) {
       const historyLines = [];
       const userMultimodalEntries = [];
 
-      for (const h of ctx.history) {
+      for (const h of filteredHistory) {
         if (typeof h.content === 'string') {
           historyLines.push(h.content);
         } else if (Array.isArray(h.content)) {
@@ -104,6 +113,7 @@ async function handleMessage(ctx) {
 
     messages.push({ role: 'user', content: ctx.content });
 
+
     const deliveryCtx = {
       contactedWA: new Set(),
       contactedEmail: new Set(),
@@ -118,6 +128,17 @@ async function handleMessage(ctx) {
     while (rounds < MAX_TOOL_ROUNDS) {
       messages = removeToolInstructionMessages(messages);
       rounds++;
+
+      if (responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) {
+        messages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: `[Richiesta immagini cronologia]` },
+            ...responseCtx.historyImagesToInclude,
+          ],
+        });
+        responseCtx.historyImagesToInclude = [];
+      }
       
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.warn(`   ⚠️ Vocale già generato, interruzione ciclo`);
