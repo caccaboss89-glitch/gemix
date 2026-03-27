@@ -5,27 +5,36 @@ const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
-const apiLogFile = path.resolve(__dirname, '..', 'logs', 'api-request-log.json');
+const apiLogDir = path.resolve(__dirname, '..', 'logs');
 
 function ensureLogDir() {
-  const dir = path.dirname(apiLogFile);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(apiLogDir)) {
+    fs.mkdirSync(apiLogDir, { recursive: true });
   }
 }
 
-function logApiRequest(modelName, apiUrl, body) {
+function _getLogFilePath(prefix, timestamp) {
+  const sanitized = timestamp.replace(/[:.]/g, '-');
+  return path.join(apiLogDir, `${prefix}-${sanitized}.json`);
+}
+
+function logApiRequest(modelName, apiUrl, body, extra = {}) {
   try {
     ensureLogDir();
+    const now = new Date().toISOString();
     const entry = {
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       model: modelName,
       apiUrl,
       requestBody: body,
+      ...extra,
     };
-    fs.appendFileSync(apiLogFile, JSON.stringify(entry, null, 2) + '\n\n');
+    const filePath = _getLogFilePath('api-request', now);
+    fs.writeFileSync(filePath, JSON.stringify(entry, null, 2));
+    return filePath;
   } catch (err) {
     log.warn(`Impossibile scrivere log API su file: ${err.message}`);
+    return null;
   }
 }
 

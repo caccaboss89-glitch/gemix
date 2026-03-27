@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { isActiveMemberOnlyTool, _markReadAboutMeUsed } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
@@ -63,6 +65,26 @@ function _incrementVoiceCount(chatKey) {
 
 function _resetVoiceCount(chatKey) {
   voiceConsecutiveByChat.delete(chatKey);
+}
+
+function _logAttachmentDelivery(toolName, target, attachments) {
+  try {
+    const logDir = path.resolve(__dirname, '..', 'logs');
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    const now = new Date().toISOString();
+    const filename = `attachment-delivery-${now.replace(/[:.]/g, '-')}.json`;
+    const filePath = path.join(logDir, filename);
+    fs.writeFileSync(filePath, JSON.stringify({
+      timestamp: now,
+      toolName,
+      target,
+      attachments: attachments.map(a => ({ name: a.name, mimetype: a.mimetype, size: a.buffer ? a.buffer.length : null })),
+    }, null, 2));
+  } catch (err) {
+    log.warn(`Impossibile scrivere log consegna allegati: ${err.message}`);
+  }
 }
 
 function _isImageMediaPart(part) {
@@ -427,6 +449,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
               emailAttachments
             );
             dynamicTaskCtx.contactedEmail.add(targetEmail.email);
+            if (emailAttachments.length > 0) {
+              _logAttachmentDelivery('send_email', targetEmail.email, emailAttachments.map(att => ({ name: att.filename, mimetype: att.contentType, buffer: Buffer.from(att.content || '') })));
+            }
             result = `Email inviata con successo a ${targetEmail.display}${emailAttachments.length > 0 ? ` con ${emailAttachments.length} allegato/i` : ''}.`;
           } catch (err) {
             result = `❌ Errore invio email: ${err.message}`;
@@ -459,6 +484,9 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             imageUrls: args.imageUrls,
             accumulatedAttachments,
           });
+          if (accumulatedAttachments.length > 0) {
+            _logAttachmentDelivery('send_email', args.recipientName || args.recipientEmail || 'sconosciuto', accumulatedAttachments.map(att => ({ name: att.filename, mimetype: att.contentType, buffer: Buffer.from(att.content || '') })));
+          }
         } catch (err) {
           result = `❌ Errore invio email: ${err.message}`;
         }
@@ -489,6 +517,10 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             }
 
             const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
+
+            if (attachmentsSentCount > 0) {
+              _logAttachmentDelivery('send_whatsapp_message', targetJid.jid, responseCtx.attachments);
+            }
 
             dynamicTaskCtx.contactedWA.add(targetJid.jid);
             result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
@@ -538,6 +570,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
                 }
               }
               if (attachmentsSent > 0) {
+                _logAttachmentDelivery('send_whatsapp_message', jid, responseCtx.attachments.slice(0, attachmentsSent));
                 result += ` ✅ ${attachmentsSent} allegato/i inviato/i.`;
               } else if (responseCtx.attachments.length > 0) {
                 result += ` ❌ Errore nell'invio degli ${responseCtx.attachments.length} allegato/i.`;
