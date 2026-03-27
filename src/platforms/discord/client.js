@@ -82,6 +82,7 @@ async function onDiscordMessage(msg) {
   const contentParts = [];
   let textBody = msg.content || '';
 
+  let quotedMediaParts = [];
   if (msg.reference) {
     try {
       const quotedMsg = await channel.messages.fetch(msg.reference.messageId);
@@ -91,6 +92,19 @@ async function onDiscordMessage(msg) {
             .map(att => `[${att.name}]`)
             .join(' ');
           textBody = `[In reply to: ${filetags}]\n` + textBody;
+
+          // Se la risposta è a un messaggio di GemiX con immagine, includi l'immagine in contentParts.
+          if (quotedMsg.author.id === discordClient.user.id) {
+            for (const att of quotedMsg.attachments.values()) {
+              const isImage = att.contentType?.startsWith('image/');
+              if (!isImage) continue;
+              try {
+                const res = await fetch(att.url);
+                const buffer = Buffer.from(await res.arrayBuffer());
+                quotedMediaParts.push(mediaToContentPart(buffer, att.contentType));
+              } catch {}
+            }
+          }
         } else if (quotedMsg.content) {
           textBody = `[In reply to: ${quotedMsg.content}]\n` + textBody;
         }
@@ -123,6 +137,10 @@ async function onDiscordMessage(msg) {
 
   if (textBody) {
     contentParts.unshift({ type: 'text', text: textBody });
+  }
+
+  if (quotedMediaParts.length > 0) {
+    contentParts.push(...quotedMediaParts);
   }
 
   if (contentParts.length === 0) return;
@@ -254,10 +272,14 @@ async function buildDiscordHistory(channel, starterMessageId) {
     for (const att of m.attachments.values()) {
       const isImage = att.contentType?.startsWith('image/');
       const isAudio = att.contentType?.startsWith('audio/');
+      const audioDuration = Number(att.duration || 0);
+      const isLongAudio = isAudio && audioDuration > 60;
       const isDoc = att.contentType?.startsWith('application/');
       const isVideo = att.contentType?.startsWith('video/');
 
-      if (isImage || isAudio || isDoc) {
+      if (isLongAudio) {
+        textContent = `${textContent} [${att.name}] (troppo lungo per essere letto: ${audioDuration}s)`.trim();
+      } else if (isImage || isAudio || isDoc) {
         try {
           const res = await fetch(att.url);
           const buffer = Buffer.from(await res.arrayBuffer());

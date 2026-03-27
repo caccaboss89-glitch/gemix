@@ -162,8 +162,12 @@ async function onPersonalMessage(msg) {
   }
 
   const quotedContent = await extractQuotedMessageContent(msg);
-  if (quotedContent) {
-    textBody = quotedContent + textBody;
+  if (quotedContent && quotedContent.prefix) {
+    textBody = quotedContent.prefix + textBody;
+  }
+
+  if (quotedContent && Array.isArray(quotedContent.mediaParts) && quotedContent.mediaParts.length > 0) {
+    contentParts.push(...quotedContent.mediaParts);
   }
 
   const media = await downloadCurrentMedia(msg);

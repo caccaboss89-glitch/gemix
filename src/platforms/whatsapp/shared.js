@@ -87,16 +87,21 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
       const mediaType = msg.type;
       const filename = msg._data?.filename || msg._data?.caption || null;
       const tag = mediaTag(filename, msg._data?.mimetype);
+      const duration = Number(msg.duration || msg._data?.duration || 0);
 
       if (isSupportedMedia(mediaType)) {
-        try {
-          const media = await msg.downloadMedia();
-          if (media) {
-            const buffer = Buffer.from(media.data, 'base64');
-            mediaParts.push(mediaToContentPart(buffer, media.mimetype));
-          }
-        } catch {}
-        textContent = `${textContent} ${tag}`.trim();
+        if ((mediaType === 'audio' || mediaType === 'ptt') && duration > 60) {
+          textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${duration}s)`.trim();
+        } else {
+          try {
+            const media = await msg.downloadMedia();
+            if (media) {
+              const buffer = Buffer.from(media.data, 'base64');
+              mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+            }
+          } catch {}
+          textContent = `${textContent} ${tag}`.trim();
+        }
       } else if (isUnsupportedMedia(mediaType)) {
         textContent = `${textContent} ${tag} (file non visionabile)`.trim();
       } else {
@@ -158,16 +163,32 @@ async function downloadCurrentMedia(msg) {
  * @returns {Promise<string>} Formatted quoted message context or empty string if not a reply
  */
 async function extractQuotedMessageContent(msg) {
-  if (!msg.hasQuotedMsg) return '';
+  if (!msg.hasQuotedMsg) return { prefix: '', mediaParts: [] };
 
   try {
     const quoted = await msg.getQuotedMessage();
-    if (!quoted) return '';
+    if (!quoted) return { prefix: '', mediaParts: [] };
+
+    let prefix = '';
+    const mediaParts = [];
 
     if (quoted.hasMedia) {
+      // For quoted media, include tag text and actual media if it's from GemiX (or user wants it implicitly).
       const filename = quoted._data?.filename || quoted._data?.caption || null;
       const tag = mediaTag(filename, quoted._data?.mimetype);
-      return `[In reply to: ${tag}]\n`;
+      prefix = `[In reply to: ${tag}]\n`;
+
+      if (quoted.fromMe) {
+        try {
+          const media = await quoted.downloadMedia();
+          if (media) {
+            const buffer = Buffer.from(media.data, 'base64');
+            mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+          }
+        } catch {}
+      }
+
+      return { prefix, mediaParts };
     }
 
     if (quoted.body) {
@@ -175,14 +196,16 @@ async function extractQuotedMessageContent(msg) {
       if (hasFooter(quotedText)) {
         quotedText = removeFooter(quotedText);
       }
-      return `[In reply to: ${quotedText}]\n`;
+      prefix = `[In reply to: ${quotedText}]\n`;
+      return { prefix, mediaParts };
     }
 
-    return '';
+    return { prefix: '', mediaParts: [] };
   } catch {
-    return '';
+    return { prefix: '', mediaParts: [] };
   }
 }
+
 
 /**
  * Send response back to WhatsApp chat.
