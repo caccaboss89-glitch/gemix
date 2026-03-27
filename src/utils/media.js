@@ -145,5 +145,7 @@ module.exports = {
   isUnsupportedMedia,
   mediaToContentPart,
   mediaTag,
+  hasHistoryImages,
+  extractLastNImages,
   limitHistoryMediaAttachments,
 };
