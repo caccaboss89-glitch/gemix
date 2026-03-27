@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const { isActiveMemberOnlyTool, _markReadAboutMeUsed } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
@@ -65,58 +63,6 @@ function _incrementVoiceCount(chatKey) {
 
 function _resetVoiceCount(chatKey) {
   voiceConsecutiveByChat.delete(chatKey);
-}
-
-function _logAttachmentDelivery(toolName, target, attachments) {
-  try {
-    const logDir = path.resolve(__dirname, '..', 'logs');
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
-    const now = new Date().toISOString();
-    const filename = `attachment-delivery-${now.replace(/[:.]/g, '-')}.json`;
-    const filePath = path.join(logDir, filename);
-    fs.writeFileSync(filePath, JSON.stringify({
-      timestamp: now,
-      toolName,
-      target,
-      attachments: attachments.map(a => ({ name: a.name, mimetype: a.mimetype, size: a.buffer ? a.buffer.length : null })),
-    }, null, 2));
-  } catch (err) {
-    log.warn(`Impossibile scrivere log consegna allegati: ${err.message}`);
-  }
-}
-
-function _isImageMediaPart(part) {
-  if (!part || part.type !== 'image_url') return false;
-  const url = part.image_url?.url || '';
-  return typeof url === 'string' && url.startsWith('data:image/');
-}
-
-function _dataUriToBuffer(dataUri) {
-  if (!dataUri || typeof dataUri !== 'string' || !dataUri.startsWith('data:')) return null;
-  const commaIndex = dataUri.indexOf(',');
-  if (commaIndex === -1) return null;
-  const prefix = dataUri.slice(0, commaIndex);
-  const base64 = dataUri.slice(commaIndex + 1);
-  const mimePart = prefix.split(';')[0];
-  const mimetype = mimePart.replace('data:', '') || 'application/octet-stream';
-  try {
-    const buffer = Buffer.from(base64, 'base64');
-    return { buffer, mimetype };
-  } catch {
-    return null;
-  }
-}
-
-function _mimeToExtension(mimetype) {
-  if (!mimetype || typeof mimetype !== 'string') return 'bin';
-  const parts = mimetype.split('/');
-  if (parts.length < 2) return 'bin';
-  let ext = parts[1];
-  if (ext.includes('+')) ext = ext.split('+')[0];
-  if (ext.includes(';')) ext = ext.split(';')[0];
-  return ext || 'bin';
 }
 
 /**
@@ -198,61 +144,30 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       }
 
       case 'read_history_images': {
-        const count = Number(args.count) || 0;
-        if (!Number.isInteger(count) || count <= 0) {
-          result = '❌ count deve essere un numero intero positivo.';
+        const requested = Number(args.count || 0);
+        const historyImages = Array.isArray(userCtx.historyImages) ? userCtx.historyImages : [];
+
+        if (historyImages.length === 0) {
+          result = 'Nessuna immagine disponibile nella cronologia.';
           break;
         }
 
-        const history = Array.isArray(userCtx.history) ? userCtx.history : [];
-        const imageEntries = [];
-
-        for (const h of history) {
-          if (!Array.isArray(h.content)) continue;
-          for (const part of h.content) {
-            if (_isImageMediaPart(part)) {
-              imageEntries.push(part);
-            }
-          }
-        }
-
-        if (imageEntries.length === 0) {
-          result = 'Nessuna immagine disponibile in cronologia da recuperare.';
-          break;
-        }
-
-        const selected = imageEntries.slice(-count);
-        let extractedCount = 0;
-
-        responseCtx.previewImages = [];
+        const count = requested <= 0 ? historyImages.length : Math.min(requested, historyImages.length);
+        const start = Math.max(0, historyImages.length - count);
+        const selected = historyImages.slice(start);
 
         for (let i = 0; i < selected.length; i++) {
-          const part = selected[i];
-          const dataUri = part.image_url?.url;
-          const parsed = _dataUriToBuffer(dataUri);
-          if (!parsed) continue;
-          const ext = _mimeToExtension(parsed.mimetype);
-          const fileName = `history_image_${i + 1}.${ext}`;
-
-          responseCtx.previewImages.push({
-            type: 'image_url',
-            image_url: { url: dataUri },
-            name: fileName,
-            mimetype: parsed.mimetype,
-            buffer: parsed.buffer,
+          const img = selected[i];
+          const buffer = Buffer.from(img.base64, 'base64');
+          const ext = (img.mimetype.split('/')[1] || 'jpg').split(';')[0] || 'jpg';
+          responseCtx.attachments.push({
+            buffer,
+            mimetype: img.mimetype,
+            name: `history_image_${start + i + 1}.${ext}`,
           });
-          extractedCount++;
         }
 
-        if (extractedCount === 0) {
-          result = 'Nessuna immagine valida trovata in cronologia.';
-        } else {
-          result = `✅ ${extractedCount} immagine${extractedCount !== 1 ? 'i' : ''} dalla cronologia pronte per il prossimo round (non inviate).`;
-          if (extractedCount < count) {
-            result += ` (richieste ${count}, trovate ${extractedCount})`;
-          }
-          result += ' Usa il tool di consegna (es. send_whatsapp_message con includeAttachments=true) solo quando vuoi inviare esplicitamente.';
-        }
+        result = `Immagini recuperate: ${selected.length}. ${count < historyImages.length ? `Ultime ${count} in ordine cronologico.` : 'Tutte le immagini disponibili.'}`;
         break;
       }
 
@@ -455,9 +370,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
               emailAttachments
             );
             dynamicTaskCtx.contactedEmail.add(targetEmail.email);
-            if (emailAttachments.length > 0) {
-              _logAttachmentDelivery('send_email', targetEmail.email, emailAttachments.map(att => ({ name: att.filename, mimetype: att.contentType, buffer: Buffer.from(att.content || '') })));
-            }
             result = `Email inviata con successo a ${targetEmail.display}${emailAttachments.length > 0 ? ` con ${emailAttachments.length} allegato/i` : ''}.`;
           } catch (err) {
             result = `❌ Errore invio email: ${err.message}`;
@@ -490,9 +402,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             imageUrls: args.imageUrls,
             accumulatedAttachments,
           });
-          if (accumulatedAttachments.length > 0) {
-            _logAttachmentDelivery('send_email', args.recipientName || args.recipientEmail || 'sconosciuto', accumulatedAttachments.map(att => ({ name: att.filename, mimetype: att.contentType, buffer: Buffer.from(att.content || '') })));
-          }
         } catch (err) {
           result = `❌ Errore invio email: ${err.message}`;
         }
@@ -523,10 +432,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             }
 
             const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
-
-            if (attachmentsSentCount > 0) {
-              _logAttachmentDelivery('send_whatsapp_message', targetJid.jid, responseCtx.attachments);
-            }
 
             dynamicTaskCtx.contactedWA.add(targetJid.jid);
             result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
@@ -576,7 +481,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
                 }
               }
               if (attachmentsSent > 0) {
-                _logAttachmentDelivery('send_whatsapp_message', jid, responseCtx.attachments.slice(0, attachmentsSent));
                 result += ` ✅ ${attachmentsSent} allegato/i inviato/i.`;
               } else if (responseCtx.attachments.length > 0) {
                 result += ` ❌ Errore nell'invio degli ${responseCtx.attachments.length} allegato/i.`;

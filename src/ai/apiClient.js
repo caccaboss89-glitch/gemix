@@ -18,15 +18,45 @@ function _getLogFilePath(prefix, timestamp) {
   return path.join(apiLogDir, `${prefix}-${sanitized}.json`);
 }
 
+function extractAttachmentsFromMessages(messages) {
+  const attachments = [];
+
+  if (!Array.isArray(messages)) return attachments;
+
+  messages.forEach((message, index) => {
+    if (!message || !Array.isArray(message.content)) return;
+    const mediaParts = message.content.filter(part => part && part.type && part.type !== 'text');
+    mediaParts.forEach((part, partIndex) => {
+      const dataUrl = part.image_url?.url || '';
+      let mimetype = null;
+      if (typeof dataUrl === 'string') {
+        const m = /^data:([^;]+);base64,/.exec(dataUrl);
+        if (m) mimetype = m[1];
+      }
+      attachments.push({
+        role: message.role || null,
+        messageIndex: index,
+        partIndex,
+        type: part.type,
+        mimetype,
+      });
+    });
+  });
+
+  return attachments;
+}
+
 function logApiRequest(modelName, apiUrl, body, extra = {}) {
   try {
     ensureLogDir();
     const now = new Date().toISOString();
+    const requestAttachments = extractAttachmentsFromMessages(body.messages);
     const entry = {
       timestamp: now,
       model: modelName,
       apiUrl,
       requestBody: body,
+      requestAttachments,
       ...extra,
     };
     const filePath = _getLogFilePath('api-request', now);
@@ -107,14 +137,15 @@ async function callModel(modelName, apiUrl, body) {
 
   try {
     ensureLogDir();
-    const responseLogFile = path.resolve(__dirname, '..', 'logs', 'api-response-log.txt');
+    const now = new Date().toISOString();
+    const responseLogFile = _getLogFilePath('api-response', now);
     const entry = {
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       model: modelName,
       apiUrl,
       responseBody: data,
     };
-    fs.appendFileSync(responseLogFile, JSON.stringify(entry) + '\n');
+    fs.writeFileSync(responseLogFile, JSON.stringify(entry, null, 2));
   } catch (err) {
     log.warn(`Impossibile scrivere log API response su file: ${err.message}`);
   }

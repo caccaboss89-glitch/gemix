@@ -83,26 +83,6 @@ function _isReadAboutMeUsed(chatKey) {
   return chatKey && readAboutMeUsedByChat.has(chatKey);
 }
 
-function _hasHistoryImages(history) {
-  if (!Array.isArray(history)) return false;
-  for (const h of history) {
-    const parts = Array.isArray(h.content) ? h.content : [];
-    for (const p of parts) {
-      const url = p?.image_url?.url || p?.url || '';
-      if (typeof url === 'string' && url.startsWith('data:image/')) {
-        return true;
-      }
-      if (p?.type === 'image_url' && p?.image_url?.url) {
-        return true;
-      }
-      if (p?.type === 'image') {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 // Carica lo stato persistente all'avvio del modulo
 _loadReadAboutMeState();
 
@@ -353,17 +333,17 @@ const BASE_TOOLS = [
     required: ['query'],
   }),
   makeTool({
-    name: 'read_history_images',
-    description: 'Recupera le ultime immagini presenti nella cronologia e le aggiunge come allegati per il prossimo round.',
-    properties: {
-      count: { type: 'integer', description: 'Numero di immagini da recuperare (ultime n).', minimum: 1 },
-    },
-    required: ['count'],
-  }),
-  makeTool({
     name: 'read_about_me',
     description: 'Invia sulla chat corrente il testo della storia di GemiX, utile per presentarti e dire chi sei.',
     properties: {},
+  }),
+  makeTool({
+    name: 'read_history_images',
+    description: 'Recupera fino a N ultime immagini dalla cronologia e preparale come allegati.',
+    properties: {
+      count: { type: 'integer', description: 'Numero di immagini da recuperare (1 = più recente, 0 = tutte).', minimum: 0 },
+    },
+    required: ['count'],
   }),
   makeVoiceTool(),
   makeScheduleTasksTool(),
@@ -485,8 +465,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools = tools.filter(t => t.function.name !== 'read_about_me');
   }
 
-  // Rimuovi il tool read_history_images se non ci sono immagini in cronologia
-  if (!_hasHistoryImages(userCtx.history)) {
+  const hasHistoryImages = Array.isArray(userCtx.historyImages) && userCtx.historyImages.length > 0;
+  if (!hasHistoryImages) {
     tools = tools.filter(t => t.function.name !== 'read_history_images');
   }
 
@@ -551,9 +531,9 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
     }),
     makeTool({
       name: 'read_history_images',
-      description: 'Recupera le ultime immagini dalla cronologia per il round successivo (minimizza input testuale).',
+      description: 'Recupera fino a N ultime immagini dalla cronologia e preparale come allegati.',
       properties: {
-        count: { type: 'integer', description: 'Numero di ultime immagini da recuperare (1-n).', minimum: 1 },
+        count: { type: 'integer', description: 'Numero di immagini da recuperare (1 = più recente, 0 = tutte).', minimum: 0 },
       },
       required: ['count'],
     }),
@@ -567,10 +547,6 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
       required: ['title', 'content'],
     }),
   ];
-
-  if (!_hasHistoryImages(userCtx.history)) {
-    tools = tools.filter(t => t.function.name !== 'read_history_images');
-  }
 
   // Delivery tools — descriptions vary by permission level
   if (isAdmin) {
