@@ -5,36 +5,13 @@ const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
-const apiLogFile = path.resolve(__dirname, '..', 'logs', 'api-request-log.txt');
+const apiLogFile = path.resolve(__dirname, '..', 'logs', 'api-request-log.json');
 
 function ensureLogDir() {
   const dir = path.dirname(apiLogFile);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-}
-
-function _formatRequestBody(body) {
-  if (!body || !Array.isArray(body.tools)) {
-    return JSON.stringify(body);
-  }
-
-  const base = { ...body };
-  const tools = base.tools;
-  delete base.tools;
-
-  const baseJson = JSON.stringify(base, null, 2);
-  const toolsJson = tools
-    .map(tool => JSON.stringify(tool, null, 2))
-    .join(',\n\n');
-
-  if (Object.keys(base).length === 0) {
-    return `{
-  "tools": [\n${toolsJson.split('\n').map(line => `    ${line}`).join('\n')}\n  ]\n}`;
-  }
-
-  return baseJson.replace(/\n\}$/, '') +
-    `,\n  "tools": [\n${toolsJson.split('\n').map(line => `    ${line}`).join('\n')}\n  ]\n}`;
 }
 
 function logApiRequest(modelName, apiUrl, body) {
@@ -44,9 +21,9 @@ function logApiRequest(modelName, apiUrl, body) {
       timestamp: new Date().toISOString(),
       model: modelName,
       apiUrl,
-      requestBody: _formatRequestBody(body),
+      requestBody: body,
     };
-    fs.appendFileSync(apiLogFile, JSON.stringify(entry) + '\n');
+    fs.appendFileSync(apiLogFile, JSON.stringify(entry, null, 2) + '\n\n');
   } catch (err) {
     log.warn(`Impossibile scrivere log API su file: ${err.message}`);
   }
