@@ -51,10 +51,10 @@ function buildSystemPrompt(ctx) {
   }
 
   prompt += `### Uso degli strumenti\n`;
-  prompt += `- Se devi eseguire qualsiasi azione (es. invio di messaggi, invio di vocali, invio di email), devi assicurarti di farlo prima di fornire la risposta finale, dopo non ti sarà più permesso utilizzarli.\n`;
-  prompt += `- Rispondi con un vocale avvolte (NON troppo spesso) se il messaggio e breve e non tecnico.\n\n`;
+  prompt += `- Se devi usare un tool (es. invio di email o messaggi a terzi), assicurarti di farlo solo prima di fornire la risposta finale.\n`;
+  prompt += `- Preferisci risposte vocali se il messaggio e breve e non tecnico.\n\n`;
 
-  prompt += `### Tool\nUsa i tool disponibili (web_search, image_search, send_voice_message, schedule_tasks, ecc.).\n`;
+  prompt += `### Tool\nPuoi usare i tool disponibili.\n`;
   if (!isActiveMember) {
     prompt += `Alcuni tool (PDF, email, invio WhatsApp a terzi) NON sono disponibili per questo utente. Se li chiede, spiegalo brevemente.\n`;
   }
@@ -68,7 +68,7 @@ function buildDedicatedWaInstructions(ctx) {
   s += ctx.isGroup
     ? `Gruppo: "${ctx.groupName || 'sconosciuto'}". Rispondi solo se taggato.\n\n`
     : `Chat privata: rispondi a ogni messaggio.\n\n`;
-  s += `Usa markdown WA (non sono supportati i doppi es. ** testo ** su WA ma solo i singoli *testo*): *bold* _italic_ ~strike~ \`code\`.\n\n`;
+  s += `Usa markdown WA (singoli): *bold* _italic_ ~strike~ \`code\` (NON doppi es. ** testo **).\n\n`;
   return s;
 }
 
@@ -79,10 +79,10 @@ function buildDedicatedWaInstructions(ctx) {
  */
 function buildPersonalWaInstructions(ctx) {
   let s = `### Piattaforma: WhatsApp (Account Personale)\n`;
-  s += `Rispondi tramite l'account personale del creatore. Un utente ha scritto "@gemix" per invocarti.\n`;  if (ctx.userName) {
+  s += `Rispondi solo se taggato.\n`;  if (ctx.userName) {
     s += `Interlocutore corrente: ${ctx.userName}` + (ctx.userPhone ? ` (${ctx.userPhone})` : '') + `\n`;
   }  s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
-  s += `Usa markdown WA (non sono supportati i doppi es. ** testo ** su WA ma solo i singoli *testo*): *bold* _italic_ ~strike~ \`code\`.\n\n`;
+  s += `Usa markdown WA (singoli): *bold* _italic_ ~strike~ \`code\` (NON doppi es. ** testo **).\n\n`;
   return s;
 }
 
@@ -97,13 +97,6 @@ function buildPersonalWaInstructions(ctx) {
 function buildDiscordInstructions(ctx) {
   let s = `### Piattaforma: Discord\n`;
   s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n`;
-
-  if (ctx.threadName) {
-    s += `Titolo attuale: "${ctx.threadName}".\n`;
-  }
-
-  s += `\nRispondi con JSON: {"title":"...","message":"..."}.\n`;
-  s += `Lascia "title" vuoto se non serve cambiare il titolo.\n\n`;
 
   if (ctx.availableEmojis) {
     s += `Emoji server: ${ctx.availableEmojis}\n\n`;

@@ -1,8 +1,33 @@
+const fs = require('fs');
+const path = require('path');
 const { notifyAdmin } = require('../utils/adminNotifier');
 const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
+const apiLogFile = path.resolve(__dirname, '..', 'logs', 'api-request-log.txt');
+
+function ensureLogDir() {
+  const dir = path.dirname(apiLogFile);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function logApiRequest(modelName, apiUrl, body) {
+  try {
+    ensureLogDir();
+    const entry = {
+      timestamp: new Date().toISOString(),
+      model: modelName,
+      apiUrl,
+      requestBody: body,
+    };
+    fs.appendFileSync(apiLogFile, JSON.stringify(entry) + '\n');
+  } catch (err) {
+    log.warn(`Impossibile scrivere log API su file: ${err.message}`);
+  }
+}
 
 /**
  * Unified API client with retry and timeout logic.
@@ -18,6 +43,7 @@ async function callApiWithRetry(modelName, apiUrl, body) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
+      logApiRequest(modelName, apiUrl, body);
       const startTime = Date.now();
       const res = await fetch(apiUrl, {
         method: 'POST',

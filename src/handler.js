@@ -1,4 +1,4 @@
-const { callGemini, DISCORD_RESPONSE_FORMAT } = require('./ai/gemini');
+const { callGemini, buildDiscordResponseFormat } = require('./ai/gemini');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolInstructions } = require('./ai/tools');
 const { executeTool } = require('./tools');
@@ -120,7 +120,7 @@ async function handleMessage(ctx) {
         break;
       }
       
-      const responseFormat = isDiscord ? DISCORD_RESPONSE_FORMAT : null;
+      const responseFormat = isDiscord ? buildDiscordResponseFormat(ctx.threadName || '') : null;
       
       log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata Gemini (round ${rounds}/${MAX_TOOL_ROUNDS})`);
       const assistantMsg = await callGemini(messages, tools, responseFormat);

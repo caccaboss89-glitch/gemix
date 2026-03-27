@@ -5,8 +5,7 @@ const { DATA_DIR } = require('../config/constants');
 // Tool definitions for Gemini AI function calling (OpenAI-compatible format).
 // Tool descriptions are kept minimal; detailed instructions are provided when a tool is actually invoked.
 
-const VOICE_EFFECTS_DOC = `LIMITE: il testo deve essere massimo 1000 caratteri. Se supera il limite, rispondi con un normale messaggio testuale.
-
+const VOICE_EFFECTS_DOC = `
 EFFETTI VOCALI DISPONIBILI:
 
 Inline tags (inseriscili nel punto esatto):

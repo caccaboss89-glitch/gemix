@@ -22,30 +22,39 @@ async function callGemini(messages, tools = null, responseFormat = null) {
 }
 
 /**
- * Discord structured output schema for Gemini.
- * Returns { title: string, message: string }.
+ * Build a Discord structured output schema for Gemini.
+ * @param {string} [currentThreadTitle] - Optional current thread title for inline guidance
+ * @returns {object} response_format object
  */
-const DISCORD_RESPONSE_FORMAT = {
-  type: 'json_schema',
-  json_schema: {
-    name: 'discord_response',
-    strict: true,
-    schema: {
-      type: 'object',
-      properties: {
-        title: {
-          type: 'string',
-          description: 'Nuovo titolo per il thread Discord se quello attuale non è coerente con la conversazione, altrimenti stringa vuota',
-        },
-        message: {
-          type: 'string',
-          description: 'Il messaggio di risposta',
-        },
-      },
-      required: ['title', 'message'],
-      additionalProperties: false,
-    },
-  },
-};
+function buildDiscordResponseFormat(currentThreadTitle = '') {
+  const titleHint = currentThreadTitle
+    ? `Nuovo titolo per il thread Discord (titolo corrente: "${currentThreadTitle}"). Lascia vuoto se non serve cambiare il titolo.`
+    : 'Nuovo titolo per il thread Discord.';
 
-module.exports = { callGemini, DISCORD_RESPONSE_FORMAT };
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: 'discord_response',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: titleHint,
+          },
+          message: {
+            type: 'string',
+            description: 'Il messaggio di risposta',
+          },
+        },
+        required: ['title', 'message'],
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
+const DISCORD_RESPONSE_FORMAT = buildDiscordResponseFormat();
+
+module.exports = { callGemini, DISCORD_RESPONSE_FORMAT, buildDiscordResponseFormat };
