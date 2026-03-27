@@ -195,6 +195,8 @@ module.exports = {
   mediaToContentPart,
   mediaTag,
   hasHistoryImages,
+  hasHistoryDocs,
   extractLastNImages,
+  extractLastNDocs,
   limitHistoryMediaAttachments,
 };
