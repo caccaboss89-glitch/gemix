@@ -173,20 +173,18 @@ async function extractQuotedMessageContent(msg) {
     const mediaParts = [];
 
     if (quoted.hasMedia) {
-      // For quoted media, include tag text and actual media if it's from GemiX (or user wants it implicitly).
+      // For quoted media, include tag text and media content from anyone in reply.
       const filename = quoted._data?.filename || quoted._data?.caption || null;
       const tag = mediaTag(filename, quoted._data?.mimetype);
       prefix = `[In reply to: ${tag}]\n`;
 
-      if (quoted.fromMe) {
-        try {
-          const media = await quoted.downloadMedia();
-          if (media) {
-            const buffer = Buffer.from(media.data, 'base64');
-            mediaParts.push(mediaToContentPart(buffer, media.mimetype));
-          }
-        } catch {}
-      }
+      try {
+        const media = await quoted.downloadMedia();
+        if (media) {
+          const buffer = Buffer.from(media.data, 'base64');
+          mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+        }
+      } catch {}
 
       return { prefix, mediaParts };
     }

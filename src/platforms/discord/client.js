@@ -93,17 +93,15 @@ async function onDiscordMessage(msg) {
             .join(' ');
           textBody = `[In reply to: ${filetags}]\n` + textBody;
 
-          // Se la risposta è a un messaggio di GemiX con immagine, includi l'immagine in contentParts.
-          if (quotedMsg.author.id === discordClient.user.id) {
-            for (const att of quotedMsg.attachments.values()) {
-              const isImage = att.contentType?.startsWith('image/');
-              if (!isImage) continue;
-              try {
-                const res = await fetch(att.url);
-                const buffer = Buffer.from(await res.arrayBuffer());
-                quotedMediaParts.push(mediaToContentPart(buffer, att.contentType));
-              } catch {}
-            }
+          // Se la risposta è a un messaggio con immagine (di chiunque), includi l'immagine in contentParts.
+          for (const att of quotedMsg.attachments.values()) {
+            const isImage = att.contentType?.startsWith('image/');
+            if (!isImage) continue;
+            try {
+              const res = await fetch(att.url);
+              const buffer = Buffer.from(await res.arrayBuffer());
+              quotedMediaParts.push(mediaToContentPart(buffer, att.contentType));
+            } catch {}
           }
         } else if (quotedMsg.content) {
           textBody = `[In reply to: ${quotedMsg.content}]\n` + textBody;
