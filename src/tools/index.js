@@ -65,6 +65,38 @@ function _resetVoiceCount(chatKey) {
   voiceConsecutiveByChat.delete(chatKey);
 }
 
+function _isImageMediaPart(part) {
+  if (!part || part.type !== 'image_url') return false;
+  const url = part.image_url?.url || '';
+  return typeof url === 'string' && url.startsWith('data:image/');
+}
+
+function _dataUriToBuffer(dataUri) {
+  if (!dataUri || typeof dataUri !== 'string' || !dataUri.startsWith('data:')) return null;
+  const commaIndex = dataUri.indexOf(',');
+  if (commaIndex === -1) return null;
+  const prefix = dataUri.slice(0, commaIndex);
+  const base64 = dataUri.slice(commaIndex + 1);
+  const mimePart = prefix.split(';')[0];
+  const mimetype = mimePart.replace('data:', '') || 'application/octet-stream';
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    return { buffer, mimetype };
+  } catch {
+    return null;
+  }
+}
+
+function _mimeToExtension(mimetype) {
+  if (!mimetype || typeof mimetype !== 'string') return 'bin';
+  const parts = mimetype.split('/');
+  if (parts.length < 2) return 'bin';
+  let ext = parts[1];
+  if (ext.includes('+')) ext = ext.split('+')[0];
+  if (ext.includes(';')) ext = ext.split(';')[0];
+  return ext || 'bin';
+}
+
 /**
  * Resolve the target email for delivery.
  * Non-member: blocked. Admin: any email. Active member (non-dynamic): other members. Otherwise: self.
@@ -140,6 +172,59 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           responseCtx.attachments.push(...imageResult.attachments);
         }
         result = imageResult.text;
+        break;
+      }
+
+      case 'read_history_images': {
+        const count = Number(args.count) || 0;
+        if (!Number.isInteger(count) || count <= 0) {
+          result = '❌ count deve essere un numero intero positivo.';
+          break;
+        }
+
+        const history = Array.isArray(userCtx.history) ? userCtx.history : [];
+        const imageEntries = [];
+
+        for (const h of history) {
+          if (!Array.isArray(h.content)) continue;
+          for (const part of h.content) {
+            if (_isImageMediaPart(part)) {
+              imageEntries.push(part);
+            }
+          }
+        }
+
+        if (imageEntries.length === 0) {
+          result = 'Nessuna immagine disponibile in cronologia da recuperare.';
+          break;
+        }
+
+        const selected = imageEntries.slice(-count);
+        let attachedCount = 0;
+
+        for (let i = 0; i < selected.length; i++) {
+          const part = selected[i];
+          const dataUri = part.image_url?.url;
+          const parsed = _dataUriToBuffer(dataUri);
+          if (!parsed) continue;
+          const ext = _mimeToExtension(parsed.mimetype);
+          const fileName = `history_image_${i + 1}.${ext}`;
+          responseCtx.attachments.push({
+            name: fileName,
+            buffer: parsed.buffer,
+            mimetype: parsed.mimetype,
+          });
+          attachedCount++;
+        }
+
+        if (attachedCount === 0) {
+          result = 'Nessuna immagine valida trovata/allegabile in cronologia.';
+        } else {
+          result = `✅ ${attachedCount} immagine${attachedCount !== 1 ? 'i' : ''} dalla cronologia aggiunta come allegato per il prossimo round.`;
+          if (attachedCount < count) {
+            result += ` (richieste ${count}, trovate ${attachedCount})`;
+          }
+        }
         break;
       }
 

@@ -34,6 +34,7 @@ const TOOL_INSTRUCTIONS = {
   send_whatsapp_message: `Rispondi solo con la chiamata al tool. È possibile allegare eventuali file nel buffer.`,
   clear_attachments: `Rispondi solo con la chiamata al tool.`,
   read_music_stats: `Rispondi solo con la chiamata al tool.`,
+  read_history_images: `Rispondi solo con la chiamata al tool.`,
 };
 // Varianti admin/membro aggiuntive saranno usate per impostare i parametri che possono cambiare.
 
@@ -80,6 +81,26 @@ function _markReadAboutMeUsed(chatKey) {
 
 function _isReadAboutMeUsed(chatKey) {
   return chatKey && readAboutMeUsedByChat.has(chatKey);
+}
+
+function _hasHistoryImages(history) {
+  if (!Array.isArray(history)) return false;
+  for (const h of history) {
+    const parts = Array.isArray(h.content) ? h.content : [];
+    for (const p of parts) {
+      const url = p?.image_url?.url || p?.url || '';
+      if (typeof url === 'string' && url.startsWith('data:image/')) {
+        return true;
+      }
+      if (p?.type === 'image_url' && p?.image_url?.url) {
+        return true;
+      }
+      if (p?.type === 'image') {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // Carica lo stato persistente all'avvio del modulo
@@ -332,6 +353,14 @@ const BASE_TOOLS = [
     required: ['query'],
   }),
   makeTool({
+    name: 'read_history_images',
+    description: 'Recupera le ultime immagini presenti nella cronologia e le aggiunge come allegati per il prossimo round.',
+    properties: {
+      count: { type: 'integer', description: 'Numero di immagini da recuperare (ultime n).', minimum: 1 },
+    },
+    required: ['count'],
+  }),
+  makeTool({
     name: 'read_about_me',
     description: 'Invia sulla chat corrente il testo della storia di GemiX, utile per presentarti e dire chi sei.',
     properties: {},
@@ -456,6 +485,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools = tools.filter(t => t.function.name !== 'read_about_me');
   }
 
+  // Rimuovi il tool read_history_images se non ci sono immagini in cronologia
+  if (!_hasHistoryImages(userCtx.history)) {
+    tools = tools.filter(t => t.function.name !== 'read_history_images');
+  }
+
   // Disabilita il tool vocale su Discord
   if (isDiscord) {
     tools = tools.filter(t => t.function.name !== 'send_voice_message');
@@ -516,6 +550,14 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
       required: ['query'],
     }),
     makeTool({
+      name: 'read_history_images',
+      description: 'Recupera le ultime immagini dalla cronologia per il round successivo (minimizza input testuale).',
+      properties: {
+        count: { type: 'integer', description: 'Numero di ultime immagini da recuperare (1-n).', minimum: 1 },
+      },
+      required: ['count'],
+    }),
+    makeTool({
       name: 'generate_pdf',
       description: 'Genera un file PDF. Il PDF verrà accumulato come allegato e inviato insieme al messaggio di consegna (WhatsApp o email).',
       properties: {
@@ -525,6 +567,10 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
       required: ['title', 'content'],
     }),
   ];
+
+  if (!_hasHistoryImages(userCtx.history)) {
+    tools = tools.filter(t => t.function.name !== 'read_history_images');
+  }
 
   // Delivery tools — descriptions vary by permission level
   if (isAdmin) {

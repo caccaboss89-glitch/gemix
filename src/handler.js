@@ -51,6 +51,7 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
+      history: ctx.history || [],
     };
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
@@ -69,10 +70,15 @@ async function handleMessage(ctx) {
         } else if (Array.isArray(h.content)) {
           const textPart = h.content.find(p => p.type === 'text');
           const mediaParts = h.content.filter(p => p.type !== 'text');
+          const imageMediaParts = mediaParts.filter(p => {
+            const url = p.image_url?.url || '';
+            return typeof url === 'string' && url.startsWith('data:image/');
+          });
+          const nonImageMediaParts = mediaParts.filter(p => !imageMediaParts.includes(p));
           const textLine = textPart ? textPart.text : '[media]';
           historyLines.push(textLine);
 
-          if (mediaParts.length > 0) {
+          if (nonImageMediaParts.length > 0) {
             const label = h.role === 'assistant'
               ? `[File dalla cronologia inviato da GemiX: ${textLine}]`
               : (textPart ? textPart.text : '[File dalla cronologia]');
@@ -80,10 +86,13 @@ async function handleMessage(ctx) {
               role: 'user',
               content: [
                 { type: 'text', text: label },
-                ...mediaParts,
+                ...nonImageMediaParts,
               ],
             });
           }
+
+          // Tutte le immagini/sticker/gif vengono mantenute in ctx.history ma non incluse
+          // nel prompt iniziale per risparmiare token. Possono essere recuperate con apposito tool.
         }
       }
 
