@@ -8,6 +8,13 @@ const { createLogger } = require('./utils/logger');
 
 const log = createLogger('Handler');
 
+function removeToolInstructionMessages(messages) {
+  return messages.filter(m => {
+    if (m.role !== 'assistant' || typeof m.content !== 'string') return true;
+    return !m.content.startsWith('ISTRUZIONI per lo strumento');
+  });
+}
+
 /**
  * Main message handler. Takes a normalized context and returns a response object.
  * Processes the message through Gemini AI with tool calls and multimodal content support.
@@ -48,7 +55,7 @@ async function handleMessage(ctx) {
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
-    const messages = [
+    let messages = [
       { role: 'system', content: systemPrompt },
     ];
 
@@ -109,6 +116,7 @@ async function handleMessage(ctx) {
     const isDiscord = ctx.platform === PLATFORM_DISCORD;
 
     while (rounds < MAX_TOOL_ROUNDS) {
+      messages = removeToolInstructionMessages(messages);
       rounds++;
       
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
@@ -133,18 +141,15 @@ async function handleMessage(ctx) {
         }
         messages.push(assistantMsg);
 
-        const usedToolInstructions = new Set();
         for (const tc of assistantMsg.tool_calls) {
           const toolName = tc.function.name;
-          if (!usedToolInstructions.has(toolName)) {
-            const toolInstr = getToolInstructions(toolName);
-            if (toolInstr) {
-              messages.push({
-                role: 'assistant',
-                content: `ISTRUZIONI per lo strumento ${toolName}: ${toolInstr}`,
-              });
-            }
-            usedToolInstructions.add(toolName);
+          const toolInstr = getToolInstructions(toolName);
+          messages = removeToolInstructionMessages(messages);
+          if (toolInstr && toolInstr.trim() !== '') {
+            messages.push({
+              role: 'assistant',
+              content: `ISTRUZIONI per lo strumento ${toolName}: ${toolInstr}`,
+            });
           }
           try {
             log.info(`   Esecuzione: ${tc.function.name}`);

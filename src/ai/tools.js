@@ -22,18 +22,18 @@ Wrapping tags (avvolgi il testo):
 Esempio: "Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!"`;
 
 const TOOL_INSTRUCTIONS = {
-  web_search: `Cerca informazioni aggiornate sul web. Usa questo tool quando devi rispondere a domande che richiedono fatti attuali o dettagli non presenti nella tua memoria. Parametro: query (string).`,
-  image_search: `Cerca immagini sul web. Le immagini trovate vengono accumulate come allegati e inviate insieme alla risposta o tramite i tool di consegna (WhatsApp/email). Parametri: query (string), count (1-4).`,
-  read_about_me: `Restituisce il contenuto del file "aboutme" di GemiX. Quando usi questo tool, invia quel testo come unica risposta finale (nessun commento aggiuntivo).`,
-  send_voice_message: `(Azioni) Rispondi solo con la chiamata al tool. Genera un messaggio vocale (solo WhatsApp). Il parametro "text" è il contenuto da convertire (max 1000 caratteri). Usa i tag vocali per effetti. Includi nel testo tutto quello che devi dire nella chat in cui lo usi. Non inviare altra risposta testuale quando chiami questo tool. ${VOICE_EFFECTS_DOC}`,
-  schedule_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Programma attività future. Ogni task include taskType (static/dynamic), content, scheduledAt (ISO 8601 Europe/Rome) e destinazioni (WhatsApp privato, gruppo, email). In modalità dynamic, content è un prompt per Grok.`,
-  read_my_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Mostra i task programmati dell'utente corrente (e opzionalmente del gruppo corrente).`,
-  remove_my_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Rimuovi task programmati dell'utente corrente usando gli ID forniti.`,
-  read_server_rules: `(Azioni) Rispondi solo con la chiamata al tool. Leggi il regolamento del server Discord.`,
-  generate_pdf: `(Azioni) Rispondi solo con la chiamata al tool. Genera un PDF da testo. Fornisci titolo e contenuto.`,
-  send_email: `(Azioni) Rispondi solo con la chiamata al tool. Invia email a un destinatario. Fornisci recipientName (o recipientEmail per admin), subject e body. Usa includeAttachments=false per evitare di allegare il buffer.`,
-  send_whatsapp_message: `(Azioni) Rispondi solo con la chiamata al tool. Invia messaggio WhatsApp a un membro attivo; allegati accumulati verranno inclusi. Fornisci recipientName e message. Usa includeAttachments=false per evitare di allegare il buffer. Usa clearAttachmentsAfterSend=true per evitare che il buffer venga inviato nella chat corrente.`,
-  read_music_stats: `(Azioni) Rispondi solo con la chiamata al tool. Leggi statistiche musicali del bot (MusicWrap).`,
+  web_search: `Rispondi solo con la chiamata al tool.`,
+  image_search: `Rispondi solo con la chiamata al tool. Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
+  send_voice_message: `Rispondi solo con la chiamata al tool. Genera vocale (solo WhatsApp), testo TTS max 1000 caratteri, è possibile allegare eventuali file nel buffer. ${VOICE_EFFECTS_DOC}`,
+  schedule_tasks: `Rispondi solo con la chiamata al tool.`,
+  read_my_tasks: `Rispondi solo con la chiamata al tool.`,
+  remove_my_tasks: `Rispondi solo con la chiamata al tool.`,
+  read_server_rules: `Rispondi solo con la chiamata al tool.`,
+  generate_pdf: `Rispondi solo con la chiamata al tool. Genera PDF con titolo+contenuto, verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
+  send_email: `Rispondi solo con la chiamata al tool. È possibile allegare eventuali file nel buffer.`,
+  send_whatsapp_message: `Rispondi solo con la chiamata al tool. È possibile allegare eventuali file nel buffer.`,
+  clear_attachments: `Rispondi solo con la chiamata al tool.`,
+  read_music_stats: `Rispondi solo con la chiamata al tool.`,
 };
 // Varianti admin/membro aggiuntive saranno usate per impostare i parametri che possono cambiare.
 
@@ -124,10 +124,6 @@ function makeVoiceTool({ includeRecipientName = false, includeRecipientPhone = f
       type: 'boolean',
       description: 'Se false, non allegare al messaggio gli eventuali file accumulati in buffer.',
     },
-    clearAttachmentsAfterSend: {
-      type: 'boolean',
-      description: 'Se true, cancella il buffer degli allegati dopo l\'invio (non verranno inviati nella chat corrente).',
-    },
   };
 
   if (includeRecipientName) {
@@ -158,10 +154,6 @@ function makeWhatsAppTool({ includeRecipientName = false, includeRecipientPhone 
     includeAttachments: {
       type: 'boolean',
       description: 'Se false, non allegare al messaggio gli eventuali file accumulati in buffer.',
-    },
-    clearAttachmentsAfterSend: {
-      type: 'boolean',
-      description: 'Se true, cancella il buffer degli allegati dopo l\'invio (non verranno inviati nella chat corrente).',
     },
   };
 
@@ -200,10 +192,6 @@ function makeEmailTool({ includeRecipientName = false, includeRecipientEmail = f
     includeAttachments: {
       type: 'boolean',
       description: 'Se false, non allegare all\'email gli eventuali file accumulati in buffer.',
-    },
-    clearAttachmentsAfterSend: {
-      type: 'boolean',
-      description: 'Se true, cancella il buffer degli allegati dopo l\'invio (non verranno inviati nella chat corrente).',
     },
   };
 
@@ -385,6 +373,11 @@ const ACTIVE_MEMBER_TOOLS = [
     properties: {},
   }),
   makeTool({
+    name: 'clear_attachments',
+    description: 'Svuota il buffer degli allegati accumulati.',
+    properties: {},
+  }),
+  makeTool({
     name: 'generate_pdf',
     description: 'Genera un PDF da testo.',
     properties: {
@@ -468,6 +461,15 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools = tools.filter(t => t.function.name !== 'send_voice_message');
   }
 
+  // Active members + admins have access alla funzione di pulizia allegati
+  if ((isActiveMember || isAdmin) && !tools.some(t => t.function.name === 'clear_attachments')) {
+    tools.push(makeTool({
+      name: 'clear_attachments',
+      description: 'Svuota il buffer degli allegati accumulati.',
+      properties: {},
+    }));
+  }
+
   if (isAdmin) {
     const adminScheduleTool = makeScheduleTasksTool({ includeRecipientName: true, includeRecipientPhone: true });
 
@@ -528,6 +530,7 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
   if (isAdmin) {
     // Add music stats for admin
     tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'clear_attachments'));
 
     tools.push(makeWhatsAppTool({ includeRecipientName: true, includeRecipientPhone: true }));
     if (!isDiscord) {
@@ -537,6 +540,7 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
   } else if (isActiveMember) {
     // Add music stats for active members
     tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'clear_attachments'));
 
     tools.push(makeWhatsAppTool());
     if (!isDiscord) {

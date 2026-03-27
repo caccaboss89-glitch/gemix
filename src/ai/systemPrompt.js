@@ -50,17 +50,14 @@ function buildSystemPrompt(ctx) {
     prompt += `Numero WhatsApp interlocutore: ${ctx.userPhone}\n\n`;
   }
 
-  prompt += `### Uso degli strumenti\n`;
-  prompt += `- Se devi usare un tool (es. invio di email o messaggi a terzi), assicurarti di farlo solo prima di fornire la risposta finale.\n`;
+  prompt += `\n`;
+  prompt += `### Tool\nPuoi usare i tool disponibili (es. invio di email o messaggi a terzi), non fornire ulteriore testo di risposta quando li chiami e assicurarti di farlo solo prima di fornire la risposta finale.\n`;
+  if (!isActiveMember) {
+    prompt += `Alcuni tool (PDF, email, invio WhatsApp a terzi) NON sono disponibili per questo utente. Se li chiede, spiegalo brevemente.\n`;
+  }
 
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
     prompt += `- Preferisci risposte vocali se il messaggio e breve e non tecnico.\n`;
-  }
-
-  prompt += `\n`;
-  prompt += `### Tool\nPuoi usare i tool disponibili.\n`;
-  if (!isActiveMember) {
-    prompt += `Alcuni tool (PDF, email, invio WhatsApp a terzi) NON sono disponibili per questo utente. Se li chiede, spiegalo brevemente.\n`;
   }
   prompt += `\n`;
 

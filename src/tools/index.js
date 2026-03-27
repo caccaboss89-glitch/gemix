@@ -119,7 +119,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
   if (isActiveMemberOnlyTool(name) && !userCtx.isActiveMember) {
     return {
       toolCallId: toolCall.id,
-      result: `Errore: lo strumento "${name}" è disponibile solo per i membri attivi del server.`,
+      result: `❌ Errore: lo strumento "${name}" è disponibile solo per i membri attivi del server.`,
     };
   }
 
@@ -166,7 +166,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         // Delivery to a specific recipient (or dynamic task forced delivery)
         if (dynamicTaskCtx && (args.recipientName || args.recipientPhone || dynamicTaskCtx.isDynamic)) {
           const includeAttachments = args.includeAttachments !== false;
-          const clearAttachments = args.clearAttachmentsAfterSend !== false;
 
           if (args.recipientName && !dynamicTaskCtx.isDynamic) {
             const member = findMemberByName(args.recipientName);
@@ -197,9 +196,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             }
 
             const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
-            if (clearAttachments) {
-              responseCtx.attachments = [];
-            }
 
             dynamicTaskCtx.contactedWA.add(targetJid.jid);
             result = `Messaggio vocale inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
@@ -207,7 +203,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
               _incrementVoiceCount(chatKey);
             }
           } catch (err) {
-            result = `Errore invio vocale: ${err.message}`;
+            result = `❌ Errore invio vocale: ${err.message}`;
           }
           break;
         }
@@ -215,7 +211,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         // Se specificato un destinatario, invia il vocale direttamente a quella persona
         if (args.recipientName || args.recipientPhone) {
           if (!userCtx.isActiveMember) {
-            result = 'Errore: solo i membri attivi possono inviare messaggi vocali ad altri.';
+            result = '❌ Errore: solo i membri attivi possono inviare messaggi vocali ad altri.';
             break;
           }
           result = await sendWhatsAppVoice(args.recipientName, cleanText, {
@@ -328,7 +324,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         // Dynamic task mode: enforce delivery rules
         if (dynamicTaskCtx) {
           const includeAttachments = args.includeAttachments !== false;
-          const clearAttachments = args.clearAttachmentsAfterSend !== false;
           const targetEmail = _resolveDynamicEmail(args, userCtx, dynamicTaskCtx);
           if (targetEmail.error) { result = targetEmail.error; break; }
           if (dynamicTaskCtx.contactedEmail.has(targetEmail.email)) {
@@ -346,19 +341,16 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
               `<div style="font-family:sans-serif">${(args.body || '').replace(/\n/g, '<br>')}</div>`,
               emailAttachments
             );
-            if (clearAttachments) {
-              responseCtx.attachments = [];
-            }
             dynamicTaskCtx.contactedEmail.add(targetEmail.email);
             result = `Email inviata con successo a ${targetEmail.display}${emailAttachments.length > 0 ? ` con ${emailAttachments.length} allegato/i` : ''}.`;
           } catch (err) {
-            result = `Errore invio email: ${err.message}`;
+            result = `❌ Errore invio email: ${err.message}`;
           }
           break;
         }
 
         if (!userCtx.isActiveMember) {
-          result = 'Errore: solo i membri attivi possono inviare email.';
+          result = '❌ Errore: solo i membri attivi possono inviare email.';
           break;
         }
         // Check that user is not sending to themselves
@@ -369,7 +361,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         }
         try {
           const includeAttachments = args.includeAttachments !== false;
-          const clearAttachments = args.clearAttachmentsAfterSend !== false;
 
           // Build accumulated attachments from responseCtx (if requested)
           const accumulatedAttachments = includeAttachments
@@ -383,12 +374,8 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             imageUrls: args.imageUrls,
             accumulatedAttachments,
           });
-
-          if (clearAttachments) {
-            responseCtx.attachments = [];
-          }
         } catch (err) {
-          result = `Errore invio email: ${err.message}`;
+          result = `❌ Errore invio email: ${err.message}`;
         }
         break;
       }
@@ -397,7 +384,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         // Dynamic task mode: enforce delivery rules
         if (dynamicTaskCtx) {
           const includeAttachments = args.includeAttachments !== false;
-          const clearAttachments = args.clearAttachmentsAfterSend === true;
 
           const targetJid = _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx);
           if (targetJid.error) { result = targetJid.error; break; }
@@ -418,20 +404,17 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             }
 
             const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
-            if (clearAttachments) {
-              responseCtx.attachments = [];
-            }
 
             dynamicTaskCtx.contactedWA.add(targetJid.jid);
             result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
           } catch (err) {
-            result = `Errore invio WhatsApp: ${err.message}`;
+            result = `❌ Errore invio WhatsApp: ${err.message}`;
           }
           break;
         }
         
         if (!userCtx.isActiveMember) {
-          result = 'Errore: solo i membri attivi possono inviare messaggi WhatsApp ad altri.';
+          result = '❌ Errore: solo i membri attivi possono inviare messaggi WhatsApp ad altri.';
           break;
         }
         // Check that user is not sending to themselves
@@ -447,7 +430,6 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           });
 
           const includeAttachments = args.includeAttachments !== false;
-          const clearAttachments = args.clearAttachmentsAfterSend !== false;
           let attachmentsSent = 0;
 
           // Send accumulated attachments if requested
@@ -478,12 +460,16 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
             }
           }
 
-          if (clearAttachments) {
-            responseCtx.attachments = [];
-          }
+          // Non gestito qui: il nuovo strumento clear_attachments mantiene il comportamento di svuotare il buffer.
         } catch (err) {
-          result = `Errore invio WhatsApp: ${err.message}`;
+          result = `❌ Errore invio WhatsApp: ${err.message}`;
         }
+        break;
+      }
+
+      case 'clear_attachments': {
+        responseCtx.attachments = [];
+        result = 'Buffer allegati cancellato.';
         break;
       }
 
@@ -496,7 +482,7 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         result = `Strumento "${name}" non riconosciuto.`;
     }
   } catch (err) {
-    result = `Errore nell'esecuzione di ${name}: ${err.message}`;
+    result = `❌ Errore nell'esecuzione di ${name}: ${err.message}`;
   }
 
   return { toolCallId: toolCall.id, result: String(result) };
