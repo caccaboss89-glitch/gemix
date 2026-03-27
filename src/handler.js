@@ -39,6 +39,8 @@ async function handleMessage(ctx) {
 
     const systemPrompt = buildSystemPrompt(ctx);
 
+    const historyHasImages = hasHistoryImages(ctx.history);
+
     const userCtx = {
       isActiveMember,
       isAdmin: userIsAdmin,
@@ -53,7 +55,7 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      hasHistoryImages,
+      hasHistoryImages: historyHasImages,
       historyFull: ctx.history || [],
     };
 
@@ -63,7 +65,6 @@ async function handleMessage(ctx) {
       { role: 'system', content: systemPrompt },
     ];
 
-    const historyHasImages = hasHistoryImages(ctx.history);
     const filteredHistory = ctx.history && ctx.history.length > 0
       ? limitHistoryMediaAttachments(JSON.parse(JSON.stringify(ctx.history)), 0, 3)
       : [];
