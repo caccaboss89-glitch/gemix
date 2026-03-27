@@ -43,7 +43,27 @@ function scheduleTasks(tasks, ctx) {
       continue;
     }
 
+    if ((task.pdfContent || task.pdfTitle) && !ctx.isActiveMember && !ctx.isAdmin) {
+      results.push('❌ PDF allegato disponibile solo per membri attivi e admin.');
+      continue;
+    }
+
+    if (task.sendToGroup && !ctx.isGroup) {
+      results.push('⚠️ Ignorato sendToGroup: non sei in un gruppo valido per questa piattaforma.');
+      task.sendToGroup = false;
+    }
+
     const isGroupTask = task.sendToGroup && ctx.isGroup && ctx.groupTaskFileId;
+    if (task.sendToGroup && !isGroupTask) {
+      results.push('❌ sendToGroup richiesto ma non è disponibile un file task gruppo.');
+      continue;
+    }
+
+    if (task.sendToPrivateWhatsApp && (task.recipientPhone || task.recipientName) && !ctx.isAdmin) {
+      results.push('❌ recipientPhone/recipientName su WhatsApp privato è riservato ad admin.');
+      continue;
+    }
+
     const fileId = isGroupTask ? ctx.groupTaskFileId : ctx.taskFileId;
     const filePath = path.join(TASKS_DIR, `${fileId}.json`);
 

@@ -43,6 +43,7 @@ async function handleMessage(ctx) {
       isGroup: ctx.isGroup,
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
+      platform: ctx.platform,
     };
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);

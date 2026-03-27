@@ -264,14 +264,24 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
 
       case 'read_my_tasks': {
         const groupFileId = userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null;
-        result = readTasks(userCtx.taskFileId, groupFileId, args.includeGroupTasks);
+        const includeGroup = Boolean(args.includeGroupTasks) && userCtx.isGroup && userCtx.platform && userCtx.platform.startsWith('whatsapp');
+        if (args.includeGroupTasks && !includeGroup) {
+          result = '⚠️ includeGroupTasks non disponibile: solo in gruppo WhatsApp.';
+          break;
+        }
+        result = readTasks(userCtx.taskFileId, groupFileId, includeGroup);
         break;
       }
 
       case 'remove_my_tasks': {
-        const fileId = args.fromGroup && userCtx.isGroup
+        const allowGroup = userCtx.isGroup && userCtx.platform && userCtx.platform.startsWith('whatsapp');
+        const fileId = args.fromGroup && allowGroup
           ? getGroupTaskFileId(userCtx.groupId)
           : userCtx.taskFileId;
+        if (args.fromGroup && !allowGroup) {
+          result = '⚠️ fromGroup non disponibile: solo in gruppo WhatsApp. Operazione sui task personali.';
+          break;
+        }
         result = removeTasks(args.taskIds, fileId);
         break;
       }

@@ -307,7 +307,7 @@ const BASE_TOOLS = [
     name: 'web_search',
     description: 'Cerca informazioni aggiornate sul web.',
     properties: {
-      query: { type: 'string', description: 'La query di ricerca (in inglese per risultati migliori)' },
+      query: { type: 'string', description: 'La query di ricerca' },
     },
     required: ['query'],
   }),
@@ -315,14 +315,14 @@ const BASE_TOOLS = [
     name: 'image_search',
     description: 'Cerca immagini sul web.',
     properties: {
-      query: { type: 'string', description: 'Cosa cercare nelle immagini (in inglese per risultati migliori)' },
+      query: { type: 'string', description: 'Cosa cercare nelle immagini' },
       count: { type: 'integer', description: 'Numero immagini da inviare (1-4). Default 1.' },
     },
     required: ['query'],
   }),
   makeTool({
     name: 'read_about_me',
-    description: 'Restituisce il testo della storia di GemiX, utile per presentarti e dire chi sei. Non usarlo MAI se ti sei già presentato nella conversazione corrente.',
+    description: 'Invia sulla chat corrente il testo della storia di GemiX, utile per presentarti e dire chi sei.',
     properties: {},
   }),
   makeVoiceTool(),
@@ -388,6 +388,42 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const chatKey = _getChatKey(userCtx);
   let tools = isActiveMember ? [...BASE_TOOLS, ...ACTIVE_MEMBER_TOOLS] : [...BASE_TOOLS];
 
+  const isWhatsAppGroup = userCtx.platform && userCtx.platform.startsWith('whatsapp') && userCtx.isGroup;
+
+  // 1) filter capabilities in schema by context to save token usage in tool calls
+  tools = tools.map(tool => {
+    if (tool.function.name === 'read_my_tasks' && !isWhatsAppGroup) {
+      const clone = JSON.parse(JSON.stringify(tool));
+      delete clone.function.parameters.properties.includeGroupTasks;
+      return clone;
+    }
+
+    if (tool.function.name === 'remove_my_tasks' && !isWhatsAppGroup) {
+      const clone = JSON.parse(JSON.stringify(tool));
+      delete clone.function.parameters.properties.fromGroup;
+      return clone;
+    }
+
+    if (tool.function.name === 'schedule_tasks') {
+      const clone = JSON.parse(JSON.stringify(tool));
+      const taskProps = clone.function.parameters.properties.tasks.items.properties;
+
+      if (!isWhatsAppGroup) {
+        delete taskProps.sendToGroup;
+      }
+
+      if (!isActiveMember && !isAdmin) {
+        delete taskProps.sendToEmail;
+        delete taskProps.pdfContent;
+        delete taskProps.pdfTitle;
+      }
+
+      return clone;
+    }
+
+    return tool;
+  });
+
   if (_isReadAboutMeUsed(chatKey)) {
     tools = tools.filter(t => t.function.name !== 'read_about_me');
   }
@@ -399,7 +435,14 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
       if (t.function.name === 'send_voice_message') return makeVoiceTool({ includeRecipientName: true, includeRecipientPhone: true });
       if (t.function.name === 'send_whatsapp_message') return makeWhatsAppTool({ includeRecipientName: true, includeRecipientPhone: true });
       if (t.function.name === 'send_email') return makeEmailTool({ includeRecipientName: true, includeRecipientEmail: true });
-      if (t.function.name === 'schedule_tasks') return adminScheduleTool;
+      if (t.function.name === 'schedule_tasks') {
+        let filtered = adminScheduleTool;
+        if (!isWhatsAppGroup) {
+          filtered = JSON.parse(JSON.stringify(filtered));
+          delete filtered.function.parameters.properties.tasks.items.properties.sendToGroup;
+        }
+        return filtered;
+      }
       return t;
     });
   } else if (isActiveMember) {
