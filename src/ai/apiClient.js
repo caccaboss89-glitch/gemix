@@ -14,6 +14,29 @@ function ensureLogDir() {
   }
 }
 
+function _formatRequestBody(body) {
+  if (!body || !Array.isArray(body.tools)) {
+    return JSON.stringify(body);
+  }
+
+  const base = { ...body };
+  const tools = base.tools;
+  delete base.tools;
+
+  const baseJson = JSON.stringify(base, null, 2);
+  const toolsJson = tools
+    .map(tool => JSON.stringify(tool, null, 2))
+    .join(',\n\n');
+
+  if (Object.keys(base).length === 0) {
+    return `{
+  "tools": [\n${toolsJson.split('\n').map(line => `    ${line}`).join('\n')}\n  ]\n}`;
+  }
+
+  return baseJson.replace(/\n\}$/, '') +
+    `,\n  "tools": [\n${toolsJson.split('\n').map(line => `    ${line}`).join('\n')}\n  ]\n}`;
+}
+
 function logApiRequest(modelName, apiUrl, body) {
   try {
     ensureLogDir();
@@ -21,7 +44,7 @@ function logApiRequest(modelName, apiUrl, body) {
       timestamp: new Date().toISOString(),
       model: modelName,
       apiUrl,
-      requestBody: body,
+      requestBody: _formatRequestBody(body),
     };
     fs.appendFileSync(apiLogFile, JSON.stringify(entry) + '\n');
   } catch (err) {
