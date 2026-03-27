@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR } = require('../config/constants');
+const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
 
 // Tool definitions for Gemini AI function calling (OpenAI-compatible format).
 // Tool descriptions are kept minimal; detailed instructions are provided when a tool is actually invoked.
@@ -25,7 +25,7 @@ const TOOL_INSTRUCTIONS = {
   web_search: `Cerca informazioni aggiornate sul web. Usa questo tool quando devi rispondere a domande che richiedono fatti attuali o dettagli non presenti nella tua memoria. Parametro: query (string).`,
   image_search: `Cerca immagini sul web. Le immagini trovate vengono accumulate come allegati e inviate insieme alla risposta o tramite i tool di consegna (WhatsApp/email). Parametri: query (string), count (1-4).`,
   read_about_me: `Restituisce il contenuto del file "aboutme" di GemiX. Quando usi questo tool, invia quel testo come unica risposta finale (nessun commento aggiuntivo).`,
-  send_voice_message: `(Azioni) Rispondi solo con la chiamata al tool. Genera un messaggio vocale. Il parametro "text" è il contenuto da convertire (max 1000 caratteri). Usa i tag vocali per effetti. Includi nel testo tutto quello che devi dire nella chat in cui lo usi. Non inviare altra risposta testuale quando chiami questo tool. ${VOICE_EFFECTS_DOC}`,
+  send_voice_message: `(Azioni) Rispondi solo con la chiamata al tool. Genera un messaggio vocale (solo WhatsApp). Il parametro "text" è il contenuto da convertire (max 1000 caratteri). Usa i tag vocali per effetti. Includi nel testo tutto quello che devi dire nella chat in cui lo usi. Non inviare altra risposta testuale quando chiami questo tool. ${VOICE_EFFECTS_DOC}`,
   schedule_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Programma attività future. Ogni task include taskType (static/dynamic), content, scheduledAt (ISO 8601 Europe/Rome) e destinazioni (WhatsApp privato, gruppo, email). In modalità dynamic, content è un prompt per Grok.`,
   read_my_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Mostra i task programmati dell'utente corrente (e opzionalmente del gruppo corrente).`,
   remove_my_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Rimuovi task programmati dell'utente corrente usando gli ID forniti.`,
@@ -146,7 +146,7 @@ function makeVoiceTool({ includeRecipientName = false, includeRecipientPhone = f
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Invia un messaggio vocale (max 1000 caratteri). ',
+    description: 'Invia un messaggio vocale. ',
     properties,
     required: ['text'],
   });
@@ -388,7 +388,9 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const chatKey = _getChatKey(userCtx);
   let tools = isActiveMember ? [...BASE_TOOLS, ...ACTIVE_MEMBER_TOOLS] : [...BASE_TOOLS];
 
-  const isWhatsAppGroup = userCtx.platform && userCtx.platform.startsWith('whatsapp') && userCtx.isGroup;
+  const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
+  const isWhatsAppGroup = isWhatsApp && userCtx.isGroup;
+  const isDiscord = userCtx.platform === PLATFORM_DISCORD;
 
   // 1) filter capabilities in schema by context to save token usage in tool calls
   tools = tools.map(tool => {
@@ -428,6 +430,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools = tools.filter(t => t.function.name !== 'read_about_me');
   }
 
+  // Disabilita il tool vocale su Discord
+  if (isDiscord) {
+    tools = tools.filter(t => t.function.name !== 'send_voice_message');
+  }
+
   if (isAdmin) {
     const adminScheduleTool = makeScheduleTasksTool({ includeRecipientName: true, includeRecipientPhone: true });
 
@@ -447,7 +454,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     });
   } else if (isActiveMember) {
     tools = tools.map(t => {
-      if (t.function.name === 'send_voice_message') return makeVoiceTool({ includeRecipientName: true });
+      if (t.function.name === 'send_voice_message' && isWhatsApp) return makeVoiceTool({ includeRecipientName: true });
       return t;
     });
   }
@@ -490,19 +497,25 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
 
     tools.push(makeWhatsAppTool({ includeRecipientName: true, includeRecipientPhone: true }));
-    tools.push(makeVoiceTool({ includeRecipientName: true, includeRecipientPhone: true }));
+    if (!isDiscord) {
+      tools.push(makeVoiceTool({ includeRecipientName: true, includeRecipientPhone: true }));
+    }
     tools.push(makeEmailTool({ includeRecipientName: true, includeRecipientEmail: true }));
   } else if (isActiveMember) {
     // Add music stats for active members
     tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
 
     tools.push(makeWhatsAppTool());
-    tools.push(makeVoiceTool());
+    if (!isDiscord) {
+      tools.push(makeVoiceTool());
+    }
     tools.push(makeEmailTool());
   } else {
     // Non-active member: only WA to self
     tools.push(makeWhatsAppTool());
-    tools.push(makeVoiceTool());
+    if (!isDiscord) {
+      tools.push(makeVoiceTool());
+    }
   }
 
   return tools;
