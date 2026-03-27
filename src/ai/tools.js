@@ -31,7 +31,7 @@ const TOOL_INSTRUCTIONS = {
   remove_my_tasks: `(Azioni) Rispondi solo con la chiamata al tool. Rimuovi task programmati dell'utente corrente usando gli ID forniti.`,
   read_server_rules: `(Azioni) Rispondi solo con la chiamata al tool. Leggi il regolamento del server Discord.`,
   generate_pdf: `(Azioni) Rispondi solo con la chiamata al tool. Genera un PDF da testo. Fornisci titolo e contenuto.`,
-  send_email: `(Azioni) Rispondi solo con la chiamata al tool. Invia email a un membro attivo; allegati accumulati (immagini, PDF) verranno inclusi automaticamente. Fornisci recipientName, subject e body. Usa includeAttachments=false per evitare di allegare il buffer.`,
+  send_email: `(Azioni) Rispondi solo con la chiamata al tool. Invia email a un destinatario. Fornisci recipientName (o recipientEmail per admin), subject e body. Usa includeAttachments=false per evitare di allegare il buffer.`,
   send_whatsapp_message: `(Azioni) Rispondi solo con la chiamata al tool. Invia messaggio WhatsApp a un membro attivo; allegati accumulati verranno inclusi. Fornisci recipientName e message. Usa includeAttachments=false per evitare di allegare il buffer. Usa clearAttachmentsAfterSend=true per evitare che il buffer venga inviato nella chat corrente.`,
   read_music_stats: `(Azioni) Rispondi solo con la chiamata al tool. Leggi statistiche musicali del bot (MusicWrap).`,
 };
@@ -252,25 +252,49 @@ function makeScheduleTasksTool({ includeRecipientName = false, includeRecipientP
               type: 'string',
               description: 'Data/ora ISO 8601 con timezone Europe/Rome (es. 2026-03-16T16:00:00+01:00)',
             },
-            sendToGroup: {
-              type: 'boolean',
-              description: 'true = invia al gruppo WhatsApp corrente (solo se la richiesta viene da un gruppo)',
+            whatsapp: {
+              type: 'object',
+              description: 'Configurazione destinazione WhatsApp per il task.',
+              properties: {
+                toGroup: {
+                  type: 'boolean',
+                  description: 'true = invia al gruppo WhatsApp corrente (solo in gruppo WA).',
+                },
+                toPrivate: {
+                  type: 'boolean',
+                  description: "true = invia in privato su WhatsApp (a te stesso o a un recipient).",
+                },
+                recipientName: {
+                  type: 'string',
+                  description: 'Nome membro attivo destinatario (solo membri attivi/admin).',
+                },
+                recipientPhone: {
+                  type: 'string',
+                  description: 'Numero di telefono per destinatario non membro (solo admin).',
+                },
+              },
             },
-            sendToPrivateWhatsApp: {
-              type: 'boolean',
-              description: "true = invia in privato su WhatsApp all'utente",
+            email: {
+              type: 'object',
+              description: 'Configurazione destinazione email per il task.',
+              properties: {
+                recipientName: {
+                  type: 'string',
+                  description: 'Nome membro attivo destinatario (solo membri attivi/admin).',
+                },
+                recipientEmail: {
+                  type: 'string',
+                  description: 'Indirizzo email diretto del destinatario (solo admin).',
+                },
+              },
             },
-            sendToEmail: {
-              type: 'boolean',
-              description: "true = invia via email (solo membri attivi, il programma blocca se non lo è)",
-            },
-            pdfContent: {
-              type: 'string',
-              description: 'Contenuto testuale per generare e allegare un PDF al task',
-            },
-            pdfTitle: {
-              type: 'string',
-              description: 'Titolo del PDF da allegare',
+            pdf: {
+              type: 'object',
+              description: 'Oggetto PDF opzionale con titolo e contenuto.',
+              properties: {
+                title: { type: 'string', description: 'Titolo del PDF (es. "Report")' },
+                content: { type: 'string', description: 'Contenuto testuale del PDF.' },
+              },
             },
           },
           required: ['taskType', 'content', 'scheduledAt'],
@@ -283,19 +307,18 @@ function makeScheduleTasksTool({ includeRecipientName = false, includeRecipientP
   if (!includeRecipientName && !includeRecipientPhone) return baseTool;
 
   const tool = JSON.parse(JSON.stringify(baseTool));
-  tool.function.description += ' ADMIN: puoi specificare recipientPhone o recipientName per inviare a qualsiasi persona, non solo a te stesso.';
 
   const itemProps = tool.function.parameters.properties.tasks.items.properties;
   if (includeRecipientPhone) {
     itemProps.recipientPhone = {
       type: 'string',
-      description: 'ADMIN: Numero di telefono del destinatario con prefisso internazionale (es. +393XXXXXXXXX) per inviare a non-membri.',
+      description: 'Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX).',
     };
   }
   if (includeRecipientName) {
     itemProps.recipientName = {
       type: 'string',
-      description: 'ADMIN: Nome completo di un membro attivo a cui inviare (al posto di a te stesso).',
+      description: 'Nome completo del destinatario. Usa per inviare ad altro membro.',
     };
   }
 
@@ -410,14 +433,24 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
       const clone = JSON.parse(JSON.stringify(tool));
       const taskProps = clone.function.parameters.properties.tasks.items.properties;
 
-      if (!isWhatsAppGroup) {
-        delete taskProps.sendToGroup;
+      if (!isWhatsAppGroup && taskProps.whatsapp && taskProps.whatsapp.properties) {
+        delete taskProps.whatsapp.properties.toGroup;
       }
 
       if (!isActiveMember && !isAdmin) {
-        delete taskProps.sendToEmail;
-        delete taskProps.pdfContent;
-        delete taskProps.pdfTitle;
+        delete taskProps.email;
+        if (taskProps.whatsapp && taskProps.whatsapp.properties) {
+          delete taskProps.whatsapp.properties.recipientName;
+          delete taskProps.whatsapp.properties.recipientPhone;
+        }
+        delete taskProps.pdf;
+      } else if (isActiveMember && !isAdmin) {
+        if (taskProps.whatsapp && taskProps.whatsapp.properties) {
+          delete taskProps.whatsapp.properties.recipientPhone;
+        }
+        if (taskProps.email && taskProps.email.properties) {
+          delete taskProps.email.properties.recipientEmail;
+        }
       }
 
       return clone;
@@ -509,7 +542,7 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
     if (!isDiscord) {
       tools.push(makeVoiceTool());
     }
-    tools.push(makeEmailTool());
+    tools.push(makeEmailTool({ includeRecipientName: true }));
   } else {
     // Non-active member: only WA to self
     tools.push(makeWhatsAppTool());

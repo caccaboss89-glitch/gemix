@@ -11,7 +11,12 @@ const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 /**
  * Schedule one or more tasks for a user or group.
  * Validates dates, permissions, and destinations before writing to task files.
- * @param {Array} tasks - Array of task objects from GemiX { taskType, content, scheduledAt, sendToGroup, sendToPrivateWhatsApp, sendToEmail, pdfContent?, pdfTitle?, recipientName?, recipientPhone? }
+ * @param {Array} tasks - Array of task objects from GemiX {
+ *   taskType, content, scheduledAt,
+ *   whatsapp: { toGroup?, toPrivate?, recipientName?, recipientPhone? },
+ *   email: { recipientName?, recipientEmail? },
+ *   pdf?: { title, content }
+ * }
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, email, isActiveMember, isAdmin, isGroup, groupId }
  * @returns {string} Result message with task confirmation or error details
  */
@@ -38,29 +43,29 @@ function scheduleTasks(tasks, ctx) {
       continue;
     }
 
-    if (task.sendToEmail && !ctx.isActiveMember) {
-      results.push(`❌ Invio email disponibile solo per membri attivi.`);
-      continue;
-    }
-
-    if ((task.pdfContent || task.pdfTitle) && !ctx.isActiveMember && !ctx.isAdmin) {
+    if (task.pdf && !ctx.isActiveMember && !ctx.isAdmin) {
       results.push('❌ PDF allegato disponibile solo per membri attivi e admin.');
       continue;
     }
 
-    if (task.sendToGroup && !ctx.isGroup) {
-      results.push('⚠️ Ignorato sendToGroup: non sei in un gruppo valido per questa piattaforma.');
-      task.sendToGroup = false;
-    }
-
-    const isGroupTask = task.sendToGroup && ctx.isGroup && ctx.groupTaskFileId;
-    if (task.sendToGroup && !isGroupTask) {
-      results.push('❌ sendToGroup richiesto ma non è disponibile un file task gruppo.');
+    if (task.email && !ctx.isActiveMember && !ctx.isAdmin) {
+      results.push('❌ Invio email disponibile solo per membri attivi e admin.');
       continue;
     }
 
-    if (task.sendToPrivateWhatsApp && (task.recipientPhone || task.recipientName) && !ctx.isAdmin) {
-      results.push('❌ recipientPhone/recipientName su WhatsApp privato è riservato ad admin.');
+    if (task.whatsapp && task.whatsapp.toGroup && !ctx.isGroup) {
+      results.push('⚠️ Ignorato whatsapp.toGroup: non sei in un gruppo valido per questa piattaforma.');
+      task.whatsapp.toGroup = false;
+    }
+
+    const isGroupTask = task.whatsapp && task.whatsapp.toGroup && ctx.isGroup && ctx.groupTaskFileId;
+    if (task.whatsapp && task.whatsapp.toGroup && !isGroupTask) {
+      results.push('❌ whatsapp.toGroup richiesto ma non è disponibile un file task gruppo.');
+      continue;
+    }
+
+    if (task.whatsapp && task.whatsapp.toPrivate && (task.whatsapp.recipientPhone || task.whatsapp.recipientName) && !ctx.isAdmin && !ctx.isActiveMember) {
+      results.push('❌ Destinatario WhatsApp specifico disponibile solo per membri attivi o admin.');
       continue;
     }
 
@@ -68,15 +73,23 @@ function scheduleTasks(tasks, ctx) {
     const filePath = path.join(TASKS_DIR, `${fileId}.json`);
 
     const destinations = {};
-    if (task.sendToPrivateWhatsApp) {
-      if (ctx.isAdmin && task.recipientPhone) {
-        destinations.whatsapp = normalizePhoneToJid(task.recipientPhone);
-      } else if (ctx.isAdmin && task.recipientName) {
-        const recipient = findMemberByName(task.recipientName);
+    if (task.whatsapp && task.whatsapp.toPrivate) {
+      if (ctx.isAdmin && task.whatsapp.recipientPhone) {
+        destinations.whatsapp = normalizePhoneToJid(task.whatsapp.recipientPhone);
+      } else if (ctx.isAdmin && task.whatsapp.recipientName) {
+        const recipient = findMemberByName(task.whatsapp.recipientName);
         if (recipient) {
           destinations.whatsapp = recipient.wa;
         } else {
-          results.push(`❌ "${task.recipientName}" non trovato tra i membri. Usa recipientPhone per non-membri.`);
+          results.push(`❌ "${task.whatsapp.recipientName}" non trovato tra i membri. Usa recipientPhone per non-membri.`);
+          continue;
+        }
+      } else if (ctx.isActiveMember && task.whatsapp.recipientName) {
+        const recipient = findMemberByName(task.whatsapp.recipientName);
+        if (recipient) {
+          destinations.whatsapp = recipient.wa;
+        } else {
+          results.push(`❌ "${task.whatsapp.recipientName}" non trovato tra i membri.`);
           continue;
         }
       } else if (ctx.userPhone) {
@@ -88,11 +101,16 @@ function scheduleTasks(tasks, ctx) {
     if (isGroupTask) {
       destinations.whatsappGroup = ctx.groupId || null;
     }
-    if (task.sendToEmail) {
-      if (ctx.isAdmin && task.recipientName) {
-        const recipient = findMemberByName(task.recipientName);
+    if (task.email) {
+      if (ctx.isAdmin && task.email.recipientEmail) {
+        destinations.email = task.email.recipientEmail;
+      } else if (task.email.recipientName) {
+        const recipient = findMemberByName(task.email.recipientName);
         if (recipient && recipient.email) {
           destinations.email = recipient.email;
+        } else {
+          results.push(`❌ "${task.email.recipientName}" non trovato tra i membri o senza email.`);
+          continue;
         }
       } else if (ctx.isActiveMember && ctx.email) {
         destinations.email = ctx.email;
@@ -116,8 +134,10 @@ function scheduleTasks(tasks, ctx) {
       createdAt: getRomeISO(),
       createdBy: ctx.userName || ctx.userId,
       destinations,
-      pdfContent: task.pdfContent || null,
-      pdfTitle: task.pdfTitle || null,
+      pdf: task.pdf && task.pdf.content ? {
+        title: task.pdf.title || 'Documento',
+        content: task.pdf.content,
+      } : null,
     };
 
     if (newTask.type === TASK_TYPE_DYNAMIC) {

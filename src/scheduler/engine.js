@@ -114,9 +114,9 @@ async function executeTask(task) {
   let messageText = task.content || '';
   let attachments = [];
 
-  if (task.pdfContent) {
-    const pdfBuffer = await generatePdf(task.pdfTitle || 'Documento', task.pdfContent);
-    const pdfName = `${sanitizeFilename(task.pdfTitle || 'documento')}.pdf`;
+  if (task.pdf && task.pdf.content) {
+    const pdfBuffer = await generatePdf(task.pdf.title || 'Documento', task.pdf.content);
+    const pdfName = `${sanitizeFilename(task.pdf.title || 'documento')}.pdf`;
     attachments.push({ name: pdfName, buffer: pdfBuffer, mimetype: 'application/pdf' });
   }
 
