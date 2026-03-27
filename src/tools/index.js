@@ -12,7 +12,7 @@ const { sendEmail, sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppMessage, sendWhatsAppVoice, sendWhatsAppAttachments, sendWhatsAppDirect } = require('./whatsappSender');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
-const { extractLastNImages } = require('../utils/media');
+const { extractLastNImages, extractLastNDocs } = require('../utils/media');
 const { readMusicStats } = require('./musicStats');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
@@ -160,6 +160,25 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
 
         responseCtx.historyImagesToInclude = images;
         result = `✅ Includo le ultime ${images.length} immagine/i nella prossima chiamata API.`;
+        break;
+      }
+
+      case 'include_history_docs': {
+        const count = Number(args.count || 0);
+        if (!Number.isInteger(count) || count <= 0) {
+          result = '❌ count deve essere un intero positivo.';
+          break;
+        }
+
+        const docs = extractLastNDocs(userCtx.historyFull || [], count);
+
+        if (!docs || docs.length === 0) {
+          result = '❌ Non ci sono documenti nella cronologia da includere.';
+          break;
+        }
+
+        responseCtx.historyDocsToInclude = docs;
+        result = `✅ Includo gli ultimi ${docs.length} documento/i nella prossima chiamata API.`;
         break;
       }
 

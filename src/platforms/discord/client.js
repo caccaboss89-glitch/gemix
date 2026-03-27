@@ -117,7 +117,12 @@ async function onDiscordMessage(msg) {
     const isDoc = att.contentType?.startsWith('application/') || ['pdf', 'txt', 'doc', 'docx', 'csv', 'json'].includes(ext);
     const isVideo = att.contentType?.startsWith('video/');
 
-    if (isImage || isAudio || isDoc) {
+    if (isVideo) {
+      textBody = `[${att.name}] (file non visionabile) ${textBody}`.trim();
+    } else if (isDoc) {
+      // Documenti in cronologia non vengono inviati direttamente, solo tag.
+      textBody = `[${att.name}] ${textBody}`.trim();
+    } else if (isImage || isAudio) {
       try {
         const res = await fetch(att.url);
         const buffer = Buffer.from(await res.arrayBuffer());
@@ -126,8 +131,6 @@ async function onDiscordMessage(msg) {
       } catch {
         textBody = `[${att.name}] ${textBody}`.trim();
       }
-    } else if (isVideo) {
-      textBody = `[${att.name}] (file non visionabile) ${textBody}`.trim();
     } else {
       textBody = `[${att.name}] ${textBody}`.trim();
     }

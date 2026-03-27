@@ -5,7 +5,7 @@ const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { hasHistoryImages, limitHistoryMediaAttachments, extractLastNImages } = require('./utils/media');
+const { hasHistoryImages, hasHistoryDocs, limitHistoryMediaAttachments, extractLastNImages, extractLastNDocs } = require('./utils/media');
 
 const log = createLogger('Handler');
 
@@ -30,6 +30,7 @@ async function handleMessage(ctx) {
     aboutMeText: null,
     isAboutMeOnly: false,
     historyImagesToInclude: [],
+    historyDocsToInclude: [],
   };
 
   try {
@@ -40,6 +41,7 @@ async function handleMessage(ctx) {
     const systemPrompt = buildSystemPrompt(ctx);
 
     const historyHasImages = hasHistoryImages(ctx.history);
+    const historyHasDocs = hasHistoryDocs(ctx.history);
 
     const userCtx = {
       isActiveMember,
@@ -56,6 +58,7 @@ async function handleMessage(ctx) {
       chatId: ctx.chatId || null,
       platform: ctx.platform,
       hasHistoryImages: historyHasImages,
+      hasHistoryDocs: historyHasDocs,
       historyFull: ctx.history || [],
     };
 
@@ -130,15 +133,19 @@ async function handleMessage(ctx) {
       messages = removeToolInstructionMessages(messages);
       rounds++;
 
-      if (responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) {
-        messages.push({
-          role: 'user',
-          content: [
-            { type: 'text', text: `[Richiesta immagini cronologia]` },
-            ...responseCtx.historyImagesToInclude,
-          ],
-        });
-        responseCtx.historyImagesToInclude = [];
+      if ((responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) || (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0)) {
+        const includeList = [];
+        if (responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) {
+          includeList.push({ type: 'text', text: `[Richiesta immagini cronologia]` });
+          includeList.push(...responseCtx.historyImagesToInclude);
+          responseCtx.historyImagesToInclude = [];
+        }
+        if (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) {
+          includeList.push({ type: 'text', text: `[Richiesta documenti cronologia]` });
+          includeList.push(...responseCtx.historyDocsToInclude);
+          responseCtx.historyDocsToInclude = [];
+        }
+        messages.push({ role: 'user', content: includeList });
       }
       
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {

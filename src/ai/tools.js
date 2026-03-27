@@ -25,6 +25,7 @@ const TOOL_INSTRUCTIONS = {
   web_search: `Rispondi solo con la chiamata al tool.`,
   image_search: `Rispondi solo con la chiamata al tool. Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
   include_history_images: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API le ultime N immagini dalla cronologia (se esistono).`,
+  include_history_docs: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API i documenti dalla cronologia (se esistono).`,
   send_voice_message: `Rispondi solo con la chiamata al tool. Genera vocale (solo WhatsApp), testo TTS max 1000 caratteri, è possibile allegare eventuali file nel buffer. ${VOICE_EFFECTS_DOC}`,
   schedule_tasks: `Rispondi solo con la chiamata al tool.`,
   read_my_tasks: `Rispondi solo con la chiamata al tool.`,
@@ -341,6 +342,14 @@ const BASE_TOOLS = [
     required: ['count'],
   }),
   makeTool({
+    name: 'include_history_docs',
+    description: 'Richiedi gli ultimi N documenti dalla cronologia (se presenti).',
+    properties: {
+      count: { type: 'integer', description: 'Numero documenti ultimi da includere (intero positivo).', minimum: 1 },
+    },
+    required: ['count'],
+  }),
+  makeTool({
     name: 'read_about_me',
     description: 'Invia sulla chat corrente il testo della storia di GemiX, utile per presentarti e dire chi sei.',
     properties: {},
@@ -505,6 +514,9 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   if (!userCtx.hasHistoryImages) {
     tools = tools.filter(t => t.function.name !== 'include_history_images');
+  }
+  if (!userCtx.hasHistoryDocs) {
+    tools = tools.filter(t => t.function.name !== 'include_history_docs');
   }
 
   return tools;

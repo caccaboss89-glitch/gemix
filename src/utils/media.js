@@ -51,6 +51,7 @@ function _getMediaTypeFromContentPart(part) {
   const mime = m[1].toLowerCase();
   if (mime.startsWith('image/')) return 'image';
   if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('application/')) return 'document';
   return null;
 }
 
@@ -61,6 +62,30 @@ function hasHistoryImages(historyMessages) {
     if (!message || !Array.isArray(message.content)) continue;
     for (const part of message.content) {
       if (_getMediaTypeFromContentPart(part) === 'image') return true;
+    }
+  }
+
+  return false;
+}
+
+function hasHistoryDocs(historyMessages) {
+  if (!Array.isArray(historyMessages)) return false;
+
+  const docTagRegex = /\[file\.[^\]]+\]/i;
+
+  for (const message of historyMessages) {
+    if (!message) continue;
+
+    if (typeof message.content === 'string') {
+      if (docTagRegex.test(message.content)) return true;
+      continue;
+    }
+
+    if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (_getMediaTypeFromContentPart(part) === 'document') return true;
+        if (part && part.type === 'text' && docTagRegex.test(part.text)) return true;
+      }
     }
   }
 
@@ -90,12 +115,36 @@ function extractLastNImages(historyMessages, count = 0) {
   return imageParts.reverse();
 }
 
-function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios = 3) {
+function extractLastNDocs(historyMessages, count = 0) {
+  if (!Array.isArray(historyMessages) || count <= 0) return [];
+
+  const docParts = [];
+
+  for (let i = historyMessages.length - 1; i >= 0; i -= 1) {
+    const message = historyMessages[i];
+    if (!message || !Array.isArray(message.content)) continue;
+
+    for (let j = message.content.length - 1; j >= 0; j -= 1) {
+      const part = message.content[j];
+      if (_getMediaTypeFromContentPart(part) === 'document') {
+        docParts.push(part);
+        if (docParts.length >= count) break;
+      }
+    }
+
+    if (docParts.length >= count) break;
+  }
+
+  return docParts.reverse();
+}
+
+function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios = 3, maxDocs = 0) {
   if (!Array.isArray(historyMessages)) return historyMessages;
 
   const remain = {
     image: maxImages,
     audio: maxAudios,
+    document: maxDocs,
   };
 
   // We iterate from newest to oldest to retain the latest attachments.
@@ -114,7 +163,7 @@ function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios 
       }
 
       const mediaType = _getMediaTypeFromContentPart(part);
-      if (mediaType === 'image' || mediaType === 'audio') {
+      if (mediaType === 'image' || mediaType === 'audio' || mediaType === 'document') {
         if (remain[mediaType] > 0) {
           keepFlags[j] = true;
           remain[mediaType] -= 1;
@@ -122,7 +171,7 @@ function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios 
           keepFlags[j] = false;
         }
       } else {
-        // Keep other media types (video/document/etc.) unchanged.
+        // Keep other media types (video/etc.) unchanged.
         keepFlags[j] = true;
       }
     }

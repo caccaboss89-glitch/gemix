@@ -90,8 +90,12 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
       const duration = Number(msg.duration || msg._data?.duration || 0);
 
       if (isSupportedMedia(mediaType)) {
+        const isDoc = mediaType === 'document';
         if ((mediaType === 'audio' || mediaType === 'ptt') && duration > 60) {
           textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${duration}s)`.trim();
+        } else if (isDoc) {
+          // Document in history is treated as placeholder text; not included as binary media unless requested via tool.
+          textContent = `${textContent} ${tag}`.trim();
         } else {
           try {
             const media = await msg.downloadMedia();
