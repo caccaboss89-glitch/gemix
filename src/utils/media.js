@@ -71,18 +71,13 @@ function hasHistoryImages(historyMessages) {
 function hasHistoryDocs(historyMessages) {
   if (!Array.isArray(historyMessages)) return false;
 
-  const docTagRegex = /\[file\.([^\]]+)\]/i;
-  const supportedDocExts = new Set(['pdf', 'txt', 'doc', 'docx', 'csv', 'json']);
+  const docTagRegex = /\[([^\]]+\.(?:pdf|txt|doc|docx|csv|json))\]/i;
 
   for (const message of historyMessages) {
     if (!message) continue;
 
     if (typeof message.content === 'string') {
-      const match = docTagRegex.exec(message.content);
-      if (match) {
-        const ext = (match[1] || '').toLowerCase();
-        if (supportedDocExts.has(ext)) return true;
-      }
+      if (docTagRegex.test(message.content)) return true;
       continue;
     }
 
