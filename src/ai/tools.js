@@ -27,7 +27,7 @@ const TOOL_INSTRUCTIONS = {
   include_history_images: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API le ultime N immagini dalla cronologia (se esistono).`,
   include_history_docs: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API i documenti dalla cronologia (se esistono).`,
   send_voice_message: `Rispondi solo con la chiamata al tool. Genera vocale (solo WhatsApp), testo TTS max 1000 caratteri, è possibile allegare eventuali file nel buffer. ${VOICE_EFFECTS_DOC}`,
-  schedule_tasks: `Rispondi solo con la chiamata al tool. Utilizza task dinamici solo se strettamente necessario e se lo fai specifica tutti i dati che gli occoreranno all'AI per completarlo (non avrà accesso al tuo contesto/cronologia ma solo a tool di ricerca/creazione).`,
+  schedule_tasks: `Rispondi solo con la chiamata al tool.`,
   read_my_tasks: `Rispondi solo con la chiamata al tool.`,
   remove_my_tasks: `Rispondi solo con la chiamata al tool.`,
   read_server_rules: `Rispondi solo con la chiamata al tool.`,
@@ -528,10 +528,18 @@ function isActiveMemberOnlyTool(toolName) {
 
 function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
   const chatKey = _getChatKey(userCtx);
-  const isDiscord = userCtx.platform === PLATFORM_DISCORD;
   // Data-gathering tools (always available, no recipient params)
   let tools = [
     BASE_TOOLS.find(t => t.function.name === 'web_search'),
+    makeTool({
+      name: 'image_search',
+      description: 'Cerca immagini sul web. Le immagini trovate verranno accumulate come allegati e inviate insieme al messaggio di consegna (WhatsApp o email).',
+      properties: {
+        query: { type: 'string', description: 'Cosa cercare nelle immagini (preferibilmente in inglese per risultati migliori)' },
+        count: { type: 'integer', description: 'Numero immagini da cercare (1-4). Default 1.' },
+      },
+      required: ['query'],
+    }),
     makeTool({
       name: 'generate_pdf',
       description: 'Genera un file PDF. Il PDF verrà accumulato come allegato e inviato insieme al messaggio di consegna (WhatsApp o email).',
@@ -544,28 +552,32 @@ function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
   ];
 
   // Delivery tools — descriptions vary by permission level
-  // Tutti i task dinamici devono avere almeno queste funzionalità (con le regole di permessi già gestite nel dispatcher degli strumenti).
-  tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
-  tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'clear_attachments'));
-
   if (isAdmin) {
+    // Add music stats for admin
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'clear_attachments'));
+
     tools.push(makeWhatsAppTool({ includeRecipientName: true, includeRecipientPhone: true }));
     if (!isDiscord) {
       tools.push(makeVoiceTool({ includeRecipientName: true, includeRecipientPhone: true }));
     }
     tools.push(makeEmailTool({ includeRecipientName: true, includeRecipientEmail: true }));
   } else if (isActiveMember) {
+    // Add music stats for active members
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
+    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'clear_attachments'));
+
     tools.push(makeWhatsAppTool());
     if (!isDiscord) {
       tools.push(makeVoiceTool());
     }
     tools.push(makeEmailTool({ includeRecipientName: true }));
   } else {
+    // Non-active member: only WA to self
     tools.push(makeWhatsAppTool());
     if (!isDiscord) {
       tools.push(makeVoiceTool());
     }
-    tools.push(makeEmailTool());
   }
 
   return tools;
