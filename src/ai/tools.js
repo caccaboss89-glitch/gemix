@@ -528,6 +528,7 @@ function isActiveMemberOnlyTool(toolName) {
 
 function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
   const chatKey = _getChatKey(userCtx);
+  const isDiscord = userCtx.platform === PLATFORM_DISCORD;
   // Data-gathering tools (always available, no recipient params)
   let tools = [
     BASE_TOOLS.find(t => t.function.name === 'web_search'),
