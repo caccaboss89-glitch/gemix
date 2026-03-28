@@ -72,6 +72,7 @@ function hasHistoryDocs(historyMessages) {
   if (!Array.isArray(historyMessages)) return false;
 
   const docTagRegex = /\[([^\]]+\.(?:pdf|txt|doc|docx|csv|json))\]/i;
+  const supportedDocExts = new Set(['pdf', 'txt', 'doc', 'docx', 'csv', 'json']);
 
   for (const message of historyMessages) {
     if (!message) continue;
