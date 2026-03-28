@@ -71,20 +71,31 @@ function hasHistoryImages(historyMessages) {
 function hasHistoryDocs(historyMessages) {
   if (!Array.isArray(historyMessages)) return false;
 
-  const docTagRegex = /\[file\.[^\]]+\]/i;
+  const docTagRegex = /\[file\.([^\]]+)\]/i;
+  const supportedDocExts = new Set(['pdf', 'txt', 'doc', 'docx', 'csv', 'json']);
 
   for (const message of historyMessages) {
     if (!message) continue;
 
     if (typeof message.content === 'string') {
-      if (docTagRegex.test(message.content)) return true;
+      const match = docTagRegex.exec(message.content);
+      if (match) {
+        const ext = (match[1] || '').toLowerCase();
+        if (supportedDocExts.has(ext)) return true;
+      }
       continue;
     }
 
     if (Array.isArray(message.content)) {
       for (const part of message.content) {
         if (_getMediaTypeFromContentPart(part) === 'document') return true;
-        if (part && part.type === 'text' && docTagRegex.test(part.text)) return true;
+        if (part && part.type === 'text') {
+          const match = docTagRegex.exec(part.text);
+          if (match) {
+            const ext = (match[1] || '').toLowerCase();
+            if (supportedDocExts.has(ext)) return true;
+          }
+        }
       }
     }
   }
