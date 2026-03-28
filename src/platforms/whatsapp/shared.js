@@ -1,5 +1,6 @@
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL } = require('../../config/constants');
+const pdfParse = require('pdf-parse');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
@@ -92,6 +93,22 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
       if (isSupportedMedia(mediaType)) {
         if ((mediaType === 'audio' || mediaType === 'ptt') && duration > 60) {
           textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${duration}s)`.trim();
+        } else if (mediaType === 'document' && msg._data?.mimetype === 'application/pdf') {
+          try {
+            const media = await msg.downloadMedia();
+            if (media) {
+              const buffer = Buffer.from(media.data, 'base64');
+              const info = await pdfParse(buffer);
+              if (info.numpages > 3) {
+                textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${info.numpages} pagine)`.trim();
+              } else {
+                mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+                textContent = `${textContent} ${tag}`.trim();
+              }
+            }
+          } catch {
+            textContent = `${textContent} ${tag}`.trim();
+          }
         } else {
           try {
             const media = await msg.downloadMedia();

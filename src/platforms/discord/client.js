@@ -4,6 +4,7 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
+const pdfParse = require('pdf-parse');
 const { mediaToContentPart, limitHistoryMediaAttachments } = require('../../utils/media');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
@@ -119,6 +120,20 @@ async function onDiscordMessage(msg) {
 
     if (isVideo) {
       textBody = `[${att.name}] (file non visionabile) ${textBody}`.trim();
+    } else if (isDoc && att.contentType === 'application/pdf') {
+      try {
+        const res = await fetch(att.url);
+        const buffer = Buffer.from(await res.arrayBuffer());
+        const info = await pdfParse(buffer);
+        if (info.numpages > 3) {
+          textBody = `[${att.name}] (troppo lungo per essere letto: ${info.numpages} pagine) ${textBody}`.trim();
+        } else {
+          contentParts.push(mediaToContentPart(buffer, att.contentType));
+          textBody = `[${att.name}] ${textBody}`.trim();
+        }
+      } catch {
+        textBody = `[${att.name}] ${textBody}`.trim();
+      }
     } else if (isDoc) {
       // Documenti in cronologia non vengono inviati direttamente, solo tag.
       textBody = `[${att.name}] ${textBody}`.trim();
