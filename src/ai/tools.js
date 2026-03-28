@@ -27,7 +27,7 @@ const TOOL_INSTRUCTIONS = {
   include_history_images: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API le ultime N immagini dalla cronologia (se esistono).`,
   include_history_docs: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API i documenti dalla cronologia (se esistono).`,
   send_voice_message: `Rispondi solo con la chiamata al tool. Genera vocale (solo WhatsApp), testo TTS max 1000 caratteri, è possibile allegare eventuali file nel buffer. ${VOICE_EFFECTS_DOC}`,
-  schedule_tasks: `Rispondi solo con la chiamata al tool. Utilizza task dinamici solo se strettamente necessario e se lo fai specifica tutti i dati che gli occoreranno all'AI per completarlo (non avrà accesso al tuo contesto/cronologia).`,
+  schedule_tasks: `Rispondi solo con la chiamata al tool. Utilizza task dinamici solo se strettamente necessario e se lo fai specifica tutti i dati che gli occoreranno all'AI per completarlo (non avrà accesso al tuo contesto/cronologia ma solo a tool di ricerca/creazione).`,
   read_my_tasks: `Rispondi solo con la chiamata al tool.`,
   remove_my_tasks: `Rispondi solo con la chiamata al tool.`,
   read_server_rules: `Rispondi solo con la chiamata al tool.`,
