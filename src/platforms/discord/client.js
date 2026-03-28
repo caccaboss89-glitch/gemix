@@ -125,7 +125,7 @@ async function onDiscordMessage(msg) {
         const res = await fetch(att.url);
         const buffer = Buffer.from(await res.arrayBuffer());
         const info = await pdfParse(buffer);
-        if (info.numpages > 3) {
+        if (info.numpages > 10) {
           textBody = `[${att.name}] (troppo lungo per essere letto: ${info.numpages} pagine) ${textBody}`.trim();
         } else {
           contentParts.push(mediaToContentPart(buffer, att.contentType));

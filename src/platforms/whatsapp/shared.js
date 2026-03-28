@@ -99,7 +99,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
             if (media) {
               const buffer = Buffer.from(media.data, 'base64');
               const info = await pdfParse(buffer);
-              if (info.numpages > 3) {
+              if (info.numpages > 10) {
                 textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${info.numpages} pagine)`.trim();
               } else {
                 mediaParts.push(mediaToContentPart(buffer, media.mimetype));

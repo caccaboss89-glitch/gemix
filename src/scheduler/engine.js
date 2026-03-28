@@ -182,19 +182,13 @@ async function executeDynamicTask(prompt, creatorCtx) {
   const isActiveMember = creatorCtx?.isActiveMember || false;
   const isCreatorAdmin = creatorCtx?.isAdmin || false;
 
-  const systemMsg = `Sei un assistente AI per task programmati. Ora (Torino): ${getRomeTime()}.
-Rispondi in italiano.
-
-1) Raccogli info (web_search, image_search, generate_pdf, read_music_stats).
-2) Usa un tool di consegna (send_whatsapp_message, send_voice_message, send_email).
-
-Regole:
-- 1 messaggio per numero WhatsApp (testo o voce).
-- 1 email per indirizzo.
-- Allegati (immagini, PDF) vanno inclusi in ogni consegna.
-- DEVI usare almeno un tool di consegna.`;
-
   const tools = getDynamicTaskTools(isActiveMember, isCreatorAdmin);
+
+  const systemPrompt = `Sei un assistente AI per task programmati. Non hai accesso alla cronologia chat né al contesto precedente; usa solo le informazioni presenti in questo prompt e le capacità dei tool abilitati.
+Rispondi in italiano.
+Completa il task richiesto e, se necessario, usa i tool a disposizione (web_search, generate_pdf, send_whatsapp_message, send_voice_message, send_email, read_music_stats, clear_attachments).
+
+Task: ${prompt}`;
 
   const userCtx = {
     isActiveMember,
@@ -225,10 +219,7 @@ Regole:
     isDynamic: true,
   };
 
-  const messages = [
-    { role: 'system', content: systemMsg },
-    { role: 'user', content: prompt },
-  ];
+  const messages = [{ role: 'system', content: systemPrompt }];
 
   let rounds = 0;
 
