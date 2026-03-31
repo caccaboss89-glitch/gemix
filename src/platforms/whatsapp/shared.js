@@ -146,7 +146,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
     }
   }
 
-return limitHistoryMediaAttachments(historyMessages, Number.MAX_SAFE_INTEGER, 3, Number.MAX_SAFE_INTEGER);
+return limitHistoryMediaAttachments(historyMessages, Number.MAX_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER);
 }
 
 /**

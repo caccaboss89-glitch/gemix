@@ -145,7 +145,7 @@ function extractLastNDocs(historyMessages, count = 0) {
   return docParts.reverse();
 }
 
-function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios = 3, maxDocs = 0) {
+function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios = 1, maxDocs = 0) {
   if (!Array.isArray(historyMessages)) return historyMessages;
 
   const remain = {

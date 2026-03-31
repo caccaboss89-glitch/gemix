@@ -69,7 +69,7 @@ async function handleMessage(ctx) {
     ];
 
     const filteredHistory = ctx.history && ctx.history.length > 0
-      ? limitHistoryMediaAttachments(JSON.parse(JSON.stringify(ctx.history)), 0, 3, 0)
+      ? limitHistoryMediaAttachments(JSON.parse(JSON.stringify(ctx.history)), 0, 1, 0)
       : [];
 
     if (filteredHistory.length > 0) {
