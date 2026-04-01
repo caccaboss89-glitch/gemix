@@ -1,7 +1,7 @@
 const { isActiveMemberOnlyTool, _markSendAboutMeUsed } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
-const { generateVoice } = require('./voiceMessage');
+const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
@@ -17,12 +17,13 @@ const { readMusicStats } = require('./musicStats');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
-const { MAX_TTS_CHARS } = require('../config/constants');
+const { MAX_TTS_CHARS, MAX_HISTORY_IMAGES, MAX_HISTORY_DOCS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
+const { storeVoiceText } = require('../utils/voiceTextCache');
 
 const log = createLogger('Tools');
 
-// Tracking consecutive voice usage per WhatsApp chat (non-active members only)
+// Tracking consecutive voice usage per WhatsApp chat
 const voiceConsecutiveByChat = new Map();
 
 /**
@@ -105,7 +106,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   const name = toolCall.function.name;
   const chatKey = _getVoiceLimitChatKey(userCtx);
 
-  // Reset consecutive voice counter on any non-voice tool call (non-active members only)
+  // Reset consecutive voice counter on any non-voice tool call
   if (name !== 'send_voice_message') {
     _resetVoiceCount(chatKey);
   }
@@ -145,11 +146,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
 
       case 'include_history_images': {
-        const count = Number(args.count || 0);
+        let count = Number(args.count || 0);
         if (!Number.isInteger(count) || count <= 0) {
           result = '❌ count deve essere un intero positivo.';
           break;
         }
+
+        if (count > MAX_HISTORY_IMAGES) count = MAX_HISTORY_IMAGES;
 
         const images = extractLastNImages(userCtx.historyFull || [], count);
 
@@ -164,11 +167,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
 
       case 'include_history_docs': {
-        const count = Number(args.count || 0);
+        let count = Number(args.count || 0);
         if (!Number.isInteger(count) || count <= 0) {
           result = '❌ count deve essere un intero positivo.';
           break;
         }
+
+        if (count > MAX_HISTORY_DOCS) count = MAX_HISTORY_DOCS;
 
         const docs = extractLastNDocs(userCtx.historyFull || [], count);
 
@@ -188,13 +193,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           .replace(/\s{2,}/g, ' ')
           .trim();
 
-        if (!userCtx.isActiveMember) {
-          const currentCount = voiceConsecutiveByChat.get(chatKey) || 0;
-          if (currentCount >= 3) {
-            log.warn(`Limite vocali WA superato in chat ${chatKey}: counter=${currentCount}`);
-            result = '❌ Limite vocali superato: in questa chat hai già inviato 3 messaggi vocali consecutivi. Rispondi con un messaggio testuale normale, senza vocali.';
-            break;
-          }
+        const currentCount = voiceConsecutiveByChat.get(chatKey) || 0;
+        if (currentCount >= 3) {
+          log.warn(`Limite vocali WA superato in chat ${chatKey}: counter=${currentCount}`);
+          result = '❌ Limite vocali superato: in questa chat hai già inviato 3 messaggi vocali consecutivi. Rispondi con un messaggio testuale normale, senza vocali.';
+          break;
         }
 
         if (cleanText.length > MAX_TTS_CHARS) {
@@ -238,9 +241,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
             deliveryCtx.contactedWA.add(targetJid.jid);
             result = `Messaggio vocale inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
-            if (!userCtx.isActiveMember) {
-              _incrementVoiceCount(chatKey);
-            }
+            _incrementVoiceCount(chatKey);
+            storeVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
             result = `❌ Errore invio vocale: ${err.message}`;
           }
@@ -258,9 +260,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
         result = 'Messaggio vocale generato con successo. Non inviare alcun messaggio testuale.';
-        if (!userCtx.isActiveMember) {
-          _incrementVoiceCount(chatKey);
-        }
+        _incrementVoiceCount(chatKey);
+        storeVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
         break;
       }
 

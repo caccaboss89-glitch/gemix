@@ -51,6 +51,13 @@ function buildSystemPrompt(ctx) {
   }
 
   prompt += `\n`;
+  prompt += `### Limiti media\n`;
+  prompt += `- Le immagini in cronologia non sono visibili di default. Usa include_history_images per vederle (max 5).\n`;
+  prompt += `- I documenti/PDF in cronologia non sono visibili di default. Usa include_history_docs per vederli (max 2, solo documenti ≤5 pagine).\n`;
+  prompt += `- Viene inviato solo l'ultimo vocale utente in cronologia (se ≤2 min). Audio troppo lunghi sono segnalati.\n`;
+  prompt += `- I tuoi vocali precedenti sono trascritti come testo nella cronologia (etichettati "TRASCRIZIONE:").\n`;
+
+  prompt += `\n`;
   prompt += `### Tool\nPuoi usare i tool disponibili (es. invio di email o messaggi a terzi), non fornire ulteriore testo di risposta quando li chiami e assicurarti di farlo solo prima di fornire la risposta finale.\n`;
   if (!isActiveMember) {
     prompt += `Alcuni tool (PDF, email, invio WhatsApp a terzi) NON sono disponibili per questo utente. Se li chiede, spiegalo brevemente.\n`;

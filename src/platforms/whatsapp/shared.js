@@ -1,10 +1,11 @@
 const { MessageMedia } = require('whatsapp-web.js');
-const { MAX_HISTORY, PLATFORM_WA_PERSONAL } = require('../../config/constants');
+const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
 const pdfParse = require('pdf-parse');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
 const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, limitHistoryMediaAttachments } = require('../../utils/media');
+const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
@@ -89,17 +90,34 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
       const filename = msg._data?.filename || msg._data?.caption || null;
       const tag = mediaTag(filename, msg._data?.mimetype);
       const duration = Number(msg.duration || msg._data?.duration || 0);
+      const isAudioType = mediaType === 'audio' || mediaType === 'ptt';
 
       if (isSupportedMedia(mediaType)) {
-        if ((mediaType === 'audio' || mediaType === 'ptt') && duration > 60) {
-          textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${duration}s)`.trim();
+        if (isAudioType) {
+          // GemiX audio → transcription (check cache first, then isGemiX flag)
+          const cachedText = retrieveVoiceText(chat.id._serialized, msg.timestamp * 1000);
+          if (cachedText) {
+            textContent = `${textContent} ${tag} TRASCRIZIONE: ${cachedText}`.trim();
+          } else if (isGemiX) {
+            textContent = `${textContent} ${tag} (trascrizione non disponibile)`.trim();
+          } else if (duration > MAX_AUDIO_DURATION_S) {
+            textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${duration}s)`.trim();
+          } else {
+            try {
+              const media = await msg.downloadMedia();
+              if (media) {
+                mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
+              }
+            } catch {}
+            textContent = `${textContent} ${tag}`.trim();
+          }
         } else if (mediaType === 'document' && msg._data?.mimetype === 'application/pdf') {
           try {
             const media = await msg.downloadMedia();
             if (media) {
               const buffer = Buffer.from(media.data, 'base64');
               const info = await pdfParse(buffer);
-              if (info.numpages > 10) {
+              if (info.numpages > MAX_DOC_PAGES) {
                 textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${info.numpages} pagine)`.trim();
               } else {
                 mediaParts.push(mediaToContentPart(buffer, media.mimetype));
@@ -113,8 +131,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
           try {
             const media = await msg.downloadMedia();
             if (media) {
-              const buffer = Buffer.from(media.data, 'base64');
-              mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+              mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
             }
           } catch {}
           textContent = `${textContent} ${tag}`.trim();
@@ -249,4 +266,63 @@ async function sendWhatsAppResponse(chat, msg, responseData) {
   }
 }
 
-module.exports = { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };
+/**
+ * Process current message media with duration/page checks.
+ * @param {object} msg - The whatsapp-web.js message object
+ * @returns {Promise<object|null>} { skipped, buffer?, mimetype?, filename?, tag, reason? } or null
+ */
+async function processCurrentMedia(msg) {
+  if (!msg.hasMedia) return null;
+
+  const mediaType = msg.type;
+  const isAudio = mediaType === 'audio' || mediaType === 'ptt';
+  const duration = Number(msg.duration || msg._data?.duration || 0);
+
+  if (isAudio && duration > MAX_AUDIO_DURATION_S) {
+    return {
+      skipped: true,
+      tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
+      reason: `audio troppo lungo: ${duration}s, non inviato`,
+    };
+  }
+
+  if (!isSupportedMedia(mediaType)) {
+    return {
+      skipped: true,
+      tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
+      reason: isUnsupportedMedia(mediaType) ? 'file non visionabile' : null,
+    };
+  }
+
+  try {
+    const media = await msg.downloadMedia();
+    if (!media) return null;
+
+    const buffer = Buffer.from(media.data, 'base64');
+
+    if (media.mimetype === 'application/pdf') {
+      try {
+        const info = await pdfParse(buffer);
+        if (info.numpages > MAX_DOC_PAGES) {
+          return {
+            skipped: true,
+            tag: mediaTag(media.filename, media.mimetype),
+            reason: `documento troppo lungo: ${info.numpages} pagine, non inviato`,
+          };
+        }
+      } catch {}
+    }
+
+    return {
+      skipped: false,
+      buffer,
+      mimetype: media.mimetype,
+      filename: media.filename || null,
+      tag: mediaTag(media.filename, media.mimetype),
+    };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { buildWhatsAppHistory, downloadCurrentMedia, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };

@@ -1,11 +1,12 @@
 const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
-const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
+const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
 const pdfParse = require('pdf-parse');
 const { mediaToContentPart, limitHistoryMediaAttachments } = require('../../utils/media');
+const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
 
@@ -125,7 +126,7 @@ async function onDiscordMessage(msg) {
         const res = await fetch(att.url);
         const buffer = Buffer.from(await res.arrayBuffer());
         const info = await pdfParse(buffer);
-        if (info.numpages > 10) {
+        if (info.numpages > MAX_DOC_PAGES) {
           textBody = `[${att.name}] (troppo lungo per essere letto: ${info.numpages} pagine) ${textBody}`.trim();
         } else {
           contentParts.push(mediaToContentPart(buffer, att.contentType));
@@ -137,7 +138,21 @@ async function onDiscordMessage(msg) {
     } else if (isDoc) {
       // Documenti in cronologia non vengono inviati direttamente, solo tag.
       textBody = `[${att.name}] ${textBody}`.trim();
-    } else if (isImage || isAudio) {
+    } else if (isAudio) {
+      const audioDuration = Number(att.duration || 0);
+      if (audioDuration > MAX_AUDIO_DURATION_S) {
+        textBody = `[${att.name}] (audio troppo lungo: ${audioDuration}s, non inviato) ${textBody}`.trim();
+      } else {
+        try {
+          const res = await fetch(att.url);
+          const buffer = Buffer.from(await res.arrayBuffer());
+          contentParts.push(mediaToContentPart(buffer, att.contentType));
+          textBody = `[${att.name}] ${textBody}`.trim();
+        } catch {
+          textBody = `[${att.name}] ${textBody}`.trim();
+        }
+      }
+    } else if (isImage) {
       try {
         const res = await fetch(att.url);
         const buffer = Buffer.from(await res.arrayBuffer());
@@ -289,21 +304,48 @@ async function buildDiscordHistory(channel, starterMessageId) {
       const isImage = att.contentType?.startsWith('image/');
       const isAudio = att.contentType?.startsWith('audio/');
       const audioDuration = Number(att.duration || 0);
-      const isLongAudio = isAudio && audioDuration > 60;
       const isDoc = att.contentType?.startsWith('application/');
       const isVideo = att.contentType?.startsWith('video/');
 
-      if (isLongAudio) {
-        textContent = `${textContent} [${att.name}] (troppo lungo per essere letto: ${audioDuration}s)`.trim();
-      } else if (isImage || isAudio || isDoc) {
+      if (isAudio) {
+        const cachedText = retrieveVoiceText(channel.id, m.createdAt.getTime());
+        if (cachedText) {
+          textContent = `${textContent} [${att.name}] TRASCRIZIONE: ${cachedText}`.trim();
+        } else if (isBot) {
+          textContent = `${textContent} [${att.name}] (trascrizione non disponibile)`.trim();
+        } else if (audioDuration > MAX_AUDIO_DURATION_S) {
+          textContent = `${textContent} [${att.name}] (troppo lungo per essere letto: ${audioDuration}s)`.trim();
+        } else {
+          try {
+            const res = await fetch(att.url);
+            const buffer = Buffer.from(await res.arrayBuffer());
+            mediaParts.push(mediaToContentPart(buffer, att.contentType));
+          } catch {}
+          textContent = `${textContent} [${att.name}]`.trim();
+        }
+      } else if (isDoc && att.contentType === 'application/pdf') {
+        try {
+          const res = await fetch(att.url);
+          const buffer = Buffer.from(await res.arrayBuffer());
+          const info = await pdfParse(buffer);
+          if (info.numpages > MAX_DOC_PAGES) {
+            textContent = `${textContent} [${att.name}] (troppo lungo per essere letto: ${info.numpages} pagine)`.trim();
+          } else {
+            mediaParts.push(mediaToContentPart(buffer, att.contentType));
+            textContent = `${textContent} [${att.name}]`.trim();
+          }
+        } catch {
+          textContent = `${textContent} [${att.name}]`.trim();
+        }
+      } else if (isVideo) {
+        textContent = `${textContent} [${att.name}] (file non visionabile)`.trim();
+      } else if (isImage || isDoc) {
         try {
           const res = await fetch(att.url);
           const buffer = Buffer.from(await res.arrayBuffer());
           mediaParts.push(mediaToContentPart(buffer, att.contentType));
         } catch {}
         textContent = `${textContent} [${att.name}]`.trim();
-      } else if (isVideo) {
-        textContent = `${textContent} [${att.name}] (file non visionabile)`.trim();
       } else {
         textContent = `${textContent} [${att.name}]`.trim();
       }

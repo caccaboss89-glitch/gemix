@@ -151,4 +151,4 @@ async function googleTranslateTTS(text) {
   return convertMp3ToWhatsAppOpus(mp3Buffer);
 }
 
-module.exports = { generateVoice, MAX_TTS_CHARS };
+module.exports = { generateVoice, stripVocalTags, MAX_TTS_CHARS };

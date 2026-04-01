@@ -132,18 +132,18 @@ const TOOL_IMAGE_SEARCH = makeTool({
 
 const TOOL_INCLUDE_HISTORY_IMAGES = makeTool({
   name: 'include_history_images',
-  description: 'Richiedi le ultime N immagini dalla cronologia (se presenti).',
+  description: 'Richiedi le ultime N immagini dalla cronologia (se presenti, max 5).',
   properties: {
-    count: { type: 'integer', description: 'Numero di immagini ultime da includere (intero positivo).', minimum: 1 },
+    count: { type: 'integer', description: 'Numero di immagini ultime da includere (intero positivo, max 5).', minimum: 1 },
   },
   required: ['count'],
 });
 
 const TOOL_INCLUDE_HISTORY_DOCS = makeTool({
   name: 'include_history_docs',
-  description: 'Richiedi gli ultimi N documenti dalla cronologia (se presenti).',
+  description: 'Richiedi gli ultimi N documenti dalla cronologia (se presenti, max 2, solo documenti ≤5 pagine).',
   properties: {
-    count: { type: 'integer', description: 'Numero documenti ultimi da includere (intero positivo).', minimum: 1 },
+    count: { type: 'integer', description: 'Numero documenti ultimi da includere (intero positivo, max 2).', minimum: 1 },
   },
   required: ['count'],
 });

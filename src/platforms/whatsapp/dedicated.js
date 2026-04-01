@@ -1,6 +1,6 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { buildWhatsAppHistory, downloadCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
+const { buildWhatsAppHistory, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
@@ -175,14 +175,18 @@ async function onDedicatedMessage(msg) {
     contentParts.push(...quotedContent.mediaParts);
   }
 
-  const media = await downloadCurrentMedia(msg);
-  if (media) {
-    contentParts.push(mediaToContentPart(media.buffer, media.mimetype));
-    const tag = mediaTag(media.filename, media.mimetype);
-    textBody = `${tag} ${textBody}`.trim();
+  const mediaResult = await processCurrentMedia(msg);
+  if (mediaResult) {
+    if (mediaResult.skipped) {
+      const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
+      textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
+    } else {
+      contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype));
+      textBody = `${mediaResult.tag} ${textBody}`.trim();
+    }
   } else if (msg.hasMedia) {
     const tag = mediaTag(null, msg._data?.mimetype);
-    textBody = `${tag} (file non visionabile) ${textBody}`.trim();
+    textBody = `${tag} (file non disponibile) ${textBody}`.trim();
   }
 
   if (textBody) {
@@ -215,30 +219,16 @@ async function onDedicatedMessage(msg) {
     return;
   }
 
-  let typingInterval = null;
-
   try {
-    // Invia typing state e rinnovalo ogni 2 secondi durante l'elaborazione
-    const sendInitialTyping = async () => {
-      try {
-        if (typeof chat.sendState === 'function') {
-          await chat.sendState('typing');
-        }
-      } catch (err) {
-        // sendState might not be available in this version
+    try {
+      if (typeof chat.sendState === 'function') {
+        await chat.sendState('typing');
       }
-    };
-
-    await sendInitialTyping();
-    typingInterval = setInterval(sendInitialTyping, 2000);
+    } catch (err) {
+      // sendState might not be available in this version
+    }
 
     const response = await handleMessage(ctx);
-
-    // Ferma il typing keepalive
-    if (typingInterval) {
-      clearInterval(typingInterval);
-      typingInterval = null;
-    }
 
     try {
       log.info(`\n📤 Invio risposta...`);
@@ -256,7 +246,6 @@ async function onDedicatedMessage(msg) {
       log.error(`   ${err.message}`);
     }
   } finally {
-    if (typingInterval) clearInterval(typingInterval);
     try { responseLock.unlock(lockKey); } catch {}
   }
 }
