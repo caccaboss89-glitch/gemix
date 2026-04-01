@@ -44,7 +44,7 @@ function saveMonitorState(state) {
  */
 function getPreviousMonthName() {
   const now = new Date();
-  const italyDate = new Date(now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' }));
+  const italyDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
   italyDate.setMonth(italyDate.getMonth() - 1);
   return italyDate.toLocaleString('it-IT', { month: 'long' });
 }
@@ -55,7 +55,7 @@ function getPreviousMonthName() {
  */
 function getItalyDateString() {
   const now = new Date();
-  const italyDate = new Date(now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' }));
+  const italyDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
   return italyDate.toISOString().split('T')[0]; // YYYY-MM-DD
 }
 
@@ -65,8 +65,10 @@ function getItalyDateString() {
  */
 function isFirstOfMonth() {
   const now = new Date();
-  const italyDate = new Date(now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' }));
-  return italyDate.getDate() === 1;
+  const italyDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
+  const day = italyDate.getDate();
+  log.info(`🔍 isFirstOfMonth check: day=${day} (${now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' })})`);
+  return day === 1;
 }
 
 /**
@@ -126,11 +128,12 @@ function wasMessageSentToday(memberWa, state) {
  */
 async function checkAndSendMusicWrap(dedicatedClient) {
   if (!dedicatedClient) {
-    log.warn('⚠️  Dedicated WhatsApp client not available');
+    log.warn('⚠️  Dedicated WhatsApp client not available (not ready yet)');
     return;
   }
 
   if (!isFirstOfMonth()) {
+    // Silently skip - isFirstOfMonth already logs the day check
     return;
   }
 
@@ -145,7 +148,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   const state = loadMonitorState();
 
   if (state.lastCommitHash === latestCommitHash) {
-    log.info('ℹ️  Nessun nuovo aggiornamento rilevato');
+    log.info('ℹ️  Nessun nuovo aggiornamento rilevato (commit: ' + latestCommitHash.slice(0, 7) + ')');
     return;
   }
 
@@ -175,7 +178,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   saveMonitorState(state);
 
   if (sentCount > 0) {
-    log.info(`✅ Completato: ${sentCount} messaggi inviati`);
+    log.info(`✅ Completato: ${sentCount} messaggi inviati su ${ACTIVE_MEMBERS.length} membri`);
   }
 }
 

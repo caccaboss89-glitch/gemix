@@ -55,6 +55,7 @@ async function checkAndExecuteTasks() {
 
   if (lastMusicWrapCheckDate !== todayDateString) {
     lastMusicWrapCheckDate = todayDateString;
+    log.info(`📅 New date detected (${todayDateString}), checking MusicWrap...`);
     try {
       await checkAndSendMusicWrap(dedicatedClient);
     } catch (err) {

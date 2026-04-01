@@ -19,6 +19,7 @@ log.info('🤖 GemiX — Avvio in corso...\n');
 const dedicatedWa = initDedicatedWhatsApp();
 
 dedicatedWa.on('ready', () => {
+  log.info('✅ Dedicated WhatsApp client is ready!');
   setSchedulerWaClient(dedicatedWa);
   setAdminNotifierClient(dedicatedWa);
 });
