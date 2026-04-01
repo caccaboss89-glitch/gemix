@@ -15,17 +15,17 @@ const MUSIC_WRAP_URL = 'https://sito-music-bot.vercel.app/';
 
 /**
  * Load monitor state from persistent file.
- * State tracks last processed commit hash and dates messages were sent to members.
- * @returns {object} Monitor state { lastCommitHash, lastSentDate }
+ * State tracks last processed commit hash, dates messages were sent to members, and last check date.
+ * @returns {object} Monitor state { lastCommitHash, lastSentDate, lastCheckDate }
  */
 function loadMonitorState() {
   if (!fs.existsSync(MONITOR_STATE_FILE)) {
-    return { lastCommitHash: null, lastSentDate: {} };
+    return { lastCommitHash: null, lastSentDate: {}, lastCheckDate: null };
   }
   try {
     return JSON.parse(fs.readFileSync(MONITOR_STATE_FILE, 'utf-8'));
   } catch {
-    return { lastCommitHash: null, lastSentDate: {} };
+    return { lastCommitHash: null, lastSentDate: {}, lastCheckDate: null };
   }
 }
 
@@ -122,7 +122,7 @@ function wasMessageSentToday(memberWa, state) {
 
 /**
  * Check conditions and send music wrap notification message to active members.
- * Triggers on: (1) First day of month (2) New commits detected (3) Not sent today.
+ * Triggers on: (1) First day of month (2) New commits detected (3) Not checked today.
  * @param {object} dedicatedClient - The whatsapp-web.js Client instance
  * @returns {Promise<void>}
  */
@@ -137,6 +137,15 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     return;
   }
 
+  const today = getItalyDateString();
+  const state = loadMonitorState();
+
+  // Se il check è già stato fatto oggi, salta (anche se il bot è riavviato)
+  if (state.lastCheckDate === today) {
+    log.info(`ℹ️  Check già eseguito oggi (${today}), skip`);
+    return;
+  }
+
   log.info('✅ Oggi è il primo! Verifica in corso...');
 
   const latestCommitHash = await getLatestCommitHash();
@@ -145,16 +154,16 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     return;
   }
 
-  const state = loadMonitorState();
-
   if (state.lastCommitHash === latestCommitHash) {
     log.info('ℹ️  Nessun nuovo aggiornamento rilevato (commit: ' + latestCommitHash.slice(0, 7) + ')');
+    // Registra il check pur senza aggiornamenti, così non ricontrolla oggi al reboot
+    state.lastCheckDate = today;
+    saveMonitorState(state);
     return;
   }
 
   log.info(`✅ Nuovo aggiornamento rilevato (commit: ${latestCommitHash.slice(0, 7)})`);
 
-  const today = getItalyDateString();
   let sentCount = 0;
 
   for (const member of ACTIVE_MEMBERS) {
@@ -175,6 +184,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   }
 
   state.lastCommitHash = latestCommitHash;
+  state.lastCheckDate = today;
   saveMonitorState(state);
 
   if (sentCount > 0) {
