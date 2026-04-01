@@ -52,8 +52,6 @@ function buildSystemPrompt(ctx) {
 
   prompt += `\n`;
   prompt += `### Limiti media\n`;
-  prompt += `- Le immagini in cronologia non sono visibili di default. Usa include_history_images per vederle (max 5).\n`;
-  prompt += `- I documenti/PDF in cronologia non sono visibili di default. Usa include_history_docs per vederli (max 2, solo documenti ≤5 pagine).\n`;
   prompt += `- Viene inviato solo l'ultimo vocale utente in cronologia (se ≤2 min). Audio troppo lunghi sono segnalati.\n`;
   prompt += `- I tuoi vocali precedenti sono trascritti come testo nella cronologia (etichettati "TRASCRIZIONE:").\n`;
 
