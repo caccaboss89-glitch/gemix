@@ -70,8 +70,7 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
 
 /**
  * Unified API client with retry and timeout logic.
- * Used by both Gemini and Grok to ensure consistent behavior.
- * @param {string} modelName - Model name for logging (e.g., 'Gemini', 'Grok')
+ * @param {string} modelName - Model name for logging (e.g., 'Gemini')
  * @param {string} apiUrl - Full API endpoint URL
  * @param {object} body - Request body
  * @returns {Promise<Response>} The raw fetch Response

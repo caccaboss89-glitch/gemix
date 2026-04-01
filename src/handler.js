@@ -121,9 +121,6 @@ async function handleMessage(ctx) {
     const deliveryCtx = {
       contactedWA: new Set(),
       contactedEmail: new Set(),
-      creatorJid: userCtx.waJid,
-      creatorEmail: userCtx.email,
-      isDynamic: false,
     };
 
     let rounds = 0;

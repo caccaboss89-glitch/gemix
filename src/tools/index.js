@@ -8,8 +8,8 @@ const { removeTasks } = require('./taskRemover');
 const { readServerRules } = require('./serverRules');
 const { readAboutMe } = require('./aboutMe');
 const { generatePdf } = require('./pdfGenerator');
-const { sendEmail, sendEmailDirect } = require('./emailSender');
-const { sendWhatsAppMessage, sendWhatsAppVoice, sendWhatsAppAttachments, sendWhatsAppDirect } = require('./whatsappSender');
+const { sendEmailDirect } = require('./emailSender');
+const { sendWhatsAppDirect } = require('./whatsappSender');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { extractLastNImages, extractLastNDocs } = require('../utils/media');
@@ -27,9 +27,9 @@ const voiceConsecutiveByChat = new Map();
 
 /**
  * Resolve the target WhatsApp JID for delivery.
- * Admin: can target anyone. Active member (non-dynamic): can target other members. Otherwise: self.
+ * Admin: can target anyone. Active member: can target other members. Otherwise: self.
  */
-function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
+function _resolveTargetWaJid(args, userCtx) {
   if (userCtx.isAdmin) {
     if (args.recipientPhone) {
       const jid = normalizePhoneToJid(args.recipientPhone);
@@ -44,13 +44,13 @@ function _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx) {
       const jid = normalizePhoneToJid(userCtx.userPhone);
       return { jid, display: userCtx.userName || userCtx.userPhone };
     }
-  } else if (userCtx.isActiveMember && args.recipientName && !dynamicTaskCtx.isDynamic) {
+  } else if (userCtx.isActiveMember && args.recipientName) {
     const member = findMemberByName(args.recipientName);
     if (!member) return { error: `❌ "${args.recipientName}" non trovato tra i membri attivi.` };
     return { jid: member.wa, display: member.name };
   }
-  if (!dynamicTaskCtx.creatorJid) return { error: '❌ Nessun numero WhatsApp del creatore disponibile.' };
-  return { jid: dynamicTaskCtx.creatorJid, display: 'te stesso' };
+  if (!userCtx.waJid) return { error: '❌ Nessun numero WhatsApp disponibile.' };
+  return { jid: userCtx.waJid, display: 'te stesso' };
 }
 
 function _getVoiceLimitChatKey(userCtx) {
@@ -68,9 +68,9 @@ function _resetVoiceCount(chatKey) {
 
 /**
  * Resolve the target email for delivery.
- * Non-member: blocked. Admin: any email. Active member (non-dynamic): other members. Otherwise: self.
+ * Non-member: blocked. Admin: any email. Active member: other members. Otherwise: self.
  */
-function _resolveDynamicEmail(args, userCtx, dynamicTaskCtx) {
+function _resolveTargetEmail(args, userCtx) {
   if (!userCtx.isActiveMember) {
     return { error: '❌ Solo i membri attivi possono inviare email.' };
   }
@@ -83,13 +83,13 @@ function _resolveDynamicEmail(args, userCtx, dynamicTaskCtx) {
       if (member && member.email) return { email: member.email, display: member.name };
       return { error: `❌ "${args.recipientName}" non trovato o senza email.` };
     }
-  } else if (args.recipientName && !dynamicTaskCtx.isDynamic) {
+  } else if (args.recipientName) {
     const member = findMemberByName(args.recipientName);
     if (member && member.email) return { email: member.email, display: member.name };
     return { error: `❌ "${args.recipientName}" non trovato o senza email.` };
   }
-  if (!dynamicTaskCtx.creatorEmail) return { error: '❌ Nessun indirizzo email del creatore disponibile.' };
-  return { email: dynamicTaskCtx.creatorEmail, display: 'te stesso' };
+  if (!userCtx.email) return { error: '❌ Nessun indirizzo email disponibile.' };
+  return { email: userCtx.email, display: 'te stesso' };
 }
 
 /**
@@ -98,10 +98,10 @@ function _resolveDynamicEmail(args, userCtx, dynamicTaskCtx) {
  * @param {object} toolCall - The tool call from Gemini { id, function: { name, arguments } }
  * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, email, isGroup, groupId }
  * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
- * @param {object|null} [dynamicTaskCtx=null] - If present, enforces dynamic task delivery rules { contactedWA: Set, contactedEmail: Set, creatorJid, creatorEmail }
+ * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set }
  * @returns {Promise<object>} { toolCallId: string, result: string }
  */
-async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null) {
+async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   const name = toolCall.function.name;
   const chatKey = _getVoiceLimitChatKey(userCtx);
 
@@ -202,20 +202,20 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
           break;
         }
 
-        // Delivery to a specific recipient (or dynamic task forced delivery)
-        if (dynamicTaskCtx && (args.recipientName || args.recipientPhone || dynamicTaskCtx.isDynamic)) {
+        // Delivery to a specific recipient
+        if (args.recipientName || args.recipientPhone) {
           const includeAttachments = args.includeAttachments !== false;
 
-          if (args.recipientName && !dynamicTaskCtx.isDynamic) {
+          if (args.recipientName) {
             const member = findMemberByName(args.recipientName);
             if (member && member.wa === userCtx.waJid) {
               result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, ometti recipientName.`;
               break;
             }
           }
-          const targetJid = _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx);
+          const targetJid = _resolveTargetWaJid(args, userCtx);
           if (targetJid.error) { result = targetJid.error; break; }
-          if (dynamicTaskCtx.contactedWA.has(targetJid.jid)) {
+          if (deliveryCtx.contactedWA.has(targetJid.jid)) {
             result = `❌ Hai già inviato un messaggio WhatsApp a questo numero. Ogni numero può ricevere solo 1 messaggio per richiesta.`;
             break;
           }
@@ -236,29 +236,13 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
 
             const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
 
-            dynamicTaskCtx.contactedWA.add(targetJid.jid);
+            deliveryCtx.contactedWA.add(targetJid.jid);
             result = `Messaggio vocale inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
             if (!userCtx.isActiveMember) {
               _incrementVoiceCount(chatKey);
             }
           } catch (err) {
             result = `❌ Errore invio vocale: ${err.message}`;
-          }
-          break;
-        }
-
-        // Se specificato un destinatario, invia il vocale direttamente a quella persona
-        if (args.recipientName || args.recipientPhone) {
-          if (!userCtx.isActiveMember) {
-            result = '❌ Errore: solo i membri attivi possono inviare messaggi vocali ad altri.';
-            break;
-          }
-          result = await sendWhatsAppVoice(args.recipientName, cleanText, {
-            isAdmin: userCtx.isAdmin,
-            recipientPhone: args.recipientPhone,
-          });
-          if (!userCtx.isActiveMember && result && result.includes('Messaggio vocale inviato con successo')) {
-            _incrementVoiceCount(chatKey);
           }
           break;
         }
@@ -351,68 +335,30 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
         // Always accumulate PDF - will be sent by send_whatsapp_message or send_email
         responseCtx.attachments.push(pdfAttachment);
         
-        if (dynamicTaskCtx || args.recipientName || args.recipientPhone) {
-          result = `PDF "${args.title}" generato con successo. Verrà allegato al prossimo messaggio di consegna.`;
-        } else {
-          result = `PDF "${args.title}" generato con successo e verrà inviato come allegato.`;
-        }
+        result = `PDF "${args.title}" generato con successo. Verrà allegato al prossimo messaggio di consegna.`;
         break;
       }
 
       case 'send_email': {
-        // Dynamic task mode: enforce delivery rules
-        if (dynamicTaskCtx) {
-          const includeAttachments = args.includeAttachments !== false;
-          const targetEmail = _resolveDynamicEmail(args, userCtx, dynamicTaskCtx);
-          if (targetEmail.error) { result = targetEmail.error; break; }
-          if (dynamicTaskCtx.contactedEmail.has(targetEmail.email)) {
-            result = `❌ Hai già inviato un'email a questo indirizzo. Ogni email può ricevere solo 1 messaggio per task.`;
-            break;
-          }
-          try {
-            // Build nodemailer attachments from responseCtx (if requested)
-            const emailAttachments = includeAttachments
-              ? responseCtx.attachments.map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }))
-              : [];
-            await sendEmailDirect(
-              targetEmail.email,
-              args.subject,
-              `<div style="font-family:sans-serif">${(args.body || '').replace(/\n/g, '<br>')}</div>`,
-              emailAttachments
-            );
-            dynamicTaskCtx.contactedEmail.add(targetEmail.email);
-            result = `Email inviata con successo a ${targetEmail.display}${emailAttachments.length > 0 ? ` con ${emailAttachments.length} allegato/i` : ''}.`;
-          } catch (err) {
-            result = `❌ Errore invio email: ${err.message}`;
-          }
-          break;
-        }
-
-        if (!userCtx.isActiveMember) {
-          result = '❌ Errore: solo i membri attivi possono inviare email.';
-          break;
-        }
-        // Check that user is not sending to themselves
-        const targetEmailMember = findMemberByName(args.recipientName);
-        if (targetEmailMember && targetEmailMember.email === userCtx.email) {
-          result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, non usare questo tool.`;
+        const includeAttachments = args.includeAttachments !== false;
+        const targetEmail = _resolveTargetEmail(args, userCtx);
+        if (targetEmail.error) { result = targetEmail.error; break; }
+        if (deliveryCtx.contactedEmail.has(targetEmail.email)) {
+          result = `❌ Hai già inviato un'email a questo indirizzo. Ogni email può ricevere solo 1 messaggio per richiesta.`;
           break;
         }
         try {
-          const includeAttachments = args.includeAttachments !== false;
-
-          // Build accumulated attachments from responseCtx (if requested)
-          const accumulatedAttachments = includeAttachments
+          const emailAttachments = includeAttachments
             ? responseCtx.attachments.map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }))
             : [];
-
-          result = await sendEmail(args.recipientName, args.subject, args.body, {
-            attachPdf: args.attachPdf,
-            pdfTitle: args.pdfTitle,
-            pdfContent: args.pdfContent,
-            imageUrls: args.imageUrls,
-            accumulatedAttachments,
-          });
+          await sendEmailDirect(
+            targetEmail.email,
+            args.subject,
+            `<div style="font-family:sans-serif">${(args.body || '').replace(/\n/g, '<br>')}</div>`,
+            emailAttachments
+          );
+          deliveryCtx.contactedEmail.add(targetEmail.email);
+          result = `Email inviata con successo a ${targetEmail.display}${emailAttachments.length > 0 ? ` con ${emailAttachments.length} allegato/i` : ''}.`;
         } catch (err) {
           result = `❌ Errore invio email: ${err.message}`;
         }
@@ -420,86 +366,29 @@ async function executeTool(toolCall, userCtx, responseCtx, dynamicTaskCtx = null
       }
 
       case 'send_whatsapp_message': {
-        // Dynamic task mode: enforce delivery rules
-        if (dynamicTaskCtx) {
-          const includeAttachments = args.includeAttachments !== false;
+        const includeAttachments = args.includeAttachments !== false;
 
-          const targetJid = _resolveDynamicWaJid(args, userCtx, dynamicTaskCtx);
-          if (targetJid.error) { result = targetJid.error; break; }
-          if (dynamicTaskCtx.contactedWA.has(targetJid.jid)) {
-            result = `❌ Hai già inviato un messaggio WhatsApp a questo numero. Ogni numero può ricevere solo 1 messaggio per task.`;
-            break;
-          }
-          try {
-            await sendWhatsAppDirect(targetJid.jid, args.message);
-            // Send accumulated attachments
-            if (includeAttachments && responseCtx.attachments.length > 0) {
-              const { MessageMedia } = require('whatsapp-web.js');
-              for (const att of responseCtx.attachments) {
-                if (!att.buffer || !att.mimetype) continue;
-                const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
-                await sendWhatsAppDirect(targetJid.jid, media);
-              }
-            }
-
-            const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
-
-            dynamicTaskCtx.contactedWA.add(targetJid.jid);
-            result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
-          } catch (err) {
-            result = `❌ Errore invio WhatsApp: ${err.message}`;
-          }
-          break;
-        }
-        
-        if (!userCtx.isActiveMember) {
-          result = '❌ Errore: solo i membri attivi possono inviare messaggi WhatsApp ad altri.';
-          break;
-        }
-        // Check that user is not sending to themselves
-        const targetMember = findMemberByName(args.recipientName);
-        if (targetMember && targetMember.wa === userCtx.waJid) {
-          result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, non usare questo tool.`;
+        const targetJid = _resolveTargetWaJid(args, userCtx);
+        if (targetJid.error) { result = targetJid.error; break; }
+        if (deliveryCtx.contactedWA.has(targetJid.jid)) {
+          result = `❌ Hai già inviato un messaggio WhatsApp a questo numero. Ogni numero può ricevere solo 1 messaggio per richiesta.`;
           break;
         }
         try {
-          result = await sendWhatsAppMessage(args.recipientName, args.message, {
-            isAdmin: userCtx.isAdmin,
-            recipientPhone: args.recipientPhone,
-          });
-
-          const includeAttachments = args.includeAttachments !== false;
-          let attachmentsSent = 0;
-
-          // Send accumulated attachments if requested
+          await sendWhatsAppDirect(targetJid.jid, args.message);
           if (includeAttachments && responseCtx.attachments.length > 0) {
-            const member = findMemberByName(args.recipientName);
-            const jid = userCtx.isAdmin && args.recipientPhone
-              ? normalizePhoneToJid(args.recipientPhone)
-              : member?.wa;
-            if (!jid) {
-              result += ` ⚠️ Non è stato possibile risolvere il destinatario per i ${responseCtx.attachments.length} allegato/i.`;
-            } else {
-              const { MessageMedia } = require('whatsapp-web.js');
-              for (const att of responseCtx.attachments) {
-                if (!att.buffer || !att.mimetype) continue;
-                try {
-                  const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
-                  await sendWhatsAppDirect(jid, media);
-                  attachmentsSent++;
-                } catch (attErr) {
-                  log.error(`[send_whatsapp_message] Errore invio allegato ${att.name}:`, attErr.message);
-                }
-              }
-              if (attachmentsSent > 0) {
-                result += ` ✅ ${attachmentsSent} allegato/i inviato/i.`;
-              } else if (responseCtx.attachments.length > 0) {
-                result += ` ❌ Errore nell'invio degli ${responseCtx.attachments.length} allegato/i.`;
-              }
+            const { MessageMedia } = require('whatsapp-web.js');
+            for (const att of responseCtx.attachments) {
+              if (!att.buffer || !att.mimetype) continue;
+              const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+              await sendWhatsAppDirect(targetJid.jid, media);
             }
           }
 
-          // Non gestito qui: il nuovo strumento clear_attachments mantiene il comportamento di svuotare il buffer.
+          const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
+
+          deliveryCtx.contactedWA.add(targetJid.jid);
+          result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
         } catch (err) {
           result = `❌ Errore invio WhatsApp: ${err.message}`;
         }

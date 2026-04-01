@@ -222,21 +222,16 @@ function makeEmailTool({ includeRecipientName = false, includeRecipientEmail = f
 function makeScheduleTasksTool({ includeRecipientName = false, includeRecipientPhone = false } = {}) {
   const baseTool = makeTool({
     name: 'schedule_tasks',
-    description: 'Programma attività future (statiche o dinamiche).',
+    description: 'Programma attività future.',
     properties: {
       tasks: {
         type: 'array',
         items: {
           type: 'object',
           properties: {
-            taskType: {
-              type: 'string',
-              enum: ['static', 'dynamic'],
-              description: "'static' = contenuto pronto; 'dynamic' = prompt per Grok AI da eseguire al momento della consegna",
-            },
             content: {
               type: 'string',
-              description: 'Testo da inviare (static) oppure prompt da elaborare (dynamic)',
+              description: 'Testo da inviare al momento della consegna',
             },
             scheduledAt: {
               type: 'string',
@@ -287,7 +282,7 @@ function makeScheduleTasksTool({ includeRecipientName = false, includeRecipientP
               },
             },
           },
-          required: ['taskType', 'content', 'scheduledAt'],
+          required: ['content', 'scheduledAt'],
         },
       },
     },
@@ -526,66 +521,8 @@ function isActiveMemberOnlyTool(toolName) {
   return ACTIVE_MEMBER_TOOL_NAMES.includes(toolName);
 }
 
-function getDynamicTaskTools(isActiveMember, isAdmin, userCtx = {}) {
-  const chatKey = _getChatKey(userCtx);
-  // Data-gathering tools (always available, no recipient params)
-  let tools = [
-    BASE_TOOLS.find(t => t.function.name === 'web_search'),
-    makeTool({
-      name: 'image_search',
-      description: 'Cerca immagini sul web. Le immagini trovate verranno accumulate come allegati e inviate insieme al messaggio di consegna (WhatsApp o email).',
-      properties: {
-        query: { type: 'string', description: 'Cosa cercare nelle immagini (preferibilmente in inglese per risultati migliori)' },
-        count: { type: 'integer', description: 'Numero immagini da cercare (1-4). Default 1.' },
-      },
-      required: ['query'],
-    }),
-    makeTool({
-      name: 'generate_pdf',
-      description: 'Genera un file PDF. Il PDF verrà accumulato come allegato e inviato insieme al messaggio di consegna (WhatsApp o email).',
-      properties: {
-        title: { type: 'string', description: 'Titolo del PDF' },
-        content: { type: 'string', description: 'Contenuto testuale del PDF. Supporta # e ## per titoli, - per elenchi puntati.' },
-      },
-      required: ['title', 'content'],
-    }),
-  ];
-
-  // Delivery tools — descriptions vary by permission level
-  if (isAdmin) {
-    // Add music stats for admin
-    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
-    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'clear_attachments'));
-
-    tools.push(makeWhatsAppTool({ includeRecipientName: true, includeRecipientPhone: true }));
-    if (!isDiscord) {
-      tools.push(makeVoiceTool({ includeRecipientName: true, includeRecipientPhone: true }));
-    }
-    tools.push(makeEmailTool({ includeRecipientName: true, includeRecipientEmail: true }));
-  } else if (isActiveMember) {
-    // Add music stats for active members
-    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'read_music_stats'));
-    tools.push(ACTIVE_MEMBER_TOOLS.find(t => t.function.name === 'clear_attachments'));
-
-    tools.push(makeWhatsAppTool());
-    if (!isDiscord) {
-      tools.push(makeVoiceTool());
-    }
-    tools.push(makeEmailTool({ includeRecipientName: true }));
-  } else {
-    // Non-active member: only WA to self
-    tools.push(makeWhatsAppTool());
-    if (!isDiscord) {
-      tools.push(makeVoiceTool());
-    }
-  }
-
-  return tools;
-}
-
 module.exports = {
   getToolsForUser,
-  getDynamicTaskTools,
   isActiveMemberOnlyTool,
   getToolInstructions,
   BASE_TOOLS,

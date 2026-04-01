@@ -23,10 +23,6 @@ module.exports = {
   MAX_IMAGE_BYTES: 7_500_000,
   MAX_TTS_CHARS: 1000,
 
-  // Task types
-  TASK_TYPE_STATIC: 'static',
-  TASK_TYPE_DYNAMIC: 'dynamic',
-
   // Platforms
   PLATFORM_DISCORD: 'discord',
   PLATFORM_WA_DEDICATED: 'whatsapp_dedicated',

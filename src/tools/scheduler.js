@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { TASKS_DIR, MAX_TASK_DAYS, TASK_TYPE_STATIC, TASK_TYPE_DYNAMIC } = require('../config/constants');
+const { TASKS_DIR, MAX_TASK_DAYS } = require('../config/constants');
 const { getRomeISO } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
@@ -12,7 +12,7 @@ const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
  * Schedule one or more tasks for a user or group.
  * Validates dates, permissions, and destinations before writing to task files.
  * @param {Array} tasks - Array of task objects from GemiX {
- *   taskType, content, scheduledAt,
+ *   content, scheduledAt,
  *   whatsapp: { toGroup?, toPrivate?, recipientName?, recipientPhone? },
  *   email: { recipientName?, recipientEmail? },
  *   pdf?: { title, content }
@@ -128,7 +128,6 @@ function scheduleTasks(tasks, ctx) {
 
     const newTask = {
       id: crypto.randomUUID(),
-      type: task.taskType || TASK_TYPE_STATIC,
       content: removeDiscordEmoji(task.content),
       scheduledAt: task.scheduledAt,
       createdAt: getRomeISO(),
@@ -139,20 +138,6 @@ function scheduleTasks(tasks, ctx) {
         content: task.pdf.content,
       } : null,
     };
-
-    if (newTask.type === TASK_TYPE_DYNAMIC) {
-      newTask.creatorCtx = {
-        isActiveMember: ctx.isActiveMember,
-        isAdmin: ctx.isAdmin,
-        taskFileId: ctx.taskFileId,
-        userId: ctx.userId,
-        userName: ctx.userName,
-        waJid: ctx.waJid,
-        email: ctx.email,
-        isGroup: ctx.isGroup,
-        groupId: ctx.groupId,
-      };
-    }
 
     let fileData = readTaskFile(fileId) || { tasks: [] };
 

@@ -16,7 +16,7 @@ function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
     result += `📋 **I tuoi task personali:**\n`;
     result += personalData.tasks.map((t, i) =>
-      `${i + 1}. [${t.type.toUpperCase()}] "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)} | ID: \`${t.id}\``
+      `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)} | ID: \`${t.id}\``
     ).join('\n');
   } else {
     result += `📋 Nessun task personale programmato.`;
@@ -27,7 +27,7 @@ function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
       result += `\n\n📋 **Task del gruppo:**\n`;
       result += groupData.tasks.map((t, i) =>
-        `${i + 1}. [${t.type.toUpperCase()}] "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)} | ID: \`${t.id}\``
+        `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)} | ID: \`${t.id}\``
       ).join('\n');
     }
   }
