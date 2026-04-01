@@ -145,13 +145,13 @@ async function handleMessage(ctx) {
         messages.push({ role: 'user', content: includeList });
       }
       
-      if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.warn(`   ⚠️ Vocale già generato, interruzione ciclo`);
+      if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
+        log.warn(`   ⚠️ Testo 'Chi sono' già preparato, interruzione ciclo`);
         break;
       }
       
-      if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
-        log.warn(`   ⚠️ Testo 'Chi sono' già preparato, interruzione ciclo`);
+      if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
+        log.warn(`   ⚠️ Vocale già generato, interruzione ciclo`);
         break;
       }
       
@@ -172,6 +172,13 @@ async function handleMessage(ctx) {
         messages.push(assistantMsg);
 
         for (const tc of assistantMsg.tool_calls) {
+          // Se un tool precedente ha impostato isAboutMeOnly o isVoiceOnly, interrompi
+          if ((responseCtx.isAboutMeOnly && responseCtx.aboutMeText) || 
+              (responseCtx.isVoiceOnly && responseCtx.voiceBuffer)) {
+            log.warn(`   ⚠️ Ciclo tool interrotto: un tool ha già generato la risposta finale`);
+            break;
+          }
+
           const toolName = tc.function.name;
           const toolInstr = getToolInstructions(toolName);
           messages = removeToolInstructionMessages(messages);

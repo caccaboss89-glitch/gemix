@@ -38,19 +38,19 @@ const TOOL_INSTRUCTIONS = {
   read_music_stats: `Rispondi solo con la chiamata al tool.`,
 };
 
-// ── read_about_me: allowed una sola volta per chat (persistito su file) ──
+// ── send_about_me: allowed una sola volta per chat (persistito su file) ──
 
-const readAboutMeUsedByChat = new Set();
+const sendAboutMeUsedByChat = new Set();
 const READ_ABOUT_ME_STATE_FILE = path.join(DATA_DIR, 'readAboutMeUsedByChat.json');
 
-function _loadReadAboutMeState() {
+function _loadSendAboutMeState() {
   try {
     if (!fs.existsSync(READ_ABOUT_ME_STATE_FILE)) return;
     const raw = fs.readFileSync(READ_ABOUT_ME_STATE_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       parsed.forEach(chatKey => {
-        if (chatKey) readAboutMeUsedByChat.add(chatKey);
+        if (chatKey) sendAboutMeUsedByChat.add(chatKey);
       });
     }
   } catch {
@@ -58,12 +58,12 @@ function _loadReadAboutMeState() {
   }
 }
 
-function _saveReadAboutMeState() {
+function _saveSendAboutMeState() {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFileSync(READ_ABOUT_ME_STATE_FILE, JSON.stringify([...readAboutMeUsedByChat], null, 2), 'utf-8');
+    fs.writeFileSync(READ_ABOUT_ME_STATE_FILE, JSON.stringify([...sendAboutMeUsedByChat], null, 2), 'utf-8');
   } catch {
     // Silenzioso su errori di scrittura
   }
@@ -73,17 +73,17 @@ function _getChatKey(userCtx) {
   return userCtx?.chatId || userCtx?.groupId || userCtx?.waJid || userCtx?.userId || 'unknown';
 }
 
-function _markReadAboutMeUsed(chatKey) {
+function _markSendAboutMeUsed(chatKey) {
   if (!chatKey) return;
-  readAboutMeUsedByChat.add(chatKey);
-  _saveReadAboutMeState();
+  sendAboutMeUsedByChat.add(chatKey);
+  _saveSendAboutMeState();
 }
 
-function _isReadAboutMeUsed(chatKey) {
-  return chatKey && readAboutMeUsedByChat.has(chatKey);
+function _isSendAboutMeUsed(chatKey) {
+  return chatKey && sendAboutMeUsedByChat.has(chatKey);
 }
 
-_loadReadAboutMeState();
+_loadSendAboutMeState();
 
 // ── Helpers ──
 
@@ -148,8 +148,8 @@ const TOOL_INCLUDE_HISTORY_DOCS = makeTool({
   required: ['count'],
 });
 
-const TOOL_READ_ABOUT_ME = makeTool({
-  name: 'read_about_me',
+const TOOL_SEND_ABOUT_ME = makeTool({
+  name: 'send_about_me',
   description: 'Invia sulla chat corrente il testo della storia di GemiX, utile per presentarti e dire chi sei.',
   properties: {},
 });
@@ -438,7 +438,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH);
   if (userCtx.hasHistoryImages) tools.push(TOOL_INCLUDE_HISTORY_IMAGES);
   if (userCtx.hasHistoryDocs) tools.push(TOOL_INCLUDE_HISTORY_DOCS);
-  if (!_isReadAboutMeUsed(chatKey)) tools.push(TOOL_READ_ABOUT_ME);
+  if (!_isSendAboutMeUsed(chatKey)) tools.push(TOOL_SEND_ABOUT_ME);
 
   // Vocale: solo WhatsApp, schema varia per grado
   if (!isDiscord) {
@@ -467,5 +467,5 @@ module.exports = {
   getToolsForUser,
   isActiveMemberOnlyTool,
   getToolInstructions,
-  _markReadAboutMeUsed,
+  _markSendAboutMeUsed,
 };

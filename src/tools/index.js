@@ -1,4 +1,4 @@
-const { isActiveMemberOnlyTool, _markReadAboutMeUsed } = require('../ai/tools');
+const { isActiveMemberOnlyTool, _markSendAboutMeUsed } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
 const { generateVoice } = require('./voiceMessage');
@@ -310,15 +310,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
-      case 'read_about_me': {
+      case 'send_about_me': {
         const aboutMeContent = readAboutMe();
         responseCtx.aboutMeText = aboutMeContent;
         responseCtx.isAboutMeOnly = true;
         result = 'Messaggio inviato all\'utente.';
 
-        // One-shot per chat: non mostrare più read_about_me nella lista strumenti.
+        // One-shot per chat: non mostrare più send_about_me nella lista strumenti.
         const chatKey = userCtx.chatId || userCtx.groupId || userCtx.waJid || userCtx.userId || 'unknown';
-        _markReadAboutMeUsed(chatKey);
+        _markSendAboutMeUsed(chatKey);
 
         break;
       }
@@ -375,7 +375,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           break;
         }
         try {
-          await sendWhatsAppDirect(targetJid.jid, args.message);
+          const sendOptions = {};
+          if (Array.isArray(args.mentions) && args.mentions.length > 0) {
+            sendOptions.mentionJids = args.mentions;
+          }
+          await sendWhatsAppDirect(targetJid.jid, args.message, sendOptions);
           if (includeAttachments && responseCtx.attachments.length > 0) {
             const { MessageMedia } = require('whatsapp-web.js');
             for (const att of responseCtx.attachments) {
