@@ -375,11 +375,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           break;
         }
         try {
-          const sendOptions = {};
-          if (Array.isArray(args.mentions) && args.mentions.length > 0) {
-            sendOptions.mentionJids = args.mentions;
-          }
-          await sendWhatsAppDirect(targetJid.jid, args.message, sendOptions);
+          await sendWhatsAppDirect(targetJid.jid, args.message);
           if (includeAttachments && responseCtx.attachments.length > 0) {
             const { MessageMedia } = require('whatsapp-web.js');
             for (const att of responseCtx.attachments) {

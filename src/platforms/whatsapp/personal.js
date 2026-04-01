@@ -209,36 +209,53 @@ async function onPersonalMessage(msg) {
     return;
   }
 
+  let typingInterval = null;
+
   try {
-    if (typeof chat.sendState === 'function') {
-      await chat.sendState('typing');
+    // Invia typing state e rinnovalo ogni 2 secondi durante l'elaborazione
+    const sendInitialTyping = async () => {
+      try {
+        if (typeof chat.sendState === 'function') {
+          await chat.sendState('typing');
+        }
+      } catch (err) {
+        // sendState might not be available in this version
+      }
+    };
+
+    await sendInitialTyping();
+    typingInterval = setInterval(sendInitialTyping, 2000);
+
+    const response = await handleMessage(ctx);
+
+    // Ferma il typing keepalive
+    if (typingInterval) {
+      clearInterval(typingInterval);
+      typingInterval = null;
     }
-  } catch (err) {
-    // sendState might not be available in this version
-  }
 
-  const response = await handleMessage(ctx);
+    if (response.text) {
+      response.text = removeFooter(response.text);
+      response.text = addFooter(response.text, getModelDisplayName(GEMINI_MODEL));
+    }
 
-  if (response.text) {
-    response.text = removeFooter(response.text);
-    response.text = addFooter(response.text, getModelDisplayName(GEMINI_MODEL));
-  }
-
-  try {
-    log.info(`\n📤 Invio risposta...`);
-    await sendWhatsAppResponse(chat, msg, response);
-    log.info(`   ✅ Messaggio inviato`);
     try {
-      if (typeof chat.sendState === 'function') {
-        await chat.sendState('paused');
+      log.info(`\n📤 Invio risposta...`);
+      await sendWhatsAppResponse(chat, msg, response);
+      log.info(`   ✅ Messaggio inviato`);
+      try {
+        if (typeof chat.sendState === 'function') {
+          await chat.sendState('paused');
+        }
+      } catch (err) {
+        // sendState might not be available in this version
       }
     } catch (err) {
-      // sendState might not be available in this version
+      log.error(`\n❌ Errore invio risposta:`);
+      log.error(`   ${err.message}`);
     }
-  } catch (err) {
-    log.error(`\n❌ Errore invio risposta:`);
-    log.error(`   ${err.message}`);
   } finally {
+    if (typingInterval) clearInterval(typingInterval);
     try { responseLock.unlock(lockKey); } catch {}
   }
 }
