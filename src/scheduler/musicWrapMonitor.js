@@ -15,17 +15,17 @@ const MUSIC_WRAP_URL = 'https://sito-music-bot.vercel.app/';
 
 /**
  * Load monitor state from persistent file.
- * State tracks last processed commit hash, dates messages were sent to members, and last check date.
- * @returns {object} Monitor state { lastCommitHash, lastSentDate, lastCheckDate }
+ * State tracks last stats timestamp, dates messages were sent to members, and last check date.
+ * @returns {object} Monitor state { lastStatsTimestamp, lastSentDate, lastCheckDate }
  */
 function loadMonitorState() {
   if (!fs.existsSync(MONITOR_STATE_FILE)) {
-    return { lastCommitHash: null, lastSentDate: {}, lastCheckDate: null };
+    return { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
   }
   try {
     return JSON.parse(fs.readFileSync(MONITOR_STATE_FILE, 'utf-8'));
   } catch {
-    return { lastCommitHash: null, lastSentDate: {}, lastCheckDate: null };
+    return { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
   }
 }
 
@@ -72,39 +72,30 @@ function isFirstOfMonth() {
 }
 
 /**
- * Fetch the latest commit hash from GitHub
- * @returns {Promise<string|null>} Commit hash or null if error
+ * Fetch and check if stats.json was updated on GitHub
+ * Uses raw GitHub URL (same as musicStats tool) instead of API commits endpoint
+ * @returns {Promise<string|null>} Content hash or null if error/no change
  */
-async function getLatestCommitHash() {
+async function checkStatsFileUpdate() {
   try {
-    const { fetchWithTimeout } = require('../utils/fetch');
-    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits?sha=${GITHUB_BRANCH}&per_page=1`;
+    const { fetchExternal } = require('../utils/fetch');
+    const STATS_URL = 'https://raw.githubusercontent.com/caccaboss89-glitch/MusicBot/main/data/stats.json';
     
-    const headers = {
-      'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'GemiX-MusicWrapMonitor/1.0'
-    };
-
-    const githubToken = process.env.GITHUB_TOKEN;
-    if (githubToken) {
-      headers['Authorization'] = `token ${githubToken}`;
-    }
-
-    const response = await fetchWithTimeout(url, { headers });
+    const response = await fetchExternal(STATS_URL, {
+      headers: { 'User-Agent': 'GemiX-MusicWrapMonitor/1.0' },
+    }, 'Music Stats Check');
     
     if (!response.ok) {
-      log.error(`❌ Errore API GitHub: ${response.status}`);
+      log.error(`❌ Errore lettura stats.json: ${response.status}`);
       return null;
     }
 
     const data = await response.json();
-    if (data.length === 0) {
-      return null;
-    }
-
-    return data[0].sha;
+    // Usa il timestamp lastUpdated dal file come identificatore di cambio
+    const timestamp = data.lastUpdated || new Date().toISOString();
+    return timestamp;
   } catch (err) {
-    log.error('❌ Errore nel fetch dell\'hash commit:', err.message);
+    log.error('❌ Errore nel fetch stats.json:', err.message);
     return null;
   }
 }
@@ -148,21 +139,21 @@ async function checkAndSendMusicWrap(dedicatedClient) {
 
   log.info('✅ Oggi è il primo! Verifica in corso...');
 
-  const latestCommitHash = await getLatestCommitHash();
-  if (!latestCommitHash) {
-    log.warn('⚠️  Impossibile verificare il commit da GitHub');
+  const statsTimestamp = await checkStatsFileUpdate();
+  if (!statsTimestamp) {
+    log.warn('⚠️  Impossibile verificare gli aggiornamenti da GitHub');
     return;
   }
 
-  if (state.lastCommitHash === latestCommitHash) {
-    log.info('ℹ️  Nessun nuovo aggiornamento rilevato (commit: ' + latestCommitHash.slice(0, 7) + ')');
+  if (state.lastStatsTimestamp === statsTimestamp) {
+    log.info('ℹ️  Nessun nuovo aggiornamento rilevato (timestamp: ' + statsTimestamp + ')');
     // Registra il check pur senza aggiornamenti, così non ricontrolla oggi al reboot
     state.lastCheckDate = today;
     saveMonitorState(state);
     return;
   }
 
-  log.info(`✅ Nuovo aggiornamento rilevato (commit: ${latestCommitHash.slice(0, 7)})`);
+  log.info(`✅ Nuovo aggiornamento rilevato (timestamp: ${statsTimestamp})`);
 
   let sentCount = 0;
 
@@ -183,7 +174,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     }
   }
 
-  state.lastCommitHash = latestCommitHash;
+  state.lastStatsTimestamp = statsTimestamp;
   state.lastCheckDate = today;
   saveMonitorState(state);
 
