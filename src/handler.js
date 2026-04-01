@@ -6,6 +6,8 @@ const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { hasHistoryImages, hasHistoryDocs, limitHistoryMediaAttachments, extractLastNImages, extractLastNDocs } = require('./utils/media');
+const { readMemory } = require('./utils/memoryStore');
+const { getGroupTaskFileId } = require('./utils/userIdentifier');
 
 const log = createLogger('Handler');
 
@@ -38,6 +40,22 @@ async function handleMessage(ctx) {
     const isActiveMember = ui.isActiveMember;
     const userIsAdmin = ui.member ? isAdmin(ui.member) : false;
 
+    // Leggi memoria personalizzata (privata o di gruppo)
+    const memoryFileId = 'memory_' + ui.taskFileId;
+    const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
+
+    let userMemory = null;
+    let groupMemory = null;
+    if (isWhatsAppGroup) {
+      const groupMemoryFileId = 'memory_' + getGroupTaskFileId(ctx.groupId);
+      groupMemory = readMemory(groupMemoryFileId);
+    } else {
+      userMemory = readMemory(memoryFileId);
+    }
+
+    ctx.userMemory = userMemory;
+    ctx.groupMemory = groupMemory;
+
     const systemPrompt = buildSystemPrompt(ctx);
 
     const historyHasImages = hasHistoryImages(ctx.history);
@@ -48,6 +66,7 @@ async function handleMessage(ctx) {
       isAdmin: userIsAdmin,
       member: ui.member,
       taskFileId: ui.taskFileId,
+      memoryFileId,
       userId: ctx.userId,
       userName: ctx.userName,
       userPhone: ctx.userPhone || null,

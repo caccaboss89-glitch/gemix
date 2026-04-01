@@ -36,6 +36,8 @@ const TOOL_INSTRUCTIONS = {
   send_whatsapp_message: `Rispondi solo con la chiamata al tool. È possibile allegare eventuali file nel buffer.`,
   clear_attachments: `Rispondi solo con la chiamata al tool.`,
   read_music_stats: `Rispondi solo con la chiamata al tool.`,
+  update_private_memory: `Rispondi solo con la chiamata al tool. Scrivi il testo completo della memoria finale. Se è quasi piena e l'utente vuole aggiungere qualcosa, compatta le informazioni o chiedi all'utente cosa rimuovere.`,
+  update_group_memory: `Rispondi solo con la chiamata al tool. Scrivi il testo completo della memoria finale. Se è quasi piena e l'utente vuole aggiungere qualcosa, compatta le informazioni o chiedi all'utente cosa rimuovere.`,
 };
 
 // ── send_about_me: allowed una sola volta per chat (persistito su file) ──
@@ -183,6 +185,30 @@ const TOOL_READ_MUSIC_STATS = makeTool({
   name: 'read_music_stats',
   description: 'Leggi le statistiche musicali del bot.',
   properties: {},
+});
+
+const TOOL_UPDATE_PRIVATE_MEMORY = makeTool({
+  name: 'update_private_memory',
+  description: 'Aggiorna memoria utente personalizzata.',
+  properties: {
+    content: {
+      type: 'string',
+      description: 'Nuovo contenuto completo della memoria (max 500 caratteri). Stringa vuota per cancellare.',
+    },
+  },
+  required: ['content'],
+});
+
+const TOOL_UPDATE_GROUP_MEMORY = makeTool({
+  name: 'update_group_memory',
+  description: 'Aggiorna memoria condivisa del gruppo.',
+  properties: {
+    content: {
+      type: 'string',
+      description: 'Nuovo contenuto completo della memoria del gruppo (max 500 caratteri). Stringa vuota per cancellare.',
+    },
+  },
+  required: ['content'],
 });
 
 // ── Dynamic tool builders (schema varies by grade/platform) ──
@@ -446,6 +472,13 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
   tools.push(buildReadMyTasksTool(isWhatsAppGroup));
   tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
+
+  // Memoria personalizzata: privata in chat private, di gruppo in gruppi WA
+  if (isWhatsAppGroup) {
+    tools.push(TOOL_UPDATE_GROUP_MEMORY);
+  } else {
+    tools.push(TOOL_UPDATE_PRIVATE_MEMORY);
+  }
 
   // Solo membri attivi / admin
   if (isActiveMember) {

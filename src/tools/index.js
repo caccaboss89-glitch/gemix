@@ -14,6 +14,8 @@ const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { extractLastNImages, extractLastNDocs } = require('../utils/media');
 const { readMusicStats } = require('./musicStats');
+const { updatePrivateMemory } = require('./userMemory');
+const { updateGroupMemory } = require('./groupMemory');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -404,6 +406,16 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
       case 'read_music_stats': {
         result = await readMusicStats();
+        break;
+      }
+
+      case 'update_private_memory': {
+        result = updatePrivateMemory(args.content, userCtx.memoryFileId);
+        break;
+      }
+
+      case 'update_group_memory': {
+        result = updateGroupMemory(args.content, userCtx.groupId);
         break;
       }
 

@@ -51,6 +51,16 @@ function buildSystemPrompt(ctx) {
   prompt += `- Viene inviato solo l'ultimo vocale utente in cronologia (se ≤2 min). Audio troppo lunghi sono segnalati.\n`;
   prompt += `- I tuoi vocali precedenti sono trascritti come testo nella cronologia (etichettati "TRASCRIZIONE:").\n`;
 
+  // Memoria personalizzata utente o gruppo
+  if (ctx.userMemory) {
+    prompt += `\n### Memoria personalizzata dell'utente\n`;
+    prompt += `${ctx.userMemory}\n`;
+  }
+  if (ctx.groupMemory) {
+    prompt += `\n### Memoria del gruppo\n`;
+    prompt += `${ctx.groupMemory}\n`;
+  }
+
   prompt += `\n`;
   prompt += `### Tool\nPuoi usare i tool disponibili (es. invio di email o messaggi a terzi), non fornire ulteriore testo di risposta quando li chiami e assicurarti di farlo solo prima di fornire la risposta finale.\n`;
   if (!isActiveMember) {
