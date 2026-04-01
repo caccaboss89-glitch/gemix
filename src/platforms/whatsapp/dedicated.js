@@ -166,7 +166,7 @@ async function onDedicatedMessage(msg) {
     textBody = formatWhatsAppPollText(msg, `[Sondaggio] ${textBody}`);
   }
 
-  const quotedContent = await extractQuotedMessageContent(msg);
+  const quotedContent = await extractQuotedMessageContent(msg, chat.id._serialized);
   if (quotedContent && quotedContent.prefix) {
     textBody = quotedContent.prefix + textBody;
   }

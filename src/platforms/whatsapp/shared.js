@@ -190,13 +190,12 @@ async function downloadCurrentMedia(msg) {
 
 /**
  * Extract quoted message content if this message is a reply.
- * Returns string to prepend to current message content with context.
- * - If reply is to text: returns quoted text with [In reply to: ...] prefix
- * - If reply is to media: returns filename/tag with [In reply to: ...] prefix
+ * Handles audio (cache transcription + duration check) and PDF (page check).
  * @param {object} msg - The whatsapp-web.js message object
- * @returns {Promise<string>} Formatted quoted message context or empty string if not a reply
+ * @param {string} chatId - Chat ID for voice cache lookup
+ * @returns {Promise<object>} { prefix: string, mediaParts: array }
  */
-async function extractQuotedMessageContent(msg) {
+async function extractQuotedMessageContent(msg, chatId) {
   if (!msg.hasQuotedMsg) return { prefix: '', mediaParts: [] };
 
   try {
@@ -207,19 +206,58 @@ async function extractQuotedMessageContent(msg) {
     const mediaParts = [];
 
     if (quoted.hasMedia) {
-      // For quoted media, include tag text and media content from anyone in reply.
       const filename = quoted._data?.filename || quoted._data?.caption || null;
       const tag = mediaTag(filename, quoted._data?.mimetype);
-      prefix = `[In reply to: ${tag}]\n`;
+      const mediaType = quoted.type;
+      const isAudio = mediaType === 'audio' || mediaType === 'ptt';
+      const duration = Number(quoted.duration || quoted._data?.duration || 0);
 
+      if (isAudio) {
+        const cachedText = chatId ? retrieveVoiceText(chatId, quoted.timestamp * 1000) : null;
+        if (cachedText) {
+          prefix = `[In reply to: ${tag} TRASCRIZIONE: ${cachedText}]\n`;
+        } else if (duration > MAX_AUDIO_DURATION_S) {
+          prefix = `[In reply to: ${tag} (audio troppo lungo: ${duration}s)]\n`;
+        } else {
+          prefix = `[In reply to: ${tag}]\n`;
+          try {
+            const media = await quoted.downloadMedia();
+            if (media) {
+              mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
+            }
+          } catch {}
+        }
+        return { prefix, mediaParts };
+      }
+
+      if (mediaType === 'document' && quoted._data?.mimetype === 'application/pdf') {
+        try {
+          const media = await quoted.downloadMedia();
+          if (media) {
+            const buffer = Buffer.from(media.data, 'base64');
+            const info = await pdfParse(buffer);
+            if (info.numpages > MAX_DOC_PAGES) {
+              prefix = `[In reply to: ${tag} (troppo lungo: ${info.numpages} pagine)]\n`;
+            } else {
+              prefix = `[In reply to: ${tag}]\n`;
+              mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+            }
+          } else {
+            prefix = `[In reply to: ${tag}]\n`;
+          }
+        } catch {
+          prefix = `[In reply to: ${tag}]\n`;
+        }
+        return { prefix, mediaParts };
+      }
+
+      prefix = `[In reply to: ${tag}]\n`;
       try {
         const media = await quoted.downloadMedia();
         if (media) {
-          const buffer = Buffer.from(media.data, 'base64');
-          mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+          mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
         }
       } catch {}
-
       return { prefix, mediaParts };
     }
 
