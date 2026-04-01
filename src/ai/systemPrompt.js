@@ -46,10 +46,6 @@ function buildSystemPrompt(ctx) {
     }
   }
 
-  if (ctx.platform === PLATFORM_WA_PERSONAL && ctx.userPhone) {
-    prompt += `Numero WhatsApp interlocutore: ${ctx.userPhone}\n\n`;
-  }
-
   prompt += `\n`;
   prompt += `### Limiti media\n`;
   prompt += `- Viene inviato solo l'ultimo vocale utente in cronologia (se ≤2 min). Audio troppo lunghi sono segnalati.\n`;
@@ -86,7 +82,7 @@ function buildDedicatedWaInstructions(ctx) {
 function buildPersonalWaInstructions(ctx) {
   let s = `### Piattaforma: WhatsApp (Account Personale)\n`;
   s += `Rispondi solo se taggato.\n`;  if (ctx.userName) {
-    s += `Interlocutore corrente: ${ctx.userName}` + (ctx.userPhone ? ` (${ctx.userPhone})` : '') + `\n`;
+    s += `Interlocutore corrente: ${ctx.userName}\n`;
   }  s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
   s += `Usa markdown WA (singoli): *bold* _italic_ ~strike~ \`code\` (NON doppi es. ** testo **).\n\n`;
   return s;
