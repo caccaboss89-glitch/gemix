@@ -6,11 +6,10 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('MusicWrap');
 
+const { MUSIC_WRAP_PASSWORD } = require('../config/env');
+
 const MONITOR_STATE_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
 
-const GITHUB_OWNER = 'SitoMusicBot';
-const GITHUB_REPO = 'SitoMusicBot';
-const GITHUB_BRANCH = 'main';
 const MUSIC_WRAP_URL = 'https://sito-music-bot.vercel.app/';
 
 /**
@@ -164,7 +163,10 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     }
 
     try {
-      const message = `🎵 *Wrap di ${getPreviousMonthName().charAt(0).toUpperCase() + getPreviousMonthName().slice(1)} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "caccaboss". \n\nGoditi le tue statistiche! 🎧📊`;
+      const monthName = getPreviousMonthName();
+      const capitalizedMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+      const password = MUSIC_WRAP_PASSWORD || 'N/D';
+      const message = `🎵 *Wrap di ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`;
       await dedicatedClient.sendMessage(member.wa, message);
       log.info(`✅ Messaggio inviato a ${member.name}`);
       state.lastSentDate[member.wa] = today;

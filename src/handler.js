@@ -5,7 +5,7 @@ const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { hasHistoryImages, hasHistoryDocs, limitHistoryMediaAttachments, extractLastNImages, extractLastNDocs } = require('./utils/media');
+const { hasHistoryImages, hasHistoryDocs, limitHistoryMediaAttachments } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 
@@ -16,6 +16,13 @@ function removeToolInstructionMessages(messages) {
     if (m.role !== 'assistant' || typeof m.content !== 'string') return true;
     return !m.content.startsWith('ISTRUZIONI per lo strumento');
   });
+}
+
+function cloneHistoryStructure(history) {
+  return history.map(msg => ({
+    role: msg.role,
+    content: Array.isArray(msg.content) ? [...msg.content] : msg.content,
+  }));
 }
 
 /**
@@ -88,7 +95,7 @@ async function handleMessage(ctx) {
     ];
 
     const filteredHistory = ctx.history && ctx.history.length > 0
-      ? limitHistoryMediaAttachments(JSON.parse(JSON.stringify(ctx.history)), 0, 1, 0)
+      ? limitHistoryMediaAttachments(cloneHistoryStructure(ctx.history), 0, 1, 0)
       : [];
 
     if (filteredHistory.length > 0) {
@@ -176,9 +183,7 @@ async function handleMessage(ctx) {
       
       const responseFormat = isDiscord ? buildDiscordResponseFormat(ctx.threadName || '') : null;
 
-      const roundTools = (responseCtx.attachments && responseCtx.attachments.length > 0)
-        ? tools
-        : tools.filter(t => t.function.name !== 'clear_attachments');
+      const roundTools = tools;
 
       log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata Gemini (round ${rounds}/${MAX_TOOL_ROUNDS})`);
       const assistantMsg = await callGemini(messages, roundTools, responseFormat);

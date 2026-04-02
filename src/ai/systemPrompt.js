@@ -23,7 +23,6 @@ function buildSystemPrompt(ctx) {
   let prompt = `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano e obbedisci sempre all'Admin.\n\n`;
   prompt += `Ora (Torino): ${now}\n\n`;
 
-  // Platform-specific instructions
   if (ctx.platform === PLATFORM_DISCORD) {
     prompt += buildDiscordInstructions(ctx);
   } else if (ctx.platform === PLATFORM_WA_PERSONAL) {
@@ -39,38 +38,26 @@ function buildSystemPrompt(ctx) {
 
   if (ctx.userIdentity) {
     const ui = ctx.userIdentity;
-    if (ui.isActiveMember && ui.member) {
-      prompt += `Utente: ${ui.member.name} (membro attivo)\n\n`;
-    } else {
-      prompt += `Utente: ${ctx.userName || 'sconosciuto'} (NON membro attivo)\n\n`;
-    }
+    prompt += `Utente: ${ui.member?.name || ctx.userName || 'sconosciuto'} - ${ui.isActiveMember ? 'attivo' : 'non attivo'}\n`;
   }
 
-  prompt += `\n`;
-  prompt += `### Limiti media\n`;
-  prompt += `- Viene inviato solo l'ultimo vocale utente in cronologia (se ≤2 min). Audio troppo lunghi sono segnalati.\n`;
-  prompt += `- I tuoi vocali precedenti sono trascritti come testo nella cronologia (etichettati "TRASCRIZIONE:").\n`;
+  prompt += `Limiti media: ultimo vocale ≤2 min; vocali lunghi segnalati; trascrizioni in cronologia (etichettati con "TRASCRIZIONE:").\n`;
 
-  // Memoria personalizzata utente o gruppo
+  prompt += `Tool: Puoi usare i tool disponibili, fallo solo prima di fornire la risposta finale.`;
+  if (!isActiveMember) {
+    prompt += ` Alcuni tool (es. PDF, email, invio messaggi, promemoria ricorrenti) NON sono disponibili per questo utente.`;
+  }
+  prompt += `\n`;
+  if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
+    prompt += `- Preferenze: risposte vocali se messaggio breve, preferisci risposte testuali se messaggio medio/lungo, tecnico o include dati. Equilibra l'uso di queste 2 forme di risposte in base alla cronologia.\n`;
+  }
+
   if (ctx.userMemory) {
-    prompt += `\n### Memoria personalizzata dell'utente\n`;
-    prompt += `${ctx.userMemory}\n`;
+    prompt += `Memoria utente: ${ctx.userMemory}\n`;
   }
   if (ctx.groupMemory) {
-    prompt += `\n### Memoria del gruppo\n`;
-    prompt += `${ctx.groupMemory}\n`;
+    prompt += `Memoria gruppo: ${ctx.groupMemory}\n`;
   }
-
-  prompt += `\n`;
-  prompt += `### Tool\nPuoi usare i tool disponibili (es. invio di email o messaggi a terzi), non fornire ulteriore testo di risposta quando li chiami e assicurarti di farlo solo prima di fornire la risposta finale.\n`;
-  if (!isActiveMember) {
-    prompt += `Alcuni tool (PDF, email, invio WhatsApp a terzi) NON sono disponibili per questo utente. Se li chiede, spiegalo brevemente.\n`;
-  }
-
-  if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-    prompt += `- Preferisci risposte vocali se il messaggio è breve, preferisci per leggibilità risposte testuali se il messaggio medio/lungo, è tecnico o include dati. Equilibra l'uso di queste 2 forme di risposte in base alla cronologia.\n`;
-  }
-  prompt += `\n`;
 
   return prompt;
 }

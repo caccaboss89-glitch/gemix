@@ -1,4 +1,4 @@
-const { readMemory, writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
+const { writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
 
 /**
  * Update the private memory for the current user.

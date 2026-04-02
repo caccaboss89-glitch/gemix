@@ -15,15 +15,6 @@ function formatPrefix(prefix) {
   return prefix ? `[${prefix}]` : '';
 }
 
-function safeStringify(value) {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
 function createLogger(prefix = '') {
   const prefixStr = formatPrefix(prefix);
 
@@ -60,4 +51,4 @@ function createLogger(prefix = '') {
   };
 }
 
-module.exports = { createLogger, getLevel, LEVELS };
+module.exports = { createLogger };

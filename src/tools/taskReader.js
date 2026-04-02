@@ -9,15 +9,24 @@ const { formatTimestamp } = require('../utils/time');
  * @param {boolean} includeGroup - Whether to include group tasks in the result
  * @returns {string} Formatted task list with emojis and timestamps
  */
+const FREQ_LABELS = { hourly: 'Ogni ora', daily: 'Ogni giorno', weekly: 'Ogni settimana', monthly: 'Ogni mese' };
+
+function _formatTask(t, i) {
+  let line = `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)}`;
+  if (t.recurrence) {
+    line += ` | 🔁 ${FREQ_LABELS[t.recurrence.freq] || t.recurrence.freq} → ${formatTimestamp(t.recurrence.endAt)}`;
+  }
+  line += ` | ID: \`${t.id}\``;
+  return line;
+}
+
 function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
   let result = '';
 
   const personalData = readTaskFile(taskFileId);
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
     result += `📋 **I tuoi task personali:**\n`;
-    result += personalData.tasks.map((t, i) =>
-      `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)} | ID: \`${t.id}\``
-    ).join('\n');
+    result += personalData.tasks.map((t, i) => _formatTask(t, i)).join('\n');
   } else {
     result += `📋 Nessun task personale programmato.`;
   }
@@ -26,9 +35,7 @@ function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
     const groupData = readTaskFile(groupTaskFileId);
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
       result += `\n\n📋 **Task del gruppo:**\n`;
-      result += groupData.tasks.map((t, i) =>
-        `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)} | ID: \`${t.id}\``
-      ).join('\n');
+      result += groupData.tasks.map((t, i) => _formatTask(t, i)).join('\n');
     }
   }
 

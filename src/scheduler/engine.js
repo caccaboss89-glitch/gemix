@@ -3,7 +3,7 @@ const path = require('path');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
 const { generatePdf } = require('../tools/pdfGenerator');
 const { sendEmailDirect } = require('../tools/emailSender');
-const { getRomeTime, getRomeISO } = require('../utils/time');
+const { getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { sanitizeFilename } = require('../utils/text');
@@ -15,6 +15,25 @@ const log = createLogger('Scheduler');
 
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
+
+/**
+ * Compute the next occurrence date for a recurring task.
+ * @param {string} scheduledAt - Current ISO date string
+ * @param {string} freq - Frequency: 'hourly' | 'daily' | 'weekly' | 'monthly'
+ * @returns {Date|null} Next occurrence date or null if freq is invalid
+ */
+function computeNextOccurrence(scheduledAt, freq) {
+  const date = new Date(scheduledAt);
+  if (isNaN(date.getTime())) return null;
+  switch (freq) {
+    case 'hourly': date.setHours(date.getHours() + 1); break;
+    case 'daily': date.setDate(date.getDate() + 1); break;
+    case 'weekly': date.setDate(date.getDate() + 7); break;
+    case 'monthly': date.setMonth(date.getMonth() + 1); break;
+    default: return null;
+  }
+  return date;
+}
 
 /**
  * Set the WhatsApp dedicated client reference for the scheduler.
@@ -85,12 +104,32 @@ async function checkAndExecuteTasks() {
       }
     }
 
+    // Process executed tasks: advance recurring or remove one-shot
     const nowAfter = new Date();
     const nowAfterTime = nowAfter.getTime();
-    data.tasks = data.tasks.filter(t => {
+    const dueIds = new Set(dueTasks.map(t => t.id));
+    const updatedTasks = [];
+
+    for (const t of data.tasks) {
       const taskDate = new Date(t.scheduledAt);
-      return !isNaN(taskDate.getTime()) && taskDate.getTime() > nowAfterTime;
-    });
+      if (!dueIds.has(t.id) || isNaN(taskDate.getTime()) || taskDate.getTime() > nowAfterTime) {
+        updatedTasks.push(t);
+        continue;
+      }
+      // Task was executed — check recurrence
+      if (t.recurrence && t.recurrence.freq) {
+        const next = computeNextOccurrence(t.scheduledAt, t.recurrence.freq);
+        if (next && (!t.recurrence.endAt || next.getTime() <= new Date(t.recurrence.endAt).getTime())) {
+          t.scheduledAt = next.toISOString();
+          updatedTasks.push(t);
+          log.info(`🔁 Task ricorrente ${t.id} riprogrammato: ${t.scheduledAt}`);
+        } else {
+          log.info(`🏁 Task ricorrente ${t.id} terminato (fine ricorrenza raggiunta).`);
+        }
+      }
+      // Non-recurring tasks are simply dropped (not pushed to updatedTasks)
+    }
+    data.tasks = updatedTasks;
     writeTaskFile(fileId, data);
   }
 }

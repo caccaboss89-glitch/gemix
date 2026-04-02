@@ -25,31 +25,53 @@ const { storeVoiceText } = require('../utils/voiceTextCache');
 
 const log = createLogger('Tools');
 
-// Tracking consecutive voice usage per WhatsApp chat
+// Tracking consecutive voice usage per WhatsApp chat (with TTL cleanup)
 const voiceConsecutiveByChat = new Map();
+const VOICE_COUNT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function _cleanupVoiceCounts() {
+  const cutoff = Date.now() - VOICE_COUNT_TTL_MS;
+  for (const [key, entry] of voiceConsecutiveByChat) {
+    if (entry.ts < cutoff) voiceConsecutiveByChat.delete(key);
+  }
+}
+
+function _getVoiceCount(chatKey) {
+  const entry = voiceConsecutiveByChat.get(chatKey);
+  if (!entry) return 0;
+  if (Date.now() - entry.ts > VOICE_COUNT_TTL_MS) {
+    voiceConsecutiveByChat.delete(chatKey);
+    return 0;
+  }
+  return entry.count;
+}
 
 /**
  * Resolve the target WhatsApp JID for delivery.
  * Admin: can target anyone. Active member: can target other members. Otherwise: self.
  */
 function _resolveTargetWaJid(args, userCtx) {
+  // Extract recipient info (can be nested in recipient object or flat for backward compatibility)
+  const recipientPhone = args.recipient?.phone || args.recipientPhone;
+  const recipientName = args.recipient?.name || args.recipientName;
+
   if (userCtx.isAdmin) {
-    if (args.recipientPhone) {
-      const jid = normalizePhoneToJid(args.recipientPhone);
-      return { jid, display: args.recipientPhone };
+    if (recipientPhone) {
+      const jid = normalizePhoneToJid(recipientPhone);
+      return { jid, display: recipientPhone };
     }
-    if (args.recipientName) {
-      const member = findMemberByName(args.recipientName);
-      if (!member) return { error: `❌ "${args.recipientName}" non trovato tra i membri attivi. Specifica recipientPhone per non-membri.` };
+    if (recipientName) {
+      const member = findMemberByName(recipientName);
+      if (!member) return { error: `❌ "${recipientName}" non trovato tra i membri attivi. Specifica il telefono per non-membri.` };
       return { jid: member.wa, display: member.name };
     }
     if (userCtx.userPhone) {
       const jid = normalizePhoneToJid(userCtx.userPhone);
       return { jid, display: userCtx.userName || userCtx.userPhone };
     }
-  } else if (userCtx.isActiveMember && args.recipientName) {
-    const member = findMemberByName(args.recipientName);
-    if (!member) return { error: `❌ "${args.recipientName}" non trovato tra i membri attivi.` };
+  } else if (userCtx.isActiveMember && recipientName) {
+    const member = findMemberByName(recipientName);
+    if (!member) return { error: `❌ "${recipientName}" non trovato tra i membri attivi.` };
     return { jid: member.wa, display: member.name };
   }
   if (!userCtx.waJid) return { error: '❌ Nessun numero WhatsApp disponibile.' };
@@ -61,8 +83,10 @@ function _getVoiceLimitChatKey(userCtx) {
 }
 
 function _incrementVoiceCount(chatKey) {
-  const count = voiceConsecutiveByChat.get(chatKey) || 0;
-  voiceConsecutiveByChat.set(chatKey, count + 1);
+  const entry = voiceConsecutiveByChat.get(chatKey);
+  const count = entry ? entry.count + 1 : 1;
+  voiceConsecutiveByChat.set(chatKey, { count, ts: Date.now() });
+  if (voiceConsecutiveByChat.size > 500) _cleanupVoiceCounts();
 }
 
 function _resetVoiceCount(chatKey) {
@@ -77,19 +101,23 @@ function _resolveTargetEmail(args, userCtx) {
   if (!userCtx.isActiveMember) {
     return { error: '❌ Solo i membri attivi possono inviare email.' };
   }
+  // Extract recipient info (can be nested in recipient object or flat for backward compatibility)
+  const recipientEmail = args.recipient?.email || args.recipientEmail;
+  const recipientName = args.recipient?.name || args.recipientName;
+
   if (userCtx.isAdmin) {
-    if (args.recipientEmail) {
-      return { email: args.recipientEmail, display: args.recipientEmail };
+    if (recipientEmail) {
+      return { email: recipientEmail, display: recipientEmail };
     }
-    if (args.recipientName) {
-      const member = findMemberByName(args.recipientName);
+    if (recipientName) {
+      const member = findMemberByName(recipientName);
       if (member && member.email) return { email: member.email, display: member.name };
-      return { error: `❌ "${args.recipientName}" non trovato o senza email.` };
+      return { error: `❌ "${recipientName}" non trovato o senza email.` };
     }
-  } else if (args.recipientName) {
-    const member = findMemberByName(args.recipientName);
+  } else if (recipientName) {
+    const member = findMemberByName(recipientName);
     if (member && member.email) return { email: member.email, display: member.name };
-    return { error: `❌ "${args.recipientName}" non trovato o senza email.` };
+    return { error: `❌ "${recipientName}" non trovato o senza email.` };
   }
   if (!userCtx.email) return { error: '❌ Nessun indirizzo email disponibile.' };
   return { email: userCtx.email, display: 'te stesso' };
@@ -195,7 +223,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           .replace(/\s{2,}/g, ' ')
           .trim();
 
-        const currentCount = voiceConsecutiveByChat.get(chatKey) || 0;
+        const currentCount = _getVoiceCount(chatKey);
         if (currentCount >= 3) {
           log.warn(`Limite vocali WA superato in chat ${chatKey}: counter=${currentCount}`);
           result = '❌ Limite vocali superato: in questa chat hai già inviato 3 messaggi vocali consecutivi. Rispondi con un messaggio testuale normale, senza vocali.';
@@ -208,13 +236,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         }
 
         // Delivery to a specific recipient
-        if (args.recipientName || args.recipientPhone) {
+        const hasRecipient = args.recipient?.name || args.recipient?.phone || args.recipientName || args.recipientPhone;
+        if (hasRecipient) {
           const includeAttachments = args.includeAttachments !== false;
 
-          if (args.recipientName) {
-            const member = findMemberByName(args.recipientName);
+          const recipientName = args.recipient?.name || args.recipientName;
+          if (recipientName) {
+            const member = findMemberByName(recipientName);
             if (member && member.wa === userCtx.waJid) {
-              result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, ometti recipientName.`;
+              result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, ometti il destinatario.`;
               break;
             }
           }
@@ -395,12 +425,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         } catch (err) {
           result = `❌ Errore invio WhatsApp: ${err.message}`;
         }
-        break;
-      }
-
-      case 'clear_attachments': {
-        responseCtx.attachments = [];
-        result = 'Buffer allegati cancellato.';
         break;
       }
 

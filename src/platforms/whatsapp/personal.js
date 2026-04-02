@@ -193,7 +193,7 @@ async function onPersonalMessage(msg) {
       ? contentParts[0].text
       : contentParts,
     history,
-    waJid: senderJid,
+    waJid: phoneJid,
   };
 
   const lockKey = `wa_personal:${ctx.chatId || ctx.userId}`;
@@ -203,34 +203,36 @@ async function onPersonalMessage(msg) {
   }
 
   try {
-    if (typeof chat.sendState === 'function') {
-      await chat.sendState('typing');
-    }
-  } catch (err) {
-    // sendState might not be available in this version
-  }
-
-  const response = await handleMessage(ctx);
-
-  if (response.text) {
-    response.text = removeFooter(response.text);
-    response.text = addFooter(response.text, getModelDisplayName(GEMINI_MODEL));
-  }
-
-  try {
-    log.info(`\n📤 Invio risposta...`);
-    await sendWhatsAppResponse(chat, msg, response);
-    log.info(`   ✅ Messaggio inviato`);
     try {
       if (typeof chat.sendState === 'function') {
-        await chat.sendState('paused');
+        await chat.sendState('typing');
       }
     } catch (err) {
       // sendState might not be available in this version
     }
-  } catch (err) {
-    log.error(`\n❌ Errore invio risposta:`);
-    log.error(`   ${err.message}`);
+
+    const response = await handleMessage(ctx);
+
+    if (response.text) {
+      response.text = removeFooter(response.text);
+      response.text = addFooter(response.text, getModelDisplayName(GEMINI_MODEL));
+    }
+
+    try {
+      log.info(`\n📤 Invio risposta...`);
+      await sendWhatsAppResponse(chat, msg, response);
+      log.info(`   ✅ Messaggio inviato`);
+      try {
+        if (typeof chat.sendState === 'function') {
+          await chat.sendState('paused');
+        }
+      } catch (err) {
+        // sendState might not be available in this version
+      }
+    } catch (err) {
+      log.error(`\n❌ Errore invio risposta:`);
+      log.error(`   ${err.message}`);
+    }
   } finally {
     try { responseLock.unlock(lockKey); } catch {}
   }

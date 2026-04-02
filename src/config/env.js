@@ -10,4 +10,5 @@ module.exports = {
   BOT_EMAIL: process.env.BOT_EMAIL,
   BOT_PASS: process.env.BOT_PASS,
   XAI_API_KEY: process.env.XAI_API_KEY,
+  MUSIC_WRAP_PASSWORD: process.env.MUSIC_WRAP_PASSWORD,
 };

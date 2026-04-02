@@ -55,6 +55,4 @@ function buildDiscordResponseFormat(currentThreadTitle = '') {
   };
 }
 
-const DISCORD_RESPONSE_FORMAT = buildDiscordResponseFormat();
-
-module.exports = { callGemini, DISCORD_RESPONSE_FORMAT, buildDiscordResponseFormat };
+module.exports = { callGemini, buildDiscordResponseFormat };

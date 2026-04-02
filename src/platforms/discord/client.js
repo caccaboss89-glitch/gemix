@@ -239,13 +239,6 @@ async function onDiscordMessage(msg) {
       }
     }
 
-    if (response.isVoiceOnly && response.voiceBuffer) {
-      const attachment = new AttachmentBuilder(response.voiceBuffer, { name: 'voice.ogg' });
-      await channel.send({ files: [attachment] });
-      log.info(`   🎤 Vocale inviato`);
-      return;
-    }
-
     const files = [];
     if (response.attachments) {
       for (const att of response.attachments) {

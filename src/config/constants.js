@@ -37,6 +37,7 @@ module.exports = {
   TASK_PREFIX_DISCORD: 'dc_',
   TASK_PREFIX_WA: 'wa_',
   TASK_PREFIX_GROUP: 'group_',
+  VALID_RECURRENCE_FREQS: ['hourly', 'daily', 'weekly', 'monthly'],
 
   // WhatsApp Puppeteer
   PUPPETEER_ARGS: [

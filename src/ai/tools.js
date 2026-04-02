@@ -21,23 +21,24 @@ Wrapping tags (avvolgi il testo):
 
 Esempio: "Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!"`;
 
+const CALL_ONLY = 'Rispondi solo con la chiamata al tool.';
+
 const TOOL_INSTRUCTIONS = {
-  web_search: `Rispondi solo con la chiamata al tool.`,
-  image_search: `Rispondi solo con la chiamata al tool. Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
-  include_history_images: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API le ultime N immagini dalla cronologia (se esistono).`,
-  include_history_docs: `Rispondi solo con la chiamata al tool. Richiedi al sistema di includere nelle prossime chiamate API i documenti dalla cronologia (se esistono).`,
-  send_voice_message: `Rispondi solo con la chiamata al tool. Genera vocale (solo WhatsApp), testo TTS max 1000 caratteri, è possibile allegare eventuali file nel buffer. ${VOICE_EFFECTS_DOC}`,
-  schedule_tasks: `Rispondi solo con la chiamata al tool.`,
-  read_my_tasks: `Rispondi solo con la chiamata al tool.`,
-  remove_my_tasks: `Rispondi solo con la chiamata al tool.`,
-  read_server_rules: `Rispondi solo con la chiamata al tool.`,
-  generate_pdf: `Rispondi solo con la chiamata al tool. Genera PDF con titolo+contenuto, verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
-  send_email: `Rispondi solo con la chiamata al tool. È possibile allegare eventuali file nel buffer.`,
-  send_whatsapp_message: `Rispondi solo con la chiamata al tool. È possibile allegare eventuali file nel buffer.`,
-  clear_attachments: `Rispondi solo con la chiamata al tool.`,
-  read_music_stats: `Rispondi solo con la chiamata al tool.`,
-  update_private_memory: `Rispondi solo con la chiamata al tool. Scrivi il testo completo della memoria finale. Se è quasi piena e l'utente vuole aggiungere qualcosa, compatta le informazioni o chiedi all'utente cosa rimuovere.`,
-  update_group_memory: `Rispondi solo con la chiamata al tool. Scrivi il testo completo della memoria finale. Se è quasi piena e l'utente vuole aggiungere qualcosa, compatta le informazioni o chiedi all'utente cosa rimuovere.`,
+  web_search: CALL_ONLY,
+  image_search: `${CALL_ONLY} Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
+  include_history_images: CALL_ONLY,
+  include_history_docs: CALL_ONLY,
+  send_voice_message: `${CALL_ONLY} ${VOICE_EFFECTS_DOC}`,
+  schedule_tasks: CALL_ONLY,
+  read_my_tasks: CALL_ONLY,
+  remove_my_tasks: CALL_ONLY,
+  read_server_rules: CALL_ONLY,
+  generate_pdf: `${CALL_ONLY} Genera PDF che verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
+  send_email: CALL_ONLY,
+  send_whatsapp_message: CALL_ONLY,
+  read_music_stats: CALL_ONLY,
+  update_private_memory: `${CALL_ONLY} Se memoria quasi piena, compatta le informazioni o chiedi all'utente cosa rimuovere.`,
+  update_group_memory: `${CALL_ONLY} Se memoria quasi piena, compatta le informazioni o chiedi agli utenti cosa rimuovere.`,
 };
 
 // ── send_about_me: allowed una sola volta per chat (persistito su file) ──
@@ -55,9 +56,7 @@ function _loadSendAboutMeState() {
         if (chatKey) sendAboutMeUsedByChat.add(chatKey);
       });
     }
-  } catch {
-    // Silenzioso: stato non persistente in caso di file corrotto
-  }
+  } catch {}
 }
 
 function _saveSendAboutMeState() {
@@ -66,9 +65,7 @@ function _saveSendAboutMeState() {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     fs.writeFileSync(READ_ABOUT_ME_STATE_FILE, JSON.stringify([...sendAboutMeUsedByChat], null, 2), 'utf-8');
-  } catch {
-    // Silenzioso su errori di scrittura
-  }
+  } catch {}
 }
 
 function _getChatKey(userCtx) {
@@ -115,9 +112,9 @@ function makeTool({ name, description, properties = {}, required = [] }) {
 
 const TOOL_WEB_SEARCH = makeTool({
   name: 'web_search',
-  description: 'Cerca informazioni aggiornate sul web.',
+  description: 'Cerca sul web.',
   properties: {
-    query: { type: 'string', description: 'La query di ricerca' },
+    query: { type: 'string', description: 'Query' },
   },
   required: ['query'],
 });
@@ -126,33 +123,33 @@ const TOOL_IMAGE_SEARCH = makeTool({
   name: 'image_search',
   description: 'Cerca immagini sul web.',
   properties: {
-    query: { type: 'string', description: 'Cosa cercare nelle immagini' },
-    count: { type: 'integer', description: 'Numero immagini da inviare (1-4). Default 1.' },
+    query: { type: 'string', description: 'Query' },
+    count: { type: 'integer', description: 'Quantità (1-4, default 1)' },
   },
   required: ['query'],
 });
 
 const TOOL_INCLUDE_HISTORY_IMAGES = makeTool({
   name: 'include_history_images',
-  description: 'Richiedi le ultime N immagini dalla cronologia (se presenti, max 5).',
+  description: 'Includi ultime N immagini dalla cronologia (max 5).',
   properties: {
-    count: { type: 'integer', description: 'Numero di immagini ultime da includere (intero positivo, max 5).', minimum: 1 },
+    count: { type: 'integer', description: 'Quantità (1-5)', minimum: 1 },
   },
   required: ['count'],
 });
 
 const TOOL_INCLUDE_HISTORY_DOCS = makeTool({
   name: 'include_history_docs',
-  description: 'Richiedi gli ultimi N documenti dalla cronologia (se presenti, max 2, solo documenti ≤5 pagine).',
+  description: 'Includi ultimi N documenti dalla cronologia (max 2, ≤5 pagine).',
   properties: {
-    count: { type: 'integer', description: 'Numero documenti ultimi da includere (intero positivo, max 2).', minimum: 1 },
+    count: { type: 'integer', description: 'Quantità (1-2)', minimum: 1 },
   },
   required: ['count'],
 });
 
 const TOOL_SEND_ABOUT_ME = makeTool({
   name: 'send_about_me',
-  description: 'Invia sulla chat corrente il testo della storia di GemiX, utile per presentarti e dire chi sei.',
+  description: 'Invia la storia di GemiX per presentarti.',
   properties: {},
 });
 
@@ -162,20 +159,14 @@ const TOOL_READ_SERVER_RULES = makeTool({
   properties: {},
 });
 
-const TOOL_CLEAR_ATTACHMENTS = makeTool({
-  name: 'clear_attachments',
-  description: 'Svuota il buffer degli allegati accumulati.',
-  properties: {},
-});
-
 const TOOL_GENERATE_PDF = makeTool({
   name: 'generate_pdf',
-  description: 'Genera un PDF da testo.',
+  description: 'Genera PDF da testo.',
   properties: {
-    title: { type: 'string', description: 'Titolo del PDF (appare in testa al documento)' },
+    title: { type: 'string', description: 'Titolo' },
     content: {
       type: 'string',
-      description: 'Contenuto testuale del PDF. Supporta # e ## per titoli, - per elenchi puntati.',
+      description: 'Testo (supporta #, ## titoli e - elenchi)',
     },
   },
   required: ['title', 'content'],
@@ -183,17 +174,17 @@ const TOOL_GENERATE_PDF = makeTool({
 
 const TOOL_READ_MUSIC_STATS = makeTool({
   name: 'read_music_stats',
-  description: 'Leggi le statistiche musicali del bot.',
+  description: 'Leggi statistiche musicali.',
   properties: {},
 });
 
 const TOOL_UPDATE_PRIVATE_MEMORY = makeTool({
   name: 'update_private_memory',
-  description: 'Aggiorna memoria utente personalizzata.',
+  description: 'Aggiorna memoria privata.',
   properties: {
     content: {
       type: 'string',
-      description: 'Nuovo contenuto completo della memoria (max 500 caratteri). Stringa vuota per cancellare.',
+      description: 'Testo completo memoria (max 500 char, vuoto=cancella)',
     },
   },
   required: ['content'],
@@ -201,11 +192,11 @@ const TOOL_UPDATE_PRIVATE_MEMORY = makeTool({
 
 const TOOL_UPDATE_GROUP_MEMORY = makeTool({
   name: 'update_group_memory',
-  description: 'Aggiorna memoria condivisa del gruppo.',
+  description: 'Aggiorna memoria del gruppo.',
   properties: {
     content: {
       type: 'string',
-      description: 'Nuovo contenuto completo della memoria del gruppo (max 500 caratteri). Stringa vuota per cancellare.',
+      description: 'Testo completo memoria (max 500 char, vuoto=cancella)',
     },
   },
   required: ['content'],
@@ -217,161 +208,201 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   const properties = {
     text: {
       type: 'string',
-      description: 'Il testo da convertire in audio vocale (max 1000 caratteri). Può contenere effetti vocali inline e wrapping tags.',
-    },
-    includeAttachments: {
-      type: 'boolean',
-      description: 'Se false, non allegare al messaggio gli eventuali file accumulati in buffer.',
+      description: 'Testo TTS (max 1000 char, supporta tag effetti vocali)',
     },
   };
 
-  if (includeRecipientName) {
-    properties.recipientName = {
-      type: 'string',
-      description: 'OPZIONALE: Nome del membro attivo a cui inviare il vocale via WhatsApp. Se omesso, invia nella chat attuale.',
+  if (includeRecipientName || includeRecipientPhone) {
+    properties.includeAttachments = {
+      type: 'boolean',
+      description: 'Allega file dal buffer (default true)',
     };
-  }
-
-  if (includeRecipientPhone) {
-    properties.recipientPhone = {
-      type: 'string',
-      description: 'OPZIONALE: Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX).',
+    const recipientProps = {};
+    if (includeRecipientName) {
+      recipientProps.name = {
+        type: 'string',
+        description: 'Nome membro (ometti=chat attuale)',
+      };
+    }
+    if (includeRecipientPhone) {
+      recipientProps.phone = {
+        type: 'string',
+        description: 'Tel. con prefisso (es. +393XXXXXXXXX)',
+      };
+    }
+    properties.recipient = {
+      type: 'object',
+      description: 'Destinatario specifico',
+      properties: recipientProps,
     };
   }
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Invia un messaggio vocale. ',
+    description: 'Invia messaggio vocale.',
     properties,
     required: ['text'],
   });
 }
 
 function buildWhatsAppTool(isAdmin) {
-  const properties = {
-    message: { type: 'string', description: 'Il messaggio da inviare' },
-    includeAttachments: {
-      type: 'boolean',
-      description: 'Se false, non allegare al messaggio gli eventuali file accumulati in buffer.',
-    },
-    recipientName: {
+  const recipientProps = {
+    name: {
       type: 'string',
-      description: 'Nome completo del destinatario (se membro attivo).',
+      description: 'Nome membro destinatario',
     },
   };
 
   if (isAdmin) {
-    properties.recipientPhone = {
+    recipientProps.phone = {
       type: 'string',
-      description: 'Numero di telefono con prefisso internazionale (es. +393XXXXXXXXX).',
+      description: 'Tel. con prefisso (es. +393XXXXXXXXX)',
     };
   }
 
+  const properties = {
+    message: { type: 'string', description: 'Messaggio' },
+    includeAttachments: {
+      type: 'boolean',
+      description: 'Allega file dal buffer (default true)',
+    },
+    recipient: {
+      type: 'object',
+      description: 'Destinatario',
+      properties: recipientProps,
+      required: isAdmin ? [] : ['name'],
+    },
+  };
+
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Invia un messaggio WhatsApp con il tuo account dedicato.',
+    description: 'Invia messaggio WhatsApp.',
     properties,
-    required: isAdmin ? ['message'] : ['recipientName', 'message'],
+    required: isAdmin ? ['message'] : ['recipient', 'message'],
   });
 }
 
 function buildEmailTool(isAdmin) {
-  const properties = {
-    subject: { type: 'string', description: "Oggetto dell'email" },
-    body: { type: 'string', description: "Corpo dell'email (può contenere HTML - NON usare markdown)" },
-    includeAttachments: {
-      type: 'boolean',
-      description: 'Se false, non allegare all\'email gli eventuali file accumulati in buffer.',
-    },
-    recipientName: {
+  const recipientProps = {
+    name: {
       type: 'string',
-      description: 'Nome completo del membro attivo destinatario (la email viene risolta dal nome).',
+      description: 'Nome membro (email risolta dal nome)',
     },
   };
 
   if (isAdmin) {
-    properties.recipientEmail = {
+    recipientProps.email = {
       type: 'string',
-      description: 'Indirizzo email diretto del destinatario (per qualsiasi persona).',
+      description: 'Email diretta destinatario',
     };
   }
 
+  const properties = {
+    subject: { type: 'string', description: 'Oggetto' },
+    body: { type: 'string', description: 'Corpo HTML (no markdown)' },
+    includeAttachments: {
+      type: 'boolean',
+      description: 'Allega file dal buffer (default true)',
+    },
+    recipient: {
+      type: 'object',
+      description: 'Destinatario',
+      properties: recipientProps,
+      required: isAdmin ? [] : ['name'],
+    },
+  };
+
   return makeTool({
     name: 'send_email',
-    description: 'Invia un\'email.',
+    description: 'Invia email.',
     properties,
-    required: isAdmin ? ['subject', 'body'] : ['recipientName', 'subject', 'body'],
+    required: isAdmin ? ['subject', 'body'] : ['recipient', 'subject', 'body'],
   });
 }
 
 function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
-  // WhatsApp destination: proprietà variano per grado e piattaforma
   const waProps = {};
   if (isWhatsAppGroup) {
     waProps.toGroup = {
       type: 'boolean',
-      description: 'true = invia al gruppo WhatsApp corrente (solo in gruppo WA).',
+      description: 'Invia al gruppo corrente',
     };
   }
   waProps.toPrivate = {
     type: 'boolean',
-    description: "true = invia in privato su WhatsApp (a te stesso o a un recipient).",
+    description: 'Invia in privato su WhatsApp',
   };
+
+  const recipientWaProps = {};
   if (isActiveMember) {
-    waProps.recipientName = {
+    recipientWaProps.name = {
       type: 'string',
-      description: 'Nome membro attivo destinatario (solo membri attivi/admin).',
+      description: 'Nome membro destinatario',
     };
   }
   if (isAdmin) {
-    waProps.recipientPhone = {
+    recipientWaProps.phone = {
       type: 'string',
-      description: 'Numero di telefono per destinatario non membro (solo admin).',
+      description: 'Tel. destinatario non membro',
+    };
+  }
+
+  if (Object.keys(recipientWaProps).length > 0) {
+    waProps.recipient = {
+      type: 'object',
+      description: 'Destinatario',
+      properties: recipientWaProps,
     };
   }
 
   const taskItemProps = {
     content: {
       type: 'string',
-      description: 'Testo da inviare al momento della consegna',
+      description: 'Testo da inviare',
     },
     scheduledAt: {
       type: 'string',
-      description: 'Data/ora ISO 8601 con timezone Europe/Rome (es. 2026-03-16T16:00:00+01:00)',
+      description: 'ISO 8601 Europe/Rome (es. 2026-03-16T16:00:00+01:00)',
     },
     whatsapp: {
       type: 'object',
-      description: 'Configurazione destinazione WhatsApp per il task.',
+      description: 'Destinazione WhatsApp',
       properties: waProps,
     },
   };
 
-  // Email e PDF: solo per membri attivi / admin
   if (isActiveMember) {
-    const emailProps = {
-      recipientName: {
+    const recipientEmailProps = {
+      name: {
         type: 'string',
-        description: 'Nome membro attivo destinatario (solo membri attivi/admin).',
+        description: 'Nome membro destinatario',
       },
     };
     if (isAdmin) {
-      emailProps.recipientEmail = {
+      recipientEmailProps.email = {
         type: 'string',
-        description: 'Indirizzo email diretto del destinatario (solo admin).',
+        description: 'Email diretta destinatario',
       };
     }
     taskItemProps.email = {
       type: 'object',
-      description: 'Configurazione destinazione email per il task.',
-      properties: emailProps,
-    };
-    taskItemProps.pdf = {
-      type: 'object',
-      description: 'Oggetto PDF opzionale con titolo e contenuto.',
+      description: 'Destinazione email',
       properties: {
-        title: { type: 'string', description: 'Titolo del PDF (es. "Report")' },
-        content: { type: 'string', description: 'Contenuto testuale del PDF.' },
+        recipient: {
+          type: 'object',
+          description: 'Destinatario',
+          properties: recipientEmailProps,
+        },
       },
+    };
+    taskItemProps.recurrence = {
+      type: 'object',
+      description: 'Ricorrenza (scheduledAt=prima esecuzione)',
+      properties: {
+        freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'], description: 'Frequenza' },
+        endAt: { type: 'string', description: 'Ultimo invio consentito (incluso), ISO 8601 Europe/Rome' },
+      },
+      required: ['freq', 'endAt'],
     };
   }
 
@@ -397,12 +428,12 @@ function buildReadMyTasksTool(isWhatsAppGroup) {
   if (isWhatsAppGroup) {
     properties.includeGroupTasks = {
       type: 'boolean',
-      description: 'true = includi anche i task del gruppo corrente (solo se in un gruppo)',
+      description: 'Includi task del gruppo',
     };
   }
   return makeTool({
     name: 'read_my_tasks',
-    description: 'Mostra i task programmati dell\'utente corrente.',
+    description: 'Mostra task programmati.',
     properties,
   });
 }
@@ -412,18 +443,18 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
     taskIds: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Gli ID dei task da rimuovere',
+      description: 'ID dei task',
     },
   };
   if (isWhatsAppGroup) {
     properties.fromGroup = {
       type: 'boolean',
-      description: 'true = rimuovi dal file del gruppo corrente invece che da quello personale',
+      description: 'Rimuovi dal gruppo invece che dal personale',
     };
   }
   return makeTool({
     name: 'remove_my_tasks',
-    description: 'Rimuovi i task programmati dell\'utente corrente.',
+    description: 'Rimuovi task programmati.',
     properties,
     required: ['taskIds'],
   });
@@ -433,7 +464,6 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
 
 const ACTIVE_MEMBER_ONLY_TOOLS = new Set([
   'read_server_rules',
-  'clear_attachments',
   'generate_pdf',
   'send_email',
   'send_whatsapp_message',
@@ -482,7 +512,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // Solo membri attivi / admin
   if (isActiveMember) {
-    tools.push(TOOL_READ_SERVER_RULES, TOOL_CLEAR_ATTACHMENTS, TOOL_GENERATE_PDF, TOOL_READ_MUSIC_STATS);
+    tools.push(TOOL_READ_SERVER_RULES, TOOL_GENERATE_PDF, TOOL_READ_MUSIC_STATS);
     tools.push(buildEmailTool(isAdmin));
     tools.push(buildWhatsAppTool(isAdmin));
   }

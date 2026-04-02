@@ -68,15 +68,6 @@ function findMemberByName(name) {
 }
 
 /**
- * Check if a member object is active (non-null).
- * @param {object|null} member - The member object
- * @returns {boolean} True if member is active (not null)
- */
-function isMemberActive(member) {
-  return member !== null;
-}
-
-/**
  * Check if a member has admin privileges.
  * @param {object|null} member - The member object
  * @returns {boolean} True if member exists and has admin flag set to true
@@ -85,4 +76,4 @@ function isAdmin(member) {
   return member !== null && member.admin === true;
 }
 
-module.exports = { ACTIVE_MEMBERS, findMemberByWa, findMemberByDiscord, findMemberByName, isMemberActive, isAdmin };
+module.exports = { ACTIVE_MEMBERS, findMemberByWa, findMemberByDiscord, findMemberByName, isAdmin };

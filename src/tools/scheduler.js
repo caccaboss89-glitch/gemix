@@ -1,7 +1,6 @@
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { TASKS_DIR, MAX_TASK_DAYS } = require('../config/constants');
+const { TASKS_DIR, MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
 const { getRomeISO } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
@@ -13,9 +12,8 @@ const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
  * Validates dates, permissions, and destinations before writing to task files.
  * @param {Array} tasks - Array of task objects from GemiX {
  *   content, scheduledAt,
- *   whatsapp: { toGroup?, toPrivate?, recipientName?, recipientPhone? },
- *   email: { recipientName?, recipientEmail? },
- *   pdf?: { title, content }
+ *   whatsapp: { toGroup?, toPrivate?, recipient?: { name?, phone? } },
+ *   email: { recipient?: { name?, email? } }
  * }
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, email, isActiveMember, isAdmin, isGroup, groupId }
  * @returns {string} Result message with task confirmation or error details
@@ -43,14 +41,37 @@ function scheduleTasks(tasks, ctx) {
       continue;
     }
 
-    if (task.pdf && !ctx.isActiveMember && !ctx.isAdmin) {
-      results.push('❌ PDF allegato disponibile solo per membri attivi e admin.');
-      continue;
-    }
-
     if (task.email && !ctx.isActiveMember && !ctx.isAdmin) {
       results.push('❌ Invio email disponibile solo per membri attivi e admin.');
       continue;
+    }
+
+    // Recurrence validation (active members / admin only)
+    let recurrence = null;
+    if (task.recurrence) {
+      if (!ctx.isActiveMember && !ctx.isAdmin) {
+        results.push('❌ Task ricorrenti disponibili solo per membri attivi e admin.');
+        continue;
+      }
+      const { freq, endAt } = task.recurrence;
+      if (!freq || !VALID_RECURRENCE_FREQS.includes(freq)) {
+        results.push(`❌ Frequenza ricorrenza non valida: "${freq}". Usa: ${VALID_RECURRENCE_FREQS.join(', ')}.`);
+        continue;
+      }
+      const endDate = new Date(endAt);
+      if (isNaN(endDate.getTime())) {
+        results.push(`❌ Data fine ricorrenza non valida: "${endAt}"`);
+        continue;
+      }
+      if (endDate.getTime() <= scheduledAtTime) {
+        results.push('❌ La data fine ricorrenza deve essere successiva alla data di inizio.');
+        continue;
+      }
+      if (endDate.getTime() > maxDateMs) {
+        results.push(`❌ La data fine ricorrenza supera il limite di 1 anno.`);
+        continue;
+      }
+      recurrence = { freq, endAt };
     }
 
     if (task.whatsapp && task.whatsapp.toGroup && !ctx.isGroup) {
@@ -64,7 +85,11 @@ function scheduleTasks(tasks, ctx) {
       continue;
     }
 
-    if (task.whatsapp && task.whatsapp.toPrivate && (task.whatsapp.recipientPhone || task.whatsapp.recipientName) && !ctx.isAdmin && !ctx.isActiveMember) {
+    // Extract recipient info (support both nested and flat structure)
+    const waRecipient = task.whatsapp?.recipient || { name: task.whatsapp?.recipientName, phone: task.whatsapp?.recipientPhone };
+    const emailRecipient = task.email?.recipient || { name: task.email?.recipientName, email: task.email?.recipientEmail };
+
+    if (task.whatsapp && task.whatsapp.toPrivate && (waRecipient.phone || waRecipient.name) && !ctx.isAdmin && !ctx.isActiveMember) {
       results.push('❌ Destinatario WhatsApp specifico disponibile solo per membri attivi o admin.');
       continue;
     }
@@ -74,22 +99,22 @@ function scheduleTasks(tasks, ctx) {
 
     const destinations = {};
     if (task.whatsapp && task.whatsapp.toPrivate) {
-      if (ctx.isAdmin && task.whatsapp.recipientPhone) {
-        destinations.whatsapp = normalizePhoneToJid(task.whatsapp.recipientPhone);
-      } else if (ctx.isAdmin && task.whatsapp.recipientName) {
-        const recipient = findMemberByName(task.whatsapp.recipientName);
+      if (ctx.isAdmin && waRecipient.phone) {
+        destinations.whatsapp = normalizePhoneToJid(waRecipient.phone);
+      } else if (ctx.isAdmin && waRecipient.name) {
+        const recipient = findMemberByName(waRecipient.name);
         if (recipient) {
           destinations.whatsapp = recipient.wa;
         } else {
-          results.push(`❌ "${task.whatsapp.recipientName}" non trovato tra i membri. Usa recipientPhone per non-membri.`);
+          results.push(`❌ "${waRecipient.name}" non trovato tra i membri. Usa il telefono per non-membri.`);
           continue;
         }
-      } else if (ctx.isActiveMember && task.whatsapp.recipientName) {
-        const recipient = findMemberByName(task.whatsapp.recipientName);
+      } else if (ctx.isActiveMember && waRecipient.name) {
+        const recipient = findMemberByName(waRecipient.name);
         if (recipient) {
           destinations.whatsapp = recipient.wa;
         } else {
-          results.push(`❌ "${task.whatsapp.recipientName}" non trovato tra i membri.`);
+          results.push(`❌ "${waRecipient.name}" non trovato tra i membri.`);
           continue;
         }
       } else if (ctx.userPhone) {
@@ -102,14 +127,14 @@ function scheduleTasks(tasks, ctx) {
       destinations.whatsappGroup = ctx.groupId || null;
     }
     if (task.email) {
-      if (ctx.isAdmin && task.email.recipientEmail) {
-        destinations.email = task.email.recipientEmail;
-      } else if (task.email.recipientName) {
-        const recipient = findMemberByName(task.email.recipientName);
+      if (ctx.isAdmin && emailRecipient.email) {
+        destinations.email = emailRecipient.email;
+      } else if (emailRecipient.name) {
+        const recipient = findMemberByName(emailRecipient.name);
         if (recipient && recipient.email) {
           destinations.email = recipient.email;
         } else {
-          results.push(`❌ "${task.email.recipientName}" non trovato tra i membri o senza email.`);
+          results.push(`❌ "${emailRecipient.name}" non trovato tra i membri o senza email.`);
           continue;
         }
       } else if (ctx.isActiveMember && ctx.email) {
@@ -137,6 +162,7 @@ function scheduleTasks(tasks, ctx) {
         title: task.pdf.title || 'Documento',
         content: task.pdf.content,
       } : null,
+      ...(recurrence && { recurrence }),
     };
 
     let fileData = readTaskFile(fileId) || { tasks: [] };
@@ -145,7 +171,8 @@ function scheduleTasks(tasks, ctx) {
     writeTaskFile(fileId, fileData);
 
     const destStr = Object.keys(destinations).join(', ');
-    results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${task.scheduledAt} [${destStr}] (ID: ${newTask.id})`);
+    const recLabel = recurrence ? ` 🔁${recurrence.freq} fino ${recurrence.endAt}` : '';
+    results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${task.scheduledAt} [${destStr}]${recLabel} (ID: ${newTask.id})`);
   }
 
   return results.join('\n');

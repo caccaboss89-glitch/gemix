@@ -167,28 +167,6 @@ return limitHistoryMediaAttachments(historyMessages, Number.MAX_SAFE_INTEGER, 1,
 }
 
 /**
- * Download media from current message if supported.
- * @param {object} msg - The whatsapp-web.js message object
- * @returns {Promise<object|null>} Media object { buffer, mimetype, filename } or null if not available/unsupported
- */
-async function downloadCurrentMedia(msg) {
-  if (!msg.hasMedia) return null;
-  if (!isSupportedMedia(msg.type)) return null;
-
-  try {
-    const media = await msg.downloadMedia();
-    if (!media) return null;
-    return {
-      buffer: Buffer.from(media.data, 'base64'),
-      mimetype: media.mimetype,
-      filename: media.filename || null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Extract quoted message content if this message is a reply.
  * Handles audio (cache transcription + duration check) and PDF (page check).
  * @param {object} msg - The whatsapp-web.js message object
@@ -363,4 +341,4 @@ async function processCurrentMedia(msg) {
   }
 }
 
-module.exports = { buildWhatsAppHistory, downloadCurrentMedia, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };
+module.exports = { buildWhatsAppHistory, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };

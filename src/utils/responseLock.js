@@ -24,17 +24,6 @@ function tryLock(key, ttl = DEFAULT_TTL_MS) {
   return true;
 }
 
-function isLocked(key) {
-  const entry = locks.get(key);
-  if (!entry) return false;
-  if (entry.expiresAt <= _now()) {
-    clearTimeout(entry.timeoutId);
-    locks.delete(key);
-    return false;
-  }
-  return true;
-}
-
 function unlock(key) {
   const entry = locks.get(key);
   if (!entry) return false;
@@ -43,4 +32,4 @@ function unlock(key) {
   return true;
 }
 
-module.exports = { tryLock, isLocked, unlock };
+module.exports = { tryLock, unlock };

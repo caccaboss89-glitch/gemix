@@ -210,7 +210,7 @@ async function onDedicatedMessage(msg) {
       ? contentParts[0].text
       : contentParts,
     history,
-    waJid: senderJid,
+    waJid: phoneJid,
   };
 
   const lockKey = `wa_dedicated:${ctx.chatId || ctx.userId}`;
