@@ -2,10 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
 const { generatePdf } = require('../tools/pdfGenerator');
-const { sendEmailDirect } = require('../tools/emailSender');
 const { getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
+const { checkNewRelease } = require('./releaseMonitor');
 const { sanitizeFilename } = require('../utils/text');
 const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 const { MessageMedia } = require('whatsapp-web.js');
@@ -77,6 +77,12 @@ async function checkAndExecuteTasks() {
     } catch (err) {
       log.error('MusicWrap - errore nel controllo:', err);
     }
+  }
+
+  try {
+    await checkNewRelease(dedicatedClient);
+  } catch (err) {
+    log.error('ReleaseMonitor - errore nel controllo:', err);
   }
 
   if (!fs.existsSync(TASKS_DIR)) return;
@@ -179,22 +185,6 @@ async function executeTask(task) {
       }
     } catch (err) {
       log.error(`Errore invio WA gruppo ${dest.whatsappGroup}:`, err.message);
-    }
-  }
-
-  if (dest.email) {
-    try {
-      const emailAttachments = attachments
-        .filter(a => !a.isVoice)
-        .map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }));
-      await sendEmailDirect(
-        dest.email,
-        `GemiX — Attività programmata`,
-        `<div style="font-family:sans-serif">${messageText.replace(/\n/g, '<br>')}</div>`,
-        emailAttachments
-      );
-    } catch (err) {
-      log.error(`Errore invio email ${dest.email}:`, err.message);
     }
   }
 }

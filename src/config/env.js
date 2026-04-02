@@ -11,4 +11,6 @@ module.exports = {
   BOT_PASS: process.env.BOT_PASS,
   XAI_API_KEY: process.env.XAI_API_KEY,
   MUSIC_WRAP_PASSWORD: process.env.MUSIC_WRAP_PASSWORD,
+  GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+  GITHUB_REPO: process.env.GITHUB_REPO,
 };

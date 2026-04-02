@@ -1,9 +1,6 @@
 const nodemailer = require('nodemailer');
 const { BOT_EMAIL, BOT_PASS } = require('../config/env');
 const { removeDiscordEmoji } = require('../utils/discord');
-const { createLogger } = require('../utils/logger');
-
-const log = createLogger('EmailSender');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -14,7 +11,7 @@ const transporter = nodemailer.createTransport({
 });
 
 /**
- * Send email directly to a specific address (used by scheduler).
+ * Send email directly to a specific address.
  */
 async function sendEmailDirect(toEmail, subject, body, attachments = []) {
   subject = removeDiscordEmoji(subject);

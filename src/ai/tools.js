@@ -37,8 +37,8 @@ const TOOL_INSTRUCTIONS = {
   send_email: CALL_ONLY,
   send_whatsapp_message: CALL_ONLY,
   read_music_stats: CALL_ONLY,
-  update_private_memory: `${CALL_ONLY} Se memoria quasi piena, compatta le informazioni o chiedi all'utente cosa rimuovere.`,
-  update_group_memory: `${CALL_ONLY} Se memoria quasi piena, compatta le informazioni o chiedi agli utenti cosa rimuovere.`,
+  update_memory: `${CALL_ONLY} Se memoria quasi piena, compatta le informazioni o chiedi all'utente/agli utenti cosa rimuovere.`,
+  toggle_release_notify: CALL_ONLY,
 };
 
 // ── send_about_me: allowed una sola volta per chat (persistito su file) ──
@@ -178,9 +178,9 @@ const TOOL_READ_MUSIC_STATS = makeTool({
   properties: {},
 });
 
-const TOOL_UPDATE_PRIVATE_MEMORY = makeTool({
-  name: 'update_private_memory',
-  description: 'Aggiorna memoria privata.',
+const TOOL_UPDATE_MEMORY = makeTool({
+  name: 'update_memory',
+  description: 'Aggiorna memoria personalizzata (privata o di gruppo in base alla chat).',
   properties: {
     content: {
       type: 'string',
@@ -190,16 +190,16 @@ const TOOL_UPDATE_PRIVATE_MEMORY = makeTool({
   required: ['content'],
 });
 
-const TOOL_UPDATE_GROUP_MEMORY = makeTool({
-  name: 'update_group_memory',
-  description: 'Aggiorna memoria del gruppo.',
+const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
+  name: 'toggle_release_notify',
+  description: 'Attiva/disattiva notifiche nuove release GemiX su questa chat.',
   properties: {
-    content: {
-      type: 'string',
-      description: 'Testo completo memoria (max 500 char, vuoto=cancella)',
+    enabled: {
+      type: 'boolean',
+      description: 'true=attiva, false=disattiva',
     },
   },
-  required: ['content'],
+  required: ['enabled'],
 });
 
 // ── Dynamic tool builders (schema varies by grade/platform) ──
@@ -372,29 +372,6 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   };
 
   if (isActiveMember) {
-    const recipientEmailProps = {
-      name: {
-        type: 'string',
-        description: 'Nome membro destinatario',
-      },
-    };
-    if (isAdmin) {
-      recipientEmailProps.email = {
-        type: 'string',
-        description: 'Email diretta destinatario',
-      };
-    }
-    taskItemProps.email = {
-      type: 'object',
-      description: 'Destinazione email',
-      properties: {
-        recipient: {
-          type: 'object',
-          description: 'Destinatario',
-          properties: recipientEmailProps,
-        },
-      },
-    };
     taskItemProps.recurrence = {
       type: 'object',
       description: 'Ricorrenza (scheduledAt=prima esecuzione)',
@@ -498,16 +475,18 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     }));
   }
 
-  // Task: tutti gli utenti, schema varia per grado e piattaforma
-  tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
-  tools.push(buildReadMyTasksTool(isWhatsAppGroup));
-  tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
+  // Task: disponibili su WhatsApp tutti gli utenti, su Discord solo attivi
+  // (Discord non-attivi non hanno WA associato, non possono usare i task)
+  if (!isDiscord || isActiveMember) {
+    tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
+    tools.push(buildReadMyTasksTool(isWhatsAppGroup));
+    tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
+  }
 
-  // Memoria personalizzata: privata in chat private, di gruppo in gruppi WA
-  if (isWhatsAppGroup) {
-    tools.push(TOOL_UPDATE_GROUP_MEMORY);
-  } else {
-    tools.push(TOOL_UPDATE_PRIVATE_MEMORY);
+  // Memoria personalizzata (backend distingue privata/gruppo in base al contesto)
+  if (!isDiscord || isActiveMember) {
+    tools.push(TOOL_UPDATE_MEMORY);
+    tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
 
   // Solo membri attivi / admin

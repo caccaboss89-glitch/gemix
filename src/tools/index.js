@@ -16,6 +16,7 @@ const { extractLastNImages, extractLastNDocs } = require('../utils/media');
 const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
+const { toggleReleaseNotify } = require('./releaseNotify');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -127,7 +128,7 @@ function _resolveTargetEmail(args, userCtx) {
  * Execute a tool call and return the result.
  * Validates permissions, executes the tool, and collects responses/attachments.
  * @param {object} toolCall - The tool call from Gemini { id, function: { name, arguments } }
- * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, email, isGroup, groupId }
+ * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, isGroup, groupId }
  * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
  * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set }
  * @returns {Promise<object>} { toolCallId: string, result: string }
@@ -304,7 +305,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           userId: userCtx.userId,
           userName: userCtx.userName,
           waJid: userCtx.waJid,
-          email: userCtx.member ? userCtx.member.email : null,
           isActiveMember: userCtx.isActiveMember,
           isAdmin: userCtx.isAdmin,
           isGroup: userCtx.isGroup,
@@ -433,13 +433,19 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
-      case 'update_private_memory': {
-        result = updatePrivateMemory(args.content, userCtx.memoryFileId);
+      case 'update_memory': {
+        if (userCtx.isGroup) {
+          result = updateGroupMemory(args.content, userCtx.groupId);
+        } else {
+          result = updatePrivateMemory(args.content, userCtx.memoryFileId);
+        }
         break;
       }
 
-      case 'update_group_memory': {
-        result = updateGroupMemory(args.content, userCtx.groupId);
+      case 'toggle_release_notify': {
+        const chatId = userCtx.chatId || userCtx.groupId || userCtx.waJid;
+        const waJid = userCtx.isGroup ? userCtx.groupId : (userCtx.waJid || (userCtx.member ? userCtx.member.wa : null));
+        result = toggleReleaseNotify(Boolean(args.enabled), chatId, waJid);
         break;
       }
 
