@@ -248,6 +248,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const currentCount = _getVoiceCount(chatKey);
         if (currentCount >= 3) {
           log.warn(`Limite vocali WA superato in chat ${chatKey}: counter=${currentCount}`);
+          _resetVoiceCount(chatKey);
           result = '❌ Limite vocali superato: in questa chat hai già inviato 3 messaggi vocali consecutivi. Rispondi con un messaggio testuale normale, senza vocali.';
           break;
         }
