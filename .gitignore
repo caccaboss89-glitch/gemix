@@ -4,3 +4,4 @@ node_modules/
 .wwebjs_cache/
 src/data/
 src/logs/
+package-lock.json

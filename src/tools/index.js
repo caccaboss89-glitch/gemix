@@ -12,7 +12,7 @@ const { sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppDirect } = require('./whatsappSender');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
-const { extractLastNImages, extractLastNDocs } = require('../utils/media');
+const { extractLastNImages, extractLastNDocs, extractLastNVoices } = require('../utils/media');
 const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
@@ -20,7 +20,7 @@ const { toggleReleaseNotify } = require('./releaseNotify');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
-const { MAX_TTS_CHARS, MAX_HISTORY_IMAGES, MAX_HISTORY_DOCS } = require('../config/constants');
+const { MAX_TTS_CHARS, MAX_HISTORY_IMAGES, MAX_HISTORY_DOCS, MAX_HISTORY_VOICES } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { storeVoiceText } = require('../utils/voiceTextCache');
 
@@ -215,6 +215,27 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
         responseCtx.historyDocsToInclude = docs;
         result = `✅ Includo gli ultimi ${docs.length} documento/i nella prossima chiamata API.`;
+        break;
+      }
+
+      case 'include_history_voices': {
+        let count = Number(args.count || 0);
+        if (!Number.isInteger(count) || count <= 0) {
+          result = '❌ count deve essere un intero positivo.';
+          break;
+        }
+
+        if (count > MAX_HISTORY_VOICES) count = MAX_HISTORY_VOICES;
+
+        const voices = extractLastNVoices(userCtx.historyFull || [], count);
+
+        if (!voices || voices.length === 0) {
+          result = '❌ Non ci sono vocali degli utenti nella cronologia da includere.';
+          break;
+        }
+
+        responseCtx.historyVoicesToInclude = voices;
+        result = `✅ Includo gli ultimi ${voices.length} vocale/i nella prossima chiamata API.`;
         break;
       }
 

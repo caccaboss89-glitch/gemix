@@ -5,7 +5,7 @@ const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { hasHistoryImages, hasHistoryDocs, limitHistoryMediaAttachments } = require('./utils/media');
+const { hasHistoryImages, hasHistoryDocs, hasHistoryVoices, limitHistoryMediaAttachments } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 
@@ -40,6 +40,7 @@ async function handleMessage(ctx) {
     isAboutMeOnly: false,
     historyImagesToInclude: [],
     historyDocsToInclude: [],
+    historyVoicesToInclude: [],
   };
 
   try {
@@ -67,6 +68,7 @@ async function handleMessage(ctx) {
 
     const historyHasImages = hasHistoryImages(ctx.history);
     const historyHasDocs = hasHistoryDocs(ctx.history);
+    const historyHasVoices = hasHistoryVoices(ctx.history);
 
     const userCtx = {
       isActiveMember,
@@ -85,6 +87,7 @@ async function handleMessage(ctx) {
       platform: ctx.platform,
       hasHistoryImages: historyHasImages,
       hasHistoryDocs: historyHasDocs,
+      hasHistoryVoices: historyHasVoices,
       historyFull: ctx.history || [],
     };
 
@@ -95,7 +98,7 @@ async function handleMessage(ctx) {
     ];
 
     const filteredHistory = ctx.history && ctx.history.length > 0
-      ? limitHistoryMediaAttachments(cloneHistoryStructure(ctx.history), 0, 1, 0)
+      ? limitHistoryMediaAttachments(cloneHistoryStructure(ctx.history), 0, 0, 0)
       : [];
 
     if (filteredHistory.length > 0) {
@@ -156,7 +159,7 @@ async function handleMessage(ctx) {
       messages = removeToolInstructionMessages(messages);
       rounds++;
 
-      if ((responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) || (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0)) {
+      if ((responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) || (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) || (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0)) {
         const includeList = [];
         if (responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) {
           includeList.push({ type: 'text', text: `[Richiesta immagini cronologia]` });
@@ -167,6 +170,11 @@ async function handleMessage(ctx) {
           includeList.push({ type: 'text', text: `[Richiesta documenti cronologia]` });
           includeList.push(...responseCtx.historyDocsToInclude);
           responseCtx.historyDocsToInclude = [];
+        }
+        if (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0) {
+          includeList.push({ type: 'text', text: `[Richiesta vocali cronologia]` });
+          includeList.push(...responseCtx.historyVoicesToInclude);
+          responseCtx.historyVoicesToInclude = [];
         }
         messages.push({ role: 'user', content: includeList });
       }

@@ -145,6 +145,42 @@ function extractLastNDocs(historyMessages, count = 0) {
   return docParts.reverse();
 }
 
+function hasHistoryVoices(historyMessages) {
+  if (!Array.isArray(historyMessages)) return false;
+
+  for (const message of historyMessages) {
+    if (!message || message.role === 'assistant' || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (_getMediaTypeFromContentPart(part) === 'audio') return true;
+    }
+  }
+
+  return false;
+}
+
+function extractLastNVoices(historyMessages, count = 0) {
+  if (!Array.isArray(historyMessages) || count <= 0) return [];
+
+  const audioParts = [];
+
+  for (let i = historyMessages.length - 1; i >= 0; i -= 1) {
+    const message = historyMessages[i];
+    if (!message || message.role === 'assistant' || !Array.isArray(message.content)) continue;
+
+    for (let j = message.content.length - 1; j >= 0; j -= 1) {
+      const part = message.content[j];
+      if (_getMediaTypeFromContentPart(part) === 'audio') {
+        audioParts.push(part);
+        if (audioParts.length >= count) break;
+      }
+    }
+
+    if (audioParts.length >= count) break;
+  }
+
+  return audioParts.reverse();
+}
+
 function limitHistoryMediaAttachments(historyMessages, maxImages = 3, maxAudios = 1, maxDocs = 0) {
   if (!Array.isArray(historyMessages)) return historyMessages;
 
@@ -203,7 +239,9 @@ module.exports = {
   mediaTag,
   hasHistoryImages,
   hasHistoryDocs,
+  hasHistoryVoices,
   extractLastNImages,
   extractLastNDocs,
+  extractLastNVoices,
   limitHistoryMediaAttachments,
 };

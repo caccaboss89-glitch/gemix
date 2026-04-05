@@ -28,6 +28,7 @@ const TOOL_INSTRUCTIONS = {
   image_search: `${CALL_ONLY} Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
   include_history_images: CALL_ONLY,
   include_history_docs: CALL_ONLY,
+  include_history_voices: CALL_ONLY,
   send_voice_message: `${CALL_ONLY} ${VOICE_EFFECTS_DOC}`,
   schedule_tasks: CALL_ONLY,
   read_my_tasks: CALL_ONLY,
@@ -143,6 +144,15 @@ const TOOL_INCLUDE_HISTORY_DOCS = makeTool({
   description: 'Includi ultimi N documenti dalla cronologia (max 2, ≤5 pagine).',
   properties: {
     count: { type: 'integer', description: 'Quantità (1-2)', minimum: 1 },
+  },
+  required: ['count'],
+});
+
+const TOOL_INCLUDE_HISTORY_VOICES = makeTool({
+  name: 'include_history_voices',
+  description: 'Includi ultimi N vocali degli utenti dalla cronologia (max 3).',
+  properties: {
+    count: { type: 'integer', description: 'Quantità (1-3)', minimum: 1 },
   },
   required: ['count'],
 });
@@ -465,6 +475,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH);
   if (userCtx.hasHistoryImages) tools.push(TOOL_INCLUDE_HISTORY_IMAGES);
   if (userCtx.hasHistoryDocs) tools.push(TOOL_INCLUDE_HISTORY_DOCS);
+  if (userCtx.hasHistoryVoices) tools.push(TOOL_INCLUDE_HISTORY_VOICES);
   if (!_isSendAboutMeUsed(chatKey)) tools.push(TOOL_SEND_ABOUT_ME);
 
   // Vocale: solo WhatsApp, schema varia per grado

@@ -4,7 +4,7 @@ module.exports = {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
-  MAX_HISTORY: 20,
+  MAX_HISTORY: 15,
   MAX_TASK_DAYS: 365,
   SCHEDULER_INTERVAL_MS: 60_000,
   DISCORD_THREAD_NAME: 'gemix',
@@ -24,6 +24,7 @@ module.exports = {
   MAX_TTS_CHARS: 1000,
   MAX_HISTORY_IMAGES: 5,
   MAX_HISTORY_DOCS: 2,
+  MAX_HISTORY_VOICES: 3,
   MAX_DOC_PAGES: 5,
   MAX_AUDIO_DURATION_S: 120,
 
