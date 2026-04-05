@@ -271,18 +271,6 @@ async function onDiscordMessage(msg) {
     let finalText = response.discordMessage || response.text || '';
     let newTitle = response.discordTitle || '';
 
-    if (newTitle && newTitle.length > 0) {
-      const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
-      if (safeTitle) {
-        try {
-          await channel.setName(safeTitle);
-          log.info(`   📝 Thread rinominato: "${safeTitle}"`);
-        } catch (err) {
-          log.error('Errore rinomina thread:', err.message);
-        }
-      }
-    }
-
     const files = [];
     if (response.attachments) {
       for (const att of response.attachments) {
@@ -306,6 +294,16 @@ async function onDiscordMessage(msg) {
       log.info(`   ✅ File inviati`);
     } else {
       log.warn(`   ⚠️ Nessun contenuto o file da inviare`);
+    }
+
+    // Rinomina thread in modo non bloccante (Discord limita a 2 rinominazioni ogni 10 min)
+    if (newTitle && newTitle.length > 0) {
+      const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
+      if (safeTitle) {
+        channel.setName(safeTitle)
+          .then(() => log.info(`   📝 Thread rinominato: "${safeTitle}"`))
+          .catch(err => log.error('Errore rinomina thread:', err.message));
+      }
     }
   } catch (err) {
     log.error(`\n❌ Errore invio risposta:`);
