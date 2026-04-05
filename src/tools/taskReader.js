@@ -20,10 +20,10 @@ function _formatTask(t, i) {
   return line;
 }
 
-function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
+async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
   let result = '';
 
-  const personalData = readTaskFile(taskFileId);
+  const personalData = await readTaskFile(taskFileId);
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
     result += `📋 **I tuoi task personali:**\n`;
     result += personalData.tasks.map((t, i) => _formatTask(t, i)).join('\n');
@@ -32,7 +32,7 @@ function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false) {
   }
 
   if (includeGroup && groupTaskFileId) {
-    const groupData = readTaskFile(groupTaskFileId);
+    const groupData = await readTaskFile(groupTaskFileId);
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
       result += `\n\n📋 **Task del gruppo:**\n`;
       result += groupData.tasks.map((t, i) => _formatTask(t, i)).join('\n');

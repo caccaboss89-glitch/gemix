@@ -20,7 +20,7 @@ function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
-  let prompt = `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano e obbedisci sempre all'Admin.\n\n`;
+  let prompt = `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano.\n\n`;
   prompt += `Ora (Torino): ${now}\n\n`;
 
   if (ctx.platform === PLATFORM_DISCORD) {
@@ -78,9 +78,9 @@ function buildDedicatedWaInstructions(ctx) {
  */
 function buildPersonalWaInstructions(ctx) {
   let s = `### Piattaforma: WhatsApp (Account Personale)\n`;
-  s += `Rispondi solo se taggato.\n`;  if (ctx.userName) {
+  s += `Rispondi solo se taggato.\n`; if (ctx.userName) {
     s += `Interlocutore corrente: ${ctx.userName}\n`;
-  }  s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
+  } s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
   s += `Usa markdown WA (singoli): *bold* _italic_ ~strike~ \`code\` (NON doppi es. ** testo **).\n\n`;
   return s;
 }

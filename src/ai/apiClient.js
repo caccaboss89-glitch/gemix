@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { notifyAdmin } = require('../utils/adminNotifier');
 const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
+const { API_KEY } = require('../config/env');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
@@ -87,7 +88,7 @@ async function callApiWithRetry(modelName, apiUrl, body) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.API_KEY || require('../config/env').API_KEY}`,
+          'Authorization': `Bearer ${process.env.API_KEY || API_KEY}`,
         },
         body: JSON.stringify(body),
         signal: controller.signal,

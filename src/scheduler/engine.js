@@ -1,3 +1,4 @@
+const fsPromises = require('fs').promises;
 const fs = require('fs');
 const path = require('path');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
@@ -7,7 +8,7 @@ const { buildScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { checkNewRelease } = require('./releaseMonitor');
 const { sanitizeFilename } = require('../utils/text');
-const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
+const { modifyTaskFile } = require('../utils/taskStore');
 const { MessageMedia } = require('whatsapp-web.js');
 const { createLogger } = require('../utils/logger');
 
@@ -85,58 +86,66 @@ async function checkAndExecuteTasks() {
     log.error('ReleaseMonitor - errore nel controllo:', err);
   }
 
-  if (!fs.existsSync(TASKS_DIR)) return;
-
-  const files = fs.readdirSync(TASKS_DIR).filter(f => f.endsWith('.json'));
+  let files;
+  try {
+    files = (await fsPromises.readdir(TASKS_DIR)).filter(f => f.endsWith('.json'));
+  } catch {
+    return;
+  }
 
   for (const file of files) {
     const fileId = file.replace('.json', '');
-    const data = readTaskFile(fileId);
-    if (!data || !data.tasks || data.tasks.length === 0) continue;
+    try {
+      // modifyTaskFile holds the per-file lock for the entire read→execute→write cycle,
+      // preventing races between the scheduler and concurrent user tool calls.
+      await modifyTaskFile(fileId, async (data) => {
+        if (!data || !data.tasks || data.tasks.length === 0) return data;
 
-    const nowTime = now.getTime();
-    const dueTasks = data.tasks.filter(t => {
-      const taskDate = new Date(t.scheduledAt);
-      return !isNaN(taskDate.getTime()) && taskDate.getTime() <= nowTime;
-    });
-    if (dueTasks.length === 0) continue;
+        const nowTime = now.getTime();
+        const dueTasks = data.tasks.filter(t => {
+          const taskDate = new Date(t.scheduledAt);
+          return !isNaN(taskDate.getTime()) && taskDate.getTime() <= nowTime;
+        });
+        if (dueTasks.length === 0) return data;
 
-    for (const task of dueTasks) {
-      try {
-        await executeTask(task);
-        log.info(`✅ Task eseguito: ${task.id}`);
-      } catch (err) {
-        log.error(`❌ Errore task ${task.id}:`, err.message);
-      }
-    }
-
-    // Process executed tasks: advance recurring or remove one-shot
-    const nowAfter = new Date();
-    const nowAfterTime = nowAfter.getTime();
-    const dueIds = new Set(dueTasks.map(t => t.id));
-    const updatedTasks = [];
-
-    for (const t of data.tasks) {
-      const taskDate = new Date(t.scheduledAt);
-      if (!dueIds.has(t.id) || isNaN(taskDate.getTime()) || taskDate.getTime() > nowAfterTime) {
-        updatedTasks.push(t);
-        continue;
-      }
-      // Task was executed — check recurrence
-      if (t.recurrence && t.recurrence.freq) {
-        const next = computeNextOccurrence(t.scheduledAt, t.recurrence.freq);
-        if (next && (!t.recurrence.endAt || next.getTime() <= new Date(t.recurrence.endAt).getTime())) {
-          t.scheduledAt = next.toISOString();
-          updatedTasks.push(t);
-          log.info(`🔁 Task ricorrente ${t.id} riprogrammato: ${t.scheduledAt}`);
-        } else {
-          log.info(`🏁 Task ricorrente ${t.id} terminato (fine ricorrenza raggiunta).`);
+        for (const task of dueTasks) {
+          try {
+            await executeTask(task);
+            log.info(`✅ Task eseguito: ${task.id}`);
+          } catch (err) {
+            log.error(`❌ Errore task ${task.id}:`, err.message);
+          }
         }
-      }
-      // Non-recurring tasks are simply dropped (not pushed to updatedTasks)
+
+        // Advance recurring tasks or drop one-shot tasks
+        const nowAfterTime = Date.now();
+        const dueIds = new Set(dueTasks.map(t => t.id));
+        const updatedTasks = [];
+
+        for (const t of data.tasks) {
+          const taskDate = new Date(t.scheduledAt);
+          if (!dueIds.has(t.id) || isNaN(taskDate.getTime()) || taskDate.getTime() > nowAfterTime) {
+            updatedTasks.push(t);
+            continue;
+          }
+          if (t.recurrence && t.recurrence.freq) {
+            const next = computeNextOccurrence(t.scheduledAt, t.recurrence.freq);
+            if (next && (!t.recurrence.endAt || next.getTime() <= new Date(t.recurrence.endAt).getTime())) {
+              t.scheduledAt = next.toISOString();
+              updatedTasks.push(t);
+              log.info(`🔁 Task ricorrente ${t.id} riprogrammato: ${t.scheduledAt}`);
+            } else {
+              log.info(`🏁 Task ricorrente ${t.id} terminato (fine ricorrenza raggiunta).`);
+            }
+          }
+          // Non-recurring tasks are simply dropped
+        }
+        data.tasks = updatedTasks;
+        return data;
+      });
+    } catch (err) {
+      log.error(`❌ Errore elaborazione file task ${fileId}:`, err.message);
     }
-    data.tasks = updatedTasks;
-    writeTaskFile(fileId, data);
   }
 }
 
@@ -148,7 +157,7 @@ async function checkAndExecuteTasks() {
  */
 async function executeTask(task) {
   // Deliver via destinations
-  let messageText = task.content || '';
+  let messageText = (task.content || '').replace(/^\[GemiX\]\s*/i, '');
   let attachments = [];
 
   if (task.pdf && task.pdf.content) {

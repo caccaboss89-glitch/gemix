@@ -17,7 +17,7 @@ const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, isActiveMember, isAdmin, isGroup, groupId }
  * @returns {string} Result message with task confirmation or error details
  */
-function scheduleTasks(tasks, ctx) {
+async function scheduleTasks(tasks, ctx) {
   const now = new Date();
   const nowTime = now.getTime();
   const maxDateMs = nowTime + MAX_TASK_DAYS * 24 * 60 * 60 * 1000;
@@ -129,9 +129,11 @@ function scheduleTasks(tasks, ctx) {
       }
     }
 
+    const cleanContent = removeDiscordEmoji(task.content).replace(/^\[GemiX\]\s*/i, '');
+
     const newTask = {
       id: crypto.randomUUID(),
-      content: removeDiscordEmoji(task.content),
+      content: cleanContent,
       scheduledAt: task.scheduledAt,
       createdAt: getRomeISO(),
       createdBy: ctx.userName || ctx.userId,
@@ -143,10 +145,10 @@ function scheduleTasks(tasks, ctx) {
       ...(recurrence && { recurrence }),
     };
 
-    let fileData = readTaskFile(fileId) || { tasks: [] };
+    let fileData = await readTaskFile(fileId) || { tasks: [] };
 
     fileData.tasks.push(newTask);
-    writeTaskFile(fileId, fileData);
+    await writeTaskFile(fileId, fileData);
 
     const destStr = Object.keys(destinations).join(', ');
     const recLabel = recurrence ? ` 🔁${recurrence.freq} fino ${recurrence.endAt}` : '';

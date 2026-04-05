@@ -6,8 +6,8 @@ const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
  * @param {string} fileId - The task file ID (user's personal or group)
  * @returns {string} Result message
  */
-function removeTasks(taskIds, fileId) {
-  const data = readTaskFile(fileId);
+async function removeTasks(taskIds, fileId) {
+  const data = await readTaskFile(fileId);
 
   if (!data) {
     return 'Nessun file task trovato. Non hai task programmati.';
@@ -17,7 +17,7 @@ function removeTasks(taskIds, fileId) {
   data.tasks = data.tasks.filter(t => !taskIds.includes(t.id));
   const removed = before - data.tasks.length;
 
-  writeTaskFile(fileId, data);
+  await writeTaskFile(fileId, data);
 
   if (removed === 0) {
     return `Nessun task trovato con gli ID specificati.`;

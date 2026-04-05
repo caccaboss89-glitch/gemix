@@ -79,11 +79,11 @@ async function checkStatsFileUpdate() {
   try {
     const { fetchExternal } = require('../utils/fetch');
     const STATS_URL = 'https://raw.githubusercontent.com/caccaboss89-glitch/MusicBot/main/data/stats.json';
-    
+
     const response = await fetchExternal(STATS_URL, {
       headers: { 'User-Agent': 'GemiX-MusicWrapMonitor/1.0' },
     }, 'Music Stats Check');
-    
+
     if (!response.ok) {
       log.error(`❌ Errore lettura stats.json: ${response.status}`);
       return null;

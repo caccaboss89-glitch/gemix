@@ -1,13 +1,11 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { buildWhatsAppHistory, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent } = require('./shared');
-const { formatWhatsAppPollText } = require('../../utils/pollParser');
+const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse } = require('./shared');
 const { getDedicatedClient } = require('./dedicated');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
 const { GEMINI_MODEL } = require('../../config/env');
-const { mediaToContentPart, mediaTag } = require('../../utils/media');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 
@@ -15,6 +13,8 @@ const log = createLogger('WA-PERSONALE');
 const responseLock = require('../../utils/responseLock');
 
 let client;
+let _reconnectAttempts = 0;
+const MAX_RECONNECT_DELAY_MS = 60_000;
 
 /**
  * Initialize personal WhatsApp account client.
@@ -39,6 +39,7 @@ function initPersonalWhatsApp() {
 
   client.on('ready', () => {
     log.info('✅ Client pronto:', client.info.wid._serialized);
+    _reconnectAttempts = 0;
   });
 
   client.on('auth_failure', (msg) => {
@@ -47,8 +48,10 @@ function initPersonalWhatsApp() {
 
   client.on('disconnected', (reason) => {
     log.warn('⚠️ Disconnesso:', reason);
-    log.info('Tentativo riconnessione...');
-    client.initialize();
+    _reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, _reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
+    log.info(`Tentativo riconnessione ${_reconnectAttempts} tra ${delay / 1000}s...`);
+    setTimeout(() => client.initialize(), delay);
   });
 
   client.on('message_create', async (msg) => {
@@ -91,7 +94,7 @@ async function onPersonalMessage(msg) {
         otherDigits = normalizeDigits(otherContact.id.user);
       }
     }
-  } catch {}
+  } catch { }
 
   if (!otherDigits && chat.id && chat.id._serialized) {
     otherDigits = normalizeDigits(chat.id._serialized);
@@ -118,13 +121,13 @@ async function onPersonalMessage(msg) {
     } else if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
       phoneJid = contact.id.user + '@c.us';
     }
-  } catch {}
+  } catch { }
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
     userId: phoneJid,
   });
-  
+
   log.info(`\n📨 Messaggio ricevuto`);
   log.info(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
   log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
@@ -134,7 +137,7 @@ async function onPersonalMessage(msg) {
   try {
     history = await Promise.race([
       buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, null),
-      new Promise((_, reject) => 
+      new Promise((_, reject) =>
         setTimeout(() => reject(new Error('History fetch timeout')), 15000)
       )
     ]);
@@ -142,41 +145,7 @@ async function onPersonalMessage(msg) {
     log.warn(`   ⚠️ History fetch fallito (${historyErr.message}), procedo senza cronologia`);
   }
 
-  const contentParts = [];
-  let textBody = msg.body || '';
-
-  if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
-    textBody = `[Contatto condiviso] ${textBody}`;
-  } else if (msg.type === 'poll_creation') {
-    textBody = formatWhatsAppPollText(msg, `[Sondaggio] ${textBody}`);
-  }
-
-  const quotedContent = await extractQuotedMessageContent(msg, chat.id._serialized);
-  if (quotedContent && quotedContent.prefix) {
-    textBody = quotedContent.prefix + textBody;
-  }
-
-  if (quotedContent && Array.isArray(quotedContent.mediaParts) && quotedContent.mediaParts.length > 0) {
-    contentParts.push(...quotedContent.mediaParts);
-  }
-
-  const mediaResult = await processCurrentMedia(msg);
-  if (mediaResult) {
-    if (mediaResult.skipped) {
-      const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
-      textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
-    } else {
-      contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype));
-      textBody = `${mediaResult.tag} ${textBody}`.trim();
-    }
-  } else if (msg.hasMedia) {
-    const tag = mediaTag(null, msg._data?.mimetype);
-    textBody = `${tag} (file non disponibile) ${textBody}`.trim();
-  }
-
-  if (textBody) {
-    contentParts.unshift({ type: 'text', text: textBody });
-  }
+  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized);
 
   if (contentParts.length === 0) return;
 
@@ -234,7 +203,7 @@ async function onPersonalMessage(msg) {
       log.error(`   ${err.message}`);
     }
   } finally {
-    try { responseLock.unlock(lockKey); } catch {}
+    try { responseLock.unlock(lockKey); } catch { }
   }
 }
 

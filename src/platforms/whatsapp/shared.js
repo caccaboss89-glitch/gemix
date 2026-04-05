@@ -108,7 +108,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
               if (media) {
                 mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
               }
-            } catch {}
+            } catch { }
             textContent = `${textContent} ${tag}`.trim();
           }
         } else if (mediaType === 'document' && msg._data?.mimetype === 'application/pdf') {
@@ -133,7 +133,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
             if (media) {
               mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
             }
-          } catch {}
+          } catch { }
           textContent = `${textContent} ${tag}`.trim();
         }
       } else if (isUnsupportedMedia(mediaType)) {
@@ -163,7 +163,7 @@ async function buildWhatsAppHistory(chat, platform, botJid) {
     }
   }
 
-return limitHistoryMediaAttachments(historyMessages, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  return limitHistoryMediaAttachments(historyMessages, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
 }
 
 /**
@@ -203,7 +203,7 @@ async function extractQuotedMessageContent(msg, chatId) {
             if (media) {
               mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
             }
-          } catch {}
+          } catch { }
         }
         return { prefix, mediaParts };
       }
@@ -235,7 +235,7 @@ async function extractQuotedMessageContent(msg, chatId) {
         if (media) {
           mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
         }
-      } catch {}
+      } catch { }
       return { prefix, mediaParts };
     }
 
@@ -326,7 +326,7 @@ async function processCurrentMedia(msg) {
             reason: `documento troppo lungo: ${info.numpages} pagine, non inviato`,
           };
         }
-      } catch {}
+      } catch { }
     }
 
     return {
@@ -341,4 +341,51 @@ async function processCurrentMedia(msg) {
   }
 }
 
-module.exports = { buildWhatsAppHistory, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };
+/**
+ * Build the contentParts array for an incoming WhatsApp message.
+ * Handles vcard/poll text formatting, quoted message content, and current message media.
+ * Extracted to avoid duplication between dedicated and personal handlers.
+ * @param {object} msg - The whatsapp-web.js message object
+ * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
+ * @returns {Promise<Array>} contentParts array (may be empty if message has no usable content)
+ */
+async function buildIncomingContentParts(msg, chatId) {
+  const contentParts = [];
+  let textBody = msg.body || '';
+
+  if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
+    textBody = `[Contatto condiviso] ${textBody}`;
+  } else if (msg.type === 'poll_creation') {
+    textBody = formatWhatsAppPollText(msg, `[Sondaggio] ${textBody}`);
+  }
+
+  const quotedContent = await extractQuotedMessageContent(msg, chatId);
+  if (quotedContent && quotedContent.prefix) {
+    textBody = quotedContent.prefix + textBody;
+  }
+  if (quotedContent && Array.isArray(quotedContent.mediaParts) && quotedContent.mediaParts.length > 0) {
+    contentParts.push(...quotedContent.mediaParts);
+  }
+
+  const mediaResult = await processCurrentMedia(msg);
+  if (mediaResult) {
+    if (mediaResult.skipped) {
+      const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
+      textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
+    } else {
+      contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype));
+      textBody = `${mediaResult.tag} ${textBody}`.trim();
+    }
+  } else if (msg.hasMedia) {
+    const tag = mediaTag(null, msg._data?.mimetype);
+    textBody = `${tag} (file non disponibile) ${textBody}`.trim();
+  }
+
+  if (textBody) {
+    contentParts.unshift({ type: 'text', text: textBody });
+  }
+
+  return contentParts;
+}
+
+module.exports = { buildWhatsAppHistory, buildIncomingContentParts, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };

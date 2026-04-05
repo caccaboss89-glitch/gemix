@@ -46,8 +46,49 @@ function initDiscord() {
     }
   });
 
-  discordClient.login(BOT_TOKEN);
+  discordClient.login(BOT_TOKEN).catch(err => {
+    log.error('❌ Login Discord fallito:', err.message);
+    process.exit(1);
+  });
   return discordClient;
+}
+
+/**
+ * Split a long text into Discord-compatible chunks (max 2000 chars).
+ * Preserves line boundaries; only splits mid-line when a single line exceeds the limit.
+ * @param {string} text - Message text to split
+ * @param {number} [maxLen=2000] - Maximum characters per chunk
+ * @returns {string[]} Array of chunks, each within maxLen
+ */
+function splitDiscordMessage(text, maxLen = 2000) {
+  const chunks = [];
+  let current = '';
+  for (const line of text.split('\n')) {
+    const separator = current ? '\n' : '';
+    if ((current + separator + line).length > maxLen) {
+      if (current) {
+        chunks.push(current);
+        current = '';
+      }
+      if (line.length > maxLen) {
+        // Single line exceeds limit: split on last space within maxLen
+        let rest = line;
+        while (rest.length > maxLen) {
+          const cut = rest.lastIndexOf(' ', maxLen);
+          const pos = cut > 0 ? cut : maxLen;
+          chunks.push(rest.substring(0, pos).trimEnd());
+          rest = rest.substring(pos).trimStart();
+        }
+        current = rest;
+      } else {
+        current = line;
+      }
+    } else {
+      current = current + separator + line;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 async function onDiscordMessage(msg) {
@@ -69,7 +110,7 @@ async function onDiscordMessage(msg) {
   let guildMember = null;
   try {
     guildMember = await guild.members.fetch(msg.author.id);
-  } catch {}
+  } catch { }
 
   const userIdentity = identifyUser({
     platform: 'discord',
@@ -103,13 +144,13 @@ async function onDiscordMessage(msg) {
               const res = await fetch(att.url);
               const buffer = Buffer.from(await res.arrayBuffer());
               quotedMediaParts.push(mediaToContentPart(buffer, att.contentType));
-            } catch {}
+            } catch { }
           }
         } else if (quotedMsg.content) {
           textBody = `[In reply to: ${quotedMsg.content}]\n` + textBody;
         }
       }
-    } catch {}
+    } catch { }
   }
 
   for (const att of msg.attachments.values()) {
@@ -182,7 +223,7 @@ async function onDiscordMessage(msg) {
     if (emojis.size > 0) {
       availableEmojis = emojis.map(e => `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`).join(' ');
     }
-  } catch {}
+  } catch { }
 
   let serverEvents = 'Nessun evento in programma.';
   try {
@@ -195,7 +236,7 @@ async function onDiscordMessage(msg) {
         serverEvents = upcoming.map(e => `${e.name} - ${formatTimestamp(e.scheduledStartAt)}`).join('; ');
       }
     }
-  } catch {}
+  } catch { }
 
   const ctx = {
     platform: 'discord',
@@ -231,11 +272,14 @@ async function onDiscordMessage(msg) {
     let newTitle = response.discordTitle || '';
 
     if (newTitle && newTitle.length > 0) {
-      try {
-        await channel.setName(newTitle);
-        log.info(`   📝 Thread rinominato: "${newTitle}"`);
-      } catch (err) {
-        log.error('Errore rinomina thread:', err.message);
+      const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
+      if (safeTitle) {
+        try {
+          await channel.setName(safeTitle);
+          log.info(`   📝 Thread rinominato: "${safeTitle}"`);
+        } catch (err) {
+          log.error('Errore rinomina thread:', err.message);
+        }
       }
     }
 
@@ -247,18 +291,14 @@ async function onDiscordMessage(msg) {
     }
 
     if (finalText) {
-      if (finalText.length > 2000) {
-        const chunks = finalText.match(/[\s\S]{1,2000}/g);
-        log.info(`   💬 Messaggio diviso in ${chunks.length} parti`);
-        for (let i = 0; i < chunks.length; i++) {
-          if (i === chunks.length - 1 && files.length > 0) {
-            await channel.send({ content: chunks[i], files });
-          } else {
-            await channel.send({ content: chunks[i] });
-          }
+      const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
+      if (chunks.length > 1) log.info(`   💬 Messaggio diviso in ${chunks.length} parti`);
+      for (let i = 0; i < chunks.length; i++) {
+        if (i === chunks.length - 1 && files.length > 0) {
+          await channel.send({ content: chunks[i], files });
+        } else {
+          await channel.send({ content: chunks[i] });
         }
-      } else {
-        await channel.send({ content: finalText, files });
       }
       log.info(`   ✅ Messaggio Discord inviato (${finalText.length} char)`);
     } else if (files.length > 0) {
@@ -272,9 +312,9 @@ async function onDiscordMessage(msg) {
     log.error(`   ${err.message}`);
     try {
       await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
-    } catch {}
+    } catch { }
   } finally {
-    try { responseLock.unlock(lockKey); } catch {}
+    try { responseLock.unlock(lockKey); } catch { }
   }
 }
 
@@ -313,7 +353,7 @@ async function buildDiscordHistory(channel, starterMessageId) {
             const res = await fetch(att.url);
             const buffer = Buffer.from(await res.arrayBuffer());
             mediaParts.push(mediaToContentPart(buffer, att.contentType));
-          } catch {}
+          } catch { }
           textContent = `${textContent} [${att.name}]`.trim();
         }
       } else if (isDoc && att.contentType === 'application/pdf') {
@@ -337,7 +377,7 @@ async function buildDiscordHistory(channel, starterMessageId) {
           const res = await fetch(att.url);
           const buffer = Buffer.from(await res.arrayBuffer());
           mediaParts.push(mediaToContentPart(buffer, att.contentType));
-        } catch {}
+        } catch { }
         textContent = `${textContent} [${att.name}]`.trim();
       } else {
         textContent = `${textContent} [${att.name}]`.trim();

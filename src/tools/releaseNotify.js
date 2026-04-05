@@ -14,7 +14,7 @@ function _load() {
     if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
       subscribedChats = new Map(Object.entries(raw));
     }
-  } catch {}
+  } catch { }
 }
 
 function _save() {

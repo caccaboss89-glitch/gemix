@@ -19,7 +19,7 @@ function _loadState() {
     if (!fs.existsSync(STATE_FILE)) return;
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
     if (raw.lastReleaseId) lastCheckedReleaseId = raw.lastReleaseId;
-  } catch {}
+  } catch { }
 }
 
 function _saveState() {

@@ -80,13 +80,26 @@ function convertMp3ToWhatsAppOpus(mp3Buffer) {
   });
 }
 
+const VOICE_GENERATION_TIMEOUT_MS = 30_000;
+
 /**
  * Generate voice audio using xAI TTS (primary) with Google Translate TTS fallback.
  * Supports vocal effect tags for dynamic voice modulation (xAI only, not Google Translate).
+ * Enforces a global timeout to prevent indefinite hangs on TTS or ffmpeg failures.
  * @param {string} text - Text to convert to speech (max 1000 characters)
  * @returns {Promise<Buffer>} OGG/Opus audio buffer (48kHz mono, iOS-optimized WhatsApp format)
  */
 async function generateVoice(text) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`Timeout generazione voce (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`)),
+      VOICE_GENERATION_TIMEOUT_MS,
+    )
+  );
+  return Promise.race([_generateVoice(text), timeout]);
+}
+
+async function _generateVoice(text) {
   // Try xAI TTS first
   if (XAI_API_KEY) {
     try {

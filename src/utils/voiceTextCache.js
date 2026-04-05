@@ -4,7 +4,7 @@ const { DATA_DIR } = require('../config/constants');
 
 const CACHE_FILE = path.join(DATA_DIR, 'voiceTextCache.json');
 const MAX_ENTRIES = 200;
-const MATCH_TOLERANCE_MS = 120_000;
+const MATCH_TOLERANCE_MS = 20_000;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 let entries = [];
@@ -21,7 +21,7 @@ function _load() {
 function _save() {
   try {
     fs.writeFileSync(CACHE_FILE, JSON.stringify(entries), 'utf-8');
-  } catch {}
+  } catch { }
 }
 
 function _cleanup() {

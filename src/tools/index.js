@@ -30,6 +30,9 @@ const log = createLogger('Tools');
 const voiceConsecutiveByChat = new Map();
 const VOICE_COUNT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+// Periodic auto-cleanup: removes stale entries even if no voice message is sent
+setInterval(_cleanupVoiceCounts, VOICE_COUNT_TTL_MS).unref();
+
 function _cleanupVoiceCounts() {
   const cutoff = Date.now() - VOICE_COUNT_TTL_MS;
   for (const [key, entry] of voiceConsecutiveByChat) {
@@ -45,6 +48,17 @@ function _getVoiceCount(chatKey) {
     return 0;
   }
   return entry.count;
+}
+
+/**
+ * Escape HTML special characters to prevent injection in email bodies.
+ */
+function _escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /**
@@ -167,7 +181,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
       case 'image_search': {
         const imageResult = await imageSearch(args.query, args.count);
-        
+
         // Always accumulate images - will be sent by send_whatsapp_message or send_email
         if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
           responseCtx.attachments.push(...imageResult.attachments);
@@ -332,7 +346,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           isGroup: userCtx.isGroup,
           groupId: userCtx.groupId,
         };
-        result = scheduleTasks(args.tasks, taskCtx);
+        result = await scheduleTasks(args.tasks, taskCtx);
         break;
       }
 
@@ -343,7 +357,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           result = '⚠️ includeGroupTasks non disponibile: solo in gruppo WhatsApp.';
           break;
         }
-        result = readTasks(userCtx.taskFileId, groupFileId, includeGroup);
+        result = await readTasks(userCtx.taskFileId, groupFileId, includeGroup);
         break;
       }
 
@@ -356,7 +370,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           result = '⚠️ fromGroup non disponibile: solo in gruppo WhatsApp. Operazione sui task personali.';
           break;
         }
-        result = removeTasks(args.taskIds, fileId);
+        result = await removeTasks(args.taskIds, fileId);
         break;
       }
 
@@ -386,10 +400,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           buffer: pdfBuffer,
           mimetype: 'application/pdf',
         };
-        
+
         // Always accumulate PDF - will be sent by send_whatsapp_message or send_email
         responseCtx.attachments.push(pdfAttachment);
-        
+
         result = `PDF "${args.title}" generato con successo. Verrà allegato al prossimo messaggio di consegna.`;
         break;
       }
@@ -409,7 +423,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           await sendEmailDirect(
             targetEmail.email,
             args.subject,
-            `<div style="font-family:sans-serif">${(args.body || '').replace(/\n/g, '<br>')}</div>`,
+            `<div style="font-family:sans-serif">${_escapeHtml(args.body || '').replace(/\n/g, '<br>')}</div>`,
             emailAttachments
           );
           deliveryCtx.contactedEmail.add(targetEmail.email);

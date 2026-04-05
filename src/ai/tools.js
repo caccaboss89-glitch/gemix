@@ -57,7 +57,7 @@ function _loadSendAboutMeState() {
         if (chatKey) sendAboutMeUsedByChat.add(chatKey);
       });
     }
-  } catch {}
+  } catch { }
 }
 
 function _saveSendAboutMeState() {
@@ -66,7 +66,7 @@ function _saveSendAboutMeState() {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     fs.writeFileSync(READ_ABOUT_ME_STATE_FILE, JSON.stringify([...sendAboutMeUsedByChat], null, 2), 'utf-8');
-  } catch {}
+  } catch { }
 }
 
 function _getChatKey(userCtx) {

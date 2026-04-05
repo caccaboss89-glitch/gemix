@@ -178,17 +178,17 @@ async function handleMessage(ctx) {
         }
         messages.push({ role: 'user', content: includeList });
       }
-      
+
       if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
         log.warn(`   ⚠️ Testo 'Chi sono' già preparato, interruzione ciclo`);
         break;
       }
-      
+
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.warn(`   ⚠️ Vocale già generato, interruzione ciclo`);
         break;
       }
-      
+
       const responseFormat = isDiscord ? buildDiscordResponseFormat(ctx.threadName || '') : null;
 
       const roundTools = tools;
@@ -205,8 +205,8 @@ async function handleMessage(ctx) {
 
         for (const tc of assistantMsg.tool_calls) {
           // Se un tool precedente ha impostato isAboutMeOnly o isVoiceOnly, interrompi
-          if ((responseCtx.isAboutMeOnly && responseCtx.aboutMeText) || 
-              (responseCtx.isVoiceOnly && responseCtx.voiceBuffer)) {
+          if ((responseCtx.isAboutMeOnly && responseCtx.aboutMeText) ||
+            (responseCtx.isVoiceOnly && responseCtx.voiceBuffer)) {
             log.warn(`   ⚠️ Ciclo tool interrotto: un tool ha già generato la risposta finale`);
             break;
           }
@@ -259,7 +259,7 @@ async function handleMessage(ctx) {
         log.info(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
         let discordTitle = '';
         if (isDiscord && text) {
-          try { discordTitle = JSON.parse(text).title || ''; } catch {}
+          try { discordTitle = JSON.parse(text).title || ''; } catch { }
         }
         return {
           text: null,
