@@ -141,7 +141,7 @@ function _resolveTargetEmail(args, userCtx) {
 /**
  * Execute a tool call and return the result.
  * Validates permissions, executes the tool, and collects responses/attachments.
- * @param {object} toolCall - The tool call from Gemini { id, function: { name, arguments } }
+ * @param {object} toolCall - The tool call from the AI model { id, function: { name, arguments } }
  * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, isGroup, groupId }
  * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
  * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set }

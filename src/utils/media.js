@@ -19,8 +19,8 @@ function isUnsupportedMedia(type) {
 }
 
 /**
- * Convert media to base64 content part for the AI API (aimlapi.com OpenAI-compatible format).
- * All media types use image_url with data URI — the MIME type tells Gemini the actual content type.
+ * Convert media to base64 content part for the AI API (OpenAI-compatible format).
+ * All media types use image_url with data URI — the MIME type tells the model the actual content type.
  * @param {Buffer} buffer
  * @param {string} mimetype - e.g. 'image/jpeg', 'audio/ogg', 'application/pdf'
  * @returns {object} Content part for the messages array

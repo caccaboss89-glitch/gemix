@@ -1,4 +1,4 @@
-const { callGemini, buildDiscordResponseFormat } = require('./ai/gemini');
+const { callAI, buildDiscordResponseFormat } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolInstructions } = require('./ai/tools');
 const { executeTool } = require('./tools');
@@ -27,9 +27,9 @@ function cloneHistoryStructure(history) {
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
- * Processes the message through Gemini AI with tool calls and multimodal content support.
+ * Routes requests to Gemini (audio) or Qwen (non-audio) based on message content.
  * @param {object} ctx - Normalized message context { platform, userId, userName, userIdentity, content, history, isGroup, groupId, ... }
- * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, discordTitle?, discordMessage? }
+ * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, discordMessage? }
  */
 async function handleMessage(ctx) {
   const responseCtx = {
@@ -153,6 +153,7 @@ async function handleMessage(ctx) {
     };
 
     let rounds = 0;
+    let lastModelUsed = null;
     const isDiscord = ctx.platform === PLATFORM_DISCORD;
 
     while (rounds < MAX_TOOL_ROUNDS) {
@@ -193,8 +194,10 @@ async function handleMessage(ctx) {
 
       const roundTools = tools;
 
-      log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata Gemini (round ${rounds}/${MAX_TOOL_ROUNDS})`);
-      const assistantMsg = await callGemini(messages, roundTools, responseFormat);
+      log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata AI (round ${rounds}/${MAX_TOOL_ROUNDS})`);
+      const { message: assistantMsg, provider, model } = await callAI(messages, roundTools, responseFormat);
+      lastModelUsed = model;
+      log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
         log.info(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
@@ -252,6 +255,7 @@ async function handleMessage(ctx) {
           isVoiceOnly: false,
           isAboutMeOnly: true,
           attachments: responseCtx.attachments,
+          modelUsed: lastModelUsed,
         };
       }
 
@@ -267,6 +271,7 @@ async function handleMessage(ctx) {
           isVoiceOnly: true,
           attachments: responseCtx.attachments,
           discordTitle,
+          modelUsed: lastModelUsed,
         };
       }
 
@@ -280,6 +285,7 @@ async function handleMessage(ctx) {
             attachments: responseCtx.attachments,
             discordTitle: parsed.title || '',
             discordMessage: parsed.message || '',
+            modelUsed: lastModelUsed,
           };
         } catch {
           // Fallback: treat as plain text
@@ -290,6 +296,7 @@ async function handleMessage(ctx) {
             attachments: responseCtx.attachments,
             discordTitle: '',
             discordMessage: text,
+            modelUsed: lastModelUsed,
           };
         }
       }
@@ -300,6 +307,7 @@ async function handleMessage(ctx) {
           voiceBuffer: responseCtx.voiceBuffer,
           isVoiceOnly: true,
           attachments: responseCtx.attachments,
+          modelUsed: lastModelUsed,
         };
       }
 
@@ -308,6 +316,7 @@ async function handleMessage(ctx) {
         voiceBuffer: null,
         isVoiceOnly: false,
         attachments: responseCtx.attachments,
+        modelUsed: lastModelUsed,
       };
     }
 
@@ -319,6 +328,7 @@ async function handleMessage(ctx) {
         isVoiceOnly: false,
         isAboutMeOnly: true,
         attachments: responseCtx.attachments,
+        modelUsed: lastModelUsed,
       };
     }
 
@@ -329,6 +339,7 @@ async function handleMessage(ctx) {
         voiceBuffer: responseCtx.voiceBuffer,
         isVoiceOnly: true,
         attachments: responseCtx.attachments,
+        modelUsed: lastModelUsed,
       };
     }
 
@@ -337,6 +348,7 @@ async function handleMessage(ctx) {
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],
+      modelUsed: lastModelUsed,
     };
 
   } catch (err) {
@@ -348,6 +360,7 @@ async function handleMessage(ctx) {
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],
+      modelUsed: null,
     };
   }
 }

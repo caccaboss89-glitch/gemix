@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { notifyAdmin } = require('../utils/adminNotifier');
 const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
-const { API_KEY } = require('../config/env');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
@@ -71,12 +70,13 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
 
 /**
  * Unified API client with retry and timeout logic.
- * @param {string} modelName - Model name for logging (e.g., 'Gemini')
+ * @param {string} modelName - Model name for logging (e.g., 'Gemini', 'Qwen')
  * @param {string} apiUrl - Full API endpoint URL
  * @param {object} body - Request body
+ * @param {string} apiKey - API key for authentication
  * @returns {Promise<Response>} The raw fetch Response
  */
-async function callApiWithRetry(modelName, apiUrl, body) {
+async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
     try {
       const controller = new AbortController();
@@ -88,7 +88,7 @@ async function callApiWithRetry(modelName, apiUrl, body) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.API_KEY || API_KEY}`,
+          'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -117,7 +117,7 @@ async function callApiWithRetry(modelName, apiUrl, body) {
       }
 
       log.error(`   ❌ API Error: ${errMsg}`);
-      await notifyAdmin(`AIMLAPI (${modelName})`, `Errore dopo ${attempt} tentativi: ${errMsg}`);
+      await notifyAdmin(`API (${modelName})`, `Errore dopo ${attempt} tentativi: ${errMsg}`);
       throw new Error(`${modelName} API non raggiungibile dopo ${attempt} tentativ${attempt > 1 ? 'i' : 'o'}: ${errMsg}`);
     }
   }
@@ -129,10 +129,11 @@ async function callApiWithRetry(modelName, apiUrl, body) {
  * @param {string} modelName - Display name for logging
  * @param {string} apiUrl - Full API endpoint URL
  * @param {object} body - Request body
+ * @param {string} apiKey - API key for authentication
  * @returns {Promise<object>} The assistant message object from the API response
  */
-async function callModel(modelName, apiUrl, body) {
-  const res = await callApiWithRetry(modelName, apiUrl, body);
+async function callModel(modelName, apiUrl, body, apiKey) {
+  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey);
   const data = await res.json();
 
   try {

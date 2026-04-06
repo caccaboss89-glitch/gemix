@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
 
-// Tool definitions for Gemini AI function calling (OpenAI-compatible format).
+// Tool definitions for AI function calling (OpenAI-compatible format).
 // Tool descriptions are kept minimal; detailed instructions are provided when a tool is actually invoked.
 
 const VOICE_EFFECTS_DOC = `

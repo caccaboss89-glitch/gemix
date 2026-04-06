@@ -5,7 +5,6 @@ const { getDedicatedClient } = require('./dedicated');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
-const { GEMINI_MODEL } = require('../../config/env');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 
@@ -184,7 +183,7 @@ async function onPersonalMessage(msg) {
 
     if (response.text) {
       response.text = removeFooter(response.text);
-      response.text = addFooter(response.text, getModelDisplayName(GEMINI_MODEL));
+      response.text = addFooter(response.text, getModelDisplayName(response.modelUsed));
     }
 
     try {
