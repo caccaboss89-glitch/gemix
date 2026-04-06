@@ -1,6 +1,6 @@
 {
   "name": "gemix",
-  "version": "1.5.6",
+  "version": "1.6.0",
   "description": "GemiX - AI Bot multipiattaforma WhatsApp & Discord",
   "main": "src/index.js",
   "scripts": {
