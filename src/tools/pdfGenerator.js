@@ -68,7 +68,10 @@ function generatePdf(title, content) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(20).font('Helvetica-Bold').text(title, { align: 'center' });
+    // Processa il titolo: rimuove .pdf e sostituisce underscore con spazi
+    const displayTitle = title.replace(/\.pdf$/i, '').replace(/_/g, ' ');
+
+    doc.fontSize(20).font('Helvetica-Bold').text(displayTitle, { align: 'center' });
     doc.moveDown(1);
 
     doc.fontSize(12).font('Helvetica');
