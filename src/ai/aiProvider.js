@@ -31,7 +31,9 @@ function hasAudioContent(messages) {
  * @returns {Promise<{message: object, provider: string, model: string}>} The assistant message with provider info
  */
 async function callAI(messages, tools = null, responseFormat = null) {
-  const useGemini = hasAudioContent(messages);
+  // Forza Gemini se: è presente audio nei messaggi OPPURE è richiesto structured output (Discord).
+  // Qwen non supporta response_format JSON schema.
+  const useGemini = hasAudioContent(messages) || responseFormat !== null;
   const model = useGemini ? GEMINI_MODEL : QWEN_MODEL;
   const baseUrl = useGemini ? API_BASE_URL : OPENROUTER_BASE_URL;
   const apiKey = useGemini ? API_KEY : OPENROUTER_API_KEY;
