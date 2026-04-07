@@ -9,30 +9,27 @@ const log = createLogger('RAG');
 
 const REGOLAMENTO_PATH = path.join(DATA_DIR, 'regolamento.txt');
 const RAG_INDEX_PATH = path.join(DATA_DIR, 'regolamento_rag.json');
+const MIN_TEXT_LENGTH = 50;
 
+/** Runtime RAG data: articles + embeddings arrays (parallel indices). */
 let ragData = null;
 
-/**
- * Parse regolamento.txt into articles.
- */
+// ────────────────────────────── Parsing ──────────────────────────────
+
 function parseArticles(content) {
   const articles = [];
   const lines = content.split('\n');
   let currentId = '';
   let currentTitle = '';
   let currentText = '';
-  let articlesFound = 0;
 
   for (const line of lines) {
-    const artMatch = line.match(/^ART\.\s*(\d+)\s*-\s*(.+)/);
-    if (artMatch) {
-      if (currentId) {
-        articles.push({ id: currentId, title: currentTitle, text: currentText.trim() });
-      }
-      currentId = `ART. ${artMatch[1]}`;
-      currentTitle = artMatch[2].trim();
+    const m = line.match(/^ART\.\s*(\d+)\s*-\s*(.+)/);
+    if (m) {
+      if (currentId) articles.push({ id: currentId, title: currentTitle, text: currentText.trim() });
+      currentId = `ART. ${m[1]}`;
+      currentTitle = m[2].trim();
       currentText = line + '\n';
-      articlesFound++;
     } else if (currentId) {
       currentText += line + '\n';
     } else if (line.trim()) {
@@ -41,59 +38,33 @@ function parseArticles(content) {
       currentText = line + '\n';
     }
   }
-  if (currentId) {
-    articles.push({ id: currentId, title: currentTitle, text: currentText.trim() });
-  }
+  if (currentId) articles.push({ id: currentId, title: currentTitle, text: currentText.trim() });
   return articles;
 }
 
-/**
- * Call the embedding API to generate vectors for an array of texts.
- * @param {string[]} texts
- * @returns {Promise<number[][]>} Array of embedding vectors
- */
-async function fetchEmbeddings(texts) {
-  // Validate and clean texts
-  const validTexts = texts
-    .map(t => (typeof t === 'string' ? t : String(t)).trim())
-    .filter(t => t.length > 0);
-  
-  if (validTexts.length === 0) {
-    throw new Error('fetchEmbeddings: all texts are empty after filtering');
-  }
-  
-  log.debug(`📝 Embedding API input: ${validTexts.length} texts (${validTexts.reduce((s, t) => s + t.length, 0)} total chars)`);
-
-  const res = await fetch(`${API_BASE_URL}/embeddings`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: validTexts.map(t => 
-        // Remove any null/undefined/invalid chars
-        t.replace(/\0/g, '').replace(/[\uFFFD]/g, '')
-      ),
-    }),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => '');
-    throw new Error(`Embedding API HTTP ${res.status}: ${errBody.substring(0, 300)}`);
-  }
-
-  const json = await res.json();
-  // Sort by index to guarantee order matches input
-  return json.data
-    .sort((a, b) => a.index - b.index)
-    .map(d => d.embedding);
+function hashText(text) {
+  return crypto.createHash('sha256').update(text).digest('hex');
 }
 
+// ────────────────────────────── Embedding API ──────────────────────────────
+
 /**
- * Cosine similarity between two embedding vectors.
+ * Fetch a single embedding vector from AIMLAPI (accepts only string input, not array).
  */
+async function fetchEmbedding(text) {
+  const res = await fetch(`${API_BASE_URL}/embeddings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Embedding API HTTP ${res.status}: ${body.substring(0, 300)}`);
+  }
+  const json = await res.json();
+  return json.data[0].embedding;
+}
+
 function cosineSimilarity(a, b) {
   let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
@@ -101,13 +72,34 @@ function cosineSimilarity(a, b) {
     normA += a[i] * a[i];
     normB += b[i] * b[i];
   }
-  if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  return (normA === 0 || normB === 0) ? 0 : dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// ────────────────────────────── Cache management ──────────────────────────────
+
 /**
- * Initialize RAG: parse regolamento, generate/load embeddings.
+ * Load existing cache from disk.
+ * Cache format: { embeddingsByHash: { [sha256]: number[] }, model: string }
  */
+function loadCache() {
+  if (!fs.existsSync(RAG_INDEX_PATH)) return {};
+  try {
+    const data = JSON.parse(fs.readFileSync(RAG_INDEX_PATH, 'utf-8'));
+    // Invalidate if embedding model changed
+    if (data.model !== EMBEDDING_MODEL) {
+      log.info('🔄 Modello embedding cambiato, cache invalidata');
+      return {};
+    }
+    return data.embeddingsByHash || {};
+  } catch { return {}; }
+}
+
+function saveCache(embeddingsByHash) {
+  fs.writeFileSync(RAG_INDEX_PATH, JSON.stringify({ model: EMBEDDING_MODEL, embeddingsByHash }), 'utf-8');
+}
+
+// ────────────────────────────── Init & Query ──────────────────────────────
+
 async function initRegolamentoRag() {
   try {
     if (!fs.existsSync(REGOLAMENTO_PATH)) {
@@ -116,65 +108,58 @@ async function initRegolamentoRag() {
     }
 
     const content = fs.readFileSync(REGOLAMENTO_PATH, 'utf-8');
-    const currentHash = crypto.createHash('sha256').update(content).digest('hex');
+    const articles = parseArticles(content).filter(a => a.text.trim().length >= MIN_TEXT_LENGTH);
 
-    let needsRebuild = true;
-    if (fs.existsSync(RAG_INDEX_PATH)) {
-      try {
-        const cached = JSON.parse(fs.readFileSync(RAG_INDEX_PATH, 'utf-8'));
-        if (cached.hash === currentHash && cached.articles && cached.embeddings) {
-          ragData = cached;
-          needsRebuild = false;
-          log.info(`✅ RAG caricato da cache (${cached.articles.length} articoli)`);
-        }
-      } catch { }
+    if (articles.length === 0) {
+      log.warn('⚠️ Nessun articolo valido nel regolamento');
+      return;
     }
 
-    if (needsRebuild) {
-      log.info('🔄 Rigenerazione embeddings regolamento...');
-      const articles = parseArticles(content);
-      log.info(`📄 Articoli parsati: ${articles.length}`);
-      
-      // Filter out articles with very short or empty texts (API requires minimum text length)
-      const validArticles = articles.filter(a => a.text.trim().length >= 50);
-      if (validArticles.length === 0) {
-        log.warn('⚠️ Nessun articolo valido trovato nel regolamento (tutti i testi sono troppo corti)');
-        return;
-      }
-      
-      log.info(`✅ ${articles.length - validArticles.length} articoli scartati (testo insufficiente)`);
-      const texts = validArticles.map((a, i) => {
-        const txt = a.text.trim();
-        log.debug(`  [${i}] ${a.id}: ${txt.length} chars`);
-        return txt;
-      });
-      log.info(`📝 Generando embeddings per ${texts.length} articoli...`);
-      const embeddings = await fetchEmbeddings(texts);
+    const cachedEmbeddings = loadCache();
+    const embeddingsByHash = {};
+    const embeddings = [];
+    let generated = 0;
 
-      ragData = { hash: currentHash, articles: validArticles, embeddings };
-      fs.writeFileSync(RAG_INDEX_PATH, JSON.stringify(ragData), 'utf-8');
-      log.info(`✅ RAG generato: ${validArticles.length} articoli con embeddings`);
+    for (const article of articles) {
+      const hash = hashText(article.text);
+
+      if (cachedEmbeddings[hash]) {
+        embeddingsByHash[hash] = cachedEmbeddings[hash];
+        embeddings.push(cachedEmbeddings[hash]);
+      } else {
+        const embedding = await fetchEmbedding(article.text);
+        embeddingsByHash[hash] = embedding;
+        embeddings.push(embedding);
+        generated++;
+
+        if (generated % 10 === 0) {
+          log.info(`  ⏳ ${generated} nuovi embeddings generati...`);
+        }
+      }
+    }
+
+    saveCache(embeddingsByHash);
+    ragData = { articles, embeddings };
+
+    if (generated > 0) {
+      log.info(`✅ RAG pronto: ${articles.length} articoli (${generated} nuovi, ${articles.length - generated} da cache)`);
+    } else {
+      log.info(`✅ RAG caricato da cache (${articles.length} articoli)`);
     }
   } catch (err) {
     log.error(`❌ Errore inizializzazione RAG: ${err.message}`);
   }
 }
 
-/**
- * Query the regolamento and return the most relevant articles.
- * @param {string} query - User's query text
- * @param {number} [topK=5] - Number of top articles to return
- * @returns {Promise<string>} Relevant articles text
- */
 async function queryRegolamento(query, topK = 5) {
-  if (!ragData || !ragData.articles) return '';
+  if (!ragData?.articles) return '';
 
-  if (!query || !query.trim()) {
+  if (!query?.trim()) {
     return ragData.articles.slice(0, 3).map(a => a.text).join('\n\n');
   }
 
   try {
-    const [queryEmbedding] = await fetchEmbeddings([query]);
+    const queryEmbedding = await fetchEmbedding(query);
 
     const scored = ragData.articles.map((article, i) => ({
       article,
@@ -184,11 +169,9 @@ async function queryRegolamento(query, topK = 5) {
     scored.sort((a, b) => b.score - a.score);
     const relevant = scored.slice(0, topK).filter(s => s.score > 0);
 
-    if (relevant.length === 0) {
-      return ragData.articles.slice(0, 3).map(a => a.text).join('\n\n');
-    }
-
-    return relevant.map(s => s.article.text).join('\n\n');
+    return relevant.length > 0
+      ? relevant.map(s => s.article.text).join('\n\n')
+      : ragData.articles.slice(0, 3).map(a => a.text).join('\n\n');
   } catch (err) {
     log.error(`❌ Errore query RAG: ${err.message}`);
     return ragData.articles.slice(0, 3).map(a => a.text).join('\n\n');
