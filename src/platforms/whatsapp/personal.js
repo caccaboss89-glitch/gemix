@@ -135,7 +135,7 @@ async function onPersonalMessage(msg) {
   let history = [];
   try {
     history = await Promise.race([
-      buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, null),
+      buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('History fetch timeout')), 15000)
       )
@@ -188,7 +188,7 @@ async function onPersonalMessage(msg) {
 
     try {
       log.info(`\n📤 Invio risposta...`);
-      await sendWhatsAppResponse(chat, msg, response);
+      await sendWhatsAppResponse(chat, response);
       log.info(`   ✅ Messaggio inviato`);
       try {
         if (typeof chat.sendState === 'function') {

@@ -8,6 +8,7 @@ const { createLogger } = require('./utils/logger');
 const { hasHistoryImages, hasHistoryDocs, hasHistoryVoices, limitHistoryMediaAttachments } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
+const { queryRegolamento } = require('./rag/regolamentoRag');
 
 const log = createLogger('Handler');
 
@@ -63,6 +64,14 @@ async function handleMessage(ctx) {
 
     ctx.userMemory = userMemory;
     ctx.groupMemory = groupMemory;
+
+    // RAG: inietta contesto regolamento per Discord
+    if (ctx.platform === PLATFORM_DISCORD) {
+      const queryText = typeof ctx.content === 'string'
+        ? ctx.content
+        : (Array.isArray(ctx.content) ? (ctx.content.find(p => p.type === 'text')?.text || '') : '');
+      ctx.ragContext = await queryRegolamento(queryText);
+    }
 
     const systemPrompt = buildSystemPrompt(ctx);
 

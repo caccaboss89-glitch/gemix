@@ -1,6 +1,5 @@
 const fsPromises = require('fs').promises;
 const fs = require('fs');
-const path = require('path');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
 const { generatePdf } = require('../tools/pdfGenerator');
 const { getRomeISO } = require('../utils/time');

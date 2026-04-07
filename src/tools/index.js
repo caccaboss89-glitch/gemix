@@ -8,6 +8,7 @@ const { removeTasks } = require('./taskRemover');
 const { readServerRules } = require('./serverRules');
 const { readAboutMe } = require('./aboutMe');
 const { generatePdf } = require('./pdfGenerator');
+const { generateFormalRequestPdf } = require('./formalRequestPdf');
 const { sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppDirect } = require('./whatsappSender');
 const { findMemberByName } = require('../config/members');
@@ -405,6 +406,24 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         responseCtx.attachments.push(pdfAttachment);
 
         result = `PDF "${args.title}" generato con successo. Verrà allegato al prossimo messaggio di consegna.`;
+        break;
+      }
+
+      case 'generate_formal_request_pdf': {
+        const formalPdfBuffer = await generateFormalRequestPdf({
+          fullName: args.fullName,
+          title: args.title,
+          motivation: args.motivation,
+          requesterSignature: args.requesterSignature,
+          legalSignature: args.legalSignature,
+        });
+        const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
+        responseCtx.attachments.push({
+          name: formalFileName,
+          buffer: formalPdfBuffer,
+          mimetype: 'application/pdf',
+        });
+        result = `PDF richiesta formale "${args.title}" generato con successo.`;
         break;
       }
 

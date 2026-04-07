@@ -1,6 +1,6 @@
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
-const { XAI_API_KEY } = require('../config/env');
+const { XAI_API_KEY, XAI_TTS_VOICE } = require('../config/env');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin } = require('../utils/adminNotifier');
@@ -128,7 +128,7 @@ async function xaiTTS(text) {
     },
     body: JSON.stringify({
       text,
-      voice_id: 'eve',
+      voice_id: XAI_TTS_VOICE || 'eve',
       language: 'it',
       output_format: { codec: 'mp3', sample_rate: 44100, bit_rate: 128000 },
     }),

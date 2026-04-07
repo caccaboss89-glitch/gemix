@@ -20,7 +20,10 @@ function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
-  let prompt = `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano.\n\n`;
+  const isDiscord = ctx.platform === PLATFORM_DISCORD;
+  let prompt = isDiscord
+    ? `Sei GemiX — Divisione Legale, assistente AI specializzato in diritto e regolamenti. Rispondi in italiano.\n\n`
+    : `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano.\n\n`;
   prompt += `Ora (Torino): ${now}\n\n`;
 
   if (ctx.platform === PLATFORM_DISCORD) {
@@ -41,7 +44,9 @@ function buildSystemPrompt(ctx) {
     prompt += `Utente: ${ui.member?.name || ctx.userName || 'sconosciuto'} - ${ui.isActiveMember ? 'attivo' : 'non attivo'}\n`;
   }
 
-  prompt += `Limiti media: ultimo vocale ≤2 min; vocali lunghi segnalati; trascrizioni in cronologia (etichettati con "TRASCRIZIONE:").\n`;
+  if (!isDiscord) {
+    prompt += `Limiti media: ultimo vocale ≤2 min; vocali lunghi segnalati; trascrizioni in cronologia (etichettati con "TRASCRIZIONE:").\n`;
+  }
 
   prompt += `Tool: Puoi usare i tool disponibili, fallo solo prima di fornire la risposta finale.`;
   if (!isActiveMember) {
@@ -50,6 +55,9 @@ function buildSystemPrompt(ctx) {
   prompt += `\n`;
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
     prompt += `- Preferenze: risposte vocali se messaggio breve, preferisci risposte testuali se messaggio medio/lungo, tecnico o include dati. Equilibra l'uso di queste 2 forme di risposte in base alla cronologia.\n`;
+    if (isActiveMember) {
+      prompt += `- Richieste formali: Puoi leggere il regolamento e generare PDF generici, ma per richieste formali serie ai sensi dell'Art. 6 dello Statuto, consiglia l'utente di andare su Discord dove GemiX — Divisione Legale può generare documenti nel formato standardizzato previsto.\n`;
+    }
   }
 
   if (ctx.userMemory) {
@@ -94,8 +102,16 @@ function buildPersonalWaInstructions(ctx) {
  * @returns {string} Discord platform instructions with structured output format
  */
 function buildDiscordInstructions(ctx) {
-  let s = `### Piattaforma: Discord\n`;
-  s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n`;
+  let s = `### Piattaforma: Discord - Divisione Legale\n`;
+  s += `Assistente specializzato in questioni legali e regolamentari del server Discord.\n`;
+  s += `Il tuo ruolo principale è assistere i membri con domande sul regolamento (Statuto Albertino), generare richieste formali in PDF ai sensi dell'Art. 6 e fornire consulenza sulle procedure del server.\n`;
+  s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n\n`;
+
+  s += `Limitazioni Discord: Su questa piattaforma NON puoi fare: vocali, promemoria/task programmati, statistiche musicali, presentazione "Chi sono", notifiche release, PDF generici. Se un utente chiede queste funzionalità, suggerisci di usare GemiX su WhatsApp dove sono disponibili tutte le funzionalità.\n\n`;
+
+  if (ctx.ragContext) {
+    s += `### Contesto Regolamento (Statuto Albertino)\nI seguenti articoli sono rilevanti per questa conversazione:\n${ctx.ragContext}\n\n`;
+  }
 
   if (ctx.availableEmojis) {
     s += `Emoji server: ${ctx.availableEmojis}\n\n`;

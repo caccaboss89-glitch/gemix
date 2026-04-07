@@ -13,6 +13,7 @@ const { initPersonalWhatsApp } = require('./platforms/whatsapp/personal');
 const { initDiscord } = require('./platforms/discord/client');
 const { startScheduler, setSchedulerWaClient } = require('./scheduler/engine');
 const { setAdminNotifierClient } = require('./utils/adminNotifier');
+const { initRegolamentoRag } = require('./rag/regolamentoRag');
 
 log.info('🤖 GemiX — Avvio in corso...\n');
 
@@ -25,7 +26,9 @@ dedicatedWa.on('ready', () => {
 
 initPersonalWhatsApp();
 
-initDiscord();
+initRegolamentoRag().then(() => {
+  initDiscord();
+});
 
 startScheduler();
 

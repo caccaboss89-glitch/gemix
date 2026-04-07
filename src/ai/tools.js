@@ -35,6 +35,7 @@ const TOOL_INSTRUCTIONS = {
   remove_my_tasks: CALL_ONLY,
   read_server_rules: CALL_ONLY,
   generate_pdf: `${CALL_ONLY} Genera PDF che verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
+  generate_formal_request_pdf: `${CALL_ONLY} Genera PDF per richiesta formale (Art. 6 Statuto). Le sezioni sono predefinite e standardizzate. Nella motivazione NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente dal titolo.`,
   send_email: CALL_ONLY,
   send_whatsapp_message: CALL_ONLY,
   read_music_stats: CALL_ONLY,
@@ -211,6 +212,19 @@ const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
     },
   },
   required: ['enabled'],
+});
+
+const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
+  name: 'generate_formal_request_pdf',
+  description: 'Genera PDF per richiesta formale (Art. 6 Statuto Albertino).',
+  properties: {
+    fullName: { type: 'string', description: 'Nome e Cognome del richiedente' },
+    title: { type: 'string', description: 'Titolo della Richiesta' },
+    motivation: { type: 'string', description: 'Motivazione dettagliata e argomentata' },
+    requesterSignature: { type: 'string', description: 'Firma del richiedente' },
+    legalSignature: { type: 'string', description: 'Firma/visto del legale' },
+  },
+  required: ['fullName', 'title', 'motivation', 'requesterSignature'],
 });
 
 // ── Dynamic tool builders (schema varies by grade/platform) ──
@@ -472,38 +486,43 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   const tools = [];
 
-  // Tutti gli utenti, tutte le piattaforme
+  // ── Tutti gli utenti, tutte le piattaforme ──
   tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH);
   if (userCtx.hasHistoryImages) tools.push(TOOL_INCLUDE_HISTORY_IMAGES);
   if (userCtx.hasHistoryDocs) tools.push(TOOL_INCLUDE_HISTORY_DOCS);
   if (userCtx.hasHistoryVoices) tools.push(TOOL_INCLUDE_HISTORY_VOICES);
-  if (!_isSendAboutMeUsed(chatKey)) tools.push(TOOL_SEND_ABOUT_ME);
 
-  // Vocale: solo WhatsApp, schema varia per grado
+  // ── Solo WhatsApp: vocale, about me, task, release notify ──
   if (!isDiscord) {
+    if (!_isSendAboutMeUsed(chatKey)) tools.push(TOOL_SEND_ABOUT_ME);
+
     tools.push(buildVoiceTool({
       includeRecipientName: isAdmin || (isActiveMember && isWhatsApp),
       includeRecipientPhone: isAdmin,
     }));
-  }
 
-  // Task: disponibili su WhatsApp tutti gli utenti, su Discord solo attivi
-  // (Discord non-attivi non hanno WA associato, non possono usare i task)
-  if (!isDiscord || isActiveMember) {
     tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
     tools.push(buildReadMyTasksTool(isWhatsAppGroup));
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
-  }
 
-  // Memoria personalizzata (backend distingue privata/gruppo in base al contesto)
-  if (!isDiscord || isActiveMember) {
-    tools.push(TOOL_UPDATE_MEMORY);
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
 
-  // Solo membri attivi / admin
+  // ── Discord: richiesta formale PDF (tutti i membri) ──
+  if (isDiscord) {
+    tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
+  }
+
+  // ── Memoria personalizzata: WhatsApp tutti, Discord solo attivi ──
+  if (!isDiscord || isActiveMember) {
+    tools.push(TOOL_UPDATE_MEMORY);
+  }
+
+  // ── Solo membri attivi ──
   if (isActiveMember) {
-    tools.push(TOOL_READ_SERVER_RULES, TOOL_GENERATE_PDF, TOOL_READ_MUSIC_STATS);
+    if (!isDiscord) {
+      tools.push(TOOL_READ_SERVER_RULES, TOOL_GENERATE_PDF, TOOL_READ_MUSIC_STATS);
+    }
     tools.push(buildEmailTool(isAdmin));
     tools.push(buildWhatsAppTool(isAdmin));
   }

@@ -158,7 +158,7 @@ async function onDedicatedMessage(msg) {
     }
   }
 
-  const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, client.info.wid._serialized);
+  const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED);
 
   const contentParts = await buildIncomingContentParts(msg, chat.id._serialized);
 
@@ -201,7 +201,7 @@ async function onDedicatedMessage(msg) {
 
     try {
       log.info(`\n📤 Invio risposta...`);
-      await sendWhatsAppResponse(chat, msg, response);
+      await sendWhatsAppResponse(chat, response);
       log.info(`   ✅ Messaggio inviato`);
       try {
         if (typeof chat.sendState === 'function') {

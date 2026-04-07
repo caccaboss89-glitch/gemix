@@ -12,10 +12,9 @@ const { retrieveVoiceText } = require('../../utils/voiceTextCache');
  * Includes message context, media handling, and footer cleanup for GemiX messages.
  * @param {object} chat - whatsapp-web.js Chat object
  * @param {string} platform - Platform identifier ('whatsapp_dedicated' | 'whatsapp_personal')
- * @param {string|null} botJid - The bot's own JID for identifying GemiX messages to skip footers
  * @returns {Promise<Array>} Array of history messages with role ('user'|'assistant') and content
  */
-async function buildWhatsAppHistory(chat, platform, botJid) {
+async function buildWhatsAppHistory(chat, platform) {
   const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
   const messages = rawMessages.slice(-MAX_HISTORY);
 
@@ -259,11 +258,10 @@ async function extractQuotedMessageContent(msg, chatId) {
  * Send response back to WhatsApp chat.
  * Handles text messages, voice messages, and file attachments.
  * @param {object} chat - The whatsapp-web.js Chat object
- * @param {object} msg - The original whatsapp-web.js message object
  * @param {object} responseData - Response data { text, voiceBuffer, isVoiceOnly, attachments }
  * @returns {Promise<void>}
  */
-async function sendWhatsAppResponse(chat, msg, responseData) {
+async function sendWhatsAppResponse(chat, responseData) {
   const hasText = typeof responseData.text === 'string' && responseData.text.trim().length > 0;
   const hasVoice = responseData.isVoiceOnly && responseData.voiceBuffer;
   const hasAttachments = Array.isArray(responseData.attachments) && responseData.attachments.length > 0;
