@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { OpenAI } = require('openai');
 const { DATA_DIR } = require('../config/constants');
 const { API_KEY, API_BASE_URL, EMBEDDING_MODEL } = require('../config/env');
 const { createLogger } = require('../utils/logger');
@@ -12,12 +11,6 @@ const REGOLAMENTO_PATH = path.join(DATA_DIR, 'regolamento.txt');
 const RAG_INDEX_PATH = path.join(DATA_DIR, 'regolamento_rag.json');
 
 let ragData = null;
-
-// Initialize OpenAI client for embeddings
-const openai = new OpenAI({
-  apiKey: API_KEY,
-  baseURL: API_BASE_URL,
-});
 
 /**
  * Parse regolamento.txt into articles.
@@ -56,31 +49,46 @@ function parseArticles(content) {
 
 /**
  * Call the embedding API to generate vectors for an array of texts.
- * Uses OpenAI official client for proper API compatibility.
  * @param {string[]} texts
  * @returns {Promise<number[][]>} Array of embedding vectors
  */
 async function fetchEmbeddings(texts) {
-  if (!texts || texts.length === 0) {
-    throw new Error('fetchEmbeddings: texts array is empty');
-  }
-
-  log.debug(`Requesting embeddings for ${texts.length} texts...`);
+  // Validate and clean texts
+  const validTexts = texts
+    .map(t => (typeof t === 'string' ? t : String(t)).trim())
+    .filter(t => t.length > 0);
   
-  try {
-    const response = await openai.embeddings.create({
-      input: texts,
-      model: EMBEDDING_MODEL,
-    });
-
-    // Sort by index to guarantee order matches input
-    return response.data
-      .sort((a, b) => a.index - b.index)
-      .map(d => d.embedding);
-  } catch (err) {
-    log.error(`Embedding API error: ${err.message}`);
-    throw err;
+  if (validTexts.length === 0) {
+    throw new Error('fetchEmbeddings: all texts are empty after filtering');
   }
+  
+  log.debug(`📝 Embedding API input: ${validTexts.length} texts (${validTexts.reduce((s, t) => s + t.length, 0)} total chars)`);
+
+  const res = await fetch(`${API_BASE_URL}/embeddings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: EMBEDDING_MODEL,
+      input: validTexts.map(t => 
+        // Remove any null/undefined/invalid chars
+        t.replace(/\0/g, '').replace(/[\uFFFD]/g, '')
+      ),
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`Embedding API HTTP ${res.status}: ${errBody.substring(0, 300)}`);
+  }
+
+  const json = await res.json();
+  // Sort by index to guarantee order matches input
+  return json.data
+    .sort((a, b) => a.index - b.index)
+    .map(d => d.embedding);
 }
 
 /**
@@ -128,26 +136,20 @@ async function initRegolamentoRag() {
       log.info(`📄 Articoli parsati: ${articles.length}`);
       
       // Filter out articles with very short or empty texts (API requires minimum text length)
-      const validArticles = articles.filter(a => {
-        const text = a.text.trim();
-        return text.length >= 50;
-      });
-      
+      const validArticles = articles.filter(a => a.text.trim().length >= 50);
       if (validArticles.length === 0) {
         log.warn('⚠️ Nessun articolo valido trovato nel regolamento (tutti i testi sono troppo corti)');
         return;
       }
       
-      const filtered = articles.length - validArticles.length;
-      if (filtered > 0) {
-        log.info(`✅ ${filtered} articoli scartati (testo insufficiente)`);
-      }
-      
-      const texts = validArticles.map(a => a.text);
-      log.info(`📝 Generando embeddings per ${texts.length} articoli (${texts.reduce((s, t) => s + t.length, 0)} bytes totali)...`);
-      
+      log.info(`✅ ${articles.length - validArticles.length} articoli scartati (testo insufficiente)`);
+      const texts = validArticles.map((a, i) => {
+        const txt = a.text.trim();
+        log.debug(`  [${i}] ${a.id}: ${txt.length} chars`);
+        return txt;
+      });
+      log.info(`📝 Generando embeddings per ${texts.length} articoli...`);
       const embeddings = await fetchEmbeddings(texts);
-      log.info(`✅ ${embeddings.length} embeddings ricevuti`);
 
       ragData = { hash: currentHash, articles: validArticles, embeddings };
       fs.writeFileSync(RAG_INDEX_PATH, JSON.stringify(ragData), 'utf-8');
