@@ -77,6 +77,9 @@ async function fetchImageAsAttachment(url, query, index) {
  * @returns {Promise<object>} Result object { text, attachments }
  */
 async function imageSearch(query, requestedCount = 1) {
+  const { createLogger } = require('../utils/logger');
+  const log = createLogger('ImageSearch');
+  
   const q = (query || '').trim();
   if (!q) {
     return {
@@ -96,6 +99,8 @@ async function imageSearch(query, requestedCount = 1) {
   });
 
   const url = `${SEARXNG_URL}/search?${params}`;
+  
+  log.debug(`🖼️ Ricerca immagini SearXNG: "${q}" (count=${count})`);
 
   const res = await fetchExternal(url, {}, 'SearXNG (Ricerca Immagini Locale)');
   if (!res.ok) {
@@ -104,6 +109,9 @@ async function imageSearch(query, requestedCount = 1) {
 
   const data = await res.json();
   const imageResults = Array.isArray(data.results) ? data.results : [];
+  
+  log.debug(`   Risultati trovati: ${imageResults.length}`);
+  
   if (imageResults.length === 0) {
     return {
       text: `Nessuna immagine trovata per "${q}".`,
@@ -117,29 +125,39 @@ async function imageSearch(query, requestedCount = 1) {
 
   for (let i = 0; i < picked.length && attachments.length < count; i++) {
     const item = picked[i];
-    // SearXNG restituisce l'immagine in 'img_src' (url diretto) o 'thumbnail'
-    const imgUrl = item.img_src || item.thumbnail || item.url;
-    if (!imgUrl) continue;
+    // SearXNG per le immagini usa 'url' come link alla pagina e potrebbe non avere img_src
+    // Prova: 'img_src', 'thumbnail', 'image_url', oppure estrai da 'url'
+    let imgUrl = item.img_src || item.thumbnail || item.image_url;
+    
+    if (!imgUrl) {
+      log.debug(`   ⚠️ Item ${i} non ha URL immagine diretto, skipped`);
+      continue;
+    }
 
     try {
+      log.debug(`   Download immagine ${attachments.length + 1}: ${imgUrl.substring(0, 80)}...`);
       const att = await fetchImageAsAttachment(imgUrl, q, attachments.length);
       attachments.push(att);
       sources.push({
         title: item.title || `Immagine ${attachments.length}`,
         source: item.url || imgUrl,
       });
-    } catch {
-      // Skip broken/hotlink-protected images and continue.
+      log.debug(`   ✅ Immagine allegata: ${att.name}`);
+    } catch (err) {
+      log.debug(`   ❌ Download fallito (${err.message}), provo prossima...`);
     }
   }
 
   if (attachments.length === 0) {
+    log.warn(`   ⚠️ Nessuna immagine scaricata per "${q}"`);
     return {
       text: `Ho trovato risultati immagini per "${q}", ma non sono riuscito a scaricare file validi da allegare.`,
       attachments: [],
     };
   }
 
+  log.info(`   ✅ ${attachments.length} immagine/i scaricate`);
+  
   const lines = [
     `Ho trovato ${attachments.length} immagine/i per "${q}" e le invio in allegato.`,
     '',
