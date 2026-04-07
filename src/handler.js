@@ -247,6 +247,11 @@ async function handleMessage(ctx) {
       let text = assistantMsg.content || '';
       log.info(`✅ [${ctx.platform.toUpperCase()}] Risposta generata (${text.length} caratteri)`);
 
+      if (!text.trim() && !responseCtx.isAboutMeOnly && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
+        log.warn('   ⚠️ Risposta AI vuota, invio fallback');
+        text = 'Mi dispiace, non sono riuscito a generare una risposta valida. Riprova tra poco.';
+      }
+
       if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
         log.info(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
         return {

@@ -264,17 +264,24 @@ async function extractQuotedMessageContent(msg, chatId) {
  * @returns {Promise<void>}
  */
 async function sendWhatsAppResponse(chat, msg, responseData) {
-  if (responseData.isVoiceOnly && responseData.voiceBuffer) {
+  const hasText = typeof responseData.text === 'string' && responseData.text.trim().length > 0;
+  const hasVoice = responseData.isVoiceOnly && responseData.voiceBuffer;
+  const hasAttachments = Array.isArray(responseData.attachments) && responseData.attachments.length > 0;
+  if (!hasText && !hasVoice && !hasAttachments) {
+    throw new Error('Risposta WhatsApp vuota: nessun testo, voce o allegato da inviare');
+  }
+
+  if (hasVoice) {
     const media = new MessageMedia('audio/ogg', responseData.voiceBuffer.toString('base64'), 'voice.ogg');
     await chat.sendMessage(media, { sendAudioAsVoice: true });
     // Continue to send attachments below (don't return early)
   }
 
-  if (responseData.text) {
+  if (hasText) {
     await chat.sendMessage(responseData.text);
   }
 
-  if (responseData.attachments && responseData.attachments.length > 0) {
+  if (hasAttachments) {
     for (const att of responseData.attachments) {
       const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
       await chat.sendMessage(media);
