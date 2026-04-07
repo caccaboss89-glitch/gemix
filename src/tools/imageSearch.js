@@ -110,16 +110,6 @@ async function imageSearch(query, requestedCount = 1) {
   const data = await res.json();
   const imageResults = Array.isArray(data.results) ? data.results : [];
   
-  log.info(`   Risultati trovati: ${imageResults.length}`);
-  if (imageResults.length > 0) {
-    const sample = imageResults[0];
-    log.info(`   Campi primo risultato: ${Object.keys(sample).join(', ')}`);
-    log.info(`   img_src: ${sample.img_src || 'N/A'}`);
-    log.info(`   thumbnail_src: ${sample.thumbnail_src || 'N/A'}`);
-    log.info(`   thumbnail: ${sample.thumbnail || 'N/A'}`);
-    log.info(`   url: ${sample.url || 'N/A'}`);
-  }
-  
   if (imageResults.length === 0) {
     return {
       text: `Nessuna immagine trovata per "${q}".`,
@@ -136,22 +126,17 @@ async function imageSearch(query, requestedCount = 1) {
     // SearXNG image results: try all known field names
     let imgUrl = item.img_src || item.thumbnail_src || item.thumbnail || item.image_url;
     
-    if (!imgUrl) {
-      log.info(`   ⚠️ Item ${i} non ha URL immagine diretto, skipped (keys: ${Object.keys(item).join(', ')})`);
-      continue;
-    }
+    if (!imgUrl) continue;
 
     try {
-      log.info(`   Download immagine ${attachments.length + 1}: ${imgUrl.substring(0, 100)}...`);
       const att = await fetchImageAsAttachment(imgUrl, q, attachments.length);
       attachments.push(att);
       sources.push({
         title: item.title || `Immagine ${attachments.length}`,
         source: item.url || imgUrl,
       });
-      log.info(`   ✅ Immagine allegata: ${att.name}`);
     } catch (err) {
-      log.info(`   ❌ Download fallito (${err.message}), provo prossima...`);
+      log.warn(`   ❌ Download fallito (${err.message}), provo prossima...`);
     }
   }
 
