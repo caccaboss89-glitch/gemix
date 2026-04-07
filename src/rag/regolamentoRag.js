@@ -21,6 +21,7 @@ function parseArticles(content) {
   let currentId = '';
   let currentTitle = '';
   let currentText = '';
+  let articlesFound = 0;
 
   for (const line of lines) {
     const artMatch = line.match(/^ART\.\s*(\d+)\s*-\s*(.+)/);
@@ -31,6 +32,7 @@ function parseArticles(content) {
       currentId = `ART. ${artMatch[1]}`;
       currentTitle = artMatch[2].trim();
       currentText = line + '\n';
+      articlesFound++;
     } else if (currentId) {
       currentText += line + '\n';
     } else if (line.trim()) {
@@ -117,12 +119,23 @@ async function initRegolamentoRag() {
     if (needsRebuild) {
       log.info('🔄 Rigenerazione embeddings regolamento...');
       const articles = parseArticles(content);
-      const texts = articles.map(a => a.text);
+      log.info(`📄 Articoli parsati: ${articles.length}`);
+      
+      // Filter out articles with very short or empty texts (API requires minimum text length)
+      const validArticles = articles.filter(a => a.text.trim().length >= 50);
+      if (validArticles.length === 0) {
+        log.warn('⚠️ Nessun articolo valido trovato nel regolamento (tutti i testi sono troppo corti)');
+        return;
+      }
+      
+      log.info(`✅ ${articles.length - validArticles.length} articoli scartati (testo insufficiente)`);
+      const texts = validArticles.map(a => a.text);
+      log.info(`📝 Generando embeddings per ${texts.length} articoli...`);
       const embeddings = await fetchEmbeddings(texts);
 
-      ragData = { hash: currentHash, articles, embeddings };
+      ragData = { hash: currentHash, articles: validArticles, embeddings };
       fs.writeFileSync(RAG_INDEX_PATH, JSON.stringify(ragData), 'utf-8');
-      log.info(`✅ RAG generato: ${articles.length} articoli con embeddings`);
+      log.info(`✅ RAG generato: ${validArticles.length} articoli con embeddings`);
     }
   } catch (err) {
     log.error(`❌ Errore inizializzazione RAG: ${err.message}`);
