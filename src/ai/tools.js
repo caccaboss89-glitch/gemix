@@ -165,7 +165,7 @@ const TOOL_SEND_ABOUT_ME = makeTool({
 
 const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
-  description: 'Leggi il regolamento del server Discord.',
+  description: 'Leggi il regolamento del server Discord (aka Statuto Albertino).',
   properties: {},
 });
 
