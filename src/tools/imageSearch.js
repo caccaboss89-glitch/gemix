@@ -95,12 +95,12 @@ async function imageSearch(query, requestedCount = 1) {
     format: 'json',
     language: 'it',
     pageno: 1,
-    category: 'images',
+    categories: 'images',
   });
 
   const url = `${SEARXNG_URL}/search?${params}`;
   
-  log.debug(`🖼️ Ricerca immagini SearXNG: "${q}" (count=${count})`);
+  log.info(`🖼️ Ricerca immagini SearXNG: "${q}" (count=${count})`);
 
   const res = await fetchExternal(url, {}, 'SearXNG (Ricerca Immagini Locale)');
   if (!res.ok) {
@@ -110,7 +110,15 @@ async function imageSearch(query, requestedCount = 1) {
   const data = await res.json();
   const imageResults = Array.isArray(data.results) ? data.results : [];
   
-  log.debug(`   Risultati trovati: ${imageResults.length}`);
+  log.info(`   Risultati trovati: ${imageResults.length}`);
+  if (imageResults.length > 0) {
+    const sample = imageResults[0];
+    log.info(`   Campi primo risultato: ${Object.keys(sample).join(', ')}`);
+    log.info(`   img_src: ${sample.img_src || 'N/A'}`);
+    log.info(`   thumbnail_src: ${sample.thumbnail_src || 'N/A'}`);
+    log.info(`   thumbnail: ${sample.thumbnail || 'N/A'}`);
+    log.info(`   url: ${sample.url || 'N/A'}`);
+  }
   
   if (imageResults.length === 0) {
     return {
@@ -119,32 +127,31 @@ async function imageSearch(query, requestedCount = 1) {
     };
   }
 
-  const picked = imageResults.slice(0, Math.max(count * 2, 6));
+  const picked = imageResults.slice(0, Math.max(count * 3, 10));
   const attachments = [];
   const sources = [];
 
   for (let i = 0; i < picked.length && attachments.length < count; i++) {
     const item = picked[i];
-    // SearXNG per le immagini usa 'url' come link alla pagina e potrebbe non avere img_src
-    // Prova: 'img_src', 'thumbnail', 'image_url', oppure estrai da 'url'
-    let imgUrl = item.img_src || item.thumbnail || item.image_url;
+    // SearXNG image results: try all known field names
+    let imgUrl = item.img_src || item.thumbnail_src || item.thumbnail || item.image_url;
     
     if (!imgUrl) {
-      log.debug(`   ⚠️ Item ${i} non ha URL immagine diretto, skipped`);
+      log.info(`   ⚠️ Item ${i} non ha URL immagine diretto, skipped (keys: ${Object.keys(item).join(', ')})`);
       continue;
     }
 
     try {
-      log.debug(`   Download immagine ${attachments.length + 1}: ${imgUrl.substring(0, 80)}...`);
+      log.info(`   Download immagine ${attachments.length + 1}: ${imgUrl.substring(0, 100)}...`);
       const att = await fetchImageAsAttachment(imgUrl, q, attachments.length);
       attachments.push(att);
       sources.push({
         title: item.title || `Immagine ${attachments.length}`,
         source: item.url || imgUrl,
       });
-      log.debug(`   ✅ Immagine allegata: ${att.name}`);
+      log.info(`   ✅ Immagine allegata: ${att.name}`);
     } catch (err) {
-      log.debug(`   ❌ Download fallito (${err.message}), provo prossima...`);
+      log.info(`   ❌ Download fallito (${err.message}), provo prossima...`);
     }
   }
 
