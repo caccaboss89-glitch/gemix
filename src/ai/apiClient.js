@@ -106,8 +106,9 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
       return res;
     } catch (err) {
       const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
-      const isRetryable = isTimeout || (err.message && /^HTTP (429|500|502|503|504)/.test(err.message));
-      const errMsg = err.name === 'AbortError' ? 'Timeout (60s)' : err.message;
+      const isNetworkError = err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message);
+      const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (429|500|502|503|504)/.test(err.message));
+      const errMsg = err.name === 'AbortError' ? `Timeout (${API_TIMEOUT_MS / 1000}s)` : err.message;
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
         const delay = attempt * 3000;
@@ -134,7 +135,15 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
  */
 async function callModel(modelName, apiUrl, body, apiKey) {
   const res = await callApiWithRetry(modelName, apiUrl, body, apiKey);
-  const data = await res.json();
+  
+  let data;
+  try {
+    data = await res.json();
+  } catch (parseErr) {
+    log.error(`   ⚠️ Errore parsing JSON da ${modelName}:`);
+    log.error(`      ${parseErr.message}`);
+    throw new Error(`${modelName} API: risposta non valida (JSON parsing failed)`);
+  }
 
   try {
     ensureLogDir();
@@ -152,7 +161,16 @@ async function callModel(modelName, apiUrl, body, apiKey) {
   }
 
   if (!data.choices || !data.choices[0]) {
-    throw new Error(`${modelName} API: nessuna risposta ricevuta`);
+    log.error(`   ⚠️ Risposta ${modelName} malformata:`);
+    log.error(`      choices: ${JSON.stringify(data.choices)}`);
+    log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
+    
+    // Se è una risposta d'errore di Qwen, includi i dettagli
+    if (data.error) {
+      throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
+    }
+    
+    throw new Error(`${modelName} API: nessuna risposta ricevuta (risposta vuota o malformata)`);
   }
   return data.choices[0].message;
 }
