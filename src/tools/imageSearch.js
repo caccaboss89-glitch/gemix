@@ -1,4 +1,4 @@
-const { SERPAPI_KEY } = require('../config/env');
+const { SEARXNG_URL } = require('../config/env');
 const { MAX_IMAGES, MAX_IMAGE_BYTES } = require('../config/constants');
 const { fetchExternal, fetchWithTimeout } = require('../utils/fetch');
 const { sanitizeFilename } = require('../utils/text');
@@ -71,7 +71,7 @@ async function fetchImageAsAttachment(url, query, index) {
 }
 
 /**
- * Search for images using SerpAPI and download as attachments.
+ * Search for images using SearXNG (self-hosted, free) and download as attachments.
  * @param {string} query - Search query for images
  * @param {number} [requestedCount=1] - Number of images to fetch (1-4)
  * @returns {Promise<object>} Result object { text, attachments }
@@ -88,20 +88,22 @@ async function imageSearch(query, requestedCount = 1) {
   const count = Math.max(1, Math.min(MAX_IMAGES, Number(requestedCount) || 1));
 
   const params = new URLSearchParams({
-    engine: 'google_images',
     q,
-    api_key: SERPAPI_KEY,
-    hl: 'it',
-    gl: 'it',
+    format: 'json',
+    language: 'it',
+    pageno: 1,
+    category: 'images',
   });
 
-  const res = await fetchExternal(`https://serpapi.com/search.json?${params}`, {}, 'SerpAPI (Ricerca Immagini)');
+  const url = `${SEARXNG_URL}/search?${params}`;
+
+  const res = await fetchExternal(url, {}, 'SearXNG (Ricerca Immagini Locale)');
   if (!res.ok) {
-    throw new Error(`SerpAPI immagini error: ${res.status}`);
+    throw new Error(`SearXNG immagini error: ${res.status}`);
   }
 
   const data = await res.json();
-  const imageResults = Array.isArray(data.images_results) ? data.images_results : [];
+  const imageResults = Array.isArray(data.results) ? data.results : [];
   if (imageResults.length === 0) {
     return {
       text: `Nessuna immagine trovata per "${q}".`,
@@ -115,7 +117,8 @@ async function imageSearch(query, requestedCount = 1) {
 
   for (let i = 0; i < picked.length && attachments.length < count; i++) {
     const item = picked[i];
-    const imgUrl = item.original || item.thumbnail;
+    // SearXNG restituisce l'immagine in 'img_src' (url diretto) o 'thumbnail'
+    const imgUrl = item.img_src || item.thumbnail || item.url;
     if (!imgUrl) continue;
 
     try {
@@ -123,7 +126,7 @@ async function imageSearch(query, requestedCount = 1) {
       attachments.push(att);
       sources.push({
         title: item.title || `Immagine ${attachments.length}`,
-        source: item.source || item.link || imgUrl,
+        source: item.url || imgUrl,
       });
     } catch {
       // Skip broken/hotlink-protected images and continue.
