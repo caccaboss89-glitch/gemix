@@ -222,7 +222,7 @@ const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
     title: { type: 'string', description: 'Titolo della Richiesta' },
     motivation: { type: 'string', description: 'Motivazione dettagliata e argomentata' },
     requesterSignature: { type: 'string', description: 'Firma del richiedente' },
-    legalSignature: { type: 'string', description: 'Firma/visto del legale' },
+    legalSignature: { type: 'string', description: 'Visto del legale ("Lorenzo Passante" se richiesto da lui in persona o "Nessuno"' },
   },
   required: ['fullName', 'title', 'motivation', 'requesterSignature'],
 });
