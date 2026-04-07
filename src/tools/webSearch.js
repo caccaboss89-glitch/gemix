@@ -5,9 +5,13 @@ const { fetchExternal } = require('../utils/fetch');
  * Perform web search using SearXNG (self-hosted) and format results.
  * Returns search results with snippets and links.
  * @param {string} query - Search query string
+ * @param {number} numResults - Number of results to return (1-50, default 15)
  * @returns {Promise<string>} Formatted search results with links
  */
-async function webSearch(query) {
+async function webSearch(query, numResults = 15) {
+  // Validate and clamp numResults to 1-50 range
+  const validNumResults = Math.max(1, Math.min(50, parseInt(numResults) || 15));
+
   const params = new URLSearchParams({
     q: query,
     format: 'json',
@@ -28,7 +32,7 @@ async function webSearch(query) {
     return 'Nessun risultato trovato.';
   }
 
-  const results = data.results.slice(0, 30).map((r, i) =>
+  const results = data.results.slice(0, validNumResults).map((r, i) =>
     `${i + 1}. **${r.title}**\n   ${r.content || ''}\n   ${r.url}`
   ).join('\n\n');
 

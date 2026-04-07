@@ -116,6 +116,7 @@ const TOOL_WEB_SEARCH = makeTool({
   description: 'Cerca sul web.',
   properties: {
     query: { type: 'string', description: 'Query' },
+    numResults: { type: 'integer', description: 'Numero risultati (1-50, default 15)' },
   },
   required: ['query'],
 });
