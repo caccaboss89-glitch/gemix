@@ -51,23 +51,9 @@ function findMemberByWa(jid) {
  */
 function findMemberByDiscord(username, displayName, nickname) {
   const candidates = [username, displayName, nickname].filter(Boolean).map(n => n.toLowerCase());
-  
-  // DEBUG: Log search parameters
-  console.log('[DEBUG findMemberByDiscord]', {
-    username,
-    displayName,
-    nickname,
-    candidates,
-    activeMembersNicks: ACTIVE_MEMBERS.map(m => ({ name: m.name, nicks: m.nicks }))
-  });
-  
-  const result = ACTIVE_MEMBERS.find(m =>
+  return ACTIVE_MEMBERS.find(m =>
     m.nicks.some(nick => candidates.includes(nick.toLowerCase()))
   ) || null;
-  
-  console.log('[DEBUG findMemberByDiscord] Result:', result?.name || 'NOT FOUND');
-  
-  return result;
 }
 
 /**

@@ -15,17 +15,13 @@ function identifyUser(ctx) {
   let member = null;
 
   if (ctx.platform === PLATFORM_DISCORD) {
-    console.log('[DEBUG identifyUser] Discord user:', ctx.userId);
     member = findMemberByDiscord(ctx.discordUsername, ctx.discordDisplayName, ctx.discordNickname);
   } else {
     const jid = ctx.userId.includes('@') ? ctx.userId : ctx.userId + '@c.us';
-    console.log('[DEBUG identifyUser] WhatsApp JID:', jid);
     member = findMemberByWa(jid);
   }
 
   const isActiveMember = member !== null;
-  
-  console.log('[DEBUG identifyUser] Platform:', ctx.platform, '| Member found:', member?.name || 'NONE', '| isActiveMember:', isActiveMember);
 
   let taskFileId;
   if (member) {

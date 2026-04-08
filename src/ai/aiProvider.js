@@ -24,15 +24,13 @@ function hasAudioContent(messages) {
 
 /**
  * Call the appropriate AI provider via OpenRouter based on message content.
- * Routes to Gemini when audio is present or platform is Discord, Qwen otherwise.
+ * Routes to Gemini when audio is detected, Qwen otherwise.
  * @param {Array} messages - OpenAI-format messages array
  * @param {Array|null} tools - Tool definitions array
- * @param {object} [options] - Options
- * @param {boolean} [options.isDiscord=false] - Whether the request comes from Discord
  * @returns {Promise<{message: object, provider: string, model: string}>} The assistant message with provider info
  */
-async function callAI(messages, tools = null, { isDiscord = false } = {}) {
-  const useGemini = hasAudioContent(messages) || isDiscord;
+async function callAI(messages, tools = null) {
+  const useGemini = hasAudioContent(messages);
   const model = useGemini ? GEMINI_MODEL : QWEN_MODEL;
   const provider = useGemini ? 'Gemini' : 'Qwen';
 

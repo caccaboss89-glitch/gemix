@@ -66,8 +66,6 @@ async function handleMessage(ctx) {
     ctx.userMemory = userMemory;
     ctx.groupMemory = groupMemory;
 
-    log.info('[DEBUG handler] ctx.userIdentity:', ctx.userIdentity);
-
     // RAG: inietta contesto regolamento per Discord
     if (ctx.platform === PLATFORM_DISCORD) {
       const queryText = typeof ctx.content === 'string'
@@ -166,7 +164,6 @@ async function handleMessage(ctx) {
 
     let rounds = 0;
     let lastModelUsed = null;
-    const isDiscord = ctx.platform === PLATFORM_DISCORD;
 
     while (rounds < MAX_TOOL_ROUNDS) {
       messages = removeToolInstructionMessages(messages);
@@ -203,7 +200,7 @@ async function handleMessage(ctx) {
       }
 
       log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata AI (round ${rounds}/${MAX_TOOL_ROUNDS})`);
-      const { message: assistantMsg, provider, model } = await callAI(messages, tools, { isDiscord });
+      const { message: assistantMsg, provider, model } = await callAI(messages, tools);
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
 

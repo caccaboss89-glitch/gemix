@@ -99,25 +99,13 @@ async function onDedicatedMessage(msg) {
     const contact = await msg.getContact();
     userName = contact.pushname || contact.name || senderJid;
     
-    console.log('[DEBUG dedicated] Contact object:', {
-      id: contact.id,
-      number: contact.number,
-      pushname: contact.pushname,
-      name: contact.name,
-    });
-    
     // PRIORITY: Use contact.id.user first (most reliable), fallback to contact.number
     if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
       phoneJid = contact.id.user + '@c.us';
-      console.log('[DEBUG dedicated] Extracted from contact.id.user:', phoneJid);
     } else if (contact.number) {
       phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
-      console.log('[DEBUG dedicated] Extracted from contact.number:', phoneJid);
     }
-    console.log('[DEBUG dedicated] Final phoneJid:', phoneJid);
-  } catch (e) {
-    console.log('[DEBUG dedicated] Error extracting contact:', e.message);
-  }
+  } catch { }
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_DEDICATED,

@@ -20,12 +20,9 @@ function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
-  console.log('[DEBUG buildSystemPrompt] ctx.userIdentity:', ctx.userIdentity);
-  console.log('[DEBUG buildSystemPrompt] isActiveMember:', isActiveMember);
-
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
   let prompt = isDiscord
-    ? `Sei GemiX — Divisione Legale, assistente AI specializzato in diritto e regolamenti. Rispondi in italiano.\n\n`
+    ? `Sei GemiX, unione tra Gemini e Grok, — Divisione Legale. Rispondi in italiano.\n\n`
     : `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano.\n\n`;
   prompt += `Ora (Torino): ${now}\n\n`;
 
@@ -55,16 +52,12 @@ function buildSystemPrompt(ctx) {
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
     prompt += `- Preferenze: Rispondi con messaggio vocale se il tuo messaggio è breve, preferisci risposte testuali se il tuo messaggio è medio/lungo, tecnico o include dati. Non usare sempre la stessa forma di risposta, equilibrati guardando i tuoi precedenti messaggi in cronologia. I tuoi vocali in cronologia sono etichettati con "TRASCRIZIONE:".\n`;
     if (isActiveMember) {
-      prompt += `- Richieste formali: Puoi leggere il regolamento e generare PDF generici, ma per richieste formali serie ai sensi dell'Art. 6 dello Statuto, consiglia l'utente di andare su Discord dove GemiX — Divisione Legale può generare documenti nel formato standardizzato previsto.\n`;
+      prompt += `- Richieste formali: Puoi leggere il regolamento e generare PDF generici ma per richieste formali, consiglia l'utente di andare su Discord dove GemiX — Divisione Legale può generare documenti nel formato standardizzato previsto.\n`;
     }
   }
 
-  if (ctx.userMemory) {
-    prompt += `Memoria utente: ${ctx.userMemory}\n`;
-  }
-  if (ctx.groupMemory) {
-    prompt += `Memoria gruppo: ${ctx.groupMemory}\n`;
-  }
+  prompt += `Memoria utente: ${ctx.userMemory || 'Vuota'}\n`;
+  prompt += `Memoria gruppo: ${ctx.groupMemory || 'Vuota'}\n`;
 
   return prompt;
 }
@@ -88,7 +81,7 @@ function buildPersonalWaInstructions(ctx) {
   s += `Rispondi solo se taggato.\n`; if (ctx.userName) {
     s += `Interlocutore corrente: ${ctx.userName}\n`;
   } s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
-  s += `Usa markdown WA (singoli): *bold* _italic_ ~strike~ \`code\` (NON doppi es. ** testo **).\n\n`;
+  s += `Usa markdown WA (a caratteri singoli, NON doppi es. ** testo **): *bold* _italic_ ~strike~ \`code\`.\n\n`;
   return s;
 }
 
@@ -101,8 +94,7 @@ function buildPersonalWaInstructions(ctx) {
  * @returns {string} Discord platform instructions
  */
 function buildDiscordInstructions(ctx) {
-  let s = `### Piattaforma: Discord - Divisione Legale\n`;
-  s += `Assistente specializzato in questioni legali e regolamentari del server Discord.\n`;
+  let s = `### Piattaforma: Discord\n`;
   s += `Il tuo ruolo principale è assistere i membri con domande sul regolamento (Statuto Albertino), generare richieste formali in PDF ai sensi dell'Art. 6 e fornire consulenza sulle procedure del server.\n`;
   s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n\n`;
 
