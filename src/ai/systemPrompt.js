@@ -44,17 +44,13 @@ function buildSystemPrompt(ctx) {
     prompt += `Utente: ${ui.member?.name || ctx.userName || 'sconosciuto'} - ${ui.isActiveMember ? 'attivo' : 'non attivo'}\n`;
   }
 
-  if (!isDiscord) {
-    prompt += `Limiti media: ultimo vocale ≤2 min; vocali lunghi segnalati; trascrizioni in cronologia (etichettati con "TRASCRIZIONE:").\n`;
-  }
-
   prompt += `Tool: Puoi usare i tool disponibili, fallo solo prima di fornire la risposta finale.`;
   if (!isActiveMember) {
     prompt += ` Alcuni tool (es. PDF, email, invio messaggi, promemoria ricorrenti) NON sono disponibili per questo utente.`;
   }
   prompt += `\n`;
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-    prompt += `- Preferenze: risposte vocali se messaggio breve, preferisci risposte testuali se messaggio medio/lungo, tecnico o include dati. Equilibra l'uso di queste 2 forme di risposte in base alla cronologia.\n`;
+    prompt += `- Preferenze: risposte vocali (usando send_voice_message) se messaggio breve, preferisci risposte testuali se messaggio medio/lungo, tecnico o include dati. Equilibra l'uso di queste 2 forme di risposte in base alla cronologia. Trascrizioni in cronologia (etichettati con "TRASCRIZIONE:").\n`;
     if (isActiveMember) {
       prompt += `- Richieste formali: Puoi leggere il regolamento e generare PDF generici, ma per richieste formali serie ai sensi dell'Art. 6 dello Statuto, consiglia l'utente di andare su Discord dove GemiX — Divisione Legale può generare documenti nel formato standardizzato previsto.\n`;
     }
