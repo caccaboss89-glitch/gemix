@@ -108,7 +108,7 @@ function buildDiscordInstructions(ctx) {
     s += `### Contesto Regolamento (Statuto Albertino)\nI seguenti articoli sono rilevanti per questa conversazione:\n${ctx.ragContext}\n\n`;
   }
 
-  s += `Markdown NON supportati: tabelle, linee ---.\n\n`;
+  s += `Sono supportati tutti i markdown TRANNE tabelle e linee ---.\n\n`;
 
   if (ctx.availableEmojis) {
     s += `Emoji server: ${ctx.availableEmojis}\n\n`;
