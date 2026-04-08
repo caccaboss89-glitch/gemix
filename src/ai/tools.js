@@ -29,7 +29,7 @@ const TOOL_INSTRUCTIONS = {
   include_history_images: CALL_ONLY,
   include_history_docs: CALL_ONLY,
   include_history_voices: CALL_ONLY,
-  send_voice_message: `${CALL_ONLY} ${VOICE_EFFECTS_DOC}`,
+  send_voice_message: `${CALL_ONLY} ${VOICE_EFFECTS_DOC} Non scrivere mai "TRASCRIZIONE" nel vocale (lo aggiungerà il sistema).`,
   schedule_tasks: CALL_ONLY,
   read_my_tasks: CALL_ONLY,
   remove_my_tasks: CALL_ONLY,
@@ -429,7 +429,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
 
   return makeTool({
     name: 'schedule_tasks',
-    description: 'Programma attività future.',
+    description: 'Programma/ricorda/ promemoria e attività future.',
     properties: {
       tasks: {
         type: 'array',
