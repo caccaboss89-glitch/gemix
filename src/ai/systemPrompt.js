@@ -20,10 +20,8 @@ function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
-  if (process.env.DEBUG_MEMBER) {
-    console.log('[DEBUG buildSystemPrompt] ctx.userIdentity:', ctx.userIdentity);
-    console.log('[DEBUG buildSystemPrompt] isActiveMember:', isActiveMember);
-  }
+  console.log('[DEBUG buildSystemPrompt] ctx.userIdentity:', ctx.userIdentity);
+  console.log('[DEBUG buildSystemPrompt] isActiveMember:', isActiveMember);
 
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
   let prompt = isDiscord
@@ -55,7 +53,7 @@ function buildSystemPrompt(ctx) {
   }
   prompt += `\n`;
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-    prompt += `- Preferenze: Rispondi con messaggio vocale (usando send_voice_message) se messaggio breve, preferisci risposte testuali se messaggio medio/lungo, tecnico o include dati. Equilibra l'uso di queste 2 forme di risposte in base alla cronologia. Trascrizioni in cronologia (etichettati con "TRASCRIZIONE:").\n`;
+    prompt += `- Preferenze: Rispondi con messaggio vocale se il tuo messaggio è breve, preferisci risposte testuali se il tuo messaggio è medio/lungo, tecnico o include dati. Non usare sempre la stessa forma di risposta, equilibrati guardando i tuoi precedenti messaggi in cronologia. I tuoi vocali in cronologia sono etichettati con "TRASCRIZIONE:".\n`;
     if (isActiveMember) {
       prompt += `- Richieste formali: Puoi leggere il regolamento e generare PDF generici, ma per richieste formali serie ai sensi dell'Art. 6 dello Statuto, consiglia l'utente di andare su Discord dove GemiX — Divisione Legale può generare documenti nel formato standardizzato previsto.\n`;
     }

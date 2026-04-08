@@ -66,9 +66,7 @@ async function handleMessage(ctx) {
     ctx.userMemory = userMemory;
     ctx.groupMemory = groupMemory;
 
-    if (process.env.DEBUG_MEMBER) {
-      log.info('[DEBUG handler] ctx.userIdentity:', ctx.userIdentity);
-    }
+    log.info('[DEBUG handler] ctx.userIdentity:', ctx.userIdentity);
 
     // RAG: inietta contesto regolamento per Discord
     if (ctx.platform === PLATFORM_DISCORD) {

@@ -53,23 +53,19 @@ function findMemberByDiscord(username, displayName, nickname) {
   const candidates = [username, displayName, nickname].filter(Boolean).map(n => n.toLowerCase());
   
   // DEBUG: Log search parameters
-  if (process.env.DEBUG_MEMBER) {
-    console.log('[DEBUG findMemberByDiscord]', {
-      username,
-      displayName,
-      nickname,
-      candidates,
-      activeMembersNicks: ACTIVE_MEMBERS.map(m => ({ name: m.name, nicks: m.nicks }))
-    });
-  }
+  console.log('[DEBUG findMemberByDiscord]', {
+    username,
+    displayName,
+    nickname,
+    candidates,
+    activeMembersNicks: ACTIVE_MEMBERS.map(m => ({ name: m.name, nicks: m.nicks }))
+  });
   
   const result = ACTIVE_MEMBERS.find(m =>
     m.nicks.some(nick => candidates.includes(nick.toLowerCase()))
   ) || null;
   
-  if (process.env.DEBUG_MEMBER) {
-    console.log('[DEBUG findMemberByDiscord] Result:', result?.name || 'NOT FOUND');
-  }
+  console.log('[DEBUG findMemberByDiscord] Result:', result?.name || 'NOT FOUND');
   
   return result;
 }
