@@ -106,12 +106,13 @@ async function onDedicatedMessage(msg) {
       name: contact.name,
     });
     
-    if (contact.number) {
-      phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
-      console.log('[DEBUG dedicated] Extracted from contact.number:', phoneJid);
-    } else if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
+    // PRIORITY: Use contact.id.user first (most reliable), fallback to contact.number
+    if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
       phoneJid = contact.id.user + '@c.us';
       console.log('[DEBUG dedicated] Extracted from contact.id.user:', phoneJid);
+    } else if (contact.number) {
+      phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
+      console.log('[DEBUG dedicated] Extracted from contact.number:', phoneJid);
     }
     console.log('[DEBUG dedicated] Final phoneJid:', phoneJid);
   } catch (e) {
