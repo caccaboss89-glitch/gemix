@@ -81,7 +81,7 @@ function buildPersonalWaInstructions(ctx) {
   s += `Rispondi solo se taggato.\n`; if (ctx.userName) {
     s += `Interlocutore corrente: ${ctx.userName}\n`;
   } s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
-  s += `Usa markdown WA (a caratteri singoli, NON doppi es. ** testo **): *bold* _italic_ ~strike~ \`code\`.\n\n`;
+  s += `Usa SOLO markdown WA (a caratteri singoli, NON doppi es. ** testo **): *bold* _italic_ ~strike~ \`code\`.\n\n`;
   return s;
 }
 
@@ -107,6 +107,8 @@ function buildDiscordInstructions(ctx) {
   if (ctx.ragContext) {
     s += `### Contesto Regolamento (Statuto Albertino)\nI seguenti articoli sono rilevanti per questa conversazione:\n${ctx.ragContext}\n\n`;
   }
+
+  s += `Markdown NON supportati: tabelle, linee ---.\n\n`;
 
   if (ctx.availableEmojis) {
     s += `Emoji server: ${ctx.availableEmojis}\n\n`;
