@@ -16,7 +16,7 @@ function setAdminNotifierClient(waClient) {
 /**
  * Send an error notification to the admin via WhatsApp.
  * Includes cooldown to avoid spam on repeated failures.
- * @param {string} source - Error source (e.g., 'API (Gemini)', 'API (Qwen)', 'SerpAPI')
+ * @param {string} source - Error source (e.g., 'API (Gemini)', 'API (Qwen)')
  * @param {string} errorMessage - Error details
  */
 async function notifyAdmin(source, errorMessage) {
@@ -30,7 +30,7 @@ async function notifyAdmin(source, errorMessage) {
   if (!admin) return;
 
   const timestamp = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
-  const message = `⚠️ *ERRORE API — ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
+  const message = `[System] ⚠️ *ERRORE API — ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
 
   try {
     await client.sendMessage(admin.wa, message);

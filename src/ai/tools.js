@@ -3,7 +3,6 @@ const path = require('path');
 const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
 
 // Tool definitions for AI function calling (OpenAI-compatible format).
-// Tool descriptions are kept minimal; detailed instructions are provided when a tool is actually invoked.
 
 const VOICE_EFFECTS_DOC = `
 EFFETTI VOCALI DISPONIBILI:
@@ -25,6 +24,7 @@ const CALL_ONLY = 'Rispondi solo con la chiamata al tool.';
 
 const TOOL_INSTRUCTIONS = {
   web_search: CALL_ONLY,
+  fetch_webpage: CALL_ONLY,
   image_search: `${CALL_ONLY} Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
   include_history_images: CALL_ONLY,
   include_history_docs: CALL_ONLY,
@@ -41,6 +41,7 @@ const TOOL_INSTRUCTIONS = {
   read_music_stats: CALL_ONLY,
   update_memory: `${CALL_ONLY} Se memoria quasi piena, compatta le informazioni o chiedi all'utente/agli utenti cosa rimuovere.`,
   toggle_release_notify: CALL_ONLY,
+  update_thread_title: CALL_ONLY,
 };
 
 // ── send_about_me: allowed una sola volta per chat (persistito su file) ──
@@ -169,6 +170,24 @@ const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
   description: 'Leggi il regolamento del server Discord (aka Statuto Albertino).',
   properties: {},
+});
+
+const TOOL_UPDATE_THREAD_TITLE = makeTool({
+  name: 'update_thread_title',
+  description: 'Cambia il titolo del thread Discord.',
+  properties: {
+    title: { type: 'string', description: 'Nuovo titolo del thread' },
+  },
+  required: ['title'],
+});
+
+const TOOL_FETCH_WEBPAGE = makeTool({
+  name: 'fetch_webpage',
+  description: 'Recupera il contenuto testuale di una pagina web dato il suo URL diretto.',
+  properties: {
+    url: { type: 'string', description: 'URL della pagina web' },
+  },
+  required: ['url'],
 });
 
 const TOOL_GENERATE_PDF = makeTool({
@@ -487,7 +506,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const tools = [];
 
   // ── Tutti gli utenti, tutte le piattaforme ──
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH);
+  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_FETCH_WEBPAGE);
   if (userCtx.hasHistoryImages) tools.push(TOOL_INCLUDE_HISTORY_IMAGES);
   if (userCtx.hasHistoryDocs) tools.push(TOOL_INCLUDE_HISTORY_DOCS);
   if (userCtx.hasHistoryVoices) tools.push(TOOL_INCLUDE_HISTORY_VOICES);
@@ -508,9 +527,10 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
 
-  // ── Discord: richiesta formale PDF (tutti i membri) ──
+  // ── Discord: richiesta formale PDF (tutti i membri) + gestione thread ──
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
+    tools.push(TOOL_UPDATE_THREAD_TITLE);
   }
 
   // ── Memoria personalizzata: WhatsApp tutti, Discord solo attivi ──

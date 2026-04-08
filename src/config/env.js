@@ -1,13 +1,11 @@
 require('dotenv').config();
 
 module.exports = {
-  API_KEY: process.env.API_KEY,
-  API_BASE_URL: process.env.API_BASE_URL,
-  GEMINI_MODEL: process.env.GEMINI_MODEL,
-  EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
+  GEMINI_MODEL: process.env.GEMINI_MODEL,
   QWEN_MODEL: process.env.QWEN_MODEL,
+  EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
   XAI_API_KEY: process.env.XAI_API_KEY,
   XAI_TTS_VOICE: process.env.XAI_TTS_VOICE,
   SEARXNG_URL: process.env.SEARXNG_URL,

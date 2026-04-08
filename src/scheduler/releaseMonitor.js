@@ -82,7 +82,7 @@ async function checkNewRelease(waClient) {
     const title = release.name || release.tag_name || 'Nuova release';
     const body = release.body || '';
 
-    const message = `🚀 *Nuova release GemiX: ${title}*\n\n${body}`.trim();
+    const message = `[System] 🚀 *Nuova release GemiX: ${title}*\n\n${body}`.trim();
 
     const subscribedChats = getSubscribedChats();
     if (subscribedChats.size === 0) {

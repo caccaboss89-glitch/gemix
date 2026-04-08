@@ -1,4 +1,4 @@
-const { callAI, buildDiscordResponseFormat } = require('./ai/aiProvider');
+const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolInstructions } = require('./ai/tools');
 const { executeTool } = require('./tools');
@@ -28,9 +28,9 @@ function cloneHistoryStructure(history) {
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
- * Routes requests to Gemini (audio) or Qwen (non-audio) based on message content.
+ * Routes requests to Gemini (audio/Discord) or Qwen (other) via OpenRouter based on message content.
  * @param {object} ctx - Normalized message context { platform, userId, userName, userIdentity, content, history, isGroup, groupId, ... }
- * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, discordMessage? }
+ * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle? }
  */
 async function handleMessage(ctx) {
   const responseCtx = {
@@ -42,6 +42,7 @@ async function handleMessage(ctx) {
     historyImagesToInclude: [],
     historyDocsToInclude: [],
     historyVoicesToInclude: [],
+    discordTitle: '',
   };
 
   try {
@@ -199,24 +200,20 @@ async function handleMessage(ctx) {
         break;
       }
 
-      const responseFormat = isDiscord ? buildDiscordResponseFormat(ctx.threadName || '') : null;
-
-      const roundTools = tools;
-
       log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata AI (round ${rounds}/${MAX_TOOL_ROUNDS})`);
-      const { message: assistantMsg, provider, model } = await callAI(messages, roundTools, responseFormat);
+      const { message: assistantMsg, provider, model } = await callAI(messages, tools, { isDiscord });
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
         log.info(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
+        // Preserve reasoning_details, delete null content for OpenRouter reasoning models
         if (assistantMsg.content === null || assistantMsg.content === undefined) {
-          assistantMsg.content = '';
+          delete assistantMsg.content;
         }
         messages.push(assistantMsg);
 
         for (const tc of assistantMsg.tool_calls) {
-          // Se un tool precedente ha impostato isAboutMeOnly o isVoiceOnly, interrompi
           if ((responseCtx.isAboutMeOnly && responseCtx.aboutMeText) ||
             (responseCtx.isVoiceOnly && responseCtx.voiceBuffer)) {
             log.warn(`   ⚠️ Ciclo tool interrotto: un tool ha già generato la risposta finale`);
@@ -269,58 +266,19 @@ async function handleMessage(ctx) {
           isVoiceOnly: false,
           isAboutMeOnly: true,
           attachments: responseCtx.attachments,
+          discordTitle: responseCtx.discordTitle || '',
           modelUsed: lastModelUsed,
         };
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.info(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
-        let discordTitle = '';
-        if (isDiscord && text) {
-          try { discordTitle = JSON.parse(text).title || ''; } catch { }
-        }
         return {
           text: null,
           voiceBuffer: responseCtx.voiceBuffer,
           isVoiceOnly: true,
           attachments: responseCtx.attachments,
-          discordTitle,
-          modelUsed: lastModelUsed,
-        };
-      }
-
-      if (isDiscord && text) {
-        try {
-          const parsed = JSON.parse(text);
-          return {
-            text: null,
-            voiceBuffer: null,
-            isVoiceOnly: false,
-            attachments: responseCtx.attachments,
-            discordTitle: parsed.title || '',
-            discordMessage: parsed.message || '',
-            modelUsed: lastModelUsed,
-          };
-        } catch {
-          // Fallback: treat as plain text
-          return {
-            text,
-            voiceBuffer: null,
-            isVoiceOnly: false,
-            attachments: responseCtx.attachments,
-            discordTitle: '',
-            discordMessage: text,
-            modelUsed: lastModelUsed,
-          };
-        }
-      }
-
-      if (responseCtx.isVoiceOnly) {
-        return {
-          text: null,
-          voiceBuffer: responseCtx.voiceBuffer,
-          isVoiceOnly: true,
-          attachments: responseCtx.attachments,
+          discordTitle: responseCtx.discordTitle || '',
           modelUsed: lastModelUsed,
         };
       }
@@ -330,6 +288,7 @@ async function handleMessage(ctx) {
         voiceBuffer: null,
         isVoiceOnly: false,
         attachments: responseCtx.attachments,
+        discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
       };
     }
@@ -342,6 +301,7 @@ async function handleMessage(ctx) {
         isVoiceOnly: false,
         isAboutMeOnly: true,
         attachments: responseCtx.attachments,
+        discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
       };
     }
@@ -353,6 +313,7 @@ async function handleMessage(ctx) {
         voiceBuffer: responseCtx.voiceBuffer,
         isVoiceOnly: true,
         attachments: responseCtx.attachments,
+        discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
       };
     }
@@ -362,6 +323,7 @@ async function handleMessage(ctx) {
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],
+      discordTitle: responseCtx.discordTitle || '',
       modelUsed: lastModelUsed,
     };
 

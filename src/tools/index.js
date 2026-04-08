@@ -1,5 +1,5 @@
 const { isActiveMemberOnlyTool, _markSendAboutMeUsed } = require('../ai/tools');
-const { webSearch } = require('./webSearch');
+const { webSearch, fetchWebpage } = require('./webSearch');
 const { imageSearch } = require('./imageSearch');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
@@ -176,7 +176,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   try {
     switch (name) {
       case 'web_search': {
-        result = await webSearch(args.query);
+        result = await webSearch(args.query, args.numResults);
+        break;
+      }
+
+      case 'fetch_webpage': {
+        result = await fetchWebpage(args.url);
         break;
       }
 
@@ -501,6 +506,17 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const chatId = userCtx.chatId || userCtx.groupId || userCtx.waJid;
         const waJid = userCtx.isGroup ? userCtx.groupId : (userCtx.waJid || (userCtx.member ? userCtx.member.wa : null));
         result = toggleReleaseNotify(Boolean(args.enabled), chatId, waJid);
+        break;
+      }
+
+      case 'update_thread_title': {
+        const title = (args.title || '').replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
+        if (!title) {
+          result = '❌ Titolo vuoto o non valido.';
+        } else {
+          responseCtx.discordTitle = title;
+          result = `Titolo thread aggiornato a: "${title}"`;
+        }
         break;
       }
 

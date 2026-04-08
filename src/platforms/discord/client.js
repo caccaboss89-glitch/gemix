@@ -268,7 +268,7 @@ async function onDiscordMessage(msg) {
 
     const response = await handleMessage(ctx);
 
-    let finalText = response.discordMessage || response.text || '';
+    let finalText = response.text || '';
     let newTitle = response.discordTitle || '';
 
     const files = [];

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { DATA_DIR } = require('../config/constants');
-const { API_KEY, API_BASE_URL, EMBEDDING_MODEL } = require('../config/env');
+const { OPENROUTER_API_KEY, OPENROUTER_BASE_URL, EMBEDDING_MODEL } = require('../config/env');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('RAG');
@@ -49,12 +49,12 @@ function hashText(text) {
 // ────────────────────────────── Embedding API ──────────────────────────────
 
 /**
- * Fetch a single embedding vector from AIMLAPI (accepts only string input, not array).
+ * Fetch a single embedding vector from OpenRouter.
  */
 async function fetchEmbedding(text) {
-  const res = await fetch(`${API_BASE_URL}/embeddings`, {
+  const res = await fetch(`${OPENROUTER_BASE_URL}/embeddings`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
     body: JSON.stringify({ model: EMBEDDING_MODEL, input: text }),
   });
   if (!res.ok) {

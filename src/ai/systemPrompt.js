@@ -99,13 +99,17 @@ function buildPersonalWaInstructions(ctx) {
  * @param {string} [ctx.threadName] - Discord thread title
  * @param {string} [ctx.availableEmojis] - Available custom server emojis
  * @param {string} [ctx.serverEvents] - Server events list
- * @returns {string} Discord platform instructions with structured output format
+ * @returns {string} Discord platform instructions
  */
 function buildDiscordInstructions(ctx) {
   let s = `### Piattaforma: Discord - Divisione Legale\n`;
   s += `Assistente specializzato in questioni legali e regolamentari del server Discord.\n`;
   s += `Il tuo ruolo principale è assistere i membri con domande sul regolamento (Statuto Albertino), generare richieste formali in PDF ai sensi dell'Art. 6 e fornire consulenza sulle procedure del server.\n`;
   s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n\n`;
+
+  if (ctx.threadName) {
+    s += `Titolo thread attuale: "${ctx.threadName}". Se il titolo non riflette l'argomento della conversazione o è cambiato il discorso, usa il tool update_thread_title per aggiornarlo con un titolo più pertinente.\n\n`;
+  }
 
   s += `Limitazioni Discord: Su questa piattaforma NON puoi fare: vocali, promemoria/task programmati, statistiche musicali, presentazione "Chi sono", notifiche release, PDF generici. Se un utente chiede queste funzionalità, suggerisci di usare GemiX su WhatsApp dove sono disponibili tutte le funzionalità.\n\n`;
 

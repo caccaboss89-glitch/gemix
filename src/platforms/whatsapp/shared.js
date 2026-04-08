@@ -24,12 +24,16 @@ async function buildWhatsAppHistory(chat, platform) {
     let senderName;
     let isGemiX = false;
     let isScheduled = false;
+    let isSystem = false;
 
     if (platform === PLATFORM_WA_PERSONAL) {
       if (msg.fromMe) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
+        } else if ((msg.body || '').startsWith('[System]')) {
+          senderName = '[System]';
+          isSystem = true;
         } else if (hasFooter(msg.body)) {
           senderName = 'GemiX';
           isGemiX = true;
@@ -49,6 +53,9 @@ async function buildWhatsAppHistory(chat, platform) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
+        } else if ((msg.body || '').startsWith('[System]')) {
+          senderName = '[System]';
+          isSystem = true;
         } else {
           senderName = 'GemiX';
           isGemiX = true;
@@ -63,10 +70,14 @@ async function buildWhatsAppHistory(chat, platform) {
       }
     }
 
+    const isFromBot = isGemiX || isScheduled || isSystem;
+
     const ts = formatTimestamp(msg.timestamp * 1000);
     let textContent;
     if (isScheduled) {
       textContent = removeScheduledFooter(msg.body || '');
+    } else if (isSystem) {
+      textContent = (msg.body || '').replace(/^\[System\]\s*/, '');
     } else if (isGemiX) {
       textContent = removeFooter(msg.body || '');
     } else {
@@ -148,7 +159,7 @@ async function buildWhatsAppHistory(chat, platform) {
 
     if (mediaParts.length > 0) {
       historyMessages.push({
-        role: isGemiX ? 'assistant' : 'user',
+        role: isFromBot ? 'assistant' : 'user',
         content: [
           { type: 'text', text: `${prefix}${textContent}` },
           ...mediaParts,
@@ -156,7 +167,7 @@ async function buildWhatsAppHistory(chat, platform) {
       });
     } else if (textContent) {
       historyMessages.push({
-        role: isGemiX ? 'assistant' : 'user',
+        role: isFromBot ? 'assistant' : 'user',
         content: `${prefix}${textContent}`,
       });
     }

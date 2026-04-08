@@ -165,7 +165,7 @@ async function callModel(modelName, apiUrl, body, apiKey) {
     log.error(`      choices: ${JSON.stringify(data.choices)}`);
     log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
     
-    // Se è una risposta d'errore di Qwen, includi i dettagli
+    // Se è una risposta d'errore, includi i dettagli
     if (data.error) {
       throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
     }

@@ -1,5 +1,5 @@
 const { SEARXNG_URL } = require('../config/env');
-const { fetchExternal } = require('../utils/fetch');
+const { fetchExternal, fetchWithTimeout } = require('../utils/fetch');
 
 /**
  * Perform web search using SearXNG (self-hosted) and format results.
@@ -39,4 +39,55 @@ async function webSearch(query, numResults = 15) {
   return results;
 }
 
-module.exports = { webSearch };
+const MAX_WEBPAGE_CHARS = 10000;
+
+/**
+ * Fetch a web page and extract its text content.
+ * @param {string} url - URL to fetch
+ * @returns {Promise<string>} Extracted text content
+ */
+async function fetchWebpage(url) {
+  if (!url || typeof url !== 'string') {
+    return 'Errore: URL mancante o non valido.';
+  }
+
+  try {
+    new URL(url);
+  } catch {
+    return 'Errore: URL non valido.';
+  }
+
+  const res = await fetchWithTimeout(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+
+  const html = await res.text();
+
+  let text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (text.length > MAX_WEBPAGE_CHARS) {
+    text = text.substring(0, MAX_WEBPAGE_CHARS) + '... (contenuto troncato)';
+  }
+
+  return text || 'Nessun contenuto testuale trovato nella pagina.';
+}
+
+module.exports = { webSearch, fetchWebpage };
