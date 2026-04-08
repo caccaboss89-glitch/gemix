@@ -20,6 +20,11 @@ function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const isActiveMember = ctx.userIdentity?.isActiveMember;
 
+  if (process.env.DEBUG_MEMBER) {
+    console.log('[DEBUG buildSystemPrompt] ctx.userIdentity:', ctx.userIdentity);
+    console.log('[DEBUG buildSystemPrompt] isActiveMember:', isActiveMember);
+  }
+
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
   let prompt = isDiscord
     ? `Sei GemiX — Divisione Legale, assistente AI specializzato in diritto e regolamenti. Rispondi in italiano.\n\n`
