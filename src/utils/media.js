@@ -98,6 +98,8 @@ function mediaTag(filename, mimetype) {
  * Transcribe all documents in a message content array.
  * Replaces PDF content parts with text transcriptions.
  * Used to ensure documents are always transcribed before sending to AI.
+ * **IMPORTANT**: If transcription fails, removes the PDF entirely and replaces with error text.
+ * PDFs are NEVER sent to the AI provider - either as text or not at all.
  * @param {Array|string} content - Message content (can be string or array of parts)
  * @returns {Promise<Array|string>} Transcribed content
  */
@@ -128,14 +130,13 @@ async function transcribeDocumentsInMessageContent(content) {
           text: `<Trascrizione>\n${result.text}\n</Trascrizione>`,
         });
       } else {
-        // If transcription fails, keep original and add error note
-        transcribed.push(part);
-        if (result.error) {
-          transcribed.push({
-            type: 'text',
-            text: `⚠️ Errore trascrizione documento: ${result.error}`,
-          });
-        }
+        // If transcription fails, DO NOT keep the PDF (it causes "image format illegal" errors).
+        // Replace with error message instead.
+        const errorMsg = result.error || 'Errore sconosciuto nella trascrizione del documento';
+        transcribed.push({
+          type: 'text',
+          text: `⚠️ Documento non trascritto (${errorMsg}). Il file non può essere elaborato dal modello AI.`,
+        });
       }
     } else {
       // Keep non-document parts as-is
