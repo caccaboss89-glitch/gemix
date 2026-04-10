@@ -21,6 +21,7 @@ function _isSystemMessage(body) {
 }
 const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, limitHistoryMediaAttachments } = require('../../utils/media');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
+const { normalizeMarkdown } = require('../../utils/text');
 
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
@@ -302,7 +303,8 @@ async function sendWhatsAppResponse(chat, responseData) {
   }
 
   if (hasText) {
-    await chat.sendMessage(responseData.text);
+    const cleanedText = normalizeMarkdown(responseData.text);
+    await chat.sendMessage(cleanedText);
   }
 
   if (hasAttachments) {

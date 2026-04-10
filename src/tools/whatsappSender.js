@@ -1,4 +1,5 @@
 const { removeDiscordEmoji } = require('../utils/discord');
+const { normalizeMarkdown } = require('../utils/text');
 
 let dedicatedClient = null;
 
@@ -30,7 +31,7 @@ async function sendWhatsAppDirect(chatId, message, options = {}) {
   if (!dedicatedClient) throw new Error('Client WhatsApp dedicato non disponibile');
   // Only clean text messages; MessageMedia objects must be passed through untouched
   if (typeof message === 'string') {
-    message = removeDiscordEmoji(message);
+    message = normalizeMarkdown(removeDiscordEmoji(message));
   }
 
   await dedicatedClient.sendMessage(chatId, message, options);

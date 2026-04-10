@@ -3,6 +3,7 @@ const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { ACTIVE_MEMBERS } = require('../config/members');
 const { createLogger } = require('../utils/logger');
+const { normalizeMarkdown } = require('../utils/text');
 
 const log = createLogger('MusicWrap');
 
@@ -166,7 +167,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
       const monthName = getPreviousMonthName();
       const capitalizedMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
       const password = MUSIC_WRAP_PASSWORD || 'N/D';
-      const message = `🎵 *Wrap di ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`;
+      const message = normalizeMarkdown(`🎵 *Wrap di ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`);
       await dedicatedClient.sendMessage(member.wa, message);
       log.info(`✅ Messaggio inviato a ${member.name}`);
       state.lastSentDate[member.wa] = today;

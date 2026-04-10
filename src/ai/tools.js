@@ -386,10 +386,10 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Programma promemoria/task per te, altri membri attivi (per nome) o contatti (per telefono). Puoi programmare più task contemporaneamente (fallo per ottimizzare): passa un array di oggetti task.'
+      ? 'Programma promemoria/task per te, altri membri attivi (per nome) o contatti (per telefono). Puoi programmare più task contemporaneamente se richiesto (fallo per ottimizzare costi/tempo): passa un array di oggetti task.'
       : (isActiveMember
-        ? 'Programma promemoria/task per te o altri membri attivi (per nome). Puoi programmare più task contemporaneamente (fallo per ottimizzare): passa un array di oggetti task.'
-        : 'Programma promemoria e attività future per te. Puoi programmare più task contemporaneamente (fallo per ottimizzare): passa un array di oggetti task.'),
+        ? 'Programma promemoria/task per te o altri membri attivi (per nome). Puoi programmare più task contemporaneamente se richiesto (fallo per ottimizzare costi/tempo): passa un array di oggetti task.'
+        : 'Programma promemoria e attività future per te. Puoi programmare più task contemporaneamente se richiesto (fallo per ottimizzare costi/tempo): passa un array di oggetti task.'),
     properties: {
       tasks: {
         type: 'array',

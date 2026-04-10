@@ -5,6 +5,7 @@ const { getRomeISO } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { removeDiscordEmoji } = require('../utils/discord');
+const { normalizeMarkdown } = require('../utils/text');
 const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 
 /**
@@ -129,7 +130,7 @@ async function scheduleTasks(tasks, ctx) {
       }
     }
 
-    const cleanContent = removeDiscordEmoji(task.content).replace(/^\[GemiX\]\s*/i, '');
+    const cleanContent = normalizeMarkdown(removeDiscordEmoji(task.content).replace(/^\[GemiX\]\s*/i, ''));
 
     const newTask = {
       id: crypto.randomUUID(),

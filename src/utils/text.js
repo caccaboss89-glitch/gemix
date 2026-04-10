@@ -28,4 +28,24 @@ function stripVoiceTags(text) {
   return text.replace(VOICE_TAGS_INLINE_RE, '').replace(VOICE_TAGS_WRAP_RE, '');
 }
 
-module.exports = { sanitizeFilename, stripVoiceTags };
+/**
+ * Normalize Markdown formatting by converting double delimiters to single.
+ * WhatsApp uses single delimiters:
+ * - **text** → *text* (bold)
+ * - __text__ → _text_ (italic)
+ * - ~~text~~ → ~text~ (strikethrough)
+ * @param {string} text
+ * @returns {string}
+ */
+function normalizeMarkdown(text) {
+  if (!text || typeof text !== 'string') return text;
+  // **text** → *text* (bold)
+  text = text.replace(/\*\*([^\*]+)\*\*/g, '*$1*');
+  // __text__ → _text_ (italic)
+  text = text.replace(/__([^_]+)__/g, '_$1_');
+  // ~~text~~ → ~text~ (strikethrough)
+  text = text.replace(/~~([^~]+)~~/g, '~$1~');
+  return text;
+}
+
+module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown };
