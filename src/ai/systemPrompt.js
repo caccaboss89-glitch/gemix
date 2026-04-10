@@ -44,7 +44,7 @@ function buildSystemPrompt(ctx) {
     prompt += `Utente: ${ui.member?.name || ctx.userName || 'sconosciuto'} - ${ui.isActiveMember ? 'attivo' : 'non attivo'}\n`;
   }
 
-  prompt += `Tool: Puoi usare i tool disponibili prima di fornire la risposta finale (SEMPRE OBBLIGATORIA, tranne se usi il tool vocale). Dopo la risposta finale non potrai più usare tool. Le uniche azioni che puoi compiere (oltre a rispondere) devono essere eseguite tramite tool. Non allucinare dicendo di aver fatto qualcosa senza aver effettivamente usato il rispettivo tool.`;
+  prompt += `Tool: Puoi usare i tool disponibili prima di fornire la risposta finale (SEMPRE OBBLIGATORIA, tranne se usi il tool vocale). Dopo la risposta finale non potrai più usare tool. Puoi chiamare più tool insieme se necessario, anche dello stesso tipo, per ottimizzare costi/tempo: passa un array di oggetti con i diversi campi. Le uniche azioni che puoi compiere (oltre a rispondere) devono essere eseguite tramite tool. Non allucinare dicendo di aver fatto qualcosa senza aver effettivamente usato il rispettivo tool.`;
   if (!isActiveMember) {
     prompt += ` Alcuni tool (es. PDF, email, invio messaggi, promemoria ricorrenti) NON sono disponibili per questo utente.`;
   }
