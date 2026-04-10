@@ -67,7 +67,7 @@ function buildDedicatedWaInstructions(ctx) {
   s += ctx.isGroup
     ? `Gruppo: "${ctx.groupName || 'sconosciuto'}". Rispondi solo se taggato.\n\n`
     : `Chat privata: rispondi a ogni messaggio.\n\n`;
-  s += `Usa SOLO i seguenti markdown WA (MAI a doppi caratteri es. **testo**): *bold* _italic_ ~strike~ \`code\` > citation.\n\n`;
+  s += `IMPORTANTE usa SOLO i seguenti markdown WA (MAI a doppi caratteri es. **testo**): *bold* _italic_ ~strike~ \`code\` > citation.\n\n`;
   return s;
 }
 
@@ -83,7 +83,7 @@ function buildPersonalWaInstructions(ctx) {
     s += `Interlocutore corrente: ${ctx.userName}\n`;
   }
   s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
-  s += `Usa SOLO i seguenti markdown WA (MAI a doppi caratteri es. **testo**): *bold* _italic_ ~strike~ \`code\` > citation.\n\n`;
+  s += `IMPORTANTE usa SOLO i seguenti markdown WA (MAI a doppi caratteri es. **testo**): *bold* _italic_ ~strike~ \`code\` > citation.\n\n`;
   return s;
 }
 
