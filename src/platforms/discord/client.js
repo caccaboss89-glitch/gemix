@@ -170,8 +170,8 @@ async function onDiscordMessage(msg) {
         if (info.numpages > MAX_DOC_PAGES) {
           textBody = `[${att.name}] (troppo lungo per essere letto: ${info.numpages} pagine) ${textBody}`.trim();
         } else {
-          contentParts.push(mediaToContentPart(buffer, att.contentType));
-          textBody = `[${att.name}] ${textBody}`.trim();
+          const docText = info.text ? `\n<Trascrizione>\n${info.text.trim()}\n</Trascrizione>` : '';
+          textBody = `[${att.name}]${docText} ${textBody}`.trim();
         }
       } catch {
         textBody = `[${att.name}] ${textBody}`.trim();

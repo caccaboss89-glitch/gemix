@@ -145,8 +145,8 @@ async function buildWhatsAppHistory(chat, platform) {
               if (info.numpages > MAX_DOC_PAGES) {
                 textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${info.numpages} pagine)`.trim();
               } else {
-                mediaParts.push(mediaToContentPart(buffer, media.mimetype));
-                textContent = `${textContent} ${tag}`.trim();
+                const docText = info.text ? `\n<Trascrizione>\n${info.text.trim()}\n</Trascrizione>` : '';
+                textContent = `${textContent} ${tag}${docText}`.trim();
               }
             }
           } catch {
@@ -242,8 +242,8 @@ async function extractQuotedMessageContent(msg, chatId) {
             if (info.numpages > MAX_DOC_PAGES) {
               prefix = `[In reply to: ${tag} (troppo lungo: ${info.numpages} pagine)]\n`;
             } else {
-              prefix = `[In reply to: ${tag}]\n`;
-              mediaParts.push(mediaToContentPart(buffer, media.mimetype));
+              const docText = info.text ? ` <Trascrizione>\n${info.text.trim()}\n</Trascrizione>` : '';
+              prefix = `[In reply to: ${tag}${docText}]\n`;
             }
           } else {
             prefix = `[In reply to: ${tag}]\n`;
@@ -357,6 +357,13 @@ async function processCurrentMedia(msg) {
             reason: `documento troppo lungo: ${info.numpages} pagine, non inviato`,
           };
         }
+        return {
+          skipped: false,
+          transcription: info.text ? info.text.trim() : null,
+          mimetype: media.mimetype,
+          filename: media.filename || null,
+          tag: mediaTag(media.filename, media.mimetype),
+        };
       } catch { }
     }
 
@@ -403,6 +410,9 @@ async function buildIncomingContentParts(msg, chatId) {
     if (mediaResult.skipped) {
       const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
       textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
+    } else if (mediaResult.transcription !== undefined) {
+      const docText = mediaResult.transcription ? `\n<Trascrizione>\n${mediaResult.transcription}\n</Trascrizione>` : '';
+      textBody = `${mediaResult.tag}${docText} ${textBody}`.trim();
     } else {
       contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype));
       textBody = `${mediaResult.tag} ${textBody}`.trim();
