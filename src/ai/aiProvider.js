@@ -39,6 +39,7 @@ async function callAI(messages, tools = null) {
     messages,
     max_tokens: MAX_TOKENS,
   };
+  if (!useGemini) body.reasoning = { effort: 'high' };
   if (tools && tools.length > 0) body.tools = tools;
 
   const message = await callModel(provider, `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
