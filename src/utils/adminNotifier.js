@@ -30,7 +30,7 @@ async function notifyAdmin(source, errorMessage) {
   if (!admin) return;
 
   const timestamp = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
-  const message = `[System] ⚠️ *ERRORE API — ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
+  const message = `⚠️ *ERRORE API — ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
 
   try {
     await client.sendMessage(admin.wa, message);

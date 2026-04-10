@@ -4,6 +4,21 @@ const pdfParse = require('pdf-parse');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
+
+/**
+ * Detect if a WhatsApp message body is a system-generated notification.
+ * Used to label messages as [System] in history without requiring a physical prefix.
+ * @param {string} body
+ * @returns {boolean}
+ */
+function _isSystemMessage(body) {
+  if (!body) return false;
+  return (
+    /^\uD83D\uDE80 \*Nuova release GemiX:/.test(body) ||
+    /^\uD83C\uDFB5 \*Wrap di /.test(body) ||
+    /^\u26A0\uFE0F \*ERRORE API \u2014/.test(body)
+  );
+}
 const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, limitHistoryMediaAttachments } = require('../../utils/media');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 
@@ -31,7 +46,7 @@ async function buildWhatsAppHistory(chat, platform) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
-        } else if ((msg.body || '').startsWith('[System]')) {
+        } else if (_isSystemMessage(msg.body)) {
           senderName = '[System]';
           isSystem = true;
         } else if (hasFooter(msg.body)) {
@@ -53,7 +68,7 @@ async function buildWhatsAppHistory(chat, platform) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
-        } else if ((msg.body || '').startsWith('[System]')) {
+        } else if (_isSystemMessage(msg.body)) {
           senderName = '[System]';
           isSystem = true;
         } else {
@@ -77,7 +92,7 @@ async function buildWhatsAppHistory(chat, platform) {
     if (isScheduled) {
       textContent = removeScheduledFooter(msg.body || '');
     } else if (isSystem) {
-      textContent = (msg.body || '').replace(/^\[System\]\s*/, '');
+      textContent = msg.body || '';
     } else if (isGemiX) {
       textContent = removeFooter(msg.body || '');
     } else {

@@ -166,7 +166,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
       const monthName = getPreviousMonthName();
       const capitalizedMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
       const password = MUSIC_WRAP_PASSWORD || 'N/D';
-      const message = `[System] 🎵 *Wrap di ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`;
+      const message = `🎵 *Wrap di ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`;
       await dedicatedClient.sendMessage(member.wa, message);
       log.info(`✅ Messaggio inviato a ${member.name}`);
       state.lastSentDate[member.wa] = today;
