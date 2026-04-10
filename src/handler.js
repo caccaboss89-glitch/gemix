@@ -1,23 +1,17 @@
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
-const { getToolsForUser, getToolInstructions } = require('./ai/tools');
+const { getToolsForUser } = require('./ai/tools');
 const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { hasHistoryImages, hasHistoryDocs, hasHistoryVoices, limitHistoryMediaAttachments } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
+const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
 
 const log = createLogger('Handler');
-
-function removeToolInstructionMessages(messages) {
-  return messages.filter(m => {
-    if (m.role !== 'assistant' || typeof m.content !== 'string') return true;
-    return !m.content.startsWith('ISTRUZIONI per lo strumento');
-  });
-}
 
 function cloneHistoryStructure(history) {
   return history.map(msg => ({
@@ -166,7 +160,6 @@ async function handleMessage(ctx) {
     let lastModelUsed = null;
 
     while (rounds < MAX_TOOL_ROUNDS) {
-      messages = removeToolInstructionMessages(messages);
       rounds++;
 
       if ((responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) || (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) || (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0)) {
@@ -220,14 +213,6 @@ async function handleMessage(ctx) {
           }
 
           const toolName = tc.function.name;
-          const toolInstr = getToolInstructions(toolName);
-          messages = removeToolInstructionMessages(messages);
-          if (toolInstr && toolInstr.trim() !== '') {
-            messages.push({
-              role: 'assistant',
-              content: `ISTRUZIONI per lo strumento ${toolName}: ${toolInstr}`,
-            });
-          }
           try {
             log.info(`   Esecuzione: ${tc.function.name}`);
             const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
@@ -249,7 +234,7 @@ async function handleMessage(ctx) {
         continue;
       }
 
-      let text = assistantMsg.content || '';
+      let text = stripVoiceTags(assistantMsg.content || '');
       log.info(`✅ [${ctx.platform.toUpperCase()}] Risposta generata (${text.length} caratteri)`);
 
       if (!text.trim() && !responseCtx.isAboutMeOnly && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {

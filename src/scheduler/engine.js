@@ -7,6 +7,7 @@ const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { checkNewRelease } = require('./releaseMonitor');
 const { modifyTaskFile } = require('../utils/taskStore');
 const { createLogger } = require('../utils/logger');
+const { stripVoiceTags } = require('../utils/text');
 
 const log = createLogger('Scheduler');
 
@@ -153,7 +154,7 @@ async function checkAndExecuteTasks() {
  */
 async function executeTask(task) {
   // Deliver via destinations
-  let messageText = (task.content || '').replace(/^\[GemiX\]\s*/i, '');
+  let messageText = stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, ''));
 
   const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
   messageText += scheduledFooter;

@@ -1,5 +1,6 @@
 const PDFDocument = require('pdfkit');
 const { getRomeTime } = require('../utils/time');
+const { stripVoiceTags } = require('../utils/text');
 
 /**
  * Parse a text line into segments with bold/italic flags.
@@ -61,6 +62,8 @@ function renderInlineMarkdown(doc, text) {
  */
 function generatePdf(title, content) {
   return new Promise((resolve, reject) => {
+    title = stripVoiceTags(title);
+    content = stripVoiceTags(content);
     const doc = new PDFDocument({ margin: 50 });
     const chunks = [];
 

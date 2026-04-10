@@ -4,31 +4,6 @@ const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
 
 // Tool definitions for AI function calling (OpenAI-compatible format).
 
-const VOICE_EFFECTS_DOC = `
-EFFETTI VOCALI DISPONIBILI:
-
-Inline tags (inseriscili nel punto esatto):
-[pause] [long-pause] [hum-tune]
-[laugh] [chuckle] [giggle] [cry]
-[tsk] [tongue-click] [lip-smack]
-[breath] [inhale] [exhale] [sigh]
-
-Wrapping tags (avvolgi il testo):
-<soft> <whisper> <loud> <build-intensity> <decrease-intensity>
-<higher-pitch> <lower-pitch> <slow> <fast>
-<sing-song> <singing> <laugh-speak> <emphasis>
-
-Esempio: "Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!"`;
-
-const TOOL_INSTRUCTIONS = {
-  image_search: `Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
-  send_voice_message: `${VOICE_EFFECTS_DOC} Non scrivere mai "TRASCRIZIONE" nel vocale (lo aggiungerà il sistema).`,
-  generate_pdf: `Genera PDF che verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
-  generate_formal_request_pdf: `Genera PDF per richiesta formale (Art. 6 Statuto). Le sezioni sono predefinite e standardizzate. Nei NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente.`,
-  schedule_tasks: `Puoi programmare più task contemporaneamente se richiesto (fallo per ottimizzare): passa un array di oggetti task con content e scheduledAt.`,
-  update_memory: `Se sono già presenti informazioni in memoria riscrivile uguali aggiungendo quello che devi aggiungere. Se memoria quasi piena, compatta le informazioni o chiedi all'utente/agli utenti cosa rimuovere.`
-};
-
 // ── send_about_me: allowed una sola volta per chat (persistito su file) ──
 
 const sendAboutMeUsedByChat = new Set();
@@ -74,10 +49,6 @@ _loadSendAboutMeState();
 
 // ── Helpers ──
 
-function getToolInstructions(name) {
-  return TOOL_INSTRUCTIONS[name] || null;
-}
-
 function makeTool({ name, description, properties = {}, required = [] }) {
   const tool = {
     type: 'function',
@@ -110,7 +81,7 @@ const TOOL_WEB_SEARCH = makeTool({
 
 const TOOL_IMAGE_SEARCH = makeTool({
   name: 'image_search',
-  description: 'Cerca immagini sul web.',
+  description: 'Cerca immagini sul web, vengono accumulate e allegate insieme alla risposta finale o tramite i tool di consegna.',
   properties: {
     query: { type: 'string', description: 'Query' },
     count: { type: 'integer', description: 'Quantità (1-4, default 1)' },
@@ -177,7 +148,7 @@ const TOOL_FETCH_WEBPAGE = makeTool({
 
 const TOOL_GENERATE_PDF = makeTool({
   name: 'generate_pdf',
-  description: 'Genera PDF da testo.',
+  description: 'Genera PDF da testo. Verrà accumulato e allegato insieme alla risposta finale o tramite i tool di consegna.',
   properties: {
     title: { type: 'string', description: 'Titolo' },
     content: {
@@ -196,7 +167,7 @@ const TOOL_READ_MUSIC_STATS = makeTool({
 
 const TOOL_UPDATE_MEMORY = makeTool({
   name: 'update_memory',
-  description: 'Aggiorna memoria personalizzata (privata o di gruppo in base alla chat).',
+  description: 'Aggiorna memoria personalizzata (privata o di gruppo in base alla chat). Se sono già presenti informazioni riscrivile uguali aggiungendo quello che devi aggiungere. Se memoria quasi piena chiedi all\'utente cosa rimuovere.',
   properties: {
     content: {
       type: 'string',
@@ -220,7 +191,7 @@ const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
 
 const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
   name: 'generate_formal_request_pdf',
-  description: 'Genera PDF per richiesta formale (Art. 6 Statuto Albertino).',
+  description: 'Genera PDF per richiesta formale. NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente.',
   properties: {
     fullName: { type: 'string', description: 'Nome e Cognome del richiedente' },
     title: { type: 'string', description: 'Titolo della Richiesta' },
@@ -237,7 +208,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   const properties = {
     text: {
       type: 'string',
-      description: 'Testo TTS (max 1000 char, supporta tag effetti vocali)',
+      description: 'Testo TTS (max 1000 char), supporta effetti vocali. Tag inline: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Tag avvolgenti: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.',
     },
   };
 
@@ -268,7 +239,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Invia messaggio vocale.',
+    description: 'Tool di consegna - Invia messaggio vocale.',
     properties,
     required: ['text'],
   });
@@ -305,7 +276,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Invia messaggio WhatsApp.',
+    description: 'Tool di consegna - Invia messaggio WhatsApp.',
     properties,
     required: isAdmin ? ['message'] : ['recipient', 'message'],
   });
@@ -343,7 +314,7 @@ function buildEmailTool(isAdmin) {
 
   return makeTool({
     name: 'send_email',
-    description: 'Invia email.',
+    description: 'Tool di consegna - Invia email.',
     properties,
     required: isAdmin ? ['subject', 'body'] : ['recipient', 'subject', 'body'],
   });
@@ -415,10 +386,10 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Programma promemoria/task per te, altri membri attivi (per nome) o contatti (per telefono).'
+      ? 'Programma promemoria/task per te, altri membri attivi (per nome) o contatti (per telefono). Puoi programmare più task contemporaneamente (fallo per ottimizzare): passa un array di oggetti task.'
       : (isActiveMember
-        ? 'Programma promemoria/task per te o altri membri attivi (per nome).'
-        : 'Programma promemoria e attività future per te.'),
+        ? 'Programma promemoria/task per te o altri membri attivi (per nome). Puoi programmare più task contemporaneamente (fallo per ottimizzare): passa un array di oggetti task.'
+        : 'Programma promemoria e attività future per te. Puoi programmare più task contemporaneamente (fallo per ottimizzare): passa un array di oggetti task.'),
     properties: {
       tasks: {
         type: 'array',
@@ -542,6 +513,5 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 module.exports = {
   getToolsForUser,
   isActiveMemberOnlyTool,
-  getToolInstructions,
   _markSendAboutMeUsed,
 };
