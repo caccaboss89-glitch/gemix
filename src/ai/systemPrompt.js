@@ -50,7 +50,7 @@ function buildSystemPrompt(ctx) {
   }
   prompt += `\n`;
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-    prompt += `- Preferenze: Rispondi con messaggio vocale se il tuo messaggio è breve con send_voice_message, preferisci risposte testuali se il tuo messaggio è medio/lungo, tecnico o include dati. Non usare sempre la stessa forma di risposta, equilibrati guardando i tuoi precedenti messaggi in cronologia. I tuoi vocali in cronologia sono etichettati dal sistema con "TRASCRIZIONE:".\n`;
+    prompt += `- Preferenze: Rispondi con messaggio vocale se il tuo messaggio è breve con send_voice_message, preferisci risposte testuali (con qualche emoji) se il tuo messaggio è medio/lungo, tecnico o include dati. Non usare sempre la stessa forma di risposta, equilibrati guardando i tuoi precedenti messaggi in cronologia. I tuoi vocali in cronologia sono etichettati dal sistema con "TRASCRIZIONE:".\n`;
     if (isActiveMember) {
       prompt += `- Richieste formali: Puoi leggere il regolamento e generare PDF generici ma per richieste formali, consiglia l'utente di andare su Discord dove GemiX — Divisione Legale può generare documenti nel formato standardizzato previsto.\n`;
     }
