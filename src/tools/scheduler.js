@@ -152,7 +152,7 @@ async function scheduleTasks(tasks, ctx) {
 
     const destStr = Object.keys(destinations).join(', ');
     const recLabel = recurrence ? ` 🔁${recurrence.freq} fino ${recurrence.endAt}` : '';
-    results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${task.scheduledAt} [${destStr}]${recLabel} (ID: ${newTask.id})`);
+    results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${task.scheduledAt} [${destStr}]${recLabel}`);
   }
 
   return results.join('\n');

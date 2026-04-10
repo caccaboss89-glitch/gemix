@@ -20,28 +20,12 @@ Wrapping tags (avvolgi il testo):
 
 Esempio: "Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!"`;
 
-const CALL_ONLY = '';
-
 const TOOL_INSTRUCTIONS = {
-  web_search: CALL_ONLY,
-  fetch_webpage: CALL_ONLY,
-  image_search: `${CALL_ONLY} Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
-  include_history_images: CALL_ONLY,
-  include_history_docs: CALL_ONLY,
-  include_history_voices: CALL_ONLY,
-  send_voice_message: `${CALL_ONLY} ${VOICE_EFFECTS_DOC} Non scrivere mai "TRASCRIZIONE" nel vocale (lo aggiungerà il sistema).`,
-  schedule_tasks: CALL_ONLY,
-  read_my_tasks: CALL_ONLY,
-  remove_my_tasks: CALL_ONLY,
-  read_server_rules: CALL_ONLY,
-  generate_pdf: `${CALL_ONLY} Genera PDF che verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
-  generate_formal_request_pdf: `${CALL_ONLY} Genera PDF per richiesta formale (Art. 6 Statuto). Le sezioni sono predefinite e standardizzate. Nella motivazione NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente dal titolo.`,
-  send_email: CALL_ONLY,
-  send_whatsapp_message: CALL_ONLY,
-  read_music_stats: CALL_ONLY,
-  update_memory: `${CALL_ONLY} Se memoria quasi piena, compatta le informazioni o chiedi all'utente/agli utenti cosa rimuovere.`,
-  toggle_release_notify: CALL_ONLY,
-  update_thread_title: CALL_ONLY,
+  image_search: `Le immagini trovate vengono accumulate nel buffer e allegati insieme alla risposta o tramite i tool di consegna (WhatsApp/email).`,
+  send_voice_message: `${VOICE_EFFECTS_DOC} Non scrivere mai "TRASCRIZIONE" nel vocale (lo aggiungerà il sistema).`,
+  generate_pdf: `Genera PDF che verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
+  generate_formal_request_pdf: `Genera PDF per richiesta formale (Art. 6 Statuto). Le sezioni sono predefinite e standardizzate. Nei NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente.`,
+  update_memory: `Se sono già presenti informazioni in memoria riscrivile uguali aggiungendo quello che devi aggiungere. Se memoria quasi piena, compatta le informazioni o chiedi all'utente/agli utenti cosa rimuovere.`
 };
 
 // ── send_about_me: allowed una sola volta per chat (persistito su file) ──

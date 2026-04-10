@@ -81,7 +81,7 @@ function buildPersonalWaInstructions(ctx) {
   s += `Rispondi solo se taggato.\n`; if (ctx.userName) {
     s += `Interlocutore corrente: ${ctx.userName}\n`;
   } s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
-  s += `Usa SOLO markdown WA (a caratteri singoli, NON doppi es. ** testo **): *bold* _italic_ ~strike~ \`code\`.\n\n`;
+  s += `Usa SOLO i seguenti precisi markdown WA: *bold* _italic_ ~strike~ \`code\` > citation.\n\n`;
   return s;
 }
 
