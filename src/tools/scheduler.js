@@ -138,10 +138,6 @@ async function scheduleTasks(tasks, ctx) {
       createdAt: getRomeISO(),
       createdBy: ctx.userName || ctx.userId,
       destinations,
-      pdf: task.pdf && task.pdf.content ? {
-        title: task.pdf.title || 'Documento',
-        content: task.pdf.content,
-      } : null,
       ...(recurrence && { recurrence }),
     };
 

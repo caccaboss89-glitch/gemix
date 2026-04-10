@@ -1,14 +1,11 @@
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
-const { generatePdf } = require('../tools/pdfGenerator');
 const { getRomeISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { checkNewRelease } = require('./releaseMonitor');
-const { sanitizeFilename } = require('../utils/text');
 const { modifyTaskFile } = require('../utils/taskStore');
-const { MessageMedia } = require('whatsapp-web.js');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('Scheduler');
@@ -157,13 +154,6 @@ async function checkAndExecuteTasks() {
 async function executeTask(task) {
   // Deliver via destinations
   let messageText = (task.content || '').replace(/^\[GemiX\]\s*/i, '');
-  let attachments = [];
-
-  if (task.pdf && task.pdf.content) {
-    const pdfBuffer = await generatePdf(task.pdf.title || 'Documento', task.pdf.content);
-    const pdfName = `${sanitizeFilename(task.pdf.title || 'documento')}.pdf`;
-    attachments.push({ name: pdfName, buffer: pdfBuffer, mimetype: 'application/pdf' });
-  }
 
   const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
   messageText += scheduledFooter;
@@ -173,11 +163,6 @@ async function executeTask(task) {
   if (dest.whatsapp && dedicatedClient) {
     try {
       await dedicatedClient.sendMessage(dest.whatsapp, messageText);
-      for (const att of attachments) {
-        const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
-        const opts = att.isVoice ? { sendAudioAsVoice: true } : {};
-        await dedicatedClient.sendMessage(dest.whatsapp, media, opts);
-      }
     } catch (err) {
       log.error(`Errore invio WA privato ${dest.whatsapp}:`, err.message);
     }
@@ -186,11 +171,6 @@ async function executeTask(task) {
   if (dest.whatsappGroup && dedicatedClient) {
     try {
       await dedicatedClient.sendMessage(dest.whatsappGroup, messageText);
-      for (const att of attachments) {
-        const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
-        const opts = att.isVoice ? { sendAudioAsVoice: true } : {};
-        await dedicatedClient.sendMessage(dest.whatsappGroup, media, opts);
-      }
     } catch (err) {
       log.error(`Errore invio WA gruppo ${dest.whatsappGroup}:`, err.message);
     }
