@@ -44,7 +44,7 @@ function buildSystemPrompt(ctx) {
     prompt += `Utente: ${ui.member?.name || ctx.userName || 'sconosciuto'} - ${ui.isActiveMember ? 'attivo' : 'non attivo'}\n`;
   }
 
-  prompt += `Tool: Puoi usare i tool disponibili prima di fornire la risposta finale (SEMPRE OBBLIGATORIA tranne se usi il tool vocale), se ti viene chiesto di programmare un messaggio fallo chiamando l'apposito tool.`;
+  prompt += `Tool: Puoi usare i tool disponibili PRIMA di fornire la risposta finale (SEMPRE OBBLIGATORIA tranne se usi il tool vocale), dopo non potrai più farlo.`;
   if (!isActiveMember) {
     prompt += ` Alcuni tool (es. PDF, email, invio messaggi, promemoria ricorrenti) NON sono disponibili per questo utente.`;
   }
