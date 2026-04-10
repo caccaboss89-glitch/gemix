@@ -148,7 +148,7 @@ const TOOL_FETCH_WEBPAGE = makeTool({
 
 const TOOL_GENERATE_PDF = makeTool({
   name: 'generate_pdf',
-  description: 'Genera PDF da testo. Verrà accumulato e allegato insieme alla risposta finale o tramite i tool di consegna.',
+  description: 'Genera PDF da testo. Verrà accumulato e allegato insieme alla risposta finale o tramite i tool di consegna. Il footer "Generato da GemiX..." verrà creato dal programma, non lo includere.',
   properties: {
     title: { type: 'string', description: 'Titolo' },
     content: {
@@ -191,7 +191,7 @@ const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
 
 const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
   name: 'generate_formal_request_pdf',
-  description: 'Genera PDF per richiesta formale. NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente.',
+  description: 'Genera PDF per richiesta formale. NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente. Il footer "Generato da GemiX..." verrà creato dal programma, non lo includere.',
   properties: {
     fullName: { type: 'string', description: 'Nome e Cognome del richiedente' },
     title: { type: 'string', description: 'Titolo della Richiesta' },

@@ -5,7 +5,7 @@ const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { hasHistoryImages, hasHistoryDocs, hasHistoryVoices, limitHistoryMediaAttachments } = require('./utils/media');
+const { hasHistoryImages, hasHistoryDocs, hasHistoryVoices, limitHistoryMediaAttachments, transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
@@ -139,6 +139,8 @@ async function handleMessage(ctx) {
       });
 
       for (const entry of userMultimodalEntries) {
+        // Transcribe documents in history entries before adding
+        entry.content = await transcribeDocumentsInMessageContent(entry.content);
         messages.push(entry);
       }
 
@@ -148,7 +150,9 @@ async function handleMessage(ctx) {
       });
     }
 
-    messages.push({ role: 'user', content: ctx.content });
+    // Transcribe documents in ctx.content before adding
+    const transcribedUserContent = await transcribeDocumentsInMessageContent(ctx.content);
+    messages.push({ role: 'user', content: transcribedUserContent });
 
 
     const deliveryCtx = {
@@ -171,7 +175,9 @@ async function handleMessage(ctx) {
         }
         if (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) {
           includeList.push({ type: 'text', text: `[Richiesta documenti cronologia]` });
-          includeList.push(...responseCtx.historyDocsToInclude);
+          // Transcribe documents before adding them
+          const transcribedDocs = await transcribeDocumentsInMessageContent(responseCtx.historyDocsToInclude);
+          includeList.push(...(Array.isArray(transcribedDocs) ? transcribedDocs : [transcribedDocs]));
           responseCtx.historyDocsToInclude = [];
         }
         if (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0) {

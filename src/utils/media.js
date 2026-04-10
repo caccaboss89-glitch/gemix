@@ -1,4 +1,5 @@
-const { SUPPORTED_MEDIA, UNSUPPORTED_MEDIA } = require('../config/constants');
+const { SUPPORTED_MEDIA, UNSUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
+const pdfParse = require('pdf-parse');
 
 /**
  * Check if a media type is supported by the AI.
@@ -16,6 +17,55 @@ function isSupportedMedia(type) {
  */
 function isUnsupportedMedia(type) {
   return UNSUPPORTED_MEDIA.includes(type);
+}
+
+/**
+ * Extract text transcription from a PDF document content part (base64).
+ * Used to convert binary PDFs to text before sending to AI provider.
+ * @param {object} contentPart - Content part with type='image_url' containing PDF base64
+ * @returns {Promise<{success: boolean, text?: string, error?: string}>} Transcription result
+ */
+async function transcribeDocumentFromContentPart(contentPart) {
+  try {
+    if (!contentPart || !contentPart.image_url || !contentPart.image_url.url) {
+      return { success: false, error: 'Invalid content part structure' };
+    }
+
+    const dataUrl = contentPart.image_url.url;
+    const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+    if (!match) {
+      return { success: false, error: 'Invalid base64 data URI format' };
+    }
+
+    const mimetype = match[1].toLowerCase();
+    const base64Data = match[2];
+
+    // Only transcribe PDFs for now
+    if (mimetype !== 'application/pdf') {
+      return { success: false, error: `Unsupported document type: ${mimetype}` };
+    }
+
+    const buffer = Buffer.from(base64Data, 'base64');
+    const info = await pdfParse(buffer);
+
+    if (!info || !info.text) {
+      return { success: false, error: 'PDF parse returned no text' };
+    }
+
+    if (info.numpages > MAX_DOC_PAGES) {
+      return {
+        success: true,
+        text: `[Documento troppo lungo per essere trascritto: ${info.numpages} pagine (max ${MAX_DOC_PAGES})]`,
+      };
+    }
+
+    return {
+      success: true,
+      text: info.text.trim(),
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 }
 
 /**
@@ -42,6 +92,58 @@ function mediaTag(filename, mimetype) {
   if (filename) return `[${filename}]`;
   const ext = (mimetype || '').split('/')[1] || 'file';
   return `[file.${ext}]`;
+}
+
+/**
+ * Transcribe all documents in a message content array.
+ * Replaces PDF content parts with text transcriptions.
+ * Used to ensure documents are always transcribed before sending to AI.
+ * @param {Array|string} content - Message content (can be string or array of parts)
+ * @returns {Promise<Array|string>} Transcribed content
+ */
+async function transcribeDocumentsInMessageContent(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return content;
+  }
+
+  const transcribed = [];
+
+  for (const part of content) {
+    if (!part) {
+      transcribed.push(part);
+      continue;
+    }
+
+    // Check if this is a document content part
+    if (_getMediaTypeFromContentPart(part) === 'document') {
+      const result = await transcribeDocumentFromContentPart(part);
+      if (result.success && result.text) {
+        // Replace document with text containing transcription
+        transcribed.push({
+          type: 'text',
+          text: `<Trascrizione>\n${result.text}\n</Trascrizione>`,
+        });
+      } else {
+        // If transcription fails, keep original and add error note
+        transcribed.push(part);
+        if (result.error) {
+          transcribed.push({
+            type: 'text',
+            text: `⚠️ Errore trascrizione documento: ${result.error}`,
+          });
+        }
+      }
+    } else {
+      // Keep non-document parts as-is
+      transcribed.push(part);
+    }
+  }
+
+  return transcribed;
 }
 
 function _getMediaTypeFromContentPart(part) {
@@ -237,6 +339,8 @@ module.exports = {
   isUnsupportedMedia,
   mediaToContentPart,
   mediaTag,
+  transcribeDocumentFromContentPart,
+  transcribeDocumentsInMessageContent,
   hasHistoryImages,
   hasHistoryDocs,
   hasHistoryVoices,
