@@ -20,7 +20,7 @@ Wrapping tags (avvolgi il testo):
 
 Esempio: "Ciao! <soft>Benvenuto nel futuro della voce.</soft> [laugh] Questo è incredibile!"`;
 
-const CALL_ONLY = 'Rispondi solo con la chiamata al tool.';
+const CALL_ONLY = '';
 
 const TOOL_INSTRUCTIONS = {
   web_search: CALL_ONLY,
