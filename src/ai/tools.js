@@ -25,7 +25,7 @@ const TOOL_INSTRUCTIONS = {
   send_voice_message: `${VOICE_EFFECTS_DOC} Non scrivere mai "TRASCRIZIONE" nel vocale (lo aggiungerà il sistema).`,
   generate_pdf: `Genera PDF che verrà accumulato nel buffer e allegato insieme alla risposta o tramite i tool di consegna (WhatsApp/email)`,
   generate_formal_request_pdf: `Genera PDF per richiesta formale (Art. 6 Statuto). Le sezioni sono predefinite e standardizzate. Nei NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente.`,
-  schedule_tasks: `Puoi programmare più task contemporaneamente se richiesto: passa un array di oggetti task con content e scheduledAt.`,
+  schedule_tasks: `Puoi programmare più task contemporaneamente se richiesto (fallo per ottimizzare): passa un array di oggetti task con content e scheduledAt.`,
   update_memory: `Se sono già presenti informazioni in memoria riscrivile uguali aggiungendo quello che devi aggiungere. Se memoria quasi piena, compatta le informazioni o chiedi all'utente/agli utenti cosa rimuovere.`
 };
 
@@ -416,7 +416,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     name: 'schedule_tasks',
     description: isAdmin
       ? 'Programma promemoria/task per te, altri membri attivi (per nome) o contatti (per telefono).'
-      : (isActiveMember 
+      : (isActiveMember
         ? 'Programma promemoria/task per te o altri membri attivi (per nome).'
         : 'Programma promemoria e attività future per te.'),
     properties: {

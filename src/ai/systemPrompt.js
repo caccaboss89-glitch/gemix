@@ -67,7 +67,7 @@ function buildDedicatedWaInstructions(ctx) {
   s += ctx.isGroup
     ? `Gruppo: "${ctx.groupName || 'sconosciuto'}". Rispondi solo se taggato.\n\n`
     : `Chat privata: rispondi a ogni messaggio.\n\n`;
-  s += `Usa markdown WA (singoli): *bold* _italic_ ~strike~ \`code\` (NON doppi es. ** testo **).\n\n`;
+  s += `Usa SOLO i seguenti precisi markdown WA: *bold* _italic_ ~strike~ \`code\` > citation.\n\n`;
   return s;
 }
 
@@ -78,9 +78,11 @@ function buildDedicatedWaInstructions(ctx) {
  */
 function buildPersonalWaInstructions(ctx) {
   let s = `### Piattaforma: WhatsApp (Account Personale)\n`;
-  s += `Rispondi solo se taggato.\n`; if (ctx.userName) {
+  s += `Rispondi solo se taggato.\n`;
+  if (ctx.userName) {
     s += `Interlocutore corrente: ${ctx.userName}\n`;
-  } s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
+  }
+  s += `Nella cronologia, i messaggi di Alberto con [GemiX] sono tuoi.\n\n`;
   s += `Usa SOLO i seguenti precisi markdown WA: *bold* _italic_ ~strike~ \`code\` > citation.\n\n`;
   return s;
 }
