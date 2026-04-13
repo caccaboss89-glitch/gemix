@@ -1,6 +1,5 @@
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
-const pdfParse = require('pdf-parse');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
@@ -19,7 +18,7 @@ function _isSystemMessage(body) {
     /^\u26A0\uFE0F \*ERRORE API \u2014/.test(body)
   );
 }
-const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, limitHistoryMediaAttachments } = require('../../utils/media');
+const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, limitHistoryMediaAttachments } = require('../../utils/media');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const { normalizeMarkdown } = require('../../utils/text');
 
@@ -142,11 +141,13 @@ async function buildWhatsAppHistory(chat, platform) {
             const media = await msg.downloadMedia();
             if (media) {
               const buffer = Buffer.from(media.data, 'base64');
-              const info = await pdfParse(buffer);
-              if (info.numpages > MAX_DOC_PAGES) {
-                textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${info.numpages} pagine)`.trim();
+              const info = await extractTextFromPdfBuffer(buffer);
+              if (!info.success) {
+                textContent = `${textContent} ${tag}`.trim();
+              } else if (info.pages > MAX_DOC_PAGES) {
+                textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${info.pages} pagine)`.trim();
               } else {
-                const docText = info.text ? `\n<Trascrizione>\n${info.text.trim()}\n</Trascrizione>` : '';
+                const docText = info.text ? `\n<Trascrizione>\n${info.text}\n</Trascrizione>` : '';
                 textContent = `${textContent} ${tag}${docText}`.trim();
               }
             }
@@ -239,11 +240,13 @@ async function extractQuotedMessageContent(msg, chatId) {
           const media = await quoted.downloadMedia();
           if (media) {
             const buffer = Buffer.from(media.data, 'base64');
-            const info = await pdfParse(buffer);
-            if (info.numpages > MAX_DOC_PAGES) {
-              prefix = `[In reply to: ${tag} (troppo lungo: ${info.numpages} pagine)]\n`;
+            const info = await extractTextFromPdfBuffer(buffer);
+            if (!info.success) {
+              prefix = `[In reply to: ${tag}]\n`;
+            } else if (info.pages > MAX_DOC_PAGES) {
+              prefix = `[In reply to: ${tag} (troppo lungo: ${info.pages} pagine)]\n`;
             } else {
-              const docText = info.text ? ` <Trascrizione>\n${info.text.trim()}\n</Trascrizione>` : '';
+              const docText = info.text ? ` <Trascrizione>\n${info.text}\n</Trascrizione>` : '';
               prefix = `[In reply to: ${tag}${docText}]\n`;
             }
           } else {
@@ -351,17 +354,26 @@ async function processCurrentMedia(msg) {
 
     if (media.mimetype === 'application/pdf') {
       try {
-        const info = await pdfParse(buffer);
-        if (info.numpages > MAX_DOC_PAGES) {
+        const info = await extractTextFromPdfBuffer(buffer);
+        if (!info.success) {
+          return {
+            skipped: false,
+            transcription: null,
+            mimetype: media.mimetype,
+            filename: media.filename || null,
+            tag: mediaTag(media.filename, media.mimetype),
+          };
+        }
+        if (info.pages > MAX_DOC_PAGES) {
           return {
             skipped: true,
             tag: mediaTag(media.filename, media.mimetype),
-            reason: `documento troppo lungo: ${info.numpages} pagine, non inviato`,
+            reason: `documento troppo lungo: ${info.pages} pagine, non inviato`,
           };
         }
         return {
           skipped: false,
-          transcription: info.text ? info.text.trim() : null,
+          transcription: info.text ? info.text : null,
           mimetype: media.mimetype,
           filename: media.filename || null,
           tag: mediaTag(media.filename, media.mimetype),

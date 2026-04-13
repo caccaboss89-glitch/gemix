@@ -1,5 +1,8 @@
 const { SUPPORTED_MEDIA, UNSUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
-const pdfParse = require('pdf-parse');
+const { convert } = require('@opendataloader/pdf');
+const fs = require('fs').promises;
+const os = require('os');
+const path = require('path');
 
 /**
  * Check if a media type is supported by the AI.
@@ -46,22 +49,22 @@ async function transcribeDocumentFromContentPart(contentPart) {
     }
 
     const buffer = Buffer.from(base64Data, 'base64');
-    const info = await pdfParse(buffer);
+    const info = await extractTextFromPdfBuffer(buffer);
 
-    if (!info || !info.text) {
-      return { success: false, error: 'PDF parse returned no text' };
+    if (!info || !info.success || !info.text) {
+      return { success: false, error: info?.error || 'OpenDataLoader ha restituito testo non valido' };
     }
 
-    if (info.numpages > MAX_DOC_PAGES) {
+    if (info.pages > MAX_DOC_PAGES) {
       return {
         success: true,
-        text: `[Documento troppo lungo per essere trascritto: ${info.numpages} pagine (max ${MAX_DOC_PAGES})]`,
+        text: `[Documento troppo lungo per essere trascritto: ${info.pages} pagine (max ${MAX_DOC_PAGES})]`,
       };
     }
 
     return {
       success: true,
-      text: info.text.trim(),
+      text: info.text,
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -83,6 +86,87 @@ function mediaToContentPart(buffer, mimetype) {
     type: 'image_url',
     image_url: { url: `data:${cleanMime};base64,${base64}` },
   };
+}
+
+async function extractTextFromPdfBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return { success: false, error: 'Buffer PDF non valido' };
+  }
+
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gemix-pdf-'));
+  const inputPdf = path.join(workDir, 'document.pdf');
+  const outputDir = path.join(workDir, 'out');
+
+  try {
+    await fs.writeFile(inputPdf, buffer);
+    await fs.mkdir(outputDir, { recursive: true });
+
+    await convert([inputPdf], {
+      outputDir,
+      format: 'text,markdown,json',
+    });
+
+    const baseName = path.basename(inputPdf, '.pdf');
+    const markdownPath = path.join(outputDir, `${baseName}.md`);
+    const textPath = path.join(outputDir, `${baseName}.txt`);
+    const jsonPath = path.join(outputDir, `${baseName}.json`);
+
+    let text = '';
+    if (await _fileExists(markdownPath)) {
+      text = await fs.readFile(markdownPath, 'utf8');
+    } else if (await _fileExists(textPath)) {
+      text = await fs.readFile(textPath, 'utf8');
+    }
+
+    let pages = 0;
+    if (await _fileExists(jsonPath)) {
+      const rawJson = await fs.readFile(jsonPath, 'utf8');
+      const jsonData = JSON.parse(rawJson);
+      pages = _pdfPageCountFromJson(jsonData);
+      if (!text) {
+        text = _textFromJson(jsonData);
+      }
+    }
+
+    if (!text) {
+      return { success: false, error: 'OpenDataLoader non ha restituito testo' };
+    }
+
+    return { success: true, text: text.trim(), pages };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  } finally {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function _fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function _pdfPageCountFromJson(jsonData) {
+  if (!Array.isArray(jsonData)) return 0;
+  return jsonData.reduce((max, item) => {
+    const page = Number(item['page number'] ?? item.page ?? 0);
+    return Number.isFinite(page) && page > max ? page : max;
+  }, 0);
+}
+
+function _textFromJson(jsonData) {
+  if (!Array.isArray(jsonData)) return '';
+  return jsonData
+    .map(item => {
+      if (typeof item.content === 'string') return item.content;
+      if (typeof item.text === 'string') return item.text;
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /**
@@ -340,6 +424,7 @@ module.exports = {
   isUnsupportedMedia,
   mediaToContentPart,
   mediaTag,
+  extractTextFromPdfBuffer,
   transcribeDocumentFromContentPart,
   transcribeDocumentsInMessageContent,
   hasHistoryImages,

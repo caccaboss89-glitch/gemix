@@ -4,8 +4,7 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } 
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const pdfParse = require('pdf-parse');
-const { mediaToContentPart, limitHistoryMediaAttachments } = require('../../utils/media');
+const { mediaToContentPart, extractTextFromPdfBuffer, limitHistoryMediaAttachments } = require('../../utils/media');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
@@ -166,11 +165,13 @@ async function onDiscordMessage(msg) {
       try {
         const res = await fetch(att.url);
         const buffer = Buffer.from(await res.arrayBuffer());
-        const info = await pdfParse(buffer);
-        if (info.numpages > MAX_DOC_PAGES) {
-          textBody = `[${att.name}] (troppo lungo per essere letto: ${info.numpages} pagine) ${textBody}`.trim();
+        const info = await extractTextFromPdfBuffer(buffer);
+        if (!info.success) {
+          textBody = `[${att.name}] ${textBody}`.trim();
+        } else if (info.pages > MAX_DOC_PAGES) {
+          textBody = `[${att.name}] (troppo lungo per essere letto: ${info.pages} pagine) ${textBody}`.trim();
         } else {
-          const docText = info.text ? `\n<Trascrizione>\n${info.text.trim()}\n</Trascrizione>` : '';
+          const docText = info.text ? `\n<Trascrizione>\n${info.text}\n</Trascrizione>` : '';
           textBody = `[${att.name}]${docText} ${textBody}`.trim();
         }
       } catch {
@@ -358,9 +359,11 @@ async function buildDiscordHistory(channel, starterMessageId) {
         try {
           const res = await fetch(att.url);
           const buffer = Buffer.from(await res.arrayBuffer());
-          const info = await pdfParse(buffer);
-          if (info.numpages > MAX_DOC_PAGES) {
-            textContent = `${textContent} [${att.name}] (troppo lungo per essere letto: ${info.numpages} pagine)`.trim();
+          const info = await extractTextFromPdfBuffer(buffer);
+          if (!info.success) {
+            textContent = `${textContent} [${att.name}]`.trim();
+          } else if (info.pages > MAX_DOC_PAGES) {
+            textContent = `${textContent} [${att.name}] (troppo lungo per essere letto: ${info.pages} pagine)`.trim();
           } else {
             mediaParts.push(mediaToContentPart(buffer, att.contentType));
             textContent = `${textContent} [${att.name}]`.trim();
