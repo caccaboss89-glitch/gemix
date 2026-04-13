@@ -1,5 +1,4 @@
 const { SUPPORTED_MEDIA, UNSUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
-const { convert } = require('@opendataloader/pdf');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -101,6 +100,7 @@ async function extractTextFromPdfBuffer(buffer) {
     await fs.writeFile(inputPdf, buffer);
     await fs.mkdir(outputDir, { recursive: true });
 
+    const { convert } = await import('@opendataloader/pdf');
     await convert([inputPdf], {
       outputDir,
       format: 'markdown,text,json',
