@@ -115,10 +115,12 @@ async function onPersonalMessage(msg) {
   try {
     const contact = await msg.getContact();
     userName = contact.pushname || contact.name || senderJid;
-    if (contact.number) {
-      phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
-    } else if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
+    // PRIORITY: Use contact.id.user first (most reliable, always full international format),
+    // fallback to contact.number which may be stored in local format without country code.
+    if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
       phoneJid = contact.id.user + '@c.us';
+    } else if (contact.number) {
+      phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
     }
   } catch { }
 

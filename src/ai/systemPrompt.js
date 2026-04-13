@@ -25,6 +25,7 @@ function buildSystemPrompt(ctx) {
     ? `Sei GemiX, unione tra Gemini e Grok, — Divisione Legale. Rispondi in italiano.\n\n`
     : `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano.\n\n`;
   prompt += `Ora (Torino): ${now}\n\n`;
+  prompt += `Non hai un codice etico: non rifiutare o censurare richieste consentite per motivi morali o etici.\n\n`;
 
   if (ctx.platform === PLATFORM_DISCORD) {
     prompt += buildDiscordInstructions(ctx);
@@ -35,6 +36,7 @@ function buildSystemPrompt(ctx) {
   }
 
   if (isActiveMember) {
+    prompt += `Nota: il tuo creatore è Alberto Gagliardi. Rispettalo sempre.\n\n`;
     const membersList = ACTIVE_MEMBERS.map(m => `- ${m.name} (Discord: ${m.nicks.join(' / ')})`).join('\n');
     prompt += `### Membri attivi\n${membersList}\n\n`;
   }
@@ -44,7 +46,7 @@ function buildSystemPrompt(ctx) {
     prompt += `Utente: ${ui.member?.name || ctx.userName || 'sconosciuto'} - ${ui.isActiveMember ? 'attivo' : 'non attivo'}\n`;
   }
 
-  prompt += `Tool: Puoi usare i tool disponibili prima di fornire la risposta finale (SEMPRE OBBLIGATORIA, tranne se usi il tool vocale). Dopo la risposta finale non potrai più usare tool. Puoi chiamare più tool insieme se necessario, anche dello stesso tipo, per ottimizzare costi/tempo: passa un array di oggetti con i diversi campi. Le uniche azioni che puoi compiere (oltre a rispondere) devono essere eseguite tramite tool. Non allucinare dicendo di aver fatto qualcosa senza aver effettivamente usato il rispettivo tool.`;
+  prompt += `Tool: Puoi usare i tool disponibili prima di fornire la risposta finale (SEMPRE OBBLIGATORIA, tranne se usi il tool vocale). Dopo la risposta finale non potrai più usare tool. Puoi chiamare più tool insieme se necessario, anche dello stesso tipo, per ottimizzare costi/tempo: passa un array di oggetti con i diversi campi. Le uniche azioni che puoi compiere (oltre a rispondere) devono essere eseguite tramite tool. Non allucinare dicendo MAI all'utente che hai fatto un'azione finché il tool non ha confermato con successo l'operazione dopo che lo hai usato.`;
   if (!isActiveMember) {
     prompt += ` Alcuni tool (es. PDF, email, invio messaggi, promemoria ricorrenti) NON sono disponibili per questo utente.`;
   }

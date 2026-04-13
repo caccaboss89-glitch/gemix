@@ -1,7 +1,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const { TASKS_DIR, MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
-const { getRomeISO } = require('../utils/time');
+const { getRomeISO, formatTimestamp } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -149,7 +149,8 @@ async function scheduleTasks(tasks, ctx) {
 
     const destStr = Object.keys(destinations).join(', ');
     const recLabel = recurrence ? ` 🔁${recurrence.freq} fino ${recurrence.endAt}` : '';
-    results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${task.scheduledAt} [${destStr}]${recLabel}`);
+    const scheduledAtRome = formatTimestamp(scheduledAt);
+    results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${scheduledAtRome} (Europe/Rome) [${destStr}]${recLabel}. Assicurati che l'orario sia quello giusto richiesto dall'utente; se no cancellalo e poi impostalo di nuovo.`);
   }
 
   return results.join('\n');
