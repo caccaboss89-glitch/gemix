@@ -103,7 +103,8 @@ async function extractTextFromPdfBuffer(buffer) {
 
     await convert([inputPdf], {
       outputDir,
-      format: 'text,markdown,json',
+      format: 'markdown,text,json',
+      quiet: true,
     });
 
     const baseName = path.basename(inputPdf, '.pdf');

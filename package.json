@@ -12,7 +12,7 @@
     "dotenv": "^16.4.7",
     "google-tts-api": "^2.0.2",
     "nodemailer": "^6.9.16",
-    "@opendataloader/pdf": "^1.0.0",
+    "@opendataloader/pdf": "^2.2.1",
     "pdfkit": "^0.15.1",
     "puppeteer-core": "^24.39.1",
     "qrcode-terminal": "^0.12.0",
