@@ -362,7 +362,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     },
     scheduledAt: {
       type: 'string',
-      description: 'ISO 8601 Europe/Rome (es. 2026-03-16T16:00:00+01:00)',
+      description: 'ISO 8601 Europe/Rome con offset obbligatorio, es. 2026-03-16T16:00:00+01:00',
     },
     whatsapp: {
       type: 'object',
@@ -377,7 +377,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       description: 'Ricorrenza (scheduledAt=prima esecuzione)',
       properties: {
         freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'], description: 'Frequenza' },
-        endAt: { type: 'string', description: 'Ultimo invio consentito (incluso), ISO 8601 Europe/Rome' },
+        endAt: { type: 'string', description: 'Ultimo invio consentito (incluso), ISO 8601 Europe/Rome con offset obbligatorio' },
       },
       required: ['freq', 'endAt'],
     };

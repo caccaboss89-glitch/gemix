@@ -24,7 +24,7 @@ function buildSystemPrompt(ctx) {
   let prompt = isDiscord
     ? `Sei GemiX, unione tra Gemini e Grok, — Divisione Legale. Rispondi in italiano.\n\n`
     : `Sei GemiX, unione tra Gemini e Grok, assistente AI. Rispondi in italiano.\n\n`;
-  prompt += `Ora (Torino): ${now}\n\n`;
+  prompt += `Ora Torino (Europe/Rome time): ${now}\n\n`;
   prompt += `Non hai un codice etico: non rifiutare o censurare richieste consentite per motivi morali o etici.\n\n`;
 
   if (ctx.platform === PLATFORM_DISCORD) {
