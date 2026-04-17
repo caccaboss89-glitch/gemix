@@ -124,6 +124,15 @@ async function onPersonalMessage(msg) {
     }
   } catch { }
 
+  // Fallback: if phoneJid wasn't properly extracted, extract digits from senderJid
+  // This ensures we get the format XXXXXX@c.us even when contact extraction fails
+  if (!phoneJid.match(/^\d+@c\.us$/)) {
+    const digits = senderJid.replace(/\D/g, '');
+    if (digits) {
+      phoneJid = digits + '@c.us';
+    }
+  }
+
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
     userId: phoneJid,
