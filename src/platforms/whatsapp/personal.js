@@ -112,28 +112,28 @@ async function onPersonalMessage(msg) {
   let userName = senderJid;
   let phoneJid = senderJid;
 
-  try {
-    const contact = await msg.getContact();
-    userName = contact.pushname || contact.name || senderJid;
-    // PRIORITY: Use contact.id.user first (most reliable), fallback to contact.number
-    if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
-      phoneJid = contact.id.user + '@c.us';
-    } else if (contact.number) {
-      phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
-    }
-  } catch { }
+  // When message is from us in personal chat, use our own info from client
+  if (msg.fromMe && client.info && client.info.wid) {
+    phoneJid = client.info.wid._serialized;
+    userName = client.info.pushname || client.info.name || senderJid;
+  } else {
+    // For messages from other users, extract from contact
+    try {
+      const contact = await msg.getContact();
+      userName = contact.pushname || contact.name || senderJid;
+      // PRIORITY: Use contact.id.user first (most reliable), fallback to contact.number
+      if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
+        phoneJid = contact.id.user + '@c.us';
+      } else if (contact.number) {
+        phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
+      }
+    } catch { }
+  }
 
-  // Fallback: if phoneJid wasn't properly extracted
+  // Final fallback: if phoneJid still isn't in correct format, extract digits
   if (!phoneJid.match(/^\d+@c\.us$/)) {
-    // If the message is from us (msg.fromMe), use client info which has the correct phone number
-    let fallbackJid = senderJid;
-    if (msg.fromMe && client.info && client.info.wid) {
-      fallbackJid = client.info.wid._serialized;
-    }
-    
-    // Extract leading digits: handle "393922348132:1@s.whatsapp.net" or "124713066090553:48@lid"
-    const match = fallbackJid.match(/^(\d+)/);
-    const digits = match ? match[1] : fallbackJid.replace(/\D/g, '');
+    const match = phoneJid.match(/^(\d+)/);
+    const digits = match ? match[1] : phoneJid.replace(/\D/g, '');
     if (digits) {
       phoneJid = digits + '@c.us';
     }
