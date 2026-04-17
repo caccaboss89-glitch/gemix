@@ -1,5 +1,6 @@
 const { readTaskFile } = require('../utils/taskStore');
 const { formatTimestamp } = require('../utils/time');
+const { VALID_RECURRENCE_FREQS } = require('../config/constants');
 
 /**
  * Read tasks for a specific user or group.
@@ -9,12 +10,18 @@ const { formatTimestamp } = require('../utils/time');
  * @param {boolean} includeGroup - Whether to include group tasks in the result
  * @returns {string} Formatted task list with emojis and timestamps
  */
-const FREQ_LABELS = { hourly: 'Ogni ora', daily: 'Ogni giorno', weekly: 'Ogni settimana', monthly: 'Ogni mese' };
+const FREQ_LABELS = {
+  hourly: 'Ogni ora',
+  daily: 'Ogni giorno',
+  weekly: 'Ogni settimana',
+  monthly: 'Ogni mese',
+};
 
 function _formatTask(t, i) {
   let line = `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)}`;
   if (t.recurrence) {
-    line += ` | 🔁 ${FREQ_LABELS[t.recurrence.freq] || t.recurrence.freq} → ${formatTimestamp(t.recurrence.endAt)}`;
+    const freqLabel = FREQ_LABELS[t.recurrence.freq] || `Ogni ${t.recurrence.freq}`;
+    line += ` | 🔁 ${freqLabel} → ${formatTimestamp(t.recurrence.endAt)}`;
   }
   line += ` | ID: \`${t.id}\``;
   return line;

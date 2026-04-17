@@ -1,7 +1,7 @@
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
-const { getRomeISO } = require('../utils/time');
+const { getRomeISO, convertRomeLocalToISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { checkNewRelease } = require('./releaseMonitor');
@@ -16,21 +16,59 @@ let lastMusicWrapCheckDate = null;
 
 /**
  * Compute the next occurrence date for a recurring task.
- * @param {string} scheduledAt - Current ISO date string
+ * Maintains correct DST-aware offset for Italy (Europe/Rome timezone).
+ * @param {string} scheduledAtISO - Current ISO date string with offset (e.g., "2026-04-17T16:30:00+02:00")
  * @param {string} freq - Frequency: 'hourly' | 'daily' | 'weekly' | 'monthly'
- * @returns {Date|null} Next occurrence date or null if freq is invalid
+ * @returns {string|null} Next occurrence ISO with correct offset or null if freq is invalid
  */
-function computeNextOccurrence(scheduledAt, freq) {
-  const date = new Date(scheduledAt);
-  if (isNaN(date.getTime())) return null;
+function computeNextOccurrence(scheduledAtISO, freq) {
+  // Parse the ISO string to extract local time components
+  const isoRegex = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
+  const match = isoRegex.exec(scheduledAtISO);
+  if (!match) return null;
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  const hour = parseInt(match[4], 10);
+  const minute = parseInt(match[5], 10);
+  const second = parseInt(match[6], 10);
+
+  // Create a Date from the current scheduled time to do arithmetic
+  const currentDate = new Date(scheduledAtISO);
+  if (isNaN(currentDate.getTime())) return null;
+
+  // Calculate next occurrence in UTC
+  const nextDate = new Date(currentDate);
   switch (freq) {
-    case 'hourly': date.setHours(date.getHours() + 1); break;
-    case 'daily': date.setDate(date.getDate() + 1); break;
-    case 'weekly': date.setDate(date.getDate() + 7); break;
-    case 'monthly': date.setMonth(date.getMonth() + 1); break;
+    case 'hourly': nextDate.setHours(nextDate.getHours() + 1); break;
+    case 'daily': nextDate.setDate(nextDate.getDate() + 1); break;
+    case 'weekly': nextDate.setDate(nextDate.getDate() + 7); break;
+    case 'monthly': nextDate.setMonth(nextDate.getMonth() + 1); break;
     default: return null;
   }
-  return date;
+
+  // Format the next date as Rome local time (without offset)
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Rome',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = Object.fromEntries(
+    formatter.formatToParts(nextDate).map(p => [p.type, p.value])
+  );
+
+  const nextHour = parts.hour === '24' ? '00' : parts.hour;
+  const localDatetimeStr = `${parts.year}-${parts.month}-${parts.day}T${nextHour}:${parts.minute}:${parts.second}`;
+
+  // Convert local datetime back to ISO with correct DST-aware offset
+  return convertRomeLocalToISO(localDatetimeStr);
 }
 
 /**
@@ -127,8 +165,8 @@ async function checkAndExecuteTasks() {
           }
           if (t.recurrence && t.recurrence.freq) {
             const next = computeNextOccurrence(t.scheduledAt, t.recurrence.freq);
-            if (next && (!t.recurrence.endAt || next.getTime() <= new Date(t.recurrence.endAt).getTime())) {
-              t.scheduledAt = next.toISOString();
+            if (next && (!t.recurrence.endAt || new Date(next).getTime() <= new Date(t.recurrence.endAt).getTime())) {
+              t.scheduledAt = next;
               updatedTasks.push(t);
               log.info(`🔁 Task ricorrente ${t.id} riprogrammato: ${t.scheduledAt}`);
             } else {

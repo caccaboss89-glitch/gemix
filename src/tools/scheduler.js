@@ -1,7 +1,6 @@
-const path = require('path');
 const crypto = require('crypto');
 const { TASKS_DIR, MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
-const { getRomeISO, formatTimestamp } = require('../utils/time');
+const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -25,7 +24,17 @@ async function scheduleTasks(tasks, ctx) {
   const results = [];
 
   for (const task of tasks) {
-    const scheduledAt = new Date(task.scheduledAt);
+    // Convert local datetime (without offset) to ISO with correct timezone offset
+    const scheduledAtISO = convertRomeLocalToISO(task.scheduledAt);
+    if (!scheduledAtISO) {
+      results.push(`❌ Data non valida: "${task.scheduledAt}". Usa formato: YYYY-MM-DDTHH:MM:SS (es: 2026-04-17T16:30:00)`);
+      continue;
+    }
+
+    // Check for ambiguous hours during DST transitions
+    const dstWarning = checkDSTAmbiguousHour(task.scheduledAt);
+
+    const scheduledAt = new Date(scheduledAtISO);
     const scheduledAtTime = scheduledAt.getTime();
 
     if (isNaN(scheduledAtTime)) {
@@ -33,27 +42,29 @@ async function scheduleTasks(tasks, ctx) {
       continue;
     }
     if (scheduledAtTime <= nowTime) {
-      results.push(`❌ La data ${task.scheduledAt} è nel passato.`);
+      results.push(`❌ La data ${formatTimestamp(scheduledAtISO)} è nel passato.`);
       continue;
     }
     if (scheduledAtTime > maxDateMs) {
-      results.push(`❌ La data ${task.scheduledAt} supera il limite di 1 anno.`);
+      results.push(`❌ La data ${formatTimestamp(scheduledAtISO)} supera il limite di 1 anno.`);
       continue;
     }
 
-    // Recurrence validation (active members / admin only)
+    // Recurrence validation (available for all users)
     let recurrence = null;
     if (task.recurrence) {
-      if (!ctx.isActiveMember && !ctx.isAdmin) {
-        results.push('❌ Task ricorrenti disponibili solo per membri attivi e admin.');
-        continue;
-      }
       const { freq, endAt } = task.recurrence;
       if (!freq || !VALID_RECURRENCE_FREQS.includes(freq)) {
         results.push(`❌ Frequenza ricorrenza non valida: "${freq}". Usa: ${VALID_RECURRENCE_FREQS.join(', ')}.`);
         continue;
       }
-      const endDate = new Date(endAt);
+      // Convert local endAt datetime to ISO with correct offset
+      const endAtISO = convertRomeLocalToISO(endAt);
+      if (!endAtISO) {
+        results.push(`❌ Data fine ricorrenza non valida: "${endAt}". Usa formato: YYYY-MM-DDTHH:MM:SS`);
+        continue;
+      }
+      const endDate = new Date(endAtISO);
       if (isNaN(endDate.getTime())) {
         results.push(`❌ Data fine ricorrenza non valida: "${endAt}"`);
         continue;
@@ -66,7 +77,7 @@ async function scheduleTasks(tasks, ctx) {
         results.push(`❌ La data fine ricorrenza supera il limite di 1 anno.`);
         continue;
       }
-      recurrence = { freq, endAt };
+      recurrence = { freq, endAt: endAtISO };
     }
 
     if (task.whatsapp && task.whatsapp.toGroup && !ctx.isGroup) {
@@ -89,7 +100,6 @@ async function scheduleTasks(tasks, ctx) {
     }
 
     const fileId = isGroupTask ? ctx.groupTaskFileId : ctx.taskFileId;
-    const filePath = path.join(TASKS_DIR, `${fileId}.json`);
 
     const destinations = {};
     if (task.whatsapp && task.whatsapp.toPrivate) {
@@ -135,7 +145,7 @@ async function scheduleTasks(tasks, ctx) {
     const newTask = {
       id: crypto.randomUUID(),
       content: cleanContent,
-      scheduledAt: task.scheduledAt,
+      scheduledAt: scheduledAtISO,
       createdAt: getRomeISO(),
       createdBy: ctx.userName || ctx.userId,
       destinations,
@@ -150,7 +160,11 @@ async function scheduleTasks(tasks, ctx) {
     const destStr = Object.keys(destinations).join(', ');
     const recLabel = recurrence ? ` 🔁${recurrence.freq} fino ${recurrence.endAt}` : '';
     const scheduledAtRome = formatTimestamp(scheduledAt);
-    results.push(`✅ Task "${task.content.substring(0, 50)}..." programmato per ${scheduledAtRome} (Europe/Rome) [${destStr}]${recLabel}. Assicurati che l'orario sia quello giusto richiesto dall'utente; se no cancellalo e poi impostalo di nuovo.`);
+    let msg = `✅ Task "${task.content.substring(0, 50)}..." programmato per ${scheduledAtRome} (Europe/Rome) [${destStr}]${recLabel}. Assicurati che l'orario sia quello giusto richiesto dall'utente; se no cancellalo e poi impostalo di nuovo.`;
+    if (dstWarning) {
+      msg = dstWarning + '\n' + msg;
+    }
+    results.push(msg);
   }
 
   return results.join('\n');

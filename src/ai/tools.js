@@ -362,34 +362,31 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     },
     scheduledAt: {
       type: 'string',
-      description: 'ISO 8601 Europe/Rome con offset obbligatorio, es. 2026-03-16T16:00:00+01:00',
+      description: 'Data e ora locale (Roma): ISO 8601 SENZA offset. Es: 2026-04-17T16:30:00. Il sistema calcola automaticamente l\'offset corretto (+02:00 o +01:00).',
     },
     whatsapp: {
       type: 'object',
       description: 'Destinazione WhatsApp',
       properties: waProps,
     },
-  };
-
-  if (isActiveMember) {
-    taskItemProps.recurrence = {
+    recurrence: {
       type: 'object',
-      description: 'Ricorrenza (scheduledAt=prima esecuzione)',
+      description: 'Ricorrenza opzionale (scheduledAt=prima esecuzione). Disponibile per tutti gli utenti.',
       properties: {
         freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'], description: 'Frequenza' },
-        endAt: { type: 'string', description: 'Ultimo invio consentito (incluso), ISO 8601 Europe/Rome con offset obbligatorio' },
+        endAt: { type: 'string', description: 'Ultimo invio consentito (incluso), formato locale ISO 8601 SENZA offset. Es: 2026-12-31T23:59:00' },
       },
       required: ['freq', 'endAt'],
-    };
-  }
+    },
+  };
 
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Programma promemoria/task per te, altri membri attivi (per nome) o contatti (per telefono). Scrivi ogni promemoria come se fosse inviato nella data/ora programmata. Se devi programmare task per diversi diversi dall\'utente corrente assicurati di inserire destinatari corretti.'
+      ? 'Programma promemoria/task (singoli o ricorrenti) per te, altri membri attivi (per nome) o contatti (per telefono). Scrivi ogni promemoria come se fosse inviato nella data/ora programmata. Se devi programmare task per diversi diversi dall\'utente corrente assicurati di inserire destinatari corretti.'
       : (isActiveMember
-        ? 'Programma promemoria/task per te o altri membri attivi (per nome). Scrivi ogni promemoria come se fosse inviato nella data/ora programmata. Se devi programmare task per diversi diversi dall\'utente corrente assicurati di inserire destinatari corretti.'
-        : 'Programma promemoria e attività future per te. Scrivi ogni promemoria come se fosse inviato nella data/ora programmata.'),
+        ? 'Programma promemoria/task (singoli o ricorrenti) per te o altri membri attivi (per nome). Scrivi ogni promemoria come se fosse inviato nella data/ora programmata. Se devi programmare task per diversi diversi dall\'utente corrente assicurati di inserire destinatari corretti.'
+        : 'Programma promemoria e attività future (singoli o ricorrenti) per te. Scrivi ogni promemoria come se fosse inviato nella data/ora programmata.'),
     properties: {
       tasks: {
         type: 'array',

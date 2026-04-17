@@ -32,7 +32,8 @@ const voiceConsecutiveByChat = new Map();
 const VOICE_COUNT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // Periodic auto-cleanup: removes stale entries even if no voice message is sent
-setInterval(_cleanupVoiceCounts, VOICE_COUNT_TTL_MS).unref();
+const voiceCountCleanupInterval = setInterval(_cleanupVoiceCounts, VOICE_COUNT_TTL_MS);
+voiceCountCleanupInterval.unref();
 
 function _cleanupVoiceCounts() {
   const cutoff = Date.now() - VOICE_COUNT_TTL_MS;
