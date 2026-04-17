@@ -108,7 +108,6 @@ async function onPersonalMessage(msg) {
 
   if (msg.fromMe && (msg.body || '').includes('--GemiX •')) return;
 
-  // Use msg.author || msg.from like dedicated.js (more reliable than client.info.wid._serialized)
   const senderJid = msg.author || msg.from;
   let userName = senderJid;
   let phoneJid = senderJid;
@@ -116,8 +115,7 @@ async function onPersonalMessage(msg) {
   try {
     const contact = await msg.getContact();
     userName = contact.pushname || contact.name || senderJid;
-    // PRIORITY: Use contact.id.user first (most reliable, always full international format),
-    // fallback to contact.number which may be stored in local format without country code.
+    // PRIORITY: Use contact.id.user first (most reliable), fallback to contact.number
     if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
       phoneJid = contact.id.user + '@c.us';
     } else if (contact.number) {
@@ -125,11 +123,17 @@ async function onPersonalMessage(msg) {
     }
   } catch { }
 
-  // Fallback: if phoneJid wasn't properly extracted, extract digits from senderJid
-  // Handle formats like "393922348132:1@s.whatsapp.net" by extracting only the leading digits
+  // Fallback: if phoneJid wasn't properly extracted
   if (!phoneJid.match(/^\d+@c\.us$/)) {
-    const match = senderJid.match(/^(\d+)/);
-    const digits = match ? match[1] : senderJid.replace(/\D/g, '');
+    // If the message is from us (msg.fromMe), use client info which has the correct phone number
+    let fallbackJid = senderJid;
+    if (msg.fromMe && client.info && client.info.wid) {
+      fallbackJid = client.info.wid._serialized;
+    }
+    
+    // Extract leading digits: handle "393922348132:1@s.whatsapp.net" or "124713066090553:48@lid"
+    const match = fallbackJid.match(/^(\d+)/);
+    const digits = match ? match[1] : fallbackJid.replace(/\D/g, '');
     if (digits) {
       phoneJid = digits + '@c.us';
     }
