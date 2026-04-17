@@ -108,7 +108,8 @@ async function onPersonalMessage(msg) {
 
   if (msg.fromMe && (msg.body || '').includes('--GemiX •')) return;
 
-  const senderJid = msg.fromMe ? client.info.wid._serialized : msg.from;
+  // Use msg.author || msg.from like dedicated.js (more reliable than client.info.wid._serialized)
+  const senderJid = msg.author || msg.from;
   let userName = senderJid;
   let phoneJid = senderJid;
 
@@ -125,9 +126,10 @@ async function onPersonalMessage(msg) {
   } catch { }
 
   // Fallback: if phoneJid wasn't properly extracted, extract digits from senderJid
-  // This ensures we get the format XXXXXX@c.us even when contact extraction fails
+  // Handle formats like "393922348132:1@s.whatsapp.net" by extracting only the leading digits
   if (!phoneJid.match(/^\d+@c\.us$/)) {
-    const digits = senderJid.replace(/\D/g, '');
+    const match = senderJid.match(/^(\d+)/);
+    const digits = match ? match[1] : senderJid.replace(/\D/g, '');
     if (digits) {
       phoneJid = digits + '@c.us';
     }
