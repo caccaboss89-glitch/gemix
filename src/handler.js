@@ -21,6 +21,22 @@ function cloneHistoryStructure(history) {
 }
 
 /**
+ * Extract and remove <title>...</title> XML tag from text.
+ * Used to extract Discord thread title from AI response.
+ * @param {string} text - Text that may contain <title> tag
+ * @returns {object} { text: string without title tag, title: extracted title or empty string }
+ */
+function extractTitleTag(text) {
+  if (!text) return { text, title: '' };
+  const titleMatch = text.match(/<title>(.*?)<\/title>/i);
+  if (!titleMatch) return { text, title: '' };
+  
+  const title = titleMatch[1].trim();
+  const cleanText = text.replace(/<title>.*?<\/title>/i, '').trim();
+  return { text: cleanText, title };
+}
+
+/**
  * Main message handler. Takes a normalized context and returns a response object.
  * Routes requests to Gemini (audio/Discord) or Qwen (other) via OpenRouter based on message content.
  * @param {object} ctx - Normalized message context { platform, userId, userName, userIdentity, content, history, isGroup, groupId, ... }
@@ -242,6 +258,16 @@ async function handleMessage(ctx) {
 
       let text = stripVoiceTags(assistantMsg.content || '');
       log.info(`✅ [${ctx.platform.toUpperCase()}] Risposta generata (${text.length} caratteri)`);
+
+      // Extract Discord thread title from <title> XML tag if present
+      if (ctx.platform === PLATFORM_DISCORD) {
+        const { text: cleanedText, title } = extractTitleTag(text);
+        text = cleanedText;
+        if (title) {
+          responseCtx.discordTitle = title.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
+          log.info(`   📝 Titolo thread estratto: "${responseCtx.discordTitle}"`);
+        }
+      }
 
       if (!text.trim() && !responseCtx.isAboutMeOnly && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
         log.warn('   ⚠️ Risposta AI vuota, invio fallback');

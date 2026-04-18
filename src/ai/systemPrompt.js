@@ -103,7 +103,7 @@ function buildDiscordInstructions(ctx) {
   s += `Stai rispondendo in un thread del canale "gemix" sul server Discord.\n\n`;
 
   if (ctx.threadName) {
-    s += `Titolo thread attuale: "${ctx.threadName}". Se il titolo non riflette l'argomento della conversazione o è cambiato il discorso, usa OBBLIGATORIAMENTE PRIMA DI RISPONDERE all'utente il tool update_thread_title per aggiornarlo con un titolo più pertinente.\n\n`;
+    s += `Titolo thread attuale: "${ctx.threadName}". Se il titolo non riflette l'argomento della conversazione o è cambiato il discorso, includi nella tua risposta il nuovo titolo tra i tag XML <title>Nuovo Titolo</title>. Il titolo verrà estratto e il thread rinominato automaticamente.\n\n`;
   }
 
   s += `Limitazioni Discord: Su questa piattaforma NON puoi fare: vocali, promemoria/task programmati, statistiche musicali, presentazione "Chi sono", notifiche release, PDF generici. Se un utente chiede queste funzionalità, suggerisci di usare GemiX su WhatsApp dove sono disponibili tutte le funzionalità.\n\n`;

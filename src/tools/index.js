@@ -511,16 +511,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
-      case 'update_thread_title': {
-        const title = (args.title || '').replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
-        if (!title) {
-          result = '❌ Titolo vuoto o non valido.';
-        } else {
-          responseCtx.discordTitle = title;
-          result = `Titolo thread aggiornato a: "${title}"`;
-        }
-        break;
-      }
+
 
       default:
         result = `Strumento "${name}" non riconosciuto.`;

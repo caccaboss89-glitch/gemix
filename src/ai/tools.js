@@ -128,14 +128,7 @@ const TOOL_READ_SERVER_RULES = makeTool({
   properties: {},
 });
 
-const TOOL_UPDATE_THREAD_TITLE = makeTool({
-  name: 'update_thread_title',
-  description: 'Cambia il titolo del thread Discord.',
-  properties: {
-    title: { type: 'string', description: 'Nuovo titolo del thread' },
-  },
-  required: ['title'],
-});
+
 
 const TOOL_FETCH_WEBPAGE = makeTool({
   name: 'fetch_webpage',
@@ -484,10 +477,9 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
 
-  // ── Discord: richiesta formale PDF (tutti i membri) + gestione thread ──
+  // ── Discord: richiesta formale PDF (tutti i membri) ──
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
-    tools.push(TOOL_UPDATE_THREAD_TITLE);
   }
 
   // ── Memoria personalizzata: WhatsApp tutti, Discord solo attivi ──
