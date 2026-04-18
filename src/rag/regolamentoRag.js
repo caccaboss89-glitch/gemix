@@ -102,8 +102,11 @@ function saveCache(embeddingsByHash) {
 
 async function initRegolamentoRag() {
   try {
+    log.info('⏳ Inizializzazione RAG in corso...');
+    
     if (!fs.existsSync(REGOLAMENTO_PATH)) {
-      log.warn('⚠️ regolamento.txt non trovato, RAG non inizializzato');
+      log.warn(`⚠️ regolamento.txt non trovato in ${REGOLAMENTO_PATH}`);
+      log.warn('⚠️ RAG non inizializzato: creare il file data/regolamento.txt per attivare il RAG');
       return;
     }
 
@@ -114,6 +117,8 @@ async function initRegolamentoRag() {
       log.warn('⚠️ Nessun articolo valido nel regolamento');
       return;
     }
+
+    log.info(`📄 ${articles.length} articoli trovati, generazione embeddings...`);
 
     const cachedEmbeddings = loadCache();
     const embeddingsByHash = {};
