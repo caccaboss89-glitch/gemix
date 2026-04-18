@@ -152,7 +152,7 @@ async function initRegolamentoRag() {
 }
 
 async function queryRegolamento(query, topK = 5) {
-  if (!ragData?.articles) return '';
+  if (!ragData?.articles || !ragData?.embeddings || ragData.embeddings.length === 0) return '';
 
   if (!query?.trim()) {
     return ragData.articles.slice(0, 3).map(a => a.text).join('\n\n');
@@ -163,7 +163,7 @@ async function queryRegolamento(query, topK = 5) {
 
     const scored = ragData.articles.map((article, i) => ({
       article,
-      score: cosineSimilarity(queryEmbedding, ragData.embeddings[i]),
+      score: ragData.embeddings[i] ? cosineSimilarity(queryEmbedding, ragData.embeddings[i]) : 0,
     }));
 
     scored.sort((a, b) => b.score - a.score);
