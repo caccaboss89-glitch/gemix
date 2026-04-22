@@ -18,7 +18,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS)
     return res;
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw new Error(`Timeout (${timeoutMs / 1000}s) raggiunto per ${url}`);
+      throw new Error(`Timeout (${timeoutMs / 1000}s) reached for ${url}`);
     }
     throw err;
   } finally {
@@ -39,7 +39,7 @@ async function fetchExternal(url, options = {}, source = null, timeoutMs = FETCH
   try {
     const res = await fetchWithTimeout(url, options, timeoutMs);
     if (!res.ok && source) {
-      await notifyAdmin(source, `Errore HTTP ${res.status}`);
+      await notifyAdmin(source, `HTTP Error ${res.status}`);
     }
     return res;
   } catch (err) {

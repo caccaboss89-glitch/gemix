@@ -96,13 +96,13 @@ function checkDSTAmbiguousHour(localDatetime) {
   // Spring forward: last Sunday of March at 02:00 → 03:00 (02:00-02:59:59 doesn't exist)
   const lastSundayMarch = getLastSundayOfMonth(year, 3);
   if (month === 3 && day === lastSundayMarch && hour === 2) {
-    return `⚠️ Orario non valido: il ${day} marzo ${year} alle 02:00 l'ora salta direttamente a 03:00 (inizio ora legale). Scegli 01:30 o 03:30.`;
+    return `⚠️ Invalid time: on March ${day}, ${year} at 02:00 the clock jumps directly to 03:00 (start of daylight saving time). Choose 01:30 or 03:30 instead.`;
   }
 
   // Fall back: last Sunday of October at 02:00-02:59 (exists twice - ambiguous)
   const lastSundayOctober = getLastSundayOfMonth(year, 10);
   if (month === 10 && day === lastSundayOctober && hour === 2) {
-    return `⚠️ Orario ambiguo: il ${day} ottobre ${year} alle 02:00-02:59 l'ora si ripete due volte (fine ora legale). Il task verrà programmato per la seconda volta (ora solare +01:00).`;
+    return `⚠️ Ambiguous time: on October ${day}, ${year} at 02:00-02:59 the hour occurs twice (end of daylight saving time). The task will be scheduled for the second occurrence (standard time +01:00).`;
   }
 
   return null;

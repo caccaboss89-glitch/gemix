@@ -9,7 +9,7 @@ const { getGroupTaskFileId } = require('../utils/userIdentifier');
  */
 function updateGroupMemory(content, groupId) {
   if (!groupId) {
-    return '❌ Impossibile identificare il gruppo corrente.';
+    return '❌ Unable to identify the current group.';
   }
 
   const memoryFileId = 'memory_' + getGroupTaskFileId(groupId);
@@ -19,10 +19,10 @@ function updateGroupMemory(content, groupId) {
   }
 
   if (!content || content.trim().length === 0) {
-    return '✅ Memoria del gruppo cancellata.';
+    return '✅ Group memory cleared.';
   }
 
-  return `✅ Memoria del gruppo aggiornata (${content.length}/${MAX_MEMORY_CHARS} caratteri).`;
+  return `✅ Group memory updated (${content.length}/${MAX_MEMORY_CHARS} chars).`;
 }
 
 module.exports = { updateGroupMemory };

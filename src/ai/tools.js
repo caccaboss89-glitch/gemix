@@ -4,7 +4,7 @@ const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
 
 // Tool definitions for AI function calling (OpenAI-compatible format).
 
-// ── send_about_me: allowed una sola volta per chat (persistito su file) ──
+// ── send_about_me: allowed once per chat (persisted to file) ──
 
 const sendAboutMeUsedByChat = new Set();
 const READ_ABOUT_ME_STATE_FILE = path.join(DATA_DIR, 'readAboutMeUsedByChat.json');
@@ -71,82 +71,122 @@ function makeTool({ name, description, properties = {}, required = [] }) {
 
 const TOOL_WEB_SEARCH = makeTool({
   name: 'web_search',
-  description: 'Cerca sul web.',
+  description: 'Search the web. Call multiple times with different queries for deep research. Supports operators: site:, -site:, after:YYYY-MM-DD, before:YYYY-MM-DD, filetype:, intitle:, inurl:, "exact phrase", OR/AND. Do not cite results with [web:N] tags — use information naturally.',
   properties: {
-    query: { type: 'string', description: 'Query' },
-    numResults: { type: 'integer', description: 'Numero risultati (1-50, default 15)' },
+    query: { type: 'string', description: 'Search query (supports operators: site:, after:, before:, filetype:, "exact phrase", OR)' },
+    num_results: { type: 'integer', description: 'Number of results (1-30, default 15)' },
+    allowed_domains: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Restrict to these domains only (max 5). Example: ["github.com", "stackoverflow.com"]',
+    },
+    excluded_domains: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Exclude these domains (max 5). Example: ["pinterest.com", "quora.com"]',
+    },
   },
   required: ['query'],
 });
 
 const TOOL_IMAGE_SEARCH = makeTool({
   name: 'image_search',
-  description: 'Cerca immagini sul web, vengono accumulate e allegate insieme alla risposta finale o tramite i tool di consegna.',
+  description: 'Search for images. Returns visual previews you can SEE and evaluate. Images are buffered for delivery. If you dislike a result, use discard to remove it (and search again if needed). Call multiple times with different queries to refine.',
   properties: {
-    query: { type: 'string', description: 'Query' },
-    count: { type: 'integer', description: 'Quantità (1-4, default 1)' },
+    query: {
+      type: 'string',
+      description: 'Specific image search query (e.g. "golden gate bridge sunset" not "bridge").',
+    },
+    count: {
+      type: 'integer',
+      description: 'Images to retrieve (1-2, default 1).',
+    },
+    language: {
+      type: 'string',
+      description: 'Language hint (default "it", use "en" for international results).',
+    },
+    image_type: {
+      type: 'string',
+      enum: ['any', 'photo', 'gif', 'clipart', 'lineart'],
+      description: 'Filter by type (default "any"). Use "gif" for animated GIFs.',
+    },
+    discard: {
+      type: 'array',
+      items: { type: 'integer' },
+      description: 'Image IDs to remove from buffer (from previous search results).',
+    },
   },
   required: ['query'],
 });
 
 const TOOL_INCLUDE_HISTORY_IMAGES = makeTool({
   name: 'include_history_images',
-  description: 'Includi ultime N immagini dalla cronologia (max 5).',
+  description: 'Include the last N images from chat history (max 5).',
   properties: {
-    count: { type: 'integer', description: 'Quantità (1-5)', minimum: 1 },
+    count: { type: 'integer', description: 'Number of images (1-5)', minimum: 1 },
   },
   required: ['count'],
 });
 
 const TOOL_INCLUDE_HISTORY_DOCS = makeTool({
   name: 'include_history_docs',
-  description: 'Includi ultimi N documenti dalla cronologia (max 2, ≤5 pagine).',
+  description: 'Include the last N documents from chat history (max 2, ≤5 pages each).',
   properties: {
-    count: { type: 'integer', description: 'Quantità (1-2)', minimum: 1 },
+    count: { type: 'integer', description: 'Number of documents (1-2)', minimum: 1 },
   },
   required: ['count'],
 });
 
 const TOOL_INCLUDE_HISTORY_VOICES = makeTool({
   name: 'include_history_voices',
-  description: 'Includi ultimi N vocali degli utenti dalla cronologia (max 3).',
+  description: 'Include the last N user voice messages from chat history (max 3).',
   properties: {
-    count: { type: 'integer', description: 'Quantità (1-3)', minimum: 1 },
+    count: { type: 'integer', description: 'Number of voice messages (1-3)', minimum: 1 },
   },
   required: ['count'],
 });
 
 const TOOL_SEND_ABOUT_ME = makeTool({
   name: 'send_about_me',
-  description: 'Invia la storia di GemiX per presentarti.',
+  description: 'Send the GemiX origin story to introduce yourself.',
   properties: {},
 });
 
 const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
-  description: 'Leggi il regolamento del server Discord (aka Statuto Albertino).',
+  description: 'Read the Discord server rules (aka Statuto Albertino).',
   properties: {},
 });
 
-
-
-const TOOL_FETCH_WEBPAGE = makeTool({
-  name: 'fetch_webpage',
-  description: 'Recupera il contenuto testuale di una pagina web dato il suo URL diretto.',
+const TOOL_BROWSE_PAGE = makeTool({
+  name: 'browse_page',
+  description: 'Fetch and analyze a web page. An LLM summarizer extracts/summarizes content based on your instructions. Use after web_search to deep-dive into promising URLs. Use mode "raw" only when you need the full unprocessed text.',
   properties: {
-    url: { type: 'string', description: 'URL della pagina web' },
+    url: {
+      type: 'string',
+      description: 'Full URL to fetch (must include https://).',
+    },
+    instructions: {
+      type: 'string',
+      description: 'What to extract or analyze from the page (e.g. "list all pricing tiers", "summarize the main argument", "extract all API endpoints"). Be specific for better results.',
+    },
+    mode: {
+      type: 'string',
+      enum: ['summary', 'raw'],
+      description: 'Processing mode (default "summary"). Use "raw" to get unprocessed extracted text without LLM summarization.',
+    },
   },
   required: ['url'],
 });
 
 const TOOL_GENERATE_PDF = makeTool({
   name: 'generate_pdf',
-  description: 'Genera PDF da testo. Verrà accumulato e allegato insieme alla risposta finale o tramite i tool di consegna. Il footer "Generato da GemiX..." verrà creato dal programma, non lo includere.',
+  description: 'Generate a PDF from text. It will be accumulated and attached to the final response or sent via delivery tools. The footer "Generated by GemiX..." is added automatically by the system — do not include it.',
   properties: {
-    title: { type: 'string', description: 'Titolo' },
+    title: { type: 'string', description: 'Document title' },
     content: {
       type: 'string',
-      description: 'Testo (supporta #, ## titoli e - elenchi)',
+      description: 'Text content (supports #, ## headings and - bullet lists)',
     },
   },
   required: ['title', 'content'],
@@ -154,17 +194,17 @@ const TOOL_GENERATE_PDF = makeTool({
 
 const TOOL_READ_MUSIC_STATS = makeTool({
   name: 'read_music_stats',
-  description: 'Leggi statistiche musicali.',
+  description: 'Read music listening statistics.',
   properties: {},
 });
 
 const TOOL_UPDATE_MEMORY = makeTool({
   name: 'update_memory',
-  description: 'Aggiorna memoria personalizzata (privata o di gruppo in base alla chat). Se sono già presenti informazioni riscrivile uguali aggiungendo quello che devi aggiungere. Se memoria quasi piena chiedi all\'utente cosa rimuovere.',
+  description: 'Update personalized memory (private or group-scoped based on current chat). If memory already contains information, rewrite existing entries and append new ones. If memory is nearly full, ask the user what to remove.',
   properties: {
     content: {
       type: 'string',
-      description: 'Testo completo memoria (max 500 char, vuoto=cancella)',
+      description: 'Full memory text (max 500 chars, empty=clear)',
     },
   },
   required: ['content'],
@@ -172,11 +212,11 @@ const TOOL_UPDATE_MEMORY = makeTool({
 
 const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
   name: 'toggle_release_notify',
-  description: 'Attiva/disattiva notifiche nuove release GemiX su questa chat.',
+  description: 'Enable or disable new GemiX release notifications for this chat.',
   properties: {
     enabled: {
       type: 'boolean',
-      description: 'true=attiva, false=disattiva',
+      description: 'true=enable, false=disable',
     },
   },
   required: ['enabled'],
@@ -184,13 +224,13 @@ const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
 
 const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
   name: 'generate_formal_request_pdf',
-  description: 'Genera PDF per richiesta formale. NON usare heading markdown (# ## ecc) ma puoi usare **grassetto**, *corsivo*, elenchi. Data e nome file sono generati automaticamente. Il footer "Generato da GemiX..." verrà creato dal programma, non lo includere.',
+  description: 'Generate a PDF for a formal request. Do NOT use markdown headings (# ## etc.) but you can use **bold**, *italic*, bullet lists. Date and filename are generated automatically. The footer "Generated by GemiX..." is added automatically by the system — do not include it.',
   properties: {
-    fullName: { type: 'string', description: 'Nome e Cognome del richiedente' },
-    title: { type: 'string', description: 'Titolo della Richiesta' },
-    motivation: { type: 'string', description: 'Motivazione dettagliata e argomentata' },
-    requesterSignature: { type: 'string', description: 'Firma del richiedente' },
-    legalSignature: { type: 'string', description: 'Visto del legale ("Lorenzo Passante" se richiesto da lui in persona o "Nessuno"' },
+    fullName: { type: 'string', description: 'Full name of the requester' },
+    title: { type: 'string', description: 'Request title' },
+    motivation: { type: 'string', description: 'Detailed and well-argued motivation' },
+    requesterSignature: { type: 'string', description: 'Requester signature' },
+    legalSignature: { type: 'string', description: 'Legal advisor signature ("Lorenzo Passante" if requested by him in person, or "Nessuno")' },
   },
   required: ['fullName', 'title', 'motivation', 'requesterSignature'],
 });
@@ -201,38 +241,38 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   const properties = {
     text: {
       type: 'string',
-      description: 'Testo TTS (max 1000 char), supporta effetti vocali. Tag inline: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Tag avvolgenti: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.',
+      description: 'TTS text (max 1000 chars), supports vocal effects. Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.',
     },
   };
 
   if (includeRecipientName || includeRecipientPhone) {
     properties.includeAttachments = {
       type: 'boolean',
-      description: 'Allega file dal buffer (default true)',
+      description: 'Attach buffered files (default true)',
     };
     const recipientProps = {};
     if (includeRecipientName) {
       recipientProps.name = {
         type: 'string',
-        description: 'Nome membro (ometti=chat attuale)',
+        description: 'Member name (omit=current chat)',
       };
     }
     if (includeRecipientPhone) {
       recipientProps.phone = {
         type: 'string',
-        description: 'Tel. con prefisso (es. +393XXXXXXXXX)',
+        description: 'Phone number with country code (e.g. +393XXXXXXXXX)',
       };
     }
     properties.recipient = {
       type: 'object',
-      description: 'Destinatario specifico',
+      description: 'Specific recipient',
       properties: recipientProps,
     };
   }
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Tool di consegna - Invia messaggio vocale.',
+    description: 'Delivery tool — Send a voice message.',
     properties,
     required: ['text'],
   });
@@ -242,26 +282,26 @@ function buildWhatsAppTool(isAdmin) {
   const recipientProps = {
     name: {
       type: 'string',
-      description: 'Nome membro destinatario',
+      description: 'Recipient member name',
     },
   };
 
   if (isAdmin) {
     recipientProps.phone = {
       type: 'string',
-      description: 'Tel. con prefisso (es. +393XXXXXXXXX)',
+      description: 'Phone number with country code (e.g. +393XXXXXXXXX)',
     };
   }
 
   const properties = {
-    message: { type: 'string', description: 'Messaggio' },
+    message: { type: 'string', description: 'Message text' },
     includeAttachments: {
       type: 'boolean',
-      description: 'Allega file dal buffer (default true)',
+      description: 'Attach buffered files (default true)',
     },
     recipient: {
       type: 'object',
-      description: 'Destinatario',
+      description: 'Recipient',
       properties: recipientProps,
       required: isAdmin ? [] : ['name'],
     },
@@ -269,7 +309,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Tool di consegna - Invia messaggio WhatsApp.',
+    description: 'Delivery tool — Send a WhatsApp message.',
     properties,
     required: isAdmin ? ['message'] : ['recipient', 'message'],
   });
@@ -279,27 +319,27 @@ function buildEmailTool(isAdmin) {
   const recipientProps = {
     name: {
       type: 'string',
-      description: 'Nome membro (email risolta dal nome)',
+      description: 'Member name (email resolved from name)',
     },
   };
 
   if (isAdmin) {
     recipientProps.email = {
       type: 'string',
-      description: 'Email diretta destinatario',
+      description: 'Direct recipient email address',
     };
   }
 
   const properties = {
-    subject: { type: 'string', description: 'Oggetto' },
-    body: { type: 'string', description: 'Corpo HTML (no markdown)' },
+    subject: { type: 'string', description: 'Email subject' },
+    body: { type: 'string', description: 'HTML body (no markdown)' },
     includeAttachments: {
       type: 'boolean',
-      description: 'Allega file dal buffer (default true)',
+      description: 'Attach buffered files (default true)',
     },
     recipient: {
       type: 'object',
-      description: 'Destinatario',
+      description: 'Recipient',
       properties: recipientProps,
       required: isAdmin ? [] : ['name'],
     },
@@ -307,7 +347,7 @@ function buildEmailTool(isAdmin) {
 
   return makeTool({
     name: 'send_email',
-    description: 'Tool di consegna - Invia email.',
+    description: 'Delivery tool — Send an email.',
     properties,
     required: isAdmin ? ['subject', 'body'] : ['recipient', 'subject', 'body'],
   });
@@ -318,32 +358,32 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   if (isWhatsAppGroup) {
     waProps.toGroup = {
       type: 'boolean',
-      description: 'Invia al gruppo corrente',
+      description: 'Send to current group',
     };
   }
   waProps.toPrivate = {
     type: 'boolean',
-    description: 'Invia in privato su WhatsApp',
+    description: 'Send privately via WhatsApp',
   };
 
   const recipientWaProps = {};
   if (isActiveMember) {
     recipientWaProps.name = {
       type: 'string',
-      description: 'Nome membro destinatario',
+      description: 'Recipient member name',
     };
   }
   if (isAdmin) {
     recipientWaProps.phone = {
       type: 'string',
-      description: 'Tel. destinatario non membro',
+      description: 'Phone number for non-member recipient',
     };
   }
 
   if (Object.keys(recipientWaProps).length > 0) {
     waProps.recipient = {
       type: 'object',
-      description: 'Destinatario',
+      description: 'Recipient',
       properties: recipientWaProps,
     };
   }
@@ -351,23 +391,23 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   const taskItemProps = {
     content: {
       type: 'string',
-      description: 'Testo da inviare',
+      description: 'Text to send to the user',
     },
     scheduledAt: {
       type: 'string',
-      description: 'Data e ora locale (Roma): ISO 8601 SENZA offset. Es: 2026-04-17T16:30:00. Il sistema calcola automaticamente l\'offset corretto (+02:00 o +01:00).',
+      description: 'Date and time in ISO 8601. The system will process it with the user\'s correct timezone. Example: 2026-04-17T16:30:00.',
     },
     whatsapp: {
       type: 'object',
-      description: 'Destinazione WhatsApp',
+      description: 'WhatsApp destination',
       properties: waProps,
     },
     recurrence: {
       type: 'object',
-      description: 'Ricorrenza opzionale (scheduledAt=prima esecuzione). Disponibile per tutti gli utenti.',
+      description: 'Optional recurrence (scheduledAt=first execution). Available to all users.',
       properties: {
-        freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'], description: 'Frequenza' },
-        endAt: { type: 'string', description: 'Ultimo invio consentito (incluso), formato locale ISO 8601 SENZA offset. Es: 2026-12-31T23:59:00' },
+        freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'], description: 'Frequency' },
+        endAt: { type: 'string', description: 'Date and time in ISO 8601 of the last allowed execution (inclusive). The system will process it with the user\'s correct timezone. Example: 2026-12-31T23:59:00' },
       },
       required: ['freq', 'endAt'],
     },
@@ -376,10 +416,10 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Programma promemoria/task (singoli o ricorrenti) per te, altri membri attivi (per nome) o contatti (per telefono). Scrivi ogni promemoria come se fosse inviato nella data/ora programmata. Se devi programmare task per diversi diversi dall\'utente corrente assicurati di inserire destinatari corretti.'
+      ? 'Schedule reminders/tasks (one-time or recurring) for yourself, other active members (by name), or contacts (by phone). Write each reminder as if it were being sent at the scheduled date/time. If scheduling tasks for recipients other than the current user, make sure to set the correct recipients.'
       : (isActiveMember
-        ? 'Programma promemoria/task (singoli o ricorrenti) per te o altri membri attivi (per nome). Scrivi ogni promemoria come se fosse inviato nella data/ora programmata. Se devi programmare task per diversi diversi dall\'utente corrente assicurati di inserire destinatari corretti.'
-        : 'Programma promemoria e attività future (singoli o ricorrenti) per te. Scrivi ogni promemoria come se fosse inviato nella data/ora programmata.'),
+        ? 'Schedule reminders/tasks (one-time or recurring) for yourself or other active members (by name). Write each reminder as if it were being sent at the scheduled date/time. If scheduling tasks for recipients other than the current user, make sure to set the correct recipients.'
+        : 'Schedule personal reminders and future tasks (one-time or recurring) for yourself. Write each reminder as if it were being sent at the scheduled date/time.'),
     properties: {
       tasks: {
         type: 'array',
@@ -399,12 +439,12 @@ function buildReadMyTasksTool(isWhatsAppGroup) {
   if (isWhatsAppGroup) {
     properties.includeGroupTasks = {
       type: 'boolean',
-      description: 'Includi task del gruppo',
+      description: 'Include group tasks',
     };
   }
   return makeTool({
     name: 'read_my_tasks',
-    description: 'Mostra task programmati.',
+    description: 'Show scheduled tasks.',
     properties,
   });
 }
@@ -414,18 +454,18 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
     taskIds: {
       type: 'array',
       items: { type: 'string' },
-      description: 'ID dei task',
+      description: 'Task IDs to remove',
     },
   };
   if (isWhatsAppGroup) {
     properties.fromGroup = {
       type: 'boolean',
-      description: 'Rimuovi dal gruppo invece che dal personale',
+      description: 'Remove from group instead of personal',
     };
   }
   return makeTool({
     name: 'remove_my_tasks',
-    description: 'Rimuovi task programmati.',
+    description: 'Remove scheduled tasks.',
     properties,
     required: ['taskIds'],
   });
@@ -455,13 +495,13 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   const tools = [];
 
-  // ── Tutti gli utenti, tutte le piattaforme ──
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_FETCH_WEBPAGE);
+  // ── All users, all platforms ──
+  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE);
   if (userCtx.hasHistoryImages) tools.push(TOOL_INCLUDE_HISTORY_IMAGES);
   if (userCtx.hasHistoryDocs) tools.push(TOOL_INCLUDE_HISTORY_DOCS);
   if (userCtx.hasHistoryVoices) tools.push(TOOL_INCLUDE_HISTORY_VOICES);
 
-  // ── Solo WhatsApp: vocale, about me, task, release notify ──
+  // ── WhatsApp only: voice, about me, tasks, release notify ──
   if (!isDiscord) {
     if (!_isSendAboutMeUsed(chatKey)) tools.push(TOOL_SEND_ABOUT_ME);
 
@@ -477,17 +517,17 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
 
-  // ── Discord: richiesta formale PDF (tutti i membri) ──
+  // ── Discord: formal request PDF (all members) ──
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   }
 
-  // ── Memoria personalizzata: WhatsApp tutti, Discord solo attivi ──
+  // ── Personalized memory: WhatsApp all, Discord active only ──
   if (!isDiscord || isActiveMember) {
     tools.push(TOOL_UPDATE_MEMORY);
   }
 
-  // ── Solo membri attivi ──
+  // ── Active members only ──
   if (isActiveMember) {
     if (!isDiscord) {
       tools.push(TOOL_READ_SERVER_RULES, TOOL_GENERATE_PDF, TOOL_READ_MUSIC_STATS);

@@ -220,7 +220,7 @@ async function transcribeDocumentsInMessageContent(content) {
         const errorMsg = result.error || 'Errore sconosciuto nella trascrizione del documento';
         transcribed.push({
           type: 'text',
-          text: `⚠️ Documento non trascritto (${errorMsg}). Il file non può essere elaborato dal modello AI.`,
+          text: `⚠️ Document not transcribed (${errorMsg}). The file cannot be processed by the AI model.`,
         });
       }
     } else {

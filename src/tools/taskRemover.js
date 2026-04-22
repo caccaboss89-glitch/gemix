@@ -10,7 +10,7 @@ async function removeTasks(taskIds, fileId) {
   const data = await readTaskFile(fileId);
 
   if (!data) {
-    return 'Nessun file task trovato. Non hai task programmati.';
+    return 'No task file found. You have no scheduled tasks.';
   }
 
   const before = data.tasks.length;
@@ -20,10 +20,10 @@ async function removeTasks(taskIds, fileId) {
   await writeTaskFile(fileId, data);
 
   if (removed === 0) {
-    return `Nessun task trovato con gli ID specificati.`;
+    return `No tasks found with the specified IDs.`;
   }
 
-  return `✅ ${removed} task rimoss${removed === 1 ? 'o' : 'i'} con successo.`;
+  return `✅ ${removed} task(s) removed successfully.`;
 }
 
 module.exports = { removeTasks };

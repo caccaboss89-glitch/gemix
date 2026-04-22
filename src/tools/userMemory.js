@@ -8,7 +8,7 @@ const { writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
  */
 function updatePrivateMemory(content, memoryFileId) {
   if (!memoryFileId) {
-    return '❌ Impossibile identificare il file memoria per questo utente.';
+    return '❌ Unable to identify the memory file for this user.';
   }
 
   const result = writeMemory(memoryFileId, content);
@@ -17,10 +17,10 @@ function updatePrivateMemory(content, memoryFileId) {
   }
 
   if (!content || content.trim().length === 0) {
-    return '✅ Memoria personale cancellata.';
+    return '✅ Personal memory cleared.';
   }
 
-  return `✅ Memoria personale aggiornata (${content.length}/${MAX_MEMORY_CHARS} caratteri).`;
+  return `✅ Personal memory updated (${content.length}/${MAX_MEMORY_CHARS} chars).`;
 }
 
 module.exports = { updatePrivateMemory };

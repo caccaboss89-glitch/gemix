@@ -33,19 +33,19 @@ _load();
  */
 function toggleReleaseNotify(enabled, chatId, waJid) {
   if (!chatId || !waJid) {
-    return '❌ Impossibile determinare la chat o il numero WhatsApp.';
+    return '❌ Unable to determine the chat or WhatsApp number.';
   }
   if (enabled) {
     subscribedChats.set(chatId, waJid);
     _save();
-    return '✅ Notifiche nuove release GemiX attivate per questa chat.';
+    return '✅ GemiX release notifications enabled for this chat.';
   }
   if (!subscribedChats.has(chatId)) {
-    return 'ℹ️ Le notifiche release erano già disattivate per questa chat.';
+    return 'ℹ️ Release notifications were already disabled for this chat.';
   }
   subscribedChats.delete(chatId);
   _save();
-  return '✅ Notifiche nuove release GemiX disattivate per questa chat.';
+  return '✅ GemiX release notifications disabled for this chat.';
 }
 
 /**

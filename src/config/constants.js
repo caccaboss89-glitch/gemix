@@ -19,7 +19,7 @@ module.exports = {
   MAX_TOOL_ROUNDS: 10,
 
   // Media
-  MAX_IMAGES: 4,
+  MAX_IMAGES: 2,
   MAX_IMAGE_BYTES: 7_500_000,
   MAX_TTS_CHARS: 1000,
   MAX_HISTORY_IMAGES: 5,

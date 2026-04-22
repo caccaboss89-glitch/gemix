@@ -40,7 +40,7 @@ function writeMemory(fileId, content) {
   }
 
   if (content.length > MAX_MEMORY_CHARS) {
-    return { success: false, error: `Il contenuto supera il limite di ${MAX_MEMORY_CHARS} caratteri (${content.length} caratteri).` };
+    return { success: false, error: `Content exceeds the ${MAX_MEMORY_CHARS} character limit (${content.length} chars).` };
   }
 
   fs.writeFileSync(filePath, JSON.stringify({ memory: content }, null, 2), 'utf-8');

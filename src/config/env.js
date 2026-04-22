@@ -6,6 +6,7 @@ module.exports = {
   GEMINI_MODEL: process.env.GEMINI_MODEL,
   QWEN_MODEL: process.env.QWEN_MODEL,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
+  BROWSE_PAGE_MODEL: process.env.BROWSE_PAGE_MODEL,
   XAI_API_KEY: process.env.XAI_API_KEY,
   XAI_TTS_VOICE: process.env.XAI_TTS_VOICE,
   SEARXNG_URL: process.env.SEARXNG_URL,

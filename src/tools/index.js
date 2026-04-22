@@ -1,5 +1,6 @@
 const { isActiveMemberOnlyTool, _markSendAboutMeUsed } = require('../ai/tools');
-const { webSearch, fetchWebpage } = require('./webSearch');
+const { webSearch } = require('./webSearch');
+const { browsePage } = require('./browsePage');
 const { imageSearch } = require('./imageSearch');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
@@ -79,7 +80,7 @@ function _resolveTargetWaJid(args, userCtx) {
     }
     if (recipientName) {
       const member = findMemberByName(recipientName);
-      if (!member) return { error: `❌ "${recipientName}" non trovato tra i membri attivi. Specifica il telefono per non-membri.` };
+      if (!member) return { error: `❌ "${recipientName}" not found among active members. Specify a phone number for non-members.` };
       return { jid: member.wa, display: member.name };
     }
     if (userCtx.userPhone) {
@@ -88,11 +89,11 @@ function _resolveTargetWaJid(args, userCtx) {
     }
   } else if (userCtx.isActiveMember && recipientName) {
     const member = findMemberByName(recipientName);
-    if (!member) return { error: `❌ "${recipientName}" non trovato tra i membri attivi.` };
+    if (!member) return { error: `❌ "${recipientName}" not found among active members.` };
     return { jid: member.wa, display: member.name };
   }
-  if (!userCtx.waJid) return { error: '❌ Nessun numero WhatsApp disponibile.' };
-  return { jid: userCtx.waJid, display: 'te stesso' };
+  if (!userCtx.waJid) return { error: '❌ No WhatsApp number available.' };
+  return { jid: userCtx.waJid, display: 'yourself' };
 }
 
 function _getVoiceLimitChatKey(userCtx) {
@@ -116,7 +117,7 @@ function _resetVoiceCount(chatKey) {
  */
 function _resolveTargetEmail(args, userCtx) {
   if (!userCtx.isActiveMember) {
-    return { error: '❌ Solo i membri attivi possono inviare email.' };
+    return { error: '❌ Only active members can send emails.' };
   }
   // Extract recipient info (can be nested in recipient object or flat for backward compatibility)
   const recipientEmail = args.recipient?.email || args.recipientEmail;
@@ -129,15 +130,15 @@ function _resolveTargetEmail(args, userCtx) {
     if (recipientName) {
       const member = findMemberByName(recipientName);
       if (member && member.email) return { email: member.email, display: member.name };
-      return { error: `❌ "${recipientName}" non trovato o senza email.` };
+      return { error: `❌ "${recipientName}" not found or has no email.` };
     }
   } else if (recipientName) {
     const member = findMemberByName(recipientName);
     if (member && member.email) return { email: member.email, display: member.name };
-    return { error: `❌ "${recipientName}" non trovato o senza email.` };
+    return { error: `❌ "${recipientName}" not found or has no email.` };
   }
-  if (!userCtx.email) return { error: '❌ Nessun indirizzo email disponibile.' };
-  return { email: userCtx.email, display: 'te stesso' };
+  if (!userCtx.email) return { error: '❌ No email address available.' };
+  return { email: userCtx.email, display: 'yourself' };
 }
 
 /**
@@ -168,7 +169,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   if (isActiveMemberOnlyTool(name) && !userCtx.isActiveMember) {
     return {
       toolCallId: toolCall.id,
-      result: `❌ Errore: lo strumento "${name}" è disponibile solo per i membri attivi del server.`,
+      result: `❌ Error: tool "${name}" is only available for active server members.`,
     };
   }
 
@@ -177,30 +178,55 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   try {
     switch (name) {
       case 'web_search': {
-        result = await webSearch(args.query, args.numResults);
+        result = await webSearch(args.query, args.num_results, args.allowed_domains, args.excluded_domains);
         break;
       }
 
-      case 'fetch_webpage': {
-        result = await fetchWebpage(args.url);
+      case 'browse_page': {
+        result = await browsePage(args.url, args.instructions, args.mode);
         break;
       }
 
       case 'image_search': {
-        const imageResult = await imageSearch(args.query, args.count);
-
-        // Always accumulate images - will be sent by send_whatsapp_message or send_email
-        if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
-          responseCtx.attachments.push(...imageResult.attachments);
+        // Handle discards first — remove previously buffered images by their global ID
+        if (Array.isArray(args.discard) && args.discard.length > 0) {
+          const discardSet = new Set(args.discard);
+          const before = responseCtx.attachments.length;
+          responseCtx.attachments = responseCtx.attachments.filter(
+            a => !a._imageSearchId || !discardSet.has(a._imageSearchId)
+          );
+          const removed = before - responseCtx.attachments.length;
+          if (removed > 0) log.info(`   🗑️ Discarded ${removed} image(s): [${[...discardSet].join(', ')}]`);
         }
-        result = imageResult.text;
+
+        const startId = responseCtx.imageSearchNextId || 1;
+        const imageResult = await imageSearch(
+          args.query,
+          args.count,
+          {
+            language: args.language,
+            image_type: args.image_type,
+            _startId: startId,
+          }
+        );
+
+        // Tag each attachment with a global ID and accumulate into delivery buffer
+        if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
+          for (let i = 0; i < imageResult.attachments.length; i++) {
+            imageResult.attachments[i]._imageSearchId = startId + i;
+            responseCtx.attachments.push(imageResult.attachments[i]);
+          }
+          responseCtx.imageSearchNextId = startId + imageResult.attachments.length;
+        }
+
+        result = imageResult.toolResult;
         break;
       }
 
       case 'include_history_images': {
         let count = Number(args.count || 0);
         if (!Number.isInteger(count) || count <= 0) {
-          result = '❌ count deve essere un intero positivo.';
+          result = '❌ count must be a positive integer.';
           break;
         }
 
@@ -209,19 +235,19 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const images = extractLastNImages(userCtx.historyFull || [], count);
 
         if (!images || images.length === 0) {
-          result = '❌ Non ci sono immagini nella cronologia da includere.';
+          result = '❌ No images found in history to include.';
           break;
         }
 
         responseCtx.historyImagesToInclude = images;
-        result = `✅ Includo le ultime ${images.length} immagine/i nella prossima chiamata API.`;
+        result = `✅ Including the last ${images.length} image(s) in the next API call.`;
         break;
       }
 
       case 'include_history_docs': {
         let count = Number(args.count || 0);
         if (!Number.isInteger(count) || count <= 0) {
-          result = '❌ count deve essere un intero positivo.';
+          result = '❌ count must be a positive integer.';
           break;
         }
 
@@ -230,19 +256,19 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const docs = extractLastNDocs(userCtx.historyFull || [], count);
 
         if (!docs || docs.length === 0) {
-          result = '❌ Non ci sono documenti nella cronologia da includere.';
+          result = '❌ No documents found in history to include.';
           break;
         }
 
         responseCtx.historyDocsToInclude = docs;
-        result = `✅ Includo gli ultimi ${docs.length} documento/i nella prossima chiamata API.`;
+        result = `✅ Including the last ${docs.length} document(s) in the next API call.`;
         break;
       }
 
       case 'include_history_voices': {
         let count = Number(args.count || 0);
         if (!Number.isInteger(count) || count <= 0) {
-          result = '❌ count deve essere un intero positivo.';
+          result = '❌ count must be a positive integer.';
           break;
         }
 
@@ -251,12 +277,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const voices = extractLastNVoices(userCtx.historyFull || [], count);
 
         if (!voices || voices.length === 0) {
-          result = '❌ Non ci sono vocali degli utenti nella cronologia da includere.';
+          result = '❌ No user voice messages found in history to include.';
           break;
         }
 
         responseCtx.historyVoicesToInclude = voices;
-        result = `✅ Includo gli ultimi ${voices.length} vocale/i nella prossima chiamata API.`;
+        result = `✅ Including the last ${voices.length} voice message(s) in the next API call.`;
         break;
       }
 
@@ -269,14 +295,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
         const currentCount = _getVoiceCount(chatKey);
         if (currentCount >= 3) {
-          log.warn(`Limite vocali WA superato in chat ${chatKey}: counter=${currentCount}`);
+          log.warn(`Voice limit exceeded in chat ${chatKey}: counter=${currentCount}`);
           _resetVoiceCount(chatKey);
-          result = '❌ Limite vocali superato: in questa chat hai già inviato 3 messaggi vocali consecutivi. Rispondi con un messaggio testuale normale, senza vocali.';
+          result = '❌ Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.';
           break;
         }
 
         if (cleanText.length > MAX_TTS_CHARS) {
-          result = `❌ Il testo supera il limite di ${MAX_TTS_CHARS} caratteri (${cleanText.length} caratteri). Non è possibile generare un vocale. Rispondi con un normale messaggio testuale.`;
+          result = `❌ Text exceeds the ${MAX_TTS_CHARS} character limit (${cleanText.length} chars). Cannot generate a voice message. Reply with a normal text message instead.`;
           break;
         }
 
@@ -289,14 +315,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           if (recipientName) {
             const member = findMemberByName(recipientName);
             if (member && member.wa === userCtx.waJid) {
-              result = `❌ Non puoi inviare a te stesso. Per rispondere nella chat attuale, ometti il destinatario.`;
+              result = `❌ You cannot send to yourself. To reply in the current chat, omit the recipient.`;
               break;
             }
           }
           const targetJid = _resolveTargetWaJid(args, userCtx);
           if (targetJid.error) { result = targetJid.error; break; }
           if (deliveryCtx.contactedWA.has(targetJid.jid)) {
-            result = `❌ Hai già inviato un messaggio WhatsApp a questo numero. Ogni numero può ricevere solo 1 messaggio per richiesta.`;
+            result = `❌ You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.`;
             break;
           }
           try {
@@ -317,26 +343,26 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
 
             deliveryCtx.contactedWA.add(targetJid.jid);
-            result = `Messaggio vocale inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
+            result = `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.`;
             _incrementVoiceCount(chatKey);
             storeVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
-            result = `❌ Errore invio vocale: ${err.message}`;
+            result = `❌ Error sending voice message: ${err.message}`;
           }
           break;
         }
 
-        // Altrimenti, invia come risposta nella chat attuale
+        // Otherwise, send as reply in the current chat
         if (responseCtx.voiceBuffer) {
           return {
             toolCallId: toolCall.id,
-            result: '❌ Errore: un messaggio vocale è già stato generato. Non puoi generarne un altro nella stessa richiesta.',
+            result: '❌ Error: a voice message has already been generated. You cannot generate another one in the same request.',
           };
         }
         const voiceBuffer = await generateVoice(cleanText);
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
-        result = 'Messaggio vocale generato con successo. Non inviare alcun messaggio testuale.';
+        result = 'Voice message generated successfully. Do not send any text message.';
         _incrementVoiceCount(chatKey);
         storeVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
         break;
@@ -362,7 +388,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const groupFileId = userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null;
         const includeGroup = Boolean(args.includeGroupTasks) && userCtx.isGroup && userCtx.platform && userCtx.platform.startsWith('whatsapp');
         if (args.includeGroupTasks && !includeGroup) {
-          result = '⚠️ includeGroupTasks non disponibile: solo in gruppo WhatsApp.';
+          result = '⚠️ includeGroupTasks not available: only in WhatsApp groups.';
           break;
         }
         result = await readTasks(userCtx.taskFileId, groupFileId, includeGroup);
@@ -375,7 +401,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           ? getGroupTaskFileId(userCtx.groupId)
           : userCtx.taskFileId;
         if (args.fromGroup && !allowGroup) {
-          result = '⚠️ fromGroup non disponibile: solo in gruppo WhatsApp. Operazione sui task personali.';
+          result = '⚠️ fromGroup not available: only in WhatsApp groups. Operating on personal tasks.';
           break;
         }
         result = await removeTasks(args.taskIds, fileId);
@@ -391,9 +417,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const aboutMeContent = readAboutMe();
         responseCtx.aboutMeText = aboutMeContent;
         responseCtx.isAboutMeOnly = true;
-        result = 'Messaggio inviato all\'utente.';
+        result = 'Message sent to user.';
 
-        // One-shot per chat: non mostrare più send_about_me nella lista strumenti.
+        // One-shot per chat: hide send_about_me from tool list going forward.
         const chatKey = userCtx.chatId || userCtx.groupId || userCtx.waJid || userCtx.userId || 'unknown';
         _markSendAboutMeUsed(chatKey);
 
@@ -412,7 +438,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         // Always accumulate PDF - will be sent by send_whatsapp_message or send_email
         responseCtx.attachments.push(pdfAttachment);
 
-        result = `PDF "${args.title}" generato con successo. Verrà allegato al prossimo messaggio di consegna.`;
+        result = `PDF "${args.title}" generated successfully. It will be attached to the next delivery message.`;
         break;
       }
 
@@ -430,7 +456,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           buffer: formalPdfBuffer,
           mimetype: 'application/pdf',
         });
-        result = `PDF richiesta formale "${args.title}" generato con successo.`;
+        result = `Formal request PDF "${args.title}" generated successfully.`;
         break;
       }
 
@@ -439,7 +465,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const targetEmail = _resolveTargetEmail(args, userCtx);
         if (targetEmail.error) { result = targetEmail.error; break; }
         if (deliveryCtx.contactedEmail.has(targetEmail.email)) {
-          result = `❌ Hai già inviato un'email a questo indirizzo. Ogni email può ricevere solo 1 messaggio per richiesta.`;
+          result = `❌ You have already sent an email to this address. Each email can only receive 1 message per request.`;
           break;
         }
         try {
@@ -453,9 +479,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             emailAttachments
           );
           deliveryCtx.contactedEmail.add(targetEmail.email);
-          result = `Email inviata con successo a ${targetEmail.display}${emailAttachments.length > 0 ? ` con ${emailAttachments.length} allegato/i` : ''}.`;
+          result = `Email sent successfully to ${targetEmail.display}${emailAttachments.length > 0 ? ` with ${emailAttachments.length} attachment(s)` : ''}.`;
         } catch (err) {
-          result = `❌ Errore invio email: ${err.message}`;
+          result = `❌ Error sending email: ${err.message}`;
         }
         break;
       }
@@ -466,7 +492,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const targetJid = _resolveTargetWaJid(args, userCtx);
         if (targetJid.error) { result = targetJid.error; break; }
         if (deliveryCtx.contactedWA.has(targetJid.jid)) {
-          result = `❌ Hai già inviato un messaggio WhatsApp a questo numero. Ogni numero può ricevere solo 1 messaggio per richiesta.`;
+          result = `❌ You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.`;
           break;
         }
         try {
@@ -483,9 +509,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
 
           deliveryCtx.contactedWA.add(targetJid.jid);
-          result = `Messaggio WhatsApp inviato con successo a ${targetJid.display}${attachmentsSentCount > 0 ? ` con ${attachmentsSentCount} allegato/i` : ''}.`;
+          result = `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.`;
         } catch (err) {
-          result = `❌ Errore invio WhatsApp: ${err.message}`;
+          result = `❌ Error sending WhatsApp message: ${err.message}`;
         }
         break;
       }
@@ -514,13 +540,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
 
       default:
-        result = `Strumento "${name}" non riconosciuto.`;
+        result = `Tool "${name}" not recognized.`;
     }
   } catch (err) {
-    result = `❌ Errore nell'esecuzione di ${name}: ${err.message}`;
+    result = `❌ Error executing ${name}: ${err.message}`;
   }
 
-  return { toolCallId: toolCall.id, result: String(result) };
+  return { toolCallId: toolCall.id, result: Array.isArray(result) ? result : String(result) };
 }
 
 module.exports = { executeTool };

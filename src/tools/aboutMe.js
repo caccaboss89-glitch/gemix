@@ -7,12 +7,12 @@ const ABOUT_FILE = path.join(DATA_DIR, 'aboutme.txt');
 function readAboutMe() {
   try {
     if (!fs.existsSync(ABOUT_FILE)) {
-      return 'Il file aboutme.txt non è stato ancora posizionato in src/data/. Contatta un amministratore.';
+      return 'The aboutme.txt file has not been placed in src/data/ yet. Contact an administrator.';
     }
     const text = fs.readFileSync(ABOUT_FILE, 'utf-8');
-    return text || 'Il file aboutme.txt è vuoto.';
+    return text || 'The aboutme.txt file is empty.';
   } catch (err) {
-    return `Errore nella lettura di aboutme.txt: ${err.message}`;
+    return `Error reading aboutme.txt: ${err.message}`;
   }
 }
 

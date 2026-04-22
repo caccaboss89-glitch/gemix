@@ -11,16 +11,16 @@ const { VALID_RECURRENCE_FREQS } = require('../config/constants');
  * @returns {string} Formatted task list with emojis and timestamps
  */
 const FREQ_LABELS = {
-  hourly: 'Ogni ora',
-  daily: 'Ogni giorno',
-  weekly: 'Ogni settimana',
-  monthly: 'Ogni mese',
+  hourly: 'Hourly',
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
 };
 
 function _formatTask(t, i) {
   let line = `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)}`;
   if (t.recurrence) {
-    const freqLabel = FREQ_LABELS[t.recurrence.freq] || `Ogni ${t.recurrence.freq}`;
+    const freqLabel = FREQ_LABELS[t.recurrence.freq] || `Every ${t.recurrence.freq}`;
     line += ` | 🔁 ${freqLabel} → ${formatTimestamp(t.recurrence.endAt)}`;
   }
   line += ` | ID: \`${t.id}\``;
@@ -32,21 +32,21 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
 
   const personalData = await readTaskFile(taskFileId);
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
-    result += `📋 **I tuoi task personali:**\n`;
+    result += `📋 **Your personal tasks:**\n`;
     result += personalData.tasks.map((t, i) => _formatTask(t, i)).join('\n');
   } else {
-    result += `📋 Nessun task personale programmato.`;
+    result += `📋 No personal tasks scheduled.`;
   }
 
   if (includeGroup && groupTaskFileId) {
     const groupData = await readTaskFile(groupTaskFileId);
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
-      result += `\n\n📋 **Task del gruppo:**\n`;
+      result += `\n\n📋 **Group tasks:**\n`;
       result += groupData.tasks.map((t, i) => _formatTask(t, i)).join('\n');
     }
   }
 
-  return result || 'Nessun task programmato.';
+  return result || 'No tasks scheduled.';
 }
 
 module.exports = { readTasks };

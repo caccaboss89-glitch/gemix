@@ -53,6 +53,7 @@ async function handleMessage(ctx) {
     historyDocsToInclude: [],
     historyVoicesToInclude: [],
     discordTitle: '',
+    imageSearchNextId: 1,
   };
 
   try {
@@ -136,8 +137,8 @@ async function handleMessage(ctx) {
 
           if (mediaParts.length > 0) {
             const label = h.role === 'assistant'
-              ? `[File dalla cronologia inviato da GemiX: ${textLine}]`
-              : (textPart ? textPart.text : '[File dalla cronologia]');
+              ? `[History file sent by GemiX: ${textLine}]`
+              : (textPart ? textPart.text : '[History file]');
             userMultimodalEntries.push({
               role: 'user',
               content: [
@@ -151,7 +152,7 @@ async function handleMessage(ctx) {
 
       messages.push({
         role: 'user',
-        content: `[CRONOLOGIA ULTIMI MESSAGGI]\n${historyLines.join('\n')}\n[FINE CRONOLOGIA]`,
+        content: `[RECENT MESSAGE HISTORY]\n${historyLines.join('\n')}\n[END HISTORY]`,
       });
 
       for (const entry of userMultimodalEntries) {
@@ -162,7 +163,7 @@ async function handleMessage(ctx) {
 
       messages.push({
         role: 'user',
-        content: 'Rispondi al seguente messaggio:',
+        content: 'Reply to the following message:',
       });
     }
 
@@ -185,19 +186,19 @@ async function handleMessage(ctx) {
       if ((responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) || (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) || (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0)) {
         const includeList = [];
         if (responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) {
-          includeList.push({ type: 'text', text: `[Richiesta immagini cronologia]` });
+          includeList.push({ type: 'text', text: `[History images request]` });
           includeList.push(...responseCtx.historyImagesToInclude);
           responseCtx.historyImagesToInclude = [];
         }
         if (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) {
-          includeList.push({ type: 'text', text: `[Richiesta documenti cronologia]` });
+          includeList.push({ type: 'text', text: `[History documents request]` });
           // Transcribe documents before adding them
           const transcribedDocs = await transcribeDocumentsInMessageContent(responseCtx.historyDocsToInclude);
           includeList.push(...(Array.isArray(transcribedDocs) ? transcribedDocs : [transcribedDocs]));
           responseCtx.historyDocsToInclude = [];
         }
         if (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0) {
-          includeList.push({ type: 'text', text: `[Richiesta vocali cronologia]` });
+          includeList.push({ type: 'text', text: `[History voice messages request]` });
           includeList.push(...responseCtx.historyVoicesToInclude);
           responseCtx.historyVoicesToInclude = [];
         }
@@ -248,8 +249,24 @@ async function handleMessage(ctx) {
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
-              content: `Errore esecuzione: ${toolErr.message}`,
+              content: `Execution error: ${toolErr.message}`,
             });
+          }
+        }
+
+        // Token optimization: strip image previews from tool results the AI has already seen.
+        // The AI evaluated them in this round; keeping base64 data wastes context in future rounds.
+        for (const msg of messages) {
+          if (msg.role === 'tool' && Array.isArray(msg.content) && msg._imagePreviewSeen) {
+            msg.content = msg.content.filter(p => p.type !== 'image_url');
+            if (msg.content.length === 1 && msg.content[0].type === 'text') {
+              msg.content = msg.content[0].text;
+            }
+            delete msg._imagePreviewSeen;
+          }
+          // Mark current multimodal tool results so they get stripped NEXT round (after AI sees them)
+          if (msg.role === 'tool' && Array.isArray(msg.content) && msg.content.some(p => p.type === 'image_url')) {
+            msg._imagePreviewSeen = true;
           }
         }
 
