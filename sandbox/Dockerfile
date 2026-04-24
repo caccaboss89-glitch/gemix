@@ -70,8 +70,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 RUN printf '#!/bin/sh\necho "pip is disabled inside the GemiX sandbox." >&2\nexit 1\n' \
         > /usr/local/bin/pip \
     && chmod 755 /usr/local/bin/pip \
-    && ln -sf /usr/local/bin/pip /usr/local/bin/pip3 \
-    && ln -sf /usr/local/bin/pip /usr/local/bin/pip3.12
+    && rm -f /usr/local/bin/pip3 /usr/local/bin/pip3.12 \
+    && ln -s /usr/local/bin/pip /usr/local/bin/pip3 \
+    && ln -s /usr/local/bin/pip /usr/local/bin/pip3.12
 
 USER sandbox
 WORKDIR /workspace
