@@ -1,0 +1,74 @@
+# GemiX sandbox — reference topology.
+#
+# This file is NOT used in production (the Node sandboxManager spawns
+# containers programmatically). It exists to:
+#   1. Let you verify the image + proxy work on your Linux server:
+#        docker compose -f sandbox/docker-compose.yml up --build
+#   2. Document the exact network topology / mounts / limits the manager
+#      will reproduce at runtime.
+#
+# Production notes:
+#   - The manager creates ONE sandbox container per active (user, project)
+#     pair and reuses it for the REPL session.
+#   - The proxy is a singleton: one instance shared by all sandboxes.
+#   - Volumes are mounted per-container by the manager (not statically).
+
+services:
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    image: gemix-sandbox-proxy:latest
+    container_name: gemix-sandbox-proxy
+    restart: unless-stopped
+    # Default allowlist lives in proxy.py; override here if you need to widen it.
+    environment:
+      # ALLOWED_HOSTS: ".polygon.io,data.astropy.org,.stsci.edu,.ipac.caltech.edu,.cds.unistra.fr,.gsfc.nasa.gov"
+      PROXY_PORT: "8080"
+    networks:
+      egress: {}           # internet access (for forwarding to allowed hosts)
+      sandbox_net: {}      # reachable by sandboxes as hostname "proxy"
+    # Do NOT expose the port to the host — the proxy must only be reachable
+    # from sandbox_net. Leaving `ports:` unset keeps it internal.
+
+  sandbox_example:
+    # Example of how the Node manager will run a sandbox. Replace SANDBOX_TOKEN
+    # with a per-container random value and mount the actual project folder.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gemix-sandbox:latest
+    container_name: gemix-sandbox-example
+    depends_on: [proxy]
+    environment:
+      SANDBOX_TOKEN: "replace-me-with-random-32char-token"
+      HTTP_PROXY:  "http://proxy:8080"
+      HTTPS_PROXY: "http://proxy:8080"
+      NO_PROXY:    "localhost,127.0.0.1"
+    networks:
+      sandbox_net: {}      # no default internet; only the proxy is reachable
+    read_only: false       # /workspace must be writable
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 200
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 1.0
+    volumes:
+      # Mount a real project directory here in tests:
+      - ./_test_workspace:/workspace
+      # Optionally mount the user's read-only zones:
+      # - /path/to/user/history:/readonly/history:ro
+      # - /path/to/user/permanent:/readonly/permanent:ro
+      # - /path/to/user/searched_images:/readonly/searched_images:ro
+
+networks:
+  # Internal-only network where sandboxes live; no direct internet.
+  sandbox_net:
+    driver: bridge
+    internal: true
+  # Network with internet access, used only by the proxy.
+  egress:
+    driver: bridge
