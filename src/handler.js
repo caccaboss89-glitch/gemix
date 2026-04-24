@@ -4,7 +4,13 @@ const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser } = require('./ai/tools');
 const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
-const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
+const {
+  MAX_TOOL_ROUNDS,
+  PLATFORM_DISCORD,
+  MAINTENANCE_MODE,
+  MAINTENANCE_ADMIN_ONLY,
+  MAINTENANCE_USER_MESSAGE,
+} = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
@@ -51,6 +57,20 @@ async function handleMessage(ctx) {
     const ui = ctx.userIdentity;
     const isActiveMember = ui.isActiveMember;
     const userIsAdmin = ui.member ? isAdmin(ui.member) : false;
+
+    // ── Maintenance gate ──
+    // Blocks every non-admin request with a fixed message. Admins always pass.
+    if (MAINTENANCE_MODE && MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
+      log.info(`   🔒 Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
+      return {
+        text: MAINTENANCE_USER_MESSAGE,
+        voiceBuffer: null,
+        isVoiceOnly: false,
+        attachments: [],
+        discordTitle: '',
+        modelUsed: null,
+      };
+    }
 
     // Leggi memoria personalizzata (privata o di gruppo)
     const memoryFileId = 'memory_' + ui.taskFileId;

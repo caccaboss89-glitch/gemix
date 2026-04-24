@@ -1,7 +1,7 @@
 // src/ai/systemPrompt.js
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
-const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
+const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, MAINTENANCE_MODE } = require('../config/constants');
 
 /**
  * Build the system prompt for GemiX AI based on message context and platform.
@@ -27,7 +27,14 @@ function buildSystemPrompt(ctx) {
   const isActiveMember = ctx.userIdentity?.isActiveMember;
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
 
-  let prompt = `<SystemPrompt>
+  let prompt = '';
+  if (MAINTENANCE_MODE) {
+    prompt += `<MaintenanceMode>
+    The bot is currently in maintenance and is only responding to admins (the user you are speaking with is an admin and bypassed the maintenance gate). Every non-admin request is silently dropped with a fixed notice, so you do not need to worry about them. Start your reply to the admin with the literal marker "🧪 [MAINT]" on a dedicated first line so it is easy to spot that this bypass is active, then proceed with the normal answer. If the admin asks you to disable maintenance, explain that they must edit MAINTENANCE_MODE in src/config/constants.js (or unset the env var) and restart the bot.
+  </MaintenanceMode>
+`;
+  }
+  prompt += `<SystemPrompt>
   <Identity>
     <Role>${isDiscord ? 'You are GemiX, a fusion of Gemini and Grok — Legal Division.' : 'You are GemiX, a fusion of Gemini and Grok, AI assistant.'}</Role>
     <ResponseLanguage>Italian</ResponseLanguage>

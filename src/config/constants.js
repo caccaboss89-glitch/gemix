@@ -1,8 +1,24 @@
 // src/config/constants.js
 const path = require('path');
 
+// Maintenance mode — blocks all non-admin requests and returns a fixed message.
+// Toggle the boolean here OR set MAINTENANCE_MODE=true in the environment to
+// enable without a commit. Admins always bypass the gate.
+const MAINTENANCE_MODE = process.env.MAINTENANCE_MODE
+  ? /^(1|true|yes|on)$/i.test(process.env.MAINTENANCE_MODE)
+  : false;
+
 module.exports = {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
+
+  // ── Maintenance mode ──
+  MAINTENANCE_MODE,
+  MAINTENANCE_ADMIN_ONLY: true,
+  MAINTENANCE_USER_MESSAGE:
+    '🌙 GemiX è temporaneamente in manutenzione per un aggiornamento importante.\n\n' +
+    'Tornerò online a breve con nuove capacità agentiche (sandbox Python, progetti, cloud personale).\n\n' +
+    'Grazie per la pazienza! 👷‍♂️',
+
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
   MAX_HISTORY: 15,
