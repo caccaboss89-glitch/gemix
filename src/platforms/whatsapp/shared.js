@@ -16,7 +16,8 @@ function _isSystemMessage(body) {
   return (
     /^\uD83D\uDE80 \*Nuova release GemiX:/.test(body) ||
     /^\uD83C\uDFB5 \*Wrap di /.test(body) ||
-    /^\u26A0\uFE0F \*ERRORE API \u2014/.test(body)
+    /^\u26A0\uFE0F \*ERRORE API \u2014/.test(body) ||
+    /^\uD83C\uDF19 GemiX è temporaneamente in manutenzione/.test(body)
   );
 }
 const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');

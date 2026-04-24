@@ -30,7 +30,7 @@ function buildSystemPrompt(ctx) {
   let prompt = '';
   if (MAINTENANCE_MODE) {
     prompt += `<MaintenanceMode>
-    The bot is currently in maintenance and is only responding to admins (the user you are speaking with is an admin and bypassed the maintenance gate). Every non-admin request is silently dropped with a fixed notice, so you do not need to worry about them. Start your reply to the admin with the literal marker "🧪 [MAINT]" on a dedicated first line so it is easy to spot that this bypass is active, then proceed with the normal answer. If the admin asks you to disable maintenance, explain that they must edit MAINTENANCE_MODE in src/config/constants.js (or unset the env var) and restart the bot.
+    The bot is currently in maintenance and is only responding to admins (the user you are speaking with is an admin and bypassed the maintenance gate). Every non-admin request is silently dropped with a fixed notice, so you do not need to worry about them. Proceed normally with your answer.
   </MaintenanceMode>
 `;
   }
