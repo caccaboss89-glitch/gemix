@@ -11,6 +11,8 @@ const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
+const { getCurrentProject } = require('./utils/projectState');
+const { listProjects, ensureUserSkeleton } = require('./utils/userPaths');
 
 const log = createLogger('Handler');
 
@@ -65,6 +67,26 @@ async function handleMessage(ctx) {
 
     ctx.userMemory = userMemory;
     ctx.groupMemory = groupMemory;
+
+    // Personal cloud: inject current project + project list (WhatsApp only)
+    if (ctx.platform && !ctx.platform.startsWith('discord')) {
+      try {
+        const probeCtx = {
+          platform: ctx.platform,
+          userId: ctx.userId,
+          waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
+          isGroup: ctx.isGroup,
+          groupId: ctx.groupId,
+        };
+        ensureUserSkeleton(probeCtx);
+        ctx.currentProject = getCurrentProject(probeCtx);
+        ctx.projects = listProjects(probeCtx);
+      } catch (err) {
+        log.warn(`Failed to load project state: ${err.message}`);
+        ctx.currentProject = null;
+        ctx.projects = [];
+      }
+    }
 
     // RAG: inietta contesto regolamento per Discord
     if (ctx.platform === PLATFORM_DISCORD) {

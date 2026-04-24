@@ -18,6 +18,15 @@ const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
 const { toggleReleaseNotify } = require('./releaseNotify');
+const {
+  listProjectsTool,
+  createProjectTool,
+  switchProjectTool,
+  deleteProjectTool,
+  cleanupProjectTool,
+  copyToPermanentTool,
+  copyToProjectTool,
+} = require('./projects');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -449,6 +458,35 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         } else {
           result = updatePrivateMemory(args.content, userCtx.memoryFileId);
         }
+        break;
+      }
+
+      case 'list_projects': {
+        result = listProjectsTool(userCtx);
+        break;
+      }
+      case 'create_project': {
+        result = createProjectTool(args, userCtx);
+        break;
+      }
+      case 'switch_project': {
+        result = switchProjectTool(args, userCtx);
+        break;
+      }
+      case 'delete_project': {
+        result = deleteProjectTool(args, userCtx);
+        break;
+      }
+      case 'cleanup_project': {
+        result = cleanupProjectTool(args, userCtx);
+        break;
+      }
+      case 'copy_to_permanent': {
+        result = copyToPermanentTool(args, userCtx);
+        break;
+      }
+      case 'copy_to_project': {
+        result = copyToProjectTool(args, userCtx);
         break;
       }
 

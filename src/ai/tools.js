@@ -89,6 +89,78 @@ const TOOL_READ_FILE = makeTool({
   required: ['path'],
 });
 
+// ── Project management (WhatsApp only) ──
+
+const TOOL_LIST_PROJECTS = makeTool({
+  name: 'list_projects',
+  description: 'List the user\'s projects with their descriptions and which one is currently selected. Use this before creating a new project to check what already exists and before switching.',
+  properties: {},
+});
+
+const TOOL_CREATE_PROJECT = makeTool({
+  name: 'create_project',
+  description: 'Create a new project and select it as current. Use this at the START of any multi-step agentic task that will produce files (PDF, PPTX, scripts, images, etc.). The project gets its own scaffold: figures/, temp/, output/, code/. A README.md is generated with the provided description, user_request and strategy. Fails if the project limit is reached or the name collides.',
+  properties: {
+    name: { type: 'string', description: 'Human-readable project name. Will be slugified (lowercase, [a-z0-9_-], max 40 chars).' },
+    description: { type: 'string', description: 'Short description of the project (1-2 sentences).' },
+    user_request: { type: 'string', description: 'Verbatim or paraphrased user instruction that motivates the project.' },
+    strategy: { type: 'string', description: 'Your plan to accomplish the task (tools to use, files to produce, ordered steps).' },
+  },
+  required: ['name', 'description', 'user_request', 'strategy'],
+});
+
+const TOOL_SWITCH_PROJECT = makeTool({
+  name: 'switch_project',
+  description: 'Select an existing project as the current one. Required before using code_execution, write_file, edit_file or bash if no project is selected.',
+  properties: {
+    name: { type: 'string', description: 'Exact project slug (as returned by list_projects).' },
+  },
+  required: ['name'],
+});
+
+const TOOL_DELETE_PROJECT = makeTool({
+  name: 'delete_project',
+  description: 'Permanently delete a project and all its files. You MUST first ask the user to explicitly confirm the deletion, then call this tool with user_confirmed=true. If the deleted project was the current one, current_project is reset.',
+  properties: {
+    name: { type: 'string', description: 'Project slug to delete.' },
+    user_confirmed: { type: 'boolean', description: 'Must be true — set only after the user confirmed in chat.' },
+  },
+  required: ['name', 'user_confirmed'],
+});
+
+const TOOL_CLEANUP_PROJECT = makeTool({
+  name: 'cleanup_project',
+  description: 'Empty the contents of one or more project subdirectories (figures/, temp/, output/, code/). The folders themselves are kept. Use to free space when close to the size quota.',
+  properties: {
+    name: { type: 'string', description: 'Project slug (defaults to the current project).' },
+    subdirs: {
+      type: 'array',
+      items: { type: 'string', enum: ['figures', 'temp', 'output', 'code'] },
+      description: 'Subdirs to clear.',
+    },
+  },
+  required: ['subdirs'],
+});
+
+const TOOL_COPY_TO_PERMANENT = makeTool({
+  name: 'copy_to_permanent',
+  description: 'Copy a file from history/ to permanent/ so the user keeps it on their personal cloud even after the chat history rotates. The original in history/ is preserved.',
+  properties: {
+    history_filename: { type: 'string', description: 'Bare filename as it appears inside history/ (no "history/" prefix).' },
+  },
+  required: ['history_filename'],
+});
+
+const TOOL_COPY_TO_PROJECT = makeTool({
+  name: 'copy_to_project',
+  description: 'Copy a file from history/ or searched_images/ into the currently selected project (into figures/ by default). Use this to bring user-provided or web-searched images into a project before processing them with code_execution.',
+  properties: {
+    source: { type: 'string', description: 'Relative path like "history/photo.jpg" or "searched_images/slug_1.png".' },
+    subdir: { type: 'string', enum: ['figures', 'temp', 'output', 'code'], description: 'Destination subdir inside the current project (default "figures").' },
+  },
+  required: ['source'],
+});
+
 const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
   description: 'Read the Discord server rules (aka Statuto Albertino).',
@@ -435,6 +507,17 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
 
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
+
+    // Project management & cloud-copy tools (agentic)
+    tools.push(
+      TOOL_LIST_PROJECTS,
+      TOOL_CREATE_PROJECT,
+      TOOL_SWITCH_PROJECT,
+      TOOL_DELETE_PROJECT,
+      TOOL_CLEANUP_PROJECT,
+      TOOL_COPY_TO_PERMANENT,
+      TOOL_COPY_TO_PROJECT,
+    );
   }
 
   // ── Discord: formal request PDF (all members) ──

@@ -70,6 +70,7 @@ ${membersList}
 `;
 
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
+    prompt += buildPersonalCloudSection(ctx);
     prompt += `  <WhatsAppPreferences>
     Reply with a voice message if your response is short using send_voice_message; prefer text responses if your message is medium/long, technical, or includes data. Don't always use the same response format — balance by looking at your previous messages in history. Your voice messages in history are labeled by the system with &lt;Transcription&gt;...&lt;/Transcription&gt;.
     ${isActiveMember ? 'Formal requests: You can read the rules and generate generic PDFs, but for formal requests, advise the user to go to Discord where GemiX — Legal Division can generate documents in the standardized format.' : ''}
@@ -84,6 +85,36 @@ ${membersList}
 </SystemPrompt>`;
 
   return prompt;
+}
+
+function buildPersonalCloudSection(ctx) {
+  const current = ctx.currentProject || null;
+  const projects = Array.isArray(ctx.projects) ? ctx.projects : [];
+  const projectList = projects.length === 0
+    ? '    <None/>\n'
+    : projects.map(p => `    <Project name="${_escapeXml(p.name)}"${p.name === current ? ' current="true"' : ''}>${_escapeXml(p.description || '')}</Project>\n`).join('');
+
+  return `  <PersonalCloud>
+    <Structure>
+      Each user has a persistent folder. Layout:
+      - history/             (read-only; all chat attachments automatically synced)
+      - permanent/           (files the user asked to keep forever; populate with copy_to_permanent)
+      - searched_images/     (images saved by image_search with save_to_disk=true)
+      - projects/&lt;slug&gt;/    each project has: figures/ temp/ output/ code/ README.md
+    </Structure>
+    <AgenticRules>
+      - Use ONE project per user request. If the user asks for something that produces files (PDF, PPTX, XLSX, DOCX, images, scripts, reports...), FIRST call create_project with a meaningful name + description + user_request + strategy.
+      - code_execution, write_file, edit_file and bash require a currently selected project. They refuse to run in the user root.
+      - Write scripts in code/, intermediate files in temp/, final deliverables in output/, images in figures/.
+      - Never try to write in history/, permanent/, projects/ root or a project root directly.
+      - Never try to delete or rename the fixed folders (history, permanent, projects, searched_images, figures, temp, output, code). You can only delete entire projects (with explicit user confirmation) or empty subdir contents via cleanup_project.
+      - Project size quota is limited; if you get quota errors, cleanup temp/ or ask the user what to keep.
+    </AgenticRules>
+    <CurrentProject>${current ? _escapeXml(current) : 'None'}</CurrentProject>
+    <Projects>
+${projectList}    </Projects>
+  </PersonalCloud>
+`;
 }
 
 function buildDedicatedWaInstructions(ctx) {
