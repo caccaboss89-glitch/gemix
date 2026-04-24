@@ -10,6 +10,7 @@ const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
 const { syncFileToHistory } = require('../../utils/historySync');
+const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 
 const log = createLogger('DISCORD');
 
@@ -294,7 +295,9 @@ async function onDiscordMessage(msg) {
     const files = [];
     if (response.attachments) {
       for (const att of response.attachments) {
-        files.push(new AttachmentBuilder(att.buffer, { name: att.name }));
+        const a = toDiscordAttachmentArgs(att);
+        if (!a) continue;
+        files.push(new AttachmentBuilder(a.data, { name: a.name }));
       }
     }
 

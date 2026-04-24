@@ -33,6 +33,7 @@ const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { storeVoiceText } = require('../utils/voiceTextCache');
+const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
 
 const log = createLogger('Tools');
 
@@ -285,8 +286,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             // Send accumulated attachments
             if (includeAttachments && responseCtx.attachments.length > 0) {
               for (const att of responseCtx.attachments) {
-                if (!att.buffer || !att.mimetype) continue;
-                const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+                const m = toWhatsAppMediaArgs(att);
+                if (!m) continue;
+                const media = new MessageMedia(m.mimetype, m.base64, m.name);
                 await sendWhatsAppDirect(targetJid.jid, media);
               }
             }
@@ -392,7 +394,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         }
         try {
           const emailAttachments = includeAttachments
-            ? responseCtx.attachments.map(a => ({ filename: a.name, content: a.buffer, contentType: a.mimetype }))
+            ? responseCtx.attachments.map(toEmailAttachment).filter(Boolean)
             : [];
           await sendEmailDirect(
             targetEmail.email,
@@ -431,8 +433,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           if (includeAttachments && responseCtx.attachments.length > 0) {
             const { MessageMedia } = require('whatsapp-web.js');
             for (const att of responseCtx.attachments) {
-              if (!att.buffer || !att.mimetype) continue;
-              const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+              const m = toWhatsAppMediaArgs(att);
+              if (!m) continue;
+              const media = new MessageMedia(m.mimetype, m.base64, m.name);
               await sendWhatsAppDirect(targetJid.jid, media);
             }
           }

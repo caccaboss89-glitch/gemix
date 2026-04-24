@@ -23,6 +23,7 @@ const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, extr
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const { normalizeMarkdown } = require('../../utils/text');
 const { syncFileToHistory } = require('../../utils/historySync');
+const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
@@ -301,7 +302,9 @@ async function sendWhatsAppResponse(chat, responseData) {
 
   if (hasAttachments) {
     for (const att of responseData.attachments) {
-      const media = new MessageMedia(att.mimetype, att.buffer.toString('base64'), att.name);
+      const m = toWhatsAppMediaArgs(att);
+      if (!m) continue;
+      const media = new MessageMedia(m.mimetype, m.base64, m.name);
       await chat.sendMessage(media);
     }
   }
