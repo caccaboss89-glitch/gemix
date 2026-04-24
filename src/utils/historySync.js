@@ -202,4 +202,50 @@ async function cleanupOldHistory(userId) {
   }
 }
 
-module.exports = { syncFileToHistory };
+/**
+ * Resolve a unique filename inside a destination directory, appending (n) to avoid collisions.
+ */
+function _uniqueFilename(destDir, baseName) {
+  let cleaned = sanitizeFilename(baseName || 'file').replace(/^\.+/, '') || 'file';
+  if (!fs.existsSync(path.join(destDir, cleaned))) return cleaned;
+  const extMatch = cleaned.match(/\.([^.]+)$/);
+  const ext = extMatch ? `.${extMatch[1]}` : '';
+  const stem = extMatch ? cleaned.slice(0, -ext.length) : cleaned;
+  let i = 1;
+  while (fs.existsSync(path.join(destDir, `${stem}(${i})${ext}`))) i++;
+  return `${stem}(${i})${ext}`;
+}
+
+/**
+ * Copy a file from history/ to a destination directory inside the same user folder.
+ * Never moves — the source must stay intact so the chat history keeps pointing to it.
+ *
+ * @param {string} userId - storageId used for the user folder
+ * @param {string} historyFilename - filename as stored inside history/ (no "history/" prefix)
+ * @param {string} destAbsDir - absolute path to the destination directory (must already exist)
+ * @returns {{success: boolean, finalName?: string, error?: string}}
+ */
+function copyFromHistory(userId, historyFilename, destAbsDir) {
+  const { historyDir } = getUserHistoryPaths(userId);
+  const src = path.join(historyDir, historyFilename);
+  if (!fs.existsSync(src)) {
+    return { success: false, error: `history/${historyFilename} not found.` };
+  }
+  if (!fs.existsSync(destAbsDir)) {
+    return { success: false, error: `Destination directory does not exist.` };
+  }
+  try {
+    const finalName = _uniqueFilename(destAbsDir, historyFilename);
+    fs.copyFileSync(src, path.join(destAbsDir, finalName));
+    return { success: true, finalName };
+  } catch (err) {
+    log.error(`copyFromHistory failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+}
+
+module.exports = {
+  syncFileToHistory,
+  copyFromHistory,
+  getUserHistoryPaths,
+};

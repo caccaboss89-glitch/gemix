@@ -79,11 +79,11 @@ const TOOL_IMAGE_SEARCH = makeTool({
 
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
-  description: 'Read the contents of a file (text, images, audio, pdf) located in the user\'s folder or history. Use this to inspect files mentioned in the chat context or scripts.',
+  description: 'Read the contents of a file (text, code, images, audio, pdf). Use this to inspect files mentioned in chat history or produced by agentic tools.',
   properties: {
-    path: { 
-      type: 'string', 
-      description: 'Path to the file to read. On Discord, paths are relative to history/ (e.g. "report.pdf"). On WhatsApp, paths are relative to your user folder (e.g. "history/report.pdf").' 
+    path: {
+      type: 'string',
+      description: 'Relative path. On Discord: any file under history/ (prefix optional, e.g. "report.pdf"). On WhatsApp: paths relative to your user root — allowed zones are "history/...", "permanent/...", "searched_images/...", "projects/<name>/{figures|temp|output|code}/...". Special read-only prefix "skills:<filename>.md" reads a skill guide (WhatsApp only).',
     },
   },
   required: ['path'],

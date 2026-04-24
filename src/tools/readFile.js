@@ -1,79 +1,51 @@
 // src/tools/readFile.js
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
+const { PLATFORM_DISCORD } = require('../config/constants');
 const { extractTextFromPdfBuffer, mediaToContentPart } = require('../utils/media');
+const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 
 const MAX_TEXT_BYTES = 50 * 1024; // 50KB limit for text reading
 const MAX_IMAGE_READS = 10;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024; // 15MB limit for audio
 
 /**
- * Ensures the target path is strictly within the allowed base directory to prevent Path Traversal.
- */
-function isPathSafe(baseDir, targetPath) {
-  const base = path.resolve(baseDir);
-  const resolved = path.resolve(baseDir, targetPath);
-
-  // Hardened prefix check: ensure resolved starts with base AND is followed by a separator or ends there.
-  // This prevents bypasses like /data/history2 starting with /data/history.
-  const relative = path.relative(base, resolved);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return false;
-  }
-
-  try {
-    if (!fs.existsSync(resolved)) return true;
-    const realPath = fs.realpathSync(resolved);
-    const realBaseDir = fs.realpathSync(base);
-
-    const relToRealBase = path.relative(realBaseDir, realPath);
-    return !relToRealBase.startsWith('..') && !path.isAbsolute(relToRealBase);
-  } catch (err) {
-    return false;
-  }
-}
-
-/**
  * Read file tool execution logic.
+ * On Discord, paths are implicitly relative to history/. On WhatsApp paths
+ * are relative to the user root and may target history/, permanent/,
+ * searched_images/, projects/**, or the special skills: prefix.
  */
 async function readFileTool(filePath, userCtx, responseCtx) {
-  // Initialize context counters if not present
   if (responseCtx.imagesReadCount === undefined) responseCtx.imagesReadCount = 0;
 
-  // Resolve storage ID based on platform and group context to ensure correct folder isolation.
-  let storageId;
-  if (userCtx.platform === PLATFORM_DISCORD) {
-    storageId = userCtx.userId; // Discord ID
-  } else {
-    // WhatsApp: use groupId if in group, otherwise sender's JID
-    storageId = userCtx.isGroup ? userCtx.groupId : userCtx.waJid;
-  }
-
-  if (!storageId) {
+  if (!resolveStorageId(userCtx)) {
     return JSON.stringify({ success: false, error: 'Could not resolve storage ID for this context.' });
   }
 
-  const userDir = path.join(DATA_DIR, 'users', String(storageId));
+  ensureUserSkeleton(userCtx);
+
   const isDiscord = userCtx.platform === PLATFORM_DISCORD;
 
-  // Discord users are sandboxed to history/. WA users can access their root folder.
-  const baseDir = isDiscord ? path.join(userDir, 'history') : userDir;
-
-  // Sanitize input path: remove leading slashes and history/ prefix if on Discord to avoid confusion
-  let sanitizedPath = filePath;
-  if (isDiscord && sanitizedPath.startsWith('history/')) {
-    sanitizedPath = sanitizedPath.substring(8);
+  // On Discord, allow both "file.pdf" and "history/file.pdf" by normalizing.
+  let rawPath = (filePath || '').trim();
+  if (isDiscord) {
+    if (rawPath.startsWith('./')) rawPath = rawPath.slice(2);
+    if (rawPath.startsWith('/')) rawPath = rawPath.replace(/^\/+/, '');
+    if (!rawPath.startsWith('history/') && !rawPath.startsWith('skills:') && !rawPath.startsWith('skills/')) {
+      rawPath = 'history/' + rawPath;
+    }
   }
 
-  const absolutePath = path.resolve(baseDir, sanitizedPath);
-
-  if (!isPathSafe(baseDir, sanitizedPath)) {
-    return JSON.stringify({ success: false, error: `Access denied. Path must be within ${isDiscord ? 'history/' : 'your user folder'}.` });
+  const check = isPathAllowed(userCtx, rawPath, { op: 'read' });
+  if (!check.ok) {
+    return JSON.stringify({ success: false, error: `Access denied: ${check.reason}` });
   }
+
+  const absolutePath = check.absPath;
+  const displayPath = rawPath;
 
   if (!fs.existsSync(absolutePath)) {
-    return JSON.stringify({ success: false, error: `File not found at path "${sanitizedPath}".` });
+    return JSON.stringify({ success: false, error: `File not found at path "${displayPath}".` });
   }
 
   let stat;
@@ -81,9 +53,9 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     stat = fs.statSync(absolutePath);
   } catch (err) {
     if (err.code === 'EACCES') {
-      return JSON.stringify({ success: false, error: `Access denied to file "${sanitizedPath}".` });
+      return JSON.stringify({ success: false, error: `Access denied to file "${displayPath}".` });
     }
-    return JSON.stringify({ success: false, error: `Cannot read file "${sanitizedPath}": ${err.message}` });
+    return JSON.stringify({ success: false, error: `Cannot read file "${displayPath}": ${err.message}` });
   }
 
   if (stat.isDirectory()) {
@@ -91,6 +63,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   }
 
   const ext = path.extname(absolutePath).toLowerCase();
+  const sanitizedPath = displayPath;
 
   // ── Size check before reading into memory ──
   if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
