@@ -1,3 +1,4 @@
+// src/utils/footer.js
 const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
 
 /**

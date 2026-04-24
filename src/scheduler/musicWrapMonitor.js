@@ -1,3 +1,4 @@
+// src/scheduler/musicWrapMonitor.js
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
@@ -44,9 +45,16 @@ function saveMonitorState(state) {
  */
 function getPreviousMonthName() {
   const now = new Date();
-  const italyDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
-  italyDate.setMonth(italyDate.getMonth() - 1);
-  return italyDate.toLocaleString('it-IT', { month: 'long' });
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Rome',
+    year: 'numeric',
+    month: 'numeric',
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(now).map(p => [p.type, p.value])
+  );
+  const prevMonth = new Date(parseInt(parts.year, 10), parseInt(parts.month, 10) - 2, 15);
+  return prevMonth.toLocaleString('it-IT', { month: 'long' });
 }
 
 /**
@@ -54,9 +62,16 @@ function getPreviousMonthName() {
  * @returns {string} Date string format (e.g., '2026-03-17')
  */
 function getItalyDateString() {
-  const now = new Date();
-  const italyDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
-  return italyDate.toISOString().split('T')[0]; // YYYY-MM-DD
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Rome',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date()).map(p => [p.type, p.value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 /**
@@ -65,8 +80,11 @@ function getItalyDateString() {
  */
 function isFirstOfMonth() {
   const now = new Date();
-  const italyDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
-  const day = italyDate.getDate();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Rome',
+    day: 'numeric',
+  });
+  const day = parseInt(formatter.format(now), 10);
   log.info(`🔍 isFirstOfMonth check: day=${day} (${now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' })})`);
   return day === 1;
 }
@@ -95,7 +113,7 @@ async function checkStatsFileUpdate() {
     const timestamp = data.lastUpdated || new Date().toISOString();
     return timestamp;
   } catch (err) {
-    log.error('❌ Errore nel fetch stats.json:', err.message);
+    log.error('❌ Errore fetch stats.json:', err.message);
     return null;
   }
 }
@@ -119,7 +137,7 @@ function wasMessageSentToday(memberWa, state) {
  */
 async function checkAndSendMusicWrap(dedicatedClient) {
   if (!dedicatedClient) {
-    log.warn('⚠️  Dedicated WhatsApp client not available (not ready yet)');
+    log.warn('⚠️  Client WhatsApp dedicato non disponibile (non ancora ready)');
     return;
   }
 

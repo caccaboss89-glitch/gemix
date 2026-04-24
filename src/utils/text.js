@@ -1,3 +1,4 @@
+// src/utils/text.js
 /**
  * Sanitize a string for use as a filename.
  * Removes special chars, collapses whitespace to underscores, trims length.
@@ -7,7 +8,8 @@
  */
 function sanitizeFilename(text, maxLen = 80) {
   return (text || 'file')
-    .replace(/[^a-zA-Z0-9àèéìòù\s_-]/gi, '')
+    .replace(/[^a-zA-Z0-9àèéìòù.\s_-]/gi, '')
+    .replace(/\.{2,}/g, '.')
     .trim()
     .replace(/\s+/g, '_')
     .slice(0, maxLen) || 'file';

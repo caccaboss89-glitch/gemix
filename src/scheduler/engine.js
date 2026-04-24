@@ -1,3 +1,4 @@
+// src/scheduler/engine.js
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
@@ -148,7 +149,7 @@ async function checkAndExecuteTasks() {
             await executeTask(task);
             log.info(`✅ Task eseguito: ${task.id}`);
           } catch (err) {
-            log.error(`❌ Errore task ${task.id}:`, err.message);
+            log.error(`❌ Errore processamento task ${task.id}:`, err.message);
           }
         }
 
@@ -179,7 +180,7 @@ async function checkAndExecuteTasks() {
         return data;
       });
     } catch (err) {
-      log.error(`❌ Errore elaborazione file task ${fileId}:`, err.message);
+      log.error(`❌ Errore processamento file task ${fileId}:`, err.message);
     }
   }
 }

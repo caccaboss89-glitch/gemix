@@ -1,3 +1,4 @@
+// src/utils/responseLock.js
 // Simple in-memory response lock per chat to avoid concurrent replies
 const locks = new Map();
 

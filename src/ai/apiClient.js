@@ -1,3 +1,4 @@
+// src/ai/apiClient.js
 const fs = require('fs');
 const path = require('path');
 const { notifyAdmin } = require('../utils/adminNotifier');
@@ -6,12 +7,42 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
+const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const LOG_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 function ensureLogDir() {
   if (!fs.existsSync(apiLogDir)) {
     fs.mkdirSync(apiLogDir, { recursive: true });
   }
 }
+
+function cleanupOldLogs() {
+  try {
+    if (!fs.existsSync(apiLogDir)) return;
+    const now = Date.now();
+    const files = fs.readdirSync(apiLogDir);
+    let deleted = 0;
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const filePath = path.join(apiLogDir, file);
+      try {
+        const stat = fs.statSync(filePath);
+        if (now - stat.mtimeMs > LOG_MAX_AGE_MS) {
+          fs.unlinkSync(filePath);
+          deleted++;
+        }
+      } catch { }
+    }
+    if (deleted > 0) log.info(`Log cleanup: deleted ${deleted} old file(s)`);
+  } catch (err) {
+    log.warn(`Log cleanup failed: ${err.message}`);
+  }
+}
+
+// Cleanup on startup and periodically
+cleanupOldLogs();
+const _logCleanupInterval = setInterval(cleanupOldLogs, LOG_CLEANUP_INTERVAL_MS);
+_logCleanupInterval.unref();
 
 function _getLogFilePath(prefix, timestamp) {
   const sanitized = timestamp.replace(/[:.]/g, '-');
@@ -112,12 +143,12 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
         const delay = attempt * 3000;
-        log.warn(`   ⚠️ API tentativo ${attempt}/${MAX_API_RETRIES} fallito: ${errMsg} — retry in ${delay / 1000}s...`);
+        log.warn(`   ⚠️ Tentativo API ${attempt}/${MAX_API_RETRIES} fallito: ${errMsg} — ritento tra ${delay / 1000}s...`);
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
 
-      log.error(`   ❌ API Error: ${errMsg}`);
+      log.error(`   ❌ Errore API: ${errMsg}`);
       await notifyAdmin(`API (${modelName})`, `Errore dopo ${attempt} tentativi: ${errMsg}`);
       throw new Error(`${modelName} API non raggiungibile dopo ${attempt} tentativ${attempt > 1 ? 'i' : 'o'}: ${errMsg}`);
     }
@@ -170,9 +201,9 @@ async function callModel(modelName, apiUrl, body, apiKey) {
       throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
     }
     
-    throw new Error(`${modelName} API: nessuna risposta ricevuta (risposta vuota o malformata)`);
+    throw new Error(`${modelName} API: Nessuna risposta ricevuta dall'API (vuota o malformata)`);
   }
   return data.choices[0].message;
 }
 
-module.exports = { callApiWithRetry, callModel };
+module.exports = { callModel };

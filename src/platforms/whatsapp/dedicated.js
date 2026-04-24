@@ -1,9 +1,9 @@
+// src/platforms/whatsapp/dedicated.js
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse } = require('./shared');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
-const { findMemberByWa } = require('../../config/members');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
@@ -119,50 +119,9 @@ async function onDedicatedMessage(msg) {
   log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
 
-  const groupParticipants = [];
-  const groupParticipantsByName = {};
+  const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid);
 
-  if (isGroup) {
-    try {
-      const participants = Array.isArray(chat.participants)
-        ? chat.participants
-        : chat.participants && typeof chat.participants[Symbol.iterator] === 'function'
-          ? Array.from(chat.participants)
-          : [];
-
-      let noNameIndex = 1;
-      for (const participant of participants) {
-        const jid = participant?.id?._serialized || participant?.id || null;
-        if (!jid) continue;
-        const phone = jid.replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/\D/g, '');
-        const rawName = participant?.notifyName || participant?.name || participant?.pushname || '';
-        const displayName = rawName.trim() || `Utente sconosciuto ${noNameIndex}`;
-        if (!rawName.trim()) noNameIndex += 1;
-
-        const member = findMemberByWa(jid);
-
-        const item = {
-          jid,
-          phone,
-          displayName,
-          isActive: !!member,
-          member: member || null,
-        };
-
-        groupParticipants.push(item);
-
-        const normalized = String(displayName).toLowerCase().trim();
-        if (!groupParticipantsByName[normalized]) groupParticipantsByName[normalized] = [];
-        groupParticipantsByName[normalized].push(jid);
-      }
-    } catch (err) {
-      log.warn('Impossibile calcolare i partecipanti di gruppo:', err.message);
-    }
-  }
-
-  const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED);
-
-  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized);
+  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, isGroup ? chat.id._serialized : phoneJid);
 
   if (contentParts.length === 0) return;
 
@@ -175,8 +134,6 @@ async function onDedicatedMessage(msg) {
     userId: senderJid,
     userName,
     userIdentity,
-    groupParticipants,
-    groupParticipantsByName,
     content: contentParts.length === 1 && contentParts[0].type === 'text'
       ? contentParts[0].text
       : contentParts,

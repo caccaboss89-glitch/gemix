@@ -1,3 +1,4 @@
+// src/tools/releaseNotify.js
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
@@ -33,19 +34,19 @@ _load();
  */
 function toggleReleaseNotify(enabled, chatId, waJid) {
   if (!chatId || !waJid) {
-    return '❌ Unable to determine the chat or WhatsApp number.';
+    return { success: false, error: 'Unable to determine the chat or WhatsApp number.' };
   }
   if (enabled) {
     subscribedChats.set(chatId, waJid);
     _save();
-    return '✅ GemiX release notifications enabled for this chat.';
+    return { success: true, message: 'GemiX release notifications enabled for this chat.' };
   }
   if (!subscribedChats.has(chatId)) {
-    return 'ℹ️ Release notifications were already disabled for this chat.';
+    return { success: true, message: 'Release notifications were already disabled for this chat.' };
   }
   subscribedChats.delete(chatId);
   _save();
-  return '✅ GemiX release notifications disabled for this chat.';
+  return { success: true, message: 'GemiX release notifications disabled for this chat.' };
 }
 
 /**

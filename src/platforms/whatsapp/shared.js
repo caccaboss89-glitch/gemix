@@ -1,3 +1,4 @@
+// src/platforms/whatsapp/shared.js
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
@@ -18,9 +19,10 @@ function _isSystemMessage(body) {
     /^\u26A0\uFE0F \*ERRORE API \u2014/.test(body)
   );
 }
-const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, limitHistoryMediaAttachments } = require('../../utils/media');
+const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const { normalizeMarkdown } = require('../../utils/text');
+const { syncFileToHistory } = require('../../utils/historySync');
 
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
@@ -29,7 +31,7 @@ const { normalizeMarkdown } = require('../../utils/text');
  * @param {string} platform - Platform identifier ('whatsapp_dedicated' | 'whatsapp_personal')
  * @returns {Promise<Array>} Array of history messages with role ('user'|'assistant') and content
  */
-async function buildWhatsAppHistory(chat, platform) {
+async function buildWhatsAppHistory(chat, platform, userId) {
   const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
   const messages = rawMessages.slice(-MAX_HISTORY);
 
@@ -53,14 +55,14 @@ async function buildWhatsAppHistory(chat, platform) {
           senderName = 'GemiX';
           isGemiX = true;
         } else {
-          senderName = 'Tu (proprietario account)';
+          senderName = 'Account Owner';
         }
       } else {
         try {
           const contact = await msg.getContact();
           senderName = contact.pushname || contact.name || msg.from;
         } catch {
-          senderName = msg.from || 'Sconosciuto';
+          senderName = msg.from || 'Unknown';
         }
       }
     } else {
@@ -80,7 +82,7 @@ async function buildWhatsAppHistory(chat, platform) {
           const contact = await msg.getContact();
           senderName = contact.pushname || contact.name || msg.from;
         } catch {
-          senderName = msg.from || 'Sconosciuto';
+          senderName = msg.from || 'Unknown';
         }
       }
     }
@@ -98,99 +100,81 @@ async function buildWhatsAppHistory(chat, platform) {
     } else {
       textContent = msg.body || '';
     }
-    const mediaParts = [];
 
     if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
-      textContent = `[Contatto condiviso] ${textContent || ''}`;
+      textContent = `[Shared contact] ${textContent || ''}`;
     } else if (msg.type === 'poll_creation') {
       try {
-        textContent = formatWhatsAppPollText(msg, `[Sondaggio] ${msg.body || ''}`);
+        textContent = formatWhatsAppPollText(msg, `[Poll] ${msg.body || ''}`);
       } catch {
-        textContent = '[Sondaggio]';
+        textContent = '[Poll]';
       }
     }
 
     if (msg.hasMedia) {
       const mediaType = msg.type;
       const filename = msg._data?.filename || msg._data?.caption || null;
-      const tag = mediaTag(filename, msg._data?.mimetype);
       const duration = Number(msg.duration || msg._data?.duration || 0);
       const isAudioType = mediaType === 'audio' || mediaType === 'ptt';
 
+      const fetchBuffer = async () => {
+        const media = await msg.downloadMedia();
+        return media ? Buffer.from(media.data, 'base64') : null;
+      };
+      const syncedPath = await syncFileToHistory(userId, msg.id.id, fetchBuffer, filename);
+      const tag = buildAttachmentTag(syncedPath, filename);
+
       if (isSupportedMedia(mediaType)) {
         if (isAudioType) {
-          // GemiX audio → transcription (check cache first, then isGemiX flag)
           const cachedText = retrieveVoiceText(chat.id._serialized, msg.timestamp * 1000);
           if (cachedText) {
-            textContent = `${textContent} ${tag} TRASCRIZIONE: ${cachedText}`.trim();
+            textContent = `${textContent} ${tag} <Transcription>${cachedText}</Transcription>`.trim();
           } else if (isGemiX) {
-            textContent = `${textContent} ${tag} (trascrizione non disponibile)`.trim();
+            textContent = `${textContent} ${tag} (transcription unavailable)`.trim();
           } else if (duration > MAX_AUDIO_DURATION_S) {
-            textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${duration}s)`.trim();
+            textContent = `${textContent} ${tag} (audio too long: ${duration}s, max 3 min)`.trim();
           } else {
-            try {
-              const media = await msg.downloadMedia();
-              if (media) {
-                mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
-              }
-            } catch { }
             textContent = `${textContent} ${tag}`.trim();
           }
         } else if (mediaType === 'document' && msg._data?.mimetype === 'application/pdf') {
           try {
-            const media = await msg.downloadMedia();
-            if (media) {
-              const buffer = Buffer.from(media.data, 'base64');
+            const buffer = await fetchBuffer();
+            if (buffer) {
               const info = await extractTextFromPdfBuffer(buffer);
               if (!info.success) {
                 textContent = `${textContent} ${tag}`.trim();
               } else if (info.pages > MAX_DOC_PAGES) {
-                textContent = `${textContent} ${tag} (troppo lungo per essere letto: ${info.pages} pagine)`.trim();
+                textContent = `${textContent} ${tag} (document too long: ${info.pages} pages)`.trim();
               } else {
-                const docText = info.text ? `\n<Trascrizione>\n${info.text}\n</Trascrizione>` : '';
-                textContent = `${textContent} ${tag}${docText}`.trim();
+                textContent = `${textContent} ${tag}`.trim();
               }
+            } else {
+              textContent = `${textContent} ${tag}`.trim();
             }
           } catch {
             textContent = `${textContent} ${tag}`.trim();
           }
         } else {
-          try {
-            const media = await msg.downloadMedia();
-            if (media) {
-              mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
-            }
-          } catch { }
           textContent = `${textContent} ${tag}`.trim();
         }
       } else if (isUnsupportedMedia(mediaType)) {
-        textContent = `${textContent} ${tag} (file non visionabile)`.trim();
+        textContent = `${textContent} ${tag} (file not viewable)`.trim();
       } else {
         textContent = `${textContent} ${tag}`.trim();
       }
     }
 
-    if (!textContent && mediaParts.length === 0) continue;
+    if (!textContent) continue;
 
     const prefix = `[${ts}] ${senderName}: `;
 
-    if (mediaParts.length > 0) {
-      historyMessages.push({
-        role: isFromBot ? 'assistant' : 'user',
-        content: [
-          { type: 'text', text: `${prefix}${textContent}` },
-          ...mediaParts,
-        ],
-      });
-    } else if (textContent) {
-      historyMessages.push({
-        role: isFromBot ? 'assistant' : 'user',
-        content: `${prefix}${textContent}`,
-      });
-    }
+    historyMessages.push({
+      role: isFromBot ? 'assistant' : 'user',
+      content: `${prefix}${textContent}`,
+    });
   }
 
-  return limitHistoryMediaAttachments(historyMessages, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+  return historyMessages;
 }
 
 /**
@@ -200,7 +184,7 @@ async function buildWhatsAppHistory(chat, platform) {
  * @param {string} chatId - Chat ID for voice cache lookup
  * @returns {Promise<object>} { prefix: string, mediaParts: array }
  */
-async function extractQuotedMessageContent(msg, chatId) {
+async function extractQuotedMessageContent(msg, chatId, userId) {
   if (!msg.hasQuotedMsg) return { prefix: '', mediaParts: [] };
 
   try {
@@ -212,23 +196,29 @@ async function extractQuotedMessageContent(msg, chatId) {
 
     if (quoted.hasMedia) {
       const filename = quoted._data?.filename || quoted._data?.caption || null;
-      const tag = mediaTag(filename, quoted._data?.mimetype);
       const mediaType = quoted.type;
       const isAudio = mediaType === 'audio' || mediaType === 'ptt';
       const duration = Number(quoted.duration || quoted._data?.duration || 0);
 
+      const fetchBuffer = async () => {
+        const media = await quoted.downloadMedia();
+        return media ? Buffer.from(media.data, 'base64') : null;
+      };
+      const syncedPath = await syncFileToHistory(userId, quoted.id.id, fetchBuffer, filename);
+      const tag = buildAttachmentTag(syncedPath, filename);
+
       if (isAudio) {
         const cachedText = chatId ? retrieveVoiceText(chatId, quoted.timestamp * 1000) : null;
         if (cachedText) {
-          prefix = `[In reply to: ${tag} TRASCRIZIONE: ${cachedText}]\n`;
+          prefix = `[In reply to: ${tag} <Transcription>${cachedText}</Transcription>]\n`;
         } else if (duration > MAX_AUDIO_DURATION_S) {
-          prefix = `[In reply to: ${tag} (audio troppo lungo: ${duration}s)]\n`;
+          prefix = `[In reply to: ${tag} (audio too long: ${duration}s, max 3 min)]\n`;
         } else {
           prefix = `[In reply to: ${tag}]\n`;
           try {
-            const media = await quoted.downloadMedia();
-            if (media) {
-              mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
+            const buffer = await fetchBuffer();
+            if (buffer) {
+              mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype));
             }
           } catch { }
         }
@@ -237,16 +227,15 @@ async function extractQuotedMessageContent(msg, chatId) {
 
       if (mediaType === 'document' && quoted._data?.mimetype === 'application/pdf') {
         try {
-          const media = await quoted.downloadMedia();
-          if (media) {
-            const buffer = Buffer.from(media.data, 'base64');
+          const buffer = await fetchBuffer();
+          if (buffer) {
             const info = await extractTextFromPdfBuffer(buffer);
             if (!info.success) {
               prefix = `[In reply to: ${tag}]\n`;
             } else if (info.pages > MAX_DOC_PAGES) {
-              prefix = `[In reply to: ${tag} (troppo lungo: ${info.pages} pagine)]\n`;
+              prefix = `[In reply to: ${tag} (document too long: ${info.pages} pages)]\n`;
             } else {
-              const docText = info.text ? ` <Trascrizione>\n${info.text}\n</Trascrizione>` : '';
+              const docText = info.text ? ` <Transcription>\n${info.text}\n</Transcription>` : '';
               prefix = `[In reply to: ${tag}${docText}]\n`;
             }
           } else {
@@ -260,9 +249,9 @@ async function extractQuotedMessageContent(msg, chatId) {
 
       prefix = `[In reply to: ${tag}]\n`;
       try {
-        const media = await quoted.downloadMedia();
-        if (media) {
-          mediaParts.push(mediaToContentPart(Buffer.from(media.data, 'base64'), media.mimetype));
+        const buffer = await fetchBuffer();
+        if (buffer) {
+          mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype));
         }
       } catch { }
       return { prefix, mediaParts };
@@ -323,7 +312,7 @@ async function sendWhatsAppResponse(chat, responseData) {
  * @param {object} msg - The whatsapp-web.js message object
  * @returns {Promise<object|null>} { skipped, buffer?, mimetype?, filename?, tag, reason? } or null
  */
-async function processCurrentMedia(msg) {
+async function processCurrentMedia(msg, userId) {
   if (!msg.hasMedia) return null;
 
   const mediaType = msg.type;
@@ -334,7 +323,7 @@ async function processCurrentMedia(msg) {
     return {
       skipped: true,
       tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
-      reason: `audio troppo lungo: ${duration}s, non inviato`,
+      reason: `audio too long: ${duration}s, max 3 min`,
     };
   }
 
@@ -342,41 +331,60 @@ async function processCurrentMedia(msg) {
     return {
       skipped: true,
       tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
-      reason: isUnsupportedMedia(mediaType) ? 'file non visionabile' : null,
+      reason: isUnsupportedMedia(mediaType) ? 'file not viewable' : null,
     };
   }
 
+  let buffer = null;
+  let mimetype = null;
+  let filename = msg._data?.filename || null;
+
   try {
     const media = await msg.downloadMedia();
-    if (!media) return null;
+    if (media) {
+      buffer = Buffer.from(media.data, 'base64');
+      mimetype = media.mimetype;
+    }
+  } catch { }
 
-    const buffer = Buffer.from(media.data, 'base64');
+  let syncedPath = null;
+  if (buffer) {
+    const fetchBuffer = async () => buffer;
+    syncedPath = await syncFileToHistory(userId, msg.id.id, fetchBuffer, filename);
+  }
 
-    if (media.mimetype === 'application/pdf') {
+  const tag = syncedPath ? buildAttachmentTag(syncedPath, filename) : mediaTag(filename, mimetype);
+
+  if (!buffer) {
+    return { skipped: true, tag, reason: 'file unavailable' };
+  }
+
+  try {
+    if (mimetype === 'application/pdf') {
       try {
         const info = await extractTextFromPdfBuffer(buffer);
         if (!info.success) {
           return {
             skipped: false,
             transcription: null,
-            mimetype: media.mimetype,
-            filename: media.filename || null,
-            tag: mediaTag(media.filename, media.mimetype),
+            mimetype,
+            filename,
+            tag,
           };
         }
         if (info.pages > MAX_DOC_PAGES) {
           return {
             skipped: true,
-            tag: mediaTag(media.filename, media.mimetype),
-            reason: `documento troppo lungo: ${info.pages} pagine, non inviato`,
+            tag,
+            reason: `document too long: ${info.pages} pages`,
           };
         }
         return {
           skipped: false,
           transcription: info.text ? info.text : null,
-          mimetype: media.mimetype,
-          filename: media.filename || null,
-          tag: mediaTag(media.filename, media.mimetype),
+          mimetype,
+          filename,
+          tag,
         };
       } catch { }
     }
@@ -384,9 +392,9 @@ async function processCurrentMedia(msg) {
     return {
       skipped: false,
       buffer,
-      mimetype: media.mimetype,
-      filename: media.filename || null,
-      tag: mediaTag(media.filename, media.mimetype),
+      mimetype,
+      filename,
+      tag,
     };
   } catch {
     return null;
@@ -401,17 +409,17 @@ async function processCurrentMedia(msg) {
  * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
  * @returns {Promise<Array>} contentParts array (may be empty if message has no usable content)
  */
-async function buildIncomingContentParts(msg, chatId) {
+async function buildIncomingContentParts(msg, chatId, userId) {
   const contentParts = [];
   let textBody = msg.body || '';
 
   if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
-    textBody = `[Contatto condiviso] ${textBody}`;
+    textBody = `[Shared contact] ${textBody}`;
   } else if (msg.type === 'poll_creation') {
-    textBody = formatWhatsAppPollText(msg, `[Sondaggio] ${textBody}`);
+    textBody = formatWhatsAppPollText(msg, `[Poll] ${textBody}`);
   }
 
-  const quotedContent = await extractQuotedMessageContent(msg, chatId);
+  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId);
   if (quotedContent && quotedContent.prefix) {
     textBody = quotedContent.prefix + textBody;
   }
@@ -419,13 +427,13 @@ async function buildIncomingContentParts(msg, chatId) {
     contentParts.push(...quotedContent.mediaParts);
   }
 
-  const mediaResult = await processCurrentMedia(msg);
+  const mediaResult = await processCurrentMedia(msg, userId);
   if (mediaResult) {
     if (mediaResult.skipped) {
       const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
       textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
     } else if (mediaResult.transcription !== undefined) {
-      const docText = mediaResult.transcription ? `\n<Trascrizione>\n${mediaResult.transcription}\n</Trascrizione>` : '';
+      const docText = mediaResult.transcription ? `\n<Transcription>\n${mediaResult.transcription}\n</Transcription>` : '';
       textBody = `${mediaResult.tag}${docText} ${textBody}`.trim();
     } else {
       contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype));
@@ -433,7 +441,7 @@ async function buildIncomingContentParts(msg, chatId) {
     }
   } else if (msg.hasMedia) {
     const tag = mediaTag(null, msg._data?.mimetype);
-    textBody = `${tag} (file non disponibile) ${textBody}`.trim();
+    textBody = `${tag} (file unavailable) ${textBody}`.trim();
   }
 
   if (textBody) {

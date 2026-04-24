@@ -1,3 +1,4 @@
+// src/tools/whatsappSender.js
 const { removeDiscordEmoji } = require('../utils/discord');
 const { normalizeMarkdown } = require('../utils/text');
 
@@ -28,7 +29,7 @@ function normalizePhoneToJid(phone) {
  * Send a WhatsApp message directly to a JID (used by scheduler).
  */
 async function sendWhatsAppDirect(chatId, message, options = {}) {
-  if (!dedicatedClient) throw new Error('Client WhatsApp dedicato non disponibile');
+  if (!dedicatedClient) throw new Error('Dedicated WhatsApp client not available');
   // Only clean text messages; MessageMedia objects must be passed through untouched
   if (typeof message === 'string') {
     message = normalizeMarkdown(removeDiscordEmoji(message));

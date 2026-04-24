@@ -1,3 +1,4 @@
+// src/utils/discord.js
 /**
  * Remove Discord custom emojis, mentions, and other Discord-specific markdown from text.
  * Removes patterns like <:name:id>, <@!id>, <#id>, <@&id>, etc.

@@ -1,3 +1,4 @@
+// src/utils/time.js
 /**
  * Get current time in Rome (Europe/Rome timezone) as localized string.
  * @returns {string} Formatted time string (it-IT locale)
@@ -96,13 +97,13 @@ function checkDSTAmbiguousHour(localDatetime) {
   // Spring forward: last Sunday of March at 02:00 → 03:00 (02:00-02:59:59 doesn't exist)
   const lastSundayMarch = getLastSundayOfMonth(year, 3);
   if (month === 3 && day === lastSundayMarch && hour === 2) {
-    return `⚠️ Invalid time: on March ${day}, ${year} at 02:00 the clock jumps directly to 03:00 (start of daylight saving time). Choose 01:30 or 03:30 instead.`;
+    return `Invalid time: on March ${day}, ${year} at 02:00 the clock jumps directly to 03:00 (start of daylight saving time). Choose 01:30 or 03:30 instead.`;
   }
 
   // Fall back: last Sunday of October at 02:00-02:59 (exists twice - ambiguous)
   const lastSundayOctober = getLastSundayOfMonth(year, 10);
   if (month === 10 && day === lastSundayOctober && hour === 2) {
-    return `⚠️ Ambiguous time: on October ${day}, ${year} at 02:00-02:59 the hour occurs twice (end of daylight saving time). The task will be scheduled for the second occurrence (standard time +01:00).`;
+    return `Ambiguous time: on October ${day}, ${year} at 02:00-02:59 the hour occurs twice (end of daylight saving time). The task will be scheduled for the second occurrence (standard time +01:00).`;
   }
 
   return null;
@@ -193,7 +194,7 @@ function convertRomeLocalToISO(localDatetime) {
   }
 
   if (bestUtcDate === null) {
-    // Fallback: if exact match not found (e.g., during ambiguous hour), use +02:00 (DST preferred)
+    // Fallback: no exact match found (e.g., non-existent spring-forward hour). Use +02:00 (CEST, active after transition).
     bestUtcDate = new Date(Date.UTC(year, month - 1, day, hour - 2, minute, second, 0));
     bestMatch = 120;
   }

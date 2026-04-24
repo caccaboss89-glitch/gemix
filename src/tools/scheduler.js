@@ -1,11 +1,12 @@
+// src/tools/scheduler.js
 const crypto = require('crypto');
-const { TASKS_DIR, MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
+const { MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
 const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { normalizeMarkdown } = require('../utils/text');
-const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
+const { modifyTaskFile } = require('../utils/taskStore');
 
 /**
  * Schedule one or more tasks for a user or group.
@@ -27,7 +28,7 @@ async function scheduleTasks(tasks, ctx) {
     // Convert local datetime (without offset) to ISO with correct timezone offset
     const scheduledAtISO = convertRomeLocalToISO(task.scheduledAt);
     if (!scheduledAtISO) {
-      results.push(`❌ Invalid date: "${task.scheduledAt}". Use format: YYYY-MM-DDTHH:MM:SS (e.g.: 2026-04-17T16:30:00)`);
+      results.push({ success: false, error: `Invalid date: "${task.scheduledAt}". Use format: YYYY-MM-DDTHH:MM:SS (e.g.: 2026-04-17T16:30:00)` });
       continue;
     }
 
@@ -38,15 +39,15 @@ async function scheduleTasks(tasks, ctx) {
     const scheduledAtTime = scheduledAt.getTime();
 
     if (isNaN(scheduledAtTime)) {
-      results.push(`❌ Invalid date: "${task.scheduledAt}"`);
+      results.push({ success: false, error: `Invalid date: "${task.scheduledAt}"` });
       continue;
     }
     if (scheduledAtTime <= nowTime) {
-      results.push(`❌ Date ${formatTimestamp(scheduledAtISO)} is in the past.`);
+      results.push({ success: false, error: `Date ${formatTimestamp(scheduledAtISO)} is in the past.` });
       continue;
     }
     if (scheduledAtTime > maxDateMs) {
-      results.push(`❌ Date ${formatTimestamp(scheduledAtISO)} exceeds the 1-year limit.`);
+      results.push({ success: false, error: `Date ${formatTimestamp(scheduledAtISO)} exceeds the 1-year limit.` });
       continue;
     }
 
@@ -55,39 +56,39 @@ async function scheduleTasks(tasks, ctx) {
     if (task.recurrence) {
       const { freq, endAt } = task.recurrence;
       if (!freq || !VALID_RECURRENCE_FREQS.includes(freq)) {
-        results.push(`❌ Invalid recurrence frequency: "${freq}". Use: ${VALID_RECURRENCE_FREQS.join(', ')}.`);
+        results.push({ success: false, error: `Invalid recurrence frequency: "${freq}". Use: ${VALID_RECURRENCE_FREQS.join(', ')}.` });
         continue;
       }
       // Convert local endAt datetime to ISO with correct offset
       const endAtISO = convertRomeLocalToISO(endAt);
       if (!endAtISO) {
-        results.push(`❌ Invalid recurrence end date: "${endAt}". Use format: YYYY-MM-DDTHH:MM:SS`);
+        results.push({ success: false, error: `Invalid recurrence end date: "${endAt}". Use format: YYYY-MM-DDTHH:MM:SS` });
         continue;
       }
       const endDate = new Date(endAtISO);
       if (isNaN(endDate.getTime())) {
-        results.push(`❌ Invalid recurrence end date: "${endAt}"`);
+        results.push({ success: false, error: `Invalid recurrence end date: "${endAt}"` });
         continue;
       }
       if (endDate.getTime() <= scheduledAtTime) {
-        results.push('❌ Recurrence end date must be after the start date.');
+        results.push({ success: false, error: 'Recurrence end date must be after the start date.' });
         continue;
       }
       if (endDate.getTime() > maxDateMs) {
-        results.push(`❌ Recurrence end date exceeds the 1-year limit.`);
+        results.push({ success: false, error: `Recurrence end date exceeds the 1-year limit.` });
         continue;
       }
       recurrence = { freq, endAt: endAtISO };
     }
 
     if (task.whatsapp && task.whatsapp.toGroup && !ctx.isGroup) {
-      results.push('⚠️ Ignored whatsapp.toGroup: you are not in a valid group for this platform.');
+      results.push({ success: true, message: 'Ignored whatsapp.toGroup: you are not in a valid group for this platform.', warning: true });
       task.whatsapp.toGroup = false;
     }
 
     const isGroupTask = task.whatsapp && task.whatsapp.toGroup && ctx.isGroup && ctx.groupTaskFileId;
     if (task.whatsapp && task.whatsapp.toGroup && !isGroupTask) {
-      results.push('❌ whatsapp.toGroup requested but no group task file is available.');
+      results.push({ success: false, error: 'whatsapp.toGroup requested but no group task file is available.' });
       continue;
     }
 
@@ -95,7 +96,7 @@ async function scheduleTasks(tasks, ctx) {
     const waRecipient = task.whatsapp?.recipient || { name: task.whatsapp?.recipientName, phone: task.whatsapp?.recipientPhone };
 
     if (task.whatsapp && task.whatsapp.toPrivate && (waRecipient.phone || waRecipient.name) && !ctx.isAdmin && !ctx.isActiveMember) {
-      results.push('❌ Specific WhatsApp recipient only available for active members or admin.');
+      results.push({ success: false, error: 'Specific WhatsApp recipient only available for active members or admin.' });
       continue;
     }
 
@@ -110,7 +111,7 @@ async function scheduleTasks(tasks, ctx) {
         if (recipient) {
           destinations.whatsapp = recipient.wa;
         } else {
-          results.push(`❌ "${waRecipient.name}" not found among members. Use phone number for non-members.`);
+          results.push({ success: false, error: `"${waRecipient.name}" not found among members. Use phone number for non-members.` });
           continue;
         }
       } else if (ctx.isActiveMember && waRecipient.name) {
@@ -118,7 +119,7 @@ async function scheduleTasks(tasks, ctx) {
         if (recipient) {
           destinations.whatsapp = recipient.wa;
         } else {
-          results.push(`❌ "${waRecipient.name}" not found among members.`);
+          results.push({ success: false, error: `"${waRecipient.name}" not found among members.` });
           continue;
         }
       } else if (ctx.userPhone) {
@@ -135,7 +136,7 @@ async function scheduleTasks(tasks, ctx) {
       if (ctx.waJid) {
         destinations.whatsapp = ctx.waJid;
       } else {
-        results.push(`❌ No valid destination for this task.`);
+        results.push({ success: false, error: `No valid destination for this task.` });
         continue;
       }
     }
@@ -152,22 +153,23 @@ async function scheduleTasks(tasks, ctx) {
       ...(recurrence && { recurrence }),
     };
 
-    let fileData = await readTaskFile(fileId) || { tasks: [] };
-
-    fileData.tasks.push(newTask);
-    await writeTaskFile(fileId, fileData);
+    await modifyTaskFile(fileId, async (fileData) => {
+      const data = fileData || { tasks: [] };
+      data.tasks.push(newTask);
+      return data;
+    });
 
     const destStr = Object.keys(destinations).join(', ');
     const recLabel = recurrence ? ` 🔁${recurrence.freq} until ${recurrence.endAt}` : '';
     const scheduledAtRome = formatTimestamp(scheduledAt);
-    let msg = `✅ Task "${task.content.substring(0, 50)}..." scheduled for ${scheduledAtRome} (Europe/Rome) [${destStr}]${recLabel}. Make sure the time matches what the user requested; if not, cancel it and set it again.`;
+    let msg = `Task "${task.content.substring(0, 50)}..." scheduled for ${scheduledAtRome} (Europe/Rome) [${destStr}]${recLabel}. Make sure the time matches what the user requested; if not, cancel it and set it again.`;
     if (dstWarning) {
       msg = dstWarning + '\n' + msg;
     }
-    results.push(msg);
+    results.push({ success: true, message: msg });
   }
 
-  return results.join('\n');
+  return { success: true, results };
 }
 
 module.exports = { scheduleTasks };

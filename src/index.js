@@ -1,3 +1,4 @@
+// src/index.js
 require('dotenv').config();
 const fs = require('fs');
 const { TASKS_DIR, DATA_DIR } = require('./config/constants');

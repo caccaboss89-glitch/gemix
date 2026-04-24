@@ -1,3 +1,4 @@
+// src/tools/voiceMessage.js
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
 const { XAI_API_KEY, XAI_TTS_VOICE } = require('../config/env');
@@ -67,11 +68,11 @@ function convertMp3ToWhatsAppOpus(mp3Buffer) {
       stderr += data.toString();
     });
     ffmpeg.on('error', err => {
-      reject(new Error(`FFmpeg non trovato o non avviabile: ${err.message}`));
+      reject(new Error(`FFmpeg not found or failed to start: ${err.message}`));
     });
     ffmpeg.on('close', code => {
       if (code !== 0) {
-        return reject(new Error(`Conversione audio FFmpeg fallita (code ${code}): ${stderr || 'errore sconosciuto'}`));
+        return reject(new Error(`FFmpeg audio conversion failed (code ${code}): ${stderr || 'unknown error'}`));
       }
       resolve(Buffer.concat(chunks));
     });
@@ -92,7 +93,7 @@ const VOICE_GENERATION_TIMEOUT_MS = 30_000;
 async function generateVoice(text) {
   const timeout = new Promise((_, reject) =>
     setTimeout(
-      () => reject(new Error(`Timeout generazione voce (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`)),
+      () => reject(new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`)),
       VOICE_GENERATION_TIMEOUT_MS,
     )
   );
@@ -164,4 +165,4 @@ async function googleTranslateTTS(text) {
   return convertMp3ToWhatsAppOpus(mp3Buffer);
 }
 
-module.exports = { generateVoice, stripVocalTags, MAX_TTS_CHARS };
+module.exports = { generateVoice, stripVocalTags };

@@ -1,3 +1,4 @@
+// src/ai/aiProvider.js
 const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, GEMINI_MODEL, QWEN_MODEL } = require('../config/env');
 const { MAX_TOKENS } = require('../config/constants');
 const { callModel } = require('./apiClient');
@@ -46,4 +47,4 @@ async function callAI(messages, tools = null) {
   return { message, provider, model };
 }
 
-module.exports = { callAI, hasAudioContent };
+module.exports = { callAI };

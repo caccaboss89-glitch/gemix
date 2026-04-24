@@ -1,4 +1,5 @@
-const { isActiveMemberOnlyTool, _markSendAboutMeUsed } = require('../ai/tools');
+// src/tools/index.js
+const { isActiveMemberOnlyTool } = require('../ai/tools');
 const { webSearch } = require('./webSearch');
 const { browsePage } = require('./browsePage');
 const { imageSearch } = require('./imageSearch');
@@ -7,14 +8,12 @@ const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
 const { readServerRules } = require('./serverRules');
-const { readAboutMe } = require('./aboutMe');
-const { generatePdf } = require('./pdfGenerator');
+const { readFileTool } = require('./readFile');
 const { generateFormalRequestPdf } = require('./formalRequestPdf');
 const { sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppDirect } = require('./whatsappSender');
 const { findMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
-const { extractLastNImages, extractLastNDocs, extractLastNVoices } = require('../utils/media');
 const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
@@ -22,7 +21,7 @@ const { toggleReleaseNotify } = require('./releaseNotify');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
-const { MAX_TTS_CHARS, MAX_HISTORY_IMAGES, MAX_HISTORY_DOCS, MAX_HISTORY_VOICES } = require('../config/constants');
+const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { storeVoiceText } = require('../utils/voiceTextCache');
 
@@ -61,7 +60,8 @@ function _escapeHtml(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**
@@ -80,7 +80,7 @@ function _resolveTargetWaJid(args, userCtx) {
     }
     if (recipientName) {
       const member = findMemberByName(recipientName);
-      if (!member) return { error: `❌ "${recipientName}" not found among active members. Specify a phone number for non-members.` };
+      if (!member) return { error: { success: false, error: `"${recipientName}" not found among active members. Specify a phone number for non-members.` } };
       return { jid: member.wa, display: member.name };
     }
     if (userCtx.userPhone) {
@@ -89,10 +89,10 @@ function _resolveTargetWaJid(args, userCtx) {
     }
   } else if (userCtx.isActiveMember && recipientName) {
     const member = findMemberByName(recipientName);
-    if (!member) return { error: `❌ "${recipientName}" not found among active members.` };
+    if (!member) return { error: { success: false, error: `"${recipientName}" not found among active members.` } };
     return { jid: member.wa, display: member.name };
   }
-  if (!userCtx.waJid) return { error: '❌ No WhatsApp number available.' };
+  if (!userCtx.waJid) return { error: { success: false, error: 'No WhatsApp number available.' } };
   return { jid: userCtx.waJid, display: 'yourself' };
 }
 
@@ -117,7 +117,7 @@ function _resetVoiceCount(chatKey) {
  */
 function _resolveTargetEmail(args, userCtx) {
   if (!userCtx.isActiveMember) {
-    return { error: '❌ Only active members can send emails.' };
+    return { error: { success: false, error: 'Only active members can send emails.' } };
   }
   // Extract recipient info (can be nested in recipient object or flat for backward compatibility)
   const recipientEmail = args.recipient?.email || args.recipientEmail;
@@ -130,14 +130,14 @@ function _resolveTargetEmail(args, userCtx) {
     if (recipientName) {
       const member = findMemberByName(recipientName);
       if (member && member.email) return { email: member.email, display: member.name };
-      return { error: `❌ "${recipientName}" not found or has no email.` };
+      return { error: { success: false, error: `"${recipientName}" not found or has no email.` } };
     }
   } else if (recipientName) {
     const member = findMemberByName(recipientName);
     if (member && member.email) return { email: member.email, display: member.name };
-    return { error: `❌ "${recipientName}" not found or has no email.` };
+    return { error: { success: false, error: `"${recipientName}" not found or has no email.` } };
   }
-  if (!userCtx.email) return { error: '❌ No email address available.' };
+  if (!userCtx.email) return { error: { success: false, error: 'No email address available.' } };
   return { email: userCtx.email, display: 'yourself' };
 }
 
@@ -169,7 +169,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   if (isActiveMemberOnlyTool(name) && !userCtx.isActiveMember) {
     return {
       toolCallId: toolCall.id,
-      result: `❌ Error: tool "${name}" is only available for active server members.`,
+      result: JSON.stringify({ success: false, error: `Tool "${name}" is only available for active server members.` }),
     };
   }
 
@@ -196,7 +196,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             a => !a._imageSearchId || !discardSet.has(a._imageSearchId)
           );
           const removed = before - responseCtx.attachments.length;
-          if (removed > 0) log.info(`   🗑️ Discarded ${removed} image(s): [${[...discardSet].join(', ')}]`);
+          if (removed > 0) log.info(`   🗑️ Scartate ${removed} immagini: [${[...discardSet].join(', ')}]`);
         }
 
         const startId = responseCtx.imageSearchNextId || 1;
@@ -223,73 +223,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
-      case 'include_history_images': {
-        let count = Number(args.count || 0);
-        if (!Number.isInteger(count) || count <= 0) {
-          result = '❌ count must be a positive integer.';
-          break;
-        }
-
-        if (count > MAX_HISTORY_IMAGES) count = MAX_HISTORY_IMAGES;
-
-        const images = extractLastNImages(userCtx.historyFull || [], count);
-
-        if (!images || images.length === 0) {
-          result = '❌ No images found in history to include.';
-          break;
-        }
-
-        responseCtx.historyImagesToInclude = images;
-        result = `✅ Including the last ${images.length} image(s) in the next API call.`;
-        break;
-      }
-
-      case 'include_history_docs': {
-        let count = Number(args.count || 0);
-        if (!Number.isInteger(count) || count <= 0) {
-          result = '❌ count must be a positive integer.';
-          break;
-        }
-
-        if (count > MAX_HISTORY_DOCS) count = MAX_HISTORY_DOCS;
-
-        const docs = extractLastNDocs(userCtx.historyFull || [], count);
-
-        if (!docs || docs.length === 0) {
-          result = '❌ No documents found in history to include.';
-          break;
-        }
-
-        responseCtx.historyDocsToInclude = docs;
-        result = `✅ Including the last ${docs.length} document(s) in the next API call.`;
-        break;
-      }
-
-      case 'include_history_voices': {
-        let count = Number(args.count || 0);
-        if (!Number.isInteger(count) || count <= 0) {
-          result = '❌ count must be a positive integer.';
-          break;
-        }
-
-        if (count > MAX_HISTORY_VOICES) count = MAX_HISTORY_VOICES;
-
-        const voices = extractLastNVoices(userCtx.historyFull || [], count);
-
-        if (!voices || voices.length === 0) {
-          result = '❌ No user voice messages found in history to include.';
-          break;
-        }
-
-        responseCtx.historyVoicesToInclude = voices;
-        result = `✅ Including the last ${voices.length} voice message(s) in the next API call.`;
+      case 'read_file': {
+        result = await readFileTool(args.path, userCtx, responseCtx);
         break;
       }
 
       case 'send_voice_message': {
         let cleanText = removeDiscordEmoji(args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
-          .replace(/TRASCRIZIONE:\s*/gi, '')
+          .replace(/<Transcription>.*?<\/Transcription>/gi, '')
           .replace(/\s{2,}/g, ' ')
           .trim();
 
@@ -297,12 +239,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         if (currentCount >= 3) {
           log.warn(`Voice limit exceeded in chat ${chatKey}: counter=${currentCount}`);
           _resetVoiceCount(chatKey);
-          result = '❌ Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.';
+          result = { success: false, error: 'Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.' };
           break;
         }
 
         if (cleanText.length > MAX_TTS_CHARS) {
-          result = `❌ Text exceeds the ${MAX_TTS_CHARS} character limit (${cleanText.length} chars). Cannot generate a voice message. Reply with a normal text message instead.`;
+          result = { success: false, error: `Text exceeds the ${MAX_TTS_CHARS} character limit (${cleanText.length} chars). Cannot generate a voice message. Reply with a normal text message instead.` };
           break;
         }
 
@@ -315,14 +257,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           if (recipientName) {
             const member = findMemberByName(recipientName);
             if (member && member.wa === userCtx.waJid) {
-              result = `❌ You cannot send to yourself. To reply in the current chat, omit the recipient.`;
+              result = { success: false, error: `You cannot send to yourself. To reply in the current chat, omit the recipient.` };
               break;
             }
           }
           const targetJid = _resolveTargetWaJid(args, userCtx);
           if (targetJid.error) { result = targetJid.error; break; }
           if (deliveryCtx.contactedWA.has(targetJid.jid)) {
-            result = `❌ You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.`;
+            result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
             break;
           }
           try {
@@ -347,7 +289,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             _incrementVoiceCount(chatKey);
             storeVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
-            result = `❌ Error sending voice message: ${err.message}`;
+            result = { success: false, error: `Error sending voice message: ${err.message}` };
           }
           break;
         }
@@ -356,7 +298,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         if (responseCtx.voiceBuffer) {
           return {
             toolCallId: toolCall.id,
-            result: '❌ Error: a voice message has already been generated. You cannot generate another one in the same request.',
+            result: JSON.stringify({ success: false, error: 'A voice message has already been generated. You cannot generate another one in the same request.' }),
           };
         }
         const voiceBuffer = await generateVoice(cleanText);
@@ -374,6 +316,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           groupTaskFileId: userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null,
           userId: userCtx.userId,
           userName: userCtx.userName,
+          userPhone: userCtx.userPhone,
           waJid: userCtx.waJid,
           isActiveMember: userCtx.isActiveMember,
           isAdmin: userCtx.isAdmin,
@@ -388,7 +331,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const groupFileId = userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null;
         const includeGroup = Boolean(args.includeGroupTasks) && userCtx.isGroup && userCtx.platform && userCtx.platform.startsWith('whatsapp');
         if (args.includeGroupTasks && !includeGroup) {
-          result = '⚠️ includeGroupTasks not available: only in WhatsApp groups.';
+          result = { success: false, error: 'includeGroupTasks not available: only in WhatsApp groups.' };
           break;
         }
         result = await readTasks(userCtx.taskFileId, groupFileId, includeGroup);
@@ -401,8 +344,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           ? getGroupTaskFileId(userCtx.groupId)
           : userCtx.taskFileId;
         if (args.fromGroup && !allowGroup) {
-          result = '⚠️ fromGroup not available: only in WhatsApp groups. Operating on personal tasks.';
-          break;
+          log.info('   fromGroup not available outside WhatsApp groups, falling back to personal tasks');
         }
         result = await removeTasks(args.taskIds, fileId);
         break;
@@ -410,35 +352,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
       case 'read_server_rules': {
         result = await readServerRules();
-        break;
-      }
-
-      case 'send_about_me': {
-        const aboutMeContent = readAboutMe();
-        responseCtx.aboutMeText = aboutMeContent;
-        responseCtx.isAboutMeOnly = true;
-        result = 'Message sent to user.';
-
-        // One-shot per chat: hide send_about_me from tool list going forward.
-        const chatKey = userCtx.chatId || userCtx.groupId || userCtx.waJid || userCtx.userId || 'unknown';
-        _markSendAboutMeUsed(chatKey);
-
-        break;
-      }
-
-      case 'generate_pdf': {
-        const pdfBuffer = await generatePdf(args.title, args.content);
-        const fileName = `${sanitizeFilename(args.title || 'documento')}.pdf`;
-        const pdfAttachment = {
-          name: fileName,
-          buffer: pdfBuffer,
-          mimetype: 'application/pdf',
-        };
-
-        // Always accumulate PDF - will be sent by send_whatsapp_message or send_email
-        responseCtx.attachments.push(pdfAttachment);
-
-        result = `PDF "${args.title}" generated successfully. It will be attached to the next delivery message.`;
         break;
       }
 
@@ -465,7 +378,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const targetEmail = _resolveTargetEmail(args, userCtx);
         if (targetEmail.error) { result = targetEmail.error; break; }
         if (deliveryCtx.contactedEmail.has(targetEmail.email)) {
-          result = `❌ You have already sent an email to this address. Each email can only receive 1 message per request.`;
+          result = { success: false, error: `You have already sent an email to this address. Each email can only receive 1 message per request.` };
           break;
         }
         try {
@@ -481,7 +394,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           deliveryCtx.contactedEmail.add(targetEmail.email);
           result = `Email sent successfully to ${targetEmail.display}${emailAttachments.length > 0 ? ` with ${emailAttachments.length} attachment(s)` : ''}.`;
         } catch (err) {
-          result = `❌ Error sending email: ${err.message}`;
+          result = { success: false, error: `Error sending email: ${err.message}` };
         }
         break;
       }
@@ -489,10 +402,19 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       case 'send_whatsapp_message': {
         const includeAttachments = args.includeAttachments !== false;
 
+        const waRecipientName = args.recipient?.name || args.recipientName;
+        if (waRecipientName) {
+          const member = findMemberByName(waRecipientName);
+          if (member && member.wa === userCtx.waJid) {
+            result = { success: false, error: 'You cannot send to yourself. To reply in the current chat, omit the recipient.' };
+            break;
+          }
+        }
+
         const targetJid = _resolveTargetWaJid(args, userCtx);
         if (targetJid.error) { result = targetJid.error; break; }
         if (deliveryCtx.contactedWA.has(targetJid.jid)) {
-          result = `❌ You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.`;
+          result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
           break;
         }
         try {
@@ -511,7 +433,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           deliveryCtx.contactedWA.add(targetJid.jid);
           result = `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.`;
         } catch (err) {
-          result = `❌ Error sending WhatsApp message: ${err.message}`;
+          result = { success: false, error: `Error sending WhatsApp message: ${err.message}` };
         }
         break;
       }
@@ -540,13 +462,21 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
 
       default:
-        result = `Tool "${name}" not recognized.`;
+        result = { success: false, error: `Tool "${name}" not recognized.` };
     }
   } catch (err) {
-    result = `❌ Error executing ${name}: ${err.message}`;
+    result = { success: false, error: `Error executing ${name}: ${err.message}` };
   }
 
-  return { toolCallId: toolCall.id, result: Array.isArray(result) ? result : String(result) };
+  let finalResult;
+  if (Array.isArray(result)) {
+    finalResult = result;
+  } else if (typeof result === 'object' && result !== null) {
+    finalResult = JSON.stringify(result);
+  } else {
+    finalResult = String(result);
+  }
+  return { toolCallId: toolCall.id, result: finalResult };
 }
 
 module.exports = { executeTool };

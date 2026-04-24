@@ -1,3 +1,4 @@
+// src/tools/groupMemory.js
 const { writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 
@@ -9,20 +10,20 @@ const { getGroupTaskFileId } = require('../utils/userIdentifier');
  */
 function updateGroupMemory(content, groupId) {
   if (!groupId) {
-    return '❌ Unable to identify the current group.';
+    return { success: false, error: 'Unable to identify the current group.' };
   }
 
   const memoryFileId = 'memory_' + getGroupTaskFileId(groupId);
   const result = writeMemory(memoryFileId, content);
   if (!result.success) {
-    return `❌ ${result.error}`;
+    return { success: false, error: result.error };
   }
 
   if (!content || content.trim().length === 0) {
-    return '✅ Group memory cleared.';
+    return { success: true, message: 'Group memory cleared.' };
   }
 
-  return `✅ Group memory updated (${content.length}/${MAX_MEMORY_CHARS} chars).`;
+  return { success: true, message: `Group memory updated (${content.length}/${MAX_MEMORY_CHARS} chars).` };
 }
 
 module.exports = { updateGroupMemory };

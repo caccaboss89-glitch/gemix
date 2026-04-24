@@ -1,3 +1,4 @@
+// src/tools/taskRemover.js
 const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 
 /**
@@ -10,7 +11,7 @@ async function removeTasks(taskIds, fileId) {
   const data = await readTaskFile(fileId);
 
   if (!data) {
-    return 'No task file found. You have no scheduled tasks.';
+    return { success: false, error: 'No task file found. You have no scheduled tasks.' };
   }
 
   const before = data.tasks.length;
@@ -20,10 +21,10 @@ async function removeTasks(taskIds, fileId) {
   await writeTaskFile(fileId, data);
 
   if (removed === 0) {
-    return `No tasks found with the specified IDs.`;
+    return { success: false, error: 'No tasks found with the specified IDs.' };
   }
 
-  return `✅ ${removed} task(s) removed successfully.`;
+  return { success: true, message: `${removed} task(s) removed successfully.` };
 }
 
 module.exports = { removeTasks };

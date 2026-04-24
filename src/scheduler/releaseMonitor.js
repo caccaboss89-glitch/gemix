@@ -1,3 +1,4 @@
+// src/scheduler/releaseMonitor.js
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
@@ -93,7 +94,7 @@ async function checkNewRelease(waClient) {
     );
 
     if (!res.ok) {
-      if (res.status !== 404) log.error(`GitHub API errore: ${res.status}`);
+      if (res.status !== 404) log.error(`Errore API GitHub: ${res.status}`);
       return;
     }
 

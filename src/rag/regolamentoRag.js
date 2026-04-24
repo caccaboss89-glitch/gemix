@@ -1,3 +1,4 @@
+// src/rag/regolamentoRag.js
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -106,7 +107,7 @@ async function initRegolamentoRag() {
     
     if (!fs.existsSync(REGOLAMENTO_PATH)) {
       log.warn(`⚠️ regolamento.txt non trovato in ${REGOLAMENTO_PATH}`);
-      log.warn('⚠️ RAG non inizializzato: creare il file data/regolamento.txt per attivare il RAG');
+      log.warn('⚠️ RAG non inizializzato: crea data/regolamento.txt per abilitarlo');
       return;
     }
 

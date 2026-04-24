@@ -1,3 +1,4 @@
+// src/tools/browsePage.js
 const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, BROWSE_PAGE_MODEL } = require('../config/env');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { createLogger } = require('../utils/logger');
@@ -174,7 +175,7 @@ async function _summarizeWithLLM(pageText, instructions, url, pageTitle = null) 
       throw new Error('Summarizer returned empty response');
     }
 
-    log.info(`   ✅ Summary generated (${message.length} chars)`);
+    log.info(`   ✅ Sommario generato (${message.length} caratteri)`);
     return message;
   } finally {
     clearTimeout(timer);
@@ -198,24 +199,24 @@ async function _summarizeWithLLM(pageText, instructions, url, pageTitle = null) 
 async function browsePage(url, instructions, mode = 'summary') {
   // ── Validate URL ──
   if (!url || typeof url !== 'string') {
-    return '❌ Error: URL is missing or invalid.';
+    return JSON.stringify({ success: false, error: 'URL is missing or invalid.' });
   }
 
   let parsedUrl;
   try {
     parsedUrl = new URL(url);
   } catch {
-    return '❌ Error: Invalid URL format. Provide a full URL with protocol (e.g. https://example.com).';
+    return JSON.stringify({ success: false, error: 'Invalid URL format. Provide a full URL with protocol (e.g. https://example.com).' });
   }
 
   // Block non-HTTP protocols
   if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-    return `❌ Error: Unsupported protocol "${parsedUrl.protocol}". Only http and https are supported.`;
+    return JSON.stringify({ success: false, error: `Unsupported protocol "${parsedUrl.protocol}". Only http and https are supported.` });
   }
 
   // ── Validate model ──
   if (!SUMMARIZER_MODEL) {
-    return '❌ Error: BROWSE_PAGE_MODEL is not defined in the environment configuration.';
+    return JSON.stringify({ success: false, error: 'BROWSE_PAGE_MODEL is not defined in the environment configuration.' });
   }
 
   // ── Fetch page ──
@@ -227,13 +228,13 @@ async function browsePage(url, instructions, mode = 'summary') {
   } catch (err) {
     const isTimeout = err.name === 'AbortError' || err.message.includes('Timeout');
     if (isTimeout) {
-      return `❌ The page at ${url} took too long to respond (timeout after ${FETCH_TIMEOUT_MS / 1000}s). Try again later.`;
+      return JSON.stringify({ success: false, error: `The page at ${url} took too long to respond (timeout after ${FETCH_TIMEOUT_MS / 1000}s). Try again later.` });
     }
     const isNetwork = /ECONNREFUSED|ECONNRESET|ENOTFOUND|ERR_NETWORK/i.test(err.message);
     if (isNetwork) {
-      return `❌ Could not connect to ${parsedUrl.hostname}. The site may be down or unreachable.`;
+      return JSON.stringify({ success: false, error: `Could not connect to ${parsedUrl.hostname}. The site may be down or unreachable.` });
     }
-    return `❌ Error fetching page: ${err.message}`;
+    return JSON.stringify({ success: false, error: `Error fetching page: ${err.message}` });
   }
 
   // Handle HTTP errors
@@ -252,9 +253,9 @@ async function browsePage(url, instructions, mode = 'summary') {
     // Still try to extract useful content from error pages
     const errorPageText = _extractText(html);
     if (errorPageText && errorPageText.length > 100) {
-      return `⚠️ ${msg}\n\nHowever, the error page contained the following content:\n\n${errorPageText.substring(0, 3000)}`;
+      return `${msg}\n\nHowever, the error page contained the following content:\n\n${errorPageText.substring(0, 3000)}`;
     }
-    return `❌ ${msg}`;
+    return JSON.stringify({ success: false, error: msg });
   }
 
   // ── Extract text ──
@@ -262,7 +263,7 @@ async function browsePage(url, instructions, mode = 'summary') {
   const pageText = _extractText(html);
 
   if (!pageText || pageText.length < 20) {
-    return `❌ No readable text content found on ${finalUrl}. The page may be JavaScript-rendered, empty, or blocked.`;
+    return JSON.stringify({ success: false, error: `No readable text content found on ${finalUrl}. The page may be JavaScript-rendered, empty, or blocked.` });
   }
 
   log.info(`   📄 Extracted ${pageText.length} chars${pageTitle ? ` — "${pageTitle}"` : ''}`);
@@ -328,9 +329,9 @@ async function browsePage(url, instructions, mode = 'summary') {
 
     return `${header}\n${summary}`;
   } catch (err) {
-    log.error(`   ❌ Summarizer failed: ${err.message}`);
+    log.error(`   ❌ Summarizer fallito: ${err.message}`);
 
-    return `❌ LLM summarizer failed to process the page: ${err.message}\n\nIf you still need the content, you can call this tool again using \`mode: "raw"\` to get the extracted text, or \`mode: "raw_html"\` for the raw HTML.`;
+    return JSON.stringify({ success: false, error: `LLM summarizer failed to process the page: ${err.message}. If you still need the content, you can call this tool again using mode: "raw" to get the extracted text, or mode: "raw_html" for the raw HTML.` });
   }
 }
 

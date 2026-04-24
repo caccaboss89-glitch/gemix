@@ -1,3 +1,4 @@
+// src/config/constants.js
 const path = require('path');
 
 module.exports = {
@@ -22,9 +23,6 @@ module.exports = {
   MAX_IMAGES: 2,
   MAX_IMAGE_BYTES: 7_500_000,
   MAX_TTS_CHARS: 1000,
-  MAX_HISTORY_IMAGES: 5,
-  MAX_HISTORY_DOCS: 2,
-  MAX_HISTORY_VOICES: 3,
   MAX_DOC_PAGES: 5,
   MAX_AUDIO_DURATION_S: 120,
 

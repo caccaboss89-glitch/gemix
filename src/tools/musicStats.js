@@ -1,3 +1,4 @@
+// src/tools/musicStats.js
 const { fetchExternal } = require('../utils/fetch');
 
 const STATS_URL = 'https://raw.githubusercontent.com/caccaboss89-glitch/MusicBot/main/data/stats.json';
@@ -13,7 +14,7 @@ async function readMusicStats() {
   }, 'Music Stats');
 
   if (!res.ok) {
-    throw new Error(`Impossibile recuperare le statistiche: HTTP ${res.status}`);
+    throw new Error(`Failed to fetch music stats: HTTP ${res.status}`);
   }
 
   const data = await res.json();

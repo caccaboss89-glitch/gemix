@@ -1,3 +1,4 @@
+// src/utils/logger.js
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3, silent: 4 };
 
 function getLevel() {
@@ -20,11 +21,10 @@ function createLogger(prefix = '') {
 
   const format = (args) => {
     if (!prefixStr) return args;
-    const first = args[0] instanceof String || typeof args[0] === 'string'
-      ? `${prefixStr} ${args[0]}`
-      : `${prefixStr}`;
-    const rest = args.slice(1);
-    return [first, ...rest];
+    if (typeof args[0] === 'string' || args[0] instanceof String) {
+      return [`${prefixStr} ${args[0]}`, ...args.slice(1)];
+    }
+    return [prefixStr, ...args];
   };
 
   return {

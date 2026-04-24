@@ -1,3 +1,4 @@
+// src/tools/imageSearch.js
 const { SEARXNG_URL } = require('../config/env');
 const { MAX_IMAGES, MAX_IMAGE_BYTES } = require('../config/constants');
 const { fetchExternal, fetchWithTimeout } = require('../utils/fetch');
@@ -85,20 +86,12 @@ async function _shrinkForPreview(buf, mime) {
  * @returns {Promise<{buffer: Buffer, mime: string}>}
  */
 async function _downloadImage(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
-
-  let res;
-  try {
-    res = await fetchWithTimeout(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'image/*,*/*;q=0.8',
-      },
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetchWithTimeout(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Accept': 'image/*,*/*;q=0.8',
+    },
+  });
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -139,7 +132,7 @@ async function _searchCandidates(query, maxCandidates, language = 'it', imageTyp
   });
 
   const url = `${SEARXNG_URL}/search?${params}`;
-  log.info(`🖼️  Image search: "${finalQuery}" (candidates=${maxCandidates}, type=${imageType || 'any'})`);
+  log.info(`🖼️  Ricerca immagini: "${finalQuery}" (candidates=${maxCandidates}, type=${imageType || 'any'})`);
 
   const res = await fetchExternal(url, {}, 'SearXNG (Image Search)');
   if (!res.ok) throw new Error(`SearXNG returned HTTP ${res.status}`);
@@ -205,7 +198,7 @@ async function _prepareImage(candidate, query, index) {
       previewBuf = dl.buffer;
       previewMime = dl.mime;
     } catch (fullErr) {
-      log.warn(`   ❌ Both preview and full download failed for "${candidate.title}": ${fullErr.message}`);
+      log.warn(`   ❌ Download anteprima e completo falliti per "${candidate.title}": ${fullErr.message}`);
       return null;
     }
   }
@@ -264,10 +257,10 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   // ── Validate query ──
   const q = _sanitizeQuery(query);
   if (!q) {
-    return { toolResult: '❌ Image search requires a non-empty query.', attachments: [] };
+    return { toolResult: { success: false, error: 'Image search requires a non-empty query.' }, attachments: [] };
   }
   if (q.length < 2) {
-    return { toolResult: '❌ Query too short. Provide a more descriptive query.', attachments: [] };
+    return { toolResult: { success: false, error: 'Query too short. Provide a more descriptive query.' }, attachments: [] };
   }
 
   // ── Clamp count ──
@@ -285,12 +278,12 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   try {
     candidates = await _searchCandidates(q, maxCandidates, language, typeFilter);
   } catch (err) {
-    log.error(`   ❌ SearXNG search failed: ${err.message}`);
+    log.error(`   ❌ Ricerca SearXNG fallita: ${err.message}`);
     throw new Error(`Image search engine unavailable: ${err.message}`);
   }
 
   if (candidates.length === 0) {
-    return { toolResult: `❌ No images found for "${q}". Try a different query.`, attachments: [] };
+    return { toolResult: { success: false, error: `No images found for "${q}". Try a different query.` }, attachments: [] };
   }
 
   log.info(`   Found ${candidates.length} candidates, downloading up to ${wantCount}...`);
@@ -307,9 +300,9 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   }
 
   if (prepared.length === 0) {
-    log.warn(`   ⚠️ All downloads failed for "${q}"`);
+    log.warn(`   ⚠️ Tutti i download falliti per "${q}"`);
     return {
-      toolResult: `❌ Found results for "${q}" but all downloads failed. Try a different query.`,
+      toolResult: { success: false, error: `Found results for "${q}" but all downloads failed. Try a different query.` },
       attachments: [],
     };
   }
@@ -337,7 +330,7 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
     });
   }
 
-  log.info(`   📦 ${prepared.length} image(s) with vision previews (IDs ${_startId}-${_startId + prepared.length - 1})`);
+  log.info(`   📦 ${prepared.length} immagini con preview vision (ID ${_startId}-${_startId + prepared.length - 1})`);
 
   return {
     toolResult: contentParts,

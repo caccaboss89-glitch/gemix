@@ -1,3 +1,4 @@
+// src/tools/webSearch.js
 const { SEARXNG_URL } = require('../config/env');
 const { fetchExternal } = require('../utils/fetch');
 const { createLogger } = require('../utils/logger');
@@ -165,10 +166,10 @@ async function webSearch(query, numResults = DEFAULT_NUM_RESULTS, allowedDomains
   // ── Validate query ──
   const cleanQuery = _sanitizeQuery(query);
   if (!cleanQuery) {
-    return '❌ Query is required. Please provide a search query.';
+    return { success: false, error: 'Query is required. Please provide a search query.' };
   }
   if (cleanQuery.length < 2) {
-    return '❌ Query is too short. Please provide a more descriptive search query.';
+    return { success: false, error: 'Query is too short. Please provide a more descriptive search query.' };
   }
 
   // ── Clamp numResults ──
@@ -176,9 +177,6 @@ async function webSearch(query, numResults = DEFAULT_NUM_RESULTS, allowedDomains
 
   // ── Build final query with domain operators ──
   const finalQuery = _buildQueryWithDomains(cleanQuery, allowedDomains, excludedDomains);
-
-  // ── Request extra results to compensate for dedup/filtering ──
-  const requestCount = Math.min(validNumResults + 10, 50);
 
   const params = new URLSearchParams({
     q: finalQuery,
@@ -190,7 +188,7 @@ async function webSearch(query, numResults = DEFAULT_NUM_RESULTS, allowedDomains
 
   const url = `${SEARXNG_URL}/search?${params}`;
 
-  log.debug(`   Query: "${finalQuery}" (requesting ${requestCount}, want ${validNumResults})`);
+  log.debug(`   Query: "${finalQuery}" (want ${validNumResults})`);
 
   const res = await fetchExternal(url, {}, 'SearXNG (Web Search)');
   if (!res.ok) {
@@ -200,7 +198,7 @@ async function webSearch(query, numResults = DEFAULT_NUM_RESULTS, allowedDomains
   const data = await res.json();
 
   if (!data.results || data.results.length === 0) {
-    return '❌ No results found. Try rephrasing the query or using different keywords.';
+    return { success: false, error: 'No results found. Try rephrasing the query or using different keywords.' };
   }
 
   // ── Post-process: deduplicate → filter excluded → trim ──
@@ -209,14 +207,14 @@ async function webSearch(query, numResults = DEFAULT_NUM_RESULTS, allowedDomains
   processed = processed.slice(0, validNumResults);
 
   if (processed.length === 0) {
-    return '❌ No results found after filtering. Try removing domain restrictions or rephrasing the query.';
+    return { success: false, error: 'No results found after filtering. Try removing domain restrictions or rephrasing the query.' };
   }
 
   // ── Format output ──
   const header = `Found ${processed.length} result(s):`;
   const formatted = processed.map((r, i) => _formatResult(r, i)).join('\n\n');
 
-  return `${header}\n\n${formatted}`;
+  return { success: true, results: `${header}\n\n${formatted}` };
 }
 
 module.exports = { webSearch };

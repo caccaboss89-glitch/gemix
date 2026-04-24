@@ -1,3 +1,4 @@
+// src/handler.js
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser } = require('./ai/tools');
@@ -5,20 +6,13 @@ const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, PLATFORM_DISCORD } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { hasHistoryImages, hasHistoryDocs, hasHistoryVoices, limitHistoryMediaAttachments, transcribeDocumentsInMessageContent } = require('./utils/media');
+const { transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
 
 const log = createLogger('Handler');
-
-function cloneHistoryStructure(history) {
-  return history.map(msg => ({
-    role: msg.role,
-    content: Array.isArray(msg.content) ? [...msg.content] : msg.content,
-  }));
-}
 
 /**
  * Extract and remove <title>...</title> XML tag from text.
@@ -30,7 +24,7 @@ function extractTitleTag(text) {
   if (!text) return { text, title: '' };
   const titleMatch = text.match(/<title>(.*?)<\/title>/i);
   if (!titleMatch) return { text, title: '' };
-  
+
   const title = titleMatch[1].trim();
   const cleanText = text.replace(/<title>.*?<\/title>/i, '').trim();
   return { text: cleanText, title };
@@ -47,11 +41,6 @@ async function handleMessage(ctx) {
     attachments: [],
     voiceBuffer: null,
     isVoiceOnly: false,
-    aboutMeText: null,
-    isAboutMeOnly: false,
-    historyImagesToInclude: [],
-    historyDocsToInclude: [],
-    historyVoicesToInclude: [],
     discordTitle: '',
     imageSearchNextId: 1,
   };
@@ -87,9 +76,7 @@ async function handleMessage(ctx) {
 
     const systemPrompt = buildSystemPrompt(ctx);
 
-    const historyHasImages = hasHistoryImages(ctx.history);
-    const historyHasDocs = hasHistoryDocs(ctx.history);
-    const historyHasVoices = hasHistoryVoices(ctx.history);
+
 
     const userCtx = {
       isActiveMember,
@@ -106,10 +93,6 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      hasHistoryImages: historyHasImages,
-      hasHistoryDocs: historyHasDocs,
-      hasHistoryVoices: historyHasVoices,
-      historyFull: ctx.history || [],
     };
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
@@ -118,48 +101,19 @@ async function handleMessage(ctx) {
       { role: 'system', content: systemPrompt },
     ];
 
-    const filteredHistory = ctx.history && ctx.history.length > 0
-      ? limitHistoryMediaAttachments(cloneHistoryStructure(ctx.history), 0, 0, 0)
-      : [];
-
-    if (filteredHistory.length > 0) {
-      const historyLines = [];
-      const userMultimodalEntries = [];
-
-      for (const h of filteredHistory) {
-        if (typeof h.content === 'string') {
-          historyLines.push(h.content);
-        } else if (Array.isArray(h.content)) {
-          const textPart = h.content.find(p => p.type === 'text');
-          const mediaParts = h.content.filter(p => p.type !== 'text');
-          const textLine = textPart ? textPart.text : '[media]';
-          historyLines.push(textLine);
-
-          if (mediaParts.length > 0) {
-            const label = h.role === 'assistant'
-              ? `[History file sent by GemiX: ${textLine}]`
-              : (textPart ? textPart.text : '[History file]');
-            userMultimodalEntries.push({
-              role: 'user',
-              content: [
-                { type: 'text', text: label },
-                ...mediaParts,
-              ],
-            });
-          }
-        }
-      }
+    if (ctx.history && ctx.history.length > 0) {
+      const historyLines = ctx.history.map(h =>
+        typeof h.content === 'string'
+          ? h.content
+          : (Array.isArray(h.content)
+            ? (h.content.find(p => p.type === 'text')?.text || '[media]')
+            : String(h.content))
+      );
 
       messages.push({
         role: 'user',
         content: `[RECENT MESSAGE HISTORY]\n${historyLines.join('\n')}\n[END HISTORY]`,
       });
-
-      for (const entry of userMultimodalEntries) {
-        // Transcribe documents in history entries before adding
-        entry.content = await transcribeDocumentsInMessageContent(entry.content);
-        messages.push(entry);
-      }
 
       messages.push({
         role: 'user',
@@ -183,35 +137,8 @@ async function handleMessage(ctx) {
     while (rounds < MAX_TOOL_ROUNDS) {
       rounds++;
 
-      if ((responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) || (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) || (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0)) {
-        const includeList = [];
-        if (responseCtx.historyImagesToInclude && responseCtx.historyImagesToInclude.length > 0) {
-          includeList.push({ type: 'text', text: `[History images request]` });
-          includeList.push(...responseCtx.historyImagesToInclude);
-          responseCtx.historyImagesToInclude = [];
-        }
-        if (responseCtx.historyDocsToInclude && responseCtx.historyDocsToInclude.length > 0) {
-          includeList.push({ type: 'text', text: `[History documents request]` });
-          // Transcribe documents before adding them
-          const transcribedDocs = await transcribeDocumentsInMessageContent(responseCtx.historyDocsToInclude);
-          includeList.push(...(Array.isArray(transcribedDocs) ? transcribedDocs : [transcribedDocs]));
-          responseCtx.historyDocsToInclude = [];
-        }
-        if (responseCtx.historyVoicesToInclude && responseCtx.historyVoicesToInclude.length > 0) {
-          includeList.push({ type: 'text', text: `[History voice messages request]` });
-          includeList.push(...responseCtx.historyVoicesToInclude);
-          responseCtx.historyVoicesToInclude = [];
-        }
-        messages.push({ role: 'user', content: includeList });
-      }
-
-      if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
-        log.warn(`   ⚠️ Testo 'Chi sono' già preparato, interruzione ciclo`);
-        break;
-      }
-
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.warn(`   ⚠️ Vocale già generato, interruzione ciclo`);
+        log.warn(`   ⚠️ Vocale già generato, salto ciclo`);
         break;
       }
 
@@ -229,13 +156,11 @@ async function handleMessage(ctx) {
         messages.push(assistantMsg);
 
         for (const tc of assistantMsg.tool_calls) {
-          if ((responseCtx.isAboutMeOnly && responseCtx.aboutMeText) ||
-            (responseCtx.isVoiceOnly && responseCtx.voiceBuffer)) {
+          if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
             log.warn(`   ⚠️ Ciclo tool interrotto: un tool ha già generato la risposta finale`);
             break;
           }
 
-          const toolName = tc.function.name;
           try {
             log.info(`   Esecuzione: ${tc.function.name}`);
             const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
@@ -286,22 +211,9 @@ async function handleMessage(ctx) {
         }
       }
 
-      if (!text.trim() && !responseCtx.isAboutMeOnly && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
+      if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
         log.warn('   ⚠️ Risposta AI vuota, invio fallback');
-        text = 'Mi dispiace, non sono riuscito a generare una risposta valida. Riprova tra poco.';
-      }
-
-      if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
-        log.info(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
-        return {
-          text: responseCtx.aboutMeText,
-          voiceBuffer: null,
-          isVoiceOnly: false,
-          isAboutMeOnly: true,
-          attachments: responseCtx.attachments,
-          discordTitle: responseCtx.discordTitle || '',
-          modelUsed: lastModelUsed,
-        };
+        text = 'Generazione della risposta fallita. Riprova.';
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
@@ -326,19 +238,6 @@ async function handleMessage(ctx) {
       };
     }
 
-    if (responseCtx.isAboutMeOnly && responseCtx.aboutMeText) {
-      log.info(`   📖 Testo 'Chi sono' pronto (${responseCtx.aboutMeText.length} caratteri)`);
-      return {
-        text: responseCtx.aboutMeText,
-        voiceBuffer: null,
-        isVoiceOnly: false,
-        isAboutMeOnly: true,
-        attachments: responseCtx.attachments,
-        discordTitle: responseCtx.discordTitle || '',
-        modelUsed: lastModelUsed,
-      };
-    }
-
     if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
       log.info(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
       return {
@@ -352,7 +251,7 @@ async function handleMessage(ctx) {
     }
 
     return {
-      text: 'Mi dispiace, ho incontrato un problema elaborando la tua richiesta. Riprova.',
+      text: 'Generazione della risposta fallita. Riprova.',
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],
@@ -365,7 +264,7 @@ async function handleMessage(ctx) {
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
     return {
-      text: 'Si è verificato un errore. Riprova tra poco.',
+      text: 'Si è verificato un errore. Riprova a breve.',
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],

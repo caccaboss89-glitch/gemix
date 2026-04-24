@@ -1,3 +1,4 @@
+// src/tools/emailSender.js
 const nodemailer = require('nodemailer');
 const { BOT_EMAIL, BOT_PASS } = require('../config/env');
 const { removeDiscordEmoji } = require('../utils/discord');

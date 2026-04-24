@@ -1,3 +1,4 @@
+// src/config/members.js
 const ACTIVE_MEMBERS = [
   {
     name: 'Gagliardi Alberto',

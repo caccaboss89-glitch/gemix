@@ -1,3 +1,4 @@
+// src/platforms/whatsapp/personal.js
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse } = require('./shared');
@@ -72,7 +73,7 @@ async function onPersonalMessage(msg) {
 
   if (chat.isGroup) return;
 
-  const dedicatedClient = getDedicatedClient && getDedicatedClient();
+  const dedicatedClient = getDedicatedClient();
   const dedicatedJid = dedicatedClient?.info?.wid?._serialized;
 
   const normalizeDigits = (jidOrPhone) => {
@@ -152,16 +153,16 @@ async function onPersonalMessage(msg) {
   let history = [];
   try {
     history = await Promise.race([
-      buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL),
+      buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, phoneJid),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('History fetch timeout')), 15000)
       )
     ]);
   } catch (historyErr) {
-    log.warn(`   ⚠️ History fetch fallito (${historyErr.message}), procedo senza cronologia`);
+    log.warn(`   ⚠️ Fetch cronologia fallito (${historyErr.message}), procedo senza cronologia`);
   }
 
-  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized);
+  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, phoneJid);
 
   if (contentParts.length === 0) return;
 
