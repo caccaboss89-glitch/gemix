@@ -204,8 +204,22 @@ async function handleMessage(ctx) {
           }
 
           try {
-            log.info(`   Esecuzione: ${tc.function.name}`);
+            let argsPreview = '';
+            try {
+              const parsed = JSON.parse(tc.function.arguments || '{}');
+              argsPreview = JSON.stringify(parsed).slice(0, 200);
+            } catch { argsPreview = String(tc.function.arguments || '').slice(0, 200); }
+            log.info(`   Esecuzione: ${tc.function.name} args=${argsPreview}`);
             const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
+            let resultPreview;
+            if (Array.isArray(result)) {
+              resultPreview = `multimodal[${result.length}] parts=${result.map(p => p.type).join(',')}`;
+            } else if (typeof result === 'string') {
+              resultPreview = `text(${result.length}) ${result.slice(0, 200).replace(/\s+/g, ' ')}`;
+            } else {
+              resultPreview = typeof result;
+            }
+            log.info(`   Risultato: ${resultPreview}`);
             messages.push({
               role: 'tool',
               tool_call_id: toolCallId,
