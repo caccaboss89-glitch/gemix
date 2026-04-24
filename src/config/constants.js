@@ -6,7 +6,7 @@ const path = require('path');
 // enable without a commit. Admins always bypass the gate.
 const MAINTENANCE_MODE = process.env.MAINTENANCE_MODE
   ? /^(1|true|yes|on)$/i.test(process.env.MAINTENANCE_MODE)
-  : false;
+  : true;
 
 module.exports = {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
