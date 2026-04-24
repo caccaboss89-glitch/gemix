@@ -1,4 +1,5 @@
 // src/platforms/whatsapp/shared.js
+const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
@@ -25,6 +26,25 @@ const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const { normalizeMarkdown } = require('../../utils/text');
 const { syncFileToHistory } = require('../../utils/historySync');
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
+
+const _MIME_TO_EXT = {
+  'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png',
+  'image/webp': '.webp', 'image/gif': '.gif', 'image/bmp': '.bmp',
+  'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/mp4': '.m4a', 'audio/webm': '.webm',
+  'video/mp4': '.mp4', 'video/webm': '.webm',
+  'application/pdf': '.pdf', 'application/zip': '.zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+};
+
+function _resolveWaFilename(givenName, mediaType, mimetype) {
+  if (givenName && path.extname(givenName)) return givenName;
+  const baseMime = (mimetype || '').split(';')[0].trim().toLowerCase();
+  const ext = _MIME_TO_EXT[baseMime] || '';
+  const base = givenName || mediaType || 'file';
+  return ext ? `${base}${ext}` : base;
+}
 
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
@@ -115,7 +135,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
     if (msg.hasMedia) {
       const mediaType = msg.type;
-      const filename = msg._data?.filename || msg._data?.caption || null;
+      const filename = _resolveWaFilename(msg._data?.filename || msg._data?.caption, msg.type, msg._data?.mimetype);
       const duration = Number(msg.duration || msg._data?.duration || 0);
       const isAudioType = mediaType === 'audio' || mediaType === 'ptt';
 
@@ -197,7 +217,7 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
     const mediaParts = [];
 
     if (quoted.hasMedia) {
-      const filename = quoted._data?.filename || quoted._data?.caption || null;
+      const filename = _resolveWaFilename(quoted._data?.filename || quoted._data?.caption, quoted.type, quoted._data?.mimetype);
       const mediaType = quoted.type;
       const isAudio = mediaType === 'audio' || mediaType === 'ptt';
       const duration = Number(quoted.duration || quoted._data?.duration || 0);
@@ -348,6 +368,7 @@ async function processCurrentMedia(msg, userId) {
     if (media) {
       buffer = Buffer.from(media.data, 'base64');
       mimetype = media.mimetype;
+      filename = _resolveWaFilename(filename, msg.type, mimetype);
     }
   } catch { }
 

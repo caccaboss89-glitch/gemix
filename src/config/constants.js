@@ -15,9 +15,9 @@ module.exports = {
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY: true,
   MAINTENANCE_USER_MESSAGE:
-    '🌙 GemiX è temporaneamente in manutenzione per un aggiornamento importante.\n\n' +
-    'Tornerò online a breve con nuove capacità avanzate per la nuova versione 2.0.\n\n' +
-    'L\'arrivo di promemoria programmati impostati continuerà a funzionare, grazie per la pazienza! 👷‍♂️',
+    '🌙 GemiX è *temporaneamente in manutenzione* per un aggiornamento importante.\n\n' +
+    'Tornerò online a breve con *nuove capacità avanzate* per la nuova versione *2.0*.\n\n' +
+    'L\'arrivo di *promemoria programmati impostati* continuerà a funzionare, grazie per la pazienza! 👷‍♂️',
 
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
