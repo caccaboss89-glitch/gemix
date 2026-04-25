@@ -28,6 +28,9 @@ const {
   copyToProjectTool,
 } = require('./projects');
 const { codeExecutionTool } = require('./codeExecution');
+const { writeFileTool } = require('./writeFile');
+const { editFileTool } = require('./editFile');
+const { bashTool } = require('./bashTool');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -552,6 +555,18 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
       case 'code_execution': {
         result = await codeExecutionTool(args, userCtx, responseCtx);
+        break;
+      }
+      case 'write_file': {
+        result = await writeFileTool(args, userCtx, responseCtx);
+        break;
+      }
+      case 'edit_file': {
+        result = await editFileTool(args, userCtx, responseCtx);
+        break;
+      }
+      case 'bash': {
+        result = await bashTool(args, userCtx, responseCtx);
         break;
       }
 

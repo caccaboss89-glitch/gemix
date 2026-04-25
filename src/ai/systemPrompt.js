@@ -116,6 +116,7 @@ function buildPersonalCloudSection(ctx) {
       - Never try to write in history/, permanent/, projects/ root or a project root directly.
       - Never try to delete or rename the fixed folders (history, permanent, projects, searched_images, figures, temp, output, code). You can only delete entire projects (with explicit user confirmation) or empty subdir contents via cleanup_project.
       - Project size quota is limited; if you get quota errors, cleanup temp/ or ask the user what to keep.
+      - Tool selection: use write_file to create new files (you provide the full content), edit_file for surgical find-and-replace edits on existing text files, code_execution for stateful Python (variables persist between calls), bash for one-shot shell commands (ls, head, ffmpeg, zip…). bash and code_execution share the same kernel state.
     </AgenticRules>
     <CurrentProject>${current ? _escapeXml(current) : 'None'}</CurrentProject>
     <Projects>

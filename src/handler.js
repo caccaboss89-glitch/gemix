@@ -27,7 +27,7 @@ const { listProjects, ensureUserSkeleton } = require('./utils/userPaths');
 // MAX_TOOL_ROUNDS to MAX_TOOL_ROUNDS_AGENTIC so multi-step pipelines
 // (create_project → code_execution → … → send_whatsapp_message) have room.
 const AGENTIC_TOOL_NAMES = new Set([
-  'code_execution',
+  'code_execution', 'write_file', 'edit_file', 'bash',
   'create_project', 'switch_project', 'delete_project', 'cleanup_project',
   'copy_to_permanent', 'copy_to_project',
 ]);

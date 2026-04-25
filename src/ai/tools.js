@@ -165,6 +165,40 @@ const TOOL_CODE_EXECUTION = makeTool({
   required: ['code'],
 });
 
+const TOOL_WRITE_FILE = makeTool({
+  name: 'write_file',
+  description: 'Create or overwrite a file inside the currently selected project. The path MUST be relative and live under projects/<current>/{figures|temp|output|code}/. Files written under output/ are automatically attached for delivery. Routed through the project sandbox so the kernel sees the new file immediately for any subsequent code_execution call. Max 5 MB per call.',
+  properties: {
+    path: { type: 'string', description: 'Relative path under the current project, e.g. "projects/<current>/code/main.py".' },
+    content: { type: 'string', description: 'File content. UTF-8 text by default; for binary data set encoding="base64".' },
+    encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Content encoding (default "utf-8").' },
+    mode: { type: 'string', enum: ['overwrite', 'append'], description: 'Write mode (default "overwrite").' },
+  },
+  required: ['path', 'content'],
+});
+
+const TOOL_EDIT_FILE = makeTool({
+  name: 'edit_file',
+  description: 'Edit an existing UTF-8 text file in the current project by replacing old_string with new_string. old_string MUST be unique in the file unless replace_all=true. Use write_file to create new files. Path constraints are the same as write_file. Routed through the sandbox.',
+  properties: {
+    path: { type: 'string', description: 'Relative path under projects/<current>/{figures|temp|output|code}/.' },
+    old_string: { type: 'string', description: 'Exact text to replace. Must appear at least once. Provide enough surrounding context to be unique unless replace_all=true.' },
+    new_string: { type: 'string', description: 'Replacement text (use empty string to delete the matched region).' },
+    replace_all: { type: 'boolean', description: 'Replace every occurrence (default false). Required when old_string is not unique.' },
+  },
+  required: ['path', 'old_string', 'new_string'],
+});
+
+const TOOL_BASH = makeTool({
+  name: 'bash',
+  description: 'Run a single shell command in the project sandbox container. Same isolation as code_execution: cwd persists across calls (cd survives), no free internet, pip/apt disabled, project subfolders mounted at /workspace. Use for quick file inspections (ls, head, grep), conversions (ffmpeg, pdftotext), zipping, and similar one-shot operations. For complex multi-step logic prefer code_execution. Default timeout 30 s, max 120 s.',
+  properties: {
+    command: { type: 'string', description: 'Shell command (bash -c). Single line or `&&`-chained statements.' },
+    timeout_ms: { type: 'integer', description: 'Optional timeout in milliseconds (default 30000, max 120000).' },
+  },
+  required: ['command'],
+});
+
 const TOOL_COPY_TO_PROJECT = makeTool({
   name: 'copy_to_project',
   description: 'Copy a file from history/ or searched_images/ into the currently selected project (into figures/ by default). Use this to bring user-provided or web-searched images into a project before processing them with code_execution.',
@@ -532,6 +566,9 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
       TOOL_COPY_TO_PERMANENT,
       TOOL_COPY_TO_PROJECT,
       TOOL_CODE_EXECUTION,
+      TOOL_WRITE_FILE,
+      TOOL_EDIT_FILE,
+      TOOL_BASH,
     );
   }
 
