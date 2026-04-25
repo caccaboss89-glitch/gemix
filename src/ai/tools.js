@@ -81,6 +81,15 @@ const TOOL_IMAGE_SEARCH = makeTool({
   required: ['query'],
 });
 
+const TOOL_ATTACH_FILE = makeTool({
+  name: 'attach_file',
+  description: 'Buffer an existing file from the user\'s personal cloud for delivery in the current response. Cross-platform. Discord: only history/<file>. WhatsApp: history/, permanent/, searched_images/, or projects/<name>/{figures|temp|output|code}/<file>. After buffering, on WhatsApp you MUST call send_whatsapp_message / send_email with includeAttachments=true to ship the file; on Discord it ships automatically with the next reply. Use this to deliver a file the user previously uploaded (history), a permanent copy, an image_search result saved to disk, or any artefact a project produced earlier (no need to re-run code_execution).',
+  properties: {
+    path: { type: 'string', description: 'Relative path under the user root, e.g. "history/foo.pdf", "permanent/keep.docx", "searched_images/cat_1.jpg", "projects/myproj/output/report.pdf".' },
+  },
+  required: ['path'],
+});
+
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
   description: 'Read the contents of a file (text, code, images, audio, pdf). Use this to inspect files mentioned in chat history or produced by agentic tools.',
@@ -540,7 +549,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const tools = [];
 
   // ── All users, all platforms ──
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, TOOL_READ_FILE);
+  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, TOOL_READ_FILE, TOOL_ATTACH_FILE);
 
   // ── WhatsApp only: voice, tasks, release notify ──
   if (!isDiscord) {

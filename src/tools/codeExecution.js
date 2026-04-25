@@ -24,6 +24,22 @@ function _formatResult({ kernelResult, diff, durationMs, quotaWarning }) {
   if (diff.newFiles.length > 0) out.new_files = diff.newFiles;
   if (diff.modifiedFiles.length > 0) out.modified_files = diff.modifiedFiles;
   if (quotaWarning) out.quota_warning = quotaWarning;
+
+  // Compact human-readable hint so the AI can decide the next step (deliver
+  // attachments / fix error / cleanup) without re-parsing the full structure.
+  const attached = (diff.newFiles || []).filter(f => f.auto_attached);
+  const escaped = [...(diff.newFiles || []), ...(diff.modifiedFiles || [])].filter(f => f.escaped);
+  const hints = [];
+  if (out.status === 'timeout') hints.push('Execution timed out — split the work into smaller steps or raise timeout_ms.');
+  else if (out.status === 'error') hints.push('Python error: read the traceback and fix the code before retrying.');
+  if (attached.length > 0) {
+    hints.push(`${attached.length} file(s) under output/ were auto-attached. Use send_whatsapp_message (or send_email / Discord) with includeAttachments=true to deliver them.`);
+  }
+  if (escaped.length > 0) {
+    hints.push(`${escaped.length} file(s) were rejected as symlink escapes — do not try to leak read-only mounts via output/.`);
+  }
+  if (out.output_truncated) hints.push('Output was truncated; redirect verbose data to a file under temp/ instead of printing.');
+  if (hints.length > 0) out.message_for_ai = hints.join(' ');
   return out;
 }
 

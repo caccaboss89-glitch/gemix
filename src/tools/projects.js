@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   MAX_PROJECTS_PER_USER,
-  MAX_PROJECT_SIZE_MB,
+  MAX_USER_TOTAL_MB,
   PLATFORM_DISCORD,
 } = require('../config/constants');
 const {
@@ -23,7 +23,8 @@ const {
   getPermanentDir,
   getSearchedImagesDir,
   getHistoryDir,
-  projectSizeBytes,
+  userTotalBytes,
+  userQuotaBytes,
   FIXED_PROJECT_SUBDIRS,
   isPathAllowed,
 } = require('../utils/userPaths');
@@ -309,9 +310,9 @@ function copyToProjectTool(args, userCtx) {
   if (!fs.existsSync(srcCheck.absPath)) return _err(`Source file not found: ${source}.`);
   if (fs.statSync(srcCheck.absPath).isDirectory()) return _err('Source must be a file, not a directory.');
 
-  // Quota check on the destination project
-  if (projectSizeBytes(userCtx, current) > MAX_PROJECT_SIZE_MB * 1024 * 1024) {
-    return _err(`Project "${current}" already exceeds its size quota (${MAX_PROJECT_SIZE_MB} MB). Free space with cleanup_project first.`);
+  // Per-user quota check (aggregate of projects/ + searched_images/)
+  if (userTotalBytes(userCtx) >= userQuotaBytes()) {
+    return _err(`Your personal cloud is full (${MAX_USER_TOTAL_MB} MB). Free space with cleanup_project / delete_project before copying more files.`);
   }
 
   ensureProjectSkeleton(userCtx, current);

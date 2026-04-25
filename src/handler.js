@@ -161,15 +161,29 @@ async function handleMessage(ctx) {
     ];
 
     if (crashRecovery) {
+      // Strip filesystem secrets / IDs before injecting into the prompt:
+      // absolute server paths, WhatsApp JIDs and Discord IDs must not bleed
+      // into the AI context (info-leak hardening).
+      const _sanitize = (s) => {
+        if (typeof s !== 'string') return s;
+        return s
+          .replace(/[A-Z]:\\[^\s"']*/gi, '<path>')
+          .replace(/\/(?:home|var|opt|root|data|workspace|readonly)[^\s"']*/g, '<path>')
+          .replace(/\b\d{8,}@[\w.-]+\b/g, '<wa_jid>')
+          .replace(/\b\d{15,}\b/g, '<id>');
+      };
       const ageSec = Math.floor((Date.now() - (crashRecovery.ts || 0)) / 1000);
       const lines = [
         '<InterruptedRun>',
         `  The previous tool call for this user did not complete (the bot process was restarted ~${ageSec}s ago).`,
         `  Type: ${crashRecovery.type || 'unknown'}`,
       ];
-      if (crashRecovery.project) lines.push(`  Project: ${crashRecovery.project}`);
+      if (crashRecovery.project) lines.push(`  Project: ${_sanitize(crashRecovery.project)}`);
       if (crashRecovery.code_preview) {
-        lines.push(`  Code preview: ${String(crashRecovery.code_preview).slice(0, 300).replace(/\n/g, ' ⏎ ')}`);
+        lines.push(`  Code preview: ${_sanitize(String(crashRecovery.code_preview).slice(0, 300)).replace(/\n/g, ' ⏎ ')}`);
+      }
+      if (crashRecovery.command_preview) {
+        lines.push(`  Command preview: ${_sanitize(String(crashRecovery.command_preview).slice(0, 300))}`);
       }
       lines.push('  Before doing anything else, briefly check the project state (read_file / list new files in output/) and then resume the user request.');
       lines.push('</InterruptedRun>');

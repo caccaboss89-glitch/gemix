@@ -9,7 +9,7 @@ const {
   DATA_DIR,
   PLATFORM_DISCORD,
   MAX_PROJECT_NAME_LEN,
-  MAX_PROJECT_SIZE_MB,
+  MAX_USER_TOTAL_MB,
 } = require('../config/constants');
 
 // ── Constants ──
@@ -316,7 +316,9 @@ function writeProjectMeta(userCtx, projectName, meta) {
 
 function projectExists(userCtx, projectName) {
   const p = getProjectRoot(userCtx, projectName);
-  return Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory());
+  if (!p || !fs.existsSync(p)) return false;
+  try { return fs.statSync(p).isDirectory(); }
+  catch { return false; }
 }
 
 // ── Project size accounting ──
@@ -348,8 +350,24 @@ function projectSizeBytes(userCtx, projectName) {
   return dirSizeBytes(getProjectRoot(userCtx, projectName));
 }
 
-function isProjectOverQuota(userCtx, projectName) {
-  return projectSizeBytes(userCtx, projectName) > MAX_PROJECT_SIZE_MB * 1024 * 1024;
+/**
+ * Aggregate size of everything the AI controls under the user root:
+ * projects/ (all of them) + searched_images/. history/ and permanent/ are
+ * user-driven and excluded from the agentic quota on purpose.
+ */
+function userTotalBytes(userCtx) {
+  const root = getUserRoot(userCtx);
+  if (!root || !fs.existsSync(root)) return 0;
+  return dirSizeBytes(path.join(root, 'projects'))
+       + dirSizeBytes(path.join(root, 'searched_images'));
+}
+
+function userQuotaBytes() {
+  return MAX_USER_TOTAL_MB * 1024 * 1024;
+}
+
+function isUserOverQuota(userCtx) {
+  return userTotalBytes(userCtx) >= userQuotaBytes();
 }
 
 module.exports = {
@@ -377,7 +395,9 @@ module.exports = {
   writeProjectMeta,
   projectExists,
   projectSizeBytes,
-  isProjectOverQuota,
+  userTotalBytes,
+  userQuotaBytes,
+  isUserOverQuota,
   dirSizeBytes,
   // constants
   FIXED_TOP_DIRS,

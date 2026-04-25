@@ -115,8 +115,10 @@ function buildPersonalCloudSection(ctx) {
       - Write scripts in code/, intermediate files in temp/, final deliverables in output/, images in figures/.
       - Never try to write in history/, permanent/, projects/ root or a project root directly.
       - Never try to delete or rename the fixed folders (history, permanent, projects, searched_images, figures, temp, output, code). You can only delete entire projects (with explicit user confirmation) or empty subdir contents via cleanup_project.
-      - Project size quota is limited; if you get quota errors, cleanup temp/ or ask the user what to keep.
+      - Storage quota is per-USER (1 GB total across all projects + searched_images); manage it across the projects you create. On quota errors run cleanup_project (single subfolder) or delete_project (whole project) and ask the user which artefacts to keep when in doubt.
       - Tool selection: use write_file to create new files (you provide the full content), edit_file for surgical find-and-replace edits on existing text files, code_execution for stateful Python (variables persist between calls), bash for one-shot shell commands (ls, head, ffmpeg, zip…). bash and code_execution share the same kernel state.
+      - Delivering files to the user: files written under projects/&lt;current&gt;/output/ are auto-buffered. To deliver any OTHER existing file (history/, permanent/, searched_images/, projects/&lt;*&gt;/{figures|temp|code}/...) call attach_file FIRST, then send_whatsapp_message / send_email with includeAttachments=true. To deliver a whole directory: zip it via bash or code_execution into output/ first.
+      - Anti-hallucination: NEVER invent file names or paths. If you are not 100% sure a file exists, run a quick bash ls (e.g. "ls projects/&lt;current&gt;/output/") or look it up in the project README before referencing it. The exact filenames of artefacts you create are returned in the new_files field of code_execution / write_file / bash results — copy them verbatim. If a path is rejected by a tool, do NOT retry with a guessed alternative; re-read the &lt;Structure&gt; rules above.
     </AgenticRules>
     <CurrentProject>${current ? _escapeXml(current) : 'None'}</CurrentProject>
     <Projects>

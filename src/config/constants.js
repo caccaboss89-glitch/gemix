@@ -38,7 +38,10 @@ module.exports = {
 
   // Agentic cloud / projects
   MAX_PROJECTS_PER_USER: 10,
-  MAX_PROJECT_SIZE_MB: 800,
+  // Total user disk quota (sum of projects/ + searched_images/). The AI is
+  // responsible for distributing this budget across its projects (and using
+  // cleanup_project / delete_project when it runs out).
+  MAX_USER_TOTAL_MB: 1024,
   MAX_PROJECT_NAME_LEN: 40,
   PROJECT_STATE_LOCK_TTL_MS: 5 * 60 * 1000,
   INTERRUPTED_RUN_TTL_MS: 2 * 60 * 60 * 1000,

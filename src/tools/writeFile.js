@@ -10,7 +10,7 @@
 
 const path = require('path');
 const { runInProjectSandbox } = require('../sandbox/projectRun');
-const { isPathAllowed } = require('../utils/userPaths');
+const { isPathAllowed, getProjectRoot } = require('../utils/userPaths');
 const { getCurrentProject } = require('../utils/projectState');
 
 const MAX_WRITE_BYTES = 5 * 1024 * 1024; // 5 MB hard cap
@@ -96,10 +96,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
     return { success: false, error: `Content too large (${buf.length} bytes). Max ${MAX_WRITE_BYTES} bytes per write_file call.` };
   }
 
-  // We need the project root host path to translate into /workspace/...
-  // runInProjectSandbox returns it on success; we compute it here too via auth.absPath.
   // auth.absPath is host-side absolute. The sandbox sees the project dir as /workspace.
-  const { getProjectRoot } = require('../utils/userPaths');
   const projectDir = getProjectRoot(userCtx, currentProject);
   const containerPath = _toContainerPath(auth.absPath, currentProject, projectDir);
 

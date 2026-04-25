@@ -139,6 +139,6 @@ All tunable from `src/config/constants.js`:
 - `CODE_EXEC_MAX_OUTPUT_BYTES`, `CODE_EXEC_MAX_FILES_PER_CALL`,
   `CODE_EXEC_MAX_TOTAL_BYTES`
 - `SANDBOX_MEMORY_MB`, `SANDBOX_IDLE_TTL_MS`
-- `MAX_PROJECT_SIZE_MB`
+- `MAX_USER_TOTAL_MB` (per-user aggregate of `projects/` + `searched_images/`)
 
 Change them on the host side and restart the bot — no rebuild needed.

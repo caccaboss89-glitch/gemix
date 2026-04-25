@@ -23,7 +23,7 @@ const {
   CODE_EXEC_MAX_TIMEOUT_MS,
   CODE_EXEC_MAX_FILES_PER_CALL,
   CODE_EXEC_MAX_TOTAL_BYTES,
-  MAX_PROJECT_SIZE_MB,
+  MAX_USER_TOTAL_MB,
   PLATFORM_DISCORD,
 } = require('../config/constants');
 const {
@@ -33,7 +33,8 @@ const {
   getProjectRoot,
   getProjectSubdir,
   projectExists,
-  projectSizeBytes,
+  userTotalBytes,
+  userQuotaBytes,
 } = require('../utils/userPaths');
 const { getCurrentProject, saveLastCrash, consumeLastCrash } = require('../utils/projectState');
 const sandboxManager = require('./sandboxManager');
@@ -150,13 +151,13 @@ async function runInProjectSandbox({
   }
   ensureProjectSkeleton(userCtx, projectName);
 
-  // ── Quota pre-check ──────────────────────────────────────────────────────
+  // ── Quota pre-check (per-user, aggregate of projects/ + searched_images/) ─
   const projectDir = getProjectRoot(userCtx, projectName);
-  const quotaBytes = MAX_PROJECT_SIZE_MB * 1024 * 1024;
-  const usedBefore = projectSizeBytes(userCtx, projectName);
+  const quotaBytes = userQuotaBytes();
+  const usedBefore = userTotalBytes(userCtx);
   if (usedBefore >= quotaBytes) {
     return {
-      error: `Project "${projectName}" is already at or over the size quota (${MAX_PROJECT_SIZE_MB} MB). Run cleanup_project before generating new files.`,
+      error: `Your personal cloud is full (${(usedBefore / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB used across all projects + searched_images). Free space with cleanup_project (per-folder) or delete_project (whole project) and ask the user which artefacts to keep.`,
     };
   }
 
@@ -210,10 +211,36 @@ async function runInProjectSandbox({
   let attachedTotalBytes = 0;
   let attachedCount = 0;
 
+  // Resolve project root realpath once: every discovered file MUST resolve
+  // inside it. Anything pointing outside (e.g. symlink to /readonly/permanent)
+  // is treated as an exfiltration attempt and refused for auto-attach.
+  let projectRealRoot;
+  try { projectRealRoot = fs.realpathSync(projectDir); }
+  catch { projectRealRoot = projectDir; }
+
   for (const [absPath, info] of after) {
     const prev = before.get(absPath);
     const rel = path.relative(projectDir, absPath).split(path.sep).join('/');
     const item = { path: `projects/${projectName}/${rel}`, size: info.size };
+
+    // ── Symlink-escape guard ──
+    let isEscaped = false;
+    try {
+      const real = fs.realpathSync(absPath);
+      if (real !== absPath) {
+        const relReal = path.relative(projectRealRoot, real);
+        if (relReal.startsWith('..') || path.isAbsolute(relReal)) isEscaped = true;
+      }
+    } catch { /* file vanished mid-scan */ }
+
+    if (isEscaped) {
+      log.warn(`refusing symlink escape: ${rel} → outside project root`);
+      item.escaped = true;
+      item.auto_attached = false;
+      if (!prev) newFiles.push(item);
+      else if (prev.size !== info.size || prev.mtimeMs !== info.mtimeMs) modifiedFiles.push(item);
+      continue;
+    }
 
     if (!prev) {
       const isOutput = absPath === outputDir || absPath.startsWith(outputDir + path.sep);
@@ -239,12 +266,14 @@ async function runInProjectSandbox({
     }
   }
 
-  // ── Quota post-check ─────────────────────────────────────────────────────
+  // ── Quota post-check (per-user) ─────────────────────────────────────────
   let quotaWarning = null;
-  const usedAfter = projectSizeBytes(userCtx, projectName);
-  if (usedAfter >= quotaBytes * 0.9) {
+  const usedAfter = userTotalBytes(userCtx);
+  if (usedAfter >= quotaBytes) {
+    quotaWarning = `Personal cloud is now FULL (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Subsequent code_execution / write_file calls will fail until you cleanup_project or delete_project.`;
+  } else if (usedAfter >= quotaBytes * 0.9) {
     const pct = Math.round((usedAfter / quotaBytes) * 100);
-    quotaWarning = `Project storage is ${pct}% full (${(usedAfter / 1048576).toFixed(1)} / ${MAX_PROJECT_SIZE_MB} MB). Consider cleanup_project before more file-producing calls.`;
+    quotaWarning = `Personal cloud is ${pct}% full (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Consider cleanup_project / delete_project before more file-producing calls.`;
   }
 
   return {

@@ -28,6 +28,7 @@ const {
   copyToProjectTool,
 } = require('./projects');
 const { codeExecutionTool } = require('./codeExecution');
+const { attachFileTool } = require('./attachFile');
 const { writeFileTool } = require('./writeFile');
 const { editFileTool } = require('./editFile');
 const { bashTool } = require('./bashTool');
@@ -38,7 +39,7 @@ const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { storeVoiceText } = require('../utils/voiceTextCache');
 const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
-const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId } = require('../utils/userPaths');
+const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId, userTotalBytes, userQuotaBytes } = require('../utils/userPaths');
 const fs = require('fs');
 const path = require('path');
 
@@ -231,13 +232,19 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const savedPaths = [];
         const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
         const wantSave = Boolean(args.save_to_disk) && isWhatsApp && resolveStorageId(userCtx);
+        let quotaFull = false;
 
         if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
           let savedDir = null;
           if (wantSave) {
             try {
               ensureUserSkeleton(userCtx);
-              savedDir = getSearchedImagesDir(userCtx);
+              if (userTotalBytes(userCtx) >= userQuotaBytes()) {
+                quotaFull = true;
+                log.warn('save_to_disk: user cloud is full — skipping persistence.');
+              } else {
+                savedDir = getSearchedImagesDir(userCtx);
+              }
             } catch (err) {
               log.warn(`save_to_disk: cannot prepare searched_images/: ${err.message}`);
               savedDir = null;
@@ -285,7 +292,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           // Asked to save but nothing saved — surface a warning.
           if (Array.isArray(imageResult.toolResult)) {
             const first = imageResult.toolResult[0];
-            const warn = 'Warning: save_to_disk requested but no images were persisted (see logs).';
+            const warn = quotaFull
+              ? 'Warning: save_to_disk could not persist images — your personal cloud is full. Run cleanup_project / delete_project and retry.'
+              : 'Warning: save_to_disk requested but no images were persisted (see logs).';
             if (first && first.type === 'text') first.text = `${first.text}\n\n${warn}`;
           }
         }
@@ -296,6 +305,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
       case 'read_file': {
         result = await readFileTool(args.path, userCtx, responseCtx);
+        break;
+      }
+
+      case 'attach_file': {
+        result = await attachFileTool(args, userCtx, responseCtx);
         break;
       }
 
