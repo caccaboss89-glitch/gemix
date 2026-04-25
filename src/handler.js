@@ -6,10 +6,12 @@ const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
 const {
   MAX_TOOL_ROUNDS,
+  MAX_TOOL_ROUNDS_AGENTIC,
   PLATFORM_DISCORD,
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY,
   MAINTENANCE_USER_MESSAGE,
+  INTERRUPTED_RUN_TTL_MS,
 } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { transcribeDocumentsInMessageContent } = require('./utils/media');
@@ -17,8 +19,18 @@ const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
-const { getCurrentProject } = require('./utils/projectState');
+const { getCurrentProject, consumeLastCrash, saveLastCrash } = require('./utils/projectState');
 const { listProjects, ensureUserSkeleton } = require('./utils/userPaths');
+
+// Tools that unlock the larger agentic round budget. As soon as any of these
+// is invoked in a message, the per-message round cap is bumped from
+// MAX_TOOL_ROUNDS to MAX_TOOL_ROUNDS_AGENTIC so multi-step pipelines
+// (create_project → code_execution → … → send_whatsapp_message) have room.
+const AGENTIC_TOOL_NAMES = new Set([
+  'code_execution',
+  'create_project', 'switch_project', 'delete_project', 'cleanup_project',
+  'copy_to_permanent', 'copy_to_project',
+]);
 
 const log = createLogger('Handler');
 
@@ -89,18 +101,23 @@ async function handleMessage(ctx) {
     ctx.groupMemory = groupMemory;
 
     // Personal cloud: inject current project + project list (WhatsApp only)
+    let crashRecovery = null;
+    let cloudProbeCtx = null;
     if (ctx.platform && !ctx.platform.startsWith('discord')) {
       try {
-        const probeCtx = {
+        cloudProbeCtx = {
           platform: ctx.platform,
           userId: ctx.userId,
           waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
           isGroup: ctx.isGroup,
           groupId: ctx.groupId,
         };
-        ensureUserSkeleton(probeCtx);
-        ctx.currentProject = getCurrentProject(probeCtx);
-        ctx.projects = listProjects(probeCtx);
+        ensureUserSkeleton(cloudProbeCtx);
+        ctx.currentProject = getCurrentProject(cloudProbeCtx);
+        ctx.projects = listProjects(cloudProbeCtx);
+        // Crash recovery: if a previous run was interrupted (bot killed mid
+        // tool call), the slot survives on disk. Consume + inject once.
+        crashRecovery = consumeLastCrash(cloudProbeCtx, INTERRUPTED_RUN_TTL_MS);
       } catch (err) {
         log.warn(`Failed to load project state: ${err.message}`);
         ctx.currentProject = null;
@@ -143,6 +160,23 @@ async function handleMessage(ctx) {
       { role: 'system', content: systemPrompt },
     ];
 
+    if (crashRecovery) {
+      const ageSec = Math.floor((Date.now() - (crashRecovery.ts || 0)) / 1000);
+      const lines = [
+        '<InterruptedRun>',
+        `  The previous tool call for this user did not complete (the bot process was restarted ~${ageSec}s ago).`,
+        `  Type: ${crashRecovery.type || 'unknown'}`,
+      ];
+      if (crashRecovery.project) lines.push(`  Project: ${crashRecovery.project}`);
+      if (crashRecovery.code_preview) {
+        lines.push(`  Code preview: ${String(crashRecovery.code_preview).slice(0, 300).replace(/\n/g, ' ⏎ ')}`);
+      }
+      lines.push('  Before doing anything else, briefly check the project state (read_file / list new files in output/) and then resume the user request.');
+      lines.push('</InterruptedRun>');
+      messages.push({ role: 'system', content: lines.join('\n') });
+      log.info(`   ♻️ Injected interrupted-run notice (type=${crashRecovery.type})`);
+    }
+
     if (ctx.history && ctx.history.length > 0) {
       const historyLines = ctx.history.map(h =>
         typeof h.content === 'string'
@@ -175,8 +209,11 @@ async function handleMessage(ctx) {
 
     let rounds = 0;
     let lastModelUsed = null;
+    let maxRounds = MAX_TOOL_ROUNDS;
+    let agenticUnlocked = false;
+    let lastAgenticTool = null;
 
-    while (rounds < MAX_TOOL_ROUNDS) {
+    while (rounds < maxRounds) {
       rounds++;
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
@@ -184,13 +221,24 @@ async function handleMessage(ctx) {
         break;
       }
 
-      log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata AI (round ${rounds}/${MAX_TOOL_ROUNDS})`);
+      log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata AI (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
       const { message: assistantMsg, provider, model } = await callAI(messages, tools);
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
         log.info(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
+        // Bump the per-message round budget on first agentic tool use.
+        for (const tc of assistantMsg.tool_calls) {
+          if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
+            lastAgenticTool = tc.function.name;
+            if (!agenticUnlocked) {
+              agenticUnlocked = true;
+              maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
+              log.info(`   🧠 Agentic tool detected → round budget bumped to ${maxRounds}`);
+            }
+          }
+        }
         // Preserve reasoning_details, delete null content for OpenRouter reasoning models
         if (assistantMsg.content === null || assistantMsg.content === undefined) {
           delete assistantMsg.content;
@@ -304,6 +352,20 @@ async function handleMessage(ctx) {
         discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
       };
+    }
+
+    // Loop exhausted without a final answer: persist a crash slot so the
+    // next user message can ask the AI to resume gracefully (only useful
+    // when an agentic pipeline was in flight).
+    if (cloudProbeCtx && agenticUnlocked) {
+      try {
+        saveLastCrash(cloudProbeCtx, {
+          type: 'tool_rounds_exhausted',
+          project: ctx.currentProject || null,
+          last_tool: lastAgenticTool,
+          rounds_used: rounds,
+        });
+      } catch (e) { log.warn(`saveLastCrash failed: ${e.message}`); }
     }
 
     return {

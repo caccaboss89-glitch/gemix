@@ -23,7 +23,7 @@ const {
   projectExists,
   projectSizeBytes,
 } = require('../utils/userPaths');
-const { getCurrentProject } = require('../utils/projectState');
+const { getCurrentProject, saveLastCrash, consumeLastCrash } = require('../utils/projectState');
 const sandboxManager = require('../sandbox/sandboxManager');
 const { createLogger } = require('../utils/logger');
 
@@ -175,15 +175,31 @@ async function codeExecutionTool(args, userCtx, responseCtx) {
   const before = _snapshot(projectDir);
   const startedAt = Date.now();
   entry.busy = true;
+
+  // Crash recovery slot: persist the fact that we are about to run code.
+  // If the bot dies mid-execution this slot survives and is picked up by
+  // handler.js on the next message so the AI can resume gracefully.
+  saveLastCrash(userCtx, {
+    type: 'code_execution',
+    project: projectName,
+    code_preview: String(code).slice(0, 400),
+    timeout_ms: timeoutMs,
+    started_at: startedAt,
+  });
+
   let kernelResult;
   try {
     kernelResult = await entry.kernel.execute(code, { timeoutMs });
   } catch (err) {
     entry.busy = false;
+    consumeLastCrash(userCtx, 0); // clear slot — error is reported synchronously
     log.error(`kernel execute threw: ${err.message}`);
     return { success: false, error: `Sandbox execution failed: ${err.message}` };
   }
   entry.busy = false;
+  // Execution completed (ok or python-level error): clear the crash slot,
+  // the result is already returned synchronously to the AI.
+  consumeLastCrash(userCtx, 0);
   sandboxManager.touch(entry);
 
   const durationMs = Date.now() - startedAt;
