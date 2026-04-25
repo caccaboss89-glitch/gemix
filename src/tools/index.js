@@ -35,6 +35,9 @@ const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { storeVoiceText } = require('../utils/voiceTextCache');
 const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
+const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId } = require('../utils/userPaths');
+const fs = require('fs');
+const path = require('path');
 
 const log = createLogger('Tools');
 
@@ -222,12 +225,66 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         );
 
         // Tag each attachment with a global ID and accumulate into delivery buffer
+        const savedPaths = [];
+        const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
+        const wantSave = Boolean(args.save_to_disk) && isWhatsApp && resolveStorageId(userCtx);
+
         if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
+          let savedDir = null;
+          if (wantSave) {
+            try {
+              ensureUserSkeleton(userCtx);
+              savedDir = getSearchedImagesDir(userCtx);
+            } catch (err) {
+              log.warn(`save_to_disk: cannot prepare searched_images/: ${err.message}`);
+              savedDir = null;
+            }
+          }
+
           for (let i = 0; i < imageResult.attachments.length; i++) {
-            imageResult.attachments[i]._imageSearchId = startId + i;
-            responseCtx.attachments.push(imageResult.attachments[i]);
+            const att = imageResult.attachments[i];
+            att._imageSearchId = startId + i;
+            // Persist to searched_images/ when requested
+            if (savedDir && att.buffer) {
+              try {
+                if (!fs.existsSync(savedDir)) fs.mkdirSync(savedDir, { recursive: true });
+                let dest = path.join(savedDir, att.name);
+                // Avoid clobbering existing files: append _<n> before extension
+                if (fs.existsSync(dest)) {
+                  const ext = path.extname(att.name);
+                  const stem = att.name.slice(0, att.name.length - ext.length);
+                  let n = 2;
+                  while (fs.existsSync(path.join(savedDir, `${stem}_${n}${ext}`))) n++;
+                  dest = path.join(savedDir, `${stem}_${n}${ext}`);
+                }
+                fs.writeFileSync(dest, att.buffer);
+                savedPaths.push(`searched_images/${path.basename(dest)}`);
+              } catch (err) {
+                log.warn(`save_to_disk: failed to write ${att.name}: ${err.message}`);
+              }
+            }
+            responseCtx.attachments.push(att);
           }
           responseCtx.imageSearchNextId = startId + imageResult.attachments.length;
+        }
+
+        // Append saved-paths info to the textual result so the AI knows the persistent paths.
+        if (savedPaths.length > 0 && Array.isArray(imageResult.toolResult)) {
+          const note = `Saved to disk: ${savedPaths.join(', ')}`;
+          // The first part is always { type: 'text', text: ... } — append a line.
+          const first = imageResult.toolResult[0];
+          if (first && first.type === 'text') {
+            first.text = `${first.text}\n\n${note}`;
+          } else {
+            imageResult.toolResult.unshift({ type: 'text', text: note });
+          }
+        } else if (wantSave && savedPaths.length === 0) {
+          // Asked to save but nothing saved — surface a warning.
+          if (Array.isArray(imageResult.toolResult)) {
+            const first = imageResult.toolResult[0];
+            const warn = 'Warning: save_to_disk requested but no images were persisted (see logs).';
+            if (first && first.type === 'text') first.text = `${first.text}\n\n${warn}`;
+          }
         }
 
         result = imageResult.toolResult;

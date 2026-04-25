@@ -73,6 +73,10 @@ const TOOL_IMAGE_SEARCH = makeTool({
       items: { type: 'integer' },
       description: 'Image IDs to remove from buffer (from previous search results).',
     },
+    save_to_disk: {
+      type: 'boolean',
+      description: 'WhatsApp only. If true, save the downloaded image(s) to the user\'s searched_images/ folder so they can be reused later (e.g. by code_execution or copy_to_project). Default false.',
+    },
   },
   required: ['query'],
 });
