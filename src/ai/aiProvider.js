@@ -1,50 +1,39 @@
 // src/ai/aiProvider.js
-const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, GEMINI_MODEL, QWEN_MODEL } = require('../config/env');
+// Single-provider router: every request goes to Qwen. Audio/video content
+// parts (which Qwen can't ingest) are pre-processed through the media
+// describer and swapped for `<Description>` text
+// parts before the call. This removes the legacy Qwen↔Gemini fork and
+// avoids the quality drop of running entire complex tasks on a small
+// multimodal model just because the request happens to contain audio.
+
+const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, QWEN_MODEL } = require('../config/env');
 const { MAX_TOKENS } = require('../config/constants');
 const { callModel } = require('./apiClient');
+const { describeMediaInMessages } = require('./mediaDescriber');
 
 /**
- * Check if any message in the array contains audio content (data:audio/* base64 parts).
- * Used to route requests to Gemini (audio-capable) vs Qwen (text/image only).
- * @param {Array} messages - OpenAI-format messages array
- * @returns {boolean} True if audio content is detected
- */
-function hasAudioContent(messages) {
-  if (!Array.isArray(messages)) return false;
-  for (const msg of messages) {
-    if (!Array.isArray(msg.content)) continue;
-    for (const part of msg.content) {
-      if (part.type === 'image_url' && part.image_url?.url) {
-        const match = /^data:([^;]+);base64,/.exec(part.image_url.url);
-        if (match && match[1].startsWith('audio/')) return true;
-      }
-    }
-  }
-  return false;
-}
-
-/**
- * Call the appropriate AI provider via OpenRouter based on message content.
- * Routes to Gemini when audio is detected, Qwen otherwise.
+ * Call the main AI provider (Qwen) via OpenRouter.
+ * Audio/video parts in `messages` are described in one batch call and
+ * replaced in-place with `<Description>` text parts before the call.
+ * Parts are mutated once so they are not re-described on subsequent rounds.
+ *
  * @param {Array} messages - OpenAI-format messages array
  * @param {Array|null} tools - Tool definitions array
- * @returns {Promise<{message: object, provider: string, model: string}>} The assistant message with provider info
+ * @returns {Promise<{message: object, provider: string, model: string}>}
  */
 async function callAI(messages, tools = null) {
-  const useGemini = hasAudioContent(messages);
-  const model = useGemini ? GEMINI_MODEL : QWEN_MODEL;
-  const provider = useGemini ? 'Gemini' : 'Qwen';
+  const processedMessages = await describeMediaInMessages(messages);
 
   const body = {
-    model,
-    messages,
+    model: QWEN_MODEL,
+    messages: processedMessages,
     max_tokens: MAX_TOKENS,
+    reasoning: { effort: 'high' },
   };
-  if (!useGemini) body.reasoning = { effort: 'high' };
   if (tools && tools.length > 0) body.tools = tools;
 
-  const message = await callModel(provider, `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
-  return { message, provider, model };
+  const message = await callModel('Qwen', `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
+  return { message, provider: 'Qwen', model: QWEN_MODEL };
 }
 
 module.exports = { callAI };

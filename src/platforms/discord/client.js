@@ -1,11 +1,12 @@
 // src/platforms/discord/client.js
 const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
-const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
+const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
 const { mediaToContentPart, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
+const { getMediaDurationSec } = require('../../utils/mediaDuration');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
@@ -35,21 +36,21 @@ function initDiscord() {
   });
 
   discordClient.on('clientReady', () => {
-    log.info(`✅ Bot pronto: ${discordClient.user.tag}`);
+    log.info(`✅ Bot ready: ${discordClient.user.tag}`);
   });
 
   discordClient.on('messageCreate', async (msg) => {
     try {
       await onDiscordMessage(msg);
     } catch (err) {
-      log.error(`\n❌ ERRORE critico:`);
+      log.error(`\n❌ Critical error:`);
       log.error(`   ${err.message}`);
       log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
   });
 
   discordClient.login(BOT_TOKEN).catch(err => {
-    log.error('❌ Login Discord fallito:', err.message);
+    log.error('❌ Discord login failed:', err.message);
     process.exit(1);
   });
   return discordClient;
@@ -145,8 +146,9 @@ async function onDiscordMessage(msg) {
             const isImage = att.contentType?.startsWith('image/');
             const isAudio = att.contentType?.startsWith('audio/');
             const isPdf = att.contentType === 'application/pdf' || ext === 'pdf';
+            const isVideo = att.contentType?.startsWith('video/');
 
-            if (isImage || isAudio) {
+            if (isImage || isAudio || isVideo) {
               try {
                 const res = await fetch(att.url);
                 const buffer = Buffer.from(await res.arrayBuffer());
@@ -183,7 +185,31 @@ async function onDiscordMessage(msg) {
     const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
     if (isVideo) {
-      textBody = `${attachmentTag} (file not viewable) ${textBody}`.trim();
+      try {
+        const buffer = await fetchBuffer();
+        const dur = await getMediaDurationSec(buffer, ext);
+        if (dur != null && dur > MAX_VIDEO_DURATION_S) {
+          textBody = `${attachmentTag} (video too long: ${Math.round(dur)}s, max ${MAX_VIDEO_DURATION_S}s) ${textBody}`.trim();
+        } else {
+          contentParts.push(mediaToContentPart(buffer, att.contentType));
+          textBody = `${attachmentTag} ${textBody}`.trim();
+        }
+      } catch {
+        textBody = `${attachmentTag} ${textBody}`.trim();
+      }
+    } else if (isAudio) {
+      const audioDuration = Number(att.duration || 0);
+      if (audioDuration > MAX_AUDIO_DURATION_S) {
+        textBody = `${attachmentTag} (audio too long: ${audioDuration}s, max ${MAX_AUDIO_DURATION_S}s) ${textBody}`.trim();
+      } else {
+        try {
+          const buffer = await fetchBuffer();
+          contentParts.push(mediaToContentPart(buffer, att.contentType));
+          textBody = `${attachmentTag} ${textBody}`.trim();
+        } catch {
+          textBody = `${attachmentTag} ${textBody}`.trim();
+        }
+      }
     } else if (isDoc && att.contentType === 'application/pdf') {
       try {
         const buffer = await fetchBuffer();
@@ -200,21 +226,8 @@ async function onDiscordMessage(msg) {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }
     } else if (isDoc) {
-      // Documenti in cronologia non vengono inviati direttamente, solo tag.
+      // Non-image, non-PDF documents: tag only.
       textBody = `${attachmentTag} ${textBody}`.trim();
-    } else if (isAudio) {
-      const audioDuration = Number(att.duration || 0);
-      if (audioDuration > MAX_AUDIO_DURATION_S) {
-        textBody = `${attachmentTag} (audio too long: ${audioDuration}s, max 3 min) ${textBody}`.trim();
-      } else {
-        try {
-          const buffer = await fetchBuffer();
-          contentParts.push(mediaToContentPart(buffer, att.contentType));
-          textBody = `${attachmentTag} ${textBody}`.trim();
-        } catch {
-          textBody = `${attachmentTag} ${textBody}`.trim();
-        }
-      }
     } else if (isImage) {
       try {
         const buffer = await fetchBuffer();
@@ -246,7 +259,7 @@ async function onDiscordMessage(msg) {
     }
   } catch { }
 
-  let serverEvents = 'Nessun evento in programma.';
+  let serverEvents = 'No upcoming events.';
   try {
     const events = await guild.scheduledEvents.fetch();
     if (events.size > 0) {
@@ -280,7 +293,7 @@ async function onDiscordMessage(msg) {
   };
   const lockKey = `discord:${channel.id}`;
   if (!responseLock.tryLock(lockKey)) {
-    log.warn(`   ⛔ Ignoro messaggio in thread ${channel.id}: GemiX sta già rispondendo`);
+    log.warn(`   ⛔ Ignoring message in thread ${channel.id}: GemiX is already responding`);
     return;
   }
 
@@ -303,7 +316,7 @@ async function onDiscordMessage(msg) {
 
     if (finalText) {
       const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
-      if (chunks.length > 1) log.info(`   💬 Messaggio diviso in ${chunks.length} parti`);
+      if (chunks.length > 1) log.info(`   💬 Message split into ${chunks.length} parts`);
       for (let i = 0; i < chunks.length; i++) {
         if (i === chunks.length - 1 && files.length > 0) {
           await channel.send({ content: chunks[i], files });
@@ -311,25 +324,25 @@ async function onDiscordMessage(msg) {
           await channel.send({ content: chunks[i] });
         }
       }
-      log.info(`   ✅ Messaggio Discord inviato (${finalText.length} char)`);
+      log.info(`   ✅ Discord message sent (${finalText.length} chars)`);
     } else if (files.length > 0) {
       await channel.send({ files });
-      log.info(`   ✅ File inviati`);
+      log.info(`   ✅ Files sent`);
     } else {
-      log.warn(`   ⚠️ Nessun contenuto o file da inviare`);
+      log.warn(`   ⚠️ No content or files to send`);
     }
 
-    // Rinomina thread in modo non bloccante (Discord limita a 2 rinominazioni ogni 10 min)
+    // Rename thread non-blocking (Discord limits to 2 renames per 10 min)
     if (newTitle && newTitle.length > 0) {
       const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
       if (safeTitle) {
         channel.setName(safeTitle)
-          .then(() => log.info(`   📝 Thread rinominato: "${safeTitle}"`))
-          .catch(err => log.error('Errore rinomina thread:', err.message));
+          .then(() => log.info(`   📝 Thread renamed: "${safeTitle}"`))
+          .catch(err => log.error('Thread rename error:', err.message));
       }
     }
   } catch (err) {
-    log.error(`\n❌ Errore invio risposta:`);
+    log.error(`\n❌ Error sending response:`);
     log.error(`   ${err.message}`);
     try {
       await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
@@ -356,7 +369,6 @@ async function buildDiscordHistory(channel, starterMessageId) {
     for (const att of m.attachments.values()) {
       const isImage = att.contentType?.startsWith('image/');
       const isAudio = att.contentType?.startsWith('audio/');
-      const audioDuration = Number(att.duration || 0);
       const isDoc = att.contentType?.startsWith('application/');
       const isVideo = att.contentType?.startsWith('video/');
 
@@ -365,14 +377,15 @@ async function buildDiscordHistory(channel, starterMessageId) {
 
       const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
-      if (isAudio) {
+      if (isVideo) {
+        // Tag-only in history: the AI re-fetches the video via read_file when it needs the description.
+        textContent = `${textContent} ${attachmentTag}`.trim();
+      } else if (isAudio) {
         const cachedText = retrieveVoiceText(channel.id, m.createdAt.getTime());
         if (cachedText) {
           textContent = `${textContent} ${attachmentTag} <Transcription>${cachedText}</Transcription>`.trim();
         } else if (isBot) {
           textContent = `${textContent} ${attachmentTag} (transcription unavailable)`.trim();
-        } else if (audioDuration > MAX_AUDIO_DURATION_S) {
-          textContent = `${textContent} ${attachmentTag} (audio too long: ${audioDuration}s, max 3 min)`.trim();
         } else {
           textContent = `${textContent} ${attachmentTag}`.trim();
         }
@@ -385,13 +398,12 @@ async function buildDiscordHistory(channel, starterMessageId) {
           } else if (info.pages > MAX_DOC_PAGES) {
             textContent = `${textContent} ${attachmentTag} (document too long: ${info.pages} pages)`.trim();
           } else {
-            textContent = `${textContent} ${attachmentTag}`.trim();
+            const docText = info.text ? `\n<Transcription>\n${info.text}\n</Transcription>` : '';
+            textContent = `${textContent} ${attachmentTag}${docText}`.trim();
           }
         } catch {
           textContent = `${textContent} ${attachmentTag}`.trim();
         }
-      } else if (isVideo) {
-        textContent = `${textContent} ${attachmentTag} (file not viewable)`.trim();
       } else if (isImage || isDoc) {
         textContent = `${textContent} ${attachmentTag}`.trim();
       } else {

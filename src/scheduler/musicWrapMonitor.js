@@ -104,16 +104,16 @@ async function checkStatsFileUpdate() {
     }, 'Music Stats Check');
 
     if (!response.ok) {
-      log.error(`❌ Errore lettura stats.json: ${response.status}`);
+      log.error(`❌ Failed to read stats.json: ${response.status}`);
       return null;
     }
 
     const data = await response.json();
-    // Usa il timestamp lastUpdated dal file come identificatore di cambio
+    // Use the lastUpdated timestamp from the file as the change identifier
     const timestamp = data.lastUpdated || new Date().toISOString();
     return timestamp;
   } catch (err) {
-    log.error('❌ Errore fetch stats.json:', err.message);
+    log.error('❌ Failed to fetch stats.json:', err.message);
     return null;
   }
 }
@@ -137,7 +137,7 @@ function wasMessageSentToday(memberWa, state) {
  */
 async function checkAndSendMusicWrap(dedicatedClient) {
   if (!dedicatedClient) {
-    log.warn('⚠️  Client WhatsApp dedicato non disponibile (non ancora ready)');
+    log.warn('⚠️  Dedicated WhatsApp client unavailable (not ready yet)');
     return;
   }
 
@@ -149,35 +149,35 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   const today = getItalyDateString();
   const state = loadMonitorState();
 
-  // Se il check è già stato fatto oggi, salta (anche se il bot è riavviato)
+  // If the check was already done today, skip (even after a bot restart)
   if (state.lastCheckDate === today) {
-    log.info(`ℹ️  Check già eseguito oggi (${today}), skip`);
+    log.info(`ℹ️  Already checked today (${today}), skipping`);
     return;
   }
 
-  log.info('✅ Oggi è il primo! Verifica in corso...');
+  log.info('✅ First of month! Running checks...');
 
   const statsTimestamp = await checkStatsFileUpdate();
   if (!statsTimestamp) {
-    log.warn('⚠️  Impossibile verificare gli aggiornamenti da GitHub');
+    log.warn('⚠️  Unable to verify updates from GitHub');
     return;
   }
 
   if (state.lastStatsTimestamp === statsTimestamp) {
-    log.info('ℹ️  Nessun nuovo aggiornamento rilevato (timestamp: ' + statsTimestamp + ')');
-    // Registra il check pur senza aggiornamenti, così non ricontrolla oggi al reboot
+    log.info('ℹ️  No new update detected (timestamp: ' + statsTimestamp + ')');
+    // Record the check even without updates so it is not re-checked today after a reboot
     state.lastCheckDate = today;
     saveMonitorState(state);
     return;
   }
 
-  log.info(`✅ Nuovo aggiornamento rilevato (timestamp: ${statsTimestamp})`);
+  log.info(`✅ New update detected (timestamp: ${statsTimestamp})`);
 
   let sentCount = 0;
 
   for (const member of ACTIVE_MEMBERS) {
     if (wasMessageSentToday(member.wa, state)) {
-      log.info(`ℹ️  Messaggio già inviato a ${member.name} oggi`);
+      log.info(`ℹ️  Message already sent to ${member.name} today`);
       continue;
     }
 
@@ -187,11 +187,11 @@ async function checkAndSendMusicWrap(dedicatedClient) {
       const password = MUSIC_WRAP_PASSWORD || 'N/D';
       const message = normalizeMarkdown(`🎵 *Wrap di ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`);
       await dedicatedClient.sendMessage(member.wa, message);
-      log.info(`✅ Messaggio inviato a ${member.name}`);
+      log.info(`✅ Message sent to ${member.name}`);
       state.lastSentDate[member.wa] = today;
       sentCount++;
     } catch (err) {
-      log.error(`❌ Errore per ${member.name}:`, err.message);
+      log.error(`❌ Error sending to ${member.name}:`, err.message);
     }
   }
 
@@ -200,7 +200,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   saveMonitorState(state);
 
   if (sentCount > 0) {
-    log.info(`✅ Completato: ${sentCount} messaggi inviati su ${ACTIVE_MEMBERS.length} membri`);
+    log.info(`✅ Done: ${sentCount}/${ACTIVE_MEMBERS.length} messages sent`);
   }
 }
 

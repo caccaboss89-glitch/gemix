@@ -1,0 +1,183 @@
+// src/ai/mediaDescriber.js
+// Captions every audio/video content part in an OpenAI-style messages array
+// using a cheap multimodal model (configured via MEDIA_DESCRIBER_MODEL).
+// All media parts from a request are sent in a SINGLE batch call; the model
+// returns one description per file in order. Each part is replaced in-place
+// with a `<Description>...</Description>` text part so the main model (Qwen)
+// can reason about media content without being multimodal-capable itself.
+
+const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, MEDIA_DESCRIBER_MODEL } = require('../config/env');
+const { callModel } = require('./apiClient');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('MediaDescriber');
+
+const DESCRIBER_MAX_TOKENS = 2048;
+const DESCRIBER_BATCH_TIMEOUT_MS = 180_000;
+
+const DESCRIBER_SYSTEM_PROMPT = [
+  'You are a multimedia file describer (audio or video).',
+  'Analyze the provided file(s) and produce a detailed description IN ITALIAN for each one, covering as applicable:',
+  '- Full transcription of all spoken content (distinguish speakers if identifiable). KEEP TRANSCRIPTIONS IN THEIR ORIGINAL LANGUAGE.',
+  '- General context: what is happening / what the file is about.',
+  '- Music: presence, genre, instruments, mood; if it is a song indicate title/artist only if clearly recognizable.',
+  '- Non-vocal sounds: describe them explicitly (e.g. burp, applause, clapping, laughter, cough, background noise, urban environment…). Do NOT transcribe them as generic onomatopoeia like "Uh".',
+  '- For VIDEOS: visual description — visible people (approximate height, apparent ethnicity, clothing, expressions, actions), objects, setting/location, camera movements, transitions, any on-screen text.',
+  '- For AUDIO: recording quality and emotional tone if relevant.',
+  'Be complete but concise; no preamble or courtesy phrases. Do not invent details that cannot be seen or heard.',
+].join('\n');
+
+function _buildDescriptionSchema(expectedCount) {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: 'media_descriptions',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          descriptions: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: expectedCount,
+            maxItems: expectedCount,
+          },
+        },
+        required: ['descriptions'],
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
+/**
+ * Detect whether a content part carries audio or video data.
+ * Detection is purely MIME-based from the data URI — user text is irrelevant.
+ * @param {object} part - OpenAI content part
+ * @returns {'audio'|'video'|null}
+ */
+function _getMediaKindFromPart(part) {
+  if (!part || part.type !== 'image_url' || !part.image_url || !part.image_url.url) return null;
+  const m = /^data:([^;]+);base64,/.exec(part.image_url.url);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('video/')) return 'video';
+  return null;
+}
+
+/**
+ * Walk an OpenAI-format messages array, locate every audio/video content
+ * part and replace it with a text part containing
+ * `<Description kind="audio|video">…</Description>`.
+ *
+ * All media parts are sent in a SINGLE batch API call. Each part is preceded
+ * by a numbered label `[Media N — audio|video]` derived from the MIME type so
+ * the model knows exactly what it is receiving without relying on user text.
+ * The schema enforces one description per file in order.
+ *
+ * Audio/video parts are replaced in-place so subsequent callAI rounds
+ * do not re-describe the same file. Returns the same (mutated) reference.
+ *
+ * @param {Array} messages
+ * @returns {Promise<Array>}
+ */
+async function describeMediaInMessages(messages) {
+  if (!Array.isArray(messages)) return messages;
+
+  const targets = [];
+  for (let mi = 0; mi < messages.length; mi++) {
+    const msg = messages[mi];
+    if (!msg || !Array.isArray(msg.content)) continue;
+    for (let pi = 0; pi < msg.content.length; pi++) {
+      const kind = _getMediaKindFromPart(msg.content[pi]);
+      if (kind) targets.push({ mi, pi, kind, part: msg.content[pi] });
+    }
+  }
+
+  if (targets.length === 0) return messages;
+
+  if (!MEDIA_DESCRIBER_MODEL) {
+    log.warn('   ⚠️ MEDIA_DESCRIBER_MODEL not configured — skipping description');
+    for (const { mi, pi, kind } of targets) {
+      messages[mi].content[pi] = { type: 'text', text: `<Description kind="${kind}">description unavailable (MEDIA_DESCRIBER_MODEL not configured)</Description>` };
+    }
+    return messages;
+  }
+
+  log.info(`🎬 Describing ${targets.length} media part(s) in one batch call (${MEDIA_DESCRIBER_MODEL})…`);
+
+  // Build a single user message: interleave MIME-based labels with media parts.
+  const userContent = [];
+  for (let i = 0; i < targets.length; i++) {
+    userContent.push({ type: 'text', text: `[Media ${i + 1} — ${targets[i].kind}]` });
+    userContent.push(targets[i].part);
+  }
+  userContent.push({
+    type: 'text',
+    text: targets.length === 1
+      ? 'Describe the media file above following the rules.'
+      : `Describe each of the ${targets.length} media files above (in order) following the rules. Return one description per file.`,
+  });
+
+  const body = {
+    model: MEDIA_DESCRIBER_MODEL,
+    messages: [
+      { role: 'system', content: DESCRIBER_SYSTEM_PROMPT },
+      { role: 'user', content: userContent },
+    ],
+    max_tokens: DESCRIBER_MAX_TOKENS * Math.min(targets.length, 3),
+    response_format: _buildDescriptionSchema(targets.length),
+  };
+
+  let results;
+  try {
+    const batchCall = callModel('MediaDescriber', `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('batch describer timeout')), DESCRIBER_BATCH_TIMEOUT_MS);
+    });
+
+    let message;
+    try {
+      message = await Promise.race([batchCall, timeoutPromise]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+
+    const raw = typeof message?.content === 'string' ? message.content : '';
+    if (!raw) throw new Error('Empty describer response');
+
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (e) { throw new Error(`Invalid JSON from describer: ${e.message}`); }
+
+    const descs = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
+    results = targets.map((_, i) => {
+      const d = descs[i];
+      return typeof d === 'string' && d.trim()
+        ? { success: true, description: d.trim() }
+        : { success: false, error: 'missing description in batch response' };
+    });
+  } catch (err) {
+    const errMsg = err.message || String(err);
+    log.error(`   ❌ Batch describe failed: ${errMsg}`);
+    results = targets.map(() => ({ success: false, error: errMsg }));
+  }
+
+  // Replace in-place so subsequent callAI rounds skip re-description.
+  for (let i = 0; i < targets.length; i++) {
+    const { mi, pi, kind } = targets[i];
+    const r = results[i] || { success: false, error: 'unknown error' };
+    const text = r.success
+      ? `<Description kind="${kind}">\n${r.description}\n</Description>`
+      : `<Description kind="${kind}">description unavailable (${r.error})</Description>`;
+    messages[mi].content[pi] = { type: 'text', text };
+  }
+
+  const ok = results.filter(r => r && r.success).length;
+  log.info(`   ✅ ${ok}/${targets.length} description(s) generated`);
+  return messages;
+}
+
+module.exports = { describeMediaInMessages };

@@ -1,7 +1,7 @@
 // src/platforms/whatsapp/shared.js
 const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
-const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
+const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
@@ -21,7 +21,7 @@ function _isSystemMessage(body) {
     /^\uD83C\uDF19 GemiX è temporaneamente in manutenzione/.test(body)
   );
 }
-const { isSupportedMedia, isUnsupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
+const { isSupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const { normalizeMarkdown } = require('../../utils/text');
 const { syncFileToHistory } = require('../../utils/historySync');
@@ -154,10 +154,12 @@ async function buildWhatsAppHistory(chat, platform, userId) {
           } else if (isGemiX) {
             textContent = `${textContent} ${tag} (transcription unavailable)`.trim();
           } else if (duration > MAX_AUDIO_DURATION_S) {
-            textContent = `${textContent} ${tag} (audio too long: ${duration}s, max 3 min)`.trim();
+            textContent = `${textContent} ${tag} (audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s)`.trim();
           } else {
             textContent = `${textContent} ${tag}`.trim();
           }
+        } else if (mediaType === 'video' && duration > MAX_VIDEO_DURATION_S) {
+          textContent = `${textContent} ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)`.trim();
         } else if (mediaType === 'document' && msg._data?.mimetype === 'application/pdf') {
           try {
             const buffer = await fetchBuffer();
@@ -179,8 +181,6 @@ async function buildWhatsAppHistory(chat, platform, userId) {
         } else {
           textContent = `${textContent} ${tag}`.trim();
         }
-      } else if (isUnsupportedMedia(mediaType)) {
-        textContent = `${textContent} ${tag} (file not viewable)`.trim();
       } else {
         textContent = `${textContent} ${tag}`.trim();
       }
@@ -229,12 +229,13 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
       const syncedPath = await syncFileToHistory(userId, quoted.id.id, fetchBuffer, filename);
       const tag = buildAttachmentTag(syncedPath, filename);
 
+      const isVideo = mediaType === 'video';
       if (isAudio) {
         const cachedText = chatId ? retrieveVoiceText(chatId, quoted.timestamp * 1000) : null;
         if (cachedText) {
           prefix = `[In reply to: ${tag} <Transcription>${cachedText}</Transcription>]\n`;
         } else if (duration > MAX_AUDIO_DURATION_S) {
-          prefix = `[In reply to: ${tag} (audio too long: ${duration}s, max 3 min)]\n`;
+          prefix = `[In reply to: ${tag} (audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s)]\n`;
         } else {
           prefix = `[In reply to: ${tag}]\n`;
           try {
@@ -242,6 +243,19 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
             if (buffer) {
               mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype));
             }
+          } catch { }
+        }
+        return { prefix, mediaParts };
+      }
+
+      if (isVideo) {
+        if (duration > MAX_VIDEO_DURATION_S) {
+          prefix = `[In reply to: ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)]\n`;
+        } else {
+          prefix = `[In reply to: ${tag}]\n`;
+          try {
+            const buffer = await fetchBuffer();
+            if (buffer) mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype));
           } catch { }
         }
         return { prefix, mediaParts };
@@ -341,13 +355,22 @@ async function processCurrentMedia(msg, userId) {
 
   const mediaType = msg.type;
   const isAudio = mediaType === 'audio' || mediaType === 'ptt';
+  const isVideo = mediaType === 'video';
   const duration = Number(msg.duration || msg._data?.duration || 0);
 
   if (isAudio && duration > MAX_AUDIO_DURATION_S) {
     return {
       skipped: true,
       tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
-      reason: `audio too long: ${duration}s, max 3 min`,
+      reason: `audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s`,
+    };
+  }
+
+  if (isVideo && duration > 0 && duration > MAX_VIDEO_DURATION_S) {
+    return {
+      skipped: true,
+      tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
+      reason: `video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s`,
     };
   }
 
@@ -355,7 +378,7 @@ async function processCurrentMedia(msg, userId) {
     return {
       skipped: true,
       tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
-      reason: isUnsupportedMedia(mediaType) ? 'file not viewable' : null,
+      reason: null,
     };
   }
 

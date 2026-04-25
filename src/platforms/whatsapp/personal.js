@@ -9,7 +9,7 @@ const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/fo
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 
-const log = createLogger('WA-PERSONALE');
+const log = createLogger('WA-PERSONAL');
 const responseLock = require('../../utils/responseLock');
 
 let client;
@@ -33,24 +33,24 @@ function initPersonalWhatsApp() {
   });
 
   client.on('qr', (qr) => {
-    log.info('Scansiona il QR code:');
+    log.info('Scan QR code:');
     qrcode.generate(qr, { small: true });
   });
 
   client.on('ready', () => {
-    log.info('✅ Client pronto:', client.info.wid._serialized);
+    log.info('✅ Client ready:', client.info.wid._serialized);
     _reconnectAttempts = 0;
   });
 
   client.on('auth_failure', (msg) => {
-    log.error('❌ Errore autenticazione:', msg);
+    log.error('❌ Auth failure:', msg);
   });
 
   client.on('disconnected', (reason) => {
-    log.warn('⚠️ Disconnesso:', reason);
+    log.warn('⚠️ Disconnected:', reason);
     _reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, _reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
-    log.info(`Tentativo riconnessione ${_reconnectAttempts} tra ${delay / 1000}s...`);
+    log.info(`Reconnect attempt ${_reconnectAttempts} in ${delay / 1000}s...`);
     setTimeout(() => client.initialize(), delay);
   });
 
@@ -58,7 +58,7 @@ function initPersonalWhatsApp() {
     try {
       await onPersonalMessage(msg);
     } catch (err) {
-      log.error(`\n❌ Errore critico:`);
+      log.error(`\n❌ Critical error:`);
       log.error(`   ${err.message}`);
       log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
@@ -101,7 +101,7 @@ async function onPersonalMessage(msg) {
   }
 
   if (dedicatedDigits && otherDigits && dedicatedDigits === otherDigits) {
-    log.info(`   Ignoro chat personale<->dedicata (numero: ${otherDigits})`);
+    log.info(`   Skipping personal\u2194dedicated chat (number: ${otherDigits})`);
     return;
   }
 
@@ -145,10 +145,10 @@ async function onPersonalMessage(msg) {
     userId: phoneJid,
   });
 
-  log.info(`\n📨 Messaggio ricevuto`);
-  log.info(`   Utente: ${userName}${msg.fromMe ? ' (TU)' : ''}`);
-  log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
-  log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
+  log.info(`\n📨 Incoming message`);
+  log.info(`   User: ${userName}${msg.fromMe ? ' (YOU)' : ''}`);
+  log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
+  log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
   let history = [];
   try {
@@ -159,7 +159,7 @@ async function onPersonalMessage(msg) {
       )
     ]);
   } catch (historyErr) {
-    log.warn(`   ⚠️ Fetch cronologia fallito (${historyErr.message}), procedo senza cronologia`);
+    log.warn(`   ⚠️ History fetch failed (${historyErr.message}), proceeding without history`);
   }
 
   const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, phoneJid);
@@ -184,7 +184,7 @@ async function onPersonalMessage(msg) {
 
   const lockKey = `wa_personal:${ctx.chatId || ctx.userId}`;
   if (!responseLock.tryLock(lockKey)) {
-    log.warn(`   ⛔ Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
+    log.warn(`   ⛔ Ignoring message in chat ${ctx.chatId || ctx.userId}: GemiX is already responding`);
     return;
   }
 
@@ -205,9 +205,9 @@ async function onPersonalMessage(msg) {
     }
 
     try {
-      log.info(`\n📤 Invio risposta...`);
+      log.info(`\n📤 Sending response...`);
       await sendWhatsAppResponse(chat, response);
-      log.info(`   ✅ Messaggio inviato`);
+      log.info(`   ✅ Message sent`);
       try {
         if (typeof chat.sendState === 'function') {
           await chat.sendState('paused');
@@ -216,7 +216,7 @@ async function onPersonalMessage(msg) {
         // sendState might not be available in this version
       }
     } catch (err) {
-      log.error(`\n❌ Errore invio risposta:`);
+      log.error(`\n❌ Error sending response:`);
       log.error(`   ${err.message}`);
     }
   } finally {

@@ -94,7 +94,7 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
     fs.writeFileSync(filePath, JSON.stringify(entry, null, 2));
     return filePath;
   } catch (err) {
-    log.warn(`Impossibile scrivere log API su file: ${err.message}`);
+    log.warn(`Failed to write API request log: ${err.message}`);
     return null;
   }
 }
@@ -133,7 +133,7 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
 
-      log.debug(`   Modello: ${modelName} - ${duration}ms${attempt > 1 ? ` (tentativo ${attempt})` : ''}`);
+      log.debug(`   Model: ${modelName} - ${duration}ms${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
       return res;
     } catch (err) {
       const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
@@ -143,14 +143,14 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
         const delay = attempt * 3000;
-        log.warn(`   ⚠️ Tentativo API ${attempt}/${MAX_API_RETRIES} fallito: ${errMsg} — ritento tra ${delay / 1000}s...`);
+        log.warn(`   ⚠️ API attempt ${attempt}/${MAX_API_RETRIES} failed: ${errMsg} — retrying in ${delay / 1000}s...`);
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
 
-      log.error(`   ❌ Errore API: ${errMsg}`);
-      await notifyAdmin(`API (${modelName})`, `Errore dopo ${attempt} tentativi: ${errMsg}`);
-      throw new Error(`${modelName} API non raggiungibile dopo ${attempt} tentativ${attempt > 1 ? 'i' : 'o'}: ${errMsg}`);
+      log.error(`   ❌ API error: ${errMsg}`);
+      await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
+      throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}`);
     }
   }
 }
@@ -171,9 +171,9 @@ async function callModel(modelName, apiUrl, body, apiKey) {
   try {
     data = await res.json();
   } catch (parseErr) {
-    log.error(`   ⚠️ Errore parsing JSON da ${modelName}:`);
+    log.error(`   ⚠️ JSON parse error from ${modelName}:`);
     log.error(`      ${parseErr.message}`);
-    throw new Error(`${modelName} API: risposta non valida (JSON parsing failed)`);
+    throw new Error(`${modelName} API: invalid response (JSON parsing failed)`);
   }
 
   try {
@@ -188,20 +188,20 @@ async function callModel(modelName, apiUrl, body, apiKey) {
     };
     fs.writeFileSync(responseLogFile, JSON.stringify(entry, null, 2));
   } catch (err) {
-    log.warn(`Impossibile scrivere log API response su file: ${err.message}`);
+    log.warn(`Failed to write API response log: ${err.message}`);
   }
 
   if (!data.choices || !data.choices[0]) {
-    log.error(`   ⚠️ Risposta ${modelName} malformata:`);
+    log.error(`   ⚠️ Malformed ${modelName} response:`);
     log.error(`      choices: ${JSON.stringify(data.choices)}`);
     log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
     
-    // Se è una risposta d'errore, includi i dettagli
+    // If it's an error response, include details
     if (data.error) {
       throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
     }
     
-    throw new Error(`${modelName} API: Nessuna risposta ricevuta dall'API (vuota o malformata)`);
+    throw new Error(`${modelName} API: no response received (empty or malformed)`);
   }
   return data.choices[0].message;
 }

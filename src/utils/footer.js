@@ -3,12 +3,11 @@ const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
 
 /**
  * Map model ID to human-readable display name.
- * @param {string} modelId - The model identifier (e.g., 'google/gemini-3-flash-preview', 'qwen/qwen3-coder:free')
+ * @param {string} modelId - The model identifier (e.g., 'qwen/qwen3-coder:free')
  * @returns {string} The human-readable model name or the original ID if not found
  */
 function getModelDisplayName(modelId) {
   const map = {
-    'google/gemini-3-flash-preview': 'Gemini 3 Flash',
     'qwen/qwen3-coder:free': 'Qwen 3 Coder',
   };
   return map[modelId] || modelId;

@@ -36,11 +36,11 @@ startScheduler();
 sandboxManager.installShutdownHook();
 
 process.on('SIGINT', async () => {
-  log.info('\n🛑 GemiX — Arresto in corso...');
+  log.info('\n🛑 GemiX — Shutting down...');
   try { await sandboxManager.shutdownAll(); } catch { /* */ }
   process.exit(0);
 });
 
 process.on('unhandledRejection', (err) => {
-  log.error('❌ Errore non gestito:', err);
+  log.error('❌ Unhandled rejection:', err);
 });

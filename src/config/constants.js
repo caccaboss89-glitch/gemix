@@ -11,7 +11,7 @@ const MAINTENANCE_MODE = process.env.MAINTENANCE_MODE
 module.exports = {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
 
-  // ── Maintenance mode ──
+  // ── Maintenance mode (not remove "GemiX è temporaneamente in manutenzione") ──
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY: true,
   MAINTENANCE_USER_MESSAGE:
@@ -25,8 +25,7 @@ module.exports = {
   MAX_TASK_DAYS: 365,
   SCHEDULER_INTERVAL_MS: 60_000,
   DISCORD_THREAD_NAME: 'gemix',
-  SUPPORTED_MEDIA: ['image', 'audio', 'document', 'sticker', 'ptt'],
-  UNSUPPORTED_MEDIA: ['video'],
+  SUPPORTED_MEDIA: ['image', 'audio', 'document', 'sticker', 'ptt', 'video'],
 
   // API
   MAX_API_RETRIES: 3,
@@ -61,6 +60,7 @@ module.exports = {
   MAX_TTS_CHARS: 1000,
   MAX_DOC_PAGES: 5,
   MAX_AUDIO_DURATION_S: 120,
+  MAX_VIDEO_DURATION_S: 15,
 
   // Platforms
   PLATFORM_DISCORD: 'discord',

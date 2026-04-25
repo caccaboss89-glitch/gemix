@@ -1,5 +1,5 @@
 // src/utils/media.js
-const { SUPPORTED_MEDIA, UNSUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
+const { SUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -11,15 +11,6 @@ const path = require('path');
  */
 function isSupportedMedia(type) {
   return SUPPORTED_MEDIA.includes(type);
-}
-
-/**
- * Check if a media type is explicitly unsupported.
- * @param {string} type - Media type (e.g., 'video')
- * @returns {boolean} True if media type is unsupported
- */
-function isUnsupportedMedia(type) {
-  return UNSUPPORTED_MEDIA.includes(type);
 }
 
 /**
@@ -260,7 +251,6 @@ function buildAttachmentTag(syncedPath, fallbackName) {
 
 module.exports = {
   isSupportedMedia,
-  isUnsupportedMedia,
   mediaToContentPart,
   mediaTag,
   extractTextFromPdfBuffer,

@@ -214,7 +214,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             a => !a._imageSearchId || !discardSet.has(a._imageSearchId)
           );
           const removed = before - responseCtx.attachments.length;
-          if (removed > 0) log.info(`   🗑️ Scartate ${removed} immagini: [${[...discardSet].join(', ')}]`);
+          if (removed > 0) log.info(`   🗑️ Discarded ${removed} image(s): [${[...discardSet].join(', ')}]`);
         }
 
         const startId = responseCtx.imageSearchNextId || 1;

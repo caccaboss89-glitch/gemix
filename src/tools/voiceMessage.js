@@ -107,7 +107,7 @@ async function _generateVoice(text) {
       const mp3Buffer = await xaiTTS(text);
       return convertMp3ToWhatsAppOpus(mp3Buffer);
     } catch (err) {
-      log.warn('[TTS] xAI TTS fallito, fallback a Google Translate:', err.message);
+      log.warn('[TTS] xAI TTS failed, falling back to Google Translate:', err.message);
       await notifyAdmin('xAI TTS', err.message);
     }
   }

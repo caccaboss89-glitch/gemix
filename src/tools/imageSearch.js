@@ -132,7 +132,7 @@ async function _searchCandidates(query, maxCandidates, language = 'it', imageTyp
   });
 
   const url = `${SEARXNG_URL}/search?${params}`;
-  log.info(`🖼️  Ricerca immagini: "${finalQuery}" (candidates=${maxCandidates}, type=${imageType || 'any'})`);
+  log.info(`🖼️  Image search: "${finalQuery}" (candidates=${maxCandidates}, type=${imageType || 'any'})`);
 
   const res = await fetchExternal(url, {}, 'SearXNG (Image Search)');
   if (!res.ok) throw new Error(`SearXNG returned HTTP ${res.status}`);
@@ -198,7 +198,7 @@ async function _prepareImage(candidate, query, index) {
       previewBuf = dl.buffer;
       previewMime = dl.mime;
     } catch (fullErr) {
-      log.warn(`   ❌ Download anteprima e completo falliti per "${candidate.title}": ${fullErr.message}`);
+      log.warn(`   ❌ Preview and full download both failed for "${candidate.title}": ${fullErr.message}`);
       return null;
     }
   }
@@ -278,7 +278,7 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   try {
     candidates = await _searchCandidates(q, maxCandidates, language, typeFilter);
   } catch (err) {
-    log.error(`   ❌ Ricerca SearXNG fallita: ${err.message}`);
+    log.error(`   ❌ SearXNG search failed: ${err.message}`);
     throw new Error(`Image search engine unavailable: ${err.message}`);
   }
 
@@ -300,7 +300,7 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   }
 
   if (prepared.length === 0) {
-    log.warn(`   ⚠️ Tutti i download falliti per "${q}"`);
+    log.warn(`   ⚠️ All downloads failed for "${q}"`);
     return {
       toolResult: { success: false, error: `Found results for "${q}" but all downloads failed. Try a different query.` },
       attachments: [],
@@ -330,7 +330,7 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
     });
   }
 
-  log.info(`   📦 ${prepared.length} immagini con preview vision (ID ${_startId}-${_startId + prepared.length - 1})`);
+  log.info(`   📦 ${prepared.length} image(s) with vision preview (ID ${_startId}-${_startId + prepared.length - 1})`);
 
   return {
     toolResult: contentParts,

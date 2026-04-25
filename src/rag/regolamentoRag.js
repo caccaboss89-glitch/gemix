@@ -88,7 +88,7 @@ function loadCache() {
     const data = JSON.parse(fs.readFileSync(RAG_INDEX_PATH, 'utf-8'));
     // Invalidate if embedding model changed
     if (data.model !== EMBEDDING_MODEL) {
-      log.info('🔄 Modello embedding cambiato, cache invalidata');
+      log.info('🔄 Embedding model changed, cache invalidated');
       return {};
     }
     return data.embeddingsByHash || {};
@@ -103,11 +103,11 @@ function saveCache(embeddingsByHash) {
 
 async function initRegolamentoRag() {
   try {
-    log.info('⏳ Inizializzazione RAG in corso...');
+    log.info('⏳ Initializing RAG...');
     
     if (!fs.existsSync(REGOLAMENTO_PATH)) {
-      log.warn(`⚠️ regolamento.txt non trovato in ${REGOLAMENTO_PATH}`);
-      log.warn('⚠️ RAG non inizializzato: crea data/regolamento.txt per abilitarlo');
+      log.warn(`⚠️ regolamento.txt not found in ${REGOLAMENTO_PATH}`);
+      log.warn('⚠️ RAG not initialized: create data/regolamento.txt to enable it');
       return;
     }
 
@@ -115,11 +115,11 @@ async function initRegolamentoRag() {
     const articles = parseArticles(content).filter(a => a.text.trim().length >= MIN_TEXT_LENGTH);
 
     if (articles.length === 0) {
-      log.warn('⚠️ Nessun articolo valido nel regolamento');
+      log.warn('⚠️ No valid articles in regolamento');
       return;
     }
 
-    log.info(`📄 ${articles.length} articoli trovati, generazione embeddings...`);
+    log.info(`📄 ${articles.length} article(s) found, generating embeddings...`);
 
     const cachedEmbeddings = loadCache();
     const embeddingsByHash = {};
@@ -139,7 +139,7 @@ async function initRegolamentoRag() {
         generated++;
 
         if (generated % 10 === 0) {
-          log.info(`  ⏳ ${generated} nuovi embeddings generati...`);
+          log.info(`  ⏳ ${generated} new embedding(s) generated...`);
         }
       }
     }
@@ -148,12 +148,12 @@ async function initRegolamentoRag() {
     ragData = { articles, embeddings };
 
     if (generated > 0) {
-      log.info(`✅ RAG pronto: ${articles.length} articoli (${generated} nuovi, ${articles.length - generated} da cache)`);
+      log.info(`✅ RAG ready: ${articles.length} article(s) (${generated} new, ${articles.length - generated} from cache)`);
     } else {
-      log.info(`✅ RAG caricato da cache (${articles.length} articoli)`);
+      log.info(`✅ RAG loaded from cache (${articles.length} article(s))`);
     }
   } catch (err) {
-    log.error(`❌ Errore inizializzazione RAG: ${err.message}`);
+    log.error(`❌ RAG initialization error: ${err.message}`);
   }
 }
 
@@ -179,7 +179,7 @@ async function queryRegolamento(query, topK = 5) {
       ? relevant.map(s => s.article.text).join('\n\n')
       : ragData.articles.slice(0, 3).map(a => a.text).join('\n\n');
   } catch (err) {
-    log.error(`❌ Errore query RAG: ${err.message}`);
+    log.error(`❌ RAG query error: ${err.message}`);
     return ragData.articles.slice(0, 3).map(a => a.text).join('\n\n');
   }
 }

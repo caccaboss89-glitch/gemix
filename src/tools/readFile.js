@@ -8,6 +8,10 @@ const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../util
 const MAX_TEXT_BYTES = 50 * 1024; // 50KB limit for text reading
 const MAX_IMAGE_READS = 10;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024; // 15MB limit for audio
+const MAX_VIDEO_BYTES = 60 * 1024 * 1024; // 60MB limit for video (caller still enforces 15s duration cap)
+
+const AUDIO_EXTS = ['.ogg', '.mp3', '.wav', '.m4a'];
+const VIDEO_EXTS = ['.mp4', '.webm', '.mov'];
 
 /**
  * Read file tool execution logic.
@@ -68,10 +72,14 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   // ── Size check before reading into memory ──
   if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
     // Image size usually not a problem for memory but we check count later
-  } else if (['.ogg', '.mp3', '.wav', '.m4a'].includes(ext)) {
+  } else if (AUDIO_EXTS.includes(ext)) {
     if (stat.size > MAX_AUDIO_BYTES) {
       const maxMins = Math.round(MAX_AUDIO_BYTES / (16 * 1024 * 60));
       return JSON.stringify({ success: false, error: `Audio file exceeds size limit (max ~${maxMins} minutes).` });
+    }
+  } else if (VIDEO_EXTS.includes(ext)) {
+    if (stat.size > MAX_VIDEO_BYTES) {
+      return JSON.stringify({ success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max). Trim it inside a project first.` });
     }
   } else if (stat.size > MAX_TEXT_BYTES * 4 && ext !== '.pdf') {
     // Heuristic: don't read more than 4x max text into memory if it's just text
@@ -94,10 +102,19 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   }
 
   // ── Audio ──
-  if (['.ogg', '.mp3', '.wav', '.m4a'].includes(ext)) {
+  if (AUDIO_EXTS.includes(ext)) {
     const mimeMap = { '.ogg': 'audio/ogg', '.mp3': 'audio/mp3', '.wav': 'audio/wav', '.m4a': 'audio/m4a' };
     return [
       { type: 'text', text: `Audio contents of ${sanitizedPath}:` },
+      mediaToContentPart(buffer, mimeMap[ext])
+    ];
+  }
+
+  // ── Video ──
+  if (VIDEO_EXTS.includes(ext)) {
+    const mimeMap = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
+    return [
+      { type: 'text', text: `Video contents of ${sanitizedPath}:` },
       mediaToContentPart(buffer, mimeMap[ext])
     ];
   }

@@ -90,13 +90,13 @@ function startScheduler() {
     fs.mkdirSync(TASKS_DIR, { recursive: true });
   }
 
-  log.info('✅ Avviato. Controlla ogni', SCHEDULER_INTERVAL_MS / 1000, 'secondi.');
+  log.info('✅ Started. Checking every', SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
 
   setInterval(async () => {
     try {
       await checkAndExecuteTasks();
     } catch (err) {
-      log.error('Errore nel ciclo:', err);
+      log.error('Cycle error:', err);
     }
   }, SCHEDULER_INTERVAL_MS);
 }
@@ -112,14 +112,14 @@ async function checkAndExecuteTasks() {
     try {
       await checkAndSendMusicWrap(dedicatedClient);
     } catch (err) {
-      log.error('MusicWrap - errore nel controllo:', err);
+      log.error('MusicWrap check error:', err);
     }
   }
 
   try {
     await checkNewRelease(dedicatedClient);
   } catch (err) {
-    log.error('ReleaseMonitor - errore nel controllo:', err);
+    log.error('ReleaseMonitor - error during check:', err);
   }
 
   let files;
@@ -147,9 +147,9 @@ async function checkAndExecuteTasks() {
         for (const task of dueTasks) {
           try {
             await executeTask(task);
-            log.info(`✅ Task eseguito: ${task.id}`);
+            log.info(`✅ Task executed: ${task.id}`);
           } catch (err) {
-            log.error(`❌ Errore processamento task ${task.id}:`, err.message);
+            log.error(`❌ Task processing error ${task.id}:`, err.message);
           }
         }
 
@@ -169,9 +169,9 @@ async function checkAndExecuteTasks() {
             if (next && (!t.recurrence.endAt || new Date(next).getTime() <= new Date(t.recurrence.endAt).getTime())) {
               t.scheduledAt = next;
               updatedTasks.push(t);
-              log.info(`🔁 Task ricorrente ${t.id} riprogrammato: ${t.scheduledAt}`);
+              log.info(`🔁 Recurring task ${t.id} rescheduled: ${t.scheduledAt}`);
             } else {
-              log.info(`🏁 Task ricorrente ${t.id} terminato (fine ricorrenza raggiunta).`);
+              log.info(`🏁 Recurring task ${t.id} ended (recurrence end reached).`);
             }
           }
           // Non-recurring tasks are simply dropped
@@ -180,7 +180,7 @@ async function checkAndExecuteTasks() {
         return data;
       });
     } catch (err) {
-      log.error(`❌ Errore processamento file task ${fileId}:`, err.message);
+      log.error(`❌ Task file processing error ${fileId}:`, err.message);
     }
   }
 }
@@ -205,7 +205,7 @@ async function executeTask(task) {
     try {
       await dedicatedClient.sendMessage(dest.whatsapp, messageText);
     } catch (err) {
-      log.error(`Errore invio WA privato ${dest.whatsapp}:`, err.message);
+      log.error(`WA private send error ${dest.whatsapp}:`, err.message);
     }
   }
 
@@ -213,7 +213,7 @@ async function executeTask(task) {
     try {
       await dedicatedClient.sendMessage(dest.whatsappGroup, messageText);
     } catch (err) {
-      log.error(`Errore invio WA gruppo ${dest.whatsappGroup}:`, err.message);
+      log.error(`WA group send error ${dest.whatsappGroup}:`, err.message);
     }
   }
 }

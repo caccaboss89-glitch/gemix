@@ -94,7 +94,7 @@ async function checkNewRelease(waClient) {
     );
 
     if (!res.ok) {
-      if (res.status !== 404) log.error(`Errore API GitHub: ${res.status}`);
+      if (res.status !== 404) log.error(`GitHub API error: ${res.status}`);
       return;
     }
 
@@ -107,7 +107,7 @@ async function checkNewRelease(waClient) {
     if (lastCheckedReleaseId === null) {
       lastCheckedReleaseId = releaseId;
       _saveState();
-      log.info(`📌 Release iniziale registrata: ${release.tag_name}`);
+      log.info(`📌 Initial release recorded: ${release.tag_name}`);
       return;
     }
 
@@ -144,16 +144,16 @@ async function checkNewRelease(waClient) {
     }
 
     if (mediaItems.length > 0) {
-      log.info(`🖼️ ${mediaItems.length} immagine/i trovate per la release ${title}`);
+      log.info(`🖼️ ${mediaItems.length} image(s) found for release ${title}`);
     }
 
     const subscribedChats = getSubscribedChats();
     if (subscribedChats.size === 0) {
-      log.info(`📦 Nuova release ${title} rilevata, ma nessuna chat sottoscritta.`);
+      log.info(`📦 New release ${title} detected, but no subscribed chats.`);
       return;
     }
 
-    log.info(`📦 Nuova release ${title} — invio a ${subscribedChats.size} chat(s)...`);
+    log.info(`📦 New release ${title} — sending to ${subscribedChats.size} chat(s)...`);
 
     for (const [chatId, waJid] of subscribedChats) {
       try {
@@ -162,15 +162,15 @@ async function checkNewRelease(waClient) {
           try {
             await waClient.sendMessage(waJid, media);
           } catch (imgErr) {
-            log.warn(`Errore invio immagine release a ${waJid}: ${imgErr.message}`);
+            log.warn(`Release image send error to ${waJid}: ${imgErr.message}`);
           }
         }
       } catch (err) {
-        log.error(`Errore invio release a ${waJid} (chat ${chatId}):`, err.message);
+        log.error(`Release send error to ${waJid} (chat ${chatId}):`, err.message);
       }
     }
   } catch (err) {
-    log.error('Errore controllo release:', err.message);
+    log.error('Release check error:', err.message);
   }
 }
 

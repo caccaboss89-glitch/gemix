@@ -54,7 +54,7 @@ function extractTitleTag(text) {
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
- * Routes requests to Gemini (audio/Discord) or Qwen (other) via OpenRouter based on message content.
+ * Sends every request to Qwen via OpenRouter; audio/video parts are captioned upstream by the media describer (see aiProvider).
  * @param {object} ctx - Normalized message context { platform, userId, userName, userIdentity, content, history, isGroup, groupId, ... }
  * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle? }
  */
@@ -255,11 +255,11 @@ async function handleMessage(ctx) {
       rounds++;
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.warn(`   ⚠️ Vocale già generato, salto ciclo`);
+        log.warn(`   ⚠️ Voice already generated, skipping round`);
         break;
       }
 
-      log.info(`🤖 [${ctx.platform.toUpperCase()}] Chiamata AI (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
+      log.info(`🤖 [${ctx.platform.toUpperCase()}] AI call (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
       const { message: assistantMsg, provider, model } = await callAI(messages, tools);
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
@@ -289,7 +289,7 @@ async function handleMessage(ctx) {
 
         for (const tc of assistantMsg.tool_calls) {
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-            log.warn(`   ⚠️ Ciclo tool interrotto: un tool ha già generato la risposta finale`);
+            log.warn(`   ⚠️ Tool loop interrupted: a tool already produced the final response`);
             break;
           }
 
@@ -299,7 +299,7 @@ async function handleMessage(ctx) {
               const parsed = JSON.parse(tc.function.arguments || '{}');
               argsPreview = JSON.stringify(parsed).slice(0, 200);
             } catch { argsPreview = String(tc.function.arguments || '').slice(0, 200); }
-            log.info(`   Esecuzione: ${tc.function.name} args=${argsPreview}`);
+            log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
             const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
             let resultPreview;
             if (Array.isArray(result)) {
@@ -309,14 +309,14 @@ async function handleMessage(ctx) {
             } else {
               resultPreview = typeof result;
             }
-            log.info(`   Risultato: ${resultPreview}`);
+            log.info(`   Result: ${resultPreview}`);
             messages.push({
               role: 'tool',
               tool_call_id: toolCallId,
               content: result,
             });
           } catch (toolErr) {
-            log.error(`   ❌ Errore tool "${tc.function.name}": ${toolErr.message}`);
+            log.error(`   ❌ Tool error "${tc.function.name}": ${toolErr.message}`);
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -362,7 +362,7 @@ async function handleMessage(ctx) {
       }
 
       let text = stripVoiceTags(assistantMsg.content || '');
-      log.info(`✅ [${ctx.platform.toUpperCase()}] Risposta generata (${text.length} caratteri)`);
+      log.info(`✅ [${ctx.platform.toUpperCase()}] Response generated (${text.length} chars)`);
 
       // Extract Discord thread title from <title> XML tag if present
       if (ctx.platform === PLATFORM_DISCORD) {
@@ -370,17 +370,17 @@ async function handleMessage(ctx) {
         text = cleanedText;
         if (title) {
           responseCtx.discordTitle = title.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
-          log.info(`   📝 Titolo thread estratto: "${responseCtx.discordTitle}"`);
+          log.info(`   📝 Thread title extracted: "${responseCtx.discordTitle}"`);
         }
       }
 
       if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
-        log.warn('   ⚠️ Risposta AI vuota, invio fallback');
+        log.warn('   ⚠️ Empty AI response, sending fallback');
         text = 'Generazione della risposta fallita. Riprova.';
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.info(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
+        log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
         return {
           text: null,
           voiceBuffer: responseCtx.voiceBuffer,
@@ -402,7 +402,7 @@ async function handleMessage(ctx) {
     }
 
     if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-      log.info(`   🎤 Vocale pronto (${responseCtx.voiceBuffer.length} bytes)`);
+      log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
       return {
         text: null,
         voiceBuffer: responseCtx.voiceBuffer,
@@ -437,7 +437,7 @@ async function handleMessage(ctx) {
     };
 
   } catch (err) {
-    log.error(`\n❌ [${ctx.platform.toUpperCase().padEnd(10)}] ERRORE nel handler:`);
+    log.error(`\n❌ [${ctx.platform.toUpperCase().padEnd(10)}] HANDLER ERROR:`);
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
     return {

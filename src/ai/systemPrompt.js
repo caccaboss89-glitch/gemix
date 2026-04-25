@@ -1,7 +1,7 @@
 // src/ai/systemPrompt.js
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
-const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, MAINTENANCE_MODE } = require('../config/constants');
+const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, MAINTENANCE_MODE, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../config/constants');
 
 /**
  * Build the system prompt for GemiX AI based on message context and platform.
@@ -74,12 +74,15 @@ ${membersList}
     You may use available tools ONLY before providing the final response (which is ALWAYS MANDATORY, except when using the voice tool which counts as the final response). You can call multiple tools together if needed.
     ${!isActiveMember ? 'Some tools (e.g. email, message sending) are NOT available for this user.' : ''}
   </ToolInstructions>
+  <MediaHandling>
+    Audio and video files attached in the request, quoted, or returned by read_file are NOT seen directly by you: a separate vision model captions them and the system replaces every audio/video part with a text block &lt;Description kind="audio|video"&gt;…&lt;/Description&gt; containing transcription, ambient sounds, music, on-screen text and visual context (in Italian). Treat that text as authoritative for the file. You can call read_file on multiple audio/video files in the same round to get parallel descriptions. Limits enforced upstream: audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s; oversize files are tagged "too long" and never described. Video URLs from the web (YouTube, etc.) are NOT supported — only files already in history/permanent/projects/searched_images.
+  </MediaHandling>
 `;
 
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
     prompt += buildPersonalCloudPointer(ctx);
     prompt += `  <WhatsAppPreferences>
-    Reply with a voice message if your response is short using send_voice_message; prefer text responses if your message is medium/long, technical, or includes data. Don't always use the same response format — balance by looking at your previous messages in history. Your voice messages in history are labeled by the system with &lt;Transcription&gt;...&lt;/Transcription&gt;.
+    Reply with a voice message if your response is short using send_voice_message; prefer text responses if your message is medium/long, technical, or includes data. Don't always use the same response format — balance by looking at your previous messages in history. Your voice messages in history are labeled by the system with &lt;Transcription&gt;...&lt;/Transcription&gt; (cached STT). Audio/video files attached by the user instead are tagged with &lt;Description kind="…"&gt;...&lt;/Description&gt; — see &lt;MediaHandling&gt;.
     ${isActiveMember ? 'Formal requests: You can read the Server rules and generate generic PDFs (in unlocked agent mode), but for formal requests, advise the user to go to Discord where GemiX — Legal Division can generate documents in the standardized format.' : ''}
   </WhatsAppPreferences>
 `;

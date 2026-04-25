@@ -8,7 +8,7 @@ const { setDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 
-const log = createLogger('WA-DEDICATO');
+const log = createLogger('WA-DEDICATED');
 const responseLock = require('../../utils/responseLock');
 
 let client;
@@ -32,25 +32,25 @@ function initDedicatedWhatsApp() {
   });
 
   client.on('qr', (qr) => {
-    log.info('Scansiona il QR code:');
+    log.info('Scan QR code:');
     qrcode.generate(qr, { small: true });
   });
 
   client.on('ready', () => {
-    log.info('✅ Client pronto:', client.info.wid._serialized);
+    log.info('✅ Client ready:', client.info.wid._serialized);
     _reconnectAttempts = 0;
     setDedicatedClient(client);
   });
 
   client.on('auth_failure', (msg) => {
-    log.error('❌ Errore autenticazione:', msg);
+    log.error('❌ Auth failure:', msg);
   });
 
   client.on('disconnected', (reason) => {
-    log.warn('⚠️ Disconnesso:', reason);
+    log.warn('⚠️ Disconnected:', reason);
     _reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, _reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
-    log.info(`Tentativo riconnessione ${_reconnectAttempts} tra ${delay / 1000}s...`);
+    log.info(`Reconnect attempt ${_reconnectAttempts} in ${delay / 1000}s...`);
     setTimeout(() => client.initialize(), delay);
   });
 
@@ -58,7 +58,7 @@ function initDedicatedWhatsApp() {
     try {
       await onDedicatedMessage(msg);
     } catch (err) {
-      log.error(`\n❌ Errore critico:`);
+      log.error(`\n❌ Critical error:`);
       log.error(`   ${err.message}`);
       log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
@@ -114,10 +114,10 @@ async function onDedicatedMessage(msg) {
 
   log.debug(`   JID: ${senderJid} → phoneJid: ${phoneJid}`);
 
-  log.info(`\n📨 Messaggio ricevuto`);
-  log.info(`   Utente: ${userName}${isGroup ? ` (Gruppo: ${chat.name})` : ''}`);
-  log.info(`   Contenuto: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
-  log.info(`   Membro attivo: ${userIdentity.isActiveMember}`);
+  log.info(`\n📨 Incoming message`);
+  log.info(`   User: ${userName}${isGroup ? ` (Group: ${chat.name})` : ''}`);
+  log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
+  log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
   const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid);
 
@@ -143,7 +143,7 @@ async function onDedicatedMessage(msg) {
 
   const lockKey = `wa_dedicated:${ctx.chatId || ctx.userId}`;
   if (!responseLock.tryLock(lockKey)) {
-    log.warn(`   ⛔ Ignoro messaggio in chat ${ctx.chatId || ctx.userId}: GemiX sta già rispondendo`);
+    log.warn(`   ⛔ Ignoring message in chat ${ctx.chatId || ctx.userId}: GemiX is already responding`);
     return;
   }
 
@@ -159,9 +159,9 @@ async function onDedicatedMessage(msg) {
     const response = await handleMessage(ctx);
 
     try {
-      log.info(`\n📤 Invio risposta...`);
+      log.info(`\n📤 Sending response...`);
       await sendWhatsAppResponse(chat, response);
-      log.info(`   ✅ Messaggio inviato`);
+      log.info(`   ✅ Message sent`);
       try {
         if (typeof chat.sendState === 'function') {
           await chat.sendState('paused');
@@ -170,7 +170,7 @@ async function onDedicatedMessage(msg) {
         // sendState might not be available in this version
       }
     } catch (err) {
-      log.error(`\n❌ Errore invio risposta:`);
+      log.error(`\n❌ Error sending response:`);
       log.error(`   ${err.message}`);
     }
   } finally {

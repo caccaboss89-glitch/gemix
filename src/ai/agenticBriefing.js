@@ -81,46 +81,43 @@ ${projectList}    </Projects>
       Use dedicated tools (web_search, browse_page, image_search) if needed (NOT web fetching inside code_execution).
     </NetworkPolicy>
     <Libraries>
-      Math &amp; symbolic
-      - numpy         Array/matrix math, FFT, linear algebra, signal generation, random sampling
-      - scipy         Optimization, signal filtering, statistical distributions, interpolation, numerical integration
-      - sympy         Symbolic algebra — solve equations algebraically, derivatives, integrals, simplify, generate LaTeX formulas
-      - mpmath        Arbitrary-precision arithmetic (hundreds of decimal places)
+      Math and symbolic
+      - numpy         # Numerical arrays and math operations.
+      - scipy         # Scientific computing, signal processing, optimization and statistics. Apply audio filters, solve differential equations...
+      - sympy         # Symbolic mathematics. Algebra, calculus, equation solving...
+      - mpmath        # High-precision numerical calculations.
 
       Data
-      - pandas        Load/clean/filter/sort/group/aggregate tabular data; read CSV/Excel; export to Excel/CSV
+      - pandas        # Data analysis and manipulation of tabular data.
 
       Visualization (no GUI — save to figures/ or output/ as PNG/HTML/PDF)
-      - matplotlib    Line, bar, scatter, histogram, pie charts and any custom 2D plot
-      - seaborn       Statistical plots: heatmaps, violin plots, pair plots, correlation matrices
-      - plotly        Interactive charts (HTML) and static PNG — scatter, candlestick, choropleth, 3D
+      - matplotlib    # Line, bar, scatter, histogram, pie charts...
+      - seaborn       # Statistical plots: heatmaps, violin plots, pair plots, correlation matrices...
+      - plotly        # Interactive zoomable/clickable graphs and dashboards (HTML + JS).
 
       Image
-      - Pillow        Resize/crop/rotate, convert formats (PNG↔JPG↔WEBP…), apply filters, draw text and shapes on images
-      - rembg         Remove background from images automatically (AI model, works offline)
-      - cairosvg      Convert SVG vector files to PNG or PDF
-      - pytesseract   OCR — extract text from images or scanned documents (Italian + English)
+      - Pillow        # Resize/crop/rotate, convert formats (PNG↔JPG↔WEBP…), filters, draw text, shapes on images...
+      - rembg         # Remove background from images automatically.
+      - cairosvg      # Convert SVG vector files to PNG or PDF.
+      - pytesseract   # e.g. read text from 100 photos, document...
 
       Audio / video (ffmpeg available as a shell command via bash)
-      - pydub         Cut audio clips, change volume/speed, convert formats (MP3/OGG/WAV/FLAC…), merge tracks, remove silence
-      - librosa       Audio analysis — detect BPM/tempo, beat tracking, spectrograms, frequency/pitch analysis
-      - moviepy       Cut/trim video clips, concatenate, resize, add/replace audio track, export MP4
+      - pydub         # Simple audio editing. Trim, volume, format conversion.
+      - librosa       # Audio analysis and feature extraction. Detect beats, pitch or extract spectrograms. Often used together with numpy and pydub.
+      - moviepy       # Video editing and creation.
 
-      Physics &amp; astronomy
-      - astropy       Sky coordinates, unit conversions, astronomical catalogs, time/date calculations (data via proxy)
-      - qutip         Quantum mechanics — simulate quantum states, operators, time evolution
+      Physics and astronomy
+      - astropy       # Astronomy and astrophysics calculations. Calculate planet positions or convert celestial coordinates.
+      - qutip         # Quantum mechanics-computing simulations.
 
       Finance (api.polygon.io via proxy)
-      - polygon-api-client  Historical OHLCV prices, real-time quotes, company news for any US ticker
+      - polygon-api-client  # Access to real-time and historical financial market data.
 
       Documents
-      - python-docx   Create and edit Word (.docx) documents with headings, tables, images
-      - openpyxl      Create and edit Excel (.xlsx) workbooks with formulas, cell styles, charts
-      - python-pptx   Create PowerPoint (.pptx) presentations with slides, text boxes, images
-      - reportlab     Generate PDF documents from scratch with text, images, tables, custom layout
-
-      Network (proxy-restricted)
-      - requests      HTTP calls — usable ONLY for api.polygon.io and astropy data servers; all other hosts are blocked
+      - python-docx   # Create or edit Microsoft Word.
+      - openpyxl      # Read and write Excel.
+      - python-pptx   # Create or edit PowerPoint
+      - reportlab     # Create professional PDF
     </Libraries>
     <CommonPitfalls>
       - matplotlib: always plt.close() after savefig to release memory; never plt.show().
