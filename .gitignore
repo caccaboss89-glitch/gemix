@@ -7,4 +7,3 @@ src/logs/
 package-lock.json
 __pycache__/
 *.pyc
-sandbox/_test_workspace/

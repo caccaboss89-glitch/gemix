@@ -75,7 +75,7 @@ const TOOL_IMAGE_SEARCH = makeTool({
     },
     save_to_disk: {
       type: 'boolean',
-      description: 'WhatsApp only. If true, save the downloaded image(s) to the user\'s searched_images/ folder so they can be reused later (e.g. by code_execution or copy_to_project). Default false.',
+      description: 'If true, save the downloaded image(s) to searched_images/ for later reuse. Default false.',
     },
   },
   required: ['query'],
@@ -83,7 +83,7 @@ const TOOL_IMAGE_SEARCH = makeTool({
 
 const TOOL_ATTACH_FILE = makeTool({
   name: 'attach_file',
-  description: 'Buffer an existing file from the user\'s personal cloud for delivery in the current response (WhatsApp only, requires prior agentic_unlock). Allowed sources: permanent/<file>, searched_images/<file>, projects/<name>/{figures|temp|output|code}/<file>. NOT allowed: history/ (the user already sees those files in their chat). After buffering, call send_whatsapp_message / send_email with includeAttachments=true to ship the file. Use this to deliver a permanent copy, an image_search result saved to disk earlier, or any artefact a project produced previously (no need to re-run code_execution).',
+  description: 'Buffer an existing file from the personal cloud for delivery. Allowed sources: permanent/<file>, searched_images/<file>, projects/<name>/{figures|temp|output|code}/<file>. NOT allowed: history/ (the user already sees those files in their chat). After buffering, call send_whatsapp_message / send_email with includeAttachments=true to ship the file. Use this to deliver a permanent copy, an image_search result saved to disk earlier, or any artefact a project produced in a previous session (no need to re-run code_execution).',
   properties: {
     path: { type: 'string', description: 'Relative path under the user root, e.g. "permanent/keep.docx", "searched_images/cat_1.jpg", "projects/myproj/output/report.pdf".' },
   },
@@ -96,17 +96,20 @@ const TOOL_AGENTIC_UNLOCK = makeTool({
   properties: {},
 });
 
-const TOOL_READ_FILE = makeTool({
-  name: 'read_file',
-  description: 'Read the contents of a file (text, code, images, audio, pdf). Use this to inspect files mentioned in chat history or produced by agentic tools.',
-  properties: {
-    path: {
-      type: 'string',
-      description: 'Relative path. On Discord: any file under history/ (prefix optional, e.g. "report.pdf"). On WhatsApp: paths relative to your user root — allowed zones are "history/...", "permanent/...", "searched_images/...", "projects/<name>/{figures|temp|output|code}/...". Special read-only prefix "skills:<filename>.md" reads a skill guide (WhatsApp only).',
-    },
-  },
-  required: ['path'],
-});
+function buildReadFileTool(isDiscord) {
+  const description = isDiscord
+    ? 'Read the contents of a file from chat history (text, code, images, audio, pdf).'
+    : 'Read the contents of a file (text, code, images, audio, pdf). Inspect files from history, your personal cloud or project artefacts.';
+  const pathDesc = isDiscord
+    ? 'Filename from history (history/ prefix optional, e.g. "report.pdf" or "history/report.pdf").'
+    : 'Relative path from user root: history/<file>, permanent/<file>, searched_images/<file>, projects/<name>/{figures|temp|output|code}/<file>. Use skills:<name>.md to read a skill guide.';
+  return makeTool({
+    name: 'read_file',
+    description,
+    properties: { path: { type: 'string', description: pathDesc } },
+    required: ['path'],
+  });
+}
 
 // ── Project management (WhatsApp only) ──
 
@@ -558,7 +561,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // attach_file is WhatsApp-only AND gated behind agentic_unlock (it deals
   // with files only relevant to the agentic flow — permanent/, projects/,
   // searched_images/). Discord never gets it.
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, TOOL_READ_FILE);
+  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, buildReadFileTool(isDiscord));
 
   // ── WhatsApp only: voice, tasks, release notify ──
   if (!isDiscord) {

@@ -68,68 +68,64 @@ ${projectList}    </Projects>
 
   <PythonSandbox>
     <Runtime>
-      Python 3.12 — stateful Jupyter kernel per (user, project). Variables persist across code_execution calls.
-      Working dir = /workspace (mapped to projects/&lt;current&gt;/). Read-only mounts: /readonly/history, /readonly/permanent, /readonly/searched_images.
+      Python 3.12 — stateful Jupyter kernel for (user, project).
+      Variables persist across code_execution calls.
+      Working dir = /workspace (mapped to projects/&lt;current&gt;/).
+      Read-only mounts: /readonly/history, /readonly/permanent, /readonly/searched_images.
       Resources per call: cpu=1, mem=1.5 GB, /tmp tmpfs=256 MB, default timeout 30s (max 120s), pids_limit=200, no-new-privileges, all caps dropped.
-      pip is DISABLED at runtime — only the libraries listed below are usable. ffmpeg, tesseract-ocr, libcairo, poppler-utils are pre-installed at OS level.
+      pip is DISABLED — only pre-installed libraries below. ffmpeg, tesseract-ocr, libcairo, poppler-utils are pre-installed at OS level.
     </Runtime>
     <NetworkPolicy>
-      The sandbox has NO free internet. All HTTP traffic is forced through an egress proxy that allows ONLY:
-        - api.polygon.io (finance OHLCV / news via polygon-api-client)
-        - astropy data servers (tabular catalogs, ephemerides)
-      Every other URL — APIs, scrapers, model downloads, npm/pypi mirrors — WILL FAIL with a connection error.
-      For everything else use the dedicated tools at the top level: web_search, browse_page, image_search, read_file, attach_file. Do NOT reimplement web fetching with requests inside code_execution.
+      The sandbox has NO free internet.
+      Allowed only: api.polygon.io and astropy data servers.
+      Use dedicated tools (web_search, browse_page, image_search) if needed (NOT web fetching inside code_execution).
     </NetworkPolicy>
     <Libraries>
-      Pinned versions (see sandbox/requirements-sandbox.txt). Practical examples per library:
-
       Math &amp; symbolic
-      - numpy 2.1.3       → arr = np.linspace(0, 2*np.pi, 200); y = np.sin(arr); fft = np.fft.rfft(y)
-      - scipy 1.14.1      → from scipy.optimize import minimize; from scipy.signal import butter, filtfilt; from scipy.stats import norm
-      - sympy 1.13.3      → from sympy import symbols, solve, integrate, diff, latex, Matrix; x=symbols('x'); solve(x**2-3, x)
-      - mpmath 1.3.0      → high-precision arithmetic: mpmath.mp.dps=50; mpmath.zeta(2)
+      - numpy         Array/matrix math, FFT, linear algebra, signal generation, random sampling
+      - scipy         Optimization, signal filtering, statistical distributions, interpolation, numerical integration
+      - sympy         Symbolic algebra — solve equations algebraically, derivatives, integrals, simplify, generate LaTeX formulas
+      - mpmath        Arbitrary-precision arithmetic (hundreds of decimal places)
 
       Data
-      - pandas 2.2.3      → df = pd.read_csv('/workspace/code/in.csv'); df.groupby('cat').agg({'val':'mean'}).to_excel('output/summary.xlsx')
+      - pandas        Load/clean/filter/sort/group/aggregate tabular data; read CSV/Excel; export to Excel/CSV
 
-      Visualization (Agg backend, no GUI; save to figures/ or output/)
-      - matplotlib 3.9.2  → import matplotlib.pyplot as plt; plt.plot(x,y); plt.savefig('figures/fig.png', dpi=160, bbox_inches='tight'); plt.close()
-      - seaborn 0.13.2    → sns.heatmap(df.corr(), annot=True); plt.savefig('figures/heat.png')
-      - plotly 5.24.1     → import plotly.express as px; fig=px.scatter(df,x='a',y='b',color='c'); fig.write_html('output/plot.html'); fig.write_image('figures/plot.png')
+      Visualization (no GUI — save to figures/ or output/ as PNG/HTML/PDF)
+      - matplotlib    Line, bar, scatter, histogram, pie charts and any custom 2D plot
+      - seaborn       Statistical plots: heatmaps, violin plots, pair plots, correlation matrices
+      - plotly        Interactive charts (HTML) and static PNG — scatter, candlestick, choropleth, 3D
 
-      Image manipulation
-      - Pillow 11.0.0     → from PIL import Image, ImageDraw, ImageFilter; im=Image.open('/readonly/permanent/photo.jpg').convert('RGB'); im.thumbnail((1024,1024)); im.save('output/thumb.jpg', quality=85)
-      - rembg 2.0.59      → from rembg import remove; out=remove(open('figures/in.png','rb').read()); open('output/no_bg.png','wb').write(out)   # u2net + u2netp pre-downloaded, OFFLINE
-      - cairosvg 2.7.1    → cairosvg.svg2png(url='figures/icon.svg', write_to='output/icon.png', output_width=512)
-      - pytesseract 0.3.13→ import pytesseract, PIL.Image as I; text=pytesseract.image_to_string(I.open('/readonly/history/scan.jpg'), lang='ita+eng')
+      Image
+      - Pillow        Resize/crop/rotate, convert formats (PNG↔JPG↔WEBP…), apply filters, draw text and shapes on images
+      - rembg         Remove background from images automatically (AI model, works offline)
+      - cairosvg      Convert SVG vector files to PNG or PDF
+      - pytesseract   OCR — extract text from images or scanned documents (Italian + English)
 
-      Audio / video (ffmpeg pre-installed)
-      - pydub 0.25.1      → from pydub import AudioSegment; a=AudioSegment.from_file('/readonly/history/voice.ogg'); a[:30000].export('output/clip.mp3', format='mp3', bitrate='192k')
-      - librosa 0.10.2    → y, sr = librosa.load('/readonly/history/song.mp3', sr=22050); tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-      - moviepy 1.0.3     → from moviepy.editor import VideoFileClip, concatenate_videoclips; clip=VideoFileClip('/readonly/history/in.mp4').subclip(0,10).resize(0.5); clip.write_videofile('output/short.mp4', codec='libx264', audio_codec='aac')
+      Audio / video (ffmpeg available as a shell command via bash)
+      - pydub         Cut audio clips, change volume/speed, convert formats (MP3/OGG/WAV/FLAC…), merge tracks, remove silence
+      - librosa       Audio analysis — detect BPM/tempo, beat tracking, spectrograms, frequency/pitch analysis
+      - moviepy       Cut/trim video clips, concatenate, resize, add/replace audio track, export MP4
 
-      Physics &amp; astronomy (controlled-API only)
-      - astropy 6.1.5     → from astropy.coordinates import SkyCoord; from astropy import units as u; from astropy.io.votable import parse_single_table   # data fetch via simbad/vizier WHEN allowed by proxy
-      - qutip 5.0.4       → import qutip as qt; psi=qt.basis(2,0); H=qt.sigmax(); res=qt.mesolve(H, psi, np.linspace(0,5,100), [], [qt.sigmaz()])
+      Physics &amp; astronomy
+      - astropy       Sky coordinates, unit conversions, astronomical catalogs, time/date calculations (data via proxy)
+      - qutip         Quantum mechanics — simulate quantum states, operators, time evolution
 
-      Finance (api.polygon.io allowed)
-      - polygon-api-client 1.14.5 → from polygon import RESTClient; c=RESTClient(api_key=os.environ.get('POLYGON_API_KEY','')); aggs=c.get_aggs('AAPL','1','day','2025-01-01','2025-04-01')
+      Finance (api.polygon.io via proxy)
+      - polygon-api-client  Historical OHLCV prices, real-time quotes, company news for any US ticker
 
-      Document creation
-      - python-docx 1.1.2 → from docx import Document; d=Document(); d.add_heading('Report',0); d.add_paragraph('text'); d.save('output/report.docx')
-      - openpyxl 3.1.5    → from openpyxl import Workbook; wb=Workbook(); ws=wb.active; ws.append(['col','val']); ws.append(['a',1]); wb.save('output/data.xlsx')
-      - python-pptx 1.0.2 → from pptx import Presentation; p=Presentation(); s=p.slides.add_slide(p.slide_layouts[0]); s.shapes.title.text='Hi'; p.save('output/deck.pptx')
-      - reportlab 4.2.5   → from reportlab.pdfgen import canvas; c=canvas.Canvas('output/doc.pdf'); c.setFont('Helvetica',14); c.drawString(72,800,'Title'); c.showPage(); c.save()
+      Documents
+      - python-docx   Create and edit Word (.docx) documents with headings, tables, images
+      - openpyxl      Create and edit Excel (.xlsx) workbooks with formulas, cell styles, charts
+      - python-pptx   Create PowerPoint (.pptx) presentations with slides, text boxes, images
+      - reportlab     Generate PDF documents from scratch with text, images, tables, custom layout
 
-      Networking helper (proxy-restricted)
-      - requests 2.32.3   → use ONLY for api.polygon.io / astropy data servers (proxy-allowed). Any other host fails — use web_search / browse_page tools instead.
+      Network (proxy-restricted)
+      - requests      HTTP calls — usable ONLY for api.polygon.io and astropy data servers; all other hosts are blocked
     </Libraries>
     <CommonPitfalls>
       - matplotlib: always plt.close() after savefig to release memory; never plt.show().
       - moviepy: pass codec='libx264', audio_codec='aac' for compatibility on WhatsApp/Discord previews.
-      - reportlab: produces low-quality wraps; for prose-heavy docs prefer python-docx + LibreOffice convert via bash if PDF needed.
       - rembg: heavy models — u2netp is ~5x faster on small images.
-      - pandas writing Excel: use openpyxl engine implicitly; chart support requires explicit openpyxl.chart imports.
       - Always flush plot buffers before reading them back: plt.savefig(...); plt.close(); then read with PIL if you need to compose images.
     </CommonPitfalls>
   </PythonSandbox>
