@@ -15,6 +15,7 @@ const { initDiscord } = require('./platforms/discord/client');
 const { startScheduler, setSchedulerWaClient } = require('./scheduler/engine');
 const { setAdminNotifierClient } = require('./utils/adminNotifier');
 const { initRegolamentoRag } = require('./rag/regolamentoRag');
+const sandboxManager = require('./sandbox/sandboxManager');
 
 log.info('🤖 GemiX — Avvio in corso...\n');
 
@@ -32,9 +33,11 @@ initRegolamentoRag().then(() => {
 });
 
 startScheduler();
+sandboxManager.installShutdownHook();
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   log.info('\n🛑 GemiX — Arresto in corso...');
+  try { await sandboxManager.shutdownAll(); } catch { /* */ }
   process.exit(0);
 });
 

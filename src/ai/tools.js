@@ -151,6 +151,16 @@ const TOOL_COPY_TO_PERMANENT = makeTool({
   required: ['history_filename'],
 });
 
+const TOOL_CODE_EXECUTION = makeTool({
+  name: 'code_execution',
+  description: 'Run Python in a stateful, isolated sandbox tied to the currently selected project. The kernel persists across calls in the same conversation, so variables defined earlier remain available. The sandbox has NO free internet (use web_search / browse_page tools instead). Allowed network destinations: api.polygon.io and astropy data servers. Pre-installed libraries: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, requests. Filesystem layout inside the sandbox: /workspace = current project root (writable: figures/ temp/ output/ code/), /readonly/{history,permanent,searched_images} (read-only). Files written under output/ are AUTO-ATTACHED for delivery (the AI can then call send_whatsapp_message with includeAttachments=true). Files in temp/ figures/ code/ are kept on disk but not auto-attached. pip is disabled — only pre-installed libraries are usable.',
+  properties: {
+    code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
+    timeout_ms: { type: 'integer', description: 'Optional execution timeout in milliseconds (default 30000, max 120000).' },
+  },
+  required: ['code'],
+});
+
 const TOOL_COPY_TO_PROJECT = makeTool({
   name: 'copy_to_project',
   description: 'Copy a file from history/ or searched_images/ into the currently selected project (into figures/ by default). Use this to bring user-provided or web-searched images into a project before processing them with code_execution.',
@@ -517,6 +527,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
       TOOL_CLEANUP_PROJECT,
       TOOL_COPY_TO_PERMANENT,
       TOOL_COPY_TO_PROJECT,
+      TOOL_CODE_EXECUTION,
     );
   }
 

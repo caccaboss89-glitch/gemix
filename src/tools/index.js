@@ -27,6 +27,7 @@ const {
   copyToPermanentTool,
   copyToProjectTool,
 } = require('./projects');
+const { codeExecutionTool } = require('./codeExecution');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -490,6 +491,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
       case 'copy_to_project': {
         result = copyToProjectTool(args, userCtx);
+        break;
+      }
+      case 'code_execution': {
+        result = await codeExecutionTool(args, userCtx, responseCtx);
         break;
       }
 

@@ -1,0 +1,359 @@
+// src/sandbox/sandboxManager.js
+// Lifecycle manager for the GemiX Python sandbox containers.
+//
+// One container per (storageId, projectName). Lazy-started on first use,
+// reused for the lifetime of the project session, and reaped after
+// SANDBOX_IDLE_TTL_MS of inactivity. The manager keeps the Jupyter kernel
+// (PythonKernel) attached to each container so successive code_execution
+// calls share a single Python REPL state.
+//
+// Hard requirements at runtime:
+//   - dockerd reachable (default unix socket; override with DOCKER_HOST env).
+//   - Two docker networks already exist:
+//       gemix_sandbox_net  (internal)   ← sandboxes attach here
+//       gemix_sandbox_egress (bridge)   ← proxy attaches here
+//   - The proxy container is named "gemix-sandbox-proxy" and is reachable
+//     from gemix_sandbox_net (same name resolves via docker DNS).
+//   - Image "gemix-sandbox:latest" is built (see sandbox/Dockerfile).
+//
+// Failure mode for fresh installs: getOrCreate() throws a clear error pointing
+// at sandbox/README.md. Callers (codeExecution tool) surface that to the AI.
+
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+const {
+  SANDBOX_MEMORY_MB,
+  SANDBOX_IDLE_TTL_MS,
+} = require('../config/constants');
+const {
+  getProjectRoot,
+  getHistoryDir,
+  getPermanentDir,
+  getSearchedImagesDir,
+  resolveStorageId,
+  ensureProjectSkeleton,
+} = require('../utils/userPaths');
+const { createLogger } = require('../utils/logger');
+const { PythonKernel } = require('./pythonKernel');
+
+const log = createLogger('SandboxManager');
+
+const SANDBOX_IMAGE = process.env.GEMIX_SANDBOX_IMAGE || 'gemix-sandbox:latest';
+const SANDBOX_NETWORK = process.env.GEMIX_SANDBOX_NETWORK || 'gemix_sandbox_net';
+const PROXY_HOSTNAME = process.env.GEMIX_SANDBOX_PROXY_HOST || 'gemix-sandbox-proxy';
+const PROXY_PORT = process.env.GEMIX_SANDBOX_PROXY_PORT || '8080';
+
+// Map<key, SandboxEntry>
+const _pool = new Map();
+
+// Single Docker client instance, lazy-required so unit tests of pure helpers
+// can run without dockerode installed.
+let _docker = null;
+function _getDocker() {
+  if (_docker) return _docker;
+  let Docker;
+  try { Docker = require('dockerode'); }
+  catch (e) {
+    throw new Error(
+      'dockerode is not installed. Run `npm install` to fetch the new dependencies (Phase C.3).'
+    );
+  }
+  _docker = new Docker();
+  return _docker;
+}
+
+/**
+ * Build the pool key for a (user, project) tuple.
+ */
+function _poolKey(storageId, projectName) {
+  return `${storageId}::${projectName}`;
+}
+
+/**
+ * Allocate a free TCP port on the host loopback. Used for kernel discovery.
+ * NOTE: kernels only listen on the internal network, so this port is published
+ * back to localhost via docker -p so Node can connect to ws://127.0.0.1:<port>.
+ */
+function _randomPort() {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const port = srv.address().port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Set ownership of project + readonly mount points to UID 1000 (sandbox user
+ * inside the container). No-op on non-root or non-Linux platforms.
+ */
+function _ensureOwnership(targetPath) {
+  if (process.platform !== 'linux') return;
+  if (process.getuid && process.getuid() !== 0) return;
+  try {
+    fs.chownSync(targetPath, 1000, 1000);
+  } catch (err) {
+    log.warn(`chown ${targetPath} -> 1000:1000 failed: ${err.message}`);
+  }
+}
+
+/**
+ * Create + start a fresh sandbox container for (storageId, projectName).
+ * Returns the entry to be inserted into the pool. The kernel inside is NOT
+ * started here — caller invokes entry.kernel.start() after the container
+ * is healthy.
+ */
+async function _spawnContainer(userCtx, projectName) {
+  const storageId = resolveStorageId(userCtx);
+  if (!storageId) throw new Error('Cannot resolve storageId');
+  const projectDir = getProjectRoot(userCtx, projectName);
+  if (!fs.existsSync(projectDir)) {
+    ensureProjectSkeleton(userCtx, projectName);
+  }
+
+  // Read-only mounts: history/permanent/searched_images so the AI can
+  // import them but cannot mutate the sources.
+  const historyDir = getHistoryDir(userCtx);
+  const permanentDir = getPermanentDir(userCtx);
+  const searchedDir = getSearchedImagesDir(userCtx);
+
+  for (const p of [projectDir, historyDir, permanentDir, searchedDir]) {
+    if (fs.existsSync(p)) _ensureOwnership(p);
+  }
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const hostPort = await _randomPort();
+  const containerName = `gemix-sb-${storageId}-${projectName}-${crypto.randomBytes(3).toString('hex')}`
+    .toLowerCase().replace(/[^a-z0-9_.-]/g, '-').slice(0, 63);
+
+  const docker = _getDocker();
+  const memBytes = SANDBOX_MEMORY_MB * 1024 * 1024;
+
+  // dockerode expects HostConfig in camelCase; using the .NET-style names
+  // would silently no-op.
+  const createOpts = {
+    name: containerName,
+    Image: SANDBOX_IMAGE,
+    Hostname: 'sandbox',
+    Env: [
+      `SANDBOX_TOKEN=${token}`,
+      `HTTP_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
+      `HTTPS_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
+      'NO_PROXY=localhost,127.0.0.1',
+    ],
+    ExposedPorts: { '8888/tcp': {} },
+    HostConfig: {
+      NetworkMode: SANDBOX_NETWORK,
+      AutoRemove: true,
+      CapDrop: ['ALL'],
+      SecurityOpt: ['no-new-privileges:true'],
+      PidsLimit: 200,
+      Memory: memBytes,
+      MemorySwap: memBytes,
+      NanoCpus: 1_000_000_000, // 1.0 CPU
+      Tmpfs: { '/tmp': 'size=256m' },
+      PortBindings: {
+        '8888/tcp': [{ HostIp: '127.0.0.1', HostPort: String(hostPort) }],
+      },
+      Binds: [
+        `${projectDir}:/workspace:rw`,
+        `${historyDir}:/readonly/history:ro`,
+        `${permanentDir}:/readonly/permanent:ro`,
+        `${searchedDir}:/readonly/searched_images:ro`,
+      ],
+      RestartPolicy: { Name: 'no' },
+    },
+    Labels: {
+      'gemix.storageId': storageId,
+      'gemix.project': projectName,
+    },
+  };
+
+  const container = await docker.createContainer(createOpts);
+  await container.start();
+
+  // The kernel will be wired in by getOrCreate() once the container is up.
+  return {
+    storageId,
+    projectName,
+    container,
+    containerId: container.id,
+    containerName,
+    hostPort,
+    token,
+    kernel: null,
+    lastUsedAt: Date.now(),
+    busy: false,
+  };
+}
+
+/**
+ * Wait for the Jupyter Server inside the container to accept HTTP. Polls
+ * GET /api/status for up to ~30 s.
+ */
+function _waitForKernelHttp(hostPort, token, timeoutMs = 30_000) {
+  return new Promise((resolve, reject) => {
+    const http = require('http');
+    const start = Date.now();
+    const tick = () => {
+      const req = http.get({
+        host: '127.0.0.1', port: hostPort, path: '/api/status',
+        headers: { Authorization: `token ${token}` },
+        timeout: 2000,
+      }, (res) => {
+        res.resume();
+        if (res.statusCode === 200) return resolve();
+        retry();
+      });
+      req.on('error', retry);
+      req.on('timeout', () => { req.destroy(); retry(); });
+    };
+    const retry = () => {
+      if (Date.now() - start > timeoutMs) return reject(new Error('Jupyter Server boot timeout'));
+      setTimeout(tick, 400);
+    };
+    tick();
+  });
+}
+
+/**
+ * Public: get (or create) the running sandbox + ready kernel for the given
+ * user / project. Concurrent calls for the same key share the same boot
+ * promise.
+ */
+async function getOrCreate(userCtx, projectName) {
+  const storageId = resolveStorageId(userCtx);
+  if (!storageId) throw new Error('Cannot resolve storageId');
+  const key = _poolKey(storageId, projectName);
+
+  let entry = _pool.get(key);
+  if (entry && entry._bootPromise) {
+    await entry._bootPromise;
+    entry.lastUsedAt = Date.now();
+    return entry;
+  }
+  if (entry && entry.kernel && entry.kernel.isAlive()) {
+    entry.lastUsedAt = Date.now();
+    return entry;
+  }
+  // Stale / dead — purge before recreate
+  if (entry) {
+    log.warn(`pool entry for ${key} is dead, recreating`);
+    await _killEntry(entry).catch(() => { /* ignore */ });
+    _pool.delete(key);
+  }
+
+  const bootPromise = (async () => {
+    const fresh = await _spawnContainer(userCtx, projectName);
+    try {
+      await _waitForKernelHttp(fresh.hostPort, fresh.token);
+      fresh.kernel = new PythonKernel({
+        host: '127.0.0.1',
+        port: fresh.hostPort,
+        token: fresh.token,
+      });
+      await fresh.kernel.start();
+    } catch (err) {
+      await _killEntry(fresh).catch(() => { /* */ });
+      throw err;
+    }
+    return fresh;
+  })();
+
+  const placeholder = { _bootPromise: bootPromise };
+  _pool.set(key, placeholder);
+
+  try {
+    const ready = await bootPromise;
+    ready.lastUsedAt = Date.now();
+    _pool.set(key, ready);
+    log.info(`sandbox ready key=${key} container=${ready.containerName}`);
+    return ready;
+  } catch (err) {
+    _pool.delete(key);
+    throw err;
+  }
+}
+
+/**
+ * Mark an entry as used (call this after every successful execution to push
+ * back the idle reaper).
+ */
+function touch(entry) {
+  if (entry) entry.lastUsedAt = Date.now();
+}
+
+/**
+ * Forcibly remove a single sandbox.
+ */
+async function _killEntry(entry) {
+  try { if (entry.kernel) await entry.kernel.shutdown(); } catch { /* */ }
+  if (entry.container) {
+    try { await entry.container.stop({ t: 2 }); } catch { /* */ }
+    try { await entry.container.remove({ force: true }); } catch { /* */ }
+  }
+}
+
+async function shutdown(userCtx, projectName) {
+  const storageId = resolveStorageId(userCtx);
+  if (!storageId) return;
+  const key = _poolKey(storageId, projectName);
+  const entry = _pool.get(key);
+  if (!entry) return;
+  _pool.delete(key);
+  await _killEntry(entry);
+  log.info(`sandbox shut down key=${key}`);
+}
+
+async function shutdownAll() {
+  const entries = [..._pool.values()];
+  _pool.clear();
+  await Promise.all(entries.map(e => _killEntry(e).catch(() => { /* */ })));
+}
+
+// ── Idle reaper ─────────────────────────────────────────────────────────────
+
+const _reaper = setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of _pool.entries()) {
+    if (!entry.lastUsedAt) continue; // skip booting entries
+    if (entry.busy) continue;
+    if (now - entry.lastUsedAt > SANDBOX_IDLE_TTL_MS) {
+      log.info(`reaping idle sandbox ${key} (idle ${(now - entry.lastUsedAt) / 1000 | 0}s)`);
+      _pool.delete(key);
+      _killEntry(entry).catch(err => log.warn(`reap kill failed: ${err.message}`));
+    }
+  }
+}, 60_000);
+_reaper.unref();
+
+// Best-effort cleanup when the bot terminates.
+let _shutdownHookInstalled = false;
+function installShutdownHook() {
+  if (_shutdownHookInstalled) return;
+  _shutdownHookInstalled = true;
+  const handler = async (signal) => {
+    log.info(`shutting down all sandboxes (${signal})…`);
+    try { await shutdownAll(); } catch { /* */ }
+  };
+  process.once('SIGINT', () => handler('SIGINT'));
+  process.once('SIGTERM', () => handler('SIGTERM'));
+  process.once('beforeExit', () => handler('beforeExit'));
+}
+
+module.exports = {
+  getOrCreate,
+  touch,
+  shutdown,
+  shutdownAll,
+  installShutdownHook,
+  // Exposed for tests / diagnostics
+  _pool,
+  _poolKey,
+};
