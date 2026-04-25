@@ -77,7 +77,7 @@ ${membersList}
 `;
 
   if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-    prompt += buildPersonalCloudSection(ctx);
+    prompt += buildPersonalCloudPointer(ctx);
     prompt += `  <WhatsAppPreferences>
     Reply with a voice message if your response is short using send_voice_message; prefer text responses if your message is medium/long, technical, or includes data. Don't always use the same response format — balance by looking at your previous messages in history. Your voice messages in history are labeled by the system with &lt;Transcription&gt;...&lt;/Transcription&gt;.
     ${isActiveMember ? 'Formal requests: You can read the rules and generate generic PDFs, but for formal requests, advise the user to go to Discord where GemiX — Legal Division can generate documents in the standardized format.' : ''}
@@ -94,35 +94,23 @@ ${membersList}
   return prompt;
 }
 
-function buildPersonalCloudSection(ctx) {
+/**
+ * Slim pointer added to the default system prompt. The full agentic
+ * briefing (cloud structure, library catalog, network policy, delivery
+ * flow, anti-hallucination rules) is gated behind the `agentic_unlock`
+ * tool — see src/ai/agenticBriefing.js. Keeping this section minimal
+ * saves ~7-8 K input tokens on every non-agentic conversation.
+ */
+function buildPersonalCloudPointer(ctx) {
   const current = ctx.currentProject || null;
   const projects = Array.isArray(ctx.projects) ? ctx.projects : [];
-  const projectList = projects.length === 0
-    ? '    <None/>\n'
-    : projects.map(p => `    <Project name="${_escapeXml(p.name)}"${p.name === current ? ' current="true"' : ''}>${_escapeXml(p.description || '')}</Project>\n`).join('');
-
-  return `  <PersonalCloud>
-    <Structure>
-      Each user has a persistent folder. Layout:
-      - history/             (read-only; all chat attachments automatically synced)
-      - permanent/           (files the user asked to keep forever; populate with copy_to_permanent)
-      - searched_images/     (images saved by image_search with save_to_disk=true)
-      - projects/&lt;slug&gt;/    each project has: figures/ temp/ output/ code/ README.md
-    </Structure>
-    <AgenticRules>
-      - Use ONE project per user request. If the user asks for something that produces files (PDF, PPTX, XLSX, DOCX, images, scripts, reports...), FIRST call create_project with a meaningful name + description + user_request + strategy.
-      - code_execution, write_file, edit_file and bash require a currently selected project. They refuse to run in the user root.
-      - Write scripts in code/, intermediate files in temp/, final deliverables in output/, images in figures/.
-      - Never try to write in history/, permanent/, projects/ root or a project root directly.
-      - Never try to delete or rename the fixed folders (history, permanent, projects, searched_images, figures, temp, output, code). You can only delete entire projects (with explicit user confirmation) or empty subdir contents via cleanup_project.
-      - Storage quota is per-USER (1 GB total across all projects + searched_images); manage it across the projects you create. On quota errors run cleanup_project (single subfolder) or delete_project (whole project) and ask the user which artefacts to keep when in doubt.
-      - Tool selection: use write_file to create new files (you provide the full content), edit_file for surgical find-and-replace edits on existing text files, code_execution for stateful Python (variables persist between calls), bash for one-shot shell commands (ls, head, ffmpeg, zip…). bash and code_execution share the same kernel state.
-      - Delivering files to the user: files written under projects/&lt;current&gt;/output/ are auto-buffered. To deliver any OTHER existing file (history/, permanent/, searched_images/, projects/&lt;*&gt;/{figures|temp|code}/...) call attach_file FIRST, then send_whatsapp_message / send_email with includeAttachments=true. To deliver a whole directory: zip it via bash or code_execution into output/ first.
-      - Anti-hallucination: NEVER invent file names or paths. If you are not 100% sure a file exists, run a quick bash ls (e.g. "ls projects/&lt;current&gt;/output/") or look it up in the project README before referencing it. The exact filenames of artefacts you create are returned in the new_files field of code_execution / write_file / bash results — copy them verbatim. If a path is rejected by a tool, do NOT retry with a guessed alternative; re-read the &lt;Structure&gt; rules above.
-    </AgenticRules>
-    <CurrentProject>${current ? _escapeXml(current) : 'None'}</CurrentProject>
-    <Projects>
-${projectList}    </Projects>
+  const projectsCount = projects.length;
+  const currentLine = current ? _escapeXml(current) : 'None';
+  return `  <PersonalCloud lite="true">
+    You have a persistent personal cloud (history/, permanent/, searched_images/, projects/) and a Python sandbox.
+    Current project: ${currentLine} — Projects on file: ${projectsCount}.
+    For ANY task that needs computation, file generation (PDF/PPTX/XLSX/DOCX/images/audio/video), background removal, OCR, charts/plots, large data manipulation, or that needs to deliver a previously-produced file, FIRST call the agentic_unlock tool. It returns a full briefing (cloud rules, library catalog with examples, sandbox network policy, file-delivery flow) and exposes the project / sandbox tools for the next round.
+    For pure-chat replies, web searches, voice replies, scheduling and memory updates do NOT call agentic_unlock — use the tools you already have.
   </PersonalCloud>
 `;
 }

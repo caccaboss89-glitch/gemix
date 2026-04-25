@@ -83,11 +83,17 @@ const TOOL_IMAGE_SEARCH = makeTool({
 
 const TOOL_ATTACH_FILE = makeTool({
   name: 'attach_file',
-  description: 'Buffer an existing file from the user\'s personal cloud for delivery in the current response. Cross-platform. Discord: only history/<file>. WhatsApp: history/, permanent/, searched_images/, or projects/<name>/{figures|temp|output|code}/<file>. After buffering, on WhatsApp you MUST call send_whatsapp_message / send_email with includeAttachments=true to ship the file; on Discord it ships automatically with the next reply. Use this to deliver a file the user previously uploaded (history), a permanent copy, an image_search result saved to disk, or any artefact a project produced earlier (no need to re-run code_execution).',
+  description: 'Buffer an existing file from the user\'s personal cloud for delivery in the current response (WhatsApp only, requires prior agentic_unlock). Allowed sources: permanent/<file>, searched_images/<file>, projects/<name>/{figures|temp|output|code}/<file>. NOT allowed: history/ (the user already sees those files in their chat). After buffering, call send_whatsapp_message / send_email with includeAttachments=true to ship the file. Use this to deliver a permanent copy, an image_search result saved to disk earlier, or any artefact a project produced previously (no need to re-run code_execution).',
   properties: {
-    path: { type: 'string', description: 'Relative path under the user root, e.g. "history/foo.pdf", "permanent/keep.docx", "searched_images/cat_1.jpg", "projects/myproj/output/report.pdf".' },
+    path: { type: 'string', description: 'Relative path under the user root, e.g. "permanent/keep.docx", "searched_images/cat_1.jpg", "projects/myproj/output/report.pdf".' },
   },
   required: ['path'],
+});
+
+const TOOL_AGENTIC_UNLOCK = makeTool({
+  name: 'agentic_unlock',
+  description: 'Unlocks GemiX\'s agentic toolkit for THIS message: project management (list/create/switch/delete/cleanup_project, copy_to_permanent, copy_to_project), Python sandbox (code_execution, write_file, edit_file, bash) and the cross-folder file delivery tool (attach_file). Call this BEFORE attempting any task that needs computation, file generation (PDF, PPTX, XLSX, DOCX, images, audio, video), background removal, OCR, large data manipulation, or that needs to deliver a file from a previous session. The tool returns a complete briefing with: cloud structure, project rules, storage quota, network policy, full Python library catalog with practical examples, file-delivery flow and anti-hallucination guardrails. After calling it the next round will expose the unlocked tools and remove this gateway. No-op for chats that are just text / web research / quick voice replies — do NOT call it for those.',
+  properties: {},
 });
 
 const TOOL_READ_FILE = makeTool({
@@ -549,7 +555,10 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const tools = [];
 
   // ── All users, all platforms ──
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, TOOL_READ_FILE, TOOL_ATTACH_FILE);
+  // attach_file is WhatsApp-only AND gated behind agentic_unlock (it deals
+  // with files only relevant to the agentic flow — permanent/, projects/,
+  // searched_images/). Discord never gets it.
+  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, TOOL_READ_FILE);
 
   // ── WhatsApp only: voice, tasks, release notify ──
   if (!isDiscord) {
@@ -565,20 +574,28 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
 
-    // Project management & cloud-copy tools (agentic)
-    tools.push(
-      TOOL_LIST_PROJECTS,
-      TOOL_CREATE_PROJECT,
-      TOOL_SWITCH_PROJECT,
-      TOOL_DELETE_PROJECT,
-      TOOL_CLEANUP_PROJECT,
-      TOOL_COPY_TO_PERMANENT,
-      TOOL_COPY_TO_PROJECT,
-      TOOL_CODE_EXECUTION,
-      TOOL_WRITE_FILE,
-      TOOL_EDIT_FILE,
-      TOOL_BASH,
-    );
+    // ── Agentic toolkit (gated) ─────────────────────────────────────────
+    // By default we expose a tiny gateway tool. The full project /
+    // sandbox / file-delivery stack only appears AFTER the AI calls it,
+    // saving ~7-8 K input tokens on every non-agentic conversation.
+    if (userCtx.agenticUnlocked) {
+      tools.push(
+        TOOL_LIST_PROJECTS,
+        TOOL_CREATE_PROJECT,
+        TOOL_SWITCH_PROJECT,
+        TOOL_DELETE_PROJECT,
+        TOOL_CLEANUP_PROJECT,
+        TOOL_COPY_TO_PERMANENT,
+        TOOL_COPY_TO_PROJECT,
+        TOOL_CODE_EXECUTION,
+        TOOL_WRITE_FILE,
+        TOOL_EDIT_FILE,
+        TOOL_BASH,
+        TOOL_ATTACH_FILE,
+      );
+    } else {
+      tools.push(TOOL_AGENTIC_UNLOCK);
+    }
   }
 
   // ── Discord: formal request PDF (all members) ──

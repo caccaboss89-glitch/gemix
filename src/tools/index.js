@@ -313,6 +313,20 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
+      case 'agentic_unlock': {
+        // The actual unlocking (rebuilding the tool list + injecting the
+        // full briefing as a system message) is performed by the handler
+        // by inspecting tool_calls names. Here we just return a short
+        // acknowledgement so the conversation keeps a single canonical
+        // copy of the briefing.
+        result = {
+          success: true,
+          unlocked: true,
+          message_for_ai: 'Agentic toolkit unlocked. Read the <AgenticToolkit> system message that follows for cloud rules, library catalog and delivery flow, then continue with the user request.',
+        };
+        break;
+      }
+
       case 'send_voice_message': {
         let cleanText = removeDiscordEmoji(args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')

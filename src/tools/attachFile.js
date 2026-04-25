@@ -58,6 +58,18 @@ async function attachFileTool(args, userCtx, responseCtx) {
   if (!check.ok) {
     return { success: false, error: `attach_file refused: ${check.reason}` };
   }
+  // history/ is intentionally NOT a valid source: the user already sees
+  // those files in their chat. Refuse with a clear message so the AI
+  // does not loop trying to re-deliver them.
+  if (check.zone === 'history') {
+    return {
+      success: false,
+      error: 'attach_file refused: files in history/ are already visible to the user in the chat — do not re-deliver them. Use attach_file only for permanent/, searched_images/ or projects/<name>/{figures|temp|output|code}/...',
+    };
+  }
+  if (check.zone === 'skills') {
+    return { success: false, error: 'attach_file refused: skills/ is read-only AI guidance, not deliverable content.' };
+  }
 
   const abs = check.absPath;
   if (!fs.existsSync(abs)) {

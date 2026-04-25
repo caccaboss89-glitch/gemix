@@ -21,6 +21,8 @@ const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
 const { getCurrentProject, consumeLastCrash, saveLastCrash } = require('./utils/projectState');
 const { listProjects, ensureUserSkeleton } = require('./utils/userPaths');
+const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
+const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
@@ -152,9 +154,14 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
+      // Per-message agentic gate: starts locked. Set to true after the AI
+      // calls `agentic_unlock`, which causes the tool list to be rebuilt
+      // (full agentic stack appears, gateway disappears) and a briefing
+      // system message to be injected.
+      agenticUnlocked: false,
     };
 
-    const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
+    let tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
     let messages = [
       { role: 'system', content: systemPrompt },
@@ -215,6 +222,23 @@ async function handleMessage(ctx) {
     const transcribedUserContent = await transcribeDocumentsInMessageContent(ctx.content);
     messages.push({ role: 'user', content: transcribedUserContent });
 
+    // ── Deterministic history prune ─────────────────────────────────────
+    // Every file under history/<userId>/ that is no longer reachable from
+    // the chat buffer the AI is about to see gets removed (100%, no
+    // probabilistic GC). On Discord we additionally enforce a 30-day cap
+    // even on still-referenced files (replies can keep old attachments
+    // alive forever otherwise).
+    try {
+      const isDiscord = ctx.platform === PLATFORM_DISCORD;
+      const historyUserId = ctx.isGroup ? (ctx.groupId || ctx.userId) : ctx.userId;
+      if (historyUserId) {
+        const referenced = collectReferencedHistoryFilenames(ctx.history, transcribedUserContent);
+        const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};
+        pruneHistory(historyUserId, referenced, opts);
+      }
+    } catch (e) {
+      log.warn(`pruneHistory pre-call failed: ${e.message}`);
+    }
 
     const deliveryCtx = {
       contactedWA: new Set(),
@@ -243,7 +267,11 @@ async function handleMessage(ctx) {
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
         log.info(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
         // Bump the per-message round budget on first agentic tool use.
+        let unlockTriggered = false;
         for (const tc of assistantMsg.tool_calls) {
+          if (tc.function.name === 'agentic_unlock') {
+            unlockTriggered = true;
+          }
           if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
             lastAgenticTool = tc.function.name;
             if (!agenticUnlocked) {
@@ -295,6 +323,23 @@ async function handleMessage(ctx) {
               content: `Execution error: ${toolErr.message}`,
             });
           }
+        }
+
+        // If agentic_unlock was just executed, swap the tool list and
+        // inject the full briefing as a system message for the next round.
+        if (unlockTriggered && !userCtx.agenticUnlocked) {
+          userCtx.agenticUnlocked = true;
+          tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
+          if (!agenticUnlocked) {
+            agenticUnlocked = true;
+            maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
+          }
+          const briefing = buildAgenticBriefing({
+            currentProject: ctx.currentProject || null,
+            projects: ctx.projects || [],
+          });
+          messages.push({ role: 'system', content: briefing });
+          log.info(`   🔓 agentic_unlock invoked → tools rebuilt (${tools.length}) + briefing injected`);
         }
 
         // Token optimization: strip image previews from tool results the AI has already seen.

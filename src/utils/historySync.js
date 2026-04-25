@@ -7,10 +7,8 @@ const { sanitizeFilename } = require('./text');
 
 const log = createLogger('HistorySync');
 
-const GC_PROBABILITY = 0.05; // 5% chance to run GC on sync
-const GC_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const GC_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour cooldown per user
-const lastGcTime = new Map();
+// Discord-only age cap. WhatsApp deletes purely on chat-history reachability.
+const DISCORD_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 /**
  * Get the history directory and meta file for a user.
@@ -70,14 +68,6 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     delete meta[uniqueId];
   }
 
-  // Occasional Garbage Collection
-  if (Math.random() < GC_PROBABILITY) {
-    const lastGc = lastGcTime.get(userId) || 0;
-    if (Date.now() - lastGc > GC_COOLDOWN_MS) {
-      lastGcTime.set(userId, Date.now());
-      setTimeout(() => cleanupOldHistory(userId).catch(() => {}), 0);
-    }
-  }
 
   // We need the buffer now
   let buffer;
@@ -162,28 +152,77 @@ function deleteFileFromHistory(userId, filename) {
 }
 
 /**
- * Garbage collection for history folder. Deletes files older than 30 days.
+ * Deterministic prune. Called by the handler at the start of EVERY user
+ * message, before the AI call. Removes from `history/<userId>/` every file
+ * that is no longer reachable from the current chat history (i.e. its
+ * filename does not appear in the set of `[Attachment: history/<name>]`
+ * tags the AI is about to see).
+ *
+ * Optionally also removes files older than `maxAgeMs` (used on Discord to
+ * keep at most 30 days of attachments even if they are still referenced
+ * via reply quotes).
+ *
+ * @param {string} userId
+ * @param {Set<string>|Iterable<string>} referencedFilenames - bare filenames present in the chat buffer (no "history/" prefix)
+ * @param {object} [opts]
+ * @param {number} [opts.maxAgeMs] - extra age cap (Discord uses 30d; WhatsApp omits)
+ * @returns {{deletedCount: number, ageDeletedCount: number, kept: number}}
  */
-async function cleanupOldHistory(userId) {
+function pruneHistory(userId, referencedFilenames, opts = {}) {
+  if (!userId) return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
   const { historyDir, metaFile } = getUserHistoryPaths(userId);
-  if (!fs.existsSync(historyDir)) return;
+  if (!fs.existsSync(historyDir)) return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
+
+  const referenced = referencedFilenames instanceof Set
+    ? referencedFilenames
+    : new Set(referencedFilenames || []);
 
   const now = Date.now();
-  let deletedCount = 0;
+  const maxAgeMs = Number.isFinite(opts.maxAgeMs) ? opts.maxAgeMs : null;
 
-  try {
-    const files = fs.readdirSync(historyDir);
-    for (const file of files) {
-      const filePath = path.join(historyDir, file);
-      const stat = fs.statSync(filePath);
-      if (now - stat.mtimeMs > GC_MAX_AGE_MS) {
-        fs.unlinkSync(filePath);
-        deletedCount++;
-      }
+  let deletedCount = 0;
+  let ageDeletedCount = 0;
+  let kept = 0;
+
+  let files;
+  try { files = fs.readdirSync(historyDir); }
+  catch (err) {
+    log.error(`pruneHistory readdir failed for ${userId}: ${err.message}`);
+    return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
+  }
+
+  for (const file of files) {
+    const filePath = path.join(historyDir, file);
+    let stat;
+    try { stat = fs.statSync(filePath); }
+    catch { continue; }
+    if (!stat.isFile()) continue;
+
+    let shouldDelete = false;
+    let ageDelete = false;
+    if (!referenced.has(file)) {
+      shouldDelete = true;
+    } else if (maxAgeMs !== null && (now - stat.mtimeMs) > maxAgeMs) {
+      shouldDelete = true;
+      ageDelete = true;
     }
 
-    if (deletedCount > 0 && fs.existsSync(metaFile)) {
-      // Clean up meta file to remove deleted entries
+    if (shouldDelete) {
+      try {
+        fs.unlinkSync(filePath);
+        deletedCount++;
+        if (ageDelete) ageDeletedCount++;
+      } catch (err) {
+        log.warn(`pruneHistory unlink failed for ${file}: ${err.message}`);
+      }
+    } else {
+      kept++;
+    }
+  }
+
+  // Sync meta file: drop entries whose target file no longer exists.
+  if (deletedCount > 0 && fs.existsSync(metaFile)) {
+    try {
       const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
       let changed = false;
       for (const [id, name] of Object.entries(meta)) {
@@ -195,11 +234,50 @@ async function cleanupOldHistory(userId) {
       if (changed) {
         fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8');
       }
-      log.info(`Garbage Collection: Deleted ${deletedCount} old files for user ${userId}.`);
+    } catch (err) {
+      log.warn(`pruneHistory meta sync failed for ${userId}: ${err.message}`);
     }
-  } catch (err) {
-    log.error(`Garbage Collection failed for user ${userId}: ${err.message}`);
   }
+
+  if (deletedCount > 0) {
+    log.info(`pruneHistory user=${userId} removed=${deletedCount} (age-based=${ageDeletedCount}) kept=${kept}`);
+  }
+  return { deletedCount, ageDeletedCount, kept };
+}
+
+/**
+ * Extract the bare filenames from every `[Attachment: history/<file>]` tag
+ * found in the provided chat history. Used by the handler to feed pruneHistory.
+ *
+ * @param {Array<{content: any}>} historyMsgs
+ * @param {any} [currentContent] - current incoming message content (already in scope before AI call)
+ * @returns {Set<string>}
+ */
+function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
+  const out = new Set();
+  const re = /\[Attachment(?:\s*\(expired\))?:\s*history\/([^\]\n\r]+)\]/g;
+  const _scan = (text) => {
+    if (typeof text !== 'string' || text.length === 0) return;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const name = m[1].trim();
+      if (name) out.add(name);
+    }
+  };
+  const _scanContent = (c) => {
+    if (!c) return;
+    if (typeof c === 'string') return _scan(c);
+    if (Array.isArray(c)) {
+      for (const part of c) {
+        if (part && typeof part === 'object' && typeof part.text === 'string') _scan(part.text);
+      }
+    }
+  };
+  if (Array.isArray(historyMsgs)) {
+    for (const m of historyMsgs) _scanContent(m && m.content);
+  }
+  _scanContent(currentContent);
+  return out;
 }
 
 /**
@@ -248,4 +326,7 @@ module.exports = {
   syncFileToHistory,
   copyFromHistory,
   getUserHistoryPaths,
+  pruneHistory,
+  collectReferencedHistoryFilenames,
+  DISCORD_MAX_AGE_MS,
 };
