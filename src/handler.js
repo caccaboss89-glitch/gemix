@@ -262,7 +262,13 @@ async function handleMessage(ctx) {
       }
 
       log.info(`🤖 [${ctx.platform.toUpperCase()}] AI call (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
+      const _roundsLeft = maxRounds - rounds;
+      const _roundHint = _roundsLeft <= 2
+        ? `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
+        : `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>normal</Status></ToolRound>`;
+      messages.push({ role: 'system', content: _roundHint });
       const { message: assistantMsg, provider, model } = await callAI(messages, tools);
+      messages.pop(); // remove ephemeral round hint — must not persist between rounds
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
 
