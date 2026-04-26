@@ -29,7 +29,7 @@ function makeTool({ name, description, properties = {}, required = [] }) {
 
 const TOOL_WEB_SEARCH = makeTool({
   name: 'web_search',
-  description: 'Search the web. Call multiple times for deeper research. Supports operators like site:, -site:, after:/before:, filetype:, intitle:, inurl:, exact phrases, OR/AND. Do not cite results with [web:N] tags.',
+  description: 'Search the web. Call multiple times for deeper research. Supports operators like site:, -site:, after:/before:, filetype:, intitle:, inurl:, exact phrases, OR/AND.',
   properties: {
     query: { type: 'string', description: 'Search query (supports operators: site:, after:, before:, filetype:, "exact phrase", OR)' },
     num_results: { type: 'integer', description: 'Number of results (1-30, default 15)' },
@@ -75,7 +75,7 @@ const TOOL_IMAGE_SEARCH = makeTool({
     },
     save_to_disk: {
       type: 'boolean',
-      description: 'If true, save the downloaded image(s) to searched_images/ (use only if necessary use them with agentic tools (e.g. image editing, include in documents, etc.)). Default false.',
+      description: 'If true, save the downloaded image(s) to searched_images/ (use only if you need them with agentic tools, e.g. image editing, include in documents, etc.). Default false.',
     },
   },
   required: ['query'],
@@ -88,6 +88,15 @@ const TOOL_ATTACH_FILE = makeTool({
     path: { type: 'string', description: 'Relative path under the user root, e.g. "permanent/keep.docx", "searched_images/cat_1.jpg", "projects/myproj/output/report.pdf".' },
   },
   required: ['path'],
+});
+
+const TOOL_REPORT_TO_USER = makeTool({
+  name: 'report_to_user',
+  description: 'Send an intermediate status message to the user while you continue working. Use ONLY during multi-step operations (3+ tool calls) to keep the user informed — e.g. before starting a research pipeline, a complex agentic workflow, or after completing a major phase. Never use for simple single-tool tasks. The message is delivered immediately; the tool loop continues. Do NOT repeat what you already said.',
+  properties: {
+    message: { type: 'string', description: 'Short status update in Italian for the user (1-2 sentences, max 300 chars).' },
+  },
+  required: ['message'],
 });
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
@@ -173,7 +182,7 @@ const TOOL_BROWSE_PAGE = makeTool({
     },
     instructions: {
       type: 'string',
-      description: 'What to extract or analyze from the page (e.g. "list all pricing tiers", "summarize the main argument", "extract all API endpoints"). Be specific for better results.',
+      description: 'What to extract or analyze from the page (e.g. "list all pricing tiers", "summarize the main argument", "extract all API endpoints"). Be specific for better results. If omitted in summary mode, the page is summarized with a generic overview.',
     },
     mode: {
       type: 'string',
@@ -491,7 +500,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // attach_file is WhatsApp-only AND gated behind agentic_unlock (it deals
   // with files only relevant to the agentic flow — permanent/, projects/,
   // searched_images/). Discord never gets it.
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, buildReadFileTool(isDiscord));
+  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, TOOL_REPORT_TO_USER, buildReadFileTool(isDiscord));
 
   // ── WhatsApp only: voice, tasks, release notify ──
   if (!isDiscord) {

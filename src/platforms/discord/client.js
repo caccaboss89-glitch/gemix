@@ -290,6 +290,12 @@ async function onDiscordMessage(msg) {
     serverEvents,
     waJid: userIdentity.member ? userIdentity.member.wa : null,
     discordChannel: channel,
+    _sendIntermediate: async (text) => {
+      const chunks = splitDiscordMessage(text);
+      for (const chunk of chunks) {
+        await channel.send({ content: chunk });
+      }
+    },
   };
   const lockKey = `discord:${channel.id}`;
   if (!responseLock.tryLock(lockKey)) {

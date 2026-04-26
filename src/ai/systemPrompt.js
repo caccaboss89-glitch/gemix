@@ -71,7 +71,7 @@ ${membersList}
   }
 
   prompt += `  <ToolInstructions>
-    Use tools only before the final response. A final response is always required, except send_voice_message to the current chat, which itself ends the turn. You may call multiple tools in one round.
+    Use tools before your final response. A final text response ends the turn; send_voice_message (no recipient) also ends the turn. You may call multiple tools in one round. For multi-step operations (3+ tool calls), use report_to_user to send brief status updates so the user is not left waiting in silence — but never for simple tasks.
     ${!isActiveMember ? 'Some tools (e.g. email, message sending) are NOT available for this user.' : ''}
   </ToolInstructions>
   <MediaHandling>
@@ -123,7 +123,7 @@ function buildDedicatedWaInstructions(ctx) {
   s += ctx.isGroup
     ? `    <Type>Group</Type>\n    <GroupName>${_escapeXml(ctx.groupName) || 'unknown'}</GroupName>\n    <Rule>Reply only when tagged.</Rule>\n`
     : `    <Type>Private</Type>\n    <Rule>Reply to every message.</Rule>\n`;
-  s += `    <Formatting>Use ONLY the following WhatsApp markdown AND NO OTHERS: *bold* _italic_ ~strike~ \`code\` > citation.</Formatting>\n`;
+  s += `    <Formatting>Use ONLY the following WhatsApp markdown AND NO OTHERS: *bold* _italic_ ~strike~ \`code\` > citation. For web search NOT cite sources, only if user asks for it.</Formatting>\n`;
   s += `  </Platform>\n`;
   return s;
 }
@@ -135,7 +135,7 @@ function buildPersonalWaInstructions(ctx) {
     s += `    <Interlocutor>${_escapeXml(ctx.userName)}</Interlocutor>\n`;
   }
   s += `    <HistoryContext>In history, Alberto's messages with [GemiX] are yours.</HistoryContext>\n`;
-  s += `    <Formatting>Use ONLY the following WhatsApp markdown AND NO OTHERS: *bold* _italic_ ~strike~ \`code\` > citation.</Formatting>\n`;
+  s += `    <Formatting>Use ONLY the following WhatsApp markdown AND NO OTHERS: *bold* _italic_ ~strike~ \`code\` > citation. For web search NOT cite sources, only if user asks for it.</Formatting>\n`;
   s += `  </Platform>\n`;
   return s;
 }
@@ -167,7 +167,7 @@ function buildDiscordInstructions(ctx) {
     s += `    <RulesContext>\n${ctx.ragContext}\n    </RulesContext>\n`;
   }
 
-  s += `    <Formatting>All markdown is supported EXCEPT tables (do not use them).</Formatting>\n`;
+  s += `    <Formatting>All markdown is supported EXCEPT tables (do not use them), for web search cite sources with standard markdown links.</Formatting>\n`;
 
   if (ctx.availableEmojis) {
     s += `    <ServerEmojis>${ctx.availableEmojis}</ServerEmojis>\n`;

@@ -11,6 +11,7 @@ const { createLogger } = require('../../utils/logger');
 
 const log = createLogger('WA-PERSONAL');
 const responseLock = require('../../utils/responseLock');
+const { pushMessage, hasPendingBatch } = require('../../utils/messageBatcher');
 
 let client;
 let _reconnectAttempts = 0;
@@ -150,52 +151,92 @@ async function onPersonalMessage(msg) {
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
-  let history = [];
-  try {
-    history = await Promise.race([
-      buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, phoneJid),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('History fetch timeout')), 15000)
-      )
-    ]);
-  } catch (historyErr) {
-    log.warn(`   ⚠️ History fetch failed (${historyErr.message}), proceeding without history`);
-  }
-
   const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, phoneJid);
 
   if (contentParts.length === 0) return;
 
-  const ctx = {
-    platform: PLATFORM_WA_PERSONAL,
-    isGroup: false,
-    groupId: null,
-    groupName: null,
-    chatId: chat.id._serialized,
-    userId: senderJid,
-    userName,
-    userIdentity,
-    content: contentParts.length === 1 && contentParts[0].type === 'text'
-      ? contentParts[0].text
-      : contentParts,
-    history,
-    waJid: phoneJid,
-  };
+  const batchKey = `wa_personal:${chat.id._serialized}`;
 
-  const lockKey = `wa_personal:${ctx.chatId || ctx.userId}`;
+  // If a batch is already accumulating for this chat, add to it and return
+  if (hasPendingBatch(batchKey)) {
+    log.info(`   📦 Batching additional message for ${batchKey}`);
+    pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity }, _handlePersonalBatch);
+    return;
+  }
+
+  // If GemiX is already responding, discard
+  const lockKey = batchKey;
+  if (responseLock.tryLock(lockKey) === false) {
+    log.warn(`   ⛔ Ignoring message in chat ${chat.id._serialized}: GemiX is already responding`);
+    return;
+  }
+  // Release lock immediately — the batch handler will re-acquire it
+  responseLock.unlock(lockKey);
+
+  // Start a new batch
+  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity }, _handlePersonalBatch);
+}
+
+/**
+ * Batch handler: called by the batcher once the debounce window closes.
+ * Merges all accumulated content parts and calls handleMessage once.
+ */
+async function _handlePersonalBatch(entries) {
+  const first = entries[0];
+  const { chat, senderJid, userName, phoneJid, userIdentity } = first;
+
+  const lockKey = `wa_personal:${chat.id._serialized}`;
   if (!responseLock.tryLock(lockKey)) {
-    log.warn(`   ⛔ Ignoring message in chat ${ctx.chatId || ctx.userId}: GemiX is already responding`);
+    log.warn(`   ⛔ Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
     return;
   }
 
   try {
+    // Merge all content parts from all entries
+    const allParts = [];
+    for (const entry of entries) {
+      allParts.push(...entry.contentParts);
+    }
+
+    // Fetch history at fire time (fresher state)
+    let history = [];
+    try {
+      history = await Promise.race([
+        buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, phoneJid),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('History fetch timeout')), 15000)
+        )
+      ]);
+    } catch (historyErr) {
+      log.warn(`   ⚠️ History fetch failed (${historyErr.message}), proceeding without history`);
+    }
+
+    const ctx = {
+      platform: PLATFORM_WA_PERSONAL,
+      isGroup: false,
+      groupId: null,
+      groupName: null,
+      chatId: chat.id._serialized,
+      userId: senderJid,
+      userName,
+      userIdentity,
+      content: allParts.length === 1 && allParts[0].type === 'text'
+        ? allParts[0].text
+        : allParts,
+      history,
+      waJid: phoneJid,
+      _sendIntermediate: async (text) => {
+        const { normalizeMarkdown } = require('../../utils/text');
+        const { addFooter } = require('../../utils/footer');
+        await chat.sendMessage(addFooter(normalizeMarkdown(text), ''));
+      },
+    };
+
     try {
       if (typeof chat.sendState === 'function') {
         await chat.sendState('typing');
       }
-    } catch (err) {
-      // sendState might not be available in this version
-    }
+    } catch { }
 
     const response = await handleMessage(ctx);
 
@@ -212,9 +253,7 @@ async function onPersonalMessage(msg) {
         if (typeof chat.sendState === 'function') {
           await chat.sendState('paused');
         }
-      } catch (err) {
-        // sendState might not be available in this version
-      }
+      } catch { }
     } catch (err) {
       log.error(`\n❌ Error sending response:`);
       log.error(`   ${err.message}`);

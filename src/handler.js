@@ -63,6 +63,10 @@ async function handleMessage(ctx) {
     isVoiceOnly: false,
     discordTitle: '',
     imageSearchNextId: 1,
+    // Platform-provided callback: sends an intermediate text message to the
+    // user's chat without ending the tool loop. Set by platform handlers
+    // (WhatsApp / Discord) so `report_to_user` can deliver status updates.
+    sendIntermediate: ctx._sendIntermediate || null,
   };
 
   try {

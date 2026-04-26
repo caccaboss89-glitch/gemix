@@ -304,6 +304,26 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
+      case 'report_to_user': {
+        const reportMsg = (args.message || '').slice(0, 300).trim();
+        if (!reportMsg) {
+          result = { success: false, error: 'Empty message.' };
+          break;
+        }
+        if (typeof responseCtx.sendIntermediate === 'function') {
+          try {
+            await responseCtx.sendIntermediate(reportMsg);
+            result = { success: true, message: 'Status update delivered. Continue working.' };
+          } catch (err) {
+            log.warn(`report_to_user delivery failed: ${err.message}`);
+            result = { success: false, error: `Delivery failed: ${err.message}` };
+          }
+        } else {
+          result = { success: false, error: 'Intermediate messaging not available on this platform.' };
+        }
+        break;
+      }
+
       case 'agentic_unlock': {
         // The actual unlocking (rebuilding the tool list + injecting the
         // full briefing as a system message) is performed by the handler

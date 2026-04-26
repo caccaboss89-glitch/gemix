@@ -10,6 +10,7 @@ const { createLogger } = require('../../utils/logger');
 
 const log = createLogger('WA-DEDICATED');
 const responseLock = require('../../utils/responseLock');
+const { pushMessage, hasPendingBatch } = require('../../utils/messageBatcher');
 
 let client;
 let _reconnectAttempts = 0;
@@ -119,42 +120,83 @@ async function onDedicatedMessage(msg) {
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
-  const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid);
-
   const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, isGroup ? chat.id._serialized : phoneJid);
 
   if (contentParts.length === 0) return;
 
-  const ctx = {
-    platform: PLATFORM_WA_DEDICATED,
-    isGroup,
-    groupId: isGroup ? chat.id._serialized : null,
-    groupName: isGroup ? chat.name : null,
-    chatId: chat.id._serialized,
-    userId: senderJid,
-    userName,
-    userIdentity,
-    content: contentParts.length === 1 && contentParts[0].type === 'text'
-      ? contentParts[0].text
-      : contentParts,
-    history,
-    waJid: phoneJid,
-  };
+  const batchKey = `wa_dedicated:${chat.id._serialized}`;
 
-  const lockKey = `wa_dedicated:${ctx.chatId || ctx.userId}`;
+  // If a batch is already accumulating for this chat, add to it and return
+  // (even if a response lock is held — the batch will fire after debounce)
+  if (hasPendingBatch(batchKey)) {
+    log.info(`   📦 Batching additional message for ${batchKey}`);
+    pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup }, _handleDedicatedBatch);
+    return;
+  }
+
+  // If GemiX is already responding, check if we should start a new batch or discard
+  const lockKey = batchKey;
+  if (responseLock.tryLock(lockKey) === false) {
+    log.warn(`   ⛔ Ignoring message in chat ${chat.id._serialized}: GemiX is already responding`);
+    return;
+  }
+  // Release lock immediately — the batch handler will re-acquire it
+  responseLock.unlock(lockKey);
+
+  // Start a new batch (the handler will fire after the debounce window)
+  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup }, _handleDedicatedBatch);
+}
+
+/**
+ * Batch handler: called by the batcher once the debounce window closes.
+ * Merges all accumulated content parts and calls handleMessage once.
+ */
+async function _handleDedicatedBatch(entries) {
+  // Use the first entry for chat/user context, merge all content parts
+  const first = entries[0];
+  const { chat, senderJid, userName, phoneJid, userIdentity, isGroup } = first;
+
+  const lockKey = `wa_dedicated:${chat.id._serialized}`;
   if (!responseLock.tryLock(lockKey)) {
-    log.warn(`   ⛔ Ignoring message in chat ${ctx.chatId || ctx.userId}: GemiX is already responding`);
+    log.warn(`   ⛔ Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
     return;
   }
 
   try {
+    // Merge all content parts from all entries
+    const allParts = [];
+    for (const entry of entries) {
+      allParts.push(...entry.contentParts);
+    }
+
+    // Re-fetch history at fire time (fresher state)
+    const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid);
+
+    const ctx = {
+      platform: PLATFORM_WA_DEDICATED,
+      isGroup,
+      groupId: isGroup ? chat.id._serialized : null,
+      groupName: isGroup ? chat.name : null,
+      chatId: chat.id._serialized,
+      userId: senderJid,
+      userName,
+      userIdentity,
+      content: allParts.length === 1 && allParts[0].type === 'text'
+        ? allParts[0].text
+        : allParts,
+      history,
+      waJid: phoneJid,
+      _sendIntermediate: async (text) => {
+        const { normalizeMarkdown } = require('../../utils/text');
+        await chat.sendMessage(normalizeMarkdown(text));
+      },
+    };
+
     try {
       if (typeof chat.sendState === 'function') {
         await chat.sendState('typing');
       }
-    } catch (err) {
-      // sendState might not be available in this version
-    }
+    } catch { }
 
     const response = await handleMessage(ctx);
 
@@ -166,9 +208,7 @@ async function onDedicatedMessage(msg) {
         if (typeof chat.sendState === 'function') {
           await chat.sendState('paused');
         }
-      } catch (err) {
-        // sendState might not be available in this version
-      }
+      } catch { }
     } catch (err) {
       log.error(`\n❌ Error sending response:`);
       log.error(`   ${err.message}`);
