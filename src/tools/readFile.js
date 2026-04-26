@@ -106,7 +106,10 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     const mimeMap = { '.ogg': 'audio/ogg', '.mp3': 'audio/mp3', '.wav': 'audio/wav', '.m4a': 'audio/m4a' };
     return [
       { type: 'text', text: `Audio contents of ${sanitizedPath}:` },
-      mediaToContentPart(buffer, mimeMap[ext])
+      mediaToContentPart(buffer, mimeMap[ext], {
+        historyPath: rawPath.startsWith('history/') ? rawPath : null,
+        historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,
+      })
     ];
   }
 
@@ -115,7 +118,10 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     const mimeMap = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
     return [
       { type: 'text', text: `Video contents of ${sanitizedPath}:` },
-      mediaToContentPart(buffer, mimeMap[ext])
+      mediaToContentPart(buffer, mimeMap[ext], {
+        historyPath: rawPath.startsWith('history/') ? rawPath : null,
+        historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,
+      })
     ];
   }
 

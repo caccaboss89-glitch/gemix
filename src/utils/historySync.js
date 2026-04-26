@@ -31,6 +31,90 @@ function ensureDir(dirPath) {
   }
 }
 
+function _loadMeta(metaFile, userId) {
+  let meta = {};
+  try {
+    if (fs.existsSync(metaFile)) {
+      meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
+    }
+  } catch (err) {
+    log.warn(`Failed to read history_meta.json for user ${userId}: ${err.message}`);
+  }
+  return meta && typeof meta === 'object' ? meta : {};
+}
+
+function _saveMeta(metaFile, meta, userId) {
+  try {
+    fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    log.warn(`Failed to write history_meta.json for user ${userId}: ${err.message}`);
+    return false;
+  }
+}
+
+function _getEntryFilename(entry) {
+  if (!entry) return null;
+  if (typeof entry === 'string') return entry;
+  if (typeof entry === 'object' && typeof entry.filename === 'string') return entry.filename;
+  return null;
+}
+
+function _normalizeHistoryFilename(historyFilename) {
+  const raw = String(historyFilename || '').trim().replace(/\\/g, '/');
+  return raw.startsWith('history/') ? raw.slice('history/'.length) : raw;
+}
+
+function getStoredHistoryMediaDescription(userId, historyFilename, expectedKind = null) {
+  if (!userId || !historyFilename) return null;
+  const { metaFile } = getUserHistoryPaths(userId);
+  const normalized = _normalizeHistoryFilename(historyFilename);
+  if (!normalized) return null;
+
+  const meta = _loadMeta(metaFile, userId);
+  for (const entry of Object.values(meta)) {
+    if (_getEntryFilename(entry) !== normalized) continue;
+    if (!entry || typeof entry !== 'object' || !entry.mediaDescription) return null;
+    const desc = entry.mediaDescription;
+    if (expectedKind && desc.kind && desc.kind !== expectedKind) return null;
+    if (typeof desc.text !== 'string' || !desc.text.trim()) return null;
+    return desc.text.trim();
+  }
+  return null;
+}
+
+function storeHistoryMediaDescription(userId, historyFilename, kind, text) {
+  if (!userId || !historyFilename || !kind || !text) return false;
+  const { metaFile } = getUserHistoryPaths(userId);
+  const normalized = _normalizeHistoryFilename(historyFilename);
+  if (!normalized) return false;
+
+  const meta = _loadMeta(metaFile, userId);
+  let targetKey = null;
+  for (const [id, entry] of Object.entries(meta)) {
+    if (_getEntryFilename(entry) === normalized) {
+      targetKey = id;
+      break;
+    }
+  }
+  if (!targetKey) {
+    targetKey = `file:${normalized}`;
+  }
+
+  const prev = meta[targetKey];
+  const base = (prev && typeof prev === 'object') ? prev : { filename: normalized };
+  meta[targetKey] = {
+    ...base,
+    filename: normalized,
+    mediaDescription: {
+      kind,
+      text: String(text).trim(),
+      updatedAt: Date.now(),
+    },
+  };
+  return _saveMeta(metaFile, meta, userId);
+}
+
 /**
  * Save a file to the user's history folder. Handles deduplication by uniqueId.
  * @param {string} userId - The unique identifier for the user (e.g. from waJid or discord id)
@@ -41,31 +125,25 @@ function ensureDir(dirPath) {
  */
 async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) {
   if (!userId || !uniqueId) return null;
-  
+
   const { historyDir, metaFile } = getUserHistoryPaths(userId);
   ensureDir(historyDir);
 
-  // Load metadata
-  let meta = {};
-  try {
-    if (fs.existsSync(metaFile)) {
-      meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
-    }
-  } catch (err) {
-    log.warn(`Failed to read history_meta.json for user ${userId}: ${err.message}`);
-  }
+  let meta = _loadMeta(metaFile, userId);
 
   // If uniqueId exists and the file is actually on disk, reuse it
   if (meta[uniqueId]) {
-    const existingFile = path.join(historyDir, meta[uniqueId]);
-    if (fs.existsSync(existingFile)) {
+    const existingName = _getEntryFilename(meta[uniqueId]);
+    const existingFile = existingName ? path.join(historyDir, existingName) : null;
+    if (existingFile && fs.existsSync(existingFile)) {
       // Refresh timestamp to prevent premature deletion
       const now = Date.now();
       fs.utimesSync(existingFile, now, now);
-      return `history/${meta[uniqueId]}`;
+      return `history/${existingName}`;
     }
     // File missing on disk, clear from meta and re-save
     delete meta[uniqueId];
+    _saveMeta(metaFile, meta, userId);
   }
 
 
@@ -83,7 +161,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   let cleanName = sanitizeFilename(originalName || 'file');
   cleanName = cleanName.replace(/^\.+/, ''); // Strip leading dots
   if (!cleanName) cleanName = 'file';
-  
+
   const extMatch = cleanName.match(/\.([^.]+)$/);
   const ext = extMatch ? `.${extMatch[1]}` : '';
   const baseName = extMatch ? cleanName.slice(0, -ext.length) : cleanName;
@@ -92,7 +170,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   let finalName = cleanName;
   let counter = 1;
   const existingValues = new Set(Object.values(meta));
-  
+
   while (existingValues.has(finalName) || fs.existsSync(path.join(historyDir, finalName))) {
     finalName = `${baseName}(${counter})${ext}`;
     counter++;
@@ -102,8 +180,8 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   const filePath = path.join(historyDir, finalName);
   try {
     fs.writeFileSync(filePath, buffer);
-    meta[uniqueId] = finalName;
-    fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8');
+    meta[uniqueId] = { filename: finalName };
+    _saveMeta(metaFile, meta, userId);
     return `history/${finalName}`;
   } catch (err) {
     log.error(`Failed to save history file for user ${userId}: ${err.message}`);
@@ -119,17 +197,12 @@ function deleteFileFromHistory(userId, filename) {
   const filePath = path.join(historyDir, filename);
 
   // Load meta
-  let meta = {};
-  try {
-    if (fs.existsSync(metaFile)) {
-      meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
-    }
-  } catch {}
+  const meta = _loadMeta(metaFile, userId);
 
   // Find ID by filename
   let idToRemove = null;
-  for (const [id, name] of Object.entries(meta)) {
-    if (name === filename) {
+  for (const [id, entry] of Object.entries(meta)) {
+    if (_getEntryFilename(entry) === filename) {
       idToRemove = id;
       break;
     }
@@ -137,9 +210,7 @@ function deleteFileFromHistory(userId, filename) {
 
   if (idToRemove) {
     delete meta[idToRemove];
-    try {
-      fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8');
-    } catch {}
+    _saveMeta(metaFile, meta, userId);
   }
 
   if (fs.existsSync(filePath)) {
@@ -225,8 +296,9 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
     try {
       const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
       let changed = false;
-      for (const [id, name] of Object.entries(meta)) {
-        if (!fs.existsSync(path.join(historyDir, name))) {
+      for (const [id, entry] of Object.entries(meta)) {
+        const name = _getEntryFilename(entry);
+        if (!name || !fs.existsSync(path.join(historyDir, name))) {
           delete meta[id];
           changed = true;
         }
@@ -326,6 +398,8 @@ module.exports = {
   syncFileToHistory,
   copyFromHistory,
   getUserHistoryPaths,
+  getStoredHistoryMediaDescription,
+  storeHistoryMediaDescription,
   pruneHistory,
   collectReferencedHistoryFilenames,
   DISCORD_MAX_AGE_MS,

@@ -24,7 +24,7 @@ function _isSystemMessage(body) {
 const { isSupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const { normalizeMarkdown } = require('../../utils/text');
-const { syncFileToHistory } = require('../../utils/historySync');
+const { syncFileToHistory, getStoredHistoryMediaDescription } = require('../../utils/historySync');
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 
 const _MIME_TO_EXT = {
@@ -149,8 +149,11 @@ async function buildWhatsAppHistory(chat, platform, userId) {
       if (isSupportedMedia(mediaType)) {
         if (isAudioType) {
           const cachedText = retrieveVoiceText(chat.id._serialized, msg.timestamp * 1000);
+          const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'audio');
           if (cachedText) {
             textContent = `${textContent} ${tag} <Transcription>${cachedText}</Transcription>`.trim();
+          } else if (cachedDescription) {
+            textContent = `${textContent} ${tag} <Description kind="audio">${cachedDescription}</Description>`.trim();
           } else if (isGemiX) {
             textContent = `${textContent} ${tag} (transcription unavailable)`.trim();
           } else if (duration > MAX_AUDIO_DURATION_S) {
@@ -158,8 +161,15 @@ async function buildWhatsAppHistory(chat, platform, userId) {
           } else {
             textContent = `${textContent} ${tag}`.trim();
           }
-        } else if (mediaType === 'video' && duration > MAX_VIDEO_DURATION_S) {
-          textContent = `${textContent} ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)`.trim();
+        } else if (mediaType === 'video') {
+          const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'video');
+          if (cachedDescription) {
+            textContent = `${textContent} ${tag} <Description kind="video">${cachedDescription}</Description>`.trim();
+          } else if (duration > MAX_VIDEO_DURATION_S) {
+            textContent = `${textContent} ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)`.trim();
+          } else {
+            textContent = `${textContent} ${tag}`.trim();
+          }
         } else if (mediaType === 'document' && msg._data?.mimetype === 'application/pdf') {
           try {
             const buffer = await fetchBuffer();
@@ -232,8 +242,11 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
       const isVideo = mediaType === 'video';
       if (isAudio) {
         const cachedText = chatId ? retrieveVoiceText(chatId, quoted.timestamp * 1000) : null;
+        const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'audio');
         if (cachedText) {
           prefix = `[In reply to: ${tag} <Transcription>${cachedText}</Transcription>]\n`;
+        } else if (cachedDescription) {
+          prefix = `[In reply to: ${tag} <Description kind="audio">${cachedDescription}</Description>]\n`;
         } else if (duration > MAX_AUDIO_DURATION_S) {
           prefix = `[In reply to: ${tag} (audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s)]\n`;
         } else {
@@ -241,7 +254,10 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
           try {
             const buffer = await fetchBuffer();
             if (buffer) {
-              mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype));
+              mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
+                historyPath: syncedPath,
+                historyUserId: userId,
+              }));
             }
           } catch { }
         }
@@ -249,13 +265,19 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
       }
 
       if (isVideo) {
-        if (duration > MAX_VIDEO_DURATION_S) {
+        const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'video');
+        if (cachedDescription) {
+          prefix = `[In reply to: ${tag} <Description kind="video">${cachedDescription}</Description>]\n`;
+        } else if (duration > MAX_VIDEO_DURATION_S) {
           prefix = `[In reply to: ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)]\n`;
         } else {
           prefix = `[In reply to: ${tag}]\n`;
           try {
             const buffer = await fetchBuffer();
-            if (buffer) mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype));
+            if (buffer) mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
+              historyPath: syncedPath,
+              historyUserId: userId,
+            }));
           } catch { }
         }
         return { prefix, mediaParts };
@@ -287,7 +309,10 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
       try {
         const buffer = await fetchBuffer();
         if (buffer) {
-          mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype));
+          mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
+            historyPath: syncedPath,
+            historyUserId: userId,
+          }));
         }
       } catch { }
       return { prefix, mediaParts };
@@ -442,6 +467,7 @@ async function processCurrentMedia(msg, userId) {
       buffer,
       mimetype,
       filename,
+      syncedPath,
       tag,
     };
   } catch {
@@ -484,7 +510,10 @@ async function buildIncomingContentParts(msg, chatId, userId) {
       const docText = mediaResult.transcription ? `\n<Transcription>\n${mediaResult.transcription}\n</Transcription>` : '';
       textBody = `${mediaResult.tag}${docText} ${textBody}`.trim();
     } else {
-      contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype));
+      contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype, {
+        historyPath: mediaResult.syncedPath,
+        historyUserId: userId,
+      }));
       textBody = `${mediaResult.tag} ${textBody}`.trim();
     }
   } else if (msg.hasMedia) {

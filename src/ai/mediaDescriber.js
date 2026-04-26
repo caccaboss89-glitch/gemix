@@ -9,6 +9,7 @@
 const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, MEDIA_DESCRIBER_MODEL } = require('../config/env');
 const { callModel } = require('./apiClient');
 const { createLogger } = require('../utils/logger');
+const { getStoredHistoryMediaDescription, storeHistoryMediaDescription } = require('../utils/historySync');
 
 const log = createLogger('MediaDescriber');
 
@@ -92,27 +93,46 @@ async function describeMediaInMessages(messages) {
 
   if (targets.length === 0) return messages;
 
+  const pendingTargets = [];
+  for (const target of targets) {
+    const historyPath = typeof target.part?._historyPath === 'string' ? target.part._historyPath : null;
+    const userId = typeof target.part?._historyUserId === 'string' ? target.part._historyUserId : null;
+    const cached = historyPath && userId
+      ? getStoredHistoryMediaDescription(userId, historyPath, target.kind)
+      : null;
+    if (cached) {
+      messages[target.mi].content[target.pi] = { type: 'text', text: `<Description kind="${target.kind}">\n${cached}\n</Description>` };
+    } else {
+      pendingTargets.push(target);
+    }
+  }
+
+  if (pendingTargets.length === 0) {
+    log.info(`   ✅ Reused ${targets.length} cached media description(s)`);
+    return messages;
+  }
+
   if (!MEDIA_DESCRIBER_MODEL) {
     log.warn('   ⚠️ MEDIA_DESCRIBER_MODEL not configured — skipping description');
-    for (const { mi, pi, kind } of targets) {
+    for (const { mi, pi, kind } of pendingTargets) {
       messages[mi].content[pi] = { type: 'text', text: `<Description kind="${kind}">description unavailable (MEDIA_DESCRIBER_MODEL not configured)</Description>` };
     }
     return messages;
   }
 
-  log.info(`🎬 Describing ${targets.length} media part(s) in one batch call (${MEDIA_DESCRIBER_MODEL})…`);
+  log.info(`🎬 Describing ${pendingTargets.length} media part(s) in one batch call (${MEDIA_DESCRIBER_MODEL})…`);
 
   // Build a single user message: interleave MIME-based labels with media parts.
   const userContent = [];
-  for (let i = 0; i < targets.length; i++) {
-    userContent.push({ type: 'text', text: `[Media ${i + 1} — ${targets[i].kind}]` });
-    userContent.push(targets[i].part);
+  for (let i = 0; i < pendingTargets.length; i++) {
+    userContent.push({ type: 'text', text: `[Media ${i + 1} — ${pendingTargets[i].kind}]` });
+    userContent.push(pendingTargets[i].part);
   }
   userContent.push({
     type: 'text',
-    text: targets.length === 1
+    text: pendingTargets.length === 1
       ? 'Describe the media item above.'
-      : `Describe the ${targets.length} media items above in order. Return one description per item.`,
+      : `Describe the ${pendingTargets.length} media items above in order. Return one description per item.`,
   });
 
   const body = {
@@ -121,8 +141,8 @@ async function describeMediaInMessages(messages) {
       { role: 'system', content: DESCRIBER_SYSTEM_PROMPT },
       { role: 'user', content: userContent },
     ],
-    max_tokens: DESCRIBER_MAX_TOKENS * Math.min(targets.length, 3),
-    response_format: _buildDescriptionSchema(targets.length),
+    max_tokens: DESCRIBER_MAX_TOKENS * Math.min(pendingTargets.length, 3),
+    response_format: _buildDescriptionSchema(pendingTargets.length),
   };
 
   let results;
@@ -148,7 +168,7 @@ async function describeMediaInMessages(messages) {
     catch (e) { throw new Error(`Invalid JSON from describer: ${e.message}`); }
 
     const descs = Array.isArray(parsed.descriptions) ? parsed.descriptions : [];
-    results = targets.map((_, i) => {
+    results = pendingTargets.map((_, i) => {
       const d = descs[i];
       return typeof d === 'string' && d.trim()
         ? { success: true, description: d.trim() }
@@ -157,21 +177,25 @@ async function describeMediaInMessages(messages) {
   } catch (err) {
     const errMsg = err.message || String(err);
     log.error(`   ❌ Batch describe failed: ${errMsg}`);
-    results = targets.map(() => ({ success: false, error: errMsg }));
+    results = pendingTargets.map(() => ({ success: false, error: errMsg }));
   }
 
   // Replace in-place so subsequent callAI rounds skip re-description.
-  for (let i = 0; i < targets.length; i++) {
-    const { mi, pi, kind } = targets[i];
+  for (let i = 0; i < pendingTargets.length; i++) {
+    const { mi, pi, kind, part } = pendingTargets[i];
     const r = results[i] || { success: false, error: 'unknown error' };
     const text = r.success
       ? `<Description kind="${kind}">\n${r.description}\n</Description>`
       : `<Description kind="${kind}">description unavailable (${r.error})</Description>`;
     messages[mi].content[pi] = { type: 'text', text };
+    if (r.success && typeof part?._historyPath === 'string' && typeof part?._historyUserId === 'string') {
+      storeHistoryMediaDescription(part._historyUserId, part._historyPath, kind, r.description);
+    }
   }
 
   const ok = results.filter(r => r && r.success).length;
-  log.info(`   ✅ ${ok}/${targets.length} description(s) generated`);
+  const reused = targets.length - pendingTargets.length;
+  log.info(`   ✅ ${ok}/${pendingTargets.length} description(s) generated${reused > 0 ? `, reused ${reused} cached` : ''}`);
   return messages;
 }
 

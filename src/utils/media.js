@@ -67,16 +67,24 @@ async function transcribeDocumentFromContentPart(contentPart) {
  * All media types use image_url with data URI — the MIME type tells the model the actual content type.
  * @param {Buffer} buffer
  * @param {string} mimetype - e.g. 'image/jpeg', 'audio/ogg', 'application/pdf'
+ * @param {object} [opts]
  * @returns {object} Content part for the messages array
  */
-function mediaToContentPart(buffer, mimetype) {
+function mediaToContentPart(buffer, mimetype, opts = {}) {
   // Strip parameters (e.g. 'audio/ogg; codecs=opus' → 'audio/ogg')
   const cleanMime = mimetype.split(';')[0].trim();
   const base64 = buffer.toString('base64');
-  return {
+  const part = {
     type: 'image_url',
     image_url: { url: `data:${cleanMime};base64,${base64}` },
   };
+  if (opts && typeof opts.historyPath === 'string' && opts.historyPath.trim()) {
+    part._historyPath = opts.historyPath.trim();
+  }
+  if (opts && typeof opts.historyUserId === 'string' && opts.historyUserId.trim()) {
+    part._historyUserId = opts.historyUserId.trim();
+  }
+  return part;
 }
 
 async function extractTextFromPdfBuffer(buffer) {

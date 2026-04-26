@@ -10,7 +10,7 @@ const { getMediaDurationSec } = require('../../utils/mediaDuration');
 const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
-const { syncFileToHistory } = require('../../utils/historySync');
+const { syncFileToHistory, getStoredHistoryMediaDescription } = require('../../utils/historySync');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 
 const log = createLogger('DISCORD');
@@ -147,17 +147,20 @@ async function onDiscordMessage(msg) {
             const isAudio = att.contentType?.startsWith('audio/');
             const isPdf = att.contentType === 'application/pdf' || ext === 'pdf';
             const isVideo = att.contentType?.startsWith('video/');
+            const fetchBuffer = async () => Buffer.from(await (await fetch(att.url)).arrayBuffer());
 
             if (isImage || isAudio || isVideo) {
               try {
-                const res = await fetch(att.url);
-                const buffer = Buffer.from(await res.arrayBuffer());
-                quotedMediaParts.push(mediaToContentPart(buffer, att.contentType));
+                const buffer = await fetchBuffer();
+                const syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
+                quotedMediaParts.push(mediaToContentPart(buffer, att.contentType, {
+                  historyPath: syncedPath,
+                  historyUserId: msg.author.id,
+                }));
               } catch { }
             } else if (isPdf) {
               try {
-                const res = await fetch(att.url);
-                const buffer = Buffer.from(await res.arrayBuffer());
+                const buffer = await fetchBuffer();
                 const info = await extractTextFromPdfBuffer(buffer);
                 if (info.success && info.pages <= MAX_DOC_PAGES) {
                   replyPrefix = `[In reply to: ${filetags}]\n\n<Transcription>\n${info.text}\n</Transcription>\n`;
@@ -191,7 +194,10 @@ async function onDiscordMessage(msg) {
         if (dur != null && dur > MAX_VIDEO_DURATION_S) {
           textBody = `${attachmentTag} (video too long: ${Math.round(dur)}s, max ${MAX_VIDEO_DURATION_S}s) ${textBody}`.trim();
         } else {
-          contentParts.push(mediaToContentPart(buffer, att.contentType));
+          contentParts.push(mediaToContentPart(buffer, att.contentType, {
+            historyPath: syncedPath,
+            historyUserId: msg.author.id,
+          }));
           textBody = `${attachmentTag} ${textBody}`.trim();
         }
       } catch {
@@ -204,7 +210,10 @@ async function onDiscordMessage(msg) {
       } else {
         try {
           const buffer = await fetchBuffer();
-          contentParts.push(mediaToContentPart(buffer, att.contentType));
+          contentParts.push(mediaToContentPart(buffer, att.contentType, {
+            historyPath: syncedPath,
+            historyUserId: msg.author.id,
+          }));
           textBody = `${attachmentTag} ${textBody}`.trim();
         } catch {
           textBody = `${attachmentTag} ${textBody}`.trim();
@@ -359,6 +368,7 @@ async function onDiscordMessage(msg) {
 }
 
 async function buildDiscordHistory(channel, starterMessageId) {
+
   const raw = await channel.messages.fetch({ limit: MAX_HISTORY + 5 });
   const messages = [...raw.values()]
     .filter(m => !starterMessageId || m.id !== starterMessageId)
@@ -384,17 +394,25 @@ async function buildDiscordHistory(channel, starterMessageId) {
       const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
       if (isVideo) {
-        // Tag-only in history: the AI re-fetches the video via read_file when it needs the description.
-        textContent = `${textContent} ${attachmentTag}`.trim();
+        const cachedDescription = getStoredHistoryMediaDescription(m.author.id, syncedPath, 'video');
+        if (cachedDescription) {
+          textContent = `${textContent} ${attachmentTag} <Description kind="video">${cachedDescription}</Description>`.trim();
+        } else {
+          textContent = `${textContent} ${attachmentTag}`.trim();
+        }
       } else if (isAudio) {
         const cachedText = retrieveVoiceText(channel.id, m.createdAt.getTime());
+        const cachedDescription = getStoredHistoryMediaDescription(m.author.id, syncedPath, 'audio');
         if (cachedText) {
           textContent = `${textContent} ${attachmentTag} <Transcription>${cachedText}</Transcription>`.trim();
+        } else if (cachedDescription) {
+          textContent = `${textContent} ${attachmentTag} <Description kind="audio">${cachedDescription}</Description>`.trim();
         } else if (isBot) {
           textContent = `${textContent} ${attachmentTag} (transcription unavailable)`.trim();
         } else {
           textContent = `${textContent} ${attachmentTag}`.trim();
         }
+
       } else if (isDoc && att.contentType === 'application/pdf') {
         try {
           const buffer = await fetchBuffer();
