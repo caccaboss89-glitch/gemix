@@ -254,7 +254,7 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
   }
   // permanent/ is managed via copy tools, not direct writes.
   if (c.zone === 'permanent') {
-    return { ok: false, reason: 'permanent/ can only be populated via the copy_to_permanent tool.' };
+    return { ok: false, reason: 'permanent/ can only be populated via `gemix-project copy-to-permanent <history_filename>` (run via bash).' };
   }
   // searched_images/ is populated only by the image_search tool with save_to_disk.
   if (c.zone === 'searched_images') {
@@ -265,7 +265,7 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
       return { ok: false, reason: `Unknown project subdir "${c.subdir}". Allowed: ${FIXED_PROJECT_SUBDIRS.join(', ')}.` };
     }
     if (!opts.currentProject) {
-      return { ok: false, reason: 'No project is currently selected. Use create_project or switch_project first.' };
+      return { ok: false, reason: 'No project is currently selected. Run `gemix-project create` (new) or `gemix-project switch <slug>` (existing) via bash first.' };
     }
     if (c.projectName !== opts.currentProject) {
       return { ok: false, reason: `You can only write inside the currently selected project ("${opts.currentProject}"), not "${c.projectName}".` };

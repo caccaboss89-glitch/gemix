@@ -143,7 +143,7 @@ async function runInProjectSandbox({
   const projectName = getCurrentProject(userCtx);
   if (!projectName) {
     return {
-      error: `No project is currently selected. Call create_project (for a new task) or switch_project before ${toolLabel}.`,
+      error: `No project is currently selected. Run \`gemix-project create\` (new task) or \`gemix-project switch <slug>\` (existing) via bash before ${toolLabel}.`,
     };
   }
   if (!projectExists(userCtx, projectName)) {
@@ -157,7 +157,7 @@ async function runInProjectSandbox({
   const usedBefore = userTotalBytes(userCtx);
   if (usedBefore >= quotaBytes) {
     return {
-      error: `Your personal cloud is full (${(usedBefore / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB used across all projects + searched_images). Free space with cleanup_project (per-folder) or delete_project (whole project) and ask the user which artefacts to keep.`,
+      error: `Your personal cloud is full (${(usedBefore / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB used across all projects + searched_images). Free space via \`gemix-project cleanup\` (per-folder) or \`gemix-project delete --confirmed\` (whole project) via bash, and ask the user which artefacts to keep.`,
     };
   }
 
@@ -270,10 +270,10 @@ async function runInProjectSandbox({
   let quotaWarning = null;
   const usedAfter = userTotalBytes(userCtx);
   if (usedAfter >= quotaBytes) {
-    quotaWarning = `Personal cloud is now FULL (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Subsequent code_execution / write_file calls will fail until you cleanup_project or delete_project.`;
+    quotaWarning = `Personal cloud is now FULL (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Subsequent code_execution / write_file calls will fail until you run \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` via bash.`;
   } else if (usedAfter >= quotaBytes * 0.9) {
     const pct = Math.round((usedAfter / quotaBytes) * 100);
-    quotaWarning = `Personal cloud is ${pct}% full (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Consider cleanup_project / delete_project before more file-producing calls.`;
+    quotaWarning = `Personal cloud is ${pct}% full (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Consider \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` via bash before more file-producing calls.`;
   }
 
   return {

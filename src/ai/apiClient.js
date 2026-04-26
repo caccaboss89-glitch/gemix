@@ -99,6 +99,26 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
   }
 }
 
+function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
+  try {
+    ensureLogDir();
+    const now = new Date().toISOString();
+    const responseLogFile = _getLogFilePath('api-response', now);
+    const entry = {
+      timestamp: now,
+      model: modelName,
+      apiUrl,
+      responseBody,
+      ...extra,
+    };
+    fs.writeFileSync(responseLogFile, JSON.stringify(entry, null, 2));
+    return responseLogFile;
+  } catch (err) {
+    log.warn(`Failed to write API response log: ${err.message}`);
+    return null;
+  }
+}
+
 /**
  * Unified API client with retry and timeout logic.
  * @param {string} modelName - Model name for logging (e.g., 'Gemini', 'Qwen')
@@ -177,16 +197,7 @@ async function callModel(modelName, apiUrl, body, apiKey) {
   }
 
   try {
-    ensureLogDir();
-    const now = new Date().toISOString();
-    const responseLogFile = _getLogFilePath('api-response', now);
-    const entry = {
-      timestamp: now,
-      model: modelName,
-      apiUrl,
-      responseBody: data,
-    };
-    fs.writeFileSync(responseLogFile, JSON.stringify(entry, null, 2));
+    logApiResponse(modelName, apiUrl, data);
   } catch (err) {
     log.warn(`Failed to write API response log: ${err.message}`);
   }
@@ -206,4 +217,4 @@ async function callModel(modelName, apiUrl, body, apiKey) {
   return data.choices[0].message;
 }
 
-module.exports = { callModel };
+module.exports = { callModel, logApiRequest, logApiResponse };

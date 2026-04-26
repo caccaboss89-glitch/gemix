@@ -1,10 +1,11 @@
 // src/tools/attachFile.js
 // Register an existing file from the user's personal cloud as an attachment
-// for the current response. Cross-platform:
+// for the current response. Files are AUTO-DELIVERED in the current chat.
+// Cross-platform:
 //   - Discord: history/ only (Discord client auto-delivers responseCtx.attachments).
-//   - WhatsApp: history/, permanent/, searched_images/, projects/<*>/{figures,temp,output,code}/...
-//     The AI must still call send_whatsapp_message / send_email with
-//     includeAttachments=true to actually ship them.
+//   - WhatsApp: permanent/, searched_images/, projects/<*>/{figures,temp,output,code}/...
+//     Files are auto-included in the current chat response (no send_whatsapp_message needed).
+//     Use send_whatsapp_message / send_email ONLY to send to OTHER recipients.
 
 const fs = require('fs');
 const path = require('path');
@@ -109,7 +110,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
     name: path.basename(abs),
     path: rawPath,
     size: stat.size,
-    message_for_ai: 'File buffered for delivery. On WhatsApp call send_whatsapp_message / send_email with includeAttachments=true. On Discord it will be delivered automatically with the next reply.',
+    message_for_ai: 'File buffered for delivery in the current chat (auto-delivered with your reply). To send to other recipients, use send_whatsapp_message / send_email with includeAttachments=true.',
   };
 }
 

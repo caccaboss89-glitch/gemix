@@ -1,5 +1,6 @@
 // src/tools/browsePage.js
-const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, BROWSE_PAGE_MODEL } = require('../config/env');
+const { BROWSE_PAGE_MODEL } = require('../config/env');
+const { summarizePage, MAX_RAW_CHARS } = require('../ai/pageSummarizer');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { createLogger } = require('../utils/logger');
 
@@ -7,10 +8,7 @@ const log = createLogger('BrowsePage');
 
 // ── Constants ──
 
-const MAX_RAW_CHARS = 60_000;        // max chars extracted from page before summarization
-const MAX_SUMMARY_TOKENS = 4096;     // max tokens for the summarizer response
 const FETCH_TIMEOUT_MS = 30_000;     // generous timeout for slow pages
-const SUMMARIZER_MODEL = BROWSE_PAGE_MODEL;
 
 // ── HTML → Text extraction ──
 
@@ -98,139 +96,6 @@ async function _fetchPage(url) {
   };
 }
 
-// ── LLM Summarizer ──
-
-/**
- * Summarize page content using a lightweight LLM via OpenRouter.
- * @param {string} pageText - Extracted text content from the page
- * @param {string} instructions - User instructions for what to extract/analyze
- * @param {string} url - Original URL (for context)
- * @param {string} [pageTitle] - Page title if available
- * @returns {Promise<string>} Summarized content
- */
-const PAGE_SUMMARY_SCHEMA = {
-  type: 'json_schema',
-  json_schema: {
-    name: 'page_summary',
-    strict: true,
-    schema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Concise page title or main subject (a few words).' },
-        summary: { type: 'string', description: 'Comprehensive narrative summary in Italian, following the user instructions. Multi-paragraph if needed.' },
-        key_points: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '3-10 short bullet points capturing the most important facts/data.',
-        },
-        relevant_sections: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Direct excerpts/quotes from the page that best support the summary. Empty array if not applicable.',
-        },
-      },
-      required: ['title', 'summary', 'key_points', 'relevant_sections'],
-      additionalProperties: false,
-    },
-  },
-};
-
-function _renderSummaryMarkdown(parsed) {
-  const lines = [];
-  if (parsed.title) lines.push(`# ${parsed.title}`, '');
-  if (parsed.summary) lines.push(parsed.summary, '');
-  if (Array.isArray(parsed.key_points) && parsed.key_points.length > 0) {
-    lines.push('## Key points');
-    for (const k of parsed.key_points) lines.push(`- ${k}`);
-    lines.push('');
-  }
-  if (Array.isArray(parsed.relevant_sections) && parsed.relevant_sections.length > 0) {
-    lines.push('## Relevant excerpts');
-    for (const s of parsed.relevant_sections) lines.push(`> ${s.replace(/\n+/g, ' ')}`);
-    lines.push('');
-  }
-  return lines.join('\n').trim();
-}
-
-async function _summarizeWithLLM(pageText, instructions, url, pageTitle = null) {
-  const systemPrompt = [
-    'You analyze raw text extracted from a web page and return a strict JSON object that fits the page_summary schema.',
-    'Reply in Italian. Follow the user instructions precisely; never fabricate information.',
-    'If the page is a login page, empty, paywalled or inaccessible, say so explicitly inside `summary` and return key_points=[] and relevant_sections=[].',
-    'If the page content was truncated upstream, mention it inside `summary`.',
-    'relevant_sections must contain verbatim short excerpts from the page (1-3 sentences each), not paraphrases.',
-  ].join(' ');
-
-  let content = pageText;
-  let truncated = false;
-  if (content.length > MAX_RAW_CHARS) {
-    content = content.substring(0, MAX_RAW_CHARS);
-    truncated = true;
-  }
-
-  const userPrompt = [
-    `**URL:** ${url}`,
-    pageTitle ? `**Page title:** ${pageTitle}` : null,
-    `**Content length:** ${pageText.length} characters${truncated ? ' (truncated to ' + MAX_RAW_CHARS + ')' : ''}`,
-    '',
-    '--- PAGE CONTENT ---',
-    content,
-    '--- END PAGE CONTENT ---',
-    '',
-    `**Instructions:** ${instructions}`,
-  ].filter(Boolean).join('\n');
-
-  const body = {
-    model: SUMMARIZER_MODEL,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    max_tokens: MAX_SUMMARY_TOKENS,
-    response_format: PAGE_SUMMARY_SCHEMA,
-  };
-
-  log.info(`   🧠 Summarizing with ${SUMMARIZER_MODEL}...`);
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60_000);
-
-  try {
-    const res = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`Summarizer HTTP ${res.status}: ${errBody.substring(0, 200)}`);
-    }
-
-    const data = await res.json();
-    const raw = data.choices?.[0]?.message?.content;
-    if (!raw) throw new Error('Summarizer returned empty response');
-
-    let parsed;
-    try { parsed = JSON.parse(raw); }
-    catch (e) { throw new Error(`Summarizer returned invalid JSON: ${e.message}`); }
-
-    if (!parsed || typeof parsed.summary !== 'string' || !Array.isArray(parsed.key_points)) {
-      throw new Error('Summarizer JSON missing required fields');
-    }
-
-    const md = _renderSummaryMarkdown(parsed);
-    log.info(`   ✅ Summary generated (${md.length} chars, ${parsed.key_points.length} key_points)`);
-    return md;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // ── Main export ──
 
 /**
@@ -264,7 +129,7 @@ async function browsePage(url, instructions, mode = 'summary') {
   }
 
   // ── Validate model ──
-  if (!SUMMARIZER_MODEL) {
+  if (!BROWSE_PAGE_MODEL) {
     return JSON.stringify({ success: false, error: 'BROWSE_PAGE_MODEL is not defined in the environment configuration.' });
   }
 
@@ -361,11 +226,11 @@ async function browsePage(url, instructions, mode = 'summary') {
   // ── Summary mode: LLM-powered extraction ──
   if (!instructions || typeof instructions !== 'string' || instructions.trim().length < 3) {
     // No instructions provided: use a sensible default
-    instructions = 'Provide a comprehensive, structured summary of the page content. Include the main topic, key sections, important details, and any notable data or conclusions.';
+    instructions = 'Summarize the page structure, main points, important details, and notable data.';
   }
 
   try {
-    const summary = await _summarizeWithLLM(pageText, instructions.trim(), finalUrl, pageTitle);
+    const summary = await summarizePage(pageText, instructions.trim(), finalUrl, pageTitle);
     const isTruncated = pageText.length > MAX_RAW_CHARS;
 
     const header = [

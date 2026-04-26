@@ -16,15 +16,10 @@ const DESCRIBER_MAX_TOKENS = 2048;
 const DESCRIBER_BATCH_TIMEOUT_MS = 180_000;
 
 const DESCRIBER_SYSTEM_PROMPT = [
-  'You are a multimedia file describer (audio or video).',
-  'Analyze the provided file(s) and produce a detailed description IN ITALIAN for each one, covering as applicable:',
-  '- Full transcription of all spoken content (distinguish speakers if identifiable). KEEP TRANSCRIPTIONS IN THEIR ORIGINAL LANGUAGE.',
-  '- General context: what is happening / what the file is about.',
-  '- Music: presence, genre, instruments, mood; if it is a song indicate title/artist only if clearly recognizable.',
-  '- Non-vocal sounds: describe them explicitly (e.g. burp, applause, clapping, laughter, cough, background noise, urban environment…). Do NOT transcribe them as generic onomatopoeia like "Uh".',
-  '- For VIDEOS: visual description — visible people (approximate height, apparent ethnicity, clothing, expressions, actions), objects, setting/location, camera movements, transitions, any on-screen text.',
-  '- For AUDIO: recording quality and emotional tone if relevant.',
-  'Be complete but concise; no preamble or courtesy phrases. Do not invent details that cannot be seen or heard.',
+  'Describe each provided audio/video file in Italian.',
+  'Include, when relevant: spoken transcript (keep spoken words in their original language and separate speakers if recognizable), overall context, music, explicit non-speech sounds, and for video the visible scene/people/actions/objects/text; for audio, recording quality and emotional tone.',
+  'Mention song title/artist only if clearly recognizable.',
+  'Be detailed but concise, with no preamble, and never invent unseen or unheard details.',
 ].join('\n');
 
 function _buildDescriptionSchema(expectedCount) {
@@ -116,8 +111,8 @@ async function describeMediaInMessages(messages) {
   userContent.push({
     type: 'text',
     text: targets.length === 1
-      ? 'Describe the media file above following the rules.'
-      : `Describe each of the ${targets.length} media files above (in order) following the rules. Return one description per file.`,
+      ? 'Describe the media item above.'
+      : `Describe the ${targets.length} media items above in order. Return one description per item.`,
   });
 
   const body = {

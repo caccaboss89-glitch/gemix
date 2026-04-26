@@ -1,6 +1,8 @@
 // src/tools/projects.js
-// Project-management tools: list / create / switch / delete / cleanup,
+// Project-management functions: list / create / switch / delete / cleanup,
 // plus copy helpers from history and searched_images into the project space.
+// These are NOT exposed as AI-callable tools anymore — they are invoked by
+// gemixProjectCmds.js when the AI runs `gemix-project <subcmd>` via bash.
 
 const fs = require('fs');
 const path = require('path');
@@ -54,7 +56,7 @@ function _guardPlatform(userCtx) {
 // ── Tools ──
 
 /**
- * list_projects → returns the list of projects with description + current.
+ * Invoked by `gemix-project list` — returns the list of projects with description + current.
  */
 function listProjectsTool(userCtx) {
   const guard = _guardPlatform(userCtx);
@@ -78,7 +80,7 @@ function listProjectsTool(userCtx) {
 }
 
 /**
- * create_project args: { name, description, user_request, strategy }
+ * Invoked by `gemix-project create '{...}'`. Args: { name, description, user_request, strategy }.
  * - Validates slug, uniqueness, max count.
  * - Creates scaffold + README.md + .project.json.
  * - Sets as current project.
@@ -100,12 +102,12 @@ function createProjectTool(args, userCtx) {
   if (existing.length >= MAX_PROJECTS_PER_USER) {
     return {
       success: false,
-      error: `Project limit reached (${MAX_PROJECTS_PER_USER}). Ask the user which existing project to delete, then call delete_project before creating a new one.`,
+      error: `Project limit reached (${MAX_PROJECTS_PER_USER}). Ask the user which existing project to delete, then run \`gemix-project delete <slug> --confirmed\` via bash before creating a new one.`,
       existing_projects: existing.map(p => ({ name: p.name, description: p.description })),
     };
   }
   if (projectExists(userCtx, slug)) {
-    return _err(`A project named "${slug}" already exists. Choose a different name or use switch_project.`);
+    return _err(`A project named "${slug}" already exists. Choose a different name or run \`gemix-project switch ${slug}\` via bash.`);
   }
 
   ensureProjectSkeleton(userCtx, slug);
@@ -153,7 +155,7 @@ function createProjectTool(args, userCtx) {
 }
 
 /**
- * switch_project args: { name }
+ * Invoked by `gemix-project switch <slug>`. Args: { name }.
  */
 function switchProjectTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
@@ -165,7 +167,7 @@ function switchProjectTool(args, userCtx) {
   if (!slug || !projectExists(userCtx, slug)) {
     return {
       success: false,
-      error: `Project "${name}" not found. Use list_projects to see available projects.`,
+      error: `Project "${name}" not found. Run \`gemix-project list\` via bash to see available projects.`,
     };
   }
 
@@ -179,7 +181,7 @@ function switchProjectTool(args, userCtx) {
 }
 
 /**
- * delete_project args: { name, user_confirmed: true }
+ * Invoked by `gemix-project delete <slug> --confirmed`. Args: { name, user_confirmed: true }.
  * Refuses without explicit user_confirmed=true flag.
  */
 function deleteProjectTool(args, userCtx) {
@@ -216,7 +218,7 @@ function deleteProjectTool(args, userCtx) {
 }
 
 /**
- * cleanup_project args: { name?, subdirs: ["temp","figures","output","code"] }
+ * Invoked by `gemix-project cleanup [<slug>] <subdir>...`. Args: { name?, subdirs: ["temp","figures","output","code"] }.
  * Deletes the CONTENTS of the specified subdirs (keeps the folders).
  */
 function cleanupProjectTool(args, userCtx) {
@@ -258,7 +260,7 @@ function cleanupProjectTool(args, userCtx) {
 }
 
 /**
- * copy_to_permanent args: { history_filename }
+ * Invoked by `gemix-project copy-to-permanent <history_filename>`. Args: { history_filename }.
  * Copies a file from history/ to permanent/ (never moves).
  */
 function copyToPermanentTool(args, userCtx) {
@@ -283,7 +285,8 @@ function copyToPermanentTool(args, userCtx) {
 }
 
 /**
- * copy_to_project args: { source, subdir?: 'figures'|'temp'|'output'|'code' }
+ * Invoked by `gemix-project copy-to-project <source> [<subdir>]`.
+ * Args: { source, subdir?: 'figures'|'temp'|'output'|'code' }.
  * Source may be "history/<file>" or "searched_images/<file>". Default subdir = figures.
  * Writes into the currently selected project.
  */
@@ -298,7 +301,7 @@ function copyToProjectTool(args, userCtx) {
   }
 
   const current = getCurrentProject(userCtx);
-  if (!current) return _err('No project is currently selected. Use create_project or switch_project first.');
+  if (!current) return _err('No project is currently selected. Run `gemix-project create` (new) or `gemix-project switch <slug>` (existing) via bash first.');
 
   // Source must be read-allowed and live in history/ or searched_images/
   const srcCheck = isPathAllowed(userCtx, source, { op: 'read' });
@@ -312,7 +315,7 @@ function copyToProjectTool(args, userCtx) {
 
   // Per-user quota check (aggregate of projects/ + searched_images/)
   if (userTotalBytes(userCtx) >= userQuotaBytes()) {
-    return _err(`Your personal cloud is full (${MAX_USER_TOTAL_MB} MB). Free space with cleanup_project / delete_project before copying more files.`);
+    return _err(`Your personal cloud is full (${MAX_USER_TOTAL_MB} MB). Free space with \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` via bash before copying more files.`);
   }
 
   ensureProjectSkeleton(userCtx, current);

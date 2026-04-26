@@ -33,13 +33,13 @@ module.exports = {
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 8192,
   MAX_TOOL_ROUNDS: 10,
-  MAX_TOOL_ROUNDS_AGENTIC: 15,
+  MAX_TOOL_ROUNDS_AGENTIC: 30,
 
   // Agentic cloud / projects
   MAX_PROJECTS_PER_USER: 10,
   // Total user disk quota (sum of projects/ + searched_images/). The AI is
   // responsible for distributing this budget across its projects (and using
-  // cleanup_project / delete_project when it runs out).
+  // `gemix-project cleanup` / `gemix-project delete --confirmed` when it runs out).
   MAX_USER_TOTAL_MB: 1024,
   MAX_PROJECT_NAME_LEN: 40,
   PROJECT_STATE_LOCK_TTL_MS: 5 * 60 * 1000,

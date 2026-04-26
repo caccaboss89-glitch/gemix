@@ -9,6 +9,8 @@
 // behaves intuitively.
 
 const { runInProjectSandbox } = require('../sandbox/projectRun');
+const { logToolExecution } = require('../utils/executionLogger');
+const { handleGemixProjectCmd, isGemixProjectCmd } = require('./gemixProjectCmds');
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -63,6 +65,24 @@ async function bashTool(args, userCtx, responseCtx) {
     return { success: false, error: `Command too long (${command.length} chars, max ${MAX_CMD_LEN}).` };
   }
 
+  // ── Intercept gemix-project commands (no sandbox needed) ──────────────────
+  if (isGemixProjectCmd(command)) {
+    const result = handleGemixProjectCmd(command, userCtx);
+    logToolExecution({
+      tool: 'bash/gemix-project',
+      input: { command },
+      output: result,
+      meta: {
+        user: {
+          id: userCtx.userId || null,
+          platform: userCtx.platform || null,
+          chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null,
+        },
+      },
+    });
+    return result;
+  }
+
   let timeoutMs = Number.isFinite(args.timeout_ms) ? Math.floor(args.timeout_ms) : DEFAULT_TIMEOUT_MS;
   if (timeoutMs <= 0) timeoutMs = DEFAULT_TIMEOUT_MS;
   if (timeoutMs > MAX_TIMEOUT_MS) timeoutMs = MAX_TIMEOUT_MS;
@@ -85,16 +105,45 @@ async function bashTool(args, userCtx, responseCtx) {
     autoAttach: true,
   });
 
-  if (result.error) return { success: false, error: result.error };
+  if (result.error) {
+    logToolExecution({
+      tool: 'bash',
+      input: { command, timeout_ms: timeoutMs },
+      output: { success: false, error: result.error },
+      meta: {
+        user: {
+          id: userCtx.userId || null,
+          platform: userCtx.platform || null,
+          chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null,
+        },
+      },
+    });
+    return { success: false, error: result.error };
+  }
 
   const k = result.kernelResult;
   if (k.status !== 'ok') {
-    return {
+    const errorOut = {
       success: false,
       error: k.error || 'bash failed inside sandbox.',
       stderr: k.stderr || '',
       traceback: k.traceback || null,
     };
+    logToolExecution({
+      tool: 'bash',
+      input: { command, timeout_ms: timeoutMs },
+      output: errorOut,
+      meta: {
+        project: result.projectName,
+        duration_ms: result.durationMs,
+        user: {
+          id: userCtx.userId || null,
+          platform: userCtx.platform || null,
+          chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null,
+        },
+      },
+    });
+    return errorOut;
   }
 
   // Last JSON line carries rc/stdout/stderr/cwd; everything before is noise.
@@ -106,7 +155,22 @@ async function bashTool(args, userCtx, responseCtx) {
     try { report = JSON.parse(ln); break; } catch { /* */ }
   }
   if (!report) {
-    return { success: false, error: 'bash: could not parse sandbox report.', stdout: k.stdout || '' };
+    const parseError = { success: false, error: 'bash: could not parse sandbox report.', stdout: k.stdout || '' };
+    logToolExecution({
+      tool: 'bash',
+      input: { command, timeout_ms: timeoutMs },
+      output: parseError,
+      meta: {
+        project: result.projectName,
+        duration_ms: result.durationMs,
+        user: {
+          id: userCtx.userId || null,
+          platform: userCtx.platform || null,
+          chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null,
+        },
+      },
+    });
+    return parseError;
   }
 
   const out = {
@@ -120,6 +184,20 @@ async function bashTool(args, userCtx, responseCtx) {
   if (result.diff.newFiles.length > 0) out.new_files = result.diff.newFiles;
   if (result.diff.modifiedFiles.length > 0) out.modified_files = result.diff.modifiedFiles;
   if (result.quotaWarning) out.quota_warning = result.quotaWarning;
+  logToolExecution({
+    tool: 'bash',
+    input: { command, timeout_ms: timeoutMs },
+    output: out,
+    meta: {
+      project: result.projectName,
+      duration_ms: result.durationMs,
+      user: {
+        id: userCtx.userId || null,
+        platform: userCtx.platform || null,
+        chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null,
+      },
+    },
+  });
   return out;
 }
 

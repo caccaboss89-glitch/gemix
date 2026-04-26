@@ -8,6 +8,7 @@
 // can share the exact same pipeline.
 
 const { runInProjectSandbox } = require('../sandbox/projectRun');
+const { logToolExecution } = require('../utils/executionLogger');
 
 function _formatResult({ kernelResult, diff, durationMs, quotaWarning }) {
   const out = {
@@ -65,8 +66,38 @@ async function codeExecutionTool(args, userCtx, responseCtx) {
     autoAttach: true,
   });
 
-  if (result.error) return { success: false, error: result.error };
-  return _formatResult(result);
+  if (result.error) {
+    logToolExecution({
+      tool: 'code_execution',
+      input: { code, timeout_ms: args.timeout_ms },
+      output: { success: false, error: result.error },
+      meta: {
+        user: {
+          id: userCtx.userId || null,
+          platform: userCtx.platform || null,
+          chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null,
+        },
+      },
+    });
+    return { success: false, error: result.error };
+  }
+
+  const formatted = _formatResult(result);
+  logToolExecution({
+    tool: 'code_execution',
+    input: { code, timeout_ms: args.timeout_ms },
+    output: formatted,
+    meta: {
+      project: result.projectName,
+      duration_ms: result.durationMs,
+      user: {
+        id: userCtx.userId || null,
+        platform: userCtx.platform || null,
+        chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null,
+      },
+    },
+  });
+  return formatted;
 }
 
 module.exports = { codeExecutionTool };

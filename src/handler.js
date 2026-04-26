@@ -27,11 +27,9 @@ const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
 // MAX_TOOL_ROUNDS to MAX_TOOL_ROUNDS_AGENTIC so multi-step pipelines
-// (create_project → code_execution → … → send_whatsapp_message) have room.
+// (gemix-project create via bash → code_execution → … → send_whatsapp_message) have room.
 const AGENTIC_TOOL_NAMES = new Set([
   'code_execution', 'write_file', 'edit_file', 'bash',
-  'create_project', 'switch_project', 'delete_project', 'cleanup_project',
-  'copy_to_permanent', 'copy_to_project',
 ]);
 
 const log = createLogger('Handler');

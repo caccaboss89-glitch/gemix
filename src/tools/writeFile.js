@@ -74,7 +74,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
 
   const currentProject = getCurrentProject(userCtx);
   if (!currentProject) {
-    return { success: false, error: 'No project is currently selected. Call create_project or switch_project first.' };
+    return { success: false, error: 'No project is currently selected. Run `gemix-project create` (new project) or `gemix-project switch <slug>` (existing) via bash first.' };
   }
 
   // Path authorization (centralised — same rules as every other write tool).
