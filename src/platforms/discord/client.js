@@ -7,10 +7,9 @@ const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
 const { mediaToContentPart, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
 const { getMediaDurationSec } = require('../../utils/mediaDuration');
-const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
-const { syncFileToHistory, getStoredHistoryMediaDescription } = require('../../utils/historySync');
+const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 
 const log = createLogger('DISCORD');
@@ -51,7 +50,6 @@ function initDiscord() {
 
   discordClient.login(BOT_TOKEN).catch(err => {
     log.error('❌ Discord login failed:', err.message);
-    process.exit(1);
   });
   return discordClient;
 }
@@ -94,6 +92,16 @@ function splitDiscordMessage(text, maxLen = 2000) {
   return chunks;
 }
 
+function createAttachmentBufferFetcher(att) {
+  let bufferPromise = null;
+  return async () => {
+    if (!bufferPromise) {
+      bufferPromise = (async () => Buffer.from(await (await fetch(att.url)).arrayBuffer()))();
+    }
+    return bufferPromise;
+  };
+}
+
 async function onDiscordMessage(msg) {
   if (msg.author.id === discordClient.user.id) return;
   if (msg.author.bot) return;
@@ -123,7 +131,7 @@ async function onDiscordMessage(msg) {
     discordNickname: guildMember?.nickname,
   });
 
-  const history = await buildDiscordHistory(channel, starterMessage?.id);
+  const history = await buildDiscordHistory(channel, starterMessage?.id, msg.author.id);
 
   const contentParts = [];
   let textBody = msg.content || '';
@@ -147,17 +155,58 @@ async function onDiscordMessage(msg) {
             const isAudio = att.contentType?.startsWith('audio/');
             const isPdf = att.contentType === 'application/pdf' || ext === 'pdf';
             const isVideo = att.contentType?.startsWith('video/');
-            const fetchBuffer = async () => Buffer.from(await (await fetch(att.url)).arrayBuffer());
+            const fetchBuffer = createAttachmentBufferFetcher(att);
+            const syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
+            const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
-            if (isImage || isAudio || isVideo) {
+            if (isImage) {
               try {
                 const buffer = await fetchBuffer();
-                const syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
+
                 quotedMediaParts.push(mediaToContentPart(buffer, att.contentType, {
                   historyPath: syncedPath,
                   historyUserId: msg.author.id,
                 }));
               } catch { }
+            } else if (isAudio) {
+              const storedVoiceText = getStoredHistoryVoiceTranscription(msg.author.id, syncedPath);
+              const cachedText = storedVoiceText || retrieveRecentVoiceText(channel.id, quotedMsg.createdAt?.getTime?.());
+              if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(msg.author.id, syncedPath, cachedText);
+              const cachedDescription = getStoredHistoryMediaDescription(msg.author.id, syncedPath, 'audio');
+              const audioDuration = Number(att.duration || 0);
+              if (cachedText) {
+                replyPrefix = `[In reply to: ${attachmentTag} <Transcription>${cachedText}</Transcription>]\n`;
+              } else if (cachedDescription) {
+                replyPrefix = `[In reply to: ${attachmentTag} <Description kind="audio">${cachedDescription}</Description>]\n`;
+              } else if (audioDuration > MAX_AUDIO_DURATION_S) {
+                replyPrefix = `[In reply to: ${attachmentTag} (audio too long: ${audioDuration}s, max ${MAX_AUDIO_DURATION_S}s)]\n`;
+              } else {
+                try {
+                  const buffer = await fetchBuffer();
+                  quotedMediaParts.push(mediaToContentPart(buffer, att.contentType, {
+                    historyPath: syncedPath,
+                    historyUserId: msg.author.id,
+                  }));
+                } catch { }
+              }
+            } else if (isVideo) {
+              const cachedDescription = getStoredHistoryMediaDescription(msg.author.id, syncedPath, 'video');
+              if (cachedDescription) {
+                replyPrefix = `[In reply to: ${attachmentTag} <Description kind="video">${cachedDescription}</Description>]\n`;
+              } else {
+                try {
+                  const buffer = await fetchBuffer();
+                  const dur = await getMediaDurationSec(buffer, ext);
+                  if (dur != null && dur > MAX_VIDEO_DURATION_S) {
+                    replyPrefix = `[In reply to: ${attachmentTag} (video too long: ${Math.round(dur)}s, max ${MAX_VIDEO_DURATION_S}s)]\n`;
+                  } else {
+                    quotedMediaParts.push(mediaToContentPart(buffer, att.contentType, {
+                      historyPath: syncedPath,
+                      historyUserId: msg.author.id,
+                    }));
+                  }
+                } catch { }
+              }
             } else if (isPdf) {
               try {
                 const buffer = await fetchBuffer();
@@ -183,7 +232,7 @@ async function onDiscordMessage(msg) {
     const isDoc = att.contentType?.startsWith('application/') || ['pdf', 'txt', 'doc', 'docx', 'csv', 'json'].includes(ext);
     const isVideo = att.contentType?.startsWith('video/');
 
-    const fetchBuffer = async () => Buffer.from(await (await fetch(att.url)).arrayBuffer());
+    const fetchBuffer = createAttachmentBufferFetcher(att);
     const syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
     const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
@@ -311,6 +360,7 @@ async function onDiscordMessage(msg) {
     log.warn(`   ⛔ Ignoring message in thread ${channel.id}: GemiX is already responding`);
     return;
   }
+  const stopLockRenew = responseLock.startAutoRenew(lockKey);
 
   try {
     await channel.sendTyping();
@@ -363,12 +413,12 @@ async function onDiscordMessage(msg) {
       await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
     } catch { }
   } finally {
+    try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
     try { responseLock.unlock(lockKey); } catch { }
   }
 }
 
-async function buildDiscordHistory(channel, starterMessageId) {
-
+async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
   const raw = await channel.messages.fetch({ limit: MAX_HISTORY + 5 });
   const messages = [...raw.values()]
     .filter(m => !starterMessageId || m.id !== starterMessageId)
@@ -389,20 +439,22 @@ async function buildDiscordHistory(channel, starterMessageId) {
       const isVideo = att.contentType?.startsWith('video/');
 
       const fetchBuffer = async () => Buffer.from(await (await fetch(att.url)).arrayBuffer());
-      const syncedPath = await syncFileToHistory(m.author.id, att.id, fetchBuffer, att.name);
+      const syncedPath = await syncFileToHistory(storageUserId, att.id, fetchBuffer, att.name);
 
       const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
       if (isVideo) {
-        const cachedDescription = getStoredHistoryMediaDescription(m.author.id, syncedPath, 'video');
+        const cachedDescription = getStoredHistoryMediaDescription(storageUserId, syncedPath, 'video');
         if (cachedDescription) {
           textContent = `${textContent} ${attachmentTag} <Description kind="video">${cachedDescription}</Description>`.trim();
         } else {
           textContent = `${textContent} ${attachmentTag}`.trim();
         }
       } else if (isAudio) {
-        const cachedText = retrieveVoiceText(channel.id, m.createdAt.getTime());
-        const cachedDescription = getStoredHistoryMediaDescription(m.author.id, syncedPath, 'audio');
+        const storedVoiceText = getStoredHistoryVoiceTranscription(storageUserId, syncedPath);
+        const cachedText = storedVoiceText || retrieveRecentVoiceText(channel.id, m.createdAt.getTime());
+        if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(storageUserId, syncedPath, cachedText);
+        const cachedDescription = getStoredHistoryMediaDescription(storageUserId, syncedPath, 'audio');
         if (cachedText) {
           textContent = `${textContent} ${attachmentTag} <Transcription>${cachedText}</Transcription>`.trim();
         } else if (cachedDescription) {
@@ -410,22 +462,6 @@ async function buildDiscordHistory(channel, starterMessageId) {
         } else if (isBot) {
           textContent = `${textContent} ${attachmentTag} (transcription unavailable)`.trim();
         } else {
-          textContent = `${textContent} ${attachmentTag}`.trim();
-        }
-
-      } else if (isDoc && att.contentType === 'application/pdf') {
-        try {
-          const buffer = await fetchBuffer();
-          const info = await extractTextFromPdfBuffer(buffer);
-          if (!info.success) {
-            textContent = `${textContent} ${attachmentTag}`.trim();
-          } else if (info.pages > MAX_DOC_PAGES) {
-            textContent = `${textContent} ${attachmentTag} (document too long: ${info.pages} pages)`.trim();
-          } else {
-            const docText = info.text ? `\n<Transcription>\n${info.text}\n</Transcription>` : '';
-            textContent = `${textContent} ${attachmentTag}${docText}`.trim();
-          }
-        } catch {
           textContent = `${textContent} ${attachmentTag}`.trim();
         }
       } else if (isImage || isDoc) {

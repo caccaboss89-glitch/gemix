@@ -36,11 +36,21 @@ const {
   userTotalBytes,
   userQuotaBytes,
 } = require('../utils/userPaths');
-const { getCurrentProject, saveLastCrash, consumeLastCrash } = require('../utils/projectState');
+const { getCurrentProject, saveLastCrash, clearLastCrash } = require('../utils/projectState');
 const sandboxManager = require('./sandboxManager');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('ProjectRun');
+
+function _isKernelTransportFailure(err) {
+  const msg = String(err && err.message || '');
+  return msg.includes('Kernel not ready')
+    || msg.includes('Kernel WS closed')
+    || msg.includes('WS send failed')
+    || msg.includes('socket hang up')
+    || msg.includes('ECONNRESET')
+    || msg.includes('ECONNREFUSED');
+}
 
 const FALLBACK_MIME_BY_EXT = {
   '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv',
@@ -193,12 +203,19 @@ async function runInProjectSandbox({
     kernelResult = await entry.kernel.execute(code, { timeoutMs: effTimeoutMs });
   } catch (err) {
     entry.busy = false;
-    consumeLastCrash(userCtx, 0);
+    clearLastCrash(userCtx);
+    if (_isKernelTransportFailure(err)) {
+      try {
+        await sandboxManager.shutdown(userCtx, projectName);
+      } catch (shutdownErr) {
+        log.warn(`failed to recycle stale sandbox (${toolLabel}): ${shutdownErr.message}`);
+      }
+    }
     log.error(`kernel execute threw (${toolLabel}): ${err.message}`);
     return { error: `Sandbox execution failed: ${err.message}` };
   }
   entry.busy = false;
-  consumeLastCrash(userCtx, 0);
+  clearLastCrash(userCtx);
   sandboxManager.touch(entry);
 
   const durationMs = Date.now() - startedAt;

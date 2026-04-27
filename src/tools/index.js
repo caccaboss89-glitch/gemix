@@ -28,7 +28,7 @@ const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
-const { storeVoiceText } = require('../utils/voiceTextCache');
+const { storeRecentVoiceText } = require('../utils/historySync');
 const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
 const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId, userTotalBytes, userQuotaBytes } = require('../utils/userPaths');
 const fs = require('fs');
@@ -150,13 +150,16 @@ function _resolveTargetEmail(args, userCtx) {
   return { email: userCtx.email, display: 'yourself' };
 }
 
+// Tools that produce identical results every time in the same round — block duplicates.
+const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock']);
+
 /**
  * Execute a tool call and return the result.
  * Validates permissions, executes the tool, and collects responses/attachments.
  * @param {object} toolCall - The tool call from the AI model { id, function: { name, arguments } }
  * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, isGroup, groupId }
  * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
- * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set }
+ * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set, roundCalledTools: Set }
  * @returns {Promise<object>} { toolCallId: string, result: string }
  */
 async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
@@ -173,6 +176,27 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
     args = JSON.parse(toolCall.function.arguments || '{}');
   } catch {
     args = {};
+  }
+
+  // ── Per-round deduplication ───────────────────────────────────────────────
+  if (ONCE_PER_ROUND_TOOLS.has(name) && deliveryCtx.roundCalledTools?.has(name)) {
+    return {
+      toolCallId: toolCall.id,
+      result: JSON.stringify({
+        success: false,
+        error: `"${name}" was already called this round — result is identical. Use the previous tool result instead of calling again.`,
+      }),
+    };
+  }
+  if (name === 'agentic_unlock' && userCtx.agenticUnlocked) {
+    return {
+      toolCallId: toolCall.id,
+      result: JSON.stringify({
+        success: true,
+        unlocked: true,
+        message_for_ai: 'Agentic toolkit is already unlocked. Briefing was provided earlier — proceed with your task.',
+      }),
+    };
   }
 
   if (isActiveMemberOnlyTool(name) && !userCtx.isActiveMember) {
@@ -254,9 +278,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
                 if (fs.existsSync(dest)) {
                   const ext = path.extname(att.name);
                   const stem = att.name.slice(0, att.name.length - ext.length);
-                  let n = 2;
-                  while (fs.existsSync(path.join(savedDir, `${stem}_${n}${ext}`))) n++;
-                  dest = path.join(savedDir, `${stem}_${n}${ext}`);
+                  let n = 1;
+                  while (fs.existsSync(path.join(savedDir, `${stem}(${n})${ext}`))) n++;
+                  dest = path.join(savedDir, `${stem}(${n})${ext}`);
                 }
                 fs.writeFileSync(dest, att.buffer);
                 savedPaths.push(`searched_images/${path.basename(dest)}`);
@@ -398,7 +422,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             deliveryCtx.contactedWA.add(targetJid.jid);
             result = `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.`;
             _incrementVoiceCount(chatKey);
-            storeVoiceText(targetJid.jid, stripVocalTags(cleanText));
+            storeRecentVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
             result = { success: false, error: `Error sending voice message: ${err.message}` };
           }
@@ -417,7 +441,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         responseCtx.isVoiceOnly = true;
         result = 'Voice message generated successfully. Do not send any text message.';
         _incrementVoiceCount(chatKey);
-        storeVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
+        storeRecentVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
         break;
       }
 
@@ -595,6 +619,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
     }
   } catch (err) {
     result = { success: false, error: `Error executing ${name}: ${err.message}` };
+  }
+
+  // Track per-round calls for idempotent tools
+  if (ONCE_PER_ROUND_TOOLS.has(name)) {
+    deliveryCtx.roundCalledTools?.add(name);
   }
 
   let finalResult;

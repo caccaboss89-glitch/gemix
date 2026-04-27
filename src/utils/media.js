@@ -257,6 +257,18 @@ function buildAttachmentTag(syncedPath, fallbackName) {
   return `[Attachment (expired): ${fallbackName || 'file'}]`;
 }
 
+function extractAttachmentTagPaths(text) {
+  const paths = [];
+  if (typeof text !== 'string' || text.length === 0) return paths;
+  const re = /\[Attachment(?:\s*\(expired\))?:\s*([^\]\n\r]+)\]/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[1].trim();
+    if (raw) paths.push(raw);
+  }
+  return paths;
+}
+
 module.exports = {
   isSupportedMedia,
   mediaToContentPart,
@@ -265,4 +277,5 @@ module.exports = {
   transcribeDocumentFromContentPart,
   transcribeDocumentsInMessageContent,
   buildAttachmentTag,
+  extractAttachmentTagPaths,
 };

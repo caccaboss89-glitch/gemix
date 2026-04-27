@@ -1,7 +1,5 @@
 // src/ai/tools.js
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
+const { PLATFORM_DISCORD } = require('../config/constants');
 
 // Tool definitions for AI function calling (OpenAI-compatible format).
 
@@ -83,35 +81,35 @@ const TOOL_IMAGE_SEARCH = makeTool({
 
 const TOOL_ATTACH_FILE = makeTool({
   name: 'attach_file',
-  description: 'Buffer an existing workspace file for auto-delivery in the current chat. Allowed: permanent/<file>, searched_images/<file>, projects/<name>/{figures|temp|output|code}/<file>. Not allowed: history/. To send buffered files to other recipients, use send_whatsapp_message / send_voice_message / send_email with includeAttachments=true.',
+  description: 'Buffer a file for delivery (NOT output/<file> or history/<file>). Allowed: permanent/<file>, searched_images/<file>, projects/<name>/{temp|code}/<file>. To send buffered files to other recipients, use send_whatsapp_message / send_voice_message / send_email with includeAttachments=true.',
   properties: {
-    path: { type: 'string', description: 'Relative path under the user root, e.g. "permanent/keep.docx", "searched_images/cat_1.jpg", "projects/myproj/output/report.pdf".' },
+    path: { type: 'string', description: 'Relative path under the user root.' },
   },
   required: ['path'],
 });
 
 const TOOL_REPORT_TO_USER = makeTool({
   name: 'report_to_user',
-  description: 'Send an intermediate status message to the user while you continue working. Use ONLY during multi-step operations (3+ tool calls) to keep the user informed — e.g. before starting a research pipeline, a complex agentic workflow, or after completing a major phase. Never use for simple single-tool tasks. The message is delivered immediately; the tool loop continues. Do NOT repeat what you already said.',
+  description: 'Send an intermediate status message to the user while you continue working. Use ONLY during multi-step operations (3+ tool calls).',
   properties: {
-    message: { type: 'string', description: 'Short status update in Italian for the user (1-2 sentences, max 300 chars).' },
+    message: { type: 'string', description: 'Short status update in Italian for the user.' },
   },
   required: ['message'],
 });
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'Unlock project management, the Python sandbox (code_execution/write_file/edit_file/bash), and attach_file. Call this before tasks that need computation, workspace exploration, file generation/editing/conversion... It returns the full agentic briefing and exposes those tools next round. Do not call it for normal chat, web research, voice replies, scheduling, memory updates, or tasks already covered by visible tools',
+  description: 'Unlock cloud, project management, the Python sandbox (code_execution/write_file/edit_file/bash with numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, yt-dlp). Call this before tasks that need computation, workspace exploration, file generation/editing/conversion... It returns the full agentic briefing and exposes those tools next round. Do not call it for normal chat, web research, voice replies, scheduling, memory updates, or tasks already covered by visible tools',
   properties: {},
 });
 
 function buildReadFileTool(isDiscord) {
   const description = isDiscord
     ? 'Read the contents of a file from chat history (text, code, images, audio, pdf).'
-    : 'Read the contents of a file (text, code, images, audio, pdf). Inspect files from history, your personal cloud or project artefacts.';
+    : 'Read the contents of a file from chat history, cloud or project artefacts (text, code, images, audio, pdf).';
   const pathDesc = isDiscord
-    ? 'Filename from history (history/ prefix optional, e.g. "report.pdf" or "history/report.pdf").'
-    : 'Relative path from user root: history/<file>, permanent/<file>, searched_images/<file>, projects/<name>/{figures|temp|output|code}/<file>. Use skills:<name>.md to read a skill guide.';
+    ? 'Filename from chat history (history/ prefix optional, e.g. "report.pdf").'
+    : 'Relative path from user root: history/<file>, permanent/<file>, searched_images/<file>, projects/<name>/{temp|output|code}/<file>. Use skills:<name>.md to read a skill guide.';
   return makeTool({
     name: 'read_file',
     description,
@@ -124,7 +122,7 @@ function buildReadFileTool(isDiscord) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run Python in the selected project sandbox. The kernel is stateful across calls. No free internet (except api.polygon.io and astropy data servers); use web_search / browse_page for external data. Writable path: /workspace = current project root (figures/, temp/, output/, code/). Read-only: /readonly/{history,permanent,searched_images}. Files written under output/ are auto-buffered for delivery. pip is disabled; only pre-installed libraries are available.',
+  description: 'Run quick single-cell Python in the project sandbox. Best for calculations, data analysis, or lightweight scripts that output to stdout or save results to output/. For multi-file projects or scripts you want to keep, prefer write_file+bash instead. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user — put there ONLY the files the user wants to receive.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
     timeout_ms: { type: 'integer', description: 'Optional execution timeout in milliseconds (default 30000, max 120000).' },
@@ -134,10 +132,10 @@ const TOOL_CODE_EXECUTION = makeTool({
 
 const TOOL_WRITE_FILE = makeTool({
   name: 'write_file',
-  description: 'Create or overwrite a file in the current project under {figures|temp|output|code}. Files written under output/ are auto-buffered for delivery. Runs through the sandbox so code_execution sees the file immediately. Max 5 MB per call.',
+  description: 'Create or overwrite a file in the current project under {temp|output|code}. Use for: scripts → code/, intermediate data → temp/, final deliverables → output/. Everything in output/ is auto-delivered to the user — put there ONLY the files the user wants to receive. Pair with bash to run scripts. Max 5 MB per call.',
   properties: {
     path: { type: 'string', description: 'Relative path under the current project, e.g. "projects/<current>/code/main.py".' },
-    content: { type: 'string', description: 'File content. UTF-8 text by default; for binary data set encoding="base64".' },
+    content: { type: 'string', description: 'File content.' },
     encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Content encoding (default "utf-8").' },
     mode: { type: 'string', enum: ['overwrite', 'append'], description: 'Write mode (default "overwrite").' },
   },
@@ -146,9 +144,9 @@ const TOOL_WRITE_FILE = makeTool({
 
 const TOOL_EDIT_FILE = makeTool({
   name: 'edit_file',
-  description: 'Edit an existing UTF-8 text file in the current project by replacing old_string with new_string. old_string must be unique unless replace_all=true. Use write_file to create new files. Same path limits as write_file.',
+  description: 'Edit an existing UTF-8 text file in the current project by replacing old_string with new_string. old_string must be unique unless replace_all=true. Same path limits as write_file.',
   properties: {
-    path: { type: 'string', description: 'Relative path under projects/<current>/{figures|temp|output|code}/.' },
+    path: { type: 'string', description: 'Relative path under projects/<current>/{temp|output|code}/.' },
     old_string: { type: 'string', description: 'Exact text to replace. Must appear at least once. Provide enough surrounding context to be unique unless replace_all=true.' },
     new_string: { type: 'string', description: 'Replacement text (use empty string to delete the matched region).' },
     replace_all: { type: 'boolean', description: 'Replace every occurrence (default false). Required when old_string is not unique.' },
@@ -158,10 +156,11 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the project sandbox. Same isolation as code_execution: persistent cwd, no free internet, pip/apt disabled, project mounted at /workspace. Use it for quick inspections/conversions/zipping and for project management via `gemix-project <subcmd>`. Prefer code_execution for complex logic. Default timeout 30 s, max 120 s.',
+  description: 'Run a shell command in the project sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Same isolation as code_execution, project mounted at /workspace. In the same round, bash always executes AFTER write_file/edit_file. Use background=true for long-running tasks (yt-dlp downloads, ffmpeg conversions). Default timeout 30 s, max 120 s.',
   properties: {
     command: { type: 'string', description: 'Shell command (bash -c). Single line or `&&`-chained statements.' },
     timeout_ms: { type: 'integer', description: 'Optional timeout in milliseconds (default 30000, max 120000).' },
+    background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results (automatically waits if still running). Default false.' },
   },
   required: ['command'],
 });

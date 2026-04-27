@@ -9,7 +9,6 @@
 // "read-on-demand" logic so platform senders don't have to care.
 
 const fs = require('fs');
-const path = require('path');
 
 /**
  * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string, _imageSearchId?: number }} Attachment

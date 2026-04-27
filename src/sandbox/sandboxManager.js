@@ -21,7 +21,6 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
 
 const {
   SANDBOX_MEMORY_MB,
@@ -245,7 +244,7 @@ async function getOrCreate(userCtx, projectName) {
   // Stale / dead — purge before recreate
   if (entry) {
     log.warn(`pool entry for ${key} is dead, recreating`);
-    await _killEntry(entry).catch(() => { /* ignore */ });
+    await _killEntry(entry).catch(err => log.warn(`failed to purge stale sandbox ${key}: ${err.message}`));
     _pool.delete(key);
   }
 
@@ -260,7 +259,7 @@ async function getOrCreate(userCtx, projectName) {
       });
       await fresh.kernel.start();
     } catch (err) {
-      await _killEntry(fresh).catch(() => { /* */ });
+      await _killEntry(fresh).catch(killErr => log.warn(`cleanup after failed sandbox boot (${projectName}) failed: ${killErr.message}`));
       throw err;
     }
     return fresh;
@@ -293,10 +292,10 @@ function touch(entry) {
  * Forcibly remove a single sandbox.
  */
 async function _killEntry(entry) {
-  try { if (entry.kernel) await entry.kernel.shutdown(); } catch { /* */ }
+  try { if (entry.kernel) await entry.kernel.shutdown(); } catch (err) { log.warn(`kernel shutdown failed for ${entry.containerName || entry.containerId || 'unknown'}: ${err.message}`); }
   if (entry.container) {
-    try { await entry.container.stop({ t: 2 }); } catch { /* */ }
-    try { await entry.container.remove({ force: true }); } catch { /* */ }
+    try { await entry.container.stop({ t: 2 }); } catch (err) { log.warn(`container stop failed for ${entry.containerName || entry.containerId || 'unknown'}: ${err.message}`); }
+    try { await entry.container.remove({ force: true }); } catch (err) { log.warn(`container remove failed for ${entry.containerName || entry.containerId || 'unknown'}: ${err.message}`); }
   }
 }
 
@@ -314,7 +313,7 @@ async function shutdown(userCtx, projectName) {
 async function shutdownAll() {
   const entries = [..._pool.values()];
   _pool.clear();
-  await Promise.all(entries.map(e => _killEntry(e).catch(() => { /* */ })));
+  await Promise.all(entries.map(e => _killEntry(e).catch(err => log.warn(`shutdownAll cleanup failed: ${err.message}`))));
 }
 
 // ── Idle reaper ─────────────────────────────────────────────────────────────
@@ -340,7 +339,7 @@ function installShutdownHook() {
   _shutdownHookInstalled = true;
   const handler = async (signal) => {
     log.info(`shutting down all sandboxes (${signal})…`);
-    try { await shutdownAll(); } catch { /* */ }
+    try { await shutdownAll(); } catch (err) { log.warn(`shutdown hook cleanup failed (${signal}): ${err.message}`); }
   };
   process.once('SIGINT', () => handler('SIGINT'));
   process.once('SIGTERM', () => handler('SIGTERM'));

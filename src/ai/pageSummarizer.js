@@ -2,7 +2,8 @@
 // LLM-powered page summarizer — uses the shared API client for
 // retry/logging/timeout while returning normal free-form markdown output.
 
-const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, BROWSE_PAGE_MODEL } = require('../config/env');
+const { OPENROUTER_API_KEY, BROWSE_PAGE_MODEL } = require('../config/env');
+const { OPENROUTER_BASE_URL } = require('../config/constants');
 const { callModel } = require('./apiClient');
 const { createLogger } = require('../utils/logger');
 
@@ -10,7 +11,7 @@ const log = createLogger('PageSummarizer');
 
 // ── Constants ──
 
-const MAX_RAW_CHARS = 60_000;        // max chars extracted from page before summarization
+const MAX_RAW_CHARS = 120_000;       // max chars extracted from page before summarization
 const MAX_SUMMARY_TOKENS = 4096;     // max tokens for the summarizer response
 
 // ── Main summarizer ──

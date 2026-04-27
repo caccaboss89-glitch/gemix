@@ -12,13 +12,14 @@ const {
   cleanupProjectTool,
   copyToPermanentTool,
   copyToProjectTool,
+  quotaTool,
 } = require('./projects');
 
 const GEMIX_PREFIX = 'gemix-project';
-const FIXED_SUBDIRS = ['figures', 'temp', 'output', 'code'];
+const FIXED_SUBDIRS = ['temp', 'output', 'code'];
 
 const SUBCMD_HELP =
-  'Valid subcommands: list, create, switch, delete, cleanup, copy-to-permanent, copy-to-project.';
+  'Valid subcommands: list, create, switch, delete, cleanup, quota, copy-to-permanent, copy-to-project.';
 
 function _stripShellQuotes(s) {
   const t = s.trim();
@@ -84,6 +85,9 @@ function handleGemixProjectCmd(command, userCtx) {
   switch (subcmd) {
     case 'list':
       return listProjectsTool(userCtx);
+
+    case 'quota':
+      return quotaTool(userCtx);
 
     case 'switch': {
       if (!argStr) return { success: false, error: 'gemix-project switch <slug>: missing project name.' };

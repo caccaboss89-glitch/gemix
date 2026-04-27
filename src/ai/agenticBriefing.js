@@ -22,54 +22,69 @@ function _escapeXml(str) {
  *
  * @param {object} ctx
  * @param {string|null} ctx.currentProject
+ * @param {string|null} [ctx.lastProjectUsed]
  * @param {Array<{name:string, description?:string}>} ctx.projects
+ * @param {string[]} [ctx.projectFiles]    - relative file paths inside the current project
+ * @param {string|null} [ctx.readmeContent] - README.md content of the current project
  */
 function buildAgenticBriefing(ctx = {}) {
   const current = ctx.currentProject || null;
+  const last = ctx.lastProjectUsed || null;
   const projects = Array.isArray(ctx.projects) ? ctx.projects : [];
+  const projectFiles = Array.isArray(ctx.projectFiles) ? ctx.projectFiles : [];
+  const readmeContent = ctx.readmeContent || null;
+
   const projectList = projects.length === 0
     ? '    <None/>\n'
     : projects.map(p => `    <Project name="${_escapeXml(p.name)}"${p.name === current ? ' current="true"' : ''}>${_escapeXml(p.description || '')}</Project>\n`).join('');
 
+  const projectFilesBlock = current
+    ? (projectFiles.length > 0
+        ? `\n    <ProjectFiles>\n${projectFiles.map(f => `      ${_escapeXml(f)}`).join('\n')}\n    </ProjectFiles>`
+        : '\n    <ProjectFiles/>')
+    : '';
+
+  const readmeBlock = (current && readmeContent)
+    ? `\n    <ProjectReadme>\n${_escapeXml(readmeContent.trim())}\n    </ProjectReadme>`
+    : '';
+
   return `<AgenticToolkit unlocked="true">
   <PersonalCloud>
     <Layout>
-      Per-user persistent storage:
-      - history/ read-only; already visible in chat, never re-deliver.
-      - permanent/ long-term files (populate via \`gemix-project copy-to-permanent\`).
+      Quota: 1 GB total.
+      Core folders (cannot be renamed/deleted):
+      - history/ : read-only, never re-deliver.
+      - permanent/ long-term cloud storage.
       - searched_images/ image_search results saved with save_to_disk=true.
-      - projects/&lt;slug&gt;/ with figures/ temp/ output/ code/ README.md.
-      Quota: 1 GB across projects/ + searched_images/.
+      - projects/&lt;slug&gt;/ contains code/, temp/, output/, README.md.
     </Layout>
     <Rules>
-      - One project per user request. If files will be produced, run \`gemix-project create\` first.
-      - code_execution / write_file / edit_file / bash require a selected project and cannot write in the user root, history/, permanent/, projects/ root, or a project root.
-      - Inside the current project: code/ scripts, temp/ intermediate files, output/ final deliverables, figures/ images.
-      - Fixed folders (history, permanent, projects, searched_images, figures, temp, output, code) cannot be renamed/deleted. Free space via \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` after asking the user.
-      - bash and code_execution share the same kernel state (cwd, variables) within a project.
+      - One project per user request. Run \`gemix-project create\` before producing files.
+      - Write access ONLY inside current project (with code_execution / write_file / edit_file / bash): code/ (scripts), temp/ (intermediate), output/ (deliverables).
+      - AUTO-DELIVERY: Files in output/ are auto-delivered to the user. NEVER call \`attach_file\` for output/ files so.
+      - Zip directories into output/ to deliver them (for many files).
+      - bash and code_execution share kernel state (cwd, variables).
+      - ANTI-HALLUCINATION: Never invent paths. Use returned paths verbatim or \`ls\` first.
     </Rules>
     <ProjectManagement>
-      Project ops run via the bash tool as \`gemix-project &lt;subcmd&gt;\`, handled by the host (sandbox not invoked).
-      Commands must be standalone: no chaining (&amp;&amp;, ||, ;, |, redirection, subshells).
-
-        gemix-project list
-        gemix-project create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}'
-        gemix-project switch &lt;slug&gt;
-        gemix-project delete &lt;slug&gt; --confirmed              (ASK the user for explicit confirmation FIRST)
-        gemix-project cleanup [&lt;slug&gt;] &lt;subdir&gt;...           (subdirs: figures|temp|output|code; slug defaults to current)
-        gemix-project copy-to-permanent &lt;history_filename&gt;    (bare filename from history/)
-        gemix-project copy-to-project &lt;source&gt; [&lt;subdir&gt;]     (source: history/&lt;file&gt; or searched_images/&lt;file&gt;; subdir defaults to figures)
+      Run via \`bash\` as standalone \`gemix-project &lt;subcmd&gt;\` (no chaining/redirection).
+      Commands:
+       - list # list all projects
+       - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}' # create a new project
+       - switch &lt;slug&gt; # re-enter an existing project
+       - quota # show used/free space and per-project sizes
+       - delete &lt;slug&gt; --confirmed # ASK the user for confirmation
+       - cleanup [&lt;slug_default_current&gt;] &lt;subdir&gt;... # subdirs: temp|output|code
+       - copy-to-permanent &lt;history_filename&gt; # move file to cloud
+       - copy-to-project &lt;source&gt; [&lt;subdir_default_temp&gt;] # move file to project
     </ProjectManagement>
     <FileDelivery>
-      - Files written under projects/&lt;current&gt;/output/ are AUTO-buffered for delivery in the current chat.
-      - For files outside output/ (permanent/, searched_images/, projects/&lt;*&gt;/{figures|temp|code}/...): call attach_file.
+      - Files written under projects/&lt;current&gt;/output/ are AUTO-buffered AND AUTO-DELIVERED in the current chat. NOT call attach_file.
+      - For files in other paths (if user needs them): call attach_file.
       - To deliver a directory: zip it into output/ first (via bash or code_execution).
     </FileDelivery>
-    <AntiHallucination>
-      - Never invent paths/filenames. Use new_files from code_execution / write_file / bash verbatim, or run \`ls projects/&lt;current&gt;/output/\` first.
-      - If a path is rejected, do NOT retry with a guess — re-read &lt;Layout&gt; above.
-    </AntiHallucination>
-    <CurrentProject>${current ? _escapeXml(current) : 'None'}</CurrentProject>
+    <CurrentProject>${current ? _escapeXml(current) : 'None'}</CurrentProject>${readmeBlock}${projectFilesBlock}
+    <LastProjectUsed>${last ? _escapeXml(last) : 'None'}</LastProjectUsed>
     <Projects>
 ${projectList}    </Projects>
   </PersonalCloud>
@@ -81,28 +96,23 @@ ${projectList}    </Projects>
       Read-only mounts: /readonly/history, /readonly/permanent, /readonly/searched_images.
       Resources: 1 CPU, 1.5 GB RAM, 30s timeout (max 120s).
       pip disabled. Only pre-installed libraries allowed. ffmpeg, tesseract-ocr, libcairo, poppler-utils are pre-installed at OS level.
+      Network: NO INTERNET except api.polygon.io, astropy servers, YouTube CDN (yt-dlp only). Do NOT pip install.
     </Runtime>
-    <NetworkPolicy>
-      No internet access except api.polygon.io and astropy data servers.
-      For external data use dedicated tools (web_search, browse_page, etc.)
-    </NetworkPolicy>
     <Libraries>
-      - numpy, scipy, sympy, mpmath  # Math/science, filters, symbolic computation.
-      - pandas  # Tabular data manipulation.
-      - matplotlib, seaborn, plotly  # Charts, heatmaps, correlations, interactive graphs/dashboards.
-      - Pillow, rembg, cairosvg, pytesseract  # Image editing/conversion, background removal, OCR.
-      - pydub, librosa, moviepy  # Audio/video editing, analysis, conversion, beats, pitch.
-      - astropy, qutip  # Astronomy and quantum calculations.
-      - polygon-api-client  # Real-time and historical financial market data.
-      - python-docx, openpyxl, python-pptx, reportlab  # Create or edit Microsoft Word, Excel, PowerPoint, PDF.
+      numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, yt-dlp.
     </Libraries>
-    <CommonPitfalls>
+    <Pitfalls>
       - matplotlib: always plt.close() after savefig(), never plt.show()
       - moviepy: pass codec='libx264', audio_codec='aac' for compatibility on WhatsApp/Discord previews
       - rembg: quality — u2netp: faster
       - Flush plots before reading: savefig() → plt.close() → then open with PIL
-    </CommonPitfalls>
+      - yt-dlp: outtmpl='/workspace/output/%(title)s.%(ext)s'.
+    </Pitfalls>
   </PythonSandbox>
+  <ToolExecution>
+    - In the same round you can run write_file/edit_file and bash/code_execution to optimize rounds. write_file/edit_file are always executed BEFORE bash/code_execution. You can create files and run them in one call.
+    - Use only bash background=true for long tasks when you have other operations to perform simultaneously. For normal commands or if you don't need to invoke other tools in the meantime, leave it off.
+  </ToolExecution>
 </AgenticToolkit>`;
 }
 

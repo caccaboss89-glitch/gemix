@@ -5,17 +5,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const {
-  DATA_DIR,
-  PLATFORM_DISCORD,
-  MAX_PROJECT_NAME_LEN,
-  MAX_USER_TOTAL_MB,
-} = require('../config/constants');
+const { DATA_DIR, PLATFORM_DISCORD, MAX_PROJECT_NAME_LEN, MAX_USER_TOTAL_MB } = require('../config/constants');
 
 // ── Constants ──
 
 const FIXED_TOP_DIRS = ['history', 'permanent', 'projects', 'searched_images'];
-const FIXED_PROJECT_SUBDIRS = ['figures', 'temp', 'output', 'code'];
+const FIXED_PROJECT_SUBDIRS = ['temp', 'output', 'code'];
 const SKILLS_DIR = path.join(DATA_DIR, 'skills');
 
 // ── Storage ID resolution (unified) ──
@@ -247,10 +242,10 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
     return { ok: false, reason: 'Path escapes user folder.' };
   }
   if (c.zone === 'user_root' || c.zone === 'projects_root') {
-    return { ok: false, reason: 'Cannot write directly in the user root or projects root. Select a project and write inside figures/, temp/, output/ or code/.' };
+    return { ok: false, reason: 'Cannot write directly in the user root or projects root. Select a project and write inside temp/, output/ or code/.' };
   }
   if (c.zone === 'project_root') {
-    return { ok: false, reason: 'Cannot write directly in the project root. Use figures/, temp/, output/ or code/.' };
+    return { ok: false, reason: 'Cannot write directly in the project root. Use temp/, output/ or code/.' };
   }
   // permanent/ is managed via copy tools, not direct writes.
   if (c.zone === 'permanent') {

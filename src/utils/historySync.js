@@ -3,12 +3,19 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { createLogger } = require('./logger');
+const { extractAttachmentTagPaths } = require('./media');
 const { sanitizeFilename } = require('./text');
 
 const log = createLogger('HistorySync');
 
 // Discord-only age cap. WhatsApp deletes purely on chat-history reachability.
 const DISCORD_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const RECENT_VOICE_CACHE_FILE = path.join(DATA_DIR, 'voiceTextCache.json');
+const RECENT_VOICE_MAX_ENTRIES = 200;
+const RECENT_VOICE_MATCH_TOLERANCE_MS = 20_000;
+const RECENT_VOICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+let recentVoiceEntries = [];
 
 /**
  * Get the history directory and meta file for a user.
@@ -65,6 +72,79 @@ function _normalizeHistoryFilename(historyFilename) {
   return raw.startsWith('history/') ? raw.slice('history/'.length) : raw;
 }
 
+function _loadRecentVoiceEntries() {
+  try {
+    if (fs.existsSync(RECENT_VOICE_CACHE_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(RECENT_VOICE_CACHE_FILE, 'utf-8'));
+      recentVoiceEntries = Array.isArray(raw) ? raw : [];
+    }
+  } catch {
+    recentVoiceEntries = [];
+  }
+}
+
+function _saveRecentVoiceEntries() {
+  try {
+    fs.writeFileSync(RECENT_VOICE_CACHE_FILE, JSON.stringify(recentVoiceEntries), 'utf-8');
+  } catch {}
+}
+
+function _cleanupRecentVoiceEntries() {
+  const cutoff = Date.now() - RECENT_VOICE_MAX_AGE_MS;
+  const before = recentVoiceEntries.length;
+  recentVoiceEntries = recentVoiceEntries.filter(e => e && e.ts >= cutoff);
+  if (recentVoiceEntries.length < before) _saveRecentVoiceEntries();
+}
+
+function storeRecentVoiceText(chatId, text) {
+  if (!chatId || !text) return;
+  _cleanupRecentVoiceEntries();
+  recentVoiceEntries.push({ chatId, ts: Date.now(), text });
+  if (recentVoiceEntries.length > RECENT_VOICE_MAX_ENTRIES) {
+    recentVoiceEntries = recentVoiceEntries.slice(-RECENT_VOICE_MAX_ENTRIES);
+  }
+  _saveRecentVoiceEntries();
+}
+
+function retrieveRecentVoiceText(chatId, msgTimestampMs) {
+  if (!chatId || !msgTimestampMs) return null;
+  let bestIdx = -1;
+  let bestDiff = Infinity;
+  for (let i = 0; i < recentVoiceEntries.length; i++) {
+    if (recentVoiceEntries[i].chatId !== chatId) continue;
+    const diff = Math.abs(recentVoiceEntries[i].ts - msgTimestampMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  }
+  if (bestIdx >= 0 && bestDiff <= RECENT_VOICE_MATCH_TOLERANCE_MS) {
+    return recentVoiceEntries[bestIdx].text;
+  }
+  return null;
+}
+
+function _findMetaEntry(meta, historyFilename) {
+  for (const [id, entry] of Object.entries(meta)) {
+    if (_getEntryFilename(entry) === historyFilename) {
+      return { id, entry };
+    }
+  }
+  return { id: null, entry: null };
+}
+
+function _upsertMetaEntry(meta, historyFilename) {
+  const normalized = _normalizeHistoryFilename(historyFilename);
+  if (!normalized) return { id: null, entry: null, normalized: null };
+  const found = _findMetaEntry(meta, normalized);
+  const id = found.id || `file:${normalized}`;
+  const base = found.entry && typeof found.entry === 'object'
+    ? found.entry
+    : { filename: normalized };
+  meta[id] = { ...base, filename: normalized };
+  return { id, entry: meta[id], normalized };
+}
+
 function getStoredHistoryMediaDescription(userId, historyFilename, expectedKind = null) {
   if (!userId || !historyFilename) return null;
   const { metaFile } = getUserHistoryPaths(userId);
@@ -86,28 +166,46 @@ function getStoredHistoryMediaDescription(userId, historyFilename, expectedKind 
 function storeHistoryMediaDescription(userId, historyFilename, kind, text) {
   if (!userId || !historyFilename || !kind || !text) return false;
   const { metaFile } = getUserHistoryPaths(userId);
-  const normalized = _normalizeHistoryFilename(historyFilename);
-  if (!normalized) return false;
-
   const meta = _loadMeta(metaFile, userId);
-  let targetKey = null;
-  for (const [id, entry] of Object.entries(meta)) {
-    if (_getEntryFilename(entry) === normalized) {
-      targetKey = id;
-      break;
-    }
-  }
-  if (!targetKey) {
-    targetKey = `file:${normalized}`;
-  }
-
-  const prev = meta[targetKey];
-  const base = (prev && typeof prev === 'object') ? prev : { filename: normalized };
-  meta[targetKey] = {
-    ...base,
-    filename: normalized,
+  const target = _upsertMetaEntry(meta, historyFilename);
+  if (!target.id || !target.normalized) return false;
+  meta[target.id] = {
+    ...target.entry,
     mediaDescription: {
       kind,
+      text: String(text).trim(),
+      updatedAt: Date.now(),
+    },
+  };
+  return _saveMeta(metaFile, meta, userId);
+}
+
+function getStoredHistoryVoiceTranscription(userId, historyFilename) {
+  if (!userId || !historyFilename) return null;
+  const { metaFile } = getUserHistoryPaths(userId);
+  const normalized = _normalizeHistoryFilename(historyFilename);
+  if (!normalized) return null;
+
+  const meta = _loadMeta(metaFile, userId);
+  for (const entry of Object.values(meta)) {
+    if (_getEntryFilename(entry) !== normalized) continue;
+    if (!entry || typeof entry !== 'object' || !entry.voiceTranscription) return null;
+    const voice = entry.voiceTranscription;
+    if (typeof voice.text !== 'string' || !voice.text.trim()) return null;
+    return voice.text.trim();
+  }
+  return null;
+}
+
+function storeHistoryVoiceTranscription(userId, historyFilename, text) {
+  if (!userId || !historyFilename || !text) return false;
+  const { metaFile } = getUserHistoryPaths(userId);
+  const meta = _loadMeta(metaFile, userId);
+  const target = _upsertMetaEntry(meta, historyFilename);
+  if (!target.id || !target.normalized) return false;
+  meta[target.id] = {
+    ...target.entry,
+    voiceTranscription: {
       text: String(text).trim(),
       updatedAt: Date.now(),
     },
@@ -169,7 +267,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   // Find an available filename
   let finalName = cleanName;
   let counter = 1;
-  const existingValues = new Set(Object.values(meta));
+  const existingValues = new Set(Object.values(meta).map(_getEntryFilename).filter(Boolean));
 
   while (existingValues.has(finalName) || fs.existsSync(path.join(historyDir, finalName))) {
     finalName = `${baseName}(${counter})${ext}`;
@@ -186,39 +284,6 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   } catch (err) {
     log.error(`Failed to save history file for user ${userId}: ${err.message}`);
     return null;
-  }
-}
-
-/**
- * Removes file from disk and its hash from meta.
- */
-function deleteFileFromHistory(userId, filename) {
-  const { historyDir, metaFile } = getUserHistoryPaths(userId);
-  const filePath = path.join(historyDir, filename);
-
-  // Load meta
-  const meta = _loadMeta(metaFile, userId);
-
-  // Find ID by filename
-  let idToRemove = null;
-  for (const [id, entry] of Object.entries(meta)) {
-    if (_getEntryFilename(entry) === filename) {
-      idToRemove = id;
-      break;
-    }
-  }
-
-  if (idToRemove) {
-    delete meta[idToRemove];
-    _saveMeta(metaFile, meta, userId);
-  }
-
-  if (fs.existsSync(filePath)) {
-    try {
-      fs.unlinkSync(filePath);
-    } catch (err) {
-      log.error(`Failed to delete history file ${filename}: ${err.message}`);
-    }
   }
 }
 
@@ -327,12 +392,11 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
  */
 function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
   const out = new Set();
-  const re = /\[Attachment(?:\s*\(expired\))?:\s*history\/([^\]\n\r]+)\]/g;
   const _scan = (text) => {
     if (typeof text !== 'string' || text.length === 0) return;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-      const name = m[1].trim();
+    for (const taggedPath of extractAttachmentTagPaths(text)) {
+      if (!taggedPath.startsWith('history/')) continue;
+      const name = taggedPath.slice('history/'.length).trim();
       if (name) out.add(name);
     }
   };
@@ -394,12 +458,18 @@ function copyFromHistory(userId, historyFilename, destAbsDir) {
   }
 }
 
+_loadRecentVoiceEntries();
+
 module.exports = {
   syncFileToHistory,
   copyFromHistory,
   getUserHistoryPaths,
   getStoredHistoryMediaDescription,
+  getStoredHistoryVoiceTranscription,
+  retrieveRecentVoiceText,
   storeHistoryMediaDescription,
+  storeHistoryVoiceTranscription,
+  storeRecentVoiceText,
   pruneHistory,
   collectReferencedHistoryFilenames,
   DISCORD_MAX_AGE_MS,

@@ -4,7 +4,7 @@
 // kernel sees it immediately for any subsequent code_execution call.
 //
 // The path MUST be relative to the user root and resolve inside the
-// CURRENT project's figures/ temp/ output/ or code/ subfolder. All other
+// CURRENT project's temp/ output/ or code/ subfolder. All other
 // destinations (history/, permanent/, project root, projects root, user
 // root, skills/) are rejected by isPathAllowed.
 
@@ -12,6 +12,7 @@ const path = require('path');
 const { runInProjectSandbox } = require('../sandbox/projectRun');
 const { isPathAllowed, getProjectRoot } = require('../utils/userPaths');
 const { getCurrentProject } = require('../utils/projectState');
+const { logToolExecution } = require('../utils/executionLogger');
 
 const MAX_WRITE_BYTES = 5 * 1024 * 1024; // 5 MB hard cap
 
@@ -29,8 +30,8 @@ function _buildPython(absPathInsideContainer, contentB64, mode) {
     `_data = base64.b64decode(${safeB64})`,
     `os.makedirs(os.path.dirname(_p), exist_ok=True)`,
     mode === 'append'
-      ? `open(_p, "ab").write(_data)`
-      : `open(_p, "wb").write(_data)`,
+      ? `with open(_p, "ab") as _f: _f.write(_data)`
+      : `with open(_p, "wb") as _f: _f.write(_data)`,
     `print(f"wrote {_p} ({len(_data)} bytes)")`,
   ].join('\n');
 }
@@ -48,7 +49,7 @@ function _toContainerPath(absHostPath, projectName, projectDir) {
 /**
  * write_file tool entry-point.
  * @param {object} args { path, content, encoding?, mode? }
- *   - path:     relative path under projects/<current>/{figures|temp|output|code}/
+ *   - path:     relative path under projects/<current>/{temp|output|code}/
  *   - content:  string (utf-8) or base64 if encoding='base64'
  *   - encoding: 'utf-8' (default) | 'base64'
  *   - mode:     'overwrite' (default) | 'append'
@@ -112,16 +113,32 @@ async function writeFileTool(args, userCtx, responseCtx) {
     autoAttach: true,
   });
 
-  if (result.error) return { success: false, error: result.error };
+  if (result.error) {
+    const errorOut = { success: false, error: result.error };
+    logToolExecution({
+      tool: 'write_file',
+      input: { path: rawPath, encoding, mode, bytes: buf.length },
+      output: errorOut,
+      meta: { user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+    });
+    return errorOut;
+  }
 
   const k = result.kernelResult;
   if (k.status !== 'ok') {
-    return {
+    const errorOut = {
       success: false,
       error: k.error || 'write_file failed inside sandbox.',
       stderr: k.stderr || '',
       traceback: k.traceback || null,
     };
+    logToolExecution({
+      tool: 'write_file',
+      input: { path: rawPath, encoding, mode, bytes: buf.length },
+      output: errorOut,
+      meta: { project: result.projectName, duration_ms: result.durationMs, user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+    });
+    return errorOut;
   }
 
   const out = {
@@ -135,6 +152,12 @@ async function writeFileTool(args, userCtx, responseCtx) {
   if (result.diff.newFiles.length > 0) out.new_files = result.diff.newFiles;
   if (result.diff.modifiedFiles.length > 0) out.modified_files = result.diff.modifiedFiles;
   if (result.quotaWarning) out.quota_warning = result.quotaWarning;
+  logToolExecution({
+    tool: 'write_file',
+    input: { path: rawPath, encoding, mode, bytes: buf.length },
+    output: out,
+    meta: { project: result.projectName, duration_ms: result.durationMs, user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+  });
   return out;
 }
 

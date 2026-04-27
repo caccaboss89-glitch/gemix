@@ -5,12 +5,13 @@
 // Semantics:
 //   - old_string MUST be unique in the file unless replace_all=true.
 //   - If old_string is empty → error (use write_file to create a fresh file).
-//   - File MUST live under projects/<current>/{figures|temp|output|code}/.
+//   - File MUST live under projects/<current>/{temp|output|code}/.
 
 const path = require('path');
 const { runInProjectSandbox } = require('../sandbox/projectRun');
 const { isPathAllowed, getProjectRoot } = require('../utils/userPaths');
 const { getCurrentProject } = require('../utils/projectState');
+const { logToolExecution } = require('../utils/executionLogger');
 
 const MAX_EDIT_BYTES = 5 * 1024 * 1024;
 
@@ -32,26 +33,30 @@ function _buildPython(containerPath, oldB64, newB64, replaceAll) {
   const safeNew = JSON.stringify(newB64);
   const allFlag = replaceAll ? 'True' : 'False';
   return [
-    'import base64, json, os, sys',
+    'import base64, json, os',
     `_p = ${safePath}`,
     `_old = base64.b64decode(${safeOld}).decode("utf-8")`,
     `_new = base64.b64decode(${safeNew}).decode("utf-8")`,
     `_replace_all = ${allFlag}`,
     'if not os.path.exists(_p):',
-    '    print(json.dumps({"ok": False, "reason": "file_not_found"})); sys.exit(0)',
-    'with open(_p, "rb") as _f: _raw = _f.read()',
-    'try: _text = _raw.decode("utf-8")',
-    'except UnicodeDecodeError:',
-    '    print(json.dumps({"ok": False, "reason": "not_utf8"})); sys.exit(0)',
-    '_n = _text.count(_old)',
-    'if _n == 0:',
-    '    print(json.dumps({"ok": False, "reason": "old_string_not_found"})); sys.exit(0)',
-    'if _n > 1 and not _replace_all:',
-    '    print(json.dumps({"ok": False, "reason": "old_string_not_unique", "occurrences": _n})); sys.exit(0)',
-    '_out = _text.replace(_old, _new) if _replace_all else _text.replace(_old, _new, 1)',
-    '_data = _out.encode("utf-8")',
-    'with open(_p, "wb") as _f: _f.write(_data)',
-    'print(json.dumps({"ok": True, "occurrences": _n if _replace_all else 1, "bytes_written": len(_data)}))',
+    '    _report = {"ok": False, "reason": "file_not_found"}',
+    'else:',
+    '    with open(_p, "rb") as _f: _raw = _f.read()',
+    '    try: _text = _raw.decode("utf-8")',
+    '    except UnicodeDecodeError:',
+    '        _report = {"ok": False, "reason": "not_utf8"}',
+    '    else:',
+    '        _n = _text.count(_old)',
+    '        if _n == 0:',
+    '            _report = {"ok": False, "reason": "old_string_not_found"}',
+    '        elif _n > 1 and not _replace_all:',
+    '            _report = {"ok": False, "reason": "old_string_not_unique", "occurrences": _n}',
+    '        else:',
+    '            _out = _text.replace(_old, _new) if _replace_all else _text.replace(_old, _new, 1)',
+    '            _data = _out.encode("utf-8")',
+    '            with open(_p, "wb") as _f: _f.write(_data)',
+    '            _report = {"ok": True, "occurrences": _n if _replace_all else 1, "bytes_written": len(_data)}',
+    'print(json.dumps(_report))',
   ].join('\n');
 }
 
@@ -107,16 +112,32 @@ async function editFileTool(args, userCtx, responseCtx) {
     autoAttach: true,
   });
 
-  if (result.error) return { success: false, error: result.error };
+  if (result.error) {
+    const errorOut = { success: false, error: result.error };
+    logToolExecution({
+      tool: 'edit_file',
+      input: { path: rawPath, replace_all: replaceAll },
+      output: errorOut,
+      meta: { user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+    });
+    return errorOut;
+  }
 
   const k = result.kernelResult;
   if (k.status !== 'ok') {
-    return {
+    const errorOut = {
       success: false,
       error: k.error || 'edit_file failed inside sandbox.',
       stderr: k.stderr || '',
       traceback: k.traceback || null,
     };
+    logToolExecution({
+      tool: 'edit_file',
+      input: { path: rawPath, replace_all: replaceAll },
+      output: errorOut,
+      meta: { project: result.projectName, duration_ms: result.durationMs, user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+    });
+    return errorOut;
   }
 
   // Parse the final JSON line printed by the snippet.
@@ -128,7 +149,14 @@ async function editFileTool(args, userCtx, responseCtx) {
     try { report = JSON.parse(ln); break; } catch { /* try next */ }
   }
   if (!report) {
-    return { success: false, error: 'edit_file: could not parse sandbox report.', stdout: k.stdout || '' };
+    const errorOut = { success: false, error: 'edit_file: could not parse sandbox report.', stdout: k.stdout || '' };
+    logToolExecution({
+      tool: 'edit_file',
+      input: { path: rawPath, replace_all: replaceAll },
+      output: errorOut,
+      meta: { project: result.projectName, duration_ms: result.durationMs, user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+    });
+    return errorOut;
   }
   if (!report.ok) {
     const reasonMap = {
@@ -137,11 +165,18 @@ async function editFileTool(args, userCtx, responseCtx) {
       old_string_not_found: 'old_string not found in the file.',
       old_string_not_unique: `old_string occurs ${report.occurrences} times — set replace_all=true or provide more surrounding context.`,
     };
-    return {
+    const errorOut = {
       success: false,
       error: reasonMap[report.reason] || `edit_file failed: ${report.reason}`,
       occurrences: report.occurrences,
     };
+    logToolExecution({
+      tool: 'edit_file',
+      input: { path: rawPath, replace_all: replaceAll },
+      output: errorOut,
+      meta: { project: result.projectName, duration_ms: result.durationMs, user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+    });
+    return errorOut;
   }
 
   const out = {
@@ -153,6 +188,12 @@ async function editFileTool(args, userCtx, responseCtx) {
   };
   if (result.diff.modifiedFiles.length > 0) out.modified_files = result.diff.modifiedFiles;
   if (result.quotaWarning) out.quota_warning = result.quotaWarning;
+  logToolExecution({
+    tool: 'edit_file',
+    input: { path: rawPath, replace_all: replaceAll },
+    output: out,
+    meta: { project: result.projectName, duration_ms: result.durationMs, user: { id: userCtx.userId || null, platform: userCtx.platform || null, chatId: userCtx.chatId || userCtx.groupId || userCtx.waJid || null } },
+  });
   return out;
 }
 

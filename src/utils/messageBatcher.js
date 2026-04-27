@@ -17,7 +17,7 @@ const MAX_BATCH_SIZE = 15;         // hard cap on messages per batch (safety val
 
 // ── State ──
 
-// Map<chatKey, { messages: Array, timer: NodeJS.Timeout, firstTs: number, handler: Function }>
+// Map<chatKey, { messages: Array, timer: NodeJS.Timeout|null, maxTimer: NodeJS.Timeout|null, handler: Function }>
 const _batches = new Map();
 
 /**

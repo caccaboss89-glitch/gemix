@@ -128,12 +128,12 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
  * @returns {Promise<Response>} The raw fetch Response
  */
 async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
+  logApiRequest(modelName, apiUrl, body);
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-      logApiRequest(modelName, apiUrl, body);
       const startTime = Date.now();
       const res = await fetch(apiUrl, {
         method: 'POST',

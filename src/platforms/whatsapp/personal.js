@@ -2,7 +2,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse } = require('./shared');
-const { getDedicatedClient } = require('./dedicated');
+const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
@@ -101,6 +101,11 @@ async function onPersonalMessage(msg) {
     otherDigits = normalizeDigits(chat.id._serialized);
   }
 
+  if (!isDedicatedClientReady()) {
+    log.info('   Skipping personal message during startup until dedicated client identity is ready');
+    return;
+  }
+
   if (dedicatedDigits && otherDigits && dedicatedDigits === otherDigits) {
     log.info(`   Skipping personal\u2194dedicated chat (number: ${otherDigits})`);
     return;
@@ -170,11 +175,10 @@ async function onPersonalMessage(msg) {
     log.warn(`   ⛔ Ignoring message in chat ${chat.id._serialized}: GemiX is already responding`);
     return;
   }
-  // Release lock immediately — the batch handler will re-acquire it
-  responseLock.unlock(lockKey);
+  const stopLockRenew = responseLock.startAutoRenew(lockKey);
 
   // Start a new batch
-  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity }, _handlePersonalBatch);
+  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, stopLockRenew }, _handlePersonalBatch);
 }
 
 /**
@@ -183,10 +187,10 @@ async function onPersonalMessage(msg) {
  */
 async function _handlePersonalBatch(entries) {
   const first = entries[0];
-  const { chat, senderJid, userName, phoneJid, userIdentity } = first;
+  const { chat, senderJid, userName, phoneJid, userIdentity, stopLockRenew } = first;
 
   const lockKey = `wa_personal:${chat.id._serialized}`;
-  if (!responseLock.tryLock(lockKey)) {
+  if (!responseLock.refresh(lockKey) && !responseLock.tryLock(lockKey)) {
     log.warn(`   ⛔ Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
     return;
   }
@@ -259,6 +263,7 @@ async function _handlePersonalBatch(entries) {
       log.error(`   ${err.message}`);
     }
   } finally {
+    try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
     try { responseLock.unlock(lockKey); } catch { }
   }
 }

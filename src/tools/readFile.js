@@ -4,14 +4,53 @@ const path = require('path');
 const { PLATFORM_DISCORD } = require('../config/constants');
 const { extractTextFromPdfBuffer, mediaToContentPart } = require('../utils/media');
 const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
+const { getBgTask, removeBgTask } = require('../utils/bgTasks');
 
 const MAX_TEXT_BYTES = 50 * 1024; // 50KB limit for text reading
+const MAX_BG_AUTO_ATTACH = 20;        // max files to auto-attach from a completed background task
+const MAX_BG_AUTO_ATTACH_BYTES = 100 * 1024 * 1024; // 100 MB total cap
+
+const _BG_MIME = {
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.flac': 'audio/flac',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.pdf': 'application/pdf', '.zip': 'application/zip',
+  '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json',
+};
+function _mimeForBg(absPath) {
+  return _BG_MIME[path.extname(absPath).toLowerCase()] || 'application/octet-stream';
+}
 const MAX_IMAGE_READS = 10;
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024; // 15MB limit for audio
 const MAX_VIDEO_BYTES = 60 * 1024 * 1024; // 60MB limit for video (caller still enforces 15s duration cap)
 
 const AUDIO_EXTS = ['.ogg', '.mp3', '.wav', '.m4a'];
 const VIDEO_EXTS = ['.mp4', '.webm', '.mov'];
+
+function _collectRecentProjectWriteViolations(projectDir, startedAt) {
+  const violations = [];
+  const stack = [projectDir];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(abs);
+        continue;
+      }
+      let st;
+      try { st = fs.statSync(abs); } catch { continue; }
+      if (st.mtimeMs < startedAt) continue;
+      const rel = path.relative(projectDir, abs).split(path.sep).join('/');
+      if (!rel.startsWith('temp/') && !rel.startsWith('output/') && !rel.startsWith('code/')) {
+        violations.push(`projects/${path.basename(projectDir)}/${rel}`);
+      }
+    }
+  }
+  return violations;
+}
 
 /**
  * Read file tool execution logic.
@@ -21,6 +60,7 @@ const VIDEO_EXTS = ['.mp4', '.webm', '.mov'];
  */
 async function readFileTool(filePath, userCtx, responseCtx) {
   if (responseCtx.imagesReadCount === undefined) responseCtx.imagesReadCount = 0;
+  let bgWriteViolationWarning = '';
 
   if (!resolveStorageId(userCtx)) {
     return JSON.stringify({ success: false, error: 'Could not resolve storage ID for this context.' });
@@ -49,7 +89,65 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   const displayPath = rawPath;
 
   if (!fs.existsSync(absolutePath)) {
-    return JSON.stringify({ success: false, error: `File not found at path "${displayPath}".` });
+    const bgTask = getBgTask(absolutePath);
+    if (bgTask) {
+      // Wait for background task to finish
+      const maxWaitMs = Math.min(bgTask.timeoutMs + 10_000, 130_000);
+      const elapsed = Date.now() - bgTask.startedAt;
+      const remaining = Math.max(0, maxWaitMs - elapsed);
+      const pollMs = 1500;
+      let waited = 0;
+      while (waited < remaining) {
+        if (fs.existsSync(bgTask.doneMarkerPath)) break;
+        await new Promise(r => setTimeout(r, pollMs));
+        waited += pollMs;
+      }
+      const bgStartedAt = bgTask.startedAt;
+      removeBgTask(absolutePath);
+      // Process finished but no output file → create empty
+      if (fs.existsSync(bgTask.doneMarkerPath) && !fs.existsSync(absolutePath)) {
+        try { fs.writeFileSync(absolutePath, '', 'utf-8'); } catch {}
+      }
+      try { if (fs.existsSync(bgTask.doneMarkerPath)) fs.unlinkSync(bgTask.doneMarkerPath); } catch {}
+      if (!fs.existsSync(absolutePath)) {
+        return JSON.stringify({ success: false, error: 'Background command timed out. Output file was not created.' });
+      }
+      try {
+        const projectDir = path.dirname(path.dirname(absolutePath));
+        const violations = _collectRecentProjectWriteViolations(projectDir, bgStartedAt);
+        if (violations.length > 0) {
+          bgWriteViolationWarning = `\n\n[Background write violation: ${violations.length} file(s) changed outside authorized dirs temp/, output/, code/: ${violations.join(', ')}]`;
+        }
+      } catch { }
+      // Auto-attach any output/ files the background command wrote after it started.
+      // These are invisible to the normal diff-based auto-attach because the diff
+      // snapshot was taken before the background thread had a chance to write them.
+      if (responseCtx && Array.isArray(responseCtx.attachments)) {
+        const projectDir = path.dirname(path.dirname(absolutePath));
+        const outputDir = path.join(projectDir, 'output');
+        let entries = [];
+        try { entries = fs.readdirSync(outputDir, { withFileTypes: true }); } catch {}
+        let bgAttachedBytes = 0;
+        for (const e of entries) {
+          if (!e.isFile()) continue;
+          if (responseCtx.attachments.length >= MAX_BG_AUTO_ATTACH || bgAttachedBytes >= MAX_BG_AUTO_ATTACH_BYTES) break;
+          const absFile = path.join(outputDir, e.name);
+          try {
+            const st = fs.statSync(absFile);
+            if (st.mtimeMs < bgStartedAt || st.size === 0) continue;
+            if (bgAttachedBytes + st.size > MAX_BG_AUTO_ATTACH_BYTES) continue;
+            const already = responseCtx.attachments.some(a => a.filePath && path.resolve(a.filePath) === path.resolve(absFile));
+            if (!already) {
+              responseCtx.attachments.push({ name: e.name, mimetype: _mimeForBg(absFile), filePath: absFile });
+              bgAttachedBytes += st.size;
+            }
+          } catch { /* skip */ }
+        }
+      }
+      // Fall through to normal file reading
+    } else {
+      return JSON.stringify({ success: false, error: `File not found at path "${displayPath}".` });
+    }
   }
 
   let stat;
@@ -65,6 +163,11 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   if (stat.isDirectory()) {
     return JSON.stringify({ success: false, error: `Path is a directory, not a file.` });
   }
+
+  const now = new Date();
+  try {
+    fs.utimesSync(absolutePath, now, now);
+  } catch (err) { }
 
   const ext = path.extname(absolutePath).toLowerCase();
   const sanitizedPath = displayPath;
@@ -135,7 +238,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     if (Buffer.byteLength(text) > MAX_TEXT_BYTES) {
       text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n[File truncated, too long]';
     }
-    return `File: ${sanitizedPath}\n\n<Transcription>\n${text}\n</Transcription>`;
+    return `File: ${sanitizedPath}\n\n<Transcription>\n${text}\n</Transcription>${bgWriteViolationWarning}`;
   }
 
   // ── Text/Code ──
@@ -146,13 +249,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     text = truncatedBuffer.toString('utf-8') + '\n\n[File truncated, too long]';
   }
 
-  // Refresh timestamp
-  const now = new Date();
-  try {
-    fs.utimesSync(absolutePath, now, now);
-  } catch (err) { }
-
-  return `File: ${sanitizedPath}\n\n${text}`;
+  return `File: ${sanitizedPath}\n\n${text}${bgWriteViolationWarning}`;
 }
 
 module.exports = { readFileTool };

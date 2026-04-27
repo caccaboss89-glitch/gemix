@@ -140,11 +140,10 @@ async function onDedicatedMessage(msg) {
     log.warn(`   ⛔ Ignoring message in chat ${chat.id._serialized}: GemiX is already responding`);
     return;
   }
-  // Release lock immediately — the batch handler will re-acquire it
-  responseLock.unlock(lockKey);
+  const stopLockRenew = responseLock.startAutoRenew(lockKey);
 
   // Start a new batch (the handler will fire after the debounce window)
-  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup }, _handleDedicatedBatch);
+  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup, stopLockRenew }, _handleDedicatedBatch);
 }
 
 /**
@@ -154,10 +153,10 @@ async function onDedicatedMessage(msg) {
 async function _handleDedicatedBatch(entries) {
   // Use the first entry for chat/user context, merge all content parts
   const first = entries[0];
-  const { chat, senderJid, userName, phoneJid, userIdentity, isGroup } = first;
+  const { chat, senderJid, userName, phoneJid, userIdentity, isGroup, stopLockRenew } = first;
 
   const lockKey = `wa_dedicated:${chat.id._serialized}`;
-  if (!responseLock.tryLock(lockKey)) {
+  if (!responseLock.refresh(lockKey) && !responseLock.tryLock(lockKey)) {
     log.warn(`   ⛔ Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
     return;
   }
@@ -170,7 +169,17 @@ async function _handleDedicatedBatch(entries) {
     }
 
     // Re-fetch history at fire time (fresher state)
-    const history = await buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid);
+    let history = [];
+    try {
+      history = await Promise.race([
+        buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('History fetch timeout')), 15000)
+        )
+      ]);
+    } catch (historyErr) {
+      log.warn(`   ⚠️ History fetch failed (${historyErr.message}), proceeding without history`);
+    }
 
     const ctx = {
       platform: PLATFORM_WA_DEDICATED,
@@ -214,6 +223,7 @@ async function _handleDedicatedBatch(entries) {
       log.error(`   ${err.message}`);
     }
   } finally {
+    try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
     try { responseLock.unlock(lockKey); } catch { }
   }
 }
@@ -222,4 +232,8 @@ function getDedicatedClient() {
   return client;
 }
 
-module.exports = { initDedicatedWhatsApp, getDedicatedClient };
+function isDedicatedClientReady() {
+  return Boolean(client?.info?.wid?._serialized);
+}
+
+module.exports = { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady };

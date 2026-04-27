@@ -3,8 +3,8 @@ require('dotenv').config();
 
 module.exports = {
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-  OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
-  QWEN_MODEL: process.env.QWEN_MODEL,
+  QWEN_FAST_MODEL: process.env.QWEN_FAST_MODEL,
+  QWEN_PLUS_MODEL: process.env.QWEN_PLUS_MODEL,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
   BROWSE_PAGE_MODEL: process.env.BROWSE_PAGE_MODEL,
   MEDIA_DESCRIBER_MODEL: process.env.MEDIA_DESCRIBER_MODEL,

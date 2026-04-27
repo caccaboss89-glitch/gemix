@@ -28,6 +28,8 @@ module.exports = {
   SUPPORTED_MEDIA: ['image', 'audio', 'document', 'sticker', 'ptt', 'video'],
 
   // API
+  OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
+  XAI_TTS_URL: 'https://api.x.ai/v1/tts',
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 60_000,
   FETCH_TIMEOUT_MS: 60_000,

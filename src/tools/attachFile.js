@@ -3,7 +3,8 @@
 // for the current response. Files are AUTO-DELIVERED in the current chat.
 // Cross-platform:
 //   - Discord: history/ only (Discord client auto-delivers responseCtx.attachments).
-//   - WhatsApp: permanent/, searched_images/, projects/<*>/{figures,temp,output,code}/...
+//   - WhatsApp: permanent/, searched_images/, projects/<*>/{temp,code}/...
+//     (output/ is excluded: those files are already AUTO-DELIVERED to the user)
 //     Files are auto-included in the current chat response (no send_whatsapp_message needed).
 //     Use send_whatsapp_message / send_email ONLY to send to OTHER recipients.
 
@@ -65,11 +66,17 @@ async function attachFileTool(args, userCtx, responseCtx) {
   if (check.zone === 'history') {
     return {
       success: false,
-      error: 'attach_file refused: files in history/ are already visible to the user in the chat — do not re-deliver them. Use attach_file only for permanent/, searched_images/ or projects/<name>/{figures|temp|output|code}/...',
+      error: 'attach_file refused: files in history/ are already visible to the user in the chat — do not re-deliver them. Use attach_file only for permanent/, searched_images/ or projects/<name>/{temp|code}/...',
     };
   }
   if (check.zone === 'skills') {
     return { success: false, error: 'attach_file refused: skills/ is read-only AI guidance, not deliverable content.' };
+  }
+  if (check.zone === 'project_sub' && check.subdir === 'output') {
+    return {
+      success: false,
+      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for projects/<name>/{temp|code}/, permanent/, or searched_images/.',
+    };
   }
 
   const abs = check.absPath;

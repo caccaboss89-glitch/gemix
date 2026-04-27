@@ -6,10 +6,14 @@
 // avoids the quality drop of running entire complex tasks on a small
 // multimodal model just because the request happens to contain audio.
 
-const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, QWEN_MODEL } = require('../config/env');
-const { MAX_TOKENS } = require('../config/constants');
+const { OPENROUTER_API_KEY, QWEN_PLUS_MODEL, QWEN_FAST_MODEL } = require('../config/env');
+const { OPENROUTER_BASE_URL, MAX_TOKENS } = require('../config/constants');
 const { callModel } = require('./apiClient');
 const { describeMediaInMessages } = require('./mediaDescriber');
+
+function getQwenModel({ agenticUnlocked = false } = {}) {
+  return agenticUnlocked ? QWEN_PLUS_MODEL : QWEN_FAST_MODEL;
+}
 
 /**
  * Call the main AI provider (Qwen) via OpenRouter.
@@ -21,11 +25,12 @@ const { describeMediaInMessages } = require('./mediaDescriber');
  * @param {Array|null} tools - Tool definitions array
  * @returns {Promise<{message: object, provider: string, model: string}>}
  */
-async function callAI(messages, tools = null) {
+async function callAI(messages, tools = null, options = {}) {
   const processedMessages = await describeMediaInMessages(messages);
+  const model = getQwenModel(options);
 
   const body = {
-    model: QWEN_MODEL,
+    model,
     messages: processedMessages,
     max_tokens: MAX_TOKENS,
     reasoning: { effort: 'high' },
@@ -33,7 +38,7 @@ async function callAI(messages, tools = null) {
   if (tools && tools.length > 0) body.tools = tools;
 
   const message = await callModel('Qwen', `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
-  return { message, provider: 'Qwen', model: QWEN_MODEL };
+  return { message, provider: 'Qwen', model };
 }
 
 module.exports = { callAI };

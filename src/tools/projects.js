@@ -6,34 +6,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const {
-  MAX_PROJECTS_PER_USER,
-  MAX_USER_TOTAL_MB,
-  PLATFORM_DISCORD,
-} = require('../config/constants');
-const {
-  resolveStorageId,
-  ensureUserSkeleton,
-  ensureProjectSkeleton,
-  sanitizeProjectName,
-  listProjects,
-  readProjectMeta,
-  writeProjectMeta,
-  projectExists,
-  getProjectRoot,
-  getProjectSubdir,
-  getPermanentDir,
-  getSearchedImagesDir,
-  getHistoryDir,
-  userTotalBytes,
-  userQuotaBytes,
-  FIXED_PROJECT_SUBDIRS,
-  isPathAllowed,
-} = require('../utils/userPaths');
-const {
-  getCurrentProject,
-  setCurrentProject,
-} = require('../utils/projectState');
+const { MAX_PROJECTS_PER_USER, MAX_USER_TOTAL_MB, PLATFORM_DISCORD } = require('../config/constants');
+const { resolveStorageId, ensureUserSkeleton, ensureProjectSkeleton, sanitizeProjectName, listProjects, readProjectMeta, writeProjectMeta, projectExists, getProjectRoot, getProjectSubdir, getPermanentDir, userTotalBytes, userQuotaBytes, projectSizeBytes, FIXED_PROJECT_SUBDIRS, isPathAllowed } = require('../utils/userPaths');
+const { getCurrentProject, setCurrentProject } = require('../utils/projectState');
 const { copyFromHistory } = require('../utils/historySync');
 const { createLogger } = require('../utils/logger');
 
@@ -150,7 +125,7 @@ function createProjectTool(args, userCtx) {
     success: true,
     project: slug,
     current_project: slug,
-    message: `Project "${slug}" created and selected as current. Write code in projects/${slug}/code/, intermediate files in temp/, final deliverables in output/, images in figures/.`,
+    message: `Project "${slug}" created and selected as current. Write scripts in projects/${slug}/code/, intermediate files in temp/, final deliverables (auto-delivered to user) in output/.`,
   };
 }
 
@@ -207,9 +182,6 @@ function deleteProjectTool(args, userCtx) {
     return _err(`Failed to delete project: ${err.message}`);
   }
 
-  const current = getCurrentProject(userCtx);
-  if (current === slug) setCurrentProject(userCtx, null);
-
   return {
     success: true,
     deleted: slug,
@@ -218,7 +190,7 @@ function deleteProjectTool(args, userCtx) {
 }
 
 /**
- * Invoked by `gemix-project cleanup [<slug>] <subdir>...`. Args: { name?, subdirs: ["temp","figures","output","code"] }.
+ * Invoked by `gemix-project cleanup [<slug>] <subdir>...`. Args: { name?, subdirs: ["temp","output","code"] }.
  * Deletes the CONTENTS of the specified subdirs (keeps the folders).
  */
 function cleanupProjectTool(args, userCtx) {
@@ -286,8 +258,8 @@ function copyToPermanentTool(args, userCtx) {
 
 /**
  * Invoked by `gemix-project copy-to-project <source> [<subdir>]`.
- * Args: { source, subdir?: 'figures'|'temp'|'output'|'code' }.
- * Source may be "history/<file>" or "searched_images/<file>". Default subdir = figures.
+ * Args: { source, subdir?: 'temp'|'output'|'code' }.
+ * Source may be "history/<file>" or "searched_images/<file>". Default subdir = temp.
  * Writes into the currently selected project.
  */
 function copyToProjectTool(args, userCtx) {
@@ -295,7 +267,7 @@ function copyToProjectTool(args, userCtx) {
   if (guard) return guard;
   const source = args && args.source;
   if (!source) return _err('Missing "source".');
-  const subdir = (args && args.subdir) || 'figures';
+  const subdir = (args && args.subdir) || 'temp';
   if (!FIXED_PROJECT_SUBDIRS.includes(subdir)) {
     return _err(`Invalid subdir "${subdir}". Allowed: ${FIXED_PROJECT_SUBDIRS.join(', ')}.`);
   }
@@ -344,6 +316,29 @@ function copyToProjectTool(args, userCtx) {
   };
 }
 
+/**
+ * Invoked by `gemix-project quota`. Returns total used/free quota and per-project breakdown.
+ */
+function quotaTool(userCtx) {
+  const guard = _guardPlatform(userCtx);
+  if (guard) return guard;
+  const usedBytes = userTotalBytes(userCtx);
+  const totalBytes = userQuotaBytes();
+  const freeBytes = Math.max(0, totalBytes - usedBytes);
+  const toMb = b => Math.round(b / 1024 / 1024 * 10) / 10;
+  const projects = listProjects(userCtx).map(p => ({
+    name: p.name,
+    size_mb: toMb(projectSizeBytes(userCtx, p.name)),
+  }));
+  return {
+    success: true,
+    used_mb: toMb(usedBytes),
+    total_mb: toMb(totalBytes),
+    free_mb: toMb(freeBytes),
+    projects,
+  };
+}
+
 module.exports = {
   listProjectsTool,
   createProjectTool,
@@ -352,4 +347,5 @@ module.exports = {
   cleanupProjectTool,
   copyToPermanentTool,
   copyToProjectTool,
+  quotaTool,
 };

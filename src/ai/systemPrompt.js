@@ -71,7 +71,7 @@ ${membersList}
   }
 
   prompt += `  <ToolInstructions>
-    Use tools before your final response. A final text response ends the turn; send_voice_message (no recipient) also ends the turn. You may call multiple tools in one round. For multi-step operations (3+ tool calls), use report_to_user to send brief status updates so the user is not left waiting in silence — but never for simple tasks.
+    You MUST NOT generate any text before or between tool calls. A final text response ends the turn; send_voice_message (no recipient) also ends the turn. You can run multiple tools in parallel where possible to optimize rounds. For multi-step operations (3+ tool calls), use first report_to_user to explain to the user what you're about to do.
     ${!isActiveMember ? 'Some tools (e.g. email, message sending) are NOT available for this user.' : ''}
   </ToolInstructions>
   <MediaHandling>
@@ -106,12 +106,14 @@ ${membersList}
  */
 function buildPersonalCloudPointer(ctx) {
   const current = ctx.currentProject || null;
+  const last = ctx.lastProjectUsed || null;
   const projects = Array.isArray(ctx.projects) ? ctx.projects : [];
   const projectsCount = projects.length;
   const currentLine = current ? _escapeXml(current) : 'None';
+  const lastLine = last ? _escapeXml(last) : 'None';
   return `  <PersonalCloud lite="true">
     Persistent personal cloud: history/, permanent/, searched_images/, projects/. Sandbox available after unlock.
-    Selected project: ${currentLine} — Projects: ${projectsCount}.
+    Selected project: ${currentLine} — Last used project: ${lastLine} — Projects: ${projectsCount}.
     Call agentic_unlock first for computation, advanced math/science, file (PDF/PPTX/XLSX/DOCX/images/audio/video) generation/editing/conversion, OCR (if you need to read text from many photos), charts, large data work, archives, produced files, zip/jar extraction or compression, or financial data.
     Do not call it for normal chat.
   </PersonalCloud>

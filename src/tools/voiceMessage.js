@@ -2,7 +2,7 @@
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
 const { XAI_API_KEY, XAI_TTS_VOICE } = require('../config/env');
-const { MAX_TTS_CHARS } = require('../config/constants');
+const { XAI_TTS_URL } = require('../config/constants');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
@@ -91,13 +91,18 @@ const VOICE_GENERATION_TIMEOUT_MS = 30_000;
  * @returns {Promise<Buffer>} OGG/Opus audio buffer (48kHz mono, iOS-optimized WhatsApp format)
  */
 async function generateVoice(text) {
-  const timeout = new Promise((_, reject) =>
-    setTimeout(
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(
       () => reject(new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`)),
       VOICE_GENERATION_TIMEOUT_MS,
-    )
-  );
-  return Promise.race([_generateVoice(text), timeout]);
+    );
+  });
+  try {
+    return await Promise.race([_generateVoice(text), timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 async function _generateVoice(text) {
@@ -121,7 +126,7 @@ async function _generateVoice(text) {
  * xAI TTS — voice "eve", language "auto", output mp3 44100Hz 128kbps.
  */
 async function xaiTTS(text) {
-  const res = await fetchWithTimeout('https://api.x.ai/v1/tts', {
+  const res = await fetchWithTimeout(XAI_TTS_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${XAI_API_KEY}`,

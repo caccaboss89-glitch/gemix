@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { DATA_DIR } = require('../config/constants');
-const { OPENROUTER_API_KEY, OPENROUTER_BASE_URL, EMBEDDING_MODEL } = require('../config/env');
+const { OPENROUTER_API_KEY, EMBEDDING_MODEL } = require('../config/env');
+const { OPENROUTER_BASE_URL } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('RAG');

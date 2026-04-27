@@ -28,13 +28,6 @@ function computeNextOccurrence(scheduledAtISO, freq) {
   const match = isoRegex.exec(scheduledAtISO);
   if (!match) return null;
 
-  const year = parseInt(match[1], 10);
-  const month = parseInt(match[2], 10);
-  const day = parseInt(match[3], 10);
-  const hour = parseInt(match[4], 10);
-  const minute = parseInt(match[5], 10);
-  const second = parseInt(match[6], 10);
-
   // Create a Date from the current scheduled time to do arithmetic
   const currentDate = new Date(scheduledAtISO);
   if (isNaN(currentDate.getTime())) return null;

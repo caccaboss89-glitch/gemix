@@ -1,26 +1,20 @@
 // src/handler.js
+const fs = require('fs');
+const path = require('path');
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser } = require('./ai/tools');
 const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
-const {
-  MAX_TOOL_ROUNDS,
-  MAX_TOOL_ROUNDS_AGENTIC,
-  PLATFORM_DISCORD,
-  MAINTENANCE_MODE,
-  MAINTENANCE_ADMIN_ONLY,
-  MAINTENANCE_USER_MESSAGE,
-  INTERRUPTED_RUN_TTL_MS,
-} = require('./config/constants');
+const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_MODE, MAINTENANCE_ADMIN_ONLY, MAINTENANCE_USER_MESSAGE, INTERRUPTED_RUN_TTL_MS } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
-const { getCurrentProject, consumeLastCrash, saveLastCrash } = require('./utils/projectState');
-const { listProjects, ensureUserSkeleton } = require('./utils/userPaths');
+const { getCurrentProject, getLastProject, setCurrentProject, consumeLastCrash, saveLastCrash, acquireLock, releaseLock, startAutoRenewLock } = require('./utils/projectState');
+const { listProjects, ensureUserSkeleton, getProjectRoot } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 
@@ -32,7 +26,39 @@ const AGENTIC_TOOL_NAMES = new Set([
   'code_execution', 'write_file', 'edit_file', 'bash',
 ]);
 
+const DEFERRED_TOOL_NAMES = new Set(['bash', 'code_execution']);
+const PARALLEL_SAFE_TOOL_NAMES = new Set([
+  'web_search',
+  'browse_page',
+  'read_server_rules',
+  'read_music_stats',
+]);
+
 const log = createLogger('Handler');
+
+/**
+ * Walk the project directory and return relative file paths (excludes hidden files and README.md).
+ * Capped at maxFiles to avoid bloating the briefing.
+ */
+function _scanProjectFiles(projectDir, maxFiles = 80) {
+  const files = [];
+  function walk(dir, rel) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'README.md') continue;
+      const relPath = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        walk(path.join(dir, e.name), relPath);
+      } else {
+        if (files.length < maxFiles) files.push(relPath);
+      }
+    }
+  }
+  walk(projectDir, '');
+  return files;
+}
 
 /**
  * Extract and remove <title>...</title> XML tag from text.
@@ -48,6 +74,12 @@ function extractTitleTag(text) {
   const title = titleMatch[1].trim();
   const cleanText = text.replace(/<title>.*?<\/title>/i, '').trim();
   return { text: cleanText, title };
+}
+
+function orderToolCalls(toolCalls) {
+  return [...toolCalls].sort((a, b) =>
+    (DEFERRED_TOOL_NAMES.has(a.function.name) ? 1 : 0) - (DEFERRED_TOOL_NAMES.has(b.function.name) ? 1 : 0)
+  );
 }
 
 /**
@@ -68,6 +100,11 @@ async function handleMessage(ctx) {
     // (WhatsApp / Discord) so `report_to_user` can deliver status updates.
     sendIntermediate: ctx._sendIntermediate || null,
   };
+  let projectLockCtx = null;
+  let projectLockOwnerId = null;
+  let projectLockHeld = false;
+  let stopProjectLockRenew = null;
+  let shouldAutoExitProject = false;
 
   try {
     const ui = ctx.userIdentity;
@@ -118,6 +155,7 @@ async function handleMessage(ctx) {
         };
         ensureUserSkeleton(cloudProbeCtx);
         ctx.currentProject = getCurrentProject(cloudProbeCtx);
+        ctx.lastProjectUsed = getLastProject(cloudProbeCtx);
         ctx.projects = listProjects(cloudProbeCtx);
         // Crash recovery: if a previous run was interrupted (bot killed mid
         // tool call), the slot survives on disk. Consume + inject once.
@@ -125,6 +163,7 @@ async function handleMessage(ctx) {
       } catch (err) {
         log.warn(`Failed to load project state: ${err.message}`);
         ctx.currentProject = null;
+        ctx.lastProjectUsed = null;
         ctx.projects = [];
       }
     }
@@ -161,7 +200,10 @@ async function handleMessage(ctx) {
       // (full agentic stack appears, gateway disappears) and a briefing
       // system message to be injected.
       agenticUnlocked: false,
+      requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
     };
+    projectLockCtx = cloudProbeCtx;
+    projectLockOwnerId = userCtx.requestId;
 
     let tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
@@ -245,6 +287,7 @@ async function handleMessage(ctx) {
     const deliveryCtx = {
       contactedWA: new Set(),
       contactedEmail: new Set(),
+      roundCalledTools: new Set(),
     };
 
     let rounds = 0;
@@ -252,6 +295,56 @@ async function handleMessage(ctx) {
     let maxRounds = MAX_TOOL_ROUNDS;
     let agenticUnlocked = false;
     let lastAgenticTool = null;
+    const runToolCall = async (tc) => {
+      if (projectLockCtx && AGENTIC_TOOL_NAMES.has(tc.function.name)) {
+        if (!acquireLock(projectLockCtx, projectLockOwnerId)) {
+          const lockError = 'Another agentic request is already using this personal cloud. Wait for it to finish before running project or sandbox tools again.';
+          log.warn(`   ⛔ Agentic lock denied for ${tc.function.name} (${projectLockOwnerId})`);
+          return {
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify({ success: false, error: lockError }),
+          };
+        }
+        if (!projectLockHeld) {
+          projectLockHeld = true;
+          stopProjectLockRenew = startAutoRenewLock(projectLockCtx, projectLockOwnerId);
+        }
+      }
+
+      try {
+        let argsPreview = '';
+        try {
+          const parsed = JSON.parse(tc.function.arguments || '{}');
+          argsPreview = JSON.stringify(parsed).slice(0, 200);
+        } catch {
+          argsPreview = String(tc.function.arguments || '').slice(0, 200);
+        }
+        log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
+        const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
+        let resultPreview;
+        if (Array.isArray(result)) {
+          resultPreview = `multimodal[${result.length}] parts=${result.map(p => p.type).join(',')}`;
+        } else if (typeof result === 'string') {
+          resultPreview = `text(${result.length}) ${result.slice(0, 200).replace(/\s+/g, ' ')}`;
+        } else {
+          resultPreview = typeof result;
+        }
+        log.info(`   Result: ${resultPreview}`);
+        return {
+          role: 'tool',
+          tool_call_id: toolCallId,
+          content: result,
+        };
+      } catch (toolErr) {
+        log.error(`   ❌ Tool error "${tc.function.name}": ${toolErr.message}`);
+        return {
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: `Execution error: ${toolErr.message}`,
+        };
+      }
+    };
 
     while (rounds < maxRounds) {
       rounds++;
@@ -267,7 +360,9 @@ async function handleMessage(ctx) {
         ? `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
         : `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>normal</Status></ToolRound>`;
       messages.push({ role: 'system', content: _roundHint });
-      const { message: assistantMsg, provider, model } = await callAI(messages, tools);
+      const { message: assistantMsg, provider, model } = await callAI(messages, tools, {
+        agenticUnlocked: agenticUnlocked || userCtx.agenticUnlocked,
+      });
       messages.pop(); // remove ephemeral round hint — must not persist between rounds
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
@@ -282,6 +377,7 @@ async function handleMessage(ctx) {
           }
           if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
             lastAgenticTool = tc.function.name;
+            shouldAutoExitProject = shouldAutoExitProject || Boolean(cloudProbeCtx);
             if (!agenticUnlocked) {
               agenticUnlocked = true;
               maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
@@ -295,42 +391,36 @@ async function handleMessage(ctx) {
         }
         messages.push(assistantMsg);
 
-        for (const tc of assistantMsg.tool_calls) {
+        // Reset per-round deduplication tracking for idempotent tools
+        deliveryCtx.roundCalledTools = new Set();
+
+        // Reorder: file-creation tools first, execution tools last so the AI
+        // can write files and run them in the same round.
+        const _orderedCalls = orderToolCalls(assistantMsg.tool_calls);
+        for (let i = 0; i < _orderedCalls.length; i++) {
+          const tc = _orderedCalls[i];
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
             log.warn(`   ⚠️ Tool loop interrupted: a tool already produced the final response`);
             break;
           }
 
-          try {
-            let argsPreview = '';
-            try {
-              const parsed = JSON.parse(tc.function.arguments || '{}');
-              argsPreview = JSON.stringify(parsed).slice(0, 200);
-            } catch { argsPreview = String(tc.function.arguments || '').slice(0, 200); }
-            log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
-            const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
-            let resultPreview;
-            if (Array.isArray(result)) {
-              resultPreview = `multimodal[${result.length}] parts=${result.map(p => p.type).join(',')}`;
-            } else if (typeof result === 'string') {
-              resultPreview = `text(${result.length}) ${result.slice(0, 200).replace(/\s+/g, ' ')}`;
-            } else {
-              resultPreview = typeof result;
+          if (PARALLEL_SAFE_TOOL_NAMES.has(tc.function.name)) {
+            const parallelCalls = [tc];
+            while (i + 1 < _orderedCalls.length && PARALLEL_SAFE_TOOL_NAMES.has(_orderedCalls[i + 1].function.name)) {
+              parallelCalls.push(_orderedCalls[i + 1]);
+              i++;
             }
-            log.info(`   Result: ${resultPreview}`);
-            messages.push({
-              role: 'tool',
-              tool_call_id: toolCallId,
-              content: result,
-            });
-          } catch (toolErr) {
-            log.error(`   ❌ Tool error "${tc.function.name}": ${toolErr.message}`);
-            messages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: `Execution error: ${toolErr.message}`,
-            });
+            if (parallelCalls.length > 1) {
+              log.info(`   ⚡ Executing ${parallelCalls.length} independent read/research tools in parallel`);
+            }
+            const toolMessages = await Promise.all(parallelCalls.map(runToolCall));
+            for (const toolMessage of toolMessages) {
+              messages.push(toolMessage);
+            }
+            continue;
           }
+
+          messages.push(await runToolCall(tc));
         }
 
         // If agentic_unlock was just executed, swap the tool list and
@@ -342,9 +432,25 @@ async function handleMessage(ctx) {
             agenticUnlocked = true;
             maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
           }
+          const _briefingProject = getCurrentProject(userCtx) || ctx.currentProject || null;
+          let _projectFiles = [];
+          let _readmeContent = null;
+          if (_briefingProject) {
+            const _pdir = getProjectRoot(userCtx, _briefingProject);
+            if (_pdir) {
+              _projectFiles = _scanProjectFiles(_pdir);
+              try {
+                const _rp = path.join(_pdir, 'README.md');
+                if (fs.existsSync(_rp)) _readmeContent = fs.readFileSync(_rp, 'utf-8').slice(0, 1500);
+              } catch { /* skip */ }
+            }
+          }
           const briefing = buildAgenticBriefing({
-            currentProject: ctx.currentProject || null,
+            currentProject: _briefingProject,
+            lastProjectUsed: getLastProject(userCtx) || ctx.lastProjectUsed || null,
             projects: ctx.projects || [],
+            projectFiles: _projectFiles,
+            readmeContent: _readmeContent,
           });
           messages.push({ role: 'system', content: briefing });
           log.info(`   🔓 agentic_unlock invoked → tools rebuilt (${tools.length}) + briefing injected`);
@@ -387,6 +493,8 @@ async function handleMessage(ctx) {
         text = 'Generazione della risposta fallita. Riprova.';
       }
 
+      shouldAutoExitProject = shouldAutoExitProject || Boolean(agenticUnlocked && cloudProbeCtx);
+
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
         return {
@@ -428,7 +536,7 @@ async function handleMessage(ctx) {
       try {
         saveLastCrash(cloudProbeCtx, {
           type: 'tool_rounds_exhausted',
-          project: ctx.currentProject || null,
+          project: getCurrentProject(cloudProbeCtx) || getLastProject(cloudProbeCtx) || null,
           last_tool: lastAgenticTool,
           rounds_used: rounds,
         });
@@ -445,7 +553,10 @@ async function handleMessage(ctx) {
     };
 
   } catch (err) {
-    log.error(`\n❌ [${ctx.platform.toUpperCase().padEnd(10)}] HANDLER ERROR:`);
+    const platformLabel = (typeof ctx?.platform === 'string' && ctx.platform)
+      ? ctx.platform.toUpperCase().padEnd(10)
+      : 'UNKNOWN   ';
+    log.error(`\n❌ [${platformLabel}] HANDLER ERROR:`);
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
     return {
@@ -453,8 +564,19 @@ async function handleMessage(ctx) {
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],
+      discordTitle: responseCtx.discordTitle || '',
       modelUsed: null,
     };
+  } finally {
+    if (shouldAutoExitProject && projectLockCtx) {
+      try { if (getCurrentProject(projectLockCtx)) setCurrentProject(projectLockCtx, null); } catch (e) { log.warn(`auto-exit project failed: ${e.message}`); }
+    }
+    if (typeof stopProjectLockRenew === 'function') {
+      try { stopProjectLockRenew(); } catch (e) { log.warn(`stopProjectLockRenew failed: ${e.message}`); }
+    }
+    if (projectLockHeld && projectLockCtx && projectLockOwnerId) {
+      try { releaseLock(projectLockCtx, projectLockOwnerId); } catch (e) { log.warn(`releaseLock failed: ${e.message}`); }
+    }
   }
 }
 

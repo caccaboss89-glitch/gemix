@@ -140,6 +140,18 @@ class PythonKernel {
     log.info(`kernel ready (id=${this.kernelId.slice(0, 8)}…)`);
   }
 
+  /**
+   * Reject every in-flight execute, clearing its timer first.
+   * Safe to call multiple times (idempotent after the first).
+   */
+  _rejectAllPending(reason) {
+    for (const [, handle] of this._pending) {
+      try { clearTimeout(handle.timer); } catch { /* */ }
+      try { handle.reject(new Error(reason)); } catch { /* */ }
+    }
+    this._pending.clear();
+  }
+
   async shutdown() {
     this._ready = false;
     try {
@@ -161,11 +173,7 @@ class PythonKernel {
       this.kernelId = null;
     }
 
-    // Reject any pending executes
-    for (const [, p] of this._pending) {
-      try { p.reject(new Error('Kernel shut down before reply')); } catch { /* */ }
-    }
-    this._pending.clear();
+    this._rejectAllPending('Kernel shut down before reply');
   }
 
   isAlive() {
@@ -290,10 +298,7 @@ class PythonKernel {
 
       ws.on('close', () => {
         this._ready = false;
-        for (const [, p] of this._pending) {
-          try { p.reject(new Error('Kernel WS closed')); } catch { /* */ }
-        }
-        this._pending.clear();
+        this._rejectAllPending('Kernel WS closed');
       });
 
       ws.on('message', (raw) => this._onMessage(raw));

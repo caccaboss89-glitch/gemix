@@ -6,7 +6,8 @@
 // with a `<Description>...</Description>` text part so the main model (Qwen)
 // can reason about media content without being multimodal-capable itself.
 
-const { OPENROUTER_BASE_URL, OPENROUTER_API_KEY, MEDIA_DESCRIBER_MODEL } = require('../config/env');
+const { OPENROUTER_API_KEY, MEDIA_DESCRIBER_MODEL } = require('../config/env');
+const { OPENROUTER_BASE_URL } = require('../config/constants');
 const { callModel } = require('./apiClient');
 const { createLogger } = require('../utils/logger');
 const { getStoredHistoryMediaDescription, storeHistoryMediaDescription } = require('../utils/historySync');
@@ -101,6 +102,7 @@ async function describeMediaInMessages(messages) {
       ? getStoredHistoryMediaDescription(userId, historyPath, target.kind)
       : null;
     if (cached) {
+      log.info(`   ♻️ Reused cached ${target.kind} description for ${historyPath}`);
       messages[target.mi].content[target.pi] = { type: 'text', text: `<Description kind="${target.kind}">\n${cached}\n</Description>` };
     } else {
       pendingTargets.push(target);
@@ -189,7 +191,8 @@ async function describeMediaInMessages(messages) {
       : `<Description kind="${kind}">description unavailable (${r.error})</Description>`;
     messages[mi].content[pi] = { type: 'text', text };
     if (r.success && typeof part?._historyPath === 'string' && typeof part?._historyUserId === 'string') {
-      storeHistoryMediaDescription(part._historyUserId, part._historyPath, kind, r.description);
+      const stored = storeHistoryMediaDescription(part._historyUserId, part._historyPath, kind, r.description);
+      if (stored) log.info(`   💾 Stored ${kind} description for ${part._historyPath}`);
     }
   }
 

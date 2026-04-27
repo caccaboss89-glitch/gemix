@@ -22,9 +22,8 @@ function _isSystemMessage(body) {
   );
 }
 const { isSupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
-const { retrieveVoiceText } = require('../../utils/voiceTextCache');
 const { normalizeMarkdown } = require('../../utils/text');
-const { syncFileToHistory, getStoredHistoryMediaDescription } = require('../../utils/historySync');
+const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 
 const _MIME_TO_EXT = {
@@ -148,7 +147,9 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
       if (isSupportedMedia(mediaType)) {
         if (isAudioType) {
-          const cachedText = retrieveVoiceText(chat.id._serialized, msg.timestamp * 1000);
+          const storedVoiceText = getStoredHistoryVoiceTranscription(userId, syncedPath);
+          const cachedText = storedVoiceText || retrieveRecentVoiceText(chat.id._serialized, msg.timestamp * 1000);
+          if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(userId, syncedPath, cachedText);
           const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'audio');
           if (cachedText) {
             textContent = `${textContent} ${tag} <Transcription>${cachedText}</Transcription>`.trim();
@@ -168,24 +169,6 @@ async function buildWhatsAppHistory(chat, platform, userId) {
           } else if (duration > MAX_VIDEO_DURATION_S) {
             textContent = `${textContent} ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)`.trim();
           } else {
-            textContent = `${textContent} ${tag}`.trim();
-          }
-        } else if (mediaType === 'document' && msg._data?.mimetype === 'application/pdf') {
-          try {
-            const buffer = await fetchBuffer();
-            if (buffer) {
-              const info = await extractTextFromPdfBuffer(buffer);
-              if (!info.success) {
-                textContent = `${textContent} ${tag}`.trim();
-              } else if (info.pages > MAX_DOC_PAGES) {
-                textContent = `${textContent} ${tag} (document too long: ${info.pages} pages)`.trim();
-              } else {
-                textContent = `${textContent} ${tag}`.trim();
-              }
-            } else {
-              textContent = `${textContent} ${tag}`.trim();
-            }
-          } catch {
             textContent = `${textContent} ${tag}`.trim();
           }
         } else {
@@ -241,7 +224,9 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
 
       const isVideo = mediaType === 'video';
       if (isAudio) {
-        const cachedText = chatId ? retrieveVoiceText(chatId, quoted.timestamp * 1000) : null;
+        const storedVoiceText = getStoredHistoryVoiceTranscription(userId, syncedPath);
+        const cachedText = storedVoiceText || (chatId ? retrieveRecentVoiceText(chatId, quoted.timestamp * 1000) : null);
+        if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(userId, syncedPath, cachedText);
         const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'audio');
         if (cachedText) {
           prefix = `[In reply to: ${tag} <Transcription>${cachedText}</Transcription>]\n`;
