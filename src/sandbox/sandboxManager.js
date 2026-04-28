@@ -167,7 +167,7 @@ async function _spawnContainer(userCtx, projectName) {
       NanoCpus: 1_000_000_000, // 1.0 CPU
       Tmpfs: { '/tmp': 'size=256m' },
       PortBindings: {
-        '8888/tcp': [{ HostPort: String(hostPort) }],
+        '8888/tcp': [{ HostIp: '127.0.0.1', HostPort: String(hostPort) }],
       },
       Binds: [
         `${projectDir}:/workspace:rw`,
@@ -210,23 +210,36 @@ function _waitForKernelHttp(hostPort, token, timeoutMs = 60_000) {
     const http = require('http');
     const start = Date.now();
     const tick = () => {
-      // Use localhost to let Node resolve appropriately (IPv4/IPv6 fallback)
       const req = http.get({
-        host: 'localhost', port: hostPort, path: `/api/status?token=${token}`,
-        timeout: 5000, // increased timeout for slow Windows Docker boots
+        host: '127.0.0.1',
+        port: hostPort,
+        path: `/api/status?token=${token}`,
+        timeout: 5000,
+        headers: {
+          'Authorization': `token ${token}` // fallback for some configs
+        }
       }, (res) => {
         res.resume();
         if (res.statusCode === 200) {
           return resolve();
         }
-        // If we get anything else (401, 404, 5xx), Jupyter isn't ready or token is wrong yet
+        // If we get 401/403, we reached it but auth failed (maybe token not yet active?)
+        // If we get 5xx, it's booting.
         return retry();
       });
-      req.on('error', retry);
+      req.on('error', (err) => {
+        // Only log if it's NOT a connection refused (which is expected during boot)
+        if (err.code !== 'ECONNREFUSED') {
+          log.warn(`Sandbox probe error on port ${hostPort}: ${err.message} (${err.code})`);
+        }
+        retry();
+      });
       req.on('timeout', () => { req.destroy(); retry(); });
     };
     const retry = () => {
-      if (Date.now() - start > timeoutMs) return reject(new Error('Jupyter Server boot timeout'));
+      if (Date.now() - start > timeoutMs) {
+        return reject(new Error(`Jupyter Server boot timeout (waited ${timeoutMs}ms on port ${hostPort})`));
+      }
       setTimeout(tick, 500);
     };
     tick();
