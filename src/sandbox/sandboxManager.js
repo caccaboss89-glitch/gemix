@@ -284,6 +284,14 @@ async function getOrCreate(userCtx, projectName) {
       });
       await fresh.kernel.start();
     } catch (err) {
+      // If boot failed, try to capture container logs for debugging before killing it
+      try {
+        const logs = await fresh.container.logs({ stdout: true, stderr: true, tail: 100 });
+        const logLines = logs.toString('utf-8').trim();
+        log.error(`Sandbox boot failed for ${projectName}. Container logs:\n${logLines || '(empty logs)'}`);
+      } catch (logErr) {
+        log.warn(`Failed to capture logs for failed sandbox ${projectName}: ${logErr.message}`);
+      }
       await _killEntry(fresh).catch(killErr => log.warn(`cleanup after failed sandbox boot (${projectName}) failed: ${killErr.message}`));
       throw err;
     }
@@ -293,26 +301,16 @@ async function getOrCreate(userCtx, projectName) {
   const placeholder = { _bootPromise: bootPromise };
   _pool.set(key, placeholder);
 
-    try {
-      const ready = await bootPromise;
-      ready.lastUsedAt = Date.now();
-      _pool.set(key, ready);
-      log.info(`sandbox ready key=${key} container=${ready.containerName}`);
-      return ready;
-    } catch (err) {
-      // If boot failed, try to capture container logs for debugging
-      const entry = await bootPromise.catch(() => null);
-      if (entry && entry.container) {
-        try {
-          const logs = await entry.container.logs({ stdout: true, stderr: true, tail: 50 });
-          log.error(`Sandbox boot failed for ${key}. Last 50 lines of logs:\n${logs.toString('utf-8')}`);
-        } catch (logErr) {
-          log.warn(`Failed to capture logs for failed sandbox ${key}: ${logErr.message}`);
-        }
-      }
-      _pool.delete(key);
-      throw err;
-    }
+  try {
+    const ready = await bootPromise;
+    ready.lastUsedAt = Date.now();
+    _pool.set(key, ready);
+    log.info(`sandbox ready key=${key} container=${ready.containerName}`);
+    return ready;
+  } catch (err) {
+    _pool.delete(key);
+    throw err;
+  }
 }
 
 /**
