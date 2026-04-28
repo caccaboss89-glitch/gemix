@@ -113,7 +113,7 @@ async function bashTool(args, userCtx, responseCtx) {
 
   // ── Intercept gemix-project commands (no sandbox needed) ──────────────────
   if (isGemixProjectCmd(command)) {
-    const result = handleGemixProjectCmd(command, userCtx);
+    const result = await handleGemixProjectCmd(command, userCtx);
     logToolExecution({
       tool: 'bash/gemix-project',
       input: { command },
@@ -131,11 +131,12 @@ async function bashTool(args, userCtx, responseCtx) {
 
   const wantBackground = Boolean(args.background);
   const { getCurrentProject } = require('../utils/projectState');
-  if (wantBackground && !getCurrentProject(userCtx)) {
+  if (wantBackground && !(await getCurrentProject(userCtx))) {
     return { success: false, error: 'Background execution requires an active project. Run `gemix-project create` or `gemix-project switch <slug>` via bash first.' };
   }
 
-  let timeoutMs = Number.isFinite(args.timeout_ms) ? Math.floor(args.timeout_ms) : DEFAULT_TIMEOUT_MS;
+  let tRaw = Number(args.timeout_ms);
+  let timeoutMs = Number.isFinite(tRaw) ? Math.floor(tRaw) : DEFAULT_TIMEOUT_MS;
   if (timeoutMs <= 0) timeoutMs = DEFAULT_TIMEOUT_MS;
   if (timeoutMs > MAX_TIMEOUT_MS) timeoutMs = MAX_TIMEOUT_MS;
   // Subprocess timeout: leave a small buffer below the kernel timeout so we

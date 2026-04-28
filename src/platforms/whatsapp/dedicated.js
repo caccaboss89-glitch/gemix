@@ -25,7 +25,7 @@ function initDedicatedWhatsApp() {
   client = new Client({
     authStrategy: new LocalAuth({ clientId: 'dedicated' }),
     puppeteer: {
-      executablePath: '/usr/bin/chromium',
+      executablePath: process.platform === 'linux' ? '/usr/bin/chromium' : undefined,
       headless: true,
       args: PUPPETEER_ARGS,
     },

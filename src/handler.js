@@ -45,16 +45,18 @@ const log = createLogger('Handler');
 function _scanProjectFiles(projectDir, maxFiles = 80) {
   const files = [];
   function walk(dir, rel) {
+    if (files.length >= maxFiles) return;
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
     catch { return; }
     for (const e of entries) {
+      if (files.length >= maxFiles) return;
       if (e.name.startsWith('.') || e.name === 'README.md') continue;
       const relPath = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) {
         walk(path.join(dir, e.name), relPath);
       } else {
-        if (files.length < maxFiles) files.push(relPath);
+        files.push(relPath);
       }
     }
   }
@@ -70,18 +72,26 @@ function _scanProjectFiles(projectDir, maxFiles = 80) {
  */
 function extractTitleTag(text) {
   if (!text) return { text, title: '' };
-  const titleMatch = text.match(/<title>(.*?)<\/title>/i);
+  const titleMatch = text.match(/<title>([\s\S]*?)<\/title>/i);
   if (!titleMatch) return { text, title: '' };
 
   const title = titleMatch[1].trim();
-  const cleanText = text.replace(/<title>.*?<\/title>/i, '').trim();
+  const cleanText = text.replace(/<title>[\s\S]*?<\/title>/gi, '').trim();
   return { text: cleanText, title };
 }
 
 function orderToolCalls(toolCalls) {
-  return [...toolCalls].sort((a, b) =>
-    (DEFERRED_TOOL_NAMES.has(a.function.name) ? 1 : 0) - (DEFERRED_TOOL_NAMES.has(b.function.name) ? 1 : 0)
-  );
+  const getPhase = (tc) => {
+    if (!DEFERRED_TOOL_NAMES.has(tc.function.name)) return 2;
+    try {
+      const args = JSON.parse(tc.function.arguments || '{}');
+      if (args.execution_phase === 'before_files') return 1;
+      return 3;
+    } catch {
+      return 3;
+    }
+  };
+  return [...toolCalls].sort((a, b) => getPhase(a) - getPhase(b));
 }
 
 function extractPlainTextContent(content) {
@@ -121,7 +131,7 @@ async function handleMessage(ctx) {
     imageSearchNextId: 1,
     // Platform-provided callback: sends an intermediate text message to the
     // user's chat without ending the tool loop. Set by platform handlers
-    // (WhatsApp / Discord) so `report_to_user` can deliver status updates.
+    // (WhatsApp / Discord).
     sendIntermediate: ctx._sendIntermediate || null,
   };
   let projectLockCtx = null;
@@ -204,12 +214,12 @@ async function handleMessage(ctx) {
           groupId: ctx.groupId,
         };
         ensureUserSkeleton(cloudProbeCtx);
-        ctx.currentProject = getCurrentProject(cloudProbeCtx);
-        ctx.lastProjectUsed = getLastProject(cloudProbeCtx);
+        ctx.currentProject = await getCurrentProject(cloudProbeCtx);
+        ctx.lastProjectUsed = await getLastProject(cloudProbeCtx);
         ctx.projects = listProjects(cloudProbeCtx);
         // Crash recovery: if a previous run was interrupted (bot killed mid
         // tool call), the slot survives on disk. Consume + inject once.
-        crashRecovery = consumeLastCrash(cloudProbeCtx, INTERRUPTED_RUN_TTL_MS);
+        crashRecovery = await consumeLastCrash(cloudProbeCtx, INTERRUPTED_RUN_TTL_MS);
       } catch (err) {
         log.warn(`Failed to load project state: ${err.message}`);
         ctx.currentProject = null;
@@ -347,7 +357,7 @@ async function handleMessage(ctx) {
     let lastAgenticTool = null;
     const runToolCall = async (tc) => {
       if (projectLockCtx && AGENTIC_TOOL_NAMES.has(tc.function.name)) {
-        if (!acquireLock(projectLockCtx, projectLockOwnerId)) {
+        if (!(await acquireLock(projectLockCtx, projectLockOwnerId))) {
           const lockError = 'Another agentic request is already using this personal cloud. Wait for it to finish before running project or sandbox tools again.';
           log.warn(`   ⛔ Agentic lock denied for ${tc.function.name} (${projectLockOwnerId})`);
           return {
@@ -482,7 +492,7 @@ async function handleMessage(ctx) {
             agenticUnlocked = true;
             maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
           }
-          const _briefingProject = getCurrentProject(userCtx) || ctx.currentProject || null;
+          const _briefingProject = (await getCurrentProject(userCtx)) || ctx.currentProject || null;
           let _projectFiles = [];
           let _readmeContent = null;
           if (_briefingProject) {
@@ -584,9 +594,9 @@ async function handleMessage(ctx) {
     // when an agentic pipeline was in flight).
     if (cloudProbeCtx && agenticUnlocked) {
       try {
-        saveLastCrash(cloudProbeCtx, {
+        await saveLastCrash(cloudProbeCtx, {
           type: 'tool_rounds_exhausted',
-          project: getCurrentProject(cloudProbeCtx) || getLastProject(cloudProbeCtx) || null,
+          project: (await getCurrentProject(cloudProbeCtx)) || (await getLastProject(cloudProbeCtx)) || null,
           last_tool: lastAgenticTool,
           rounds_used: rounds,
         });
@@ -619,13 +629,16 @@ async function handleMessage(ctx) {
     };
   } finally {
     if (shouldAutoExitProject && projectLockCtx) {
-      try { if (getCurrentProject(projectLockCtx)) setCurrentProject(projectLockCtx, null); } catch (e) { log.warn(`auto-exit project failed: ${e.message}`); }
+      try { 
+        const _cp = await getCurrentProject(projectLockCtx);
+        if (_cp) await setCurrentProject(projectLockCtx, null); 
+      } catch (e) { log.warn(`auto-exit project failed: ${e.message}`); }
     }
     if (typeof stopProjectLockRenew === 'function') {
       try { stopProjectLockRenew(); } catch (e) { log.warn(`stopProjectLockRenew failed: ${e.message}`); }
     }
     if (projectLockHeld && projectLockCtx && projectLockOwnerId) {
-      try { releaseLock(projectLockCtx, projectLockOwnerId); } catch (e) { log.warn(`releaseLock failed: ${e.message}`); }
+      try { await releaseLock(projectLockCtx, projectLockOwnerId); } catch (e) { log.warn(`releaseLock failed: ${e.message}`); }
     }
   }
 }

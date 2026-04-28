@@ -152,9 +152,11 @@ function classifyUserPath(userCtx, rawPath) {
     return { ok: false, reason: 'Invalid path (null byte).' };
   }
 
-  // Skills special prefix
-  if (rawPath.startsWith('skills:') || rawPath.startsWith('skills/')) {
-    const rest = rawPath.startsWith('skills:') ? rawPath.slice(7) : rawPath.slice(7);
+  // Skills special prefix (read-only, WA only)
+  const skillsPrefixes = ['skills:', 'skills/'];
+  const matchedPrefix = skillsPrefixes.find(p => rawPath.startsWith(p));
+  if (matchedPrefix) {
+    const rest = rawPath.slice(matchedPrefix.length);
     if (!rest || rest.includes('..') || path.isAbsolute(rest)) {
       return { ok: false, reason: 'Invalid skills path.' };
     }
@@ -215,6 +217,11 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
   if (!c.ok) return c;
 
   const isDiscord = userCtx.platform === PLATFORM_DISCORD;
+
+  const filename = path.basename(c.absPath);
+  if (filename === '.state.json' || filename === '.project.json') {
+    return { ok: false, reason: 'Access to system configuration files is restricted.' };
+  }
 
   // ── Read rules ──
   if (op === 'read') {

@@ -87,7 +87,6 @@ function snapshotProject(dir) {
     try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
     catch { continue; }
     for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
       const full = path.join(cur, entry.name);
       if (entry.isDirectory()) {
         stack.push(full);
@@ -106,7 +105,8 @@ function snapshotProject(dir) {
  * Resolve effective timeout in ms with the standard caps.
  */
 function resolveTimeout(rawMs) {
-  let t = Number.isFinite(rawMs) ? Math.floor(rawMs) : CODE_EXEC_TIMEOUT_MS;
+  let tRaw = Number(rawMs);
+  let t = Number.isFinite(tRaw) ? Math.floor(tRaw) : CODE_EXEC_TIMEOUT_MS;
   if (t <= 0) t = CODE_EXEC_TIMEOUT_MS;
   if (t > CODE_EXEC_MAX_TIMEOUT_MS) t = CODE_EXEC_MAX_TIMEOUT_MS;
   return t;
@@ -152,7 +152,7 @@ async function runInProjectSandbox({
 
   ensureUserSkeleton(userCtx);
 
-  let projectName = getCurrentProject(userCtx);
+  let projectName = await getCurrentProject(userCtx);
   const usingScratch = !projectName && !requireProject;
   
   if (requireProject && !projectName) {
@@ -165,7 +165,15 @@ async function runInProjectSandbox({
   if (usingScratch) {
     projectName = '_scratch_';
     const scratchDir = getScratchDir(userCtx);
-    if (scratchDir && !fs.existsSync(scratchDir)) {
+    if (scratchDir) {
+      if (fs.existsSync(scratchDir)) {
+        try {
+          fs.rmSync(scratchDir, { recursive: true, force: true });
+          log.info(`   🧹 Purged stale scratch directory: ${projectName}`);
+        } catch (err) {
+          log.warn(`   ⚠️ Failed to purge scratch directory: ${err.message}`);
+        }
+      }
       fs.mkdirSync(scratchDir, { recursive: true });
     }
   } else if (projectName && !projectExists(userCtx, projectName)) {
@@ -207,7 +215,7 @@ async function runInProjectSandbox({
   const startedAt = Date.now();
   entry.busy = true;
 
-  saveLastCrash(userCtx, {
+  await saveLastCrash(userCtx, {
     type: toolLabel,
     project: projectName,
     timeout_ms: effTimeoutMs,
@@ -220,7 +228,7 @@ async function runInProjectSandbox({
     kernelResult = await entry.kernel.execute(code, { timeoutMs: effTimeoutMs });
   } catch (err) {
     entry.busy = false;
-    clearLastCrash(userCtx);
+    await clearLastCrash(userCtx);
     if (_isKernelTransportFailure(err)) {
       try {
         await sandboxManager.shutdown(userCtx, projectName);
@@ -232,7 +240,7 @@ async function runInProjectSandbox({
     return { error: `Sandbox execution failed: ${err.message}` };
   }
   entry.busy = false;
-  clearLastCrash(userCtx);
+  await clearLastCrash(userCtx);
   sandboxManager.touch(entry);
 
   const durationMs = Date.now() - startedAt;

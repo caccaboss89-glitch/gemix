@@ -53,6 +53,10 @@ DEFAULT_ALLOWED = [
     ".gsfc.nasa.gov",    # heasarc, skyview
     ".eso.org",          # ESO archive
     ".noirlab.edu",      # NOIRLab data archive
+    # YouTube / Video Delivery (for yt-dlp)
+    ".youtube.com",
+    ".googlevideo.com",
+    ".ytimg.com",
 ]
 
 

@@ -66,7 +66,7 @@ function isGemixProjectCmd(command) {
   return raw.startsWith(GEMIX_PREFIX + ' ') || raw.startsWith(GEMIX_PREFIX + '\t');
 }
 
-function handleGemixProjectCmd(command, userCtx) {
+async function handleGemixProjectCmd(command, userCtx) {
   const raw = command.trim();
   if (!isGemixProjectCmd(raw)) return null;
 
@@ -84,14 +84,14 @@ function handleGemixProjectCmd(command, userCtx) {
 
   switch (subcmd) {
     case 'list':
-      return listProjectsTool(userCtx);
+      return await listProjectsTool(userCtx);
 
     case 'quota':
-      return quotaTool(userCtx);
+      return await quotaTool(userCtx);
 
     case 'switch': {
       if (!argStr) return { success: false, error: 'gemix-project switch <slug>: missing project name.' };
-      return switchProjectTool({ name: argStr }, userCtx);
+      return await switchProjectTool({ name: argStr }, userCtx);
     }
 
     case 'delete': {
@@ -99,7 +99,7 @@ function handleGemixProjectCmd(command, userCtx) {
       const name = parts.find(p => !p.startsWith('--'));
       const confirmed = parts.includes('--confirmed');
       if (!name) return { success: false, error: 'gemix-project delete <slug> --confirmed: missing project name.' };
-      return deleteProjectTool({ name, user_confirmed: confirmed }, userCtx);
+      return await deleteProjectTool({ name, user_confirmed: confirmed }, userCtx);
     }
 
     case 'cleanup': {
@@ -109,13 +109,13 @@ function handleGemixProjectCmd(command, userCtx) {
       }
       // If first token is a known subdir, no project name was given (uses current project).
       if (FIXED_SUBDIRS.includes(parts[0])) {
-        return cleanupProjectTool({ subdirs: parts }, userCtx);
+        return await cleanupProjectTool({ subdirs: parts }, userCtx);
       }
       const [name, ...subdirParts] = parts;
       if (subdirParts.length === 0) {
         return { success: false, error: `gemix-project cleanup ${name} <subdir>...: specify at least one subdir. Allowed: ${FIXED_SUBDIRS.join(', ')}.` };
       }
-      return cleanupProjectTool({ name, subdirs: subdirParts }, userCtx);
+      return await cleanupProjectTool({ name, subdirs: subdirParts }, userCtx);
     }
 
     case 'create': {
@@ -134,14 +134,14 @@ function handleGemixProjectCmd(command, userCtx) {
           error: 'gemix-project create: argument must be a valid JSON object with fields: name, description, user_request, strategy.',
         };
       }
-      return createProjectTool(parsed, userCtx);
+      return await createProjectTool(parsed, userCtx);
     }
 
     case 'copy-to-permanent': {
       if (!argStr) {
         return { success: false, error: 'gemix-project copy-to-permanent <history_filename>: missing filename.' };
       }
-      return copyToPermanentTool({ history_filename: argStr }, userCtx);
+      return await copyToPermanentTool({ history_filename: argStr }, userCtx);
     }
 
     case 'copy-to-project': {
@@ -153,7 +153,7 @@ function handleGemixProjectCmd(command, userCtx) {
       }
       const args = { source };
       if (subdir) args.subdir = subdir;
-      return copyToProjectTool(args, userCtx);
+      return await copyToProjectTool(args, userCtx);
     }
 
     default:

@@ -73,7 +73,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
     return { success: false, error: 'Unsupported mode. Use "overwrite" or "append".' };
   }
 
-  const currentProject = getCurrentProject(userCtx);
+  const currentProject = await getCurrentProject(userCtx);
   if (!currentProject) {
     return { success: false, error: 'No project is currently selected. Run `gemix-project create` (new project) or `gemix-project switch <slug>` (existing) via bash first.' };
   }

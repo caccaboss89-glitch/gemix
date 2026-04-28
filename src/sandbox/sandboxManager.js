@@ -346,6 +346,18 @@ function touch(entry) {
 }
 
 /**
+ * Check if a specific sandbox is pooled and its kernel is alive.
+ */
+function isSandboxAlive(userCtx, projectName) {
+  const storageId = resolveStorageId(userCtx);
+  if (!storageId) return false;
+  const key = _poolKey(storageId, projectName);
+  const entry = _pool.get(key);
+  if (!entry || entry._bootPromise) return false;
+  return !!(entry.kernel && entry.kernel.isAlive());
+}
+
+/**
  * Forcibly remove a single sandbox.
  */
 async function _killEntry(entry) {
@@ -409,6 +421,7 @@ module.exports = {
   shutdown,
   shutdownAll,
   installShutdownHook,
+  isSandboxAlive,
   // Exposed for tests / diagnostics
   _pool,
   _poolKey,

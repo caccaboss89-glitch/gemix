@@ -63,7 +63,6 @@ function buildAgenticBriefing(ctx = {}) {
       - bash and code_execution: can run WITHOUT a selected project (for quick calculations, checks), but CANNOT create or modify files in this mode. To produce and deliver files (downloads, plots, scripts), you MUST create or switch to a project first.
       - Write/edit access ONLY inside current project: code/ (scripts), temp/ (intermediate), output/ (deliverables).
       - Zip directories into output/ to deliver them (for many files).
-      - ALWAYS use report_to_user before multi-step operations (+3 tools), NEVER use delivery tools (send_voice_message, send_whatsapp_message, etc).
     </Rules>
     <ProjectManagement>
       Run via \`bash\` as standalone \`gemix-project &lt;subcmd&gt;\` (no chaining/redirection).
@@ -105,13 +104,14 @@ ${projectList}    </Projects>
       - moviepy: pass codec='libx264', audio_codec='aac' for compatibility on WhatsApp/Discord previews
       - rembg: quality — u2netp: faster
       - Flush plots before reading: savefig() → plt.close() → then open with PIL
-      - yt-dlp: outtmpl='/workspace/output/%(title)s.%(ext)s'.
+      - yt-dlp: outtmpl='/workspace/output/%(title)s.%(ext)s'. Use \`--proxy ""\` ONLY if specifically instructed; usually the sandbox proxy is required and handled automatically.
       - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports).
     </Pitfalls>
   </PythonSandbox>
   <ToolExecution>
-    - In the same round you can run write_file/edit_file and bash/code_execution to optimize rounds. write_file/edit_file are always executed BEFORE bash/code_execution. You can create files and run them in one call.
-    - Use only bash background=true for long tasks when you have other operations to perform simultaneously. For normal commands or if you don't need to invoke other tools in the meantime, leave it off.
+    - OPTIMIZE ROUNDS: Call multiple tools (e.g. \`gemix-project create\` (bash) + \`write_file\`) in one single round to save time/tokens.
+    - Execution Order: tools in the same round run sequentially based on their phase. File-editing tools run in phase 2. Use execution_phase='before_files' on bash/code_execution to run them in phase 1, or 'after_files' for phase 3.
+    - Use bash background=true only for tasks >2 min.
   </ToolExecution>
 </AgenticToolkit>`;
 }

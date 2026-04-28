@@ -55,7 +55,7 @@ const TOOL_IMAGE_SEARCH = makeTool({
     },
     count: {
       type: 'integer',
-      description: 'Images to retrieve (1-2, default 1).',
+      description: 'Images to retrieve (1-4, default 1).',
     },
     language: {
       type: 'string',
@@ -88,14 +88,6 @@ const TOOL_ATTACH_FILE = makeTool({
   required: ['path'],
 });
 
-const TOOL_REPORT_TO_USER = makeTool({
-  name: 'report_to_user',
-  description: 'Send an intermediate TEXT status message to the user while you continue working. Use ONLY during multi-step operations (3+ tool calls). This tool does NOT end your turn.',
-  properties: {
-    message: { type: 'string', description: 'Short status update in Italian for the user.' },
-  },
-  required: ['message'],
-});
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
@@ -122,17 +114,22 @@ function buildReadFileTool(isDiscord) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run quick single-cell Python in the sandbox. Best for calculations, data analysis, or lightweight scripts. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user.',
+  description: 'Run quick single-cell Python in the sandbox. Best for calculations, data analysis, or lightweight scripts. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user. You can combine this tool with write_file in the exact same round. Set execution_phase=\'before_files\' to run before writing files, or \'after_files\' to run after.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
     timeout_ms: { type: 'integer', description: 'Optional execution timeout in milliseconds (default 30000, max 120000).' },
+    execution_phase: {
+      type: 'string',
+      enum: ['before_files', 'after_files'],
+      description: "Determines execution order in a single round. Use 'before_files' to run this BEFORE file creation. Use 'after_files' to run AFTER file creation. Default: 'after_files'."
+    },
   },
   required: ['code'],
 });
 
 const TOOL_WRITE_FILE = makeTool({
   name: 'write_file',
-  description: 'Create or overwrite a file in the current project under {temp|output|code}. Use for: scripts → code/, intermediate data → temp/, final deliverables → output/. Everything in output/ is auto-delivered to the user — put there ONLY the files the user wants to receive. Pair with bash to run scripts. Max 5 MB per call.',
+  description: 'Create or overwrite a file in the current project under {temp|output|code}. Use for: scripts → code/, intermediate data → temp/, final deliverables → output/. Everything in output/ is auto-delivered to the user — put there ONLY the files the user wants to receive. You can queue multiple write_file calls and bash executions in the same round to create a full project in one step. Max 5 MB per call.',
   properties: {
     path: { type: 'string', description: 'Relative path under the current project, e.g. "projects/<current>/code/main.py".' },
     content: { type: 'string', description: 'File content.' },
@@ -156,11 +153,16 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Same isolation as code_execution, project mounted at /workspace. In the same round, bash always executes AFTER write_file/edit_file. Default timeout 30 s, max 120 s.',
+  description: 'Run a shell command in the sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Same isolation as code_execution, project mounted at /workspace. You can combine this tool with write_file in the exact same round to save time. Set execution_phase=\'before_files\' to scaffold projects before writing, or \'after_files\' to run code after writing. Default timeout 30 s, max 120 s.',
   properties: {
     command: { type: 'string', description: 'Shell command (bash -c). Single line or `&&`-chained statements.' },
     timeout_ms: { type: 'integer', description: 'Optional timeout in milliseconds (default 30000, max 120000).' },
     background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results (automatically waits if still running). Default false.' },
+    execution_phase: {
+      type: 'string',
+      enum: ['before_files', 'after_files'],
+      description: "Determines execution order in a single round. Use 'before_files' to run this BEFORE file creation (e.g. creating project structures/directories). Use 'after_files' to run AFTER file creation (e.g. executing written scripts). Default: 'after_files'."
+    },
   },
   required: ['command'],
 });
@@ -499,7 +501,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // attach_file is WhatsApp-only AND gated behind agentic_unlock (it deals
   // with files only relevant to the agentic flow — permanent/, projects/,
   // searched_images/). Discord never gets it.
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, TOOL_REPORT_TO_USER, buildReadFileTool(isDiscord));
+  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, buildReadFileTool(isDiscord));
 
   // ── WhatsApp only: voice, tasks, release notify ──
   if (!isDiscord) {

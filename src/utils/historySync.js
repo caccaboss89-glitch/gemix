@@ -235,7 +235,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     const existingFile = existingName ? path.join(historyDir, existingName) : null;
     if (existingFile && fs.existsSync(existingFile)) {
       // Refresh timestamp to prevent premature deletion
-      const now = Date.now();
+      const now = new Date();
       fs.utimesSync(existingFile, now, now);
       return `history/${existingName}`;
     }

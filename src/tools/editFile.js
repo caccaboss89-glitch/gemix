@@ -82,7 +82,7 @@ async function editFileTool(args, userCtx, responseCtx) {
     return { success: false, error: 'old_string / new_string too large.' };
   }
 
-  const currentProject = getCurrentProject(userCtx);
+  const currentProject = await getCurrentProject(userCtx);
   if (!currentProject) {
     return { success: false, error: 'No project is currently selected. Run `gemix-project create` (new project) or `gemix-project switch <slug>` (existing) via bash first.' };
   }

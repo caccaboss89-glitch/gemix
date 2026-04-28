@@ -76,7 +76,7 @@ async function _shrinkForPreview(buf, mime) {
       .toBuffer();
     return { buffer: resized, mime: 'image/jpeg' };
   } catch {
-    return { buffer: buf.subarray(0, PREVIEW_MAX_BYTES), mime };
+    return { buffer: buf, mime };
   }
 }
 
@@ -181,7 +181,7 @@ async function _searchCandidates(query, maxCandidates, language = 'it', imageTyp
  * @param {number} index - 0-based index (for filename)
  * @returns {Promise<{preview: string, attachment: object, meta: object}|null>}
  */
-async function _prepareImage(candidate, query, index) {
+async function _prepareImage(candidate, query, index, startId) {
   const previewUrl = candidate.thumbnail_url || candidate.img_url;
   const fullUrl = candidate.img_url;
 
@@ -224,7 +224,7 @@ async function _prepareImage(candidate, query, index) {
 
   const ext = _extFromMime(attachmentMime);
   const base = sanitizeFilename(query, 40) || 'image';
-  const filename = `${base}_${index + 1}.${ext}`;
+  const filename = `${base}_${startId + index}.${ext}`;
 
   return {
     preview: previewDataUrl,
@@ -288,14 +288,21 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
 
   log.info(`   Found ${candidates.length} candidates, downloading up to ${wantCount}...`);
 
-  // ── Download & prepare images ──
+  // ── Download & prepare images (Parallel with concurrency limit) ──
   const prepared = [];
+  const concurrency = 4;
 
-  for (let i = 0; i < candidates.length && prepared.length < wantCount; i++) {
-    const img = await _prepareImage(candidates[i], q, prepared.length);
-    if (img) {
-      prepared.push(img);
-      log.info(`   ✅ [${prepared.length}/${wantCount}] "${candidates[i].title}"`);
+  for (let i = 0; i < candidates.length && prepared.length < wantCount; i += concurrency) {
+    const chunk = candidates.slice(i, i + concurrency);
+    const results = await Promise.all(
+      chunk.map((c, idx) => _prepareImage(c, q, i + idx, _startId))
+    );
+
+    for (const img of results) {
+      if (img && prepared.length < wantCount) {
+        prepared.push(img);
+        log.info(`   ✅ [${prepared.length}/${wantCount}] Prepared image`);
+      }
     }
   }
 

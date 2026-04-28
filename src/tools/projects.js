@@ -33,13 +33,13 @@ function _guardPlatform(userCtx) {
 /**
  * Invoked by `gemix-project list` — returns the list of projects with description + current.
  */
-function listProjectsTool(userCtx) {
+async function listProjectsTool(userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
 
   ensureUserSkeleton(userCtx);
   const projects = listProjects(userCtx);
-  const current = getCurrentProject(userCtx);
+  const current = await getCurrentProject(userCtx);
   return {
     success: true,
     current_project: current,
@@ -60,7 +60,7 @@ function listProjectsTool(userCtx) {
  * - Creates scaffold + README.md + .project.json.
  * - Sets as current project.
  */
-function createProjectTool(args, userCtx) {
+async function createProjectTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
 
@@ -120,7 +120,7 @@ function createProjectTool(args, userCtx) {
     log.error(`Failed to write README for ${slug}: ${err.message}`);
   }
 
-  setCurrentProject(userCtx, slug);
+  await setCurrentProject(userCtx, slug);
   return {
     success: true,
     project: slug,
@@ -132,7 +132,7 @@ function createProjectTool(args, userCtx) {
 /**
  * Invoked by `gemix-project switch <slug>`. Args: { name }.
  */
-function switchProjectTool(args, userCtx) {
+async function switchProjectTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
 
@@ -151,7 +151,7 @@ function switchProjectTool(args, userCtx) {
   meta.last_used_at = new Date().toISOString();
   writeProjectMeta(userCtx, slug, meta);
 
-  setCurrentProject(userCtx, slug);
+  await setCurrentProject(userCtx, slug);
   return { success: true, current_project: slug };
 }
 
@@ -159,7 +159,7 @@ function switchProjectTool(args, userCtx) {
  * Invoked by `gemix-project delete <slug> --confirmed`. Args: { name, user_confirmed: true }.
  * Refuses without explicit user_confirmed=true flag.
  */
-function deleteProjectTool(args, userCtx) {
+async function deleteProjectTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
 
@@ -185,7 +185,7 @@ function deleteProjectTool(args, userCtx) {
   return {
     success: true,
     deleted: slug,
-    current_project: getCurrentProject(userCtx),
+    current_project: await getCurrentProject(userCtx),
   };
 }
 
@@ -193,11 +193,11 @@ function deleteProjectTool(args, userCtx) {
  * Invoked by `gemix-project cleanup [<slug>] <subdir>...`. Args: { name?, subdirs: ["temp","output","code"] }.
  * Deletes the CONTENTS of the specified subdirs (keeps the folders).
  */
-function cleanupProjectTool(args, userCtx) {
+async function cleanupProjectTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
 
-  const name = (args && args.name) || getCurrentProject(userCtx);
+  const name = (args && args.name) || (await getCurrentProject(userCtx));
   if (!name) return _err('No project specified and no current project selected.');
   const slug = sanitizeProjectName(name);
   if (!slug || !projectExists(userCtx, slug)) return _err(`Project "${name}" not found.`);
@@ -235,7 +235,7 @@ function cleanupProjectTool(args, userCtx) {
  * Invoked by `gemix-project copy-to-permanent <history_filename>`. Args: { history_filename }.
  * Copies a file from history/ to permanent/ (never moves).
  */
-function copyToPermanentTool(args, userCtx) {
+async function copyToPermanentTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
   const name = args && args.history_filename;
@@ -262,7 +262,7 @@ function copyToPermanentTool(args, userCtx) {
  * Source may be "history/<file>" or "searched_images/<file>". Default subdir = temp.
  * Writes into the currently selected project.
  */
-function copyToProjectTool(args, userCtx) {
+async function copyToProjectTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
   const source = args && args.source;
@@ -272,7 +272,7 @@ function copyToProjectTool(args, userCtx) {
     return _err(`Invalid subdir "${subdir}". Allowed: ${FIXED_PROJECT_SUBDIRS.join(', ')}.`);
   }
 
-  const current = getCurrentProject(userCtx);
+  const current = await getCurrentProject(userCtx);
   if (!current) return _err('No project is currently selected. Run `gemix-project create` (new) or `gemix-project switch <slug>` (existing) via bash first.');
 
   // Source must be read-allowed and live in history/ or searched_images/
@@ -319,7 +319,7 @@ function copyToProjectTool(args, userCtx) {
 /**
  * Invoked by `gemix-project quota`. Returns total used/free quota and per-project breakdown.
  */
-function quotaTool(userCtx) {
+async function quotaTool(userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
   const usedBytes = userTotalBytes(userCtx);

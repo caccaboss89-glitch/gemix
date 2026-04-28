@@ -4,10 +4,33 @@
 
 const fs = require('fs');
 const { PROJECT_STATE_LOCK_TTL_MS } = require('../config/constants');
-const { getStateFile, projectExists, getUserRoot, ensureUserSkeleton } = require('./userPaths');
+const { getStateFile, projectExists, getUserRoot, ensureUserSkeleton, resolveStorageId } = require('./userPaths');
 const { createLogger } = require('./logger');
 
 const log = createLogger('ProjectState');
+
+// In-memory mutexes per storageId to ensure atomic read-modify-write on .state.json
+const _stateLocks = new Map();
+
+async function _withStateLock(userCtx, fn) {
+  const id = resolveStorageId(userCtx);
+  if (!id) return fn(); // fallback
+
+  while (_stateLocks.get(id)) {
+    await _stateLocks.get(id);
+  }
+
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  _stateLocks.set(id, promise);
+
+  try {
+    return await fn();
+  } finally {
+    _stateLocks.delete(id);
+    resolve();
+  }
+}
 
 function _readRaw(userCtx) {
   const f = getStateFile(userCtx);
@@ -46,33 +69,39 @@ function _readExistingProject(st, key, userCtx) {
 }
 
 function getCurrentProject(userCtx) {
-  const st = _readRaw(userCtx);
-  const { name, dirty } = _readExistingProject(st, 'current_project', userCtx);
-  if (dirty) {
-    _writeRaw(userCtx, st);
-  }
-  return name;
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    const { name, dirty } = _readExistingProject(st, 'current_project', userCtx);
+    if (dirty) {
+      _writeRaw(userCtx, st);
+    }
+    return name;
+  });
 }
 
 function getLastProject(userCtx) {
-  const st = _readRaw(userCtx);
-  const { name, dirty } = _readExistingProject(st, 'last_project', userCtx);
-  if (dirty) {
-    _writeRaw(userCtx, st);
-  }
-  return name;
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    const { name, dirty } = _readExistingProject(st, 'last_project', userCtx);
+    if (dirty) {
+      _writeRaw(userCtx, st);
+    }
+    return name;
+  });
 }
 
 function setCurrentProject(userCtx, projectName) {
-  const st = _readRaw(userCtx);
-  if (projectName === null || projectName === undefined) {
-    delete st.current_project;
-  } else {
-    st.current_project = projectName;
-    st.last_project = projectName;
-  }
-  st.updated_at = new Date().toISOString();
-  return _writeRaw(userCtx, st);
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (projectName === null || projectName === undefined) {
+      delete st.current_project;
+    } else {
+      st.current_project = projectName;
+      st.last_project = projectName;
+    }
+    st.updated_at = new Date().toISOString();
+    return _writeRaw(userCtx, st);
+  });
 }
 
 /**
@@ -81,27 +110,35 @@ function setCurrentProject(userCtx, projectName) {
  * The lock is advisory and auto-expires after TTL to recover from crashes.
  */
 function acquireLock(userCtx, ownerId) {
-  const st = _readRaw(userCtx);
-  const now = Date.now();
-  const lock = st.lock;
-  if (lock && lock.ownerId !== ownerId && now - (lock.ts || 0) < PROJECT_STATE_LOCK_TTL_MS) {
-    return false;
-  }
-  st.lock = { ownerId, ts: now };
-  _writeRaw(userCtx, st);
-  return true;
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    const now = Date.now();
+    const lock = st.lock;
+    if (lock && lock.ownerId !== ownerId && now - (lock.ts || 0) < PROJECT_STATE_LOCK_TTL_MS) {
+      return false;
+    }
+    st.lock = { ownerId, ts: now };
+    _writeRaw(userCtx, st);
+    return true;
+  });
 }
 
 function refreshLock(userCtx, ownerId) {
-  const st = _readRaw(userCtx);
-  if (!st.lock || st.lock.ownerId !== ownerId) return false;
-  st.lock.ts = Date.now();
-  return _writeRaw(userCtx, st);
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (!st.lock || st.lock.ownerId !== ownerId) return false;
+    st.lock.ts = Date.now();
+    return _writeRaw(userCtx, st);
+  });
 }
 
 function startAutoRenewLock(userCtx, ownerId, renewEveryMs = Math.max(30_000, Math.floor(PROJECT_STATE_LOCK_TTL_MS / 3))) {
-  const timer = setInterval(() => {
-    if (!refreshLock(userCtx, ownerId)) {
+  const timer = setInterval(async () => {
+    try {
+      if (!(await refreshLock(userCtx, ownerId))) {
+        clearInterval(timer);
+      }
+    } catch {
       clearInterval(timer);
     }
   }, renewEveryMs);
@@ -110,11 +147,13 @@ function startAutoRenewLock(userCtx, ownerId, renewEveryMs = Math.max(30_000, Ma
 }
 
 function releaseLock(userCtx, ownerId) {
-  const st = _readRaw(userCtx);
-  if (st.lock && st.lock.ownerId === ownerId) {
-    delete st.lock;
-    _writeRaw(userCtx, st);
-  }
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (st.lock && st.lock.ownerId === ownerId) {
+      delete st.lock;
+      _writeRaw(userCtx, st);
+    }
+  });
 }
 
 // ── Crash recovery slot ──
@@ -122,26 +161,32 @@ function releaseLock(userCtx, ownerId) {
 // next system prompt and then cleared.
 
 function saveLastCrash(userCtx, payload) {
-  const st = _readRaw(userCtx);
-  st.last_crash = { ...payload, ts: Date.now() };
-  return _writeRaw(userCtx, st);
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    st.last_crash = { ...payload, ts: Date.now() };
+    return _writeRaw(userCtx, st);
+  });
 }
 
 function consumeLastCrash(userCtx, ttlMs) {
-  const st = _readRaw(userCtx);
-  if (!st.last_crash) return null;
-  const fresh = (Date.now() - (st.last_crash.ts || 0)) <= ttlMs;
-  const payload = fresh ? st.last_crash : null;
-  delete st.last_crash;
-  _writeRaw(userCtx, st);
-  return payload;
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (!st.last_crash) return null;
+    const fresh = (Date.now() - (st.last_crash.ts || 0)) <= ttlMs;
+    const payload = fresh ? st.last_crash : null;
+    delete st.last_crash;
+    _writeRaw(userCtx, st);
+    return payload;
+  });
 }
 
 function clearLastCrash(userCtx) {
-  const st = _readRaw(userCtx);
-  if (!st.last_crash) return true;
-  delete st.last_crash;
-  return _writeRaw(userCtx, st);
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (!st.last_crash) return true;
+    delete st.last_crash;
+    return _writeRaw(userCtx, st);
+  });
 }
 
 module.exports = {

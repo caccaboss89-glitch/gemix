@@ -5,6 +5,7 @@ const { PLATFORM_DISCORD } = require('../config/constants');
 const { extractTextFromPdfBuffer, mediaToContentPart } = require('../utils/media');
 const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
+const { isSandboxAlive } = require('../sandbox/sandboxManager');
 
 const MAX_TEXT_BYTES = 50 * 1024; // 50KB limit for text reading
 const MAX_BG_AUTO_ATTACH = 20;        // max files to auto-attach from a completed background task
@@ -95,10 +96,17 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       const maxWaitMs = Math.min(bgTask.timeoutMs + 10_000, 130_000);
       const elapsed = Date.now() - bgTask.startedAt;
       const remaining = Math.max(0, maxWaitMs - elapsed);
+      const projectDir = path.dirname(path.dirname(absolutePath));
+      const projectName = path.basename(projectDir);
       const pollMs = 1500;
       let waited = 0;
+
       while (waited < remaining) {
         if (fs.existsSync(bgTask.doneMarkerPath)) break;
+        // Watchdog: if the sandbox for this project is gone, the bg task definitely crashed.
+        if (!isSandboxAlive(userCtx, projectName)) {
+           return JSON.stringify({ success: false, error: 'Background command failed: the sandbox container or kernel was lost.' });
+        }
         await new Promise(r => setTimeout(r, pollMs));
         waited += pollMs;
       }
@@ -106,9 +114,9 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       removeBgTask(absolutePath);
       // Process finished but no output file → create empty
       if (fs.existsSync(bgTask.doneMarkerPath) && !fs.existsSync(absolutePath)) {
-        try { fs.writeFileSync(absolutePath, '', 'utf-8'); } catch {}
+        try { fs.writeFileSync(absolutePath, '', 'utf-8'); } catch { }
       }
-      try { if (fs.existsSync(bgTask.doneMarkerPath)) fs.unlinkSync(bgTask.doneMarkerPath); } catch {}
+      try { if (fs.existsSync(bgTask.doneMarkerPath)) fs.unlinkSync(bgTask.doneMarkerPath); } catch { }
       if (!fs.existsSync(absolutePath)) {
         return JSON.stringify({ success: false, error: 'Background command timed out. Output file was not created.' });
       }
@@ -125,23 +133,54 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       if (responseCtx && Array.isArray(responseCtx.attachments)) {
         const projectDir = path.dirname(path.dirname(absolutePath));
         const outputDir = path.join(projectDir, 'output');
-        let entries = [];
-        try { entries = fs.readdirSync(outputDir, { withFileTypes: true }); } catch {}
+
+        let projectRealRoot;
+        try { projectRealRoot = fs.realpathSync(projectDir); } catch { projectRealRoot = projectDir; }
+
         let bgAttachedBytes = 0;
-        for (const e of entries) {
-          if (!e.isFile()) continue;
+        const stack = [outputDir];
+
+        while (stack.length > 0) {
           if (responseCtx.attachments.length >= MAX_BG_AUTO_ATTACH || bgAttachedBytes >= MAX_BG_AUTO_ATTACH_BYTES) break;
-          const absFile = path.join(outputDir, e.name);
-          try {
-            const st = fs.statSync(absFile);
-            if (st.mtimeMs < bgStartedAt || st.size === 0) continue;
-            if (bgAttachedBytes + st.size > MAX_BG_AUTO_ATTACH_BYTES) continue;
-            const already = responseCtx.attachments.some(a => a.filePath && path.resolve(a.filePath) === path.resolve(absFile));
-            if (!already) {
-              responseCtx.attachments.push({ name: e.name, mimetype: _mimeForBg(absFile), filePath: absFile });
-              bgAttachedBytes += st.size;
+          const cur = stack.pop();
+          let entries = [];
+          try { entries = fs.readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+
+          for (const e of entries) {
+            const absFile = path.join(cur, e.name);
+
+            if (e.isDirectory()) {
+              stack.push(absFile);
+              continue;
             }
-          } catch { /* skip */ }
+            if (!e.isFile()) continue;
+
+            if (responseCtx.attachments.length >= MAX_BG_AUTO_ATTACH || bgAttachedBytes >= MAX_BG_AUTO_ATTACH_BYTES) break;
+
+            try {
+              const st = fs.statSync(absFile);
+              if (st.mtimeMs < bgStartedAt || st.size === 0) continue;
+              if (bgAttachedBytes + st.size > MAX_BG_AUTO_ATTACH_BYTES) continue;
+
+              const already = responseCtx.attachments.some(a => a.filePath && path.resolve(a.filePath) === path.resolve(absFile));
+              if (!already) {
+                // Symlink-escape guard
+                let isEscaped = false;
+                try {
+                  const real = fs.realpathSync(absFile);
+                  if (real !== absFile) {
+                    const relReal = path.relative(projectRealRoot, real);
+                    if (relReal.startsWith('..') || path.isAbsolute(relReal)) isEscaped = true;
+                  }
+                } catch { continue; }
+
+                if (isEscaped) continue;
+
+                responseCtx.attachments.push({ name: e.name, mimetype: _mimeForBg(absFile), filePath: absFile });
+                bgAttachedBytes += st.size;
+              }
+            } catch { /* skip */ }
+          }
         }
       }
       // Fall through to normal file reading
