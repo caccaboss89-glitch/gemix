@@ -40,8 +40,8 @@ function buildAgenticBriefing(ctx = {}) {
 
   const projectFilesBlock = current
     ? (projectFiles.length > 0
-        ? `\n    <ProjectFiles>\n${projectFiles.map(f => `      ${_escapeXml(f)}`).join('\n')}\n    </ProjectFiles>`
-        : '\n    <ProjectFiles/>')
+      ? `\n    <ProjectFiles>\n${projectFiles.map(f => `      ${_escapeXml(f)}`).join('\n')}\n    </ProjectFiles>`
+      : '\n    <ProjectFiles/>')
     : '';
 
   const readmeBlock = (current && readmeContent)
@@ -60,7 +60,7 @@ function buildAgenticBriefing(ctx = {}) {
     </Layout>
     <Rules>
       - One project per user request. Run \`gemix-project create\` before producing files.
-      - bash and code_execution: can run WITHOUT a selected project (for quick calculations, checks), but CANNOT create or modify files in this mode. To produce files (downloads, plots, scripts), you MUST create or switch to a project first.
+      - bash and code_execution: can run WITHOUT a selected project (for quick calculations, checks), but CANNOT create or modify files in this mode. To produce and deliver files (downloads, plots, scripts), you MUST create or switch to a project first.
       - Write/edit access ONLY inside current project: code/ (scripts), temp/ (intermediate), output/ (deliverables).
       - Zip directories into output/ to deliver them (for many files).
       - ALWAYS use report_to_user before multi-step operations (+3 tools).
@@ -106,6 +106,7 @@ ${projectList}    </Projects>
       - rembg: quality — u2netp: faster
       - Flush plots before reading: savefig() → plt.close() → then open with PIL
       - yt-dlp: outtmpl='/workspace/output/%(title)s.%(ext)s'.
+      - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports).
     </Pitfalls>
   </PythonSandbox>
   <ToolExecution>
