@@ -19,7 +19,7 @@ module.exports = {
   MAINTENANCE_USER_MESSAGE:
     '🌙 GemiX è temporaneamente in manutenzione per un aggiornamento importante.\n\n' +
     'Tornerò online a breve con *nuove capacità avanzate* per la nuova versione *2.0*.\n\n' +
-    `Se vuoi essere avvisato non appena escono nuovi aggiornamenti, scrivi *${MAINTENANCE_RELEASE_NOTIFY_COMMAND}*.\n\n` +
+    `Se vuoi essere avvisato non appena escono nuovi aggiornamenti, scrivi: \`${MAINTENANCE_RELEASE_NOTIFY_COMMAND}\`.\n\n` +
     'L\'arrivo di *promemoria programmati impostati* continuerà a funzionare, grazie per la pazienza! 👷‍♂️',
 
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
