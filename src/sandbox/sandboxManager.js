@@ -286,9 +286,20 @@ async function getOrCreate(userCtx, projectName) {
     } catch (err) {
       // If boot failed, try to capture container logs for debugging before killing it
       try {
-        const logs = await fresh.container.logs({ stdout: true, stderr: true, tail: 100 });
-        const logLines = logs.toString('utf-8').trim();
-        log.error(`Sandbox boot failed for ${projectName}. Container logs:\n${logLines || '(empty logs)'}`);
+        const logsBuf = await fresh.container.logs({ stdout: true, stderr: true, tail: 100 });
+        // Docker multiplexes stdout/stderr into a binary format if TTY is off.
+        // Each chunk has an 8-byte header: [type, 0, 0, 0, size1, size2, size3, size4]
+        let logLines = '';
+        let offset = 0;
+        while (offset + 8 <= logsBuf.length) {
+          const type = logsBuf.readUInt8(offset);
+          const size = logsBuf.readUInt32BE(offset + 4);
+          const chunk = logsBuf.slice(offset + 8, offset + 8 + size);
+          logLines += chunk.toString('utf8');
+          offset += 8 + size;
+        }
+        if (!logLines && logsBuf.length > 0) logLines = logsBuf.toString('utf8'); // fallback
+        log.error(`Sandbox boot failed for ${projectName}. Container logs:\n${logLines.trim() || '(empty logs)'}`);
       } catch (logErr) {
         log.warn(`Failed to capture logs for failed sandbox ${projectName}: ${logErr.message}`);
       }

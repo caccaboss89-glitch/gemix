@@ -27,12 +27,12 @@ echo "Starting Jupyter Server on port 8888..."
 exec jupyter server \
   --ServerApp.ip=0.0.0.0 \
   --ServerApp.port=8888 \
-  --ServerApp.token="${SANDBOX_TOKEN}" \
+  --IdentityProvider.token="${SANDBOX_TOKEN}" \
   --ServerApp.password='' \
   --ServerApp.disable_check_xsrf=True \
   --ServerApp.allow_remote_access=True \
   --ServerApp.allow_origin='*' \
   --ServerApp.root_dir="${SANDBOX_WORKDIR}" \
   --ServerApp.terminado_settings="shell_command=['/bin/bash']" \
-  --ServerApp.log_level=WARN \
+  --ServerApp.log_level=INFO \
   --no-browser
