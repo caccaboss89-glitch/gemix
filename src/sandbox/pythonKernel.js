@@ -26,17 +26,12 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('PythonKernel');
 
-const KERNEL_BOOT_TIMEOUT_MS = 30_000;
+const KERNEL_BOOT_TIMEOUT_MS = 60_000;
 const WS_OPEN_TIMEOUT_MS = 15_000;
 
 /** Generate a random message id ("msg_id") in Jupyter style. */
 function _msgId() {
   return crypto.randomBytes(8).toString('hex');
-}
-
-function _withTokenQuery(path, token) {
-  const sep = path.includes('?') ? '&' : '?';
-  return `${path}${sep}token=${encodeURIComponent(token)}`;
 }
 
 /** Build a Jupyter v5.4 message envelope. */
@@ -70,7 +65,7 @@ function _httpJson({ host, port, method, path, token, body }) {
       host,
       port,
       method,
-      path: _withTokenQuery(path, token),
+      path,
       headers: {
         'Authorization': `token ${token}`,
         'Content-Type': 'application/json',

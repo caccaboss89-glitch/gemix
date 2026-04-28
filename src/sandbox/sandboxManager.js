@@ -88,11 +88,6 @@ function _randomPort() {
   });
 }
 
-function _withTokenQuery(path, token) {
-  const sep = path.includes('?') ? '&' : '?';
-  return `${path}${sep}token=${encodeURIComponent(token)}`;
-}
-
 /**
  * Set ownership of project + readonly mount points to UID 1000 (sandbox user
  * inside the container). No-op on non-root or non-Linux platforms.
@@ -199,15 +194,15 @@ async function _spawnContainer(userCtx, projectName) {
 
 /**
  * Wait for the Jupyter Server inside the container to accept HTTP. Polls
- * GET /api/status for up to ~30 s.
+ * GET /api/status for up to ~60 s.
  */
-function _waitForKernelHttp(hostPort, token, timeoutMs = 30_000) {
+function _waitForKernelHttp(hostPort, token, timeoutMs = 60_000) {
   return new Promise((resolve, reject) => {
     const http = require('http');
     const start = Date.now();
     const tick = () => {
       const req = http.get({
-        host: '127.0.0.1', port: hostPort, path: _withTokenQuery('/api/status', token),
+        host: '127.0.0.1', port: hostPort, path: '/api/status',
         headers: { Authorization: `token ${token}` },
         timeout: 2000,
       }, (res) => {
