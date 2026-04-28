@@ -26,9 +26,9 @@ const MAX_SUMMARY_TOKENS = 4096;     // max tokens for the summarizer response
  */
 async function summarizePage(pageText, instructions, url, pageTitle = null) {
   const systemPrompt = [
-    'Reply in Italian, follow the user instructions, and never invent facts.',
     'Return normal Markdown text, not JSON and not XML.',
     'Structure the answer clearly with a short title, a concise summary, key points, and relevant excerpts when useful.',
+    'Follow the user instructions, and never invent facts.',
     'If the page is empty, paywalled, blocked, login-only, or inaccessible, say so clearly.',
     'If content was truncated, mention it clearly.',
     'When you include excerpts, keep them short and verbatim, not paraphrased.',

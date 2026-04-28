@@ -102,6 +102,15 @@ function createAttachmentBufferFetcher(att) {
   };
 }
 
+function isDiscordSystemMessage(body) {
+  if (!body) return false;
+  return (
+    /^🌙 GemiX è temporaneamente in manutenzione/.test(body) ||
+    /^🔔 Le notifiche degli aggiornamenti di GemiX sono state attivate\./.test(body) ||
+    /^ℹ️ Le notifiche degli aggiornamenti di GemiX sono già attive\./.test(body)
+  );
+}
+
 async function onDiscordMessage(msg) {
   if (msg.author.id === discordClient.user.id) return;
   if (msg.author.bot) return;
@@ -430,6 +439,7 @@ async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
   for (const m of messages) {
     const ts = formatTimestamp(m.createdAt);
     const isBot = m.author.id === discordClient.user.id;
+    const isSystem = isBot && isDiscordSystemMessage(m.content || '');
     let textContent = m.content || '';
 
     for (const att of m.attachments.values()) {
@@ -473,7 +483,7 @@ async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
 
     if (!textContent) continue;
 
-    const senderName = isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username);
+    const senderName = isSystem ? '[System]' : (isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username));
     const prefix = `[${ts}] ${senderName}: `;
 
     history.push({

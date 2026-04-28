@@ -25,6 +25,37 @@ function _save() {
 
 _load();
 
+function _findByWaJid(waJid) {
+  if (!waJid) return null;
+  for (const [chatId, storedWaJid] of subscribedChats.entries()) {
+    if (storedWaJid === waJid) return { chatId, waJid: storedWaJid };
+  }
+  return null;
+}
+
+function isReleaseNotifyEnabled(chatId, waJid) {
+  if (!chatId && !waJid) return false;
+  if (chatId && subscribedChats.has(chatId)) return true;
+  return Boolean(_findByWaJid(waJid));
+}
+
+function enableReleaseNotify(chatId, waJid) {
+  if (!chatId || !waJid) {
+    return { success: false, alreadyEnabled: false, error: 'Unable to determine the chat or WhatsApp number.' };
+  }
+  if (isReleaseNotifyEnabled(chatId, waJid)) {
+    return { success: true, alreadyEnabled: true, message: 'GemiX release notifications were already enabled for this chat.' };
+  }
+  for (const [existingChatId, existingWaJid] of subscribedChats.entries()) {
+    if (existingChatId === chatId || existingWaJid === waJid) {
+      subscribedChats.delete(existingChatId);
+    }
+  }
+  subscribedChats.set(chatId, waJid);
+  _save();
+  return { success: true, alreadyEnabled: false, message: 'GemiX release notifications enabled for this chat.' };
+}
+
 /**
  * Toggle release notifications for a chat.
  * @param {boolean} enabled - Whether to enable or disable notifications
@@ -37,14 +68,22 @@ function toggleReleaseNotify(enabled, chatId, waJid) {
     return { success: false, error: 'Unable to determine the chat or WhatsApp number.' };
   }
   if (enabled) {
-    subscribedChats.set(chatId, waJid);
-    _save();
-    return { success: true, message: 'GemiX release notifications enabled for this chat.' };
+    return enableReleaseNotify(chatId, waJid);
   }
-  if (!subscribedChats.has(chatId)) {
+  let removed = false;
+  if (subscribedChats.has(chatId)) {
+    subscribedChats.delete(chatId);
+    removed = true;
+  }
+  for (const [existingChatId, existingWaJid] of [...subscribedChats.entries()]) {
+    if (existingWaJid === waJid) {
+      subscribedChats.delete(existingChatId);
+      removed = true;
+    }
+  }
+  if (!removed) {
     return { success: true, message: 'Release notifications were already disabled for this chat.' };
   }
-  subscribedChats.delete(chatId);
   _save();
   return { success: true, message: 'GemiX release notifications disabled for this chat.' };
 }
@@ -57,4 +96,4 @@ function getSubscribedChats() {
   return new Map(subscribedChats);
 }
 
-module.exports = { toggleReleaseNotify, getSubscribedChats };
+module.exports = { toggleReleaseNotify, getSubscribedChats, isReleaseNotifyEnabled, enableReleaseNotify };

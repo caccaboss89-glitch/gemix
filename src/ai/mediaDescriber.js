@@ -18,7 +18,7 @@ const DESCRIBER_MAX_TOKENS = 2048;
 const DESCRIBER_BATCH_TIMEOUT_MS = 180_000;
 
 const DESCRIBER_SYSTEM_PROMPT = [
-  'Describe each provided audio/video file in Italian.',
+  'Describe each provided audio/video file.',
   'Include, when relevant: spoken transcript (keep spoken words in their original language and separate speakers if recognizable), overall context, music, explicit non-speech sounds, and for video the visible scene/people/actions/objects/text; for audio, recording quality and emotional tone.',
   'Mention song title/artist only if clearly recognizable.',
   'Be detailed but concise, with no preamble, and never invent unseen or unheard details.',

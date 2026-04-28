@@ -6,7 +6,7 @@ const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser } = require('./ai/tools');
 const { executeTool } = require('./tools');
 const { isAdmin } = require('./config/members');
-const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_MODE, MAINTENANCE_ADMIN_ONLY, MAINTENANCE_USER_MESSAGE, INTERRUPTED_RUN_TTL_MS } = require('./config/constants');
+const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_MODE, MAINTENANCE_ADMIN_ONLY, MAINTENANCE_USER_MESSAGE, MAINTENANCE_RELEASE_NOTIFY_COMMAND, INTERRUPTED_RUN_TTL_MS } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
@@ -17,6 +17,8 @@ const { getCurrentProject, getLastProject, setCurrentProject, consumeLastCrash, 
 const { listProjects, ensureUserSkeleton, getProjectRoot } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { buildAgenticBriefing } = require('./ai/agenticBriefing');
+const { enableReleaseNotify } = require('./tools/releaseNotify');
+const { sendWhatsAppDirect } = require('./tools/whatsappSender');
 
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
@@ -82,6 +84,28 @@ function orderToolCalls(toolCalls) {
   );
 }
 
+function extractPlainTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.find(p => p.type === 'text')?.text || '';
+  return '';
+}
+
+function getReleaseNotifyTarget(ctx, ui) {
+  const waJid = ctx.isGroup
+    ? ctx.groupId
+    : (ctx.waJid || (ui.member ? ui.member.wa : null));
+  const chatId = ctx.chatId || ctx.groupId || waJid;
+  return { chatId, waJid };
+}
+
+function buildMaintenanceReleaseEnabledMessage() {
+  return '🔔 Le notifiche degli aggiornamenti di GemiX sono state attivate.\n\nTi avviserò non appena sarà disponibile un nuovo aggiornamento.';
+}
+
+function buildMaintenanceReleaseAlreadyEnabledMessage() {
+  return 'ℹ️ Le notifiche degli aggiornamenti di GemiX sono già attive.\n\nPotrai disabilitarle chiedendolo direttamente a GemiX quando tornerà disponibile.';
+}
+
 /**
  * Main message handler. Takes a normalized context and returns a response object.
  * Sends every request to Qwen via OpenRouter; audio/video parts are captioned upstream by the media describer (see aiProvider).
@@ -110,10 +134,35 @@ async function handleMessage(ctx) {
     const ui = ctx.userIdentity;
     const isActiveMember = ui.isActiveMember;
     const userIsAdmin = ui.member ? isAdmin(ui.member) : false;
+    const maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
+    const releaseNotifyTarget = getReleaseNotifyTarget(ctx, ui);
 
     // ── Maintenance gate ──
     // Blocks every non-admin request with a fixed message. Admins always pass.
     if (MAINTENANCE_MODE && MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
+      if (maintenanceCommand === MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
+        const enableResult = enableReleaseNotify(releaseNotifyTarget.chatId, releaseNotifyTarget.waJid);
+        const alreadyEnabled = Boolean(enableResult.alreadyEnabled);
+        const text = alreadyEnabled
+          ? buildMaintenanceReleaseAlreadyEnabledMessage()
+          : buildMaintenanceReleaseEnabledMessage();
+        if (!alreadyEnabled && ctx.platform === PLATFORM_DISCORD && releaseNotifyTarget.waJid) {
+          try {
+            await sendWhatsAppDirect(releaseNotifyTarget.waJid, text);
+          } catch (err) {
+            log.warn(`maintenance release notify mirror to WhatsApp failed: ${err.message}`);
+          }
+        }
+        return {
+          text,
+          voiceBuffer: null,
+          isVoiceOnly: false,
+          attachments: [],
+          discordTitle: '',
+          modelUsed: null,
+          systemMessage: true,
+        };
+      }
       log.info(`   🔒 Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
       return {
         text: MAINTENANCE_USER_MESSAGE,
@@ -122,6 +171,7 @@ async function handleMessage(ctx) {
         attachments: [],
         discordTitle: '',
         modelUsed: null,
+        systemMessage: true,
       };
     }
 

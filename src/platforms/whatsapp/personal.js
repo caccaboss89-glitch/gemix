@@ -246,7 +246,9 @@ async function _handlePersonalBatch(entries) {
 
     if (response.text) {
       response.text = removeFooter(response.text);
-      response.text = addFooter(response.text, getModelDisplayName(response.modelUsed));
+      if (!response.systemMessage) {
+        response.text = addFooter(response.text, getModelDisplayName(response.modelUsed));
+      }
     }
 
     try {
