@@ -32,6 +32,7 @@ const {
   ensureProjectSkeleton,
   getProjectRoot,
   getProjectSubdir,
+  getScratchDir,
   projectExists,
   userTotalBytes,
   userQuotaBytes,
@@ -136,6 +137,7 @@ async function runInProjectSandbox({
   timeoutMs,
   crashPayload = {},
   autoAttach = true,
+  requireProject = true,
 }) {
   // ── Platform / project guards ────────────────────────────────────────────
   if (userCtx.platform === PLATFORM_DISCORD) {
@@ -150,19 +152,34 @@ async function runInProjectSandbox({
 
   ensureUserSkeleton(userCtx);
 
-  const projectName = getCurrentProject(userCtx);
-  if (!projectName) {
+  let projectName = getCurrentProject(userCtx);
+  const usingScratch = !projectName && !requireProject;
+  
+  if (requireProject && !projectName) {
     return {
       error: `No project is currently selected. Run \`gemix-project create\` (new task) or \`gemix-project switch <slug>\` (existing) via bash before ${toolLabel}.`,
     };
   }
-  if (!projectExists(userCtx, projectName)) {
+  
+  // Use scratch workspace for projectless execution (bash/code_execution without project)
+  if (usingScratch) {
+    projectName = '_scratch_';
+    const scratchDir = getScratchDir(userCtx);
+    if (scratchDir && !fs.existsSync(scratchDir)) {
+      fs.mkdirSync(scratchDir, { recursive: true });
+    }
+  } else if (projectName && !projectExists(userCtx, projectName)) {
     return { error: `Current project "${projectName}" no longer exists on disk.` };
   }
-  ensureProjectSkeleton(userCtx, projectName);
+  
+  if (projectName && !usingScratch) {
+    ensureProjectSkeleton(userCtx, projectName);
+  }
 
   // ── Quota pre-check (per-user, aggregate of projects/ + searched_images/) ─
-  const projectDir = getProjectRoot(userCtx, projectName);
+  const projectDir = usingScratch 
+    ? getScratchDir(userCtx) 
+    : getProjectRoot(userCtx, projectName);
   const quotaBytes = userQuotaBytes();
   const usedBefore = userTotalBytes(userCtx);
   if (usedBefore >= quotaBytes) {
@@ -224,7 +241,9 @@ async function runInProjectSandbox({
   // ── Diff ─────────────────────────────────────────────────────────────────
   const newFiles = [];
   const modifiedFiles = [];
-  const outputDir = getProjectSubdir(userCtx, projectName, 'output');
+  const outputDir = usingScratch 
+    ? path.join(projectDir, 'output') 
+    : getProjectSubdir(userCtx, projectName, 'output');
   let attachedTotalBytes = 0;
   let attachedCount = 0;
 
@@ -238,7 +257,7 @@ async function runInProjectSandbox({
   for (const [absPath, info] of after) {
     const prev = before.get(absPath);
     const rel = path.relative(projectDir, absPath).split(path.sep).join('/');
-    const item = { path: `projects/${projectName}/${rel}`, size: info.size };
+    const item = { path: usingScratch ? `scratch/${rel}` : `projects/${projectName}/${rel}`, size: info.size };
 
     // ── Symlink-escape guard ──
     let isEscaped = false;
@@ -263,7 +282,7 @@ async function runInProjectSandbox({
       const isOutput = absPath === outputDir || absPath.startsWith(outputDir + path.sep);
       let autoAttached = false;
       if (
-        autoAttach && isOutput &&
+        autoAttach && !usingScratch && isOutput &&
         attachedCount < CODE_EXEC_MAX_FILES_PER_CALL &&
         attachedTotalBytes + info.size <= CODE_EXEC_MAX_TOTAL_BYTES
       ) {
@@ -281,6 +300,14 @@ async function runInProjectSandbox({
     } else if (prev.size !== info.size || prev.mtimeMs !== info.mtimeMs) {
       modifiedFiles.push(item);
     }
+  }
+
+  // ── Projectless write guard ──────────────────────────────────────────────
+  if (usingScratch && (newFiles.length > 0 || modifiedFiles.length > 0)) {
+    const first = [...newFiles, ...modifiedFiles][0].path;
+    return {
+      error: `Execution blocked: you attempted to create or modify files (e.g., "${first}") without an active project. For file-producing tasks, downloads, or scripts, you MUST create or switch to a project first via gemix-project. Use scratch mode only for calculations or stateless checks.`,
+    };
   }
 
   // ── Quota post-check (per-user) ─────────────────────────────────────────

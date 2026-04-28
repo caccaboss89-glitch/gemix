@@ -145,6 +145,7 @@ async function codeExecutionTool(args, userCtx, responseCtx) {
     timeoutMs: args.timeout_ms,
     crashPayload: { code_preview: String(code).slice(0, 400) },
     autoAttach: true,
+    requireProject: false,
   });
 
   if (result.error) {

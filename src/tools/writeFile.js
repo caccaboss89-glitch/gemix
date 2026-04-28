@@ -111,6 +111,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
     timeoutMs: 15_000,
     crashPayload: { target_path: auth.absPath, mode, bytes: buf.length },
     autoAttach: true,
+    requireProject: true,
   });
 
   if (result.error) {

@@ -122,7 +122,7 @@ function buildReadFileTool(isDiscord) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run quick single-cell Python in the project sandbox. Best for calculations, data analysis, or lightweight scripts that output to stdout or save results to output/. For multi-file projects or scripts you want to keep, prefer write_file+bash instead. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user — put there ONLY the files the user wants to receive.',
+  description: 'Run quick single-cell Python in the sandbox. Best for calculations, data analysis, or lightweight scripts. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
     timeout_ms: { type: 'integer', description: 'Optional execution timeout in milliseconds (default 30000, max 120000).' },
@@ -156,7 +156,7 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the project sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Same isolation as code_execution, project mounted at /workspace. In the same round, bash always executes AFTER write_file/edit_file. Use background=true for long-running tasks (yt-dlp downloads, ffmpeg conversions). Default timeout 30 s, max 120 s.',
+  description: 'Run a shell command in the sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Same isolation as code_execution, project mounted at /workspace. In the same round, bash always executes AFTER write_file/edit_file. Default timeout 30 s, max 120 s.',
   properties: {
     command: { type: 'string', description: 'Shell command (bash -c). Single line or `&&`-chained statements.' },
     timeout_ms: { type: 'integer', description: 'Optional timeout in milliseconds (default 30000, max 120000).' },

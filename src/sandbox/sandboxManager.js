@@ -27,11 +27,13 @@ const {
   SANDBOX_IDLE_TTL_MS,
 } = require('../config/constants');
 const {
+  resolveStorageId,
   getProjectRoot,
+  getScratchDir,
   getHistoryDir,
   getPermanentDir,
   getSearchedImagesDir,
-  resolveStorageId,
+  ensureUserSkeleton,
   ensureProjectSkeleton,
 } = require('../utils/userPaths');
 const { createLogger } = require('../utils/logger');
@@ -111,8 +113,15 @@ function _ensureOwnership(targetPath) {
 async function _spawnContainer(userCtx, projectName) {
   const storageId = resolveStorageId(userCtx);
   if (!storageId) throw new Error('Cannot resolve storageId');
-  const projectDir = getProjectRoot(userCtx, projectName);
+  const isScratch = projectName === '_scratch_';
+  const projectDir = isScratch 
+    ? getScratchDir(userCtx) 
+    : getProjectRoot(userCtx, projectName);
+  if (!projectDir) throw new Error('Cannot resolve project/scratch directory');
   if (!fs.existsSync(projectDir)) {
+    fs.mkdirSync(projectDir, { recursive: true });
+  }
+  if (!isScratch) {
     ensureProjectSkeleton(userCtx, projectName);
   }
 
@@ -201,9 +210,9 @@ function _waitForKernelHttp(hostPort, token, timeoutMs = 60_000) {
     const http = require('http');
     const start = Date.now();
     const tick = () => {
+      // Jupyter expects token as query param, not Authorization header
       const req = http.get({
-        host: '127.0.0.1', port: hostPort, path: '/api/status',
-        headers: { Authorization: `token ${token}` },
+        host: '127.0.0.1', port: hostPort, path: `/api/status?token=${token}`,
         timeout: 2000,
       }, (res) => {
         res.resume();

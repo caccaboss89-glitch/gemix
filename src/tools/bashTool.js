@@ -130,6 +130,10 @@ async function bashTool(args, userCtx, responseCtx) {
   }
 
   const wantBackground = Boolean(args.background);
+  const { getCurrentProject } = require('../utils/projectState');
+  if (wantBackground && !getCurrentProject(userCtx)) {
+    return { success: false, error: 'Background execution requires an active project. Run `gemix-project create` or `gemix-project switch <slug>` via bash first.' };
+  }
 
   let timeoutMs = Number.isFinite(args.timeout_ms) ? Math.floor(args.timeout_ms) : DEFAULT_TIMEOUT_MS;
   if (timeoutMs <= 0) timeoutMs = DEFAULT_TIMEOUT_MS;
@@ -159,6 +163,7 @@ async function bashTool(args, userCtx, responseCtx) {
       timeoutMs: 10_000,
       crashPayload: { command_preview: command.slice(0, 300), background: true },
       autoAttach: false,
+      requireProject: false,
     });
 
     if (bgResult.error) {
@@ -210,6 +215,7 @@ async function bashTool(args, userCtx, responseCtx) {
     timeoutMs,
     crashPayload: { command_preview: command.slice(0, 300) },
     autoAttach: true,
+    requireProject: false,
   });
 
   if (result.error) {

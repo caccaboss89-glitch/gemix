@@ -110,6 +110,7 @@ async function editFileTool(args, userCtx, responseCtx) {
     timeoutMs: 15_000,
     crashPayload: { target_path: auth.absPath, replace_all: replaceAll },
     autoAttach: true,
+    requireProject: true,
   });
 
   if (result.error) {

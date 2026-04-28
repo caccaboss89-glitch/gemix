@@ -47,6 +47,7 @@ function getPermanentDir(userCtx)       { const r = getUserRoot(userCtx); return
 function getProjectsRoot(userCtx)       { const r = getUserRoot(userCtx); return r && path.join(r, 'projects'); }
 function getSearchedImagesDir(userCtx)  { const r = getUserRoot(userCtx); return r && path.join(r, 'searched_images'); }
 function getStateFile(userCtx)          { const r = getUserRoot(userCtx); return r && path.join(r, '.state.json'); }
+function getScratchDir(userCtx)          { const r = getUserRoot(userCtx); return r && path.join(r, 'scratch'); }
 
 function getProjectRoot(userCtx, projectName) {
   const root = getProjectsRoot(userCtx);
@@ -374,6 +375,7 @@ module.exports = {
   getProjectsRoot,
   getSearchedImagesDir,
   getStateFile,
+  getScratchDir,
   getProjectRoot,
   getProjectSubdir,
   // skeleton

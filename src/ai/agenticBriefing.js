@@ -60,11 +60,10 @@ function buildAgenticBriefing(ctx = {}) {
     </Layout>
     <Rules>
       - One project per user request. Run \`gemix-project create\` before producing files.
-      - Write access ONLY inside current project (with code_execution / write_file / edit_file / bash): code/ (scripts), temp/ (intermediate), output/ (deliverables).
-      - AUTO-DELIVERY: Files in output/ are auto-delivered to the user. NEVER call \`attach_file\` for output/ files so.
+      - bash and code_execution: can run WITHOUT a selected project (for quick calculations, checks), but CANNOT create or modify files in this mode. To produce files (downloads, plots, scripts), you MUST create or switch to a project first.
+      - Write/edit access ONLY inside current project: code/ (scripts), temp/ (intermediate), output/ (deliverables).
       - Zip directories into output/ to deliver them (for many files).
-      - bash and code_execution share kernel state (cwd, variables).
-      - ANTI-HALLUCINATION: Never invent paths. Use returned paths verbatim or \`ls\` first.
+      - ALWAYS use report_to_user before multi-step operations (+3 tools).
     </Rules>
     <ProjectManagement>
       Run via \`bash\` as standalone \`gemix-project &lt;subcmd&gt;\` (no chaining/redirection).
@@ -112,7 +111,6 @@ ${projectList}    </Projects>
   <ToolExecution>
     - In the same round you can run write_file/edit_file and bash/code_execution to optimize rounds. write_file/edit_file are always executed BEFORE bash/code_execution. You can create files and run them in one call.
     - Use only bash background=true for long tasks when you have other operations to perform simultaneously. For normal commands or if you don't need to invoke other tools in the meantime, leave it off.
-    - ALWAYS use report_to_user before multi-step operations (+3 tools).
   </ToolExecution>
 </AgenticToolkit>`;
 }
