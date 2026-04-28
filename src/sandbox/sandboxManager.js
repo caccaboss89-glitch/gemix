@@ -154,7 +154,9 @@ async function _spawnContainer(userCtx, projectName) {
       `HTTP_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
       `HTTPS_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
       'NO_PROXY=localhost,127.0.0.1',
+      'HOME=/tmp', // Ensure home is writable even if UID changes
     ],
+    User: process.getuid ? `${process.getuid()}:${process.getgid()}` : '1000:1000',
     ExposedPorts: { '8888/tcp': {} },
     HostConfig: {
       NetworkMode: SANDBOX_NETWORK,
