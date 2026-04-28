@@ -158,7 +158,7 @@ async function _spawnContainer(userCtx, projectName) {
     ExposedPorts: { '8888/tcp': {} },
     HostConfig: {
       NetworkMode: SANDBOX_NETWORK,
-      AutoRemove: true,
+      AutoRemove: false, // temporarily disabled for debugging boot timeout
       CapDrop: ['ALL'],
       SecurityOpt: ['no-new-privileges:true'],
       PidsLimit: 200,
@@ -293,16 +293,26 @@ async function getOrCreate(userCtx, projectName) {
   const placeholder = { _bootPromise: bootPromise };
   _pool.set(key, placeholder);
 
-  try {
-    const ready = await bootPromise;
-    ready.lastUsedAt = Date.now();
-    _pool.set(key, ready);
-    log.info(`sandbox ready key=${key} container=${ready.containerName}`);
-    return ready;
-  } catch (err) {
-    _pool.delete(key);
-    throw err;
-  }
+    try {
+      const ready = await bootPromise;
+      ready.lastUsedAt = Date.now();
+      _pool.set(key, ready);
+      log.info(`sandbox ready key=${key} container=${ready.containerName}`);
+      return ready;
+    } catch (err) {
+      // If boot failed, try to capture container logs for debugging
+      const entry = await bootPromise.catch(() => null);
+      if (entry && entry.container) {
+        try {
+          const logs = await entry.container.logs({ stdout: true, stderr: true, tail: 50 });
+          log.error(`Sandbox boot failed for ${key}. Last 50 lines of logs:\n${logs.toString('utf-8')}`);
+        } catch (logErr) {
+          log.warn(`Failed to capture logs for failed sandbox ${key}: ${logErr.message}`);
+        }
+      }
+      _pool.delete(key);
+      throw err;
+    }
 }
 
 /**

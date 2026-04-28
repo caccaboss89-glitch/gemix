@@ -18,6 +18,12 @@ export GEMIX_SANDBOX=1
 # Bootstrap user-level config (matplotlib etc. may want writable cache)
 mkdir -p "$HOME/.config" "$HOME/.cache" || true
 
+echo "--- GemiX Sandbox Bootstrapped ---"
+echo "User: $(id)"
+echo "Workdir: $(pwd)"
+echo "Environment: GEMIX_SANDBOX=$GEMIX_SANDBOX"
+echo "Starting Jupyter Server on port 8888..."
+
 exec jupyter server \
   --ServerApp.ip=0.0.0.0 \
   --ServerApp.port=8888 \
