@@ -109,13 +109,12 @@ ${projectList}    </Projects>
     </Pitfalls>
   </PythonSandbox>
   <ToolExecution>
-    - ALWAYS OPTIMIZE ROUNDS: Chain multiple tools in one round to save time/tokens.
+    - ALWAYS OPTIMIZE ROUNDS: Do NOT wait for a project to be created in a separate round. Chain \`gemix-project create\` (phase: before_all) with your first action (e.g. \`yt-dlp\`, phase: after_all) in the same round.
     - Execution Sequence (1-2-3):
         1. \`before_all\`: \`bash\` or \`code_execution\` (e.g. \`gemix-project create\`).
         2. \`standard\`: \`write_file\`, \`edit_file\`, \`read_file\`, \`web_search\`, etc.
         3. \`after_all\` (Default): \`bash\` or \`code_execution\` (e.g. \`yt-dlp\`, \`python code/script.py\`).
-    - Example: bash(command: "gemix-project create '{\\"name\\":\\"yt-dl\\", \\"user_request\\":\\"...\\"}'", phase: before_all) + bash(command: "yt-dlp ...", phase: after_all).
-    - Use background: true ONLY for slow tasks (>1 min) AND only if you have other tools to run in parallel while waiting. Otherwise, use standard execution.
+    - Use \`background: true\` ONLY for slow tasks (>1 min) AND only if you have other tools to run in parallel while waiting. Otherwise, use standard execution.
   </ToolExecution>
 </AgenticToolkit>`;
 }
