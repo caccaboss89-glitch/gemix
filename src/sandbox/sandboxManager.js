@@ -167,7 +167,7 @@ async function _spawnContainer(userCtx, projectName) {
       NanoCpus: 1_000_000_000, // 1.0 CPU
       Tmpfs: { '/tmp': 'size=256m' },
       PortBindings: {
-        '8888/tcp': [{ HostIp: '127.0.0.1', HostPort: String(hostPort) }],
+        '8888/tcp': [{ HostPort: String(hostPort) }],
       },
       Binds: [
         `${projectDir}:/workspace:rw`,
@@ -210,24 +210,24 @@ function _waitForKernelHttp(hostPort, token, timeoutMs = 60_000) {
     const http = require('http');
     const start = Date.now();
     const tick = () => {
-      // Jupyter expects token as query param, not Authorization header
+      // Use localhost to let Node resolve appropriately (IPv4/IPv6 fallback)
       const req = http.get({
-        host: '127.0.0.1', port: hostPort, path: `/api/status?token=${token}`,
-        timeout: 2000,
+        host: 'localhost', port: hostPort, path: `/api/status?token=${token}`,
+        timeout: 5000, // increased timeout for slow Windows Docker boots
       }, (res) => {
         res.resume();
-        if (res.statusCode && res.statusCode >= 500) return retry();
-        if (res.statusCode && res.statusCode !== 200) {
-          log.warn(`sandbox HTTP ready check returned ${res.statusCode} on ${hostPort}; continuing to kernel bootstrap`);
+        if (res.statusCode === 200) {
+          return resolve();
         }
-        return resolve();
+        // If we get anything else (401, 404, 5xx), Jupyter isn't ready or token is wrong yet
+        return retry();
       });
       req.on('error', retry);
       req.on('timeout', () => { req.destroy(); retry(); });
     };
     const retry = () => {
       if (Date.now() - start > timeoutMs) return reject(new Error('Jupyter Server boot timeout'));
-      setTimeout(tick, 400);
+      setTimeout(tick, 500);
     };
     tick();
   });

@@ -61,13 +61,15 @@ function _buildMessage(msgType, content, sessionId) {
 function _httpJson({ host, port, method, path, token, body }) {
   return new Promise((resolve, reject) => {
     const data = body ? Buffer.from(JSON.stringify(body)) : null;
+    const sep = path.includes('?') ? '&' : '?';
+    const finalPath = `${path}${sep}token=${token}`;
+
     const req = http.request({
       host,
       port,
       method,
-      path,
+      path: finalPath,
       headers: {
-        'Authorization': `token ${token}`,
         'Content-Type': 'application/json',
         ...(data ? { 'Content-Length': data.length } : {}),
       },
@@ -274,8 +276,6 @@ class PythonKernel {
     return new Promise((resolve, reject) => {
       const url = `ws://${this.host}:${this.port}/api/kernels/${this.kernelId}/channels?token=${encodeURIComponent(this.token)}`;
       const ws = new WebSocket(url, {
-        // Token is also accepted as auth header for some configs
-        headers: { Authorization: `token ${this.token}` },
         perMessageDeflate: false,
       });
 
