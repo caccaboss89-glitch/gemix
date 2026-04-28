@@ -120,8 +120,8 @@ const TOOL_CODE_EXECUTION = makeTool({
     timeout_ms: { type: 'integer', description: 'Optional execution timeout in milliseconds (default 30000, max 120000).' },
     execution_phase: {
       type: 'string',
-      enum: ['before_files', 'after_files'],
-      description: "Determines execution order in a single round. Use 'before_files' to run this BEFORE file creation. Use 'after_files' to run AFTER file creation. Default: 'after_files'."
+      enum: ['before_all', 'after_all'],
+      description: "Determines execution order in a single round. Use 'before_all' to run this BEFORE other tools (write_file, edit_file, code_execution, other bash). Use 'after_all' to run AFTER other tools. Default: 'after_all'."
     },
   },
   required: ['code'],
@@ -160,8 +160,8 @@ const TOOL_BASH = makeTool({
     background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results (automatically waits if still running). Default false.' },
     execution_phase: {
       type: 'string',
-      enum: ['before_files', 'after_files'],
-      description: "Determines execution order in a single round. Use 'before_files' to run this BEFORE file creation (e.g. creating project structures/directories). Use 'after_files' to run AFTER file creation (e.g. executing written scripts). Default: 'after_files'."
+      enum: ['before_all', 'after_all'],
+      description: "Determines execution order in a single round. Use 'before_all' to run this BEFORE other tools (write_file, edit_file, code_execution, other bash). Use 'after_all' to run AFTER other tools (like executing scripts). Default: 'after_all'."
     },
   },
   required: ['command'],

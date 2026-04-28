@@ -85,7 +85,7 @@ function orderToolCalls(toolCalls) {
     if (!DEFERRED_TOOL_NAMES.has(tc.function.name)) return 2;
     try {
       const args = JSON.parse(tc.function.arguments || '{}');
-      if (args.execution_phase === 'before_files') return 1;
+      if (args.execution_phase === 'before_all') return 1;
       return 3;
     } catch {
       return 3;

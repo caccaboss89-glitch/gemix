@@ -75,7 +75,7 @@ ${membersList}
     ${!isActiveMember ? 'Some tools (email, messages to other user...) are NOT available for this user.' : ''}
   </ToolInstructions>
   <MediaHandling>
-    Audio/video are replaced by &lt;Description kind="..."&gt; tags. Call read_file on multiple files for parallel analysis. Limits: audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s. Web URLs (YouTube) NOT supported.
+    Audio/video are replaced by &lt;Description kind="..."&gt; tags. Call read_file on multiple files for parallel analysis. Limits: audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s.
   </MediaHandling>
 `;
 
@@ -114,7 +114,7 @@ function buildPersonalCloudPointer(ctx) {
   return `  <PersonalCloud lite="true">
     Persistent personal cloud: history/, permanent/, searched_images/, projects/. Sandbox available after unlock.
     Selected project: ${currentLine} — Last used project: ${lastLine} — Projects: ${projectsCount}.
-    Call agentic_unlock first for computation, advanced math/science, file (PDF/PPTX/XLSX/DOCX/images/audio/video) generation/editing/conversion, OCR (if you need to read text from many photos), charts, large data work, archives, produced files, zip/jar extraction or compression, or financial data.
+    Call agentic_unlock first for computation, advanced math/science, file (PDF/PPTX/XLSX/DOCX/images/audio/video) generation/editing/conversion, YouTube downloads, OCR (if you need to read text from many photos), charts, large data work, archives, produced files, zip/jar extraction or compression, or financial data.
     Do not call it for normal chat.
   </PersonalCloud>
 `;

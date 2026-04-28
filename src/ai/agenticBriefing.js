@@ -94,7 +94,7 @@ ${projectList}    </Projects>
       Read-only mounts: /readonly/history, /readonly/permanent, /readonly/searched_images.
       Resources: 1 CPU, 1.5 GB RAM, 30s timeout (max 120s).
       pip disabled. Only pre-installed libraries allowed. ffmpeg, tesseract-ocr, libcairo, poppler-utils are pre-installed at OS level.
-      Network: NO INTERNET except api.polygon.io, astropy servers, YouTube CDN (yt-dlp only). Do NOT pip install.
+      Network: NO INTERNET except api.polygon.io, astropy, yt-dlp servers. Do NOT pip install.
     </Runtime>
     <Libraries>
       numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, yt-dlp.
@@ -104,14 +104,18 @@ ${projectList}    </Projects>
       - moviepy: pass codec='libx264', audio_codec='aac' for compatibility on WhatsApp/Discord previews
       - rembg: quality — u2netp: faster
       - Flush plots before reading: savefig() → plt.close() → then open with PIL
-      - yt-dlp: outtmpl='/workspace/output/%(title)s.%(ext)s'. Use \`--proxy ""\` ONLY if specifically instructed; usually the sandbox proxy is required and handled automatically.
+      - yt-dlp: outtmpl='/workspace/output/%(title)s.%(ext)s'. Always use the DEFAULT proxy configuration; bypassing it (e.g. --proxy "" or unsetting env vars) will block all internet access and cause the download to fail.
       - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports).
     </Pitfalls>
   </PythonSandbox>
   <ToolExecution>
-    - OPTIMIZE ROUNDS: Call multiple tools (e.g. \`gemix-project create\` (bash) + \`write_file\`) in one single round to save time/tokens.
-    - Execution Order: tools in the same round run sequentially based on their phase. File-editing tools run in phase 2. Use execution_phase='before_files' on bash/code_execution to run them in phase 1, or 'after_files' for phase 3.
-    - Use bash background=true only for tasks >2 min.
+    - ALWAYS OPTIMIZE ROUNDS: Chain multiple tools in one round to save time/tokens.
+    - Execution Sequence (1-2-3):
+        1. \`before_all\`: \`bash\` or \`code_execution\` (e.g. \`gemix-project create\`).
+        2. \`standard\`: \`write_file\`, \`edit_file\`, \`read_file\`, \`web_search\`, etc.
+        3. \`after_all\` (Default): \`bash\` or \`code_execution\` (e.g. \`yt-dlp\`, \`python code/script.py\`).
+    - Example: \`bash(create, phase: before_all)\` + \`write_file(script)\` + \`bash(run, phase: after_all)\`.
+    - Use \`background: true\` ONLY for slow tasks AND especially if you have other tools to run in parallel while waiting.
   </ToolExecution>
 </AgenticToolkit>`;
 }
