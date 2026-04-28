@@ -207,8 +207,11 @@ function _waitForKernelHttp(hostPort, token, timeoutMs = 60_000) {
         timeout: 2000,
       }, (res) => {
         res.resume();
-        if (res.statusCode === 200) return resolve();
-        retry();
+        if (res.statusCode && res.statusCode >= 500) return retry();
+        if (res.statusCode && res.statusCode !== 200) {
+          log.warn(`sandbox HTTP ready check returned ${res.statusCode} on ${hostPort}; continuing to kernel bootstrap`);
+        }
+        return resolve();
       });
       req.on('error', retry);
       req.on('timeout', () => { req.destroy(); retry(); });
