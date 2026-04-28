@@ -158,7 +158,7 @@ async function _spawnContainer(userCtx, projectName) {
     ExposedPorts: { '8888/tcp': {} },
     HostConfig: {
       NetworkMode: SANDBOX_NETWORK,
-      AutoRemove: false, // temporarily disabled for debugging boot timeout
+      AutoRemove: true,
       CapDrop: ['ALL'],
       SecurityOpt: ['no-new-privileges:true'],
       PidsLimit: 200,
