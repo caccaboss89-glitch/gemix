@@ -90,7 +90,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_REPORT_TO_USER = makeTool({
   name: 'report_to_user',
-  description: 'Send an intermediate status message to the user while you continue working. Use ONLY during multi-step operations (3+ tool calls).',
+  description: 'Send an intermediate TEXT status message to the user while you continue working. Use ONLY during multi-step operations (3+ tool calls). This tool does NOT end your turn.',
   properties: {
     message: { type: 'string', description: 'Short status update in Italian for the user.' },
   },
@@ -274,7 +274,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Delivery tool — Send a voice message. Without a recipient it replies in the current chat and ends the turn; with a recipient it sends externally. Buffered files are always included in current-chat replies and optional for other recipients.',
+    description: 'Delivery tool — Send a voice message. Without a recipient, it replies to the current chat and ends the turn (ignoring further tool calls). With a recipient, it sends the message and allows you to continue the turn. Buffered files are always included in current-chat replies and optional for other recipients.',
     properties,
     required: ['text'],
   });

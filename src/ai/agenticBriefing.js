@@ -63,7 +63,7 @@ function buildAgenticBriefing(ctx = {}) {
       - bash and code_execution: can run WITHOUT a selected project (for quick calculations, checks), but CANNOT create or modify files in this mode. To produce and deliver files (downloads, plots, scripts), you MUST create or switch to a project first.
       - Write/edit access ONLY inside current project: code/ (scripts), temp/ (intermediate), output/ (deliverables).
       - Zip directories into output/ to deliver them (for many files).
-      - ALWAYS use report_to_user before multi-step operations (+3 tools).
+      - ALWAYS use report_to_user before multi-step operations (+3 tools), NEVER use delivery tools (send_voice_message, send_whatsapp_message, etc).
     </Rules>
     <ProjectManagement>
       Run via \`bash\` as standalone \`gemix-project &lt;subcmd&gt;\` (no chaining/redirection).
