@@ -186,6 +186,9 @@ async function _spawnContainer(userCtx, projectName) {
   const container = await docker.createContainer(createOpts);
   await container.start();
 
+  const inspect = await container.inspect();
+  const internalIp = inspect.NetworkSettings.Networks[SANDBOX_NETWORK]?.IPAddress;
+
   // The kernel will be wired in by getOrCreate() once the container is up.
   return {
     storageId,
@@ -194,6 +197,7 @@ async function _spawnContainer(userCtx, projectName) {
     containerId: container.id,
     containerName,
     hostPort,
+    internalIp,
     token,
     kernel: null,
     lastUsedAt: Date.now(),
@@ -205,40 +209,47 @@ async function _spawnContainer(userCtx, projectName) {
  * Wait for the Jupyter Server inside the container to accept HTTP. Polls
  * GET /api/status for up to ~60 s.
  */
-function _waitForKernelHttp(hostPort, token, timeoutMs = 60_000) {
+function _waitForKernelHttp(entry, timeoutMs = 60_000) {
+  const { hostPort, internalIp, token } = entry;
   return new Promise((resolve, reject) => {
     const http = require('http');
     const start = Date.now();
+    let tryInternal = false;
+
     const tick = () => {
+      // Try host loopback first, fallback to internal IP if host fails
+      const currentHost = tryInternal && internalIp ? internalIp : '127.0.0.1';
+      const currentPort = tryInternal && internalIp ? 8888 : hostPort;
+
       const req = http.get({
-        host: '127.0.0.1',
-        port: hostPort,
+        host: currentHost,
+        port: currentPort,
         path: `/api/status?token=${token}`,
         timeout: 5000,
         headers: {
-          'Authorization': `token ${token}` // fallback for some configs
+          'Authorization': `token ${token}`
         }
       }, (res) => {
         res.resume();
         if (res.statusCode === 200) {
           return resolve();
         }
-        // If we get 401/403, we reached it but auth failed (maybe token not yet active?)
-        // If we get 5xx, it's booting.
         return retry();
       });
+
       req.on('error', (err) => {
-        // Only log if it's NOT a connection refused (which is expected during boot)
-        if (err.code !== 'ECONNREFUSED') {
-          log.warn(`Sandbox probe error on port ${hostPort}: ${err.message} (${err.code})`);
+        if (err.code !== 'ECONNREFUSED' && err.code !== 'ETIMEDOUT') {
+          log.warn(`Sandbox probe error on ${currentHost}:${currentPort}: ${err.message} (${err.code})`);
         }
+        // Switch between host and internal IP on every retry if both are available
+        if (internalIp) tryInternal = !tryInternal;
         retry();
       });
       req.on('timeout', () => { req.destroy(); retry(); });
     };
     const retry = () => {
       if (Date.now() - start > timeoutMs) {
-        return reject(new Error(`Jupyter Server boot timeout (waited ${timeoutMs}ms on port ${hostPort})`));
+        return reject(new Error(`Jupyter Server boot timeout (waited ${timeoutMs}ms on host port ${hostPort} / internal ${internalIp}:8888)`));
       }
       setTimeout(tick, 500);
     };
@@ -276,10 +287,10 @@ async function getOrCreate(userCtx, projectName) {
   const bootPromise = (async () => {
     const fresh = await _spawnContainer(userCtx, projectName);
     try {
-      await _waitForKernelHttp(fresh.hostPort, fresh.token);
+      await _waitForKernelHttp(fresh);
       fresh.kernel = new PythonKernel({
-        host: '127.0.0.1',
-        port: fresh.hostPort,
+        host: fresh.internalIp || '127.0.0.1',
+        port: fresh.internalIp ? 8888 : fresh.hostPort,
         token: fresh.token,
       });
       await fresh.kernel.start();
