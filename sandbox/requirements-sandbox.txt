@@ -54,3 +54,4 @@ reportlab==4.2.5
 
 # ── Networking helper (used by AI for controlled APIs, must respect proxy) ──
 requests==2.32.3
+yt-dlp==2024.11.04

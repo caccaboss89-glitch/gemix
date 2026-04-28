@@ -32,6 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         python3-dev \
         fonts-dejavu-core \
+        curl \
+        wget \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ──
