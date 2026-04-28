@@ -88,6 +88,11 @@ function _randomPort() {
   });
 }
 
+function _withTokenQuery(path, token) {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}token=${encodeURIComponent(token)}`;
+}
+
 /**
  * Set ownership of project + readonly mount points to UID 1000 (sandbox user
  * inside the container). No-op on non-root or non-Linux platforms.
@@ -202,7 +207,7 @@ function _waitForKernelHttp(hostPort, token, timeoutMs = 30_000) {
     const start = Date.now();
     const tick = () => {
       const req = http.get({
-        host: '127.0.0.1', port: hostPort, path: '/api/status',
+        host: '127.0.0.1', port: hostPort, path: _withTokenQuery('/api/status', token),
         headers: { Authorization: `token ${token}` },
         timeout: 2000,
       }, (res) => {

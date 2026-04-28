@@ -34,6 +34,11 @@ function _msgId() {
   return crypto.randomBytes(8).toString('hex');
 }
 
+function _withTokenQuery(path, token) {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}token=${encodeURIComponent(token)}`;
+}
+
 /** Build a Jupyter v5.4 message envelope. */
 function _buildMessage(msgType, content, sessionId) {
   const msgId = _msgId();
@@ -65,7 +70,7 @@ function _httpJson({ host, port, method, path, token, body }) {
       host,
       port,
       method,
-      path,
+      path: _withTokenQuery(path, token),
       headers: {
         'Authorization': `token ${token}`,
         'Content-Type': 'application/json',
