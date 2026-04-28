@@ -112,7 +112,7 @@ ${projectList}    </Projects>
   <ToolExecution>
     - In the same round you can run write_file/edit_file and bash/code_execution to optimize rounds. write_file/edit_file are always executed BEFORE bash/code_execution. You can create files and run them in one call.
     - Use only bash background=true for long tasks when you have other operations to perform simultaneously. For normal commands or if you don't need to invoke other tools in the meantime, leave it off.
-    - Always use report_to_user before multi-step operations (+3 tools).
+    - ALWAYS use report_to_user before multi-step operations (+3 tools).
   </ToolExecution>
 </AgenticToolkit>`;
 }

@@ -28,5 +28,5 @@ exec jupyter server \
   --ServerApp.allow_origin='*' \
   --ServerApp.root_dir="${SANDBOX_WORKDIR}" \
   --ServerApp.terminado_settings="shell_command=['/bin/bash']" \
-  --ServerApp.log_level=WARNING \
+  --ServerApp.log_level=WARN \
   --no-browser
