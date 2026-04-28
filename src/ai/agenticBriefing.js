@@ -114,8 +114,8 @@ ${projectList}    </Projects>
         1. \`before_all\`: \`bash\` or \`code_execution\` (e.g. \`gemix-project create\`).
         2. \`standard\`: \`write_file\`, \`edit_file\`, \`read_file\`, \`web_search\`, etc.
         3. \`after_all\` (Default): \`bash\` or \`code_execution\` (e.g. \`yt-dlp\`, \`python code/script.py\`).
-    - Example: \`bash(create, phase: before_all)\` + \`write_file(script)\` + \`bash(run, phase: after_all)\`.
-    - Use \`background: true\` ONLY for slow tasks AND especially if you have other tools to run in parallel while waiting.
+    - Example: bash(command: "gemix-project create '{\\"name\\":\\"yt-dl\\", \\"user_request\\":\\"...\\"}'", phase: before_all) + bash(command: "yt-dlp ...", phase: after_all).
+    - Use background: true ONLY for slow tasks (>1 min) AND only if you have other tools to run in parallel while waiting. Otherwise, use standard execution.
   </ToolExecution>
 </AgenticToolkit>`;
 }

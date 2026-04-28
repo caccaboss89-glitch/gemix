@@ -64,10 +64,12 @@ async function createProjectTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
 
-  const { name, description, user_request, strategy } = args || {};
-  if (!name || !description || !user_request || !strategy) {
-    return _err('Missing required fields: name, description, user_request, strategy.');
+  const { name, user_request } = args || {};
+  if (!name || !user_request) {
+    return _err('Missing required fields: name, user_request. (Optional: description, strategy)');
   }
+  const description = args.description || 'No description provided.';
+  const strategy = args.strategy || 'General agentic strategy.';
 
   const slug = sanitizeProjectName(name);
   if (!slug) return _err('Invalid project name (empty after sanitization). Use letters, numbers, _ or -.');

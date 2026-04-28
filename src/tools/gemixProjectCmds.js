@@ -122,7 +122,7 @@ async function handleGemixProjectCmd(command, userCtx) {
       if (!argStr) {
         return {
           success: false,
-          error: "gemix-project create '{...}': missing JSON. Required fields: name, description, user_request, strategy.",
+          error: "gemix-project create '{...}': missing JSON. Required fields: name, user_request. (Optional: description, strategy).",
         };
       }
       let parsed;
@@ -131,7 +131,7 @@ async function handleGemixProjectCmd(command, userCtx) {
       } catch {
         return {
           success: false,
-          error: 'gemix-project create: argument must be a valid JSON object with fields: name, description, user_request, strategy.',
+          error: 'gemix-project create: argument must be a valid JSON object with fields: name, user_request. (Optional: description, strategy).',
         };
       }
       return await createProjectTool(parsed, userCtx);
