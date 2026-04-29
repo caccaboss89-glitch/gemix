@@ -211,10 +211,20 @@ async function webSearch(query, numResults = DEFAULT_NUM_RESULTS, allowedDomains
   }
 
   // ── Format output ──
-  const header = `Found ${processed.length} result(s):`;
-  const formatted = processed.map((r, i) => _formatResult(r, i)).join('\n\n');
+  const resultsXml = processed.map((r, i) => {
+    return `<Result rank="${i + 1}">
+  <Title>${r.title || 'Untitled'}</Title>
+  <URL>${r.url}</URL>
+  <Snippet>${r.content || ''}</Snippet>
+  ${r.publishedDate ? `<Date>${r.publishedDate}</Date>` : ''}
+</Result>`;
+  }).join('\n');
 
-  return { success: true, results: `${header}\n\n${formatted}` };
+  const output = `<SearchResults query="${cleanQuery}" count="${processed.length}">
+${resultsXml}
+</SearchResults>`;
+
+  return { success: true, content: output };
 }
 
 module.exports = { webSearch };

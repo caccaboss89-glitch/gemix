@@ -40,17 +40,17 @@ async function listProjectsTool(userCtx) {
   ensureUserSkeleton(userCtx);
   const projects = listProjects(userCtx);
   const current = await getCurrentProject(userCtx);
+  const projectLines = projects.map(p => {
+    return `  <Project name="${p.name}" last_used="${p.last_used_at}"${p.name === current ? ' current="true"' : ''}>${p.description}</Project>`;
+  }).join('\n');
+
+  const output = `<ProjectList count="${projects.length}" max="${MAX_PROJECTS_PER_USER}" current="${current || ''}">
+${projectLines || '  <!-- No projects found -->' }
+</ProjectList>`;
+
   return {
     success: true,
-    current_project: current,
-    count: projects.length,
-    max: MAX_PROJECTS_PER_USER,
-    projects: projects.map(p => ({
-      name: p.name,
-      description: p.description,
-      last_used_at: p.last_used_at,
-      is_current: p.name === current,
-    })),
+    content: output,
   };
 }
 
@@ -154,7 +154,7 @@ async function switchProjectTool(args, userCtx) {
   writeProjectMeta(userCtx, slug, meta);
 
   await setCurrentProject(userCtx, slug);
-  return { success: true, current_project: slug };
+  return { success: true, message: `Switched to project "${slug}".` };
 }
 
 /**
@@ -184,10 +184,10 @@ async function deleteProjectTool(args, userCtx) {
     return _err(`Failed to delete project: ${err.message}`);
   }
 
+  const current = await getCurrentProject(userCtx);
   return {
     success: true,
-    deleted: slug,
-    current_project: await getCurrentProject(userCtx),
+    message: `Project "${slug}" deleted.${current ? ` Current project: ${current}` : ' No project currently selected.'}`,
   };
 }
 
@@ -230,7 +230,7 @@ async function cleanupProjectTool(args, userCtx) {
     }
     cleared[sub] = removed;
   }
-  return { success: true, project: slug, cleared };
+  return { success: true, message: `Cleanup complete for project "${slug}". Subdirs cleared: ${subdirs.join(', ')}.` };
 }
 
 /**
@@ -253,8 +253,7 @@ async function copyToPermanentTool(args, userCtx) {
   if (!result.success) return _err(result.error);
   return {
     success: true,
-    source: `history/${name}`,
-    destination: `permanent/${result.finalName}`,
+    message: `File copied: history/${name} -> permanent/${result.finalName}`,
   };
 }
 
@@ -313,8 +312,7 @@ async function copyToProjectTool(args, userCtx) {
   }
   return {
     success: true,
-    source,
-    destination: `projects/${current}/${subdir}/${finalName}`,
+    message: `File copied: ${source} -> projects/${current}/${subdir}/${finalName}`,
   };
 }
 
@@ -328,18 +326,22 @@ async function quotaTool(userCtx) {
   const totalBytes = userQuotaBytes();
   const freeBytes = Math.max(0, totalBytes - usedBytes);
   const toMb = b => Math.round(b / 1024 / 1024 * 10) / 10;
-  const projects = listProjects(userCtx).map(p => ({
-    name: p.name,
-    size_mb: toMb(projectSizeBytes(userCtx, p.name)),
-  }));
+  
+  const projectsXml = listProjects(userCtx).map(p => {
+    const size = toMb(projectSizeBytes(userCtx, p.name));
+    return `  <Project name="${p.name}" size_mb="${size}" />`;
+  }).join('\n');
+
+  const output = `<StorageQuota used_mb="${toMb(usedBytes)}" total_mb="${toMb(totalBytes)}" free_mb="${toMb(freeBytes)}">
+${projectsXml || '  <!-- No projects found -->' }
+</StorageQuota>`;
+
   return {
     success: true,
-    used_mb: toMb(usedBytes),
-    total_mb: toMb(totalBytes),
-    free_mb: toMb(freeBytes),
-    projects,
+    content: output,
   };
 }
+
 
 module.exports = {
   listProjectsTool,

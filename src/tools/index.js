@@ -194,7 +194,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       result: JSON.stringify({
         success: true,
         unlocked: true,
-        message_for_ai: 'Agentic toolkit is already unlocked. Briefing was provided earlier — proceed with your task.',
+        message: 'Agentic toolkit is already unlocked. Briefing was provided earlier — proceed with your task.',
       }),
     };
   }
@@ -338,7 +338,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         result = {
           success: true,
           unlocked: true,
-          message_for_ai: 'Agentic toolkit unlocked. Read the <AgenticToolkit> system message that follows for cloud rules, library catalog and delivery flow, then continue with the user request.',
+          message: 'Agentic toolkit unlocked. Read the <AgenticToolkit> system message that follows for cloud rules, library catalog and delivery flow, then continue with the user request.',
         };
         break;
       }
@@ -401,7 +401,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
 
             deliveryCtx.contactedWA.add(targetJid.jid);
-            result = `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.`;
+            result = { success: true, message: `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.` };
             _incrementVoiceCount(chatKey);
             storeRecentVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
@@ -420,7 +420,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const voiceBuffer = await generateVoice(cleanText);
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
-        result = 'Voice message generated successfully. Do not send any text message.';
+        result = { success: true, message: 'Voice message generated successfully. Do not send any text message.' };
         _incrementVoiceCount(chatKey);
         storeRecentVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
         break;
@@ -485,7 +485,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           buffer: formalPdfBuffer,
           mimetype: 'application/pdf',
         });
-        result = `Formal request PDF "${args.title}" generated successfully.`;
+        result = { success: true, message: `Formal request PDF "${args.title}" generated successfully.` };
         break;
       }
 
@@ -508,7 +508,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             emailAttachments
           );
           deliveryCtx.contactedEmail.add(targetEmail.email);
-          result = `Email sent successfully to ${targetEmail.display}${emailAttachments.length > 0 ? ` with ${emailAttachments.length} attachment(s)` : ''}.`;
+          result = { success: true, message: `Email sent successfully to ${targetEmail.display}${emailAttachments.length > 0 ? ` with ${emailAttachments.length} attachment(s)` : ''}.` };
         } catch (err) {
           result = { success: false, error: `Error sending email: ${err.message}` };
         }
@@ -548,7 +548,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
 
           deliveryCtx.contactedWA.add(targetJid.jid);
-          result = `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.`;
+          result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.` };
         } catch (err) {
           result = { success: false, error: `Error sending WhatsApp message: ${err.message}` };
         }

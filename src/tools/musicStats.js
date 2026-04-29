@@ -66,9 +66,9 @@ function formatStats(data) {
     const top5Str = top5.map((s, i) => `  ${i + 1}. ${s.title} (${s.count}x)`).join('\n');
 
     return `👤 ${u.global_name || u.username} (@${u.username})\n` +
-      `   Ascolto: ${hours}h ${minutes}m | Canzoni: ${totalSongs}\n` +
-      `   Aggiunte playlist server: ${u.serverPlaylistAdds || 0} | Personali: ${u.personalPlaylistAdds || 0}\n` +
-      `   Top 5 canzoni:\n${top5Str}`;
+      `   Listening: ${hours}h ${minutes}m | Songs: ${totalSongs}\n` +
+      `   Server playlist adds: ${u.serverPlaylistAdds || 0} | Personal: ${u.personalPlaylistAdds || 0}\n` +
+      `   Top 5 songs:\n${top5Str}`;
   });
 
   // --- Global top 5 ---
@@ -94,28 +94,30 @@ function formatStats(data) {
   const totalHours = Math.floor(totalListeningMs / 3600000);
   const totalMinutes = Math.floor((totalListeningMs % 3600000) / 60000);
 
-  let output = '🎵 STATISTICHE MUSIC BOT\n\n';
+  let output = '🎵 MUSIC BOT STATISTICS\n\n';
 
-  output += '📊 GLOBALI:\n';
-  output += `  Canzoni avviate: ${global.songsStarted || 'N/D'}\n`;
-  output += `  Canzoni completate: ${global.songsCompleted || 'N/D'}\n`;
-  output += `  Utenti attivi: ${userEntries.length}\n`;
-  output += `  Ore di musica totali: ${totalHours}h ${totalMinutes}m\n`;
-  output += `  Aggiunte playlist server: ${totalServerAdds}\n`;
-  output += `  Aggiunte playlist personali: ${totalPersonalAdds}\n`;
+  output += '📊 GLOBAL:\n';
+  output += `  Songs started: ${global.songsStarted || 'N/A'}\n`;
+  output += `  Songs completed: ${global.songsCompleted || 'N/A'}\n`;
+  output += `  Active users: ${userEntries.length}\n`;
+  output += `  Total music hours: ${totalHours}h ${totalMinutes}m\n`;
+  output += `  Server playlist adds: ${totalServerAdds}\n`;
+  output += `  Personal playlist adds: ${totalPersonalAdds}\n`;
 
   if (globalTop5.length > 0) {
-    output += `\n🏆 TOP 5 CANZONI GLOBALI:\n${globalTop5Str}\n`;
+    output += `\n🏆 GLOBAL TOP 5 SONGS:\n${globalTop5Str}\n`;
   }
 
-  output += '\n👥 UTENTI:\n\n';
+  output += '\n👥 USERS:\n\n';
   output += userSummaries.join('\n\n');
 
   if (data.lastUpdated) {
-    output += `\n\n📅 Ultimo aggiornamento: ${data.lastUpdated}`;
+    output += `\n\n📅 Last updated: ${data.lastUpdated}`;
   }
 
-  return output;
+  const xmlOutput = `<MusicStats last_updated="${data.lastUpdated || ''}">\n${output}\n</MusicStats>`;
+
+  return { success: true, content: xmlOutput };
 }
 
 module.exports = { readMusicStats };

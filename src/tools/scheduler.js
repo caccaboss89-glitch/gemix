@@ -169,7 +169,7 @@ async function scheduleTasks(tasks, ctx) {
     results.push({ success: true, message: msg });
   }
 
-  return { success: true, results };
+  return { success: true, message: results };
 }
 
 module.exports = { scheduleTasks };

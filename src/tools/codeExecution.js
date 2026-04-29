@@ -79,6 +79,7 @@ const _ALLOWED_WRITE_SUBDIRS = ['temp/', 'output/', 'code/'];
 function _formatResult({ kernelResult, diff, durationMs, quotaWarning, projectName }) {
   const out = {
     success: kernelResult.status === 'ok',
+    message: 'Python code executed successfully.',
     status: kernelResult.status,
     duration_ms: durationMs,
     stdout: kernelResult.stdout || '',
@@ -115,13 +116,13 @@ function _formatResult({ kernelResult, diff, durationMs, quotaWarning, projectNa
     }
   }
   if (attached.length > 0) {
-    hints.push(`${attached.length} file(s) under output/ were auto-attached. Use send_whatsapp_message (or send_email / Discord) with includeAttachments=true to deliver them.`);
+    hints.push(`${attached.length} file(s) under output/ were auto-attached. They will be AUTO-DELIVERED in the current chat. Only use send_whatsapp_message (or send_email / Discord) with includeAttachments=true if you need to deliver them to a DIFFERENT user.`);
   }
   if (escaped.length > 0) {
     hints.push(`${escaped.length} file(s) were rejected as symlink escapes — do not try to leak read-only mounts via output/.`);
   }
   if (out.output_truncated) hints.push('Output was truncated; redirect verbose data to a file under temp/ instead of printing.');
-  if (hints.length > 0) out.message_for_ai = hints.join(' ');
+  if (hints.length > 0) out.message = hints.join(' ');
   return out;
 }
 

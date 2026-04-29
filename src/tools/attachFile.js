@@ -117,7 +117,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
     name: path.basename(abs),
     path: rawPath,
     size: stat.size,
-    message_for_ai: 'File buffered for delivery in the current chat (auto-delivered with your reply). To send to other recipients, use send_whatsapp_message / send_email with includeAttachments=true.',
+    message: 'File buffered for delivery in the current chat (auto-delivered with your reply). To send to other recipients, use send_whatsapp_message / send_email with includeAttachments=true.',
   };
 }
 

@@ -401,7 +401,7 @@ async function handleMessage(ctx) {
         return {
           role: 'tool',
           tool_call_id: tc.id,
-          content: `Execution error: ${toolErr.message}`,
+          content: JSON.stringify({ success: false, error: `Execution error: ${toolErr.message}` }),
         };
       }
     };

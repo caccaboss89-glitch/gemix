@@ -144,6 +144,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
 
   const out = {
     success: true,
+    message: 'File written successfully.',
     path: auth.absPath ? `projects/${currentProject}/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}` : rawPath,
     bytes_written: buf.length,
     mode,

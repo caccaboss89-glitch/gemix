@@ -111,26 +111,25 @@ async function _fetchPage(url) {
  * @returns {Promise<string>} Processed page content
  */
 async function browsePage(url, instructions, mode = 'summary') {
-  // ── Validate URL ──
   if (!url || typeof url !== 'string') {
-    return JSON.stringify({ success: false, error: 'URL is missing or invalid.' });
+    return { success: false, error: 'URL is missing or invalid.' };
   }
 
   let parsedUrl;
   try {
     parsedUrl = new URL(url);
   } catch {
-    return JSON.stringify({ success: false, error: 'Invalid URL format. Provide a full URL with protocol (e.g. https://example.com).' });
+    return { success: false, error: 'Invalid URL format. Provide a full URL with protocol (e.g. https://example.com).' };
   }
 
   // Block non-HTTP protocols
   if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-    return JSON.stringify({ success: false, error: `Unsupported protocol "${parsedUrl.protocol}". Only http and https are supported.` });
+    return { success: false, error: `Unsupported protocol "${parsedUrl.protocol}". Only http and https are supported.` };
   }
 
   // ── Validate model ──
   if (!BROWSE_PAGE_MODEL) {
-    return JSON.stringify({ success: false, error: 'BROWSE_PAGE_MODEL is not defined in the environment configuration.' });
+    return { success: false, error: 'BROWSE_PAGE_MODEL is not defined in the environment configuration.' };
   }
 
   // ── Fetch page ──
@@ -142,13 +141,13 @@ async function browsePage(url, instructions, mode = 'summary') {
   } catch (err) {
     const isTimeout = err.name === 'AbortError' || err.message.includes('Timeout');
     if (isTimeout) {
-      return JSON.stringify({ success: false, error: `The page at ${url} took too long to respond (timeout after ${FETCH_TIMEOUT_MS / 1000}s). Try again later.` });
+      return { success: false, error: `The page at ${url} took too long to respond (timeout after ${FETCH_TIMEOUT_MS / 1000}s). Try again later.` };
     }
     const isNetwork = /ECONNREFUSED|ECONNRESET|ENOTFOUND|ERR_NETWORK/i.test(err.message);
     if (isNetwork) {
-      return JSON.stringify({ success: false, error: `Could not connect to ${parsedUrl.hostname}. The site may be down or unreachable.` });
+      return { success: false, error: `Could not connect to ${parsedUrl.hostname}. The site may be down or unreachable.` };
     }
-    return JSON.stringify({ success: false, error: `Error fetching page: ${err.message}` });
+    return { success: false, error: `Error fetching page: ${err.message}` };
   }
 
   // Handle HTTP errors
@@ -167,9 +166,9 @@ async function browsePage(url, instructions, mode = 'summary') {
     // Still try to extract useful content from error pages
     const errorPageText = _extractText(html);
     if (errorPageText && errorPageText.length > 100) {
-      return `${msg}\n\nHowever, the error page contained the following content:\n\n${errorPageText.substring(0, 3000)}`;
+      return { success: false, error: msg, content: errorPageText.substring(0, 3000) };
     }
-    return JSON.stringify({ success: false, error: msg });
+    return { success: false, error: msg };
   }
 
   // ── Extract text ──
@@ -177,50 +176,38 @@ async function browsePage(url, instructions, mode = 'summary') {
   const pageText = _extractText(html);
 
   if (!pageText || pageText.length < 20) {
-    return JSON.stringify({ success: false, error: `No readable text content found on ${finalUrl}. The page may be JavaScript-rendered, empty, or blocked.` });
+    return { success: false, error: `No readable text content found on ${finalUrl}. The page may be JavaScript-rendered, empty, or blocked.` };
   }
 
   log.info(`   📄 Extracted ${pageText.length} chars${pageTitle ? ` — "${pageTitle}"` : ''}`);
 
   // ── Raw HTML mode: return full HTML ──
   if (mode === 'raw_html') {
-    let result = html;
     const maxHtml = MAX_RAW_CHARS * 2;
     const isTruncated = html.length > maxHtml;
-    
-    if (isTruncated) {
-      result = result.substring(0, maxHtml) + '\n\n... (HTML truncated at ' + maxHtml + ' characters)';
-    }
+    const result = isTruncated ? html.substring(0, maxHtml) + '\n\n... (HTML truncated)' : html;
+    const timestamp = new Date().toISOString();
 
-    const header = [
-      `**URL:** ${finalUrl}`,
-      pageTitle ? `**Title:** ${pageTitle}` : null,
-      `**Fetched at:** ${new Date().toLocaleString('it-IT')}`,
-      `**Content length:** ${html.length} characters (HTML)${isTruncated ? ' [TRUNCATED]' : ''}`,
-      '',
-    ].filter(Boolean).join('\n');
+    const output = `<PageContent url="${finalUrl}" title="${pageTitle || ''}" mode="raw_html" timestamp="${timestamp}" length="${html.length}"${isTruncated ? ' truncated="true"' : ''}>
+\`\`\`html
+${result}
+\`\`\`
+</PageContent>`;
 
-    return `${header}\n\`\`\`html\n${result}\n\`\`\``;
+    return { success: true, content: output };
   }
 
   // ── Raw mode: return extracted text directly ──
   if (mode === 'raw') {
-    let result = pageText;
     const isTruncated = pageText.length > MAX_RAW_CHARS;
-    
-    if (isTruncated) {
-      result = result.substring(0, MAX_RAW_CHARS) + '\n\n... (content truncated at ' + MAX_RAW_CHARS + ' characters)';
-    }
+    const result = isTruncated ? pageText.substring(0, MAX_RAW_CHARS) + '\n\n... (content truncated)' : pageText;
+    const timestamp = new Date().toISOString();
 
-    const header = [
-      `**URL:** ${finalUrl}`,
-      pageTitle ? `**Title:** ${pageTitle}` : null,
-      `**Fetched at:** ${new Date().toLocaleString('it-IT')}`,
-      `**Content length:** ${pageText.length} characters${isTruncated ? ' [TRUNCATED]' : ''}`,
-      '',
-    ].filter(Boolean).join('\n');
+    const output = `<PageContent url="${finalUrl}" title="${pageTitle || ''}" mode="raw" timestamp="${timestamp}" length="${pageText.length}"${isTruncated ? ' truncated="true"' : ''}>
+${result}
+</PageContent>`;
 
-    return `${header}\n${result}`;
+    return { success: true, content: output };
   }
 
   // ── Summary mode: LLM-powered extraction ──
@@ -231,21 +218,18 @@ async function browsePage(url, instructions, mode = 'summary') {
 
   try {
     const summary = await summarizePage(pageText, instructions.trim(), finalUrl, pageTitle);
+    const timestamp = new Date().toISOString();
     const isTruncated = pageText.length > MAX_RAW_CHARS;
 
-    const header = [
-      `**URL:** ${finalUrl}`,
-      pageTitle ? `**Title:** ${pageTitle}` : null,
-      `**Fetched at:** ${new Date().toLocaleString('it-IT')}`,
-      `**Original length:** ${pageText.length} characters${isTruncated ? ' [TRUNCATED for summarization]' : ''}`,
-      '',
-    ].filter(Boolean).join('\n');
+    const output = `<PageAnalysis url="${finalUrl}" title="${pageTitle || ''}" mode="summary" timestamp="${timestamp}" original_length="${pageText.length}"${isTruncated ? ' truncated_for_analysis="true"' : ''}>
+${summary}
+</PageAnalysis>`;
 
-    return `${header}\n${summary}`;
+    return { success: true, content: output };
   } catch (err) {
     log.error(`   ❌ Summarizer failed: ${err.message}`);
 
-    return JSON.stringify({ success: false, error: `LLM summarizer failed to process the page: ${err.message}. If you still need the content, you can call this tool again using mode: "raw" to get the extracted text, or mode: "raw_html" for the raw HTML.` });
+    return { success: false, error: `LLM summarizer failed to process the page: ${err.message}. If you still need the content, you can call this tool again using mode: "raw" to get the extracted text, or mode: "raw_html" for the raw HTML.` };
   }
 }
 

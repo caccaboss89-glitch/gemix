@@ -104,7 +104,7 @@ ${projectList}    </Projects>
       - moviepy: pass codec='libx264', audio_codec='aac' for compatibility on WhatsApp/Discord previews
       - rembg: quality — u2netp: faster
       - Flush plots before reading: savefig() → plt.close() → then open with PIL
-      - yt-dlp: outtmpl='/workspace/output/%(title)s.%(ext)s'. Always use the DEFAULT proxy configuration; bypassing it (e.g. --proxy "" or unsetting env vars) will block all internet access and cause the download to fail.
+      - yt-dlp: Pre-configured with proxy and UA. DO NOT pass --proxy or --user-agent. Always use --outtmpl='/workspace/output/%(title)s.%(ext)s' to save results in the auto-delivered output folder.
       - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports).
     </Pitfalls>
   </PythonSandbox>

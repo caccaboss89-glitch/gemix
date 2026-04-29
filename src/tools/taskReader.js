@@ -46,7 +46,9 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
     }
   }
 
-  return result || 'No tasks scheduled.';
+  const output = `<ScheduledTasks include_group="${includeGroup}">\n${result || 'No tasks scheduled.'}\n</ScheduledTasks>`;
+
+  return { success: true, content: output };
 }
 
 module.exports = { readTasks };

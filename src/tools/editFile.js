@@ -182,6 +182,7 @@ async function editFileTool(args, userCtx, responseCtx) {
 
   const out = {
     success: true,
+    message: 'File edited successfully.',
     path: `projects/${currentProject}/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}`,
     occurrences_replaced: report.occurrences,
     bytes_written: report.bytes_written,

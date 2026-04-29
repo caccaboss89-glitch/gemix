@@ -129,6 +129,12 @@ async function bashTool(args, userCtx, responseCtx) {
     return result;
   }
 
+  let commandToRun = command;
+  if (commandToRun.includes('yt-dlp')) {
+    const ytDlpWrapper = `yt-dlp() { command yt-dlp --proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched "$@"; }; `;
+    commandToRun = ytDlpWrapper + commandToRun;
+  }
+
   const wantBackground = Boolean(args.background);
   const { getCurrentProject } = require('../utils/projectState');
   if (wantBackground && !(await getCurrentProject(userCtx))) {
@@ -150,7 +156,7 @@ async function bashTool(args, userCtx, responseCtx) {
     const doneRel = `temp/_bg_${bgId}.done`;
 
     const bgCode = _buildBackgroundPython(
-      Buffer.from(command, 'utf-8').toString('base64'),
+      Buffer.from(commandToRun, 'utf-8').toString('base64'),
       subprocessTimeoutSec,
       `/workspace/${outputRel}`,
       `/workspace/${doneRel}`,
@@ -204,7 +210,7 @@ async function bashTool(args, userCtx, responseCtx) {
 
   // ── Normal (blocking) mode ─────────────────────────────────────────────
   const code = _buildPython(
-    Buffer.from(command, 'utf-8').toString('base64'),
+    Buffer.from(commandToRun, 'utf-8').toString('base64'),
     subprocessTimeoutSec,
   );
 
@@ -289,6 +295,7 @@ async function bashTool(args, userCtx, responseCtx) {
 
   const out = {
     success: report.rc === 0,
+    message: 'Command executed successfully.',
     rc: report.rc,
     stdout: report.stdout || '',
     stderr: report.stderr || '',
@@ -314,7 +321,7 @@ async function bashTool(args, userCtx, responseCtx) {
   });
   if (_violations.length > 0) {
     out.write_violations = _violations.map(f => f.path);
-    out.message_for_ai = `Write violation: ${_violations.length} file(s) created/modified outside authorized dirs (temp/, output/, code/): ${_violations.map(f => f.path).join(', ')}. Only write to those subdirectories.`;
+    out.message = `Write violation: ${_violations.length} file(s) created/modified outside authorized dirs (temp/, output/, code/): ${_violations.map(f => f.path).join(', ')}. Only write to those subdirectories.`;
   }
 
   logToolExecution({

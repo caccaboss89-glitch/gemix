@@ -315,20 +315,21 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   }
 
   // ── Build multimodal tool result for AI vision ──
-  // Labels use global IDs (_startId) so the AI can reference them across multiple calls.
   const contentParts = [];
 
-  const metaLines = [
-    `Found ${prepared.length} image(s) for "${q}". Review previews below. Use discard with IDs to remove unwanted results.`,
-    '',
-    ...prepared.map((img, i) => [
-      `[Image ${_startId + i}]`,
-      `  Title: ${img.meta.title}`,
-      `  Source: ${img.meta.source_url}`,
-    ].join('\n')),
-  ];
+  const imageXml = prepared.map((img, i) => {
+    return `  <Image id="${_startId + i}">
+    <Title>${img.meta.title}</Title>
+    <Source>${img.meta.source_url}</Source>
+  </Image>`;
+  }).join('\n');
 
-  contentParts.push({ type: 'text', text: metaLines.join('\n') });
+  const metaText = `<ImageSearchResults query="${q}" count="${prepared.length}">
+${imageXml}
+</ImageSearchResults>
+Review the previews below. Use 'discard' with IDs to remove unwanted results from the buffer.`;
+
+  contentParts.push({ type: 'text', text: metaText });
 
   for (const img of prepared) {
     contentParts.push({

@@ -8,12 +8,13 @@ const RULES_FILE = path.join(DATA_DIR, 'regolamento.txt');
 async function readServerRules() {
   try {
     if (!fs.existsSync(RULES_FILE)) {
-      return 'The rules file (regolamento.txt) has not been placed in src/data/ yet. Contact an administrator.';
+      return { success: false, error: 'The rules file (regolamento.txt) has not been placed in src/data/ yet. Contact an administrator.' };
     }
     const text = fs.readFileSync(RULES_FILE, 'utf-8');
-    return text || 'The rules file is empty.';
+    const output = `<ServerRules>\n${text || 'The rules file is empty.'}\n</ServerRules>`;
+    return { success: true, content: output };
   } catch (err) {
-    return `Error reading the rules: ${err.message}`;
+    return { success: false, error: `Error reading the rules: ${err.message}` };
   }
 }
 

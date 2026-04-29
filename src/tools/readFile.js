@@ -64,7 +64,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   let bgWriteViolationWarning = '';
 
   if (!resolveStorageId(userCtx)) {
-    return JSON.stringify({ success: false, error: 'Could not resolve storage ID for this context.' });
+    return { success: false, error: 'Could not resolve storage ID for this context.' };
   }
 
   ensureUserSkeleton(userCtx);
@@ -83,7 +83,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
 
   const check = isPathAllowed(userCtx, rawPath, { op: 'read' });
   if (!check.ok) {
-    return JSON.stringify({ success: false, error: `Access denied: ${check.reason}` });
+    return { success: false, error: `Access denied: ${check.reason}` };
   }
 
   const absolutePath = check.absPath;
@@ -105,7 +105,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
         if (fs.existsSync(bgTask.doneMarkerPath)) break;
         // Watchdog: if the sandbox for this project is gone, the bg task definitely crashed.
         if (!isSandboxAlive(userCtx, projectName)) {
-           return JSON.stringify({ success: false, error: 'Background command failed: the sandbox container or kernel was lost.' });
+           return { success: false, error: 'Background command failed: the sandbox container or kernel was lost.' };
         }
         await new Promise(r => setTimeout(r, pollMs));
         waited += pollMs;
@@ -118,7 +118,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       }
       try { if (fs.existsSync(bgTask.doneMarkerPath)) fs.unlinkSync(bgTask.doneMarkerPath); } catch { }
       if (!fs.existsSync(absolutePath)) {
-        return JSON.stringify({ success: false, error: 'Background command timed out. Output file was not created.' });
+        return { success: false, error: 'Background command timed out. Output file was not created.' };
       }
       try {
         const projectDir = path.dirname(path.dirname(absolutePath));
@@ -185,7 +185,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       }
       // Fall through to normal file reading
     } else {
-      return JSON.stringify({ success: false, error: `File not found at path "${displayPath}".` });
+      return { success: false, error: `File not found at path "${displayPath}".` };
     }
   }
 
@@ -194,13 +194,13 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     stat = fs.statSync(absolutePath);
   } catch (err) {
     if (err.code === 'EACCES') {
-      return JSON.stringify({ success: false, error: `Access denied to file "${displayPath}".` });
+      return { success: false, error: `Access denied to file "${displayPath}".` };
     }
-    return JSON.stringify({ success: false, error: `Cannot read file "${displayPath}": ${err.message}` });
+    return { success: false, error: `Cannot read file "${displayPath}": ${err.message}` };
   }
 
   if (stat.isDirectory()) {
-    return JSON.stringify({ success: false, error: `Path is a directory, not a file.` });
+    return { success: false, error: `Path is a directory, not a file.` };
   }
 
   const now = new Date();
@@ -217,15 +217,15 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   } else if (AUDIO_EXTS.includes(ext)) {
     if (stat.size > MAX_AUDIO_BYTES) {
       const maxMins = Math.round(MAX_AUDIO_BYTES / (16 * 1024 * 60));
-      return JSON.stringify({ success: false, error: `Audio file exceeds size limit (max ~${maxMins} minutes).` });
+      return { success: false, error: `Audio file exceeds size limit (max ~${maxMins} minutes).` };
     }
   } else if (VIDEO_EXTS.includes(ext)) {
     if (stat.size > MAX_VIDEO_BYTES) {
-      return JSON.stringify({ success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max). Trim it inside a project first.` });
+      return { success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max). Trim it inside a project first.` };
     }
   } else if (stat.size > MAX_TEXT_BYTES * 4 && ext !== '.pdf') {
     // Heuristic: don't read more than 4x max text into memory if it's just text
-    return JSON.stringify({ success: false, error: `File is too large to read as text (max ${MAX_TEXT_BYTES / 1024}KB).` });
+    return { success: false, error: `File is too large to read as text (max ${MAX_TEXT_BYTES / 1024}KB).` };
   }
 
   const buffer = fs.readFileSync(absolutePath);
@@ -233,7 +233,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   // ── Images ──
   if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
     if (responseCtx.imagesReadCount >= MAX_IMAGE_READS) {
-      return JSON.stringify({ success: false, error: `Image limit reached. You can only read up to ${MAX_IMAGE_READS} images per call.` });
+      return { success: false, error: `Image limit reached. You can only read up to ${MAX_IMAGE_READS} images per call.` };
     }
     responseCtx.imagesReadCount++;
     const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -271,24 +271,36 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   if (ext === '.pdf') {
     const info = await extractTextFromPdfBuffer(buffer);
     if (!info.success) {
-      return JSON.stringify({ success: false, error: `Failed to extract text from PDF.` });
+      return { success: false, error: `Failed to extract text from PDF.` };
     }
     let text = info.text;
-    if (Buffer.byteLength(text) > MAX_TEXT_BYTES) {
-      text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n[File truncated, too long]';
+    const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
+    if (isTruncated) {
+      text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';
     }
-    return `File: ${sanitizedPath}\n\n<Transcription>\n${text}\n</Transcription>${bgWriteViolationWarning}`;
+    
+    const output = `<FileAnalysis path="${sanitizedPath}" type="pdf" size="${stat.size}"${isTruncated ? ' truncated="true"' : ''}>
+<Transcription>
+${text}
+</Transcription>
+</FileAnalysis>${bgWriteViolationWarning}`;
+
+    return { success: true, content: output };
   }
 
   // ── Text/Code ──
   let text = buffer.toString('utf-8');
-  if (Buffer.byteLength(text) > MAX_TEXT_BYTES) {
-    // Correct byte-based truncation
+  const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
+  if (isTruncated) {
     const truncatedBuffer = buffer.slice(0, MAX_TEXT_BYTES);
-    text = truncatedBuffer.toString('utf-8') + '\n\n[File truncated, too long]';
+    text = truncatedBuffer.toString('utf-8') + '\n\n... (file truncated)';
   }
 
-  return `File: ${sanitizedPath}\n\n${text}${bgWriteViolationWarning}`;
+  const output = `<FileContent path="${sanitizedPath}" size="${stat.size}"${isTruncated ? ' truncated="true"' : ''}>
+${text}
+</FileContent>${bgWriteViolationWarning}`;
+
+  return { success: true, content: output };
 }
 
 module.exports = { readFileTool };

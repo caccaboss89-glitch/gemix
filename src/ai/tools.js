@@ -114,7 +114,7 @@ function buildReadFileTool(isDiscord) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run quick single-cell Python in the sandbox. Best for calculations, data analysis, or lightweight scripts. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user. You can combine this tool with write_file in the exact same round. Set execution_phase=\'before_files\' to run before writing files, or \'after_files\' to run after.',
+  description: 'Run quick single-cell Python in the sandbox. Best for calculations, data analysis, or lightweight scripts. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user. You can combine this tool with write_file in the exact same round. Set execution_phase=\'before_all\' to run before writing files, or \'after_all\' to run after.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
     timeout_ms: { type: 'integer', description: 'Optional execution timeout in milliseconds (default 30000, max 120000).' },
@@ -153,7 +153,7 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Same isolation as code_execution, project mounted at /workspace. You can combine this tool with write_file in the exact same round to save time. Set execution_phase=\'before_files\' to scaffold projects before writing, or \'after_files\' to run code after writing. Default timeout 30 s, max 120 s.',
+  description: 'Run shell command in the sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Same isolation as code_execution, project mounted at /workspace. You can combine this tool with write_file in the exact same round to save time. Set execution_phase=\'before_all\' to scaffold projects before writing, or \'after_all\' to run code after writing. Default timeout 30 s, max 120 s.',
   properties: {
     command: { type: 'string', description: 'Shell command (bash -c). Single line or `&&`-chained statements.' },
     timeout_ms: { type: 'integer', description: 'Optional timeout in milliseconds (default 30000, max 120000).' },
@@ -193,8 +193,6 @@ const TOOL_BROWSE_PAGE = makeTool({
   },
   required: ['url'],
 });
-
-
 
 const TOOL_READ_MUSIC_STATS = makeTool({
   name: 'read_music_stats',
@@ -497,30 +495,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   const tools = [];
 
-  // ── All users, all platforms ──
-  // attach_file is WhatsApp-only AND gated behind agentic_unlock (it deals
-  // with files only relevant to the agentic flow — permanent/, projects/,
-  // searched_images/). Discord never gets it.
+  // 1. Search & Information Retrieval
   tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, buildReadFileTool(isDiscord));
 
-  // ── WhatsApp only: voice, tasks, release notify ──
+  // 2. Agentic Workspace (Gated)
   if (!isDiscord) {
-
-    tools.push(buildVoiceTool({
-      includeRecipientName: isAdmin || (isActiveMember && isWhatsApp),
-      includeRecipientPhone: isAdmin,
-    }));
-
-    tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
-    tools.push(buildReadMyTasksTool(isWhatsAppGroup));
-    tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
-
-    tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
-
-    // ── Agentic toolkit (gated) ─────────────────────────────────────────
-    // By default we expose a tiny gateway tool. The full project /
-    // sandbox / file-delivery stack only appears AFTER the AI calls it,
-    // saving ~7-8 K input tokens on every non-agentic conversation.
     if (userCtx.agenticUnlocked) {
       tools.push(
         TOOL_CODE_EXECUTION,
@@ -534,23 +513,37 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     }
   }
 
-  // ── Discord: formal request PDF (all members) ──
+  // 3. Communication & Delivery
+  if (!isDiscord) {
+    tools.push(buildVoiceTool({
+      includeRecipientName: isAdmin || (isActiveMember && isWhatsApp),
+      includeRecipientPhone: isAdmin,
+    }));
+  }
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   }
+  if (isActiveMember) {
+    tools.push(buildEmailTool(isAdmin));
+    tools.push(buildWhatsAppTool(isAdmin));
+  }
 
-  // ── Personalized memory: WhatsApp all, Discord active only ──
+  // 4. Task Management
+  if (!isDiscord) {
+    tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
+    tools.push(buildReadMyTasksTool(isWhatsAppGroup));
+    tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
+  }
+
+  // 5. Memory, Meta & Stats
   if (!isDiscord || isActiveMember) {
     tools.push(TOOL_UPDATE_MEMORY);
   }
-
-  // ── Active members only ──
-  if (isActiveMember) {
-    if (!isDiscord) {
+  if (!isDiscord) {
+    tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
+    if (isActiveMember) {
       tools.push(TOOL_READ_SERVER_RULES, TOOL_READ_MUSIC_STATS);
     }
-    tools.push(buildEmailTool(isAdmin));
-    tools.push(buildWhatsAppTool(isAdmin));
   }
 
   return tools;
