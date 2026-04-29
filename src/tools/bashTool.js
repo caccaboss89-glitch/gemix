@@ -34,19 +34,14 @@ async function executeYtDlpOnHost(args, userCtx, command) {
   // Map /workspace paths to the real host directory
   let hostCmd = command.replace(/\/workspace/g, projectDir.replace(/\\/g, '/'));
 
-  // Decide which binary to use: local bin/yt-dlp if it exists, otherwise system yt-dlp
-  const gemixRoot = path.resolve(__dirname, '../../');
-  const localYtDlpBin = path.join(gemixRoot, 'bin', 'yt-dlp');
-  const ytDlpBin = fs.existsSync(localYtDlpBin) ? localYtDlpBin.replace(/\\/g, '/') : 'yt-dlp';
-
   // Inject the infallible evasion wrapper exactly as in DiscordMusicBot
   if (process.platform === 'win32') {
     // Windows cmd.exe fallback (for local development testing)
     const evasionArgs = `--proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched`;
-    hostCmd = hostCmd.replace(/\byt-dlp\b/g, `"${ytDlpBin}" ${evasionArgs}`);
+    hostCmd = hostCmd.replace(/\byt-dlp\b/g, `python -m yt_dlp ${evasionArgs}`);
   } else {
     // Robust bash function for Linux production
-    const ytDlpWrapper = `yt-dlp() { "${ytDlpBin}" --proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched "$@"; }; `;
+    const ytDlpWrapper = `yt-dlp() { python3 -m yt_dlp --proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched "$@"; }; `;
     hostCmd = ytDlpWrapper + hostCmd;
   }
 
