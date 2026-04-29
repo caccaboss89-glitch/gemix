@@ -14,6 +14,90 @@ const { runInProjectSandbox } = require('../sandbox/projectRun');
 const { logToolExecution } = require('../utils/executionLogger');
 const { handleGemixProjectCmd, isGemixProjectCmd } = require('./gemixProjectCmds');
 const { registerBgTask } = require('../utils/bgTasks');
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
+const { getProjectRoot } = require('../utils/userPaths');
+const { snapshotProject } = require('../sandbox/projectRun');
+
+async function executeYtDlpOnHost(args, userCtx, command) {
+  const { getCurrentProject } = require('../utils/projectState');
+  const projectName = await getCurrentProject(userCtx);
+  if (!projectName) {
+    return { success: false, error: 'No active project for yt-dlp.' };
+  }
+
+  const projectDir = getProjectRoot(userCtx, projectName);
+  const before = snapshotProject(projectDir);
+  const startedAt = Date.now();
+
+  // Map /workspace paths to the real host directory
+  let hostCmd = command.replace(/\/workspace/g, projectDir.replace(/\\/g, '/'));
+
+  // Inject the infallible evasion wrapper exactly as in DiscordMusicBot
+  if (process.platform === 'win32') {
+    // Windows cmd.exe fallback (for local development testing)
+    const evasionArgs = `--proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched`;
+    hostCmd = hostCmd.replace(/\byt-dlp\b/g, `yt-dlp ${evasionArgs}`);
+  } else {
+    // Robust bash function for Linux production
+    const ytDlpWrapper = `yt-dlp() { command yt-dlp --proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched "$@"; }; `;
+    hostCmd = ytDlpWrapper + hostCmd;
+  }
+
+  let rc = 0, stdout = '', stderr = '';
+  try {
+    const opts = { cwd: projectDir, timeout: 120_000 };
+    if (process.platform !== 'win32') {
+      opts.shell = '/bin/bash';
+    }
+    const result = await exec(hostCmd, opts);
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } catch (err) {
+    rc = err.code || 1;
+    stdout = err.stdout || '';
+    stderr = err.stderr || err.message;
+  }
+
+  const durationMs = Date.now() - startedAt;
+  const after = snapshotProject(projectDir);
+  
+  const newFiles = [];
+  const modifiedFiles = [];
+  
+  for (const [absPath, info] of after) {
+    const prev = before.get(absPath);
+    const rel = path.relative(projectDir, absPath).split(path.sep).join('/');
+    const item = { path: `projects/${projectName}/${rel}`, size: info.size };
+    
+    if (!prev) {
+      newFiles.push(item);
+    } else if (prev.size !== info.size || prev.mtimeMs !== info.mtimeMs) {
+      modifiedFiles.push(item);
+    }
+  }
+
+  const out = {
+    success: rc === 0,
+    message: 'Command executed successfully on Host.',
+    rc,
+    stdout,
+    stderr,
+    cwd: '/workspace',
+    duration_ms: durationMs,
+  };
+  if (newFiles.length > 0) out.new_files = newFiles;
+  if (modifiedFiles.length > 0) out.modified_files = modifiedFiles;
+
+  logToolExecution({
+    tool: 'bash/yt-dlp-host',
+    input: { command },
+    output: out,
+    meta: { project: projectName, duration_ms: durationMs, user: { id: userCtx.userId || null, platform: userCtx.platform || null } },
+  });
+
+  return out;
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -131,8 +215,8 @@ async function bashTool(args, userCtx, responseCtx) {
 
   let commandToRun = command;
   if (commandToRun.includes('yt-dlp')) {
-    const ytDlpWrapper = `yt-dlp() { command yt-dlp --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4 --mark-watched "$@"; }; `;
-    commandToRun = ytDlpWrapper + commandToRun;
+    // Execute yt-dlp on the Host OS to directly access 127.0.0.1:5040 and local chromium profiles
+    return await executeYtDlpOnHost(args, userCtx, commandToRun);
   }
 
   const wantBackground = Boolean(args.background);
