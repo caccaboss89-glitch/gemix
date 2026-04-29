@@ -10,6 +10,7 @@
 
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const { runInProjectSandbox } = require('../sandbox/projectRun');
 const { logToolExecution } = require('../utils/executionLogger');
 const { handleGemixProjectCmd, isGemixProjectCmd } = require('./gemixProjectCmds');
