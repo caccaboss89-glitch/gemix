@@ -131,7 +131,7 @@ async function bashTool(args, userCtx, responseCtx) {
 
   let commandToRun = command;
   if (commandToRun.includes('yt-dlp')) {
-    const ytDlpWrapper = `yt-dlp() { command yt-dlp --proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched "$@"; }; `;
+    const ytDlpWrapper = `yt-dlp() { command yt-dlp --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4 --mark-watched "$@"; }; `;
     commandToRun = ytDlpWrapper + commandToRun;
   }
 
