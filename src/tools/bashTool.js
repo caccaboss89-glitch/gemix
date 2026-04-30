@@ -65,9 +65,6 @@ async function executeYtDlpOnHost(args, userCtx, command) {
     stderr = err.stderr || err.message;
   }
 
-  try {
-    fs.writeFileSync(path.join(projectDir, 'yt-dlp-debug.log'), `RC: ${rc}\n\nSTDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`);
-  } catch(e) {}
 
   const durationMs = Date.now() - startedAt;
   const after = snapshotProject(projectDir);
@@ -81,6 +78,24 @@ async function executeYtDlpOnHost(args, userCtx, command) {
     const item = { path: `projects/${projectName}/${rel}`, size: info.size };
 
     if (!prev) {
+      // Auto-attach files in output/
+      let autoAttached = false;
+      if (rel.startsWith('output/') && responseCtx && Array.isArray(responseCtx.attachments)) {
+        let mime = 'application/octet-stream';
+        const ext = path.extname(absPath).toLowerCase();
+        if (ext === '.mp4') mime = 'video/mp4';
+        else if (ext === '.m4a') mime = 'audio/mp4';
+        else if (ext === '.mp3') mime = 'audio/mpeg';
+        else if (ext === '.webm') mime = 'video/webm';
+
+        responseCtx.attachments.push({
+          name: path.basename(absPath),
+          mimetype: mime,
+          filePath: absPath,
+        });
+        autoAttached = true;
+      }
+      item.auto_attached = autoAttached;
       newFiles.push(item);
     } else if (prev.size !== info.size || prev.mtimeMs !== info.mtimeMs) {
       modifiedFiles.push(item);
