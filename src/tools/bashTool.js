@@ -65,6 +65,10 @@ async function executeYtDlpOnHost(args, userCtx, command) {
     stderr = err.stderr || err.message;
   }
 
+  try {
+    fs.writeFileSync(path.join(projectDir, 'yt-dlp-debug.log'), `RC: ${rc}\n\nSTDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`);
+  } catch(e) {}
+
   const durationMs = Date.now() - startedAt;
   const after = snapshotProject(projectDir);
 
