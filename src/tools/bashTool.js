@@ -39,14 +39,14 @@ async function executeYtDlpOnHost(args, userCtx, command) {
   const localYtDlpBin = path.join(gemixRoot, 'bin', 'yt-dlp');
   const ytDlpBin = fs.existsSync(localYtDlpBin) ? localYtDlpBin.replace(/\\/g, '/') : 'yt-dlp';
 
-  // Inject the infallible evasion wrapper exactly as in DiscordMusicBot
+  // Inject the infallible evasion wrapper (adapted for Video instead of Audio-only)
   if (process.platform === 'win32') {
     // Windows cmd.exe fallback (for local development testing)
-    const evasionArgs = `--proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched`;
+    const evasionArgs = `--proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID,WEB;player_client=android,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4`;
     hostCmd = hostCmd.replace(/\byt-dlp\b/g, `"${ytDlpBin}" ${evasionArgs}`);
   } else {
     // Robust bash function for Linux production
-    const ytDlpWrapper = `yt-dlp() { "${ytDlpBin}" --proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID_MUSIC,WEB;player_client=android_music,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 --mark-watched "$@"; }; `;
+    const ytDlpWrapper = `yt-dlp() { "${ytDlpBin}" --proxy "socks5h://127.0.0.1:5040" --extractor-args "youtube:client=ANDROID,WEB;player_client=android,web" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --cookies-from-browser chromium --force-ipv4 "$@"; }; `;
     hostCmd = ytDlpWrapper + hostCmd;
   }
 
@@ -67,15 +67,15 @@ async function executeYtDlpOnHost(args, userCtx, command) {
 
   const durationMs = Date.now() - startedAt;
   const after = snapshotProject(projectDir);
-  
+
   const newFiles = [];
   const modifiedFiles = [];
-  
+
   for (const [absPath, info] of after) {
     const prev = before.get(absPath);
     const rel = path.relative(projectDir, absPath).split(path.sep).join('/');
     const item = { path: `projects/${projectName}/${rel}`, size: info.size };
-    
+
     if (!prev) {
       newFiles.push(item);
     } else if (prev.size !== info.size || prev.mtimeMs !== info.mtimeMs) {
