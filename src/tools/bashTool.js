@@ -20,7 +20,7 @@ const exec = util.promisify(require('child_process').exec);
 const { getProjectRoot } = require('../utils/userPaths');
 const { snapshotProject } = require('../sandbox/projectRun');
 
-async function executeYtDlpOnHost(args, userCtx, command) {
+async function executeYtDlpOnHost(args, userCtx, command, responseCtx) {
   const { getCurrentProject } = require('../utils/projectState');
   const projectName = await getCurrentProject(userCtx);
   if (!projectName) {
@@ -241,7 +241,7 @@ async function bashTool(args, userCtx, responseCtx) {
   let commandToRun = command;
   if (commandToRun.includes('yt-dlp')) {
     // Execute yt-dlp on the Host OS to directly access 127.0.0.1:5040 and local chromium profiles
-    return await executeYtDlpOnHost(args, userCtx, commandToRun);
+    return await executeYtDlpOnHost(args, userCtx, commandToRun, responseCtx);
   }
 
   const wantBackground = Boolean(args.background);
