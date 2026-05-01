@@ -57,6 +57,18 @@ DEFAULT_ALLOWED = [
     ".youtube.com",
     ".googlevideo.com",
     ".ytimg.com",
+    # Social Media
+    ".twitter.com",
+    ".x.com",
+    ".twimg.com",
+    ".instagram.com",
+    ".cdninstagram.com",
+    ".tiktok.com",
+    ".tiktokv.com",
+    ".byteoversea.com",
+    ".ibyteimg.com",
+    ".facebook.com",
+    ".fbcdn.net",
 ]
 
 

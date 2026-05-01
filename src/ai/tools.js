@@ -27,7 +27,7 @@ function makeTool({ name, description, properties = {}, required = [] }) {
 
 const TOOL_WEB_SEARCH = makeTool({
   name: 'web_search',
-  description: 'Search the web. Call multiple times for deeper research. Supports operators like site:, -site:, after:/before:, filetype:, intitle:, inurl:, exact phrases, OR/AND.',
+  description: 'Search the web. Call multiple times for deeper research. Supports operators: site:, -site:, after:/before:, filetype:, intitle:, inurl:, "exact phrase", OR/AND.',
   properties: {
     query: { type: 'string', description: 'Search query (supports operators: site:, after:, before:, filetype:, "exact phrase", OR)' },
     num_results: { type: 'integer', description: 'Number of results (1-30, default 15)' },
@@ -91,7 +91,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'Unlock cloud, project management, the Python sandbox (code_execution/write_file/edit_file/bash with numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, yt-dlp). Call this before tasks that need computation, workspace exploration, file generation/editing/conversion... It returns the full agentic briefing and exposes those tools next round. Do not call it for normal chat, web research, voice replies, scheduling, memory updates, or tasks already covered by visible tools',
+  description: 'Unlock agentic environment (Python sandbox, project management, bash, file generation/editing). Call for: computation, file creation/conversion, YouTube downloads, OCR, charts, data work, archives. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
   properties: {},
 });
 
@@ -114,14 +114,14 @@ function buildReadFileTool(isDiscord) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run quick single-cell Python in the sandbox. Best for calculations, data analysis, or lightweight scripts. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{temp,output,code}/. Read-only: /readonly/{history,permanent,searched_images}. Everything in output/ is auto-delivered to the user. You can combine this tool with write_file in the exact same round. Set execution_phase=\'before_all\' to run before writing files, or \'after_all\' to run after.',
+  description: 'Run Python in the sandbox. For calculations, data analysis, scripts. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,permanent,searched_images}. output/ files are auto-delivered. Can combine with write_file/edit_file or other bash/code_execution in the same round. Set execution_phase to control ordering.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
-    timeout_ms: { type: 'integer', description: 'Optional execution timeout in milliseconds (default 30000, max 120000).' },
+    timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
     execution_phase: {
       type: 'string',
       enum: ['before_all', 'after_all'],
-      description: "Determines execution order in a single round. Use 'before_all' to run this BEFORE other tools (write_file, edit_file, code_execution, other bash). Use 'after_all' to run AFTER other tools. Default: 'after_all'."
+      description: "Execution order in multi-tool rounds. Default: 'after_all'."
     },
   },
   required: ['code'],
@@ -129,7 +129,7 @@ const TOOL_CODE_EXECUTION = makeTool({
 
 const TOOL_WRITE_FILE = makeTool({
   name: 'write_file',
-  description: 'Create or overwrite a file in the current project under {temp|output|code}. Use for: scripts → code/, intermediate data → temp/, final deliverables → output/. Everything in output/ is auto-delivered to the user — put there ONLY the files the user wants to receive. You can queue multiple write_file calls and bash executions in the same round to create a full project in one step. Max 5 MB per call.',
+  description: 'Create or overwrite a file in the current project ({temp|output|code}). output/ files are auto-delivered. Max 5 MB.',
   properties: {
     path: { type: 'string', description: 'Relative path under the current project, e.g. "projects/<current>/code/main.py".' },
     content: { type: 'string', description: 'File content.' },
@@ -153,15 +153,15 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run shell command in the sandbox. Use for: `gemix-project <subcmd>` management, running workspace scripts (`python code/script.py`), shell utilities (ffmpeg, zip, ls, cp...), and yt-dlp downloads. Can run without a project for stateless tasks, but creating/modifying files REQUIRES an active project. Same isolation as code_execution, project mounted at /workspace. You can combine this tool with write_file in the exact same round to save time. Set execution_phase=\'before_all\' to scaffold projects before writing, or \'after_all\' to run code after writing. Default timeout 30 s, max 120 s.',
+  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (ffmpeg, zip, ls, cp...), yt-dlp downloads. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Can combine with write_file/edit_file or other bash/code_execution in the same round. Set execution_phase to control ordering.',
   properties: {
     command: { type: 'string', description: 'Shell command (bash -c). Single line or `&&`-chained statements.' },
-    timeout_ms: { type: 'integer', description: 'Optional timeout in milliseconds (default 30000, max 120000).' },
-    background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results (automatically waits if still running). Default false.' },
+    timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
+    background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results. Default false.' },
     execution_phase: {
       type: 'string',
       enum: ['before_all', 'after_all'],
-      description: "Determines execution order in a single round. Use 'before_all' to run this BEFORE other tools (write_file, edit_file, code_execution, other bash). Use 'after_all' to run AFTER other tools (like executing scripts). Default: 'after_all'."
+      description: "Execution order in multi-tool rounds. Default: 'after_all'."
     },
   },
   required: ['command'],
