@@ -142,7 +142,7 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
 
     await convert([inputPdf], {
       outputDir,
-      format: ['json', 'markdown-with-images'],
+      format: 'json,markdown-with-images',
       hybrid: 'docling-fast',
       hybridMode: 'full',
       hybridUrl: HYBRID_URL,
@@ -160,7 +160,7 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
       includeHeaderFooter: true,
       detectStrikethrough: true,
       sanitize: false,
-      threads: '4',
+      threads: 4,
       quiet: true,
       enrichTable: true,
       enrichPictureDescription: true,
