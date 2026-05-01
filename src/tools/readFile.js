@@ -7,6 +7,8 @@ const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../util
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
 const { isSandboxAlive } = require('../sandbox/sandboxManager');
 
+const NON_READABLE_EXTS = new Set(['.xls', '.xlsx', '.doc', '.docx', '.ppt', '.pptx', '.exe', '.dll', '.bin', '.so', '.zip', '.tar', '.gz', '.7z', '.rar', '.jar', '.class', '.pyc', '.db', '.sqlite', '.iso', '.dmg']);
+
 const MAX_TEXT_BYTES = 50 * 1024; // 50KB limit for text reading
 const MAX_BG_AUTO_ATTACH = 20;        // max files to auto-attach from a completed background task
 const MAX_BG_AUTO_ATTACH_BYTES = 100 * 1024 * 1024; // 100 MB total cap
@@ -105,7 +107,8 @@ async function readFileTool(filePath, userCtx, responseCtx) {
         if (fs.existsSync(bgTask.doneMarkerPath)) break;
         // Watchdog: if the sandbox for this project is gone, the bg task definitely crashed.
         if (!isSandboxAlive(userCtx, projectName)) {
-           return { success: false, error: 'Background command failed: the sandbox container or kernel was lost.' };
+           removeBgTask(absolutePath);
+           return { success: false, error: `Background command failed: the sandbox container for project "${projectName}" was lost or restarted. The background task was terminated.` };
         }
         await new Promise(r => setTimeout(r, pollMs));
         waited += pollMs;
@@ -210,20 +213,25 @@ async function readFileTool(filePath, userCtx, responseCtx) {
 
   const ext = path.extname(absolutePath).toLowerCase();
   const sanitizedPath = displayPath;
+  const fileSize = stat.size;
+
+  if (NON_READABLE_EXTS.has(ext)) {
+    return { success: false, error: `read_file: files with extension "${ext}" are binary and not supported for direct reading. Use specialized tools or scripts to analyze them.` };
+  }
 
   // ── Size check before reading into memory ──
   if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
     // Image size usually not a problem for memory but we check count later
   } else if (AUDIO_EXTS.includes(ext)) {
-    if (stat.size > MAX_AUDIO_BYTES) {
+    if (fileSize > MAX_AUDIO_BYTES) {
       const maxMins = Math.round(MAX_AUDIO_BYTES / (16 * 1024 * 60));
       return { success: false, error: `Audio file exceeds size limit (max ~${maxMins} minutes).` };
     }
   } else if (VIDEO_EXTS.includes(ext)) {
-    if (stat.size > MAX_VIDEO_BYTES) {
+    if (fileSize > MAX_VIDEO_BYTES) {
       return { success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max). Trim it inside a project first.` };
     }
-  } else if (stat.size > MAX_TEXT_BYTES * 4 && ext !== '.pdf') {
+  } else if (fileSize > MAX_TEXT_BYTES * 4 && ext !== '.pdf') {
     // Heuristic: don't read more than 4x max text into memory if it's just text
     return { success: false, error: `File is too large to read as text (max ${MAX_TEXT_BYTES / 1024}KB).` };
   }
@@ -279,13 +287,13 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';
     }
     
-    const output = `<FileAnalysis path="${sanitizedPath}" type="pdf" size="${stat.size}"${isTruncated ? ' truncated="true"' : ''}>
+    const output = `<FileAnalysis path="${sanitizedPath}" type="pdf" size="${fileSize}"${isTruncated ? ' truncated="true"' : ''}>
 <Transcription>
 ${text}
 </Transcription>
 </FileAnalysis>${bgWriteViolationWarning}`;
 
-    return { success: true, content: output };
+    return { success: true, message: output };
   }
 
   // ── Text/Code ──
@@ -296,11 +304,15 @@ ${text}
     text = truncatedBuffer.toString('utf-8') + '\n\n... (file truncated)';
   }
 
-  const output = `<FileContent path="${sanitizedPath}" size="${stat.size}"${isTruncated ? ' truncated="true"' : ''}>
-${text}
+  // Add line numbers for better AI context (similar to view_file)
+  const lines = text.split(/\r?\n/);
+  const numberedText = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
+
+  const output = `<FileContent path="${sanitizedPath}" size="${fileSize}"${isTruncated ? ' truncated="true"' : ''}>
+${numberedText}
 </FileContent>${bgWriteViolationWarning}`;
 
-  return { success: true, content: output };
+  return { success: true, message: output };
 }
 
 module.exports = { readFileTool };

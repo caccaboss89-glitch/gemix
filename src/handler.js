@@ -4,7 +4,7 @@ const path = require('path');
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser } = require('./ai/tools');
-const { executeTool } = require('./tools');
+const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_MODE, MAINTENANCE_ADMIN_ONLY, MAINTENANCE_USER_MESSAGE, MAINTENANCE_RELEASE_NOTIFY_COMMAND, INTERRUPTED_RUN_TTL_MS } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
@@ -16,16 +16,17 @@ const { queryRegolamento } = require('./rag/regolamentoRag');
 const { getCurrentProject, getLastProject, setCurrentProject, consumeLastCrash, saveLastCrash, acquireLock, releaseLock, startAutoRenewLock } = require('./utils/projectState');
 const { listProjects, ensureUserSkeleton, getProjectRoot } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
-const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
+const { buildAgenticBriefing } = require('./ai/agenticBriefing');
+const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
 
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
 // MAX_TOOL_ROUNDS to MAX_TOOL_ROUNDS_AGENTIC so multi-step pipelines
 // (gemix-project create via bash → code_execution → … → send_whatsapp_message) have room.
 const AGENTIC_TOOL_NAMES = new Set([
-  'code_execution', 'write_file', 'edit_file', 'bash',
+  'code_execution', 'write_file', 'edit_file', 'bash'
 ]);
 
 const DEFERRED_TOOL_NAMES = new Set(['bash', 'code_execution']);
@@ -33,7 +34,7 @@ const PARALLEL_SAFE_TOOL_NAMES = new Set([
   'web_search',
   'browse_page',
   'read_server_rules',
-  'read_music_stats',
+  'read_music_stats'
 ]);
 
 const log = createLogger('Handler');
@@ -71,12 +72,12 @@ function _scanProjectFiles(projectDir, maxFiles = 80) {
  * @returns {object} { text: string without title tag, title: extracted title or empty string }
  */
 function extractTitleTag(text) {
-  if (!text) return { text, title: '' };
+  if (typeof text !== 'string') return { text: text || '', title: '' };
   const titleMatch = text.match(/<title>([\s\S]*?)<\/title>/i);
   if (!titleMatch) return { text, title: '' };
 
   const title = titleMatch[1].trim();
-  const cleanText = text.replace(/<title>[\s\S]*?<\/title>/gi, '').trim();
+  const cleanText = text.replace(/<title>[\s\S]*?<\/title>/i, '').trim();
   return { text: cleanText, title };
 }
 
@@ -109,11 +110,11 @@ function getReleaseNotifyTarget(ctx, ui) {
 }
 
 function buildMaintenanceReleaseEnabledMessage() {
-  return '🔔 Le notifiche degli aggiornamenti di GemiX sono state attivate.\n\nTi avviserò non appena sarà disponibile un nuovo aggiornamento.';
+  return `${RELEASE_NOTIFY_ENABLED_PREFIX}\n\nTi avviserò non appena sarà disponibile un nuovo aggiornamento.`;
 }
 
 function buildMaintenanceReleaseAlreadyEnabledMessage() {
-  return 'ℹ️ Le notifiche degli aggiornamenti di GemiX sono già attive.\n\nPotrai disabilitarle chiedendolo direttamente a GemiX quando tornerà disponibile.';
+  return `${RELEASE_NOTIFY_ALREADY_PREFIX}\n\nPotrai disabilitarle chiedendolo direttamente a GemiX quando tornerà disponibile.`;
 }
 
 /**
@@ -128,7 +129,12 @@ async function handleMessage(ctx) {
     voiceBuffer: null,
     isVoiceOnly: false,
     discordTitle: '',
-    imageSearchNextId: 1,
+    _imageSearchNextId: 1,
+    reserveImageIds(count) {
+      const start = this._imageSearchNextId;
+      this._imageSearchNextId += count;
+      return start;
+    },
     // Platform-provided callback: sends an intermediate text message to the
     // user's chat without ending the tool loop. Set by platform handlers
     // (WhatsApp / Discord).
@@ -163,6 +169,7 @@ async function handleMessage(ctx) {
             log.warn(`maintenance release notify mirror to WhatsApp failed: ${err.message}`);
           }
         }
+        await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
         return {
           text,
           voiceBuffer: null,
@@ -174,6 +181,7 @@ async function handleMessage(ctx) {
         };
       }
       log.info(`   🔒 Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
+      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
       return {
         text: MAINTENANCE_USER_MESSAGE,
         voiceBuffer: null,
@@ -236,9 +244,7 @@ async function handleMessage(ctx) {
       ctx.ragContext = await queryRegolamento(queryText);
     }
 
-    const systemPrompt = buildSystemPrompt(ctx);
-
-
+    let currentAgenticBriefing = null;
 
     const userCtx = {
       isActiveMember,
@@ -267,14 +273,7 @@ async function handleMessage(ctx) {
 
     let tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
-    let messages = [
-      { role: 'system', content: systemPrompt },
-    ];
-
     if (crashRecovery) {
-      // Strip filesystem secrets / IDs before injecting into the prompt:
-      // absolute server paths, WhatsApp JIDs and Discord IDs must not bleed
-      // into the AI context (info-leak hardening).
       const _sanitize = (s) => {
         if (typeof s !== 'string') return s;
         return s
@@ -285,22 +284,24 @@ async function handleMessage(ctx) {
       };
       const ageSec = Math.floor((Date.now() - (crashRecovery.ts || 0)) / 1000);
       const lines = [
-        '<InterruptedRun>',
-        `  The previous tool call for this user did not complete (the bot process was restarted ~${ageSec}s ago).`,
-        `  Type: ${crashRecovery.type || 'unknown'}`,
+        `The previous tool call for this user did not complete (the bot process was restarted ~${ageSec}s ago).`,
+        `Type: ${crashRecovery.type || 'unknown'}`,
       ];
-      if (crashRecovery.project) lines.push(`  Project: ${_sanitize(crashRecovery.project)}`);
+      if (crashRecovery.project) lines.push(`Project: ${_sanitize(crashRecovery.project)}`);
       if (crashRecovery.code_preview) {
-        lines.push(`  Code preview: ${_sanitize(String(crashRecovery.code_preview).slice(0, 300)).replace(/\n/g, ' ⏎ ')}`);
+        lines.push(`Code preview: ${_sanitize(String(crashRecovery.code_preview).slice(0, 300)).replace(/\n/g, ' ⏎ ')}`);
       }
       if (crashRecovery.command_preview) {
-        lines.push(`  Command preview: ${_sanitize(String(crashRecovery.command_preview).slice(0, 300))}`);
+        lines.push(`Command preview: ${_sanitize(String(crashRecovery.command_preview).slice(0, 300))}`);
       }
-      lines.push('  Before doing anything else, briefly check the project state (read_file / list new files in output/) and then resume the user request.');
-      lines.push('</InterruptedRun>');
-      messages.push({ role: 'system', content: lines.join('\n') });
-      log.info(`   ♻️ Injected interrupted-run notice (type=${crashRecovery.type})`);
+      lines.push('Before doing anything else, briefly check the project state (read_file / list new files in output/) and then resume the user request.');
+      ctx.crashRecovery = lines.join('\n');
+      log.info(`   ♻️ Prepared interrupted-run notice (type=${crashRecovery.type})`);
     }
+
+    let messages = [
+      { role: 'system', content: buildSystemPrompt(ctx) },
+    ];
 
     if (ctx.history && ctx.history.length > 0) {
       const historyLines = ctx.history.map(h =>
@@ -419,11 +420,17 @@ async function handleMessage(ctx) {
       const _roundHint = _roundsLeft <= 2
         ? `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
         : `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>normal</Status></ToolRound>`;
-      messages.push({ role: 'system', content: _roundHint });
+
+      // Update system prompt in messages[0] with the current round hint and briefing
+      messages[0].content = buildSystemPrompt({
+        ...ctx,
+        roundHint: _roundHint,
+        agenticBriefing: currentAgenticBriefing
+      });
+
       const { message: assistantMsg, provider, model } = await callAI(messages, tools, {
         agenticUnlocked: agenticUnlocked || userCtx.agenticUnlocked,
       });
-      messages.pop(); // remove ephemeral round hint — must not persist between rounds
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
 
@@ -512,8 +519,8 @@ async function handleMessage(ctx) {
             projectFiles: _projectFiles,
             readmeContent: _readmeContent,
           });
-          messages.push({ role: 'system', content: briefing });
-          log.info(`   🔓 agentic_unlock invoked → tools rebuilt (${tools.length}) + briefing injected`);
+          currentAgenticBriefing = briefing;
+          log.info(`   🔓 agentic_unlock invoked → tools rebuilt (${tools.length}) + briefing prepared for next round`);
         }
 
         // Token optimization: strip image previews from tool results the AI has already seen.
@@ -550,7 +557,7 @@ async function handleMessage(ctx) {
 
       if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
         log.warn('   ⚠️ Empty AI response, sending fallback');
-        text = 'Generazione della risposta fallita. Riprova.';
+        text = FALLBACK_ERROR_PREFIX;
       }
 
       shouldAutoExitProject = shouldAutoExitProject || Boolean(agenticUnlocked && cloudProbeCtx);
@@ -567,6 +574,7 @@ async function handleMessage(ctx) {
         };
       }
 
+      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
       return {
         text: text || null,
         voiceBuffer: null,
@@ -603,8 +611,9 @@ async function handleMessage(ctx) {
       } catch (e) { log.warn(`saveLastCrash failed: ${e.message}`); }
     }
 
+    await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
     return {
-      text: 'Generazione della risposta fallita. Riprova.',
+      text: FALLBACK_ERROR_PREFIX,
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],
@@ -619,8 +628,9 @@ async function handleMessage(ctx) {
     log.error(`\n❌ [${platformLabel}] HANDLER ERROR:`);
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
+    await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
     return {
-      text: 'Si è verificato un errore. Riprova a breve.',
+      text: FALLBACK_ERROR_PREFIX,
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: [],
@@ -629,9 +639,9 @@ async function handleMessage(ctx) {
     };
   } finally {
     if (shouldAutoExitProject && projectLockCtx) {
-      try { 
+      try {
         const _cp = await getCurrentProject(projectLockCtx);
-        if (_cp) await setCurrentProject(projectLockCtx, null); 
+        if (_cp) await setCurrentProject(projectLockCtx, null);
       } catch (e) { log.warn(`auto-exit project failed: ${e.message}`); }
     }
     if (typeof stopProjectLockRenew === 'function') {

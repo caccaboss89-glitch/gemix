@@ -18,4 +18,5 @@ module.exports = {
   MUSIC_WRAP_PASSWORD: process.env.MUSIC_WRAP_PASSWORD,
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
   GITHUB_REPO: process.env.GITHUB_REPO,
+  GEMIX_NOTIFY_URL: process.env.GEMIX_NOTIFY_URL,
 };

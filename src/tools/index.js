@@ -31,34 +31,16 @@ const { createLogger } = require('../utils/logger');
 const { storeRecentVoiceText } = require('../utils/historySync');
 const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
 const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId, userTotalBytes, userQuotaBytes } = require('../utils/userPaths');
+const { notifyAdmin } = require('../utils/adminNotifier');
+const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/projectState');
 const fs = require('fs');
 const path = require('path');
+const { MessageMedia } = require('whatsapp-web.js');
 
 const log = createLogger('Tools');
 
-// Tracking consecutive voice usage per WhatsApp chat (with TTL cleanup)
-const voiceConsecutiveByChat = new Map();
-const VOICE_COUNT_TTL_MS = 30 * 60 * 1000; // 30 minutes
-
-// Periodic auto-cleanup: removes stale entries even if no voice message is sent
-const voiceCountCleanupInterval = setInterval(_cleanupVoiceCounts, VOICE_COUNT_TTL_MS);
-voiceCountCleanupInterval.unref();
-
-function _cleanupVoiceCounts() {
-  const cutoff = Date.now() - VOICE_COUNT_TTL_MS;
-  for (const [key, entry] of voiceConsecutiveByChat) {
-    if (entry.ts < cutoff) voiceConsecutiveByChat.delete(key);
-  }
-}
-
-function _getVoiceCount(chatKey) {
-  const entry = voiceConsecutiveByChat.get(chatKey);
-  if (!entry) return 0;
-  if (Date.now() - entry.ts > VOICE_COUNT_TTL_MS) {
-    voiceConsecutiveByChat.delete(chatKey);
-    return 0;
-  }
-  return entry.count;
+function _getVoiceLimitChatKey(userCtx) {
+  return userCtx?.chatId || userCtx?.groupId || userCtx?.waJid || userCtx?.userId || 'unknown';
 }
 
 /**
@@ -89,35 +71,20 @@ function _resolveTargetWaJid(args, userCtx) {
     }
     if (recipientName) {
       const member = findMemberByName(recipientName);
-      if (!member) return { error: { success: false, error: `"${recipientName}" not found among active members. Specify a phone number for non-members.` } };
-      return { jid: member.wa, display: member.name };
+      if (member) return { jid: member.wa, display: member.name };
+      // If name not found, don't fail immediately if we can just use the user's own number
+      log.info(`   Target name "${recipientName}" not found among active members.`);
     }
-    if (userCtx.userPhone) {
-      const jid = normalizePhoneToJid(userCtx.userPhone);
-      return { jid, display: userCtx.userName || userCtx.userPhone };
+    if (userCtx.waJid) {
+      return { jid: userCtx.waJid, display: userCtx.userName || 'yourself' };
     }
   } else if (userCtx.isActiveMember && recipientName) {
     const member = findMemberByName(recipientName);
-    if (!member) return { error: { success: false, error: `"${recipientName}" not found among active members.` } };
+    if (!member) return { error: { success: false, error: `Member "${recipientName}" not found.` } };
     return { jid: member.wa, display: member.name };
   }
   if (!userCtx.waJid) return { error: { success: false, error: 'No WhatsApp number available.' } };
   return { jid: userCtx.waJid, display: 'yourself' };
-}
-
-function _getVoiceLimitChatKey(userCtx) {
-  return userCtx?.chatId || userCtx?.groupId || userCtx?.waJid || userCtx?.userId || 'unknown';
-}
-
-function _incrementVoiceCount(chatKey) {
-  const entry = voiceConsecutiveByChat.get(chatKey);
-  const count = entry ? entry.count + 1 : 1;
-  voiceConsecutiveByChat.set(chatKey, { count, ts: Date.now() });
-  if (voiceConsecutiveByChat.size > 500) _cleanupVoiceCounts();
-}
-
-function _resetVoiceCount(chatKey) {
-  voiceConsecutiveByChat.delete(chatKey);
 }
 
 /**
@@ -151,7 +118,7 @@ function _resolveTargetEmail(args, userCtx) {
 }
 
 // Tools that produce identical results every time in the same round — block duplicates.
-const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock']);
+const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock', 'list_projects', 'quota']);
 
 /**
  * Execute a tool call and return the result.
@@ -166,10 +133,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   const name = toolCall.function.name;
   const chatKey = _getVoiceLimitChatKey(userCtx);
 
-  // Reset consecutive voice counter on any non-voice tool call
-  if (name !== 'send_voice_message') {
-    _resetVoiceCount(chatKey);
-  }
+  // Voice limits are now reset centrally in handler.js when a text message is sent,
+  // preventing the AI from bypassing limits by calling intermediate tools.
 
   let args;
   try {
@@ -232,18 +197,22 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           if (removed > 0) log.info(`   🗑️ Discarded ${removed} image(s): [${[...discardSet].join(', ')}]`);
         }
 
-        const startId = responseCtx.imageSearchNextId || 1;
         const imageResult = await imageSearch(
           args.query,
           args.count,
           {
             language: args.language,
             image_type: args.image_type,
-            _startId: startId,
+            _startId: 1, // Will be overridden by the manual ID tagging below
           }
         );
 
         // Tag each attachment with a global ID and accumulate into delivery buffer
+        // CRITICAL: Reserve IDs atomically using reserveImageIds to prevent race conditions in parallel calls.
+        const startId = typeof responseCtx.reserveImageIds === 'function' 
+          ? responseCtx.reserveImageIds(imageResult.attachments.length)
+          : (responseCtx._imageSearchNextId || 1);
+        
         const savedPaths = [];
         const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
         const wantSave = Boolean(args.save_to_disk) && isWhatsApp && resolveStorageId(userCtx);
@@ -290,7 +259,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             }
             responseCtx.attachments.push(att);
           }
-          responseCtx.imageSearchNextId = startId + imageResult.attachments.length;
         }
 
         // Append saved-paths info to the textual result so the AI knows the persistent paths.
@@ -350,10 +318,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           .replace(/\s{2,}/g, ' ')
           .trim();
 
-        const currentCount = _getVoiceCount(chatKey);
+        const currentCount = await getVoiceCount(userCtx, chatKey);
         if (currentCount >= 3) {
           log.warn(`Voice limit exceeded in chat ${chatKey}: counter=${currentCount}`);
-          _resetVoiceCount(chatKey);
+          await resetVoiceCount(userCtx, chatKey);
           result = { success: false, error: 'Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.' };
           break;
         }
@@ -384,7 +352,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           }
           try {
             const voiceBuf = await generateVoice(cleanText);
-            const { MessageMedia } = require('whatsapp-web.js');
             const voiceMedia = new MessageMedia('audio/ogg', voiceBuf.toString('base64'), 'voice.ogg');
             await sendWhatsAppDirect(targetJid.jid, voiceMedia, { sendAudioAsVoice: true });
 
@@ -402,7 +369,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
             deliveryCtx.contactedWA.add(targetJid.jid);
             result = { success: true, message: `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.` };
-            _incrementVoiceCount(chatKey);
+            await incrementVoiceCount(userCtx, chatKey);
             storeRecentVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
             result = { success: false, error: `Error sending voice message: ${err.message}` };
@@ -421,7 +388,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
         result = { success: true, message: 'Voice message generated successfully. Do not send any text message.' };
-        _incrementVoiceCount(chatKey);
+        await incrementVoiceCount(userCtx, chatKey);
         storeRecentVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
         break;
       }
@@ -536,7 +503,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         try {
           await sendWhatsAppDirect(targetJid.jid, args.message);
           if (includeAttachments && responseCtx.attachments.length > 0) {
-            const { MessageMedia } = require('whatsapp-web.js');
             for (const att of responseCtx.attachments) {
               const m = toWhatsAppMediaArgs(att);
               if (!m) continue;
@@ -592,8 +558,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         result = toggleReleaseNotify(Boolean(args.enabled), chatId, waJid);
         break;
       }
-
-
+      case 'bug_report': {
+        const bugSource = String(args.source || 'unknown').slice(0, 100);
+        const bugDetails = String(args.details || '').slice(0, 500);
+        await notifyAdmin(`Bug Report — ${bugSource}`, bugDetails);
+        result = { success: true, message: 'Bug report sent to admin.' };
+        break;
+      }
 
       default:
         result = { success: false, error: `Tool "${name}" not recognized.` };
@@ -618,4 +589,4 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   return { toolCallId: toolCall.id, result: finalResult };
 }
 
-module.exports = { executeTool };
+module.exports = { executeTool, resetVoiceCount, getVoiceCount, incrementVoiceCount, getVoiceLimitChatKey: _getVoiceLimitChatKey };

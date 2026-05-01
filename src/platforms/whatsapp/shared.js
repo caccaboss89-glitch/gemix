@@ -6,6 +6,8 @@ const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
 
+const { isSystemMessage } = require('../../config/systemMessages');
+
 /**
  * Detect if a WhatsApp message body is a system-generated notification.
  * Used to label messages as [System] in history without requiring a physical prefix.
@@ -13,15 +15,7 @@ const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = r
  * @returns {boolean}
  */
 function _isSystemMessage(body) {
-  if (!body) return false;
-  return (
-    /^\uD83D\uDE80 \*Nuova release GemiX:/.test(body) ||
-    /^\uD83C\uDFB5 \*Wrap di /.test(body) ||
-    /^\u26A0\uFE0F \*ERRORE API \u2014/.test(body) ||
-    /^\uD83C\uDF19 GemiX è temporaneamente in manutenzione/.test(body) ||
-    /^\uD83D\uDD14 Le notifiche degli aggiornamenti di GemiX sono state attivate\./.test(body) ||
-    /^\u2139\uFE0F Le notifiche degli aggiornamenti di GemiX sono già attive\./.test(body)
-  );
+  return isSystemMessage(body);
 }
 const { isSupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
 const { normalizeMarkdown } = require('../../utils/text');
@@ -30,13 +24,14 @@ const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 
 const _MIME_TO_EXT = {
   'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png',
-  'image/webp': '.webp', 'image/gif': '.gif', 'image/bmp': '.bmp',
-  'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/mp4': '.m4a', 'audio/webm': '.webm',
-  'video/mp4': '.mp4', 'video/webm': '.webm',
-  'application/pdf': '.pdf', 'application/zip': '.zip',
+  'image/webp': '.webp', 'image/gif': '.gif', 'image/bmp': '.bmp', 'image/tiff': '.tiff',
+  'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/mp4': '.m4a', 'audio/webm': '.webm', 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/aac': '.aac',
+  'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov', 'video/x-matroska': '.mkv',
+  'application/pdf': '.pdf', 'application/zip': '.zip', 'application/x-zip-compressed': '.zip',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  'text/plain': '.txt', 'text/markdown': '.md', 'text/html': '.html', 'text/csv': '.csv', 'application/json': '.json',
 };
 
 function _resolveWaFilename(givenName, mediaType, mimetype) {

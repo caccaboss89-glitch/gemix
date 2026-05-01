@@ -3,6 +3,9 @@ const { SUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
+const { createLogger } = require('./logger');
+
+const log = createLogger('Media');
 
 /**
  * Check if a media type is supported by the AI.
@@ -100,7 +103,15 @@ async function extractTextFromPdfBuffer(buffer) {
     await fs.writeFile(inputPdf, buffer);
     await fs.mkdir(outputDir, { recursive: true });
 
-    const { convert } = await import('@opendataloader/pdf');
+    let convert;
+    try {
+      const mod = await import('@opendataloader/pdf');
+      convert = mod.convert;
+    } catch (err) {
+      log.error(`@opendataloader/pdf not found. Make sure it is installed: ${err.message}`);
+      return { success: false, error: 'PDF transcription service is currently unavailable (missing dependency).' };
+    }
+
     await convert([inputPdf], {
       outputDir,
       format: 'markdown,text,json',

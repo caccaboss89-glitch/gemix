@@ -29,12 +29,14 @@ Operational:
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import socketserver
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler
 from typing import Iterable
 from urllib.parse import urlparse
@@ -83,6 +85,39 @@ ALLOWED_HOSTS: list[str] = _parse_allowlist(os.environ.get("ALLOWED_HOSTS"))
 PROXY_PORT: int = int(os.environ.get("PROXY_PORT", "8080"))
 TUNNEL_TIMEOUT_S: int = int(os.environ.get("TUNNEL_TIMEOUT_S", "120"))
 MAX_UPSTREAM_CONNECT_S: int = int(os.environ.get("UPSTREAM_CONNECT_TIMEOUT_S", "15"))
+GEMIX_NOTIFY_URL: str | None = os.environ.get("GEMIX_NOTIFY_URL")  # e.g. http://host.docker.internal:9999/notify
+
+# Per-source cooldown for admin notifications (avoid spam)
+_notify_cooldowns: dict[str, float] = {}
+_notify_lock = threading.Lock()
+_NOTIFY_COOLDOWN_S = 300  # 5 minutes
+
+
+def _notify_admin(source: str, details: str) -> None:
+    """Send an error notification to the host's internal notify endpoint (non-blocking)."""
+    if not GEMIX_NOTIFY_URL:
+        return
+    with _notify_lock:
+        last = _notify_cooldowns.get(source, 0)
+        if time.time() - last < _NOTIFY_COOLDOWN_S:
+            return
+        _notify_cooldowns[source] = time.time()
+
+    def _post() -> None:
+        try:
+            payload = json.dumps({"source": source, "details": details}).encode()
+            req = urllib.request.Request(
+                GEMIX_NOTIFY_URL,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+        except Exception:
+            pass  # never let notification errors surface
+
+    threading.Thread(target=_post, daemon=True).start()
 
 
 def host_allowed(host: str, allowlist: Iterable[str] = ALLOWED_HOSTS) -> bool:
@@ -134,6 +169,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         if not host_allowed(host):
             _log("warn", event="deny_connect", host=host, port=port)
+            _notify_admin(
+                "Proxy — deny_connect",
+                f"Connessione bloccata verso host non autorizzato: {host}:{port}",
+            )
             self._reject(403, f"host {host} not allowed")
             return
 
@@ -142,9 +181,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
             upstream = socket.create_connection((host, port), timeout=MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
+            _notify_admin(
+                "Proxy — upstream_fail (CONNECT)",
+                f"Connessione upstream fallita verso {host}:{port} — {e}",
+            )
             self._reject(502, "upstream connect failed")
             return
-
         _log("info", event="allow_connect", host=host, port=port)
         try:
             self.send_response(200, "Connection Established")
@@ -161,6 +203,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         port = parsed.port or 80
         if not host_allowed(host):
             _log("warn", event="deny_http", method=self.command, host=host)
+            _notify_admin(
+                "Proxy — deny_http",
+                f"Richiesta HTTP bloccata verso host non autorizzato: {self.command} {host}",
+            )
             self._reject(403, f"host {host} not allowed")
             return
 
@@ -173,6 +219,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             upstream = socket.create_connection((host, port), timeout=MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
+            _notify_admin(
+                "Proxy — upstream_fail (HTTP)",
+                f"Connessione upstream fallita verso {host}:{port} — {e}",
+            )
             self._reject(502, "upstream connect failed")
             return
 

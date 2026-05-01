@@ -224,7 +224,7 @@ async function webSearch(query, numResults = DEFAULT_NUM_RESULTS, allowedDomains
 ${resultsXml}
 </SearchResults>`;
 
-  return { success: true, content: output };
+  return { success: true, message: output };
 }
 
 module.exports = { webSearch };

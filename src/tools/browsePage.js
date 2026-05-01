@@ -194,7 +194,7 @@ ${result}
 \`\`\`
 </PageContent>`;
 
-    return { success: true, content: output };
+    return { success: true, message: output };
   }
 
   // ── Raw mode: return extracted text directly ──
@@ -207,7 +207,7 @@ ${result}
 ${result}
 </PageContent>`;
 
-    return { success: true, content: output };
+    return { success: true, message: output };
   }
 
   // ── Summary mode: LLM-powered extraction ──
@@ -225,7 +225,7 @@ ${result}
 ${summary}
 </PageAnalysis>`;
 
-    return { success: true, content: output };
+    return { success: true, message: output };
   } catch (err) {
     log.error(`   ❌ Summarizer failed: ${err.message}`);
 

@@ -12,6 +12,7 @@
 // it in context for every subsequent round).
 
 const { escapeXml } = require('../utils/xmlEscape');
+const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 
 /**
  * Build the agentic system message. Same structure used by the unlock
@@ -45,6 +46,9 @@ function buildAgenticBriefing(ctx = {}) {
     ? `\n    <ProjectReadme>\n${escapeXml(readmeContent.trim())}\n    </ProjectReadme>`
     : '';
 
+  const skills = loadSkills();
+  const skillsBlock = formatSkillsForPrompt(skills);
+
   return `<AgenticToolkit unlocked="true">
   <PersonalCloud>
     <Layout>
@@ -64,19 +68,19 @@ function buildAgenticBriefing(ctx = {}) {
     <ProjectManagement>
       Run via \`bash\` as standalone \`gemix-project <subcmd>\` (no chaining/redirection).
       Commands:
-       - list
-       - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}'
-       - switch <slug>
-       - quota
-       - delete <slug> --confirmed  # ASK user for confirmation
-       - cleanup [<slug_default_current>] <subdir>...  # subdirs: temp|output|code
-       - copy-to-permanent <history_filename>
-       - copy-to-project <source> [<subdir_default_temp>]
+      - list
+      - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}'
+      - switch <slug>
+      - quota
+      - delete <slug> --confirmed  # ASK user for confirmation
+      - cleanup [<slug_default_current>] <subdir>...  # subdirs: temp|output|code
+      - copy-to-permanent <history_filename>
+      - copy-to-project <source> [<subdir_default_temp>]
     </ProjectManagement>
     <FileDelivery>
       CRITICAL: output/ files are AUTO-DELIVERED (arrive AFTER (below) your text response). Do NOT call attach_file for them.
       - For files in other paths: call attach_file.
-      - For directories: zip into output/ first.
+      - For directories OR 4+ output files: zip into output/ first, then deliver the zip.
     </FileDelivery>
     <CurrentProject>${current ? escapeXml(current) : 'None'}</CurrentProject>${readmeBlock}${projectFilesBlock}
     <LastProjectUsed>${last ? escapeXml(last) : 'None'}</LastProjectUsed>
@@ -84,6 +88,7 @@ function buildAgenticBriefing(ctx = {}) {
 ${projectList}    </Projects>
   </PersonalCloud>
 
+${skillsBlock}
   <PythonSandbox>
     <Runtime>
       Python 3.12, stateful Jupyter kernel; variables persist across calls.
@@ -101,6 +106,7 @@ ${projectList}    </Projects>
     - rembg: u2netp is faster
     - Flush plots: savefig() → plt.close() → then open with PIL
     - yt-dlp: MUST use bash CLI directly. NEVER use python -c or import yt_dlp. Always -o '/workspace/output/%(title)s.%(ext)s', limit resolution (-f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"). Only videos, no images. No proxy args.
+      If yt-dlp fails with a network/connection error (sandbox proxy not working), do NOT retry — report via bug_report and inform the user.
     - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports)
     </Pitfalls>
   </PythonSandbox>

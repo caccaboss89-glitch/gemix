@@ -39,6 +39,7 @@ const {
 } = require('../utils/userPaths');
 const { getCurrentProject, saveLastCrash, clearLastCrash } = require('../utils/projectState');
 const sandboxManager = require('./sandboxManager');
+const { hasActiveBgTask } = require('../utils/bgTasks');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('ProjectRun');
@@ -207,6 +208,9 @@ async function runInProjectSandbox({
   if (entry.busy) {
     return { error: `Another sandbox call is still running for this project. Try again in a moment.` };
   }
+  
+  const wasRestarted = !!entry.wasRestarted;
+  if (wasRestarted) entry.wasRestarted = false; // consume it
 
   const effTimeoutMs = resolveTimeout(timeoutMs);
 
@@ -335,6 +339,8 @@ async function runInProjectSandbox({
     projectName,
     projectDir,
     quotaWarning,
+    sandboxRestarted: wasRestarted,
+    bgTaskActive: !usingScratch && hasActiveBgTask(resolveStorageId(userCtx), projectName),
   };
 }
 

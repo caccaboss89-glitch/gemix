@@ -25,6 +25,10 @@ services:
     environment:
       # ALLOWED_HOSTS: ".polygon.io,data.astropy.org,.stsci.edu,.ipac.caltech.edu,.cds.unistra.fr,.gsfc.nasa.gov"
       PROXY_PORT: "8080"
+      # URL of the host's internal notify server — set to reach the Node process.
+      # On Linux Docker: http://172.17.0.1:9999/notify (host bridge IP)
+      # On Docker Desktop: http://host.docker.internal:9999/notify
+      GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
     networks:
       egress: {}           # internet access (for forwarding to allowed hosts)
       sandbox_net: {}      # reachable by sandboxes as hostname "proxy"

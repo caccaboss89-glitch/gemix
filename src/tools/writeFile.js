@@ -15,6 +15,7 @@ const { getCurrentProject } = require('../utils/projectState');
 const { logToolExecution } = require('../utils/executionLogger');
 
 const MAX_WRITE_BYTES = 5 * 1024 * 1024; // 5 MB hard cap
+const NON_WRITABLE_EXTS = new Set(['.zip', '.rar', '.7z', '.tar', '.gz', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp3', '.wav', '.mp4', '.mov', '.pdf', '.jar', '.class', '.pyc', '.exe', '.dll', '.bin', '.db', '.sqlite', '.iso', '.dmg']);
 
 /**
  * Build the Python snippet that materialises the write inside the sandbox.
@@ -84,6 +85,11 @@ async function writeFileTool(args, userCtx, responseCtx) {
     return { success: false, error: `write_file refused: ${auth.reason}` };
   }
 
+  const ext = path.extname(auth.absPath).toLowerCase();
+  if (NON_WRITABLE_EXTS.has(ext)) {
+    return { success: false, error: `write_file: creating or appending to files with extension "${ext}" is not allowed because they are binary formats. Use specialized scripts (e.g. via code_execution) to generate such files if needed.` };
+  }
+
   // Encode content as base64 once (binary-safe transport into Python).
   let buf;
   try {
@@ -142,9 +148,17 @@ async function writeFileTool(args, userCtx, responseCtx) {
     return errorOut;
   }
 
+  const hints = ['File written successfully.'];
+  if (result.sandboxRestarted) {
+    hints.push('⚠️ The Python kernel was RESTARTED because it was dead or hung. All your previous variables and state are LOST. You must re-import modules and re-declare variables.');
+  }
+  if (result.bgTaskActive) {
+    hints.push('⚠️ WARNING: A background task is currently running in this project. Foreground execution may cause race conditions or corrupt state if they modify the same files.');
+  }
+
   const out = {
     success: true,
-    message: 'File written successfully.',
+    message: hints.join(' '),
     path: auth.absPath ? `projects/${currentProject}/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}` : rawPath,
     bytes_written: buf.length,
     mode,

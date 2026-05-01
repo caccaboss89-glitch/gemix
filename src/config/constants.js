@@ -1,5 +1,6 @@
 // src/config/constants.js
 const path = require('path');
+const { MAINTENANCE_PREFIX } = require('./systemMessages');
 
 // Maintenance mode — blocks all non-admin requests and returns a fixed message.
 // Toggle the boolean here OR set MAINTENANCE_MODE=true in the environment to
@@ -17,7 +18,7 @@ module.exports = {
   MAINTENANCE_ADMIN_ONLY: true,
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
   MAINTENANCE_USER_MESSAGE:
-    '🌙 GemiX è temporaneamente in manutenzione per un aggiornamento importante.\n\n' +
+    MAINTENANCE_PREFIX + ' per un aggiornamento importante.\n\n' +
     'Tornerò online a breve con *nuove capacità avanzate* per la nuova versione *2.0*.\n\n' +
     `Se vuoi essere avvisato non appena escono nuovi aggiornamenti, scrivi: \`${MAINTENANCE_RELEASE_NOTIFY_COMMAND}\`.\n\n` +
     'L\'arrivo di *promemoria programmati già impostati* continuerà a funzionare, grazie per la pazienza! 👷‍♂️',
@@ -58,6 +59,8 @@ module.exports = {
   CODE_EXEC_MAX_TOTAL_BYTES: 100 * 1024 * 1024,
   SANDBOX_MEMORY_MB: 1536,
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
+  SANDBOX_PROXY_HOST: '127.0.0.1',
+  SANDBOX_PROXY_PORT: 5040,
 
   // Media
   MAX_IMAGES: 4,

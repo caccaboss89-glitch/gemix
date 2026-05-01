@@ -185,9 +185,13 @@ async function deleteProjectTool(args, userCtx) {
   }
 
   const current = await getCurrentProject(userCtx);
+  if (current === slug) {
+    await setCurrentProject(userCtx, null);
+  }
+  const newCurrent = await getCurrentProject(userCtx);
   return {
     success: true,
-    message: `Project "${slug}" deleted.${current ? ` Current project: ${current}` : ' No project currently selected.'}`,
+    message: `Project "${slug}" deleted.${newCurrent ? ` Current project: ${newCurrent}` : ' No project currently selected.'}`,
   };
 }
 

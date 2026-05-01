@@ -33,7 +33,7 @@ function _stripShellQuotes(s) {
  * Detect shell chaining/redirection operators OUTSIDE of single/double-quoted
  * regions. Used to refuse mixed commands like `gemix-project list && ls`.
  */
-function _hasChaining(cmd) {
+function hasShellChaining(cmd) {
   let inSingle = false;
   let inDouble = false;
   for (let i = 0; i < cmd.length; i++) {
@@ -66,11 +66,56 @@ function isGemixProjectCmd(command) {
   return raw.startsWith(GEMIX_PREFIX + ' ') || raw.startsWith(GEMIX_PREFIX + '\t');
 }
 
+function _parseArgs(argStr) {
+  const args = [];
+  let i = 0;
+  const len = argStr.length;
+
+  while (i < len) {
+    // Skip leading whitespace
+    while (i < len && /\s/.test(argStr[i])) i++;
+    if (i >= len) break;
+
+    const ch = argStr[i];
+    let token = '';
+
+    if (ch === '"' || ch === "'") {
+      // Quoted token — supports backslash-escaped quotes inside
+      const quote = ch;
+      i++; // skip opening quote
+      while (i < len) {
+        const c = argStr[i];
+        if (c === '\\' && i + 1 < len && (argStr[i + 1] === quote || argStr[i + 1] === '\\')) {
+          // Escape sequence: \" or \' or \\
+          token += argStr[i + 1];
+          i += 2;
+        } else if (c === quote) {
+          i++; // skip closing quote
+          break;
+        } else {
+          token += c;
+          i++;
+        }
+      }
+    } else {
+      // Unquoted token — ends at whitespace
+      while (i < len && !/\s/.test(argStr[i])) {
+        token += argStr[i];
+        i++;
+      }
+    }
+
+    if (token.length > 0) args.push(token);
+  }
+
+  return args;
+}
+
 async function handleGemixProjectCmd(command, userCtx) {
   const raw = command.trim();
   if (!isGemixProjectCmd(raw)) return null;
 
-  if (_hasChaining(raw)) {
+  if (hasShellChaining(raw)) {
     return {
       success: false,
       error: 'gemix-project commands must run standalone — no chaining (&&, ||, ;, |, redirection, subshells). Run them in separate bash calls.',
@@ -78,9 +123,11 @@ async function handleGemixProjectCmd(command, userCtx) {
   }
 
   const rest = raw.slice(GEMIX_PREFIX.length).trim();
-  const spaceIdx = rest.indexOf(' ');
-  const subcmd = (spaceIdx === -1 ? rest : rest.slice(0, spaceIdx)).toLowerCase();
-  const argStr = spaceIdx === -1 ? '' : rest.slice(spaceIdx + 1).trim();
+  if (!rest) return { success: false, error: `Missing subcommand. ${SUBCMD_HELP}` };
+
+  const args = _parseArgs(rest);
+  const subcmd = args[0].toLowerCase();
+  const subArgs = args.slice(1);
 
   switch (subcmd) {
     case 'list':
@@ -90,28 +137,26 @@ async function handleGemixProjectCmd(command, userCtx) {
       return await quotaTool(userCtx);
 
     case 'switch': {
-      if (!argStr) return { success: false, error: 'gemix-project switch <slug>: missing project name.' };
-      return await switchProjectTool({ name: argStr }, userCtx);
+      if (subArgs.length === 0) return { success: false, error: 'gemix-project switch <slug>: missing project name.' };
+      return await switchProjectTool({ name: subArgs[0] }, userCtx);
     }
 
     case 'delete': {
-      const parts = argStr.split(/\s+/).filter(Boolean);
-      const name = parts.find(p => !p.startsWith('--'));
-      const confirmed = parts.includes('--confirmed');
+      const name = subArgs.find(a => !a.startsWith('--'));
+      const confirmed = subArgs.includes('--confirmed');
       if (!name) return { success: false, error: 'gemix-project delete <slug> --confirmed: missing project name.' };
       return await deleteProjectTool({ name, user_confirmed: confirmed }, userCtx);
     }
 
     case 'cleanup': {
-      const parts = argStr.split(/[\s,]+/).filter(Boolean);
-      if (parts.length === 0) {
+      if (subArgs.length === 0) {
         return { success: false, error: `gemix-project cleanup [<slug>] <subdir>...: missing arguments. Allowed subdirs: ${FIXED_SUBDIRS.join(', ')}.` };
       }
       // If first token is a known subdir, no project name was given (uses current project).
-      if (FIXED_SUBDIRS.includes(parts[0])) {
-        return await cleanupProjectTool({ subdirs: parts }, userCtx);
+      if (FIXED_SUBDIRS.includes(subArgs[0])) {
+        return await cleanupProjectTool({ subdirs: subArgs }, userCtx);
       }
-      const [name, ...subdirParts] = parts;
+      const [name, ...subdirParts] = subArgs;
       if (subdirParts.length === 0) {
         return { success: false, error: `gemix-project cleanup ${name} <subdir>...: specify at least one subdir. Allowed: ${FIXED_SUBDIRS.join(', ')}.` };
       }
@@ -119,15 +164,17 @@ async function handleGemixProjectCmd(command, userCtx) {
     }
 
     case 'create': {
-      if (!argStr) {
+      if (subArgs.length === 0) {
         return {
           success: false,
           error: "gemix-project create '{...}': missing JSON. Required fields: name, user_request. (Optional: description, strategy).",
         };
       }
+      // For 'create', the JSON might have spaces, so we should probably use the original argStr minus the subcommand
+      const jsonStr = _stripShellQuotes(rest.slice(subcmd.length).trim());
       let parsed;
       try {
-        parsed = JSON.parse(_stripShellQuotes(argStr));
+        parsed = JSON.parse(jsonStr);
       } catch {
         return {
           success: false,
@@ -138,22 +185,32 @@ async function handleGemixProjectCmd(command, userCtx) {
     }
 
     case 'copy-to-permanent': {
-      if (!argStr) {
+      if (subArgs.length === 0) {
         return { success: false, error: 'gemix-project copy-to-permanent <history_filename>: missing filename.' };
       }
-      return await copyToPermanentTool({ history_filename: argStr }, userCtx);
+      return await copyToPermanentTool({ history_filename: subArgs[0] }, userCtx);
     }
 
     case 'copy-to-project': {
-      const parts = argStr.split(/\s+/).filter(Boolean);
-      const source = parts[0];
-      const subdir = parts[1];
-      if (!source) {
+      if (subArgs.length === 0) {
         return { success: false, error: 'gemix-project copy-to-project <source> [subdir]: missing source. Source must be like "history/foo.jpg" or "searched_images/bar.png".' };
       }
-      const args = { source };
-      if (subdir) args.subdir = subdir;
-      return await copyToProjectTool(args, userCtx);
+      // If we have 2 args, second is subdir. If 1 arg, source only.
+      // But source might have spaces if NOT quoted, though _parseArgs handles quoted ones.
+      // If the AI didn't quote a source with spaces, _parseArgs will split it.
+      // However, we can be smart: if the LAST arg is a valid subdir, then everything before it is the source.
+      let source, subdir;
+      if (subArgs.length > 1 && FIXED_SUBDIRS.includes(subArgs[subArgs.length - 1])) {
+        subdir = subArgs.pop();
+        source = subArgs.join(' '); // Re-join if AI forgot quotes but we parsed it as multiple tokens
+      } else {
+        source = subArgs.join(' ');
+        subdir = 'temp';
+      }
+
+      const copyArgs = { source };
+      if (subdir) copyArgs.subdir = subdir;
+      return await copyToProjectTool(copyArgs, userCtx);
     }
 
     default:
@@ -164,4 +221,4 @@ async function handleGemixProjectCmd(command, userCtx) {
   }
 }
 
-module.exports = { handleGemixProjectCmd, isGemixProjectCmd, GEMIX_PREFIX };
+module.exports = { handleGemixProjectCmd, isGemixProjectCmd, hasShellChaining, GEMIX_PREFIX };

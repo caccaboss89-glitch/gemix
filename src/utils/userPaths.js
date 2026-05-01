@@ -112,23 +112,31 @@ function sanitizeProjectName(name) {
 // ── Path-safety ──
 
 /**
+ * Internal realpath that handles non-existent trailing components.
+ * Essential to defeat TOCTOU symlink attacks.
+ */
+function _safeRealpath(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+      const parent = path.dirname(p);
+      if (parent === p) return p;
+      return path.join(_safeRealpath(parent), path.basename(p));
+    }
+    return path.resolve(p);
+  }
+}
+
+/**
  * Strict containment check: is `target` a descendant of (or equal to) `base`?
- * Uses realpath when the path exists to defeat symlink escapes.
- * Both args MUST be absolute.
+ * Resolves symlinks in both paths to their real locations.
  */
 function _isInside(base, target) {
-  const b = path.resolve(base);
-  const t = path.resolve(target);
-  const rel = path.relative(b, t);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
-  try {
-    const rb = fs.existsSync(b) ? fs.realpathSync(b) : b;
-    const rt = fs.existsSync(t) ? fs.realpathSync(t) : t;
-    const rel2 = path.relative(rb, rt);
-    return !rel2.startsWith('..') && !path.isAbsolute(rel2);
-  } catch {
-    return false;
-  }
+  const rb = _safeRealpath(base);
+  const rt = _safeRealpath(target);
+  const rel = path.relative(rb, rt);
+  return !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /**
@@ -175,9 +183,9 @@ function classifyUserPath(userCtx, rawPath) {
     return { ok: false, reason: 'Absolute paths are not allowed.' };
   }
 
-  const absPath = path.resolve(root, rawPath);
+  const absPath = _safeRealpath(path.resolve(root, rawPath));
   if (!_isInside(root, absPath)) {
-    return { ok: false, reason: 'Path escapes user folder.', zone: 'outside' };
+    return { ok: false, reason: 'Path escapes user folder.', zone: 'outside', absPath };
   }
 
   const rel = path.relative(root, absPath).split(path.sep);

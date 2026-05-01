@@ -279,11 +279,13 @@ async function getOrCreate(userCtx, projectName) {
     entry.lastUsedAt = Date.now();
     return entry;
   }
+  let wasRestarted = false;
   // Stale / dead — purge before recreate
   if (entry) {
     log.warn(`pool entry for ${key} is dead, recreating`);
     await _killEntry(entry).catch(err => log.warn(`failed to purge stale sandbox ${key}: ${err.message}`));
     _pool.delete(key);
+    wasRestarted = true;
   }
 
   const bootPromise = (async () => {
@@ -328,6 +330,7 @@ async function getOrCreate(userCtx, projectName) {
   try {
     const ready = await bootPromise;
     ready.lastUsedAt = Date.now();
+    if (wasRestarted) ready.wasRestarted = true;
     _pool.set(key, ready);
     log.info(`sandbox ready key=${key} container=${ready.containerName}`);
     return ready;
@@ -385,6 +388,50 @@ async function shutdownAll() {
   await Promise.all(entries.map(e => _killEntry(e).catch(err => log.warn(`shutdownAll cleanup failed: ${err.message}`))));
 }
 
+/**
+ * Cleanup any orphan containers left over from previous runs.
+ * Matches containers by the "gemix-sb-" name prefix or GemiX labels.
+ * Called automatically on startup.
+ */
+async function cleanupOrphanSandboxes() {
+  let docker;
+  try {
+    docker = _getDocker();
+  } catch (err) {
+    // If dockerode is not installed or docker is not reachable, skip cleanup
+    log.debug(`Orphan cleanup skipped: ${err.message}`);
+    return;
+  }
+
+  try {
+    const containers = await docker.listContainers({ all: true });
+    // Docker prefixes names with a forward slash
+    const orphans = containers.filter(c => 
+      c.Names.some(name => name.startsWith('/gemix-sb-')) || 
+      (c.Labels && (c.Labels['gemix.storageId'] || c.Labels['gemix.project']))
+    );
+    
+    if (orphans.length === 0) return;
+
+    log.info(`Found ${orphans.length} orphan sandbox containers. Cleaning up...`);
+    for (const cInfo of orphans) {
+      try {
+        const container = docker.getContainer(cInfo.Id);
+        if (cInfo.State === 'running') {
+          // Attempt a quick stop, then force remove
+          await container.stop({ t: 2 }).catch(() => {});
+        }
+        await container.remove({ force: true });
+        log.info(`Cleaned up orphan container ${cInfo.Names[0]} (${cInfo.Id.slice(0, 12)})`);
+      } catch (err) {
+        log.warn(`Failed to cleanup orphan container ${cInfo.Id.slice(0, 12)}: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    log.error(`Error during orphan sandbox cleanup: ${err.message}`);
+  }
+}
+
 // ── Idle reaper ─────────────────────────────────────────────────────────────
 
 const _reaper = setInterval(() => {
@@ -400,6 +447,9 @@ const _reaper = setInterval(() => {
   }
 }, 60_000);
 _reaper.unref();
+
+// Start cleanup in the background as soon as the module is loaded (on startup).
+cleanupOrphanSandboxes().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
 
 // Best-effort cleanup when the bot terminates.
 let _shutdownHookInstalled = false;
@@ -422,6 +472,7 @@ module.exports = {
   shutdownAll,
   installShutdownHook,
   isSandboxAlive,
+  cleanupOrphanSandboxes, // Exposed for manual trigger if needed
   // Exposed for tests / diagnostics
   _pool,
   _poolKey,

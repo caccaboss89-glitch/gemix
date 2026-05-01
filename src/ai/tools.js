@@ -147,6 +147,8 @@ const TOOL_EDIT_FILE = makeTool({
     old_string: { type: 'string', description: 'Exact text to replace. Must appear at least once. Provide enough surrounding context to be unique unless replace_all=true.' },
     new_string: { type: 'string', description: 'Replacement text (use empty string to delete the matched region).' },
     replace_all: { type: 'boolean', description: 'Replace every occurrence (default false). Required when old_string is not unique.' },
+    start_line: { type: 'integer', description: 'Optional: line number where to start searching (1-indexed).' },
+    end_line: { type: 'integer', description: 'Optional: line number where to stop searching (1-indexed).' },
   },
   required: ['path', 'old_string', 'new_string'],
 });
@@ -188,7 +190,7 @@ const TOOL_BROWSE_PAGE = makeTool({
     mode: {
       type: 'string',
       enum: ['summary', 'raw', 'raw_html'],
-      description: 'Processing mode (default "summary"). Use "raw" to get unprocessed extracted text without LLM summarization. Use "raw_html" to get the full HTML source.',
+      description: 'Processing mode (default "summary"). Use "raw" to get unprocessed extracted text without LLM summarization. Use "raw_html" to get the full HTML source (useful for complex scraping).',
     },
   },
   required: ['url'],
@@ -473,6 +475,16 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
   });
 }
 
+const TOOL_BUG_REPORT = makeTool({
+  name: 'bug_report',
+  description: 'Report a system problem to the admin (bug, tool failure, unexpected behavior). Use when a tool fails, something behaves wrongly, or there is a system issue worth reporting.',
+  properties: {
+    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "bash", "yt-dlp", "proxy")' },
+    details: { type: 'string', description: 'Brief but clear description of the problem' },
+  },
+  required: ['source', 'details'],
+});
+
 // ── Active-member-only tool check (runtime permission guard) ──
 
 const ACTIVE_MEMBER_ONLY_TOOLS = new Set([
@@ -536,15 +548,18 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   }
 
   // 5. Memory, Meta & Stats
-  if (!isDiscord || isActiveMember) {
-    tools.push(TOOL_UPDATE_MEMORY);
-  }
+  // Note: On Discord, all users are active members, so no need to check isActiveMember.
+  tools.push(TOOL_UPDATE_MEMORY);
   if (!isDiscord) {
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
-    if (isActiveMember) {
-      tools.push(TOOL_READ_SERVER_RULES, TOOL_READ_MUSIC_STATS);
-    }
   }
+  // Rules and Stats are for all Discord users (members) or active WA members.
+  if (isDiscord || isActiveMember) {
+    tools.push(TOOL_READ_SERVER_RULES, TOOL_READ_MUSIC_STATS);
+  }
+
+  // 6. Bug Report (all platforms, all modes)
+  tools.push(TOOL_BUG_REPORT);
 
   return tools;
 }

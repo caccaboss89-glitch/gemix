@@ -30,8 +30,9 @@ async function notifyAdmin(source, errorMessage) {
   const admin = ACTIVE_MEMBERS.find(m => m.admin);
   if (!admin) return;
 
+  const { ADMIN_ERROR_PREFIX } = require('../config/systemMessages');
   const timestamp = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
-  const message = `⚠️ *ERRORE API — ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
+  const message = `${ADMIN_ERROR_PREFIX} ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
 
   try {
     await client.sendMessage(admin.wa, message);

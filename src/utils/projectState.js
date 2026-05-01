@@ -181,11 +181,62 @@ function consumeLastCrash(userCtx, ttlMs) {
 }
 
 function clearLastCrash(userCtx) {
-  return _withStateLock(userCtx, () => {
+  return _withStateLock(userCtx, async () => {
     const st = _readRaw(userCtx);
     if (!st.last_crash) return true;
     delete st.last_crash;
     return _writeRaw(userCtx, st);
+  });
+}
+
+// ── Persistent Voice Counts ──
+
+function getVoiceCount(userCtx, chatKey) {
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (!st.voice_counts) return 0;
+    const entry = st.voice_counts[chatKey];
+    if (!entry) return 0;
+    
+    // TTL: 30 minutes
+    const VOICE_COUNT_TTL_MS = 30 * 60 * 1000;
+    if (Date.now() - (entry.ts || 0) > VOICE_COUNT_TTL_MS) {
+      delete st.voice_counts[chatKey];
+      _writeRaw(userCtx, st);
+      return 0;
+    }
+    return entry.count || 0;
+  });
+}
+
+function incrementVoiceCount(userCtx, chatKey) {
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (!st.voice_counts) st.voice_counts = {};
+    const entry = st.voice_counts[chatKey] || { count: 0, ts: 0 };
+    
+    entry.count = (entry.count || 0) + 1;
+    entry.ts = Date.now();
+    st.voice_counts[chatKey] = entry;
+    
+    // Prune other stale entries while we're at it
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const k in st.voice_counts) {
+      if (st.voice_counts[k].ts < cutoff) delete st.voice_counts[k];
+    }
+    
+    return _writeRaw(userCtx, st);
+  });
+}
+
+function resetVoiceCount(userCtx, chatKey) {
+  return _withStateLock(userCtx, () => {
+    const st = _readRaw(userCtx);
+    if (st.voice_counts && st.voice_counts[chatKey]) {
+      delete st.voice_counts[chatKey];
+      return _writeRaw(userCtx, st);
+    }
+    return true;
   });
 }
 
@@ -200,4 +251,7 @@ module.exports = {
   saveLastCrash,
   consumeLastCrash,
   clearLastCrash,
+  getVoiceCount,
+  incrementVoiceCount,
+  resetVoiceCount,
 };

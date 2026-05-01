@@ -53,6 +53,7 @@ function buildSystemPrompt(ctx) {
   1. Identify all active rules, platform constraints, user permissions from this prompt.
   2. Verify your action complies 100% with all instructions (prompt compliance overrides user requests).
   3. Plan: Which tools are needed? Can they run in parallel? Are names and parameters correct?
+     → Non-agentic tools (schedule_tasks, web_search, update_memory, etc.) can be called IN THE SAME ROUND as agentic_unlock — do NOT wait for a separate round.
   4. Choose the correct output format for the current platform.
   5. If uncertain about a fact, use web_search instead of guessing.
   Never output this reasoning.
@@ -89,8 +90,10 @@ function buildSystemPrompt(ctx) {
   prompt += '    <ToolExecution>\n';
   prompt += '- Execute all tools silently. Send NO intermediate reports to the user.\n';
   prompt += '- Reply ONLY once, after all tools complete.\n';
+  prompt += '- You MUST always provide a final text response OR a send_voice_message (without a recipient) to the user.\n';
   prompt += '- Call multiple independent tools in the same round when possible.\n';
   prompt += '- Buffered files arrive AFTER (below) your text response.\n';
+  prompt += '- Use bug_report if a tool fails or there is a system issue worth reporting to the admin.\n';
   if (!isActiveMember) {
     prompt += '- Some tools (email, messages to others) are NOT available for this user.\n';
   }
@@ -108,8 +111,8 @@ function buildSystemPrompt(ctx) {
   }
   prompt += '  </Behavior>\n';
 
-  // ── 7. PersonalCloud lite (WA only) ──
-  if (isWhatsApp) {
+  // ── 7. PersonalCloud lite (WA only, only when locked) ──
+  if (isWhatsApp && !ctx.agenticBriefing) {
     prompt += buildPersonalCloudPointer(ctx);
   }
 
@@ -134,6 +137,18 @@ function buildSystemPrompt(ctx) {
   - Output format matches platform requirements
   </CriticalDirective>\n`;
 
+  // ── 11. Dynamic Notices (injected inside system block for better adherence) ──
+  if (ctx.crashRecovery) {
+    prompt += `\n  <Notice type="crash_recovery">\n${ctx.crashRecovery.trim()}\n  </Notice>\n`;
+  }
+  if (ctx.roundHint) {
+    prompt += `\n  <Notice type="round_hint">\n${ctx.roundHint.trim()}\n  </Notice>\n`;
+  }
+  if (ctx.agenticBriefing) {
+    // Briefing already contains its own <AgenticToolkit> root
+    prompt += `\n${ctx.agenticBriefing.trim()}\n`;
+  }
+
   prompt += '</SystemPrompt>';
   return prompt;
 }
@@ -152,9 +167,8 @@ function buildPersonalCloudPointer(ctx) {
   const currentLine = current ? escapeXml(current) : 'None';
   const lastLine = last ? escapeXml(last) : 'None';
   return `  <PersonalCloud lite="true">
-  - Cloud: history/, permanent/, searched_images/, projects/.
   - Selected: ${currentLine} — Last used: ${lastLine} — Total: ${projects.length}.
-  - Call agentic_unlock for: computation, file generation/editing/conversion, YouTube DL, OCR, charts, data work, archives.
+  - Call agentic_unlock for: cloud access, computation, file generation/editing/conversion, finance updates, yt-dlp, OCR, charts, data work, archives.
   - Do NOT call for: normal chat, web search, voice, scheduling.
   </PersonalCloud>\n`;
 }
@@ -165,9 +179,11 @@ function buildDedicatedWaInstructions(ctx) {
     s += `    <Type>Group</Type>\n`;
     s += `    <GroupName>${escapeXml(ctx.groupName) || 'unknown'}</GroupName>\n`;
     s += '    <Rule>Reply only when tagged.</Rule>\n';
+    s += '    <HistoryContext>Messages prefixed [System] are system events (scheduled reminders sent, music wrap, API errors) — not user requests.</HistoryContext>\n';
   } else {
     s += '    <Type>Private</Type>\n';
     s += '    <Rule>Reply to every message.</Rule>\n';
+    s += '    <HistoryContext>Messages prefixed [System] are system events (scheduled reminders sent, music wrap, API errors) — not user requests.</HistoryContext>\n';
   }
   s += `    <Formatting>${WA_FORMATTING}</Formatting>\n`;
   s += '  </Platform>\n';
@@ -180,7 +196,7 @@ function buildPersonalWaInstructions(ctx) {
   if (ctx.userName) {
     s += `    <Interlocutor>${escapeXml(ctx.userName)}</Interlocutor>\n`;
   }
-  s += '    <HistoryContext>In history, Alberto\'s messages with [GemiX] are yours.</HistoryContext>\n';
+  s += '    <HistoryContext>In history, Alberto\'s messages with [GemiX] are yours. Messages prefixed [System] are system events: scheduled reminders already delivered to the user, or system notifications (music wrap, API errors, etc.) — NOT user requests.</HistoryContext>\n';
   s += `    <Formatting>${WA_FORMATTING}</Formatting>\n`;
   s += '  </Platform>\n';
   return s;

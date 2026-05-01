@@ -16,6 +16,7 @@ const { startScheduler, setSchedulerWaClient } = require('./scheduler/engine');
 const { setAdminNotifierClient } = require('./utils/adminNotifier');
 const { initRegolamentoRag } = require('./rag/regolamentoRag');
 const sandboxManager = require('./sandbox/sandboxManager');
+const { startInternalNotifyServer } = require('./utils/internalNotifyServer');
 
 log.info('🤖 GemiX — Avvio in corso...\n');
 
@@ -38,6 +39,7 @@ initRegolamentoRag()
 
 startScheduler();
 sandboxManager.installShutdownHook();
+startInternalNotifyServer();
 
 process.on('SIGINT', async () => {
   log.info('\n🛑 GemiX — Shutting down...');

@@ -76,7 +76,10 @@ if '_gemix_write_guard_active' not in globals():
 
 const _ALLOWED_WRITE_SUBDIRS = ['temp/', 'output/', 'code/'];
 
-function _formatResult({ kernelResult, diff, durationMs, quotaWarning, projectName }) {
+function _formatResult({ kernelResult, diff, durationMs, quotaWarning, projectName, sandboxRestarted, bgTaskActive }) {
+  if (!kernelResult) {
+    return { success: false, message: 'Internal error: Python kernel returned no result.', status: 'error' };
+  }
   const out = {
     success: kernelResult.status === 'ok',
     message: 'Python code executed successfully.',
@@ -100,6 +103,13 @@ function _formatResult({ kernelResult, diff, durationMs, quotaWarning, projectNa
   const hints = [];
   if (out.status === 'timeout') hints.push('Execution timed out — split the work into smaller steps or raise timeout_ms.');
   else if (out.status === 'error') hints.push('Python error: read the traceback and fix the code before retrying.');
+  
+  if (sandboxRestarted) {
+    hints.push('⚠️ The Python kernel was RESTARTED because it was dead or hung. All your previous variables and state are LOST. You must re-import modules and re-declare variables.');
+  }
+  if (bgTaskActive) {
+    hints.push('⚠️ WARNING: A background task is currently running in this project. Foreground execution may cause race conditions or corrupt state if they modify the same files.');
+  }
 
   // Post-execution write violation check (defense-in-depth: catches os.open() bypasses)
   if (projectName) {

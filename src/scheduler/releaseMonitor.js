@@ -123,7 +123,8 @@ async function checkNewRelease(waClient) {
     // Strip markdown image syntax (images are sent separately as media)
     const cleanBody = body.replace(/!\[.*?\]\(https?:\/\/[^)\s]+\)/g, '').replace(/\n{3,}/g, '\n\n').trim();
 
-    const message = `🚀 *Nuova release GemiX: ${title}*\n\n${cleanBody}`.trim();
+    const { RELEASE_NOTIFICATION_PREFIX } = require('../config/systemMessages');
+    const message = `${RELEASE_NOTIFICATION_PREFIX} ${title}*\n\n${cleanBody}`.trim();
 
     // Collect images: inline markdown images + image assets
     const inlineImageUrls = _extractMarkdownImageUrls(body);

@@ -14,6 +14,7 @@ const { getCurrentProject } = require('../utils/projectState');
 const { logToolExecution } = require('../utils/executionLogger');
 
 const MAX_EDIT_BYTES = 5 * 1024 * 1024;
+const NON_READABLE_EXTS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.mp3', '.wav', '.mp4', '.mov', '.zip', '.tar', '.gz', '.7z', '.rar', '.xlsx', '.docx', '.pptx', '.exe', '.dll', '.bin', '.so', '.jar', '.class', '.pyc', '.db', '.sqlite', '.iso', '.dmg']);
 
 function _toContainerPath(absHostPath, projectDir) {
   const rel = path.relative(projectDir, absHostPath).split(path.sep).join('/');
@@ -27,17 +28,22 @@ function _toContainerPath(absHostPath, projectDir) {
  *   3. Replace and write back.
  *   4. Print a structured one-line summary the JS side parses.
  */
-function _buildPython(containerPath, oldB64, newB64, replaceAll) {
+function _buildPython(containerPath, oldB64, newB64, replaceAll, startLine = null, endLine = null) {
   const safePath = JSON.stringify(containerPath);
   const safeOld = JSON.stringify(oldB64);
   const safeNew = JSON.stringify(newB64);
   const allFlag = replaceAll ? 'True' : 'False';
+  const sLine = startLine === null ? 'None' : Math.max(1, parseInt(startLine));
+  const eLine = endLine === null ? 'None' : Math.max(1, parseInt(endLine));
+
   return [
     'import base64, json, os',
     `_p = ${safePath}`,
     `_old = base64.b64decode(${safeOld}).decode("utf-8")`,
     `_new = base64.b64decode(${safeNew}).decode("utf-8")`,
     `_replace_all = ${allFlag}`,
+    `_sl = ${sLine}`,
+    `_el = ${eLine}`,
     'if not os.path.exists(_p):',
     '    _report = {"ok": False, "reason": "file_not_found"}',
     'else:',
@@ -46,16 +52,33 @@ function _buildPython(containerPath, oldB64, newB64, replaceAll) {
     '    except UnicodeDecodeError:',
     '        _report = {"ok": False, "reason": "not_utf8"}',
     '    else:',
-    '        _n = _text.count(_old)',
-    '        if _n == 0:',
-    '            _report = {"ok": False, "reason": "old_string_not_found"}',
-    '        elif _n > 1 and not _replace_all:',
-    '            _report = {"ok": False, "reason": "old_string_not_unique", "occurrences": _n}',
+    '        if _sl is not None or _el is not None:',
+    '            _lines = _text.splitlines(keepends=True)',
+    '            _start_idx = (_sl - 1) if _sl is not None else 0',
+    '            _end_idx = _el if _el is not None else len(_lines)',
+    '            _target_block = "".join(_lines[_start_idx:_end_idx])',
+    '            _n = _target_block.count(_old)',
+    '            if _n == 0:',
+    '                _report = {"ok": False, "reason": "old_string_not_found_in_range"}',
+    '            elif _n > 1 and not _replace_all:',
+    '                _report = {"ok": False, "reason": "old_string_not_unique_in_range", "occurrences": _n}',
+    '            else:',
+    '                _replaced = _target_block.replace(_old, _new) if _replace_all else _target_block.replace(_old, _new, 1)',
+    '                _out = "".join(_lines[:_start_idx]) + _replaced + "".join(_lines[_end_idx:])',
+    '                _data = _out.encode("utf-8")',
+    '                with open(_p, "wb") as _f: _f.write(_data)',
+    '                _report = {"ok": True, "occurrences": _n if _replace_all else 1, "bytes_written": len(_data)}',
     '        else:',
-    '            _out = _text.replace(_old, _new) if _replace_all else _text.replace(_old, _new, 1)',
-    '            _data = _out.encode("utf-8")',
-    '            with open(_p, "wb") as _f: _f.write(_data)',
-    '            _report = {"ok": True, "occurrences": _n if _replace_all else 1, "bytes_written": len(_data)}',
+    '            _n = _text.count(_old)',
+    '            if _n == 0:',
+    '                _report = {"ok": False, "reason": "old_string_not_found"}',
+    '            elif _n > 1 and not _replace_all:',
+    '                _report = {"ok": False, "reason": "old_string_not_unique", "occurrences": _n}',
+    '            else:',
+    '                _out = _text.replace(_old, _new) if _replace_all else _text.replace(_old, _new, 1)',
+    '                _data = _out.encode("utf-8")',
+    '                with open(_p, "wb") as _f: _f.write(_data)',
+    '                _report = {"ok": True, "occurrences": _n if _replace_all else 1, "bytes_written": len(_data)}',
     'print(json.dumps(_report))',
   ].join('\n');
 }
@@ -65,12 +88,14 @@ async function editFileTool(args, userCtx, responseCtx) {
   const oldStr = args && args.old_string;
   const newStr = args && args.new_string;
   const replaceAll = Boolean(args && args.replace_all);
+  const startLine = args && args.start_line !== undefined ? Number(args.start_line) : null;
+  const endLine = args && args.end_line !== undefined ? Number(args.end_line) : null;
 
   if (typeof rawPath !== 'string' || rawPath.length === 0) {
     return { success: false, error: 'Missing required argument "path".' };
   }
-  if (typeof oldStr !== 'string' || oldStr.length === 0) {
-    return { success: false, error: 'old_string must be a non-empty string. Use write_file to create a new file.' };
+  if (typeof oldStr !== 'string' || oldStr.trim().length === 0) {
+    return { success: false, error: 'old_string must be a non-empty string and cannot be only whitespace. Use write_file to create a new file or provide context.' };
   }
   if (typeof newStr !== 'string') {
     return { success: false, error: 'new_string must be a string (use empty string to delete).' };
@@ -92,6 +117,11 @@ async function editFileTool(args, userCtx, responseCtx) {
     return { success: false, error: `edit_file refused: ${auth.reason}` };
   }
 
+  const ext = path.extname(auth.absPath).toLowerCase();
+  if (NON_READABLE_EXTS.has(ext)) {
+    return { success: false, error: `edit_file: files with extension "${ext}" are binary or not supported for direct text editing. Use other specialized tools or scripts to handle them.` };
+  }
+
   const projectDir = getProjectRoot(userCtx, currentProject);
   const containerPath = _toContainerPath(auth.absPath, projectDir);
 
@@ -100,6 +130,8 @@ async function editFileTool(args, userCtx, responseCtx) {
     Buffer.from(oldStr, 'utf-8').toString('base64'),
     Buffer.from(newStr, 'utf-8').toString('base64'),
     replaceAll,
+    startLine,
+    endLine,
   );
 
   const result = await runInProjectSandbox({
@@ -164,7 +196,9 @@ async function editFileTool(args, userCtx, responseCtx) {
       file_not_found: 'File does not exist. Use write_file to create it first.',
       not_utf8: 'File is not UTF-8 — edit_file only supports text files.',
       old_string_not_found: 'old_string not found in the file.',
+      old_string_not_found_in_range: `old_string not found within lines ${startLine} and ${endLine}.`,
       old_string_not_unique: `old_string occurs ${report.occurrences} times — set replace_all=true or provide more surrounding context.`,
+      old_string_not_unique_in_range: `old_string occurs ${report.occurrences} times within lines ${startLine} and ${endLine} — set replace_all=true or provide more surrounding context.`,
     };
     const errorOut = {
       success: false,
@@ -180,9 +214,17 @@ async function editFileTool(args, userCtx, responseCtx) {
     return errorOut;
   }
 
+  const hints = ['File edited successfully.'];
+  if (result.sandboxRestarted) {
+    hints.push('⚠️ The Python kernel was RESTARTED because it was dead or hung. All your previous variables and state are LOST. You must re-import modules and re-declare variables.');
+  }
+  if (result.bgTaskActive) {
+    hints.push('⚠️ WARNING: A background task is currently running in this project. Foreground execution may cause race conditions or corrupt state if they modify the same files.');
+  }
+
   const out = {
     success: true,
-    message: 'File edited successfully.',
+    message: hints.join(' '),
     path: `projects/${currentProject}/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}`,
     occurrences_replaced: report.occurrences,
     bytes_written: report.bytes_written,

@@ -184,8 +184,9 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     try {
       const monthName = getPreviousMonthName();
       const capitalizedMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+      const { MUSIC_WRAP_PREFIX } = require('../config/systemMessages');
       const password = MUSIC_WRAP_PASSWORD || 'N/D';
-      const message = normalizeMarkdown(`🎵 *Wrap di ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`);
+      const message = normalizeMarkdown(`${MUSIC_WRAP_PREFIX} ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`);
       await dedicatedClient.sendMessage(member.wa, message);
       log.info(`✅ Message sent to ${member.name}`);
       state.lastSentDate[member.wa] = today;

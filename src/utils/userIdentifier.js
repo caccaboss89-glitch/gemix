@@ -22,7 +22,8 @@ function identifyUser(ctx) {
     member = findMemberByWa(jid);
   }
 
-  const isActiveMember = member !== null;
+  // On Discord, all users are active members by definition (server is private).
+  const isActiveMember = ctx.platform === PLATFORM_DISCORD || member !== null;
 
   let taskFileId;
   if (member) {

@@ -9,6 +9,7 @@ const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
 const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const LOG_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const crypto = require('crypto');
 
 function ensureLogDir() {
   if (!fs.existsSync(apiLogDir)) {
@@ -46,7 +47,8 @@ _logCleanupInterval.unref();
 
 function _getLogFilePath(prefix, timestamp) {
   const sanitized = timestamp.replace(/[:.]/g, '-');
-  return path.join(apiLogDir, `${prefix}-${sanitized}.json`);
+  const rand = crypto.randomBytes(3).toString('hex');
+  return path.join(apiLogDir, `${prefix}-${sanitized}-${rand}.json`);
 }
 
 function extractAttachmentsFromMessages(messages) {
