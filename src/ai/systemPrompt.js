@@ -56,7 +56,7 @@ function buildSystemPrompt(ctx) {
      → Non-agentic tools (schedule_tasks, web_search, update_memory, etc.) can be called IN THE SAME ROUND as agentic_unlock — do NOT wait for a separate round.
   4. Choose the correct output format for the current platform.
   5. If uncertain about a fact, use web_search instead of guessing.
-  Never output this reasoning.
+  NEVER include internal planning, meta-commentary, or "Thinking" blocks in your final output.
   </CriticalRule>\n`;
 
   // ── 3. Identity (compact markdown list) ──

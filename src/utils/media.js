@@ -142,7 +142,7 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
 
     await convert([inputPdf], {
       outputDir,
-      format: 'json,markdown-with-images',
+      format: ['json', 'markdown-with-images'],
       hybrid: 'docling-fast',
       hybridMode: 'full',
       hybridUrl: HYBRID_URL,
@@ -160,10 +160,9 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
       includeHeaderFooter: true,
       detectStrikethrough: true,
       sanitize: false,
-      threads: 4,
+      threads: '4',
       quiet: true,
       enrichTable: true,
-      enrichPictureDescription: true,
     });
 
     log.info(`✅ PDF Transcription finished in ${((Date.now() - start) / 1000).toFixed(1)}s`);
@@ -182,12 +181,7 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
       const rawJson = await fs.readFile(jsonPath, 'utf8');
       const jsonData = JSON.parse(rawJson);
       pages = _pdfPageCountFromJson(jsonData);
-
-      if (text) {
-        // Inject AI descriptions from JSON into the Markdown text
-        text = _injectDescriptionsIntoMarkdown(text, jsonData);
-      } else {
-        // Fallback: build text from JSON
+      if (!text) {
         text = _textFromJson(jsonData);
       }
     }
@@ -238,7 +232,7 @@ async function _fileExists(filePath) {
 function _pdfPageCountFromJson(jsonData) {
   if (!Array.isArray(jsonData)) return 0;
   return jsonData.reduce((max, item) => {
-    const page = Number(item['page number'] ?? item.page ?? (item.prov && item.prov[0]?.page_no) ?? 0);
+    const page = Number(item['page number'] ?? item.page ?? 0);
     return Number.isFinite(page) && page > max ? page : max;
   }, 0);
 }
@@ -248,63 +242,14 @@ function _textFromJson(jsonData) {
   return jsonData
     .map(item => {
       const parts = [];
-      if (typeof item.title === 'string' && item.title) parts.push(`### ${item.title}`);
-      if (typeof item.heading === 'string' && item.heading) parts.push(`## ${item.heading}`);
-
-      if (typeof item.content === 'string' && item.content) {
-        parts.push(item.content);
-      } else if (typeof item.text === 'string' && item.text) {
-        parts.push(item.text);
-      }
-
-      // Include AI descriptions if present in JSON
-      if (item.type === 'picture' || item.type === 'figure') {
-        if (item.description) {
-          parts.push(`\n> **AI Image Description**: ${item.description}\n`);
-        }
-      }
-
+      if (typeof item.title === 'string' && item.title) parts.push(item.title);
+      if (typeof item.heading === 'string' && item.heading) parts.push(item.heading);
+      if (typeof item.content === 'string' && item.content) parts.push(item.content);
+      else if (typeof item.text === 'string' && item.text) parts.push(item.text);
       return parts.join('\n');
     })
     .filter(Boolean)
     .join('\n\n');
-}
-
-/**
- * Injects AI-generated descriptions from JSON into the Markdown text.
- * Docling Markdown usually contains tags like ![image 1](path).
- * We find the corresponding JSON entry and append the description.
- */
-function _injectDescriptionsIntoMarkdown(text, jsonData) {
-  if (!Array.isArray(jsonData) || !text) return text;
-
-  // Extract all pictures with descriptions from JSON
-  const pictures = jsonData.filter(item => (item.type === 'picture' || item.type === 'figure') && item.description);
-  if (pictures.length === 0) return text;
-
-  let enrichedText = text;
-
-  // Docling 2.x images in MD are usually numbered based on their order in the doc.
-  // We'll try to match them. Note: index in MD might not perfectly align with JSON index
-  // but usually they follow the document flow.
-  pictures.forEach((pic, index) => {
-    const aiDesc = pic.description;
-    if (!aiDesc) return;
-
-    // Look for various possible image tags: ![image N], ![picture N], or generic ![image]
-    // We try to match ![image {index+1}] which is common.
-    const imageTagRegex = new RegExp(`(!\\[(?:image|picture)\\s*${index + 1}?\\s*\\]\\([^)]+\\))`, 'g');
-
-    if (imageTagRegex.test(enrichedText)) {
-      enrichedText = enrichedText.replace(imageTagRegex, `$1\n\n> **AI Image Description**: ${aiDesc}\n`);
-    } else {
-      // Fallback: if we can't find the specific numbered tag, we might want to append
-      // descriptions at the end or try a more generic match, but for now we only
-      // inject if we find a likely match to avoid corrupting the layout.
-    }
-  });
-
-  return enrichedText;
 }
 
 /**
