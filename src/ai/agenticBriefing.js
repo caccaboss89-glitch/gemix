@@ -56,10 +56,10 @@ function buildAgenticBriefing(ctx = {}) {
       - projects/<slug>/  (code/, temp/, output/, README.md)
     </Layout>
     <Rules>
-- One project per user request. Run \`gemix-project create\` before producing files.
-- bash and code_execution: can run WITHOUT a project (quick calculations, checks), but CANNOT create/modify files without one.
-- Write/edit access ONLY inside current project: code/ (scripts), temp/ (intermediate), output/ (deliverables).
-- Zip directories into output/ to deliver them.
+    - One project per user request. Run \`gemix-project create\` before producing files.
+    - bash and code_execution: can run WITHOUT a project (quick calculations, checks), but CANNOT create/modify files without one.
+    - Write/edit access ONLY inside current project: code/ (scripts), temp/ (intermediate), output/ (deliverables).
+    - Zip directories into output/ to deliver them.
     </Rules>
     <ProjectManagement>
       Run via \`bash\` as standalone \`gemix-project <subcmd>\` (no chaining/redirection).
@@ -74,7 +74,7 @@ function buildAgenticBriefing(ctx = {}) {
        - copy-to-project <source> [<subdir_default_temp>]
     </ProjectManagement>
     <FileDelivery>
-      CRITICAL: output/ files are AUTO-DELIVERED — do NOT call attach_file for them.
+      CRITICAL: output/ files are AUTO-DELIVERED (arrive AFTER (below) your text response). Do NOT call attach_file for them.
       - For files in other paths: call attach_file.
       - For directories: zip into output/ first.
     </FileDelivery>
@@ -90,7 +90,7 @@ ${projectList}    </Projects>
       Working dir: /workspace (mapped to projects/<current>/).
       Read-only mounts: /readonly/{history,permanent,searched_images}.
       Resources: 1 CPU, 1.5 GB RAM, 30s timeout (max 120s).
-      Network: NO INTERNET except api.polygon.io, astropy, yt-dlp, X (Twitter), Instagram, TikTok, Facebook.
+      Network: NO INTERNET except api.polygon.io, astropy, yt-dlp servers.
       pip: DISABLED. Only pre-installed libraries.
     </Runtime>
     <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
@@ -100,18 +100,18 @@ ${projectList}    </Projects>
     - moviepy: pass codec='libx264', audio_codec='aac' for WhatsApp/Discord previews
     - rembg: u2netp is faster
     - Flush plots: savefig() → plt.close() → then open with PIL
-    - yt-dlp: MUST use bash CLI directly. Supports YouTube, X (Twitter), Instagram, TikTok, Facebook. Always -o '/workspace/output/%(title)s.%(ext)s', limit resolution (e.g. -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"). Never pass proxy arguments.
+    - yt-dlp: MUST use bash CLI directly. NEVER use python -c or import yt_dlp. Always -o '/workspace/output/%(title)s.%(ext)s', limit resolution (-f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"). No proxy args.
     - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports)
     </Pitfalls>
   </PythonSandbox>
 
   <ToolExecution>
-- ALWAYS OPTIMIZE ROUNDS: chain \`gemix-project create\` or \`gemix-project switch\` (phase: before_all) with your first action (phase: after_all) in the same round. Never wait for a separate round just to set up the project.
-- Execution Sequence (1-2-3):
-    1. \`before_all\`: bash or code_execution (e.g. gemix-project create / switch)
-    2. \`standard\`: write_file, edit_file, read_file, web_search, other bash or code_execution, etc.
-    3. \`after_all\` (default): bash or code_execution (e.g. yt-dlp, python code/script.py)
-- Use \`background: true\` ONLY for slow tasks (>1 min) AND only if you have other tools to run in parallel.
+  - ALWAYS OPTIMIZE ROUNDS: chain \`gemix-project create\` or \`gemix-project switch\` (phase: before_all) with your first action (phase: after_all) in the same round. Never wait for a separate round just to set up the project.
+  - Execution Sequence (1-2-3):
+      1. \`before_all\`: bash or code_execution (e.g. gemix-project create / switch)
+      2. \`standard\`: write_file, edit_file, read_file, web_search, other bash or code_execution, etc.
+      3. \`after_all\` (default): bash or code_execution (e.g. yt-dlp, python code/script.py)
+  - Use \`background: true\` ONLY for slow tasks (>1 min) AND only if you have other tools to run in parallel.
   </ToolExecution>
 </AgenticToolkit>`;
 }
