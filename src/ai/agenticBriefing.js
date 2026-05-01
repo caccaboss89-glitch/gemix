@@ -100,7 +100,7 @@ ${projectList}    </Projects>
     - moviepy: pass codec='libx264', audio_codec='aac' for WhatsApp/Discord previews
     - rembg: u2netp is faster
     - Flush plots: savefig() → plt.close() → then open with PIL
-    - yt-dlp: MUST use bash CLI directly. NEVER use python -c or import yt_dlp. Always -o '/workspace/output/%(title)s.%(ext)s', limit resolution (-f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"). No proxy args.
+    - yt-dlp: MUST use bash CLI directly. NEVER use python -c or import yt_dlp. Always -o '/workspace/output/%(title)s.%(ext)s', limit resolution (-f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"). Only videos, no images. No proxy args.
     - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports)
     </Pitfalls>
   </PythonSandbox>
