@@ -1,11 +1,13 @@
 // src/platforms/discord/client.js
+const fs = require('fs');
+const path = require('path');
 const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
-const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
+const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../../config/constants');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { mediaToContentPart, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
+const { mediaToContentPart, buildAttachmentTag } = require('../../utils/media');
 const { getMediaDurationSec } = require('../../utils/mediaDuration');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
@@ -142,9 +144,7 @@ async function onDiscordMessage(msg) {
 
   const history = await buildDiscordHistory(channel, starterMessage?.id, msg.author.id);
 
-  const contentParts = [];
   let textBody = msg.content || '';
-
   let quotedMediaParts = [];
   if (msg.reference) {
     try {
@@ -217,13 +217,18 @@ async function onDiscordMessage(msg) {
                 } catch { }
               }
             } else if (isPdf) {
-              try {
-                const buffer = await fetchBuffer();
-                const info = await extractTextFromPdfBuffer(buffer);
-                if (info.success && info.pages <= MAX_DOC_PAGES) {
-                  replyPrefix = `[In reply to: ${filetags}]\n\n<Transcription>\n${info.text}\n</Transcription>\n`;
-                }
-              } catch { }
+              // PDF is stored as a directory with transcription.md — read it
+              if (syncedPath && syncedPath.endsWith('/')) {
+                try {
+                  const { historyDir } = require('../../utils/historySync').getUserHistoryPaths(msg.author.id);
+                  const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+                  const mdPath = path.join(historyDir, dirName, 'transcription.md');
+                  if (fs.existsSync(mdPath)) {
+                    const transcription = fs.readFileSync(mdPath, 'utf-8');
+                    replyPrefix = `[In reply to: ${filetags}]\n\n<Transcription>\n${transcription}\n</Transcription>\n`;
+                  }
+                } catch { }
+              }
             }
           }
           textBody = replyPrefix + textBody;
@@ -234,6 +239,7 @@ async function onDiscordMessage(msg) {
     } catch { }
   }
 
+  const contentParts = [];
   for (const att of msg.attachments.values()) {
     const ext = (att.name || '').split('.').pop().toLowerCase();
     const isImage = att.contentType?.startsWith('image/');
@@ -278,18 +284,23 @@ async function onDiscordMessage(msg) {
         }
       }
     } else if (isDoc && att.contentType === 'application/pdf') {
-      try {
-        const buffer = await fetchBuffer();
-        const info = await extractTextFromPdfBuffer(buffer);
-        if (!info.success) {
+      // PDF is stored as a directory — read the pre-parsed transcription
+      if (syncedPath && syncedPath.endsWith('/')) {
+        try {
+          const { historyDir } = require('../../utils/historySync').getUserHistoryPaths(msg.author.id);
+          const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+          const mdPath = path.join(historyDir, dirName, 'transcription.md');
+          if (fs.existsSync(mdPath)) {
+            const transcription = fs.readFileSync(mdPath, 'utf-8');
+            const docText = `\n<Transcription>\n${transcription}\n</Transcription>`;
+            textBody = `${attachmentTag}${docText} ${textBody}`.trim();
+          } else {
+            textBody = `${attachmentTag} ${textBody}`.trim();
+          }
+        } catch {
           textBody = `${attachmentTag} ${textBody}`.trim();
-        } else if (info.pages > MAX_DOC_PAGES) {
-          textBody = `${attachmentTag} (document too long: ${info.pages} pages) ${textBody}`.trim();
-        } else {
-          const docText = info.text ? `\n<Transcription>\n${info.text}\n</Transcription>` : '';
-          textBody = `${attachmentTag}${docText} ${textBody}`.trim();
         }
-      } catch {
+      } else {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }
     } else if (isDoc) {

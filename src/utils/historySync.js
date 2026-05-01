@@ -1,9 +1,9 @@
 // src/utils/historySync.js
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR } = require('../config/constants');
+const { DATA_DIR, MAX_DOC_PAGES } = require('../config/constants');
 const { createLogger } = require('./logger');
-const { extractAttachmentTagPaths } = require('./media');
+const { extractAttachmentTagPaths, extractTextFromPdfBuffer } = require('./media');
 const { sanitizeFilename } = require('./text');
 
 const log = createLogger('HistorySync');
@@ -215,11 +215,18 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
 
 /**
  * Save a file to the user's history folder. Handles deduplication by uniqueId.
+ *
+ * **PDFs** are stored as directories:
+ *   `history/<name>/` containing `transcription.md` and an `assets/` subfolder
+ *   with extracted images. The returned path still looks like `history/<name>/`.
+ *
+ * All other file types are stored as flat files (unchanged behaviour).
+ *
  * @param {string} userId - The unique identifier for the user (e.g. from waJid or discord id)
  * @param {string} uniqueId - A unique ID for the attachment (e.g., Discord attachment ID or WA message ID)
  * @param {function} fetchBufferFn - Async function returning the file Buffer (called only if needed)
  * @param {string} originalName - Original file name
- * @returns {Promise<string>} The relative contextual path like 'history/filename.ext'
+ * @returns {Promise<string>} The relative contextual path like 'history/filename.ext' or 'history/name/'
  */
 async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) {
   if (!userId || !uniqueId) return null;
@@ -229,21 +236,23 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
 
   let meta = _loadMeta(metaFile, userId);
 
-  // If uniqueId exists and the file is actually on disk, reuse it
+  // If uniqueId exists and the entry is actually on disk, reuse it
   if (meta[uniqueId]) {
     const existingName = _getEntryFilename(meta[uniqueId]);
-    const existingFile = existingName ? path.join(historyDir, existingName) : null;
-    if (existingFile && fs.existsSync(existingFile)) {
+    const existingPath = existingName ? path.join(historyDir, existingName) : null;
+    if (existingPath && fs.existsSync(existingPath)) {
       // Refresh timestamp to prevent premature deletion
       const now = new Date();
-      fs.utimesSync(existingFile, now, now);
+      try {
+        // Works for both files and directories
+        fs.utimesSync(existingPath, now, now);
+      } catch { /* best-effort */ }
       return `history/${existingName}`;
     }
-    // File missing on disk, clear from meta and re-save
+    // Entry missing on disk, clear from meta and re-save
     delete meta[uniqueId];
     _saveMeta(metaFile, meta, userId);
   }
-
 
   // We need the buffer now
   let buffer;
@@ -263,8 +272,50 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   const extMatch = cleanName.match(/\.([^.]+)$/);
   const ext = extMatch ? `.${extMatch[1]}` : '';
   const baseName = extMatch ? cleanName.slice(0, -ext.length) : cleanName;
+  const isPdf = ext.toLowerCase() === '.pdf';
 
-  // Find an available filename
+  // ── PDF directory-based storage ──
+  if (isPdf) {
+    // For PDFs we store a directory named after the base (without .pdf)
+    let dirName = baseName;
+    let counter = 1;
+    const existingValues = new Set(Object.values(meta).map(_getEntryFilename).filter(Boolean));
+    while (existingValues.has(dirName + '/') || fs.existsSync(path.join(historyDir, dirName))) {
+      dirName = `${baseName}(${counter})`;
+      counter++;
+    }
+    const pdfDir = path.join(historyDir, dirName);
+    try {
+      fs.mkdirSync(pdfDir, { recursive: true });
+
+      // Parse with Heavy/Hybrid AI mode, persisting images into pdfDir/assets/
+      const info = await extractTextFromPdfBuffer(buffer, { persistDir: pdfDir });
+      let transcription = '';
+      if (info.success && info.text) {
+        if (info.pages > MAX_DOC_PAGES) {
+          transcription = `[Document too long to process: ${info.pages} pages (max ${MAX_DOC_PAGES})]`;
+        } else {
+          transcription = info.text;
+        }
+      } else {
+        transcription = `[PDF transcription failed: ${info.error || 'unknown error'}]`;
+      }
+
+      fs.writeFileSync(path.join(pdfDir, 'transcription.md'), transcription, 'utf-8');
+
+      const finalName = dirName + '/';
+      meta[uniqueId] = { filename: finalName, type: 'pdf-dir' };
+      _saveMeta(metaFile, meta, userId);
+      return `history/${finalName}`;
+    } catch (err) {
+      log.error(`Failed to save PDF history dir for user ${userId}: ${err.message}`);
+      // Clean up partial directory
+      try { fs.rmSync(pdfDir, { recursive: true, force: true }); } catch { }
+      return null;
+    }
+  }
+
+  // ── Standard flat-file storage (non-PDF) ──
   let finalName = cleanName;
   let counter = 1;
   const existingValues = new Set(Object.values(meta).map(_getEntryFilename).filter(Boolean));
@@ -309,6 +360,8 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
   const { historyDir, metaFile } = getUserHistoryPaths(userId);
   if (!fs.existsSync(historyDir)) return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
 
+  // Build referenced set. For PDF dirs stored as "name/", the attachment tag
+  // path is "history/name/" so the bare filename reaching us is "name/".
   const referenced = referencedFilenames instanceof Set
     ? referencedFilenames
     : new Set(referencedFilenames || []);
@@ -320,23 +373,25 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
   let ageDeletedCount = 0;
   let kept = 0;
 
-  let files;
-  try { files = fs.readdirSync(historyDir); }
+  let entries;
+  try { entries = fs.readdirSync(historyDir); }
   catch (err) {
     log.error(`pruneHistory readdir failed for ${userId}: ${err.message}`);
     return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
   }
 
-  for (const file of files) {
-    const filePath = path.join(historyDir, file);
+  for (const entry of entries) {
+    const entryPath = path.join(historyDir, entry);
     let stat;
-    try { stat = fs.statSync(filePath); }
+    try { stat = fs.statSync(entryPath); }
     catch { continue; }
-    if (!stat.isFile()) continue;
+
+    // For directories (PDF dirs), the reference key includes trailing slash
+    const refKey = stat.isDirectory() ? entry + '/' : entry;
 
     let shouldDelete = false;
     let ageDelete = false;
-    if (!referenced.has(file)) {
+    if (!referenced.has(refKey) && !referenced.has(entry)) {
       shouldDelete = true;
     } else if (maxAgeMs !== null && (now - stat.mtimeMs) > maxAgeMs) {
       shouldDelete = true;
@@ -345,25 +400,32 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
 
     if (shouldDelete) {
       try {
-        fs.unlinkSync(filePath);
+        if (stat.isDirectory()) {
+          fs.rmSync(entryPath, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(entryPath);
+        }
         deletedCount++;
         if (ageDelete) ageDeletedCount++;
       } catch (err) {
-        log.warn(`pruneHistory unlink failed for ${file}: ${err.message}`);
+        log.warn(`pruneHistory remove failed for ${entry}: ${err.message}`);
       }
     } else {
       kept++;
     }
   }
 
-  // Sync meta file: drop entries whose target file no longer exists.
+  // Sync meta file: drop entries whose target file/dir no longer exists.
   if (deletedCount > 0 && fs.existsSync(metaFile)) {
     try {
       const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
       let changed = false;
       for (const [id, entry] of Object.entries(meta)) {
         const name = _getEntryFilename(entry);
-        if (!name || !fs.existsSync(path.join(historyDir, name))) {
+        if (!name) { delete meta[id]; changed = true; continue; }
+        // Strip trailing slash for fs.existsSync check
+        const diskName = name.endsWith('/') ? name.slice(0, -1) : name;
+        if (!fs.existsSync(path.join(historyDir, diskName))) {
           delete meta[id];
           changed = true;
         }
@@ -441,7 +503,9 @@ function _uniqueFilename(destDir, baseName) {
  */
 function copyFromHistory(userId, historyFilename, destAbsDir) {
   const { historyDir } = getUserHistoryPaths(userId);
-  const src = path.join(historyDir, historyFilename);
+  // Strip trailing slash for disk lookup
+  const diskName = historyFilename.endsWith('/') ? historyFilename.slice(0, -1) : historyFilename;
+  const src = path.join(historyDir, diskName);
   if (!fs.existsSync(src)) {
     return { success: false, error: `history/${historyFilename} not found.` };
   }
@@ -449,6 +513,14 @@ function copyFromHistory(userId, historyFilename, destAbsDir) {
     return { success: false, error: `Destination directory does not exist.` };
   }
   try {
+    const stat = fs.statSync(src);
+    if (stat.isDirectory()) {
+      // PDF directory — copy the entire tree
+      const finalName = _uniqueFilename(destAbsDir, diskName);
+      const destPath = path.join(destAbsDir, finalName);
+      fs.cpSync(src, destPath, { recursive: true });
+      return { success: true, finalName };
+    }
     const finalName = _uniqueFilename(destAbsDir, historyFilename);
     fs.copyFileSync(src, path.join(destAbsDir, finalName));
     return { success: true, finalName };

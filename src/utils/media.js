@@ -3,6 +3,7 @@ const { SUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
+const { OPENDATALOADER_HYBRID_URL, OPENDATALOADER_HYBRID_TIMEOUT } = require('../config/env');
 const { createLogger } = require('./logger');
 
 const log = createLogger('Media');
@@ -90,18 +91,43 @@ function mediaToContentPart(buffer, mimetype, opts = {}) {
   return part;
 }
 
-async function extractTextFromPdfBuffer(buffer) {
+/**
+ * Extract text and images from a PDF buffer using Heavy/Hybrid AI mode.
+ *
+ * Heavy mode features:
+ *  - OCR for scanned / non-extractable text
+ *  - Complex table extraction (borderless, merged cells)
+ *  - AI-generated picture descriptions (SmolVLM)
+ *
+ * The hybrid backend must be running at HYBRID_URL (default localhost:5002).
+ * Falls back gracefully to Java-only extraction when the backend is down.
+ *
+ * @param {Buffer} buffer - raw PDF bytes
+ * @param {object} [opts]
+ * @param {string} [opts.persistDir] - if set, images are saved here permanently
+ *                                     (used by syncFileToHistory for directory-based storage)
+ * @returns {Promise<{success:boolean, text?:string, pages?:number, assetsDir?:string, error?:string}>}
+ */
+async function extractTextFromPdfBuffer(buffer, opts = {}) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     return { success: false, error: 'Invalid PDF buffer' };
   }
 
+  const HYBRID_URL = OPENDATALOADER_HYBRID_URL;
+  const HYBRID_TIMEOUT = OPENDATALOADER_HYBRID_TIMEOUT;
+
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gemix-pdf-'));
   const inputPdf = path.join(workDir, 'document.pdf');
   const outputDir = path.join(workDir, 'out');
+  // If caller wants images persisted, use their dir; otherwise a temp subdir.
+  const imageDir = opts.persistDir
+    ? path.join(opts.persistDir, 'assets')
+    : path.join(workDir, 'assets');
 
   try {
     await fs.writeFile(inputPdf, buffer);
     await fs.mkdir(outputDir, { recursive: true });
+    await fs.mkdir(imageDir, { recursive: true });
 
     let convert;
     try {
@@ -114,20 +140,35 @@ async function extractTextFromPdfBuffer(buffer) {
 
     await convert([inputPdf], {
       outputDir,
-      format: 'markdown,text,json',
+      format: ['json', 'markdown-with-images'],
+      hybrid: 'docling-fast',
+      hybridMode: 'full',
+      hybridUrl: HYBRID_URL,
+      hybridTimeout: String(HYBRID_TIMEOUT),
+      hybridFallback: true,
+
+      // Image extraction
+      imageOutput: 'external',
+      imageDir,
+      imageFormat: 'png',
+
+      // Table & structure
+      tableMethod: 'cluster',
+      useStructTree: true,
+      includeHeaderFooter: true,
+      detectStrikethrough: true,
+      sanitize: false,
+      threads: '4',
       quiet: true,
     });
 
     const baseName = path.basename(inputPdf, '.pdf');
     const markdownPath = path.join(outputDir, `${baseName}.md`);
-    const textPath = path.join(outputDir, `${baseName}.txt`);
     const jsonPath = path.join(outputDir, `${baseName}.json`);
 
     let text = '';
     if (await _fileExists(markdownPath)) {
       text = await fs.readFile(markdownPath, 'utf8');
-    } else if (await _fileExists(textPath)) {
-      text = await fs.readFile(textPath, 'utf8');
     }
 
     let pages = 0;
@@ -144,10 +185,32 @@ async function extractTextFromPdfBuffer(buffer) {
       return { success: false, error: 'OpenDataLoader returned no text' };
     }
 
-    return { success: true, text: text.trim(), pages };
+    // If images were persisted, rewrite image paths in markdown to use
+    // relative `assets/` references (the markdown-with-images format may
+    // use the absolute imageDir path).
+    if (opts.persistDir) {
+      const absPrefix = imageDir.replace(/\\/g, '/');
+      text = text.split(absPrefix).join('assets');
+    }
+
+    // Determine if there are actual extracted images
+    let hasAssets = false;
+    try {
+      const assetEntries = await fs.readdir(imageDir);
+      hasAssets = assetEntries.length > 0;
+    } catch { /* empty dir or missing — fine */ }
+
+    return {
+      success: true,
+      text: text.trim(),
+      pages,
+      assetsDir: hasAssets ? imageDir : undefined,
+    };
   } catch (err) {
     return { success: false, error: err?.message || String(err) };
   } finally {
+    // Only clean up the temp workDir; if persistDir was used, the assets
+    // directory lives outside workDir and must NOT be deleted.
     await fs.rm(workDir, { recursive: true, force: true }).catch(() => { });
   }
 }

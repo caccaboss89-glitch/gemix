@@ -202,7 +202,37 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return { success: false, error: `Cannot read file "${displayPath}": ${err.message}` };
   }
 
+  // ── PDF directory (created by Heavy/Hybrid parser) ──
+  // PDF history entries are stored as directories with transcription.md + assets/
   if (stat.isDirectory()) {
+    const transcriptionPath = path.join(absolutePath, 'transcription.md');
+    if (fs.existsSync(transcriptionPath)) {
+      let text = fs.readFileSync(transcriptionPath, 'utf-8');
+      const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
+      if (isTruncated) {
+        text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';
+      }
+
+      // List assets if present
+      let assetsInfo = '';
+      const assetsDir = path.join(absolutePath, 'assets');
+      if (fs.existsSync(assetsDir)) {
+        try {
+          const assetFiles = fs.readdirSync(assetsDir);
+          if (assetFiles.length > 0) {
+            assetsInfo = `\n<Assets count="${assetFiles.length}">\n${assetFiles.map(f => `  ${displayPath}assets/${f}`).join('\n')}\n</Assets>`;
+          }
+        } catch { /* ignore */ }
+      }
+
+      const output = `<FileAnalysis path="${displayPath}" type="pdf-transcription"${isTruncated ? ' truncated="true"' : ''}>
+<Transcription>
+${text}
+</Transcription>${assetsInfo}
+</FileAnalysis>${bgWriteViolationWarning}`;
+
+      return { success: true, message: output };
+    }
     return { success: false, error: `Path is a directory, not a file.` };
   }
 
@@ -275,7 +305,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     ];
   }
 
-  // ── PDF ──
+  // ── PDF (raw .pdf file, not a parsed directory) ──
   if (ext === '.pdf') {
     const info = await extractTextFromPdfBuffer(buffer);
     if (!info.success) {

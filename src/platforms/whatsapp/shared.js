@@ -1,4 +1,5 @@
 // src/platforms/whatsapp/shared.js
+const fs = require('fs');
 const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
@@ -17,9 +18,9 @@ const { isSystemMessage } = require('../../config/systemMessages');
 function _isSystemMessage(body) {
   return isSystemMessage(body);
 }
-const { isSupportedMedia, mediaToContentPart, mediaTag, extractTextFromPdfBuffer, buildAttachmentTag } = require('../../utils/media');
+const { isSupportedMedia, mediaToContentPart, mediaTag, buildAttachmentTag } = require('../../utils/media');
 const { normalizeMarkdown } = require('../../utils/text');
-const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
+const { syncFileToHistory, getUserHistoryPaths, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 
 const _MIME_TO_EXT = {
@@ -266,22 +267,23 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
       }
 
       if (mediaType === 'document' && quoted._data?.mimetype === 'application/pdf') {
-        try {
-          const buffer = await fetchBuffer();
-          if (buffer) {
-            const info = await extractTextFromPdfBuffer(buffer);
-            if (!info.success) {
-              prefix = `[In reply to: ${tag}]\n`;
-            } else if (info.pages > MAX_DOC_PAGES) {
-              prefix = `[In reply to: ${tag} (document too long: ${info.pages} pages)]\n`;
-            } else {
-              const docText = info.text ? ` <Transcription>\n${info.text}\n</Transcription>` : '';
+        // PDF is stored as a directory — read the pre-parsed transcription
+        if (syncedPath && syncedPath.endsWith('/')) {
+          try {
+            const { historyDir } = getUserHistoryPaths(userId);
+            const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+            const mdPath = path.join(historyDir, dirName, 'transcription.md');
+            if (fs.existsSync(mdPath)) {
+              const transcription = fs.readFileSync(mdPath, 'utf-8');
+              const docText = ` <Transcription>\n${transcription}\n</Transcription>`;
               prefix = `[In reply to: ${tag}${docText}]\n`;
+            } else {
+              prefix = `[In reply to: ${tag}]\n`;
             }
-          } else {
+          } catch {
             prefix = `[In reply to: ${tag}]\n`;
           }
-        } catch {
+        } else {
           prefix = `[In reply to: ${tag}]\n`;
         }
         return { prefix, mediaParts };
@@ -416,32 +418,32 @@ async function processCurrentMedia(msg, userId) {
 
   try {
     if (mimetype === 'application/pdf') {
-      try {
-        const info = await extractTextFromPdfBuffer(buffer);
-        if (!info.success) {
-          return {
-            skipped: false,
-            transcription: null,
-            mimetype,
-            filename,
-            tag,
-          };
-        }
-        if (info.pages > MAX_DOC_PAGES) {
-          return {
-            skipped: true,
-            tag,
-            reason: `document too long: ${info.pages} pages`,
-          };
-        }
-        return {
-          skipped: false,
-          transcription: info.text ? info.text : null,
-          mimetype,
-          filename,
-          tag,
-        };
-      } catch { }
+      // PDF is already parsed and stored as a directory by syncFileToHistory.
+      // Read the pre-parsed transcription if the directory exists.
+      if (syncedPath && syncedPath.endsWith('/')) {
+        try {
+          const { historyDir } = getUserHistoryPaths(userId);
+          const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+          const mdPath = path.join(historyDir, dirName, 'transcription.md');
+          if (fs.existsSync(mdPath)) {
+            const transcription = fs.readFileSync(mdPath, 'utf-8');
+            return {
+              skipped: false,
+              transcription,
+              mimetype,
+              filename,
+              tag,
+            };
+          }
+        } catch { }
+      }
+      return {
+        skipped: false,
+        transcription: null,
+        mimetype,
+        filename,
+        tag,
+      };
     }
 
     return {
