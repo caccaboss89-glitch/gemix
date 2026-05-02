@@ -39,7 +39,7 @@ module.exports = {
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 8192,
   MAX_TOOL_ROUNDS: 5,
-  MAX_TOOL_ROUNDS_AGENTIC: 10,
+  MAX_TOOL_ROUNDS_AGENTIC: 20,
 
   // Agentic cloud / projects
   MAX_PROJECTS_PER_USER: 10,

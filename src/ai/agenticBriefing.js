@@ -114,6 +114,7 @@ ${skillsBlock}
   <ToolExecution>
   - ALWAYS OPTIMIZE ROUNDS: You MUST chain commands. Never use one round just to set up a project or unlock the toolkit.
   - COMPULSORY SKILLS: If a <Skill> is available for the task, you MUST call \`read_file\` on its <Source> path BEFORE or IN THE SAME ROUND as your first action. NEVER write manual code if a skill exists.
+  - FILE CREATION: NEVER use \`bash\` with \`cat << EOF\` or \`echo\` to create files. ALWAYS use the native \`write_file\` tool to avoid length limits and escaping bugs.
   - CHAINING EXAMPLES:
       * Round 1: \`agentic_unlock\` + \`read_file\` (skill documentation)
       * Round 2: \`bash\` (command: \`gemix-project create ...\`, execution_phase: before_all) + \`write_file\` (your first script) + \`bash\` (command: \`python script.py\`, execution_phase: after_all)
