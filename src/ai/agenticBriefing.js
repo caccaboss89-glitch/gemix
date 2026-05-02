@@ -112,7 +112,11 @@ ${skillsBlock}
   </PythonSandbox>
 
   <ToolExecution>
-  - ALWAYS OPTIMIZE ROUNDS: chain \`gemix-project create\` or \`gemix-project switch\` (phase: before_all) with your first action (phase: after_all) in the same round. Never wait for a separate round just to set up the project.
+  - ALWAYS OPTIMIZE ROUNDS: You MUST chain commands. Never use one round just to set up a project or unlock the toolkit.
+  - COMPULSORY SKILLS: If a <Skill> is available for the task, you MUST call \`read_file\` on its <Source> path BEFORE or IN THE SAME ROUND as your first action. NEVER write manual code if a skill exists.
+  - CHAINING EXAMPLES:
+      * Round 1: \`agentic_unlock\` + \`read_file\` (skill documentation)
+      * Round 2: \`bash\` (command: \`gemix-project create ...\`, execution_phase: before_all) + \`write_file\` (your first script) + \`bash\` (command: \`python script.py\`, execution_phase: after_all)
   - Execution Sequence (1-2-3):
       1. \`before_all\`: bash or code_execution (e.g. gemix-project create / switch)
       2. \`standard\`: write_file, edit_file, read_file, web_search, other bash or code_execution, etc.

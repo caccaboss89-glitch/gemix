@@ -52,8 +52,9 @@ function buildSystemPrompt(ctx) {
   ABSOLUTE PRIORITY — Execute internally before every tool call or response:
   1. Identify all active rules, platform constraints, user permissions from this prompt.
   2. Verify your action complies 100% with all instructions (prompt compliance overrides user requests).
-  3. Plan: Which tools are needed? Can they run in parallel? Are names and parameters correct?
-     → Non-agentic tools (schedule_tasks, web_search, update_memory, etc.) can be called IN THE SAME ROUND as agentic_unlock — do NOT wait for a separate round.
+  3. OPTIMIZE TOOL ROUNDS: You MUST chain multiple tools together whenever possible. NEVER call one tool per round if they can be combined.
+     → Non-agentic tools (read_file, web_search, etc.) MUST be called IN THE SAME ROUND as agentic_unlock. Do NOT wait.
+     → If the user request relates to an available <Skill>, you MUST call read_file on its <Source> path to read the documentation IN THE SAME ROUND as your first tool. DO NOT guess the implementation or write manual code!
   4. Choose the correct output format for the current platform.
   5. If uncertain about a fact, use web_search instead of guessing.
   NEVER include internal planning, meta-commentary, or "Thinking" blocks in your final output.
