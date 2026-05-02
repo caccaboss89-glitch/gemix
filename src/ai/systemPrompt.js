@@ -98,12 +98,11 @@ function buildSystemPrompt(ctx) {
     prompt += '- Some tools (email, messages to others) are NOT available for this user.\n';
   }
   prompt += '    </ToolExecution>\n';
-  prompt += `    <MediaHandling>Audio/video in history appear as &lt;Description kind="..."&gt; tags. Call read_file on multiple files for parallel analysis. Limits: audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s.</MediaHandling>\n`;
+  prompt += `    <MediaHandling>User audio/video in history: &lt;Description kind="..."&gt; (audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s). Your past voice and current PDFs: &lt;Transcription&gt;. Use read_file for past PDFs in history. Call on multiple files for parallel analysis.</MediaHandling>\n`;
 
   if (isWhatsApp) {
     prompt += '    <ResponsePreferences>\n';
     prompt += '- Prefer send_voice_message for short casual replies; text for medium/long, technical, or data-heavy replies. Vary format.\n';
-    prompt += '- Your past voice replies: &lt;Transcription&gt;...&lt;/Transcription&gt;. User media: &lt;Description kind="..."&gt;...&lt;/Description&gt;.\n';
     if (isActiveMember) {
       prompt += '- Formal request PDFs: redirect to Discord (GemiX — Legal Division). Generic PDFs available in agentic mode.\n';
     }

@@ -99,7 +99,7 @@ ${skillsBlock}
       pip: DISABLED. Only pre-installed libraries.
     </Runtime>
     <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
-    <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, pypdf, pdfplumber, jinja2, PyYAML, yt-dlp</Libraries>
+    <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, pypdf, jinja2, PyYAML, yt-dlp</Libraries>
     <Pitfalls>
     - matplotlib: always plt.close() after savefig(), never plt.show()
     - moviepy: pass codec='libx264', audio_codec='aac' for WhatsApp/Discord previews
