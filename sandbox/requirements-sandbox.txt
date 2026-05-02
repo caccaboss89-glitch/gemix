@@ -54,6 +54,7 @@ reportlab==4.2.5
 pypdf==4.2.0
 pdfplumber==0.11.1
 jinja2==3.1.4
+PyYAML==6.0.2
 
 # ── Networking helper (used by AI for controlled APIs, must respect proxy) ──
 requests==2.32.3
