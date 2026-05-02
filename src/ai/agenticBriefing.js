@@ -77,19 +77,17 @@ ${formatSkillsForPrompt(loadSkills())}
   </PythonSandbox>
 
   <ToolExecution>
-    - ALWAYS OPTIMIZE ROUNDS: Chain multiple tools in ONE JSON array.
-    - COMPULSORY SKILLS: If a user request matches a skill (see list below), you **MUST** call \`read_file\` on its \` < Source > \` path immediately. **Do NOT** perform any project work (create, write, bash) in the same round you read the skill for the first time. Read first, then act in the next round.
-    - 1-ROUND PIPELINE (Next Round): After reading the skill, you can Create Project -> Write Files -> Execute in a SINGLE round:
-        1. \`gemix-project create\` (phase: \`before_all\`)
-        2. \`write_file\` / \`edit_file\` (standard phase)
-        3. \`bash\` / \`code_execution\` (phase: \`after_all\`)
-    - OUTPUT HYGIENE: Only place the FINAL user-requested documents in \`output/\`. **NEVER** place intermediate files, logs, auxiliary TeX files, or figures there; use \`temp/\` instead. Pollution of \`output/\` causes unwanted delivery of garbage to the user.
-    - PATH RESOLUTION:
-        * Host tools (\`read_file\`, \`write_file\`, \`edit_file\`): Use \`projects/<current>/code/file\` or \`history/file\`.
-        * Sandbox tools (\`bash\`, \`code_execution\`): The project is already mounted at \` / workspace\`. Use \`code / file\` or \`temp / file\`. NEVER use \` / workspace / projects /...\`.
-    - FILE CREATION: NEVER use \`bash\` (cat/echo) to create files. Use the native \`write_file\` tool.
-    - NO LISTING BLOAT: Avoid \`ls - R\` or \`cat\` on large generated files. Large outputs waste context and can cause delivery errors.
-    - EXECUTION PHASES: 1. before_all (setup) | 2. standard (I/O) | 3. after_all (run/compile).
+    - **GOLDEN RULE 1: READ SKILL FIRST**. If a request matches a skill, you **MUST** call \`read_file\` on its \`<Source>\` path. DO NOT do any other work in that round.
+    - **GOLDEN RULE 2: PATHS**. \`read_file\`, \`write_file\`, \`edit_file\` **ALWAYS** need the full path: \`projects/<slug>/{code|temp|output}/filename\`. NEVER omit the \`path\` argument.
+    - **GOLDEN RULE 3: PROJECT CREATION**. Use \`gemix-project create '{\"name\":\"slug\",\"user_request\":\"...\"}'\`. You **MUST** use single quotes \`'\` around the JSON and double quotes \`"\` inside. Ensure the JSON is valid and complete.
+    - **GOLDEN RULE 4: 1-ROUND PIPELINE**. After reading the skill, you can do everything in ONE round using phases:
+        1. \`before_all\`: \`gemix-project create\`
+        2. \`standard\`: \`write_file\` (use full paths!)
+        3. \`after_all\`: \`bash\` (execution)
+    - **GOLDEN RULE 5: OUTPUT HYGIENE**. Only put the FINAL PDF/Video in \`output/\`. Put figures, logs, and temp files in \`temp/\`. Garbage in \`output/\` results in garbage delivered to the user.
+    - **GOLDEN RULE 6: SYMPY**. Use \`sp.symbols('hbar')\` or sottomodules like \`sympy.physics.units\`. \`sp.hbar\` does NOT exist.
+    - **SANDBOX PATHS**: Inside \`bash\` or \`code_execution\`, the project is already at \`/workspace\`. Use \`code/file.py\` or \`temp/data.json\`.
+    - **EXECUTION PHASES**: 1. \`before_all\` (setup) | 2. \`standard\` (I/O) | 3. \`after_all\` (run/compile).
   </ToolExecution>
 </AgenticToolkit>`;
 }
