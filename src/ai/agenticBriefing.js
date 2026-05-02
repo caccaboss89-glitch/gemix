@@ -70,12 +70,12 @@ function buildAgenticBriefing(ctx = {}) {
       Commands:
       - list
       - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}'
-      - switch &lt;slug&gt;
+      - switch <slug>
       - quota
-      - delete &lt;slug&gt; --confirmed  # ASK user for confirmation
-      - cleanup [&lt;slug_default_current&gt;] &lt;subdir&gt;...  # subdirs: temp|output|code
-      - copy-to-permanent &lt;history_filename&gt;
-      - copy-to-project &lt;source&gt; [&lt;subdir_default_temp&gt;]
+      - delete <slug> --confirmed  # ASK user for confirmation
+      - cleanup [<slug_default_current>] <subdir>...  # subdirs: temp|output|code
+      - copy-to-permanent <history_filename>
+      - copy-to-project <source> [<subdir_default_temp>]
     </ProjectManagement>
     <FileDelivery>
       CRITICAL: output/ files are AUTO-DELIVERED (arrive AFTER (below) your text response). Do NOT call attach_file for them.
@@ -108,14 +108,14 @@ ${skillsBlock}
     - yt-dlp: MUST use bash CLI directly. NEVER use python -c or import yt_dlp. Always -o '/workspace/output/%(title)s.%(ext)s', limit resolution (-f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"). Only videos, no images. No proxy args.
       If yt-dlp fails with a network/connection error (sandbox proxy not working), do NOT retry — report via bug_report and inform the user.
     - mpmath: use \`mpmath.mp.dps\` for precision (avoid partial imports)
+    - Python Strings: ALWAYS use raw strings (r"...") for LaTeX equations, regex, or paths containing backslashes to avoid \`SyntaxWarning: invalid escape sequence\`.
     </Pitfalls>
   </PythonSandbox>
 
   <ToolExecution>
   - ALWAYS OPTIMIZE ROUNDS: You MUST chain commands. Never use one round just to set up a project or unlock the toolkit.
-  - COMPULSORY SKILLS: If a &lt;Skill&gt; is available, you MUST output a \`read_file\` call for its &lt;Source&gt; path. If you haven't read it yet, DO IT NOW alongside your next tool call. DO NOT write manual scripts or guess code before reading the skill.
+  - COMPULSORY SKILLS: If a <Skill> is available, you MUST output a \`read_file\` call for its <Source> path IN THE SAME JSON ARRAY as \`agentic_unlock\`. DO NOT write manual scripts.
   - FILE CREATION: NEVER use \`bash\` with \`cat << EOF\` or \`echo\` to create files. ALWAYS use the native \`write_file\` tool to avoid length limits and escaping bugs.
-  - STATE DEPENDENCY EXCEPTION: You are GUARANTEED that if you call \`bash\` (project create) and \`write_file\` simultaneously, the system will execute the bash command first. DO NOT separate them into two rounds!
   - CHAINING EXAMPLES:
       * Round 1: \`agentic_unlock\` + \`read_file\` (skill documentation)
       * Round 2: \`bash\` (command: \`gemix-project create ...\`, execution_phase: before_all) + \`write_file\` (your first script) + \`bash\` (command: \`python script.py\`, execution_phase: after_all)
