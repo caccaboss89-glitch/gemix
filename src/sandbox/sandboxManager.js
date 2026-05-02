@@ -130,6 +130,7 @@ async function _spawnContainer(userCtx, projectName) {
   const historyDir = getHistoryDir(userCtx);
   const permanentDir = getPermanentDir(userCtx);
   const searchedDir = getSearchedImagesDir(userCtx);
+  const skillsDir = require('../utils/userPaths').SKILLS_DIR;
 
   for (const p of [projectDir, historyDir, permanentDir, searchedDir]) {
     if (fs.existsSync(p)) _ensureOwnership(p);
@@ -176,6 +177,7 @@ async function _spawnContainer(userCtx, projectName) {
         `${historyDir}:/readonly/history:ro`,
         `${permanentDir}:/readonly/permanent:ro`,
         `${searchedDir}:/readonly/searched_images:ro`,
+        `${skillsDir}:/readonly/skills:ro`,
       ],
       RestartPolicy: { Name: 'no' },
     },

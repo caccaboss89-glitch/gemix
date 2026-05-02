@@ -17,27 +17,35 @@ function loadSkills() {
   }
 
   try {
-    const files = fs.readdirSync(SKILLS_DIR);
+    const entries = fs.readdirSync(SKILLS_DIR, { withFileTypes: true });
     const skills = [];
 
-    for (const file of files) {
-      if (file.endsWith('.md')) {
-        const filePath = path.join(SKILLS_DIR, file);
-        const content = fs.readFileSync(filePath, 'utf-8');
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const skillName = entry.name;
+        const filePath = path.join(SKILLS_DIR, skillName, 'SKILL.md');
+        
+        if (fs.existsSync(filePath)) {
+          const content = fs.readFileSync(filePath, 'utf-8');
 
-        // Extract YAML frontmatter
-        const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-        if (match) {
-          const yaml = match[1];
-          const nameMatch = yaml.match(/^name:\s*(.*)$/m);
-          const descMatch = yaml.match(/^description:\s*(.*)$/m);
+          // Extract YAML frontmatter
+          const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+          if (match) {
+            const yaml = match[1];
+            const nameMatch = yaml.match(/^name:\s*(.*)$/m);
+            const descMatch = yaml.match(/^description:\s*(.*)$/m);
 
-          if (nameMatch && descMatch) {
-            skills.push({
-              name: nameMatch[1].trim(),
-              description: descMatch[1].trim(),
-              filename: file
-            });
+            if (nameMatch && descMatch) {
+              const parsedName = nameMatch[1].trim();
+              if (parsedName !== skillName) {
+                log.warn(`Skill folder name '${skillName}' does not match name in frontmatter '${parsedName}'`);
+              }
+              skills.push({
+                name: parsedName,
+                description: descMatch[1].trim(),
+                filename: `${skillName}/SKILL.md`
+              });
+            }
           }
         }
       }
@@ -60,7 +68,7 @@ function formatSkillsForPrompt(skills) {
   }
 
   let xml = '  <Skills>\n';
-  xml += '    <Instruction>If a skill matches the user request, call read_file on "skills:&lt;name&gt;.md" to get full technical instructions before proceeding.</Instruction>\n';
+  xml += '    <Instruction>If a skill matches the user request, call read_file on the path provided in &lt;Source&gt; to get full technical instructions before proceeding.</Instruction>\n';
   for (const skill of skills) {
     xml += `    <Skill name="${skill.name}">\n      <Description>${skill.description}</Description>\n      <Source>skills:${skill.filename}</Source>\n    </Skill>\n`;
   }

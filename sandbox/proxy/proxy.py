@@ -48,13 +48,13 @@ DEFAULT_ALLOWED = [
     ".polygon.io",
     # Astropy / astroquery common data servers
     "data.astropy.org",
-    ".stsci.edu",        # archive.stsci.edu, mast.stsci.edu, ...
-    ".ipac.caltech.edu", # ned.ipac.caltech.edu, irsa.ipac.caltech.edu
-    ".u-strasbg.fr",     # CDS mirrors (legacy)
-    ".cds.unistra.fr",   # CDS (SIMBAD, VizieR, Aladin)
-    ".gsfc.nasa.gov",    # heasarc, skyview
-    ".eso.org",          # ESO archive
-    ".noirlab.edu",      # NOIRLab data archive
+    ".stsci.edu",  # archive.stsci.edu, mast.stsci.edu, ...
+    ".ipac.caltech.edu",  # ned.ipac.caltech.edu, irsa.ipac.caltech.edu
+    ".u-strasbg.fr",  # CDS mirrors (legacy)
+    ".cds.unistra.fr",  # CDS (SIMBAD, VizieR, Aladin)
+    ".gsfc.nasa.gov",  # heasarc, skyview
+    ".eso.org",  # ESO archive
+    ".noirlab.edu",  # NOIRLab data archive
     # YouTube / Video Delivery (for yt-dlp)
     ".youtube.com",
     ".googlevideo.com",
@@ -85,7 +85,9 @@ ALLOWED_HOSTS: list[str] = _parse_allowlist(os.environ.get("ALLOWED_HOSTS"))
 PROXY_PORT: int = int(os.environ.get("PROXY_PORT", "8080"))
 TUNNEL_TIMEOUT_S: int = int(os.environ.get("TUNNEL_TIMEOUT_S", "120"))
 MAX_UPSTREAM_CONNECT_S: int = int(os.environ.get("UPSTREAM_CONNECT_TIMEOUT_S", "15"))
-GEMIX_NOTIFY_URL: str | None = os.environ.get("GEMIX_NOTIFY_URL")  # e.g. http://host.docker.internal:9999/notify
+GEMIX_NOTIFY_URL: str | None = os.environ.get(
+    "GEMIX_NOTIFY_URL"
+)  # e.g. http://host.docker.internal:9999/notify
 
 # Per-source cooldown for admin notifications (avoid spam)
 _notify_cooldowns: dict[str, float] = {}
@@ -153,6 +155,7 @@ def _log(level: str, **fields) -> None:
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "GemixSandboxProxy/1.0"
+
     # Silence default noisy per-request log
     def log_message(self, format, *args):  # noqa: N802 (BaseHTTPRequestHandler API)
         return
@@ -178,7 +181,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # Connect upstream
         try:
-            upstream = socket.create_connection((host, port), timeout=MAX_UPSTREAM_CONNECT_S)
+            upstream = socket.create_connection(
+                (host, port), timeout=MAX_UPSTREAM_CONNECT_S
+            )
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
@@ -193,8 +198,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self._pipe(self.connection, upstream)
         finally:
-            try: upstream.close()
-            except Exception: pass
+            try:
+                upstream.close()
+            except Exception:
+                pass
 
     # ── Plain HTTP forwarding ──────────────────────────────────────────────
     def _forward_http(self) -> None:
@@ -216,7 +223,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # Build upstream request
         try:
-            upstream = socket.create_connection((host, port), timeout=MAX_UPSTREAM_CONNECT_S)
+            upstream = socket.create_connection(
+                (host, port), timeout=MAX_UPSTREAM_CONNECT_S
+            )
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
@@ -246,19 +255,40 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         try:
             upstream.sendall(req_data)
-            _log("info", event="allow_http", method=self.command, host=host, body_bytes=len(body))
+            _log(
+                "info",
+                event="allow_http",
+                method=self.command,
+                host=host,
+                body_bytes=len(body),
+            )
             self._pipe(upstream, self.connection, close_other=True)
         finally:
-            try: upstream.close()
-            except Exception: pass
+            try:
+                upstream.close()
+            except Exception:
+                pass
 
-    def do_GET(self):     self._forward_http()  # noqa: N802
-    def do_POST(self):    self._forward_http()  # noqa: N802
-    def do_PUT(self):     self._forward_http()  # noqa: N802
-    def do_DELETE(self):  self._forward_http()  # noqa: N802
-    def do_HEAD(self):    self._forward_http()  # noqa: N802
-    def do_PATCH(self):   self._forward_http()  # noqa: N802
-    def do_OPTIONS(self): self._forward_http()  # noqa: N802
+    def do_GET(self):
+        self._forward_http()  # noqa: N802
+
+    def do_POST(self):
+        self._forward_http()  # noqa: N802
+
+    def do_PUT(self):
+        self._forward_http()  # noqa: N802
+
+    def do_DELETE(self):
+        self._forward_http()  # noqa: N802
+
+    def do_HEAD(self):
+        self._forward_http()  # noqa: N802
+
+    def do_PATCH(self):
+        self._forward_http()  # noqa: N802
+
+    def do_OPTIONS(self):
+        self._forward_http()  # noqa: N802
 
     # ── Helpers ────────────────────────────────────────────────────────────
     def _reject(self, code: int, reason: str) -> None:
@@ -273,7 +303,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
-    def _pipe(self, a: socket.socket, b: socket.socket, close_other: bool = False) -> None:
+    def _pipe(
+        self, a: socket.socket, b: socket.socket, close_other: bool = False
+    ) -> None:
         """Bidirectional byte relay until one side closes or timeout expires."""
         a.settimeout(TUNNEL_TIMEOUT_S)
         b.settimeout(TUNNEL_TIMEOUT_S)
@@ -288,13 +320,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             finally:
-                try: dst.shutdown(socket.SHUT_WR)
-                except Exception: pass
+                try:
+                    dst.shutdown(socket.SHUT_WR)
+                except Exception:
+                    pass
 
         t1 = threading.Thread(target=copy, args=(a, b), daemon=True)
         t2 = threading.Thread(target=copy, args=(b, a), daemon=True)
-        t1.start(); t2.start()
-        t1.join(); t2.join()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):

@@ -34,6 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
         curl \
         wget \
+        ghostscript \
+        texlive-latex-recommended \
+        texlive-latex-extra \
+        texlive-fonts-recommended \
+        texlive-fonts-extra \
+        texlive-science \
+        cm-super \
+        dvipng \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ──

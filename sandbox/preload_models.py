@@ -4,6 +4,7 @@ so the sandbox is fully offline-ready (no download at runtime).
 
 Executed once at Docker build time.
 """
+
 import os
 import sys
 
@@ -29,9 +30,11 @@ def preload_matplotlib_font_cache() -> None:
     try:
         import matplotlib  # type: ignore
         import matplotlib.pyplot as plt  # noqa: F401
+
         matplotlib.get_cachedir()
         # Force font cache build
         from matplotlib import font_manager  # type: ignore
+
         font_manager.findSystemFonts()
         print("[preload] matplotlib font cache built.", flush=True)
     except Exception as e:

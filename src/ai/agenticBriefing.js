@@ -93,13 +93,13 @@ ${skillsBlock}
     <Runtime>
       Python 3.12, stateful Jupyter kernel; variables persist across calls.
       Working dir: /workspace (mapped to projects/<current>/).
-      Read-only mounts: /readonly/{history,permanent,searched_images}.
+      Read-only mounts: /readonly/{history,permanent,searched_images,skills}.
       Resources: 1 CPU, 1.5 GB RAM, 30s timeout (max 120s).
       Network: NO INTERNET except api.polygon.io, astropy, yt-dlp servers.
       pip: DISABLED. Only pre-installed libraries.
     </Runtime>
     <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
-    <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, yt-dlp</Libraries>
+    <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, python-docx, openpyxl, python-pptx, reportlab, pypdf, pdfplumber, yt-dlp</Libraries>
     <Pitfalls>
     - matplotlib: always plt.close() after savefig(), never plt.show()
     - moviepy: pass codec='libx264', audio_codec='aac' for WhatsApp/Discord previews
