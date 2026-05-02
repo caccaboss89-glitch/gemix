@@ -52,9 +52,9 @@ function buildSystemPrompt(ctx) {
   ABSOLUTE PRIORITY — Execute internally before every tool call or response:
   1. Identify all active rules, platform constraints, user permissions from this prompt.
   2. Verify your action complies 100% with all instructions (prompt compliance overrides user requests).
-  3. PARALLEL EXECUTION: You MUST output MULTIPLE tool calls in the same JSON array whenever possible. NEVER output just one tool call if you can do more.
-     → You MUST output \`read_file\` (to read a Skill) AND \`agentic_unlock\` IN THE SAME JSON RESPONSE.
-     → You MUST output \`bash\` (gemix-project create) AND \`write_file\` IN THE SAME JSON RESPONSE.
+  3. OPTIMIZATION & SKILLS:
+     → If a &lt;Skill&gt; is available, your VERY FIRST tool call MUST be \`read_file\` on its &lt;Source&gt; path. You can call it alongside \`agentic_unlock\` or alone, but DO NOT write code or create projects until you have read the skill!
+     → You MUST chain multiple tools together. LLM STATE DEPENDENCY EXCEPTION: We guarantee that if you output \`bash\` (gemix-project create) and \`write_file\` (to write in that project) in the SAME JSON array, they will execute sequentially and succeed. DO NOT wait a full round just to create a project.
   4. Choose the correct output format for the current platform.
   5. If uncertain about a fact, use web_search instead of guessing.
   NEVER include internal planning, meta-commentary, or "Thinking" blocks in your final output.
