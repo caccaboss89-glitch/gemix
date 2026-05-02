@@ -24,7 +24,7 @@ function loadSkills() {
       if (entry.isDirectory()) {
         const skillName = entry.name;
         const filePath = path.join(SKILLS_DIR, skillName, 'SKILL.md');
-        
+
         if (fs.existsSync(filePath)) {
           const content = fs.readFileSync(filePath, 'utf-8');
 
@@ -72,7 +72,7 @@ function formatSkillsForPrompt(skills) {
   }
 
   let xml = '  <Skills>\n';
-  xml += '    <Instruction>CRITICAL RULE: If a skill matches the user request, you MUST call `read_file` on its <Source> path IMMEDIATELY. DO NOT write any script, DO NOT guess the code, and DO NOT use `bash` or `write_file` before you have read the skill documentation.</Instruction>\n';
+  xml += '    <Instruction>CRITICAL: If a skill matches the request, you MUST call `read_file` on its &lt;Source&gt; path IMMEDIATELY. DO NOT write manual scripts or guess code before reading the documentation.</Instruction>\n';
   for (const skill of skills) {
     xml += `    <Skill name="${skill.name}">\n      <Description>${skill.description}</Description>\n      <Source>skills:${skill.filename}</Source>\n    </Skill>\n`;
   }

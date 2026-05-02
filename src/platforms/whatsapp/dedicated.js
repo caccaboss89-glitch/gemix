@@ -28,6 +28,7 @@ function initDedicatedWhatsApp() {
       executablePath: process.platform === 'linux' ? '/usr/bin/chromium' : undefined,
       headless: true,
       args: PUPPETEER_ARGS,
+      protocolTimeout: 120000,
     },
     qr_timeout: WA_QR_TIMEOUT,
   });
