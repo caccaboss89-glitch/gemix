@@ -28,8 +28,8 @@ function loadSkills() {
         if (fs.existsSync(filePath)) {
           const content = fs.readFileSync(filePath, 'utf-8');
 
-          // Extract YAML frontmatter
-          const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+          // Extract YAML frontmatter (more robust regex)
+          const match = content.match(/^\s*---\r?\n([\s\S]*?)\r?\n---/);
           if (match) {
             const yaml = match[1];
             const nameMatch = yaml.match(/^name:\s*(.*)$/m);
@@ -45,7 +45,11 @@ function loadSkills() {
                 description: descMatch[1].trim(),
                 filename: `${skillName}/SKILL.md`
               });
+            } else {
+              log.warn(`Skill at '${filePath}' missing 'name' or 'description' in frontmatter`);
             }
+          } else {
+            log.warn(`Skill at '${filePath}' has invalid or missing frontmatter (must start with ---)`);
           }
         }
       }

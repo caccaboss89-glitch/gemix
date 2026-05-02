@@ -514,7 +514,7 @@ async function handleMessage(ctx) {
           }
           const briefing = buildAgenticBriefing({
             currentProject: _briefingProject,
-            lastProjectUsed: getLastProject(userCtx) || ctx.lastProjectUsed || null,
+            lastProjectUsed: (await getLastProject(userCtx)) || ctx.lastProjectUsed || null,
             projects: ctx.projects || [],
             projectFiles: _projectFiles,
             readmeContent: _readmeContent,
