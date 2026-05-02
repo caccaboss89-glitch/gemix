@@ -113,7 +113,7 @@ ${skillsBlock}
 
   <ToolExecution>
   - ALWAYS OPTIMIZE ROUNDS: You MUST chain commands. Never use one round just to set up a project or unlock the toolkit.
-  - COMPULSORY SKILLS: If a <Skill> is available for the task, you MUST call \`read_file\` on its <Source> path BEFORE or IN THE SAME ROUND as your first action. NEVER write manual code if a skill exists.
+  - COMPULSORY SKILLS: If a <Skill> is available, you MUST output a \`read_file\` call for its <Source> path IN THE SAME JSON ARRAY as \`agentic_unlock\`. DO NOT write manual scripts.
   - FILE CREATION: NEVER use \`bash\` with \`cat << EOF\` or \`echo\` to create files. ALWAYS use the native \`write_file\` tool to avoid length limits and escaping bugs.
   - CHAINING EXAMPLES:
       * Round 1: \`agentic_unlock\` + \`read_file\` (skill documentation)

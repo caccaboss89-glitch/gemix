@@ -52,9 +52,9 @@ function buildSystemPrompt(ctx) {
   ABSOLUTE PRIORITY — Execute internally before every tool call or response:
   1. Identify all active rules, platform constraints, user permissions from this prompt.
   2. Verify your action complies 100% with all instructions (prompt compliance overrides user requests).
-  3. OPTIMIZE TOOL ROUNDS: You MUST chain multiple tools together whenever possible. NEVER call one tool per round if they can be combined.
-     → Non-agentic tools (read_file, web_search, etc.) MUST be called IN THE SAME ROUND as agentic_unlock. Do NOT wait.
-     → If the user request relates to an available <Skill>, you MUST call read_file on its <Source> path to read the documentation IN THE SAME ROUND as your first tool. DO NOT guess the implementation or write manual code!
+  3. PARALLEL EXECUTION: You MUST output MULTIPLE tool calls in the same JSON array whenever possible. NEVER output just one tool call if you can do more.
+     → You MUST output \`read_file\` (to read a Skill) AND \`agentic_unlock\` IN THE SAME JSON RESPONSE.
+     → You MUST output \`bash\` (gemix-project create) AND \`write_file\` IN THE SAME JSON RESPONSE.
   4. Choose the correct output format for the current platform.
   5. If uncertain about a fact, use web_search instead of guessing.
   NEVER include internal planning, meta-commentary, or "Thinking" blocks in your final output.
