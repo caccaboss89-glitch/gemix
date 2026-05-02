@@ -78,13 +78,16 @@ ${formatSkillsForPrompt(loadSkills())}
 
   <ToolExecution>
     - ALWAYS OPTIMIZE ROUNDS: Chain multiple tools in ONE JSON array.
-    - COMPULSORY SKILLS: If a skill matches, you MUST call \`read_file\` on its <Source> path IN THE SAME JSON RESPONSE as \`agentic_unlock\`.
+    - 1-ROUND PIPELINE: You can Create Project -> Write Files -> Execute in a SINGLE round:
+        1. \`gemix-project create\` (phase: \`before_all\`)
+        2. \`write_file\` (e.g., \`data.json\` for PDF) (standard phase)
+        3. \`bash\` (e.g., \`unified_pdf_generator.py --data-file temp/data.json\`) (phase: \`after_all\`)
     - PATH RESOLUTION:
         * Host tools (\`read_file\`, \`write_file\`, \`edit_file\`): Use \`projects/<current>/code/file\` or \`history/file\`.
         * Sandbox tools (\`bash\`, \`code_execution\`): The project is already mounted at \`/workspace\`. Use \`code/file\` or \`temp/file\`. NEVER use \`/workspace/projects/...\`.
     - PARALLEL VERIFICATION: If you MUST verify a file (existence or content), include the check (\`ls\`, \`cat\`, \`read_file\`) IN THE SAME ROUND as the creation tool.
     - FILE CREATION: NEVER use \`bash\` (cat/echo) to create files. Use the native \`write_file\` tool.
-    - EXECUTION PHASES: 1. before_all (create/switch) | 2. standard (write/read) | 3. after_all (run/compile).
+    - EXECUTION PHASES: 1. before_all (setup) | 2. standard (I/O) | 3. after_all (run/compile).
   </ToolExecution>
 </AgenticToolkit>`;
 }
