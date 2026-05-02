@@ -78,15 +78,17 @@ ${formatSkillsForPrompt(loadSkills())}
 
   <ToolExecution>
     - ALWAYS OPTIMIZE ROUNDS: Chain multiple tools in ONE JSON array.
-    - 1-ROUND PIPELINE: You can Create Project -> Write Files -> Execute in a SINGLE round:
+    - COMPULSORY SKILLS: If a user request matches a skill (see list below), you **MUST** call \`read_file\` on its \` < Source > \` path immediately. **Do NOT** perform any project work (create, write, bash) in the same round you read the skill for the first time. Read first, then act in the next round.
+    - 1-ROUND PIPELINE (Next Round): After reading the skill, you can Create Project -> Write Files -> Execute in a SINGLE round:
         1. \`gemix-project create\` (phase: \`before_all\`)
-        2. \`write_file\` (e.g., \`data.json\` for PDF) (standard phase)
-        3. \`bash\` (e.g., \`unified_pdf_generator.py --data-file temp/data.json\`) (phase: \`after_all\`)
+        2. \`write_file\` / \`edit_file\` (standard phase)
+        3. \`bash\` / \`code_execution\` (phase: \`after_all\`)
+    - OUTPUT HYGIENE: Only place the FINAL user-requested documents in \`output/\`. **NEVER** place intermediate files, logs, auxiliary TeX files, or figures there; use \`temp/\` instead. Pollution of \`output/\` causes unwanted delivery of garbage to the user.
     - PATH RESOLUTION:
         * Host tools (\`read_file\`, \`write_file\`, \`edit_file\`): Use \`projects/<current>/code/file\` or \`history/file\`.
-        * Sandbox tools (\`bash\`, \`code_execution\`): The project is already mounted at \`/workspace\`. Use \`code/file\` or \`temp/file\`. NEVER use \`/workspace/projects/...\`.
-    - PARALLEL VERIFICATION: If you MUST verify a file (existence or content), include the check (\`ls\`, \`cat\`, \`read_file\`) IN THE SAME ROUND as the creation tool.
+        * Sandbox tools (\`bash\`, \`code_execution\`): The project is already mounted at \` / workspace\`. Use \`code / file\` or \`temp / file\`. NEVER use \` / workspace / projects /...\`.
     - FILE CREATION: NEVER use \`bash\` (cat/echo) to create files. Use the native \`write_file\` tool.
+    - NO LISTING BLOAT: Avoid \`ls - R\` or \`cat\` on large generated files. Large outputs waste context and can cause delivery errors.
     - EXECUTION PHASES: 1. before_all (setup) | 2. standard (I/O) | 3. after_all (run/compile).
   </ToolExecution>
 </AgenticToolkit>`;

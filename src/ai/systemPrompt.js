@@ -4,7 +4,7 @@ const { ACTIVE_MEMBERS } = require('../config/members');
 const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, MAINTENANCE_MODE, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../config/constants');
 const { escapeXml } = require('../utils/xmlEscape');
 
-const WA_FORMATTING = 'Use ONLY WhatsApp markdown: *bold* _italic_ ~strike~ `code` > citation. Do NOT cite web search sources unless requested.';
+const WA_FORMATTING = 'Use ONLY WhatsApp markdown: *bold* _italic_ ~strike~ `code` > citation. Do NOT use other, do NOT cite web search sources unless requested.';
 
 function buildSystemPrompt(ctx) {
   const now = getRomeTime();
