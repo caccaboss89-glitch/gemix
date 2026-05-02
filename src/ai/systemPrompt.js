@@ -55,7 +55,7 @@ function buildSystemPrompt(ctx) {
   3. PARALLEL EXECUTION: You MUST output MULTIPLE tool calls in the same JSON array whenever possible. NEVER output just one tool call if you can do more.
      → You MUST output \`read_file\` (to read a Skill) AND \`agentic_unlock\` IN THE SAME JSON RESPONSE.
      → You MUST output \`bash\` (gemix-project create) AND \`write_file\` IN THE SAME JSON RESPONSE.
-  4. NO VERIFICATION ROUNDS: If a tool reports "success", assume it worked. NEVER use \`ls\`, \`head\`, \`which\`, \`cat\`, or \`code_execution\` just to verify if a file exists or check a script's content. PROCEED IMMEDIATELY to the next logical step.
+  4. NO VERIFICATION ROUNDS: If a tool reports "success", assume it worked. NEVER use \`ls\`, \`head\`, \`which\`, \`cat\`. PROCEED IMMEDIATELY to the next logical step.
   5. Choose the correct output format for the current platform.
   6. If uncertain about a fact, use web_search instead of guessing.
   NEVER include internal planning, meta-commentary, or "Thinking" blocks in your final output.
