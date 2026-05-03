@@ -81,13 +81,19 @@ ${formatSkillsForPrompt(loadSkills())}
     - **GOLDEN RULE 2: PATHS**. \`read_file\`, \`write_file\`, \`edit_file\` **ALWAYS** need the full path: \`projects/<slug>/{code|temp|output}/filename\`. NEVER omit the \`path\` argument.
     - **GOLDEN RULE 3: PROJECT CREATION**. Use \`gemix-project create '{\"name\":\"slug\",\"user_request\":\"...\"}'\`. You **MUST** use single quotes \`'\` around the JSON and double quotes \`"\` inside. Ensure the JSON is valid and complete.
     - **GOLDEN RULE 4: 1-ROUND PIPELINE**. After reading the skill, you can do everything in ONE round using phases:
-        1. \`before_all\`: \`gemix-project create\`
-        2. \`standard\`: \`write_file\` (use full paths!)
-        3. \`after_all\`: \`bash\` (execution)
+        1. \`before_all\`: \`bash\` (to create project OR generate snippets/files needed by \`write_file\`)
+        2. \`standard\`: \`write_file\` / \`edit_file\` (to create data JSONs or main templates)
+        3. \`after_all\`: \`bash\` / \`code_execution\` (to compile, run, or verify)
     - **GOLDEN RULE 5: OUTPUT HYGIENE**. Only put the FINAL PDF/Video in \`output/\`. Put figures, logs, and temp files in \`temp/\`. Garbage in \`output/\` results in garbage delivered to the user.
-    - **GOLDEN RULE 6: SYMPY**. Use \`sp.symbols('hbar')\` or sottomodules like \`sympy.physics.units\`. \`sp.hbar\` does NOT exist.
+    - **GOLDEN RULE 6: SYMPY**. Use \`sp.symbols('hbar')\` or \`sympy.physics.units\`. \`sp.hbar\` does NOT exist. NEVER use \`from sympy import hbar\`; constants must be imported from \`sympy.physics.quantum.constants\`.
     - **SANDBOX PATHS**: Inside \`bash\` or \`code_execution\`, the project is already at \`/workspace\`. Use \`code/file.py\` or \`temp/data.json\`.
-    - **EXECUTION PHASES**: 1. \`before_all\` (setup) | 2. \`standard\` (I/O) | 3. \`after_all\` (run/compile).
+    - **EXECUTION PHASES**: 
+        - \`before_all\` (Phase 1): Setup/Preparation (e.g., \`gemix-project create\`, \`latex_helper.py\` to create snippets).
+        - \`standard\` (Phase 2): I/O (e.g., \`write_file\`). This phase runs AFTER Phase 1.
+        - \`after_all\` (Phase 3 - DEFAULT for \`bash\` / \`code_execution\`): Execution/Compilation (e.g., \`unified_pdf_generator.py\`). This runs AFTER Phase 2.
+    - **CRITICAL: ROUND OUTPUT DEPENDENCIES**.
+        - You **CANNOT** use the text output (stdout) of tool A as an argument for tool B in the same round. If tool B needs text from tool A, use TWO rounds.
+        - You **CAN** use a **FILE** created by tool A as input for tool B in the same round by putting tool A in a previous phase (\`before_all\` → \`standard\` → \`after_all\`).
   </ToolExecution>
 </AgenticToolkit>`;
 }

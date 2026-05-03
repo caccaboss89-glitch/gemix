@@ -24,7 +24,8 @@ function buildSystemPrompt(ctx) {
   2. PARALLEL EXECUTION: You MUST output MULTIPLE tool calls in the same JSON array whenever possible.
      → REQUIRED CHAIN: Output \`read_file\` (for a Skill) AND \`agentic_unlock\` in the SAME first response.
      → REQUIRED CHAIN: Output \`bash\` (project create) AND \`write_file\` in the SAME response.
-  3. PARALLEL VERIFICATION: Never waste a standalone round to verify files. If you MUST verify existence or content (ls, cat, read_file), run the check IN THE SAME ROUND as the tool that creates/executes it.
+     → AGENTIC PIPELINES: Use \`execution_phase\` (\`before_all\`, \`after_all\`) to chain tools that depend on each other's files (see <AgenticToolkit>).
+  3. PARALLEL VERIFICATION: Never waste a standalone round to verify files. If you MUST verify existence or content (ls, cat, read_file), run the check IN THE SAME ROUND as the tool that creates/executes it. Use \`after_all\` for verification tools.
   4. NO META: Do NOT include internal planning, "Thinking" blocks, or intermediate reports in final output.
   </CriticalRule>\n`;
 
