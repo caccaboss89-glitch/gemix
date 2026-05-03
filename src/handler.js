@@ -464,11 +464,30 @@ async function handleMessage(ctx) {
         // Reorder: file-creation tools first, execution tools last so the AI
         // can write files and run them in the same round.
         const _orderedCalls = orderToolCalls(assistantMsg.tool_calls);
+        // ── Tool whitelist enforcement ──────────────────────────────────────
+        // Build a Set of tool names the AI is actually allowed to call this
+        // round. Any hallucinated tool name outside this set is silently
+        // rejected with a clear error instead of falling through to the
+        // executor (which would run it anyway if the name matched a case).
+        const _allowedToolNames = new Set(tools.map(t => t.function?.name).filter(Boolean));
         for (let i = 0; i < _orderedCalls.length; i++) {
           const tc = _orderedCalls[i];
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
             log.warn(`   ⚠️ Tool loop interrupted: a tool already produced the final response`);
             break;
+          }
+
+          if (!_allowedToolNames.has(tc.function.name)) {
+            log.warn(`   ⛔ Tool "${tc.function.name}" not in current allowed list — rejected`);
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({
+                success: false,
+                error: `Tool "${tc.function.name}" is not available in the current context. Call agentic_unlock first to access the full agentic toolkit, then retry.`,
+              }),
+            });
+            continue;
           }
 
           if (PARALLEL_SAFE_TOOL_NAMES.has(tc.function.name)) {

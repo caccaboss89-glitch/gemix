@@ -89,7 +89,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'Unlock agentic environment (Python sandbox, project management, bash, file generation/editing). Call for: computation, file creation/conversion, YouTube downloads, OCR, charts, data work, archives. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
+  description: 'MUST be called ALONE (no other tools in the same call) BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, cloud storage, project management, advance computations, yt-dlp downloads, OCR, charts, data work, finance... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
   properties: {},
 });
 
