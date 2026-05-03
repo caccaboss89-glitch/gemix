@@ -70,7 +70,8 @@ ${formatSkillsForPrompt(loadSkills())}
     <Pitfalls>
       - Project Management: \`gemix-project\` commands MUST run as a standalone bash command. NO shell concatenation (\`&&\`, \`||\`, \`;\`, \`|\`, redirection). Concatenation causes an immediate error.
       - Atomic Creation: If \`gemix-project create\` fails in a round (e.g., due to invalid JSON or shell concatenation), ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
-      - SymPy: NEVER use \`sympy.hbar\` or \`from sympy import hbar\`. Use \`sp.symbols('hbar')\` for a generic symbol, or \`from sympy.physics.quantum.constants import hbar\` for the physical constant.
+      - SymPy Syntax: While \`latex_helper.py sympy\` supports \`=\`, prefer passing the mathematical expression alone. NEVER use \`sympy.hbar\` or \`from sympy import hbar\`. Use \`sp.symbols('hbar')\` for a generic symbol, or \`from sympy.physics.quantum.constants import hbar\` for the physical constant.
+      - PDF Generation Timing: In complex multi-task rounds (equations + figures + PDF), ensure all assets (temp/*.tex) are written before the final \`unified_pdf_generator.py\` runs. If it fails in a phased round, it is often a race condition; retry it in a dedicated round.
       - Matplotlib: Always call \`plt.close()\` after \`savefig()\`.
       - yt-dlp: MUST use bash CLI directly. Limit resolution, no proxy args.
       - Strings: Use raw strings (\`r"..."\`) for LaTeX/regex/paths.
@@ -80,7 +81,7 @@ ${formatSkillsForPrompt(loadSkills())}
 
   <AgenticOrchestration>
     <OrchestrationRules>
-      1. READ SKILL FIRST: If a task matches a skill, call \`read_file\` on its \`<Source>\` path and **STOP** the round. DO NOT call other tools in Round 1.
+      1. SKILL & PROJECT: If a task matches a skill and requires workspace actions, call \`read_file\` on its \`<Source>\` path AND \`gemix-project create\` in the SAME round. STOP the round after these calls to process the documentation before proceeding.
       2. PROJECT PATHS: Always use \`/workspace/{code|temp|output}/filename\`.
       3. HYGIENE: Final deliverables in \`/workspace/output/\`. Logs, figures, and snippets in \`/workspace/temp/\`.
       4. PARALLEL EFFICIENCY: Emit MULTIPLE tool calls in the SAME round whenever possible (e.g. \`gemix-project create\` + \`write_file\` + \`bash/code\`). Run verification checks (\`ls\`, \`cat\`, \`read_file\`) in the SAME round as the tool that creates/executes them (use \`after_all\` for verification).
