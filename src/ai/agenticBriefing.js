@@ -70,7 +70,7 @@ ${formatSkillsForPrompt(loadSkills())}
     <Pitfalls>
       - Project Management: \`gemix-project\` commands MUST run as a standalone bash command. NO shell concatenation (\`&&\`, \`||\`, \`;\`, \`|\`, redirection). Concatenation causes an immediate error.
       - Atomic Creation: If \`gemix-project create\` fails in a round (e.g., due to invalid JSON or shell concatenation), ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
-      - SymPy Syntax: While \`latex_helper.py sympy\` supports \`=\`, prefer passing the mathematical expression alone. NEVER use \`sympy.hbar\` or \`from sympy import hbar\`. Use \`sp.symbols('hbar')\` for a generic symbol, or \`from sympy.physics.quantum.constants import hbar\` for the physical constant.
+      - SymPy Syntax: Input for \`latex_helper.py sympy\` MUST be a mathematical expression (e.g., \`a**2 + b\`), NOT LaTeX source code (e.g., NO \`\\frac\`, NO \`\\hbar\`). If using physical constants like \`hbar\` or complex operators, it is safer to use \`code_execution\` to define them explicitly.
       - PDF Generation Timing: In complex multi-task rounds (equations + figures + PDF), ensure all assets (temp/*.tex) are written before the final \`unified_pdf_generator.py\` runs. If it fails in a phased round, it is often a race condition; retry it in a dedicated round.
       - Matplotlib: Always call \`plt.close()\` after \`savefig()\`.
       - yt-dlp: MUST use bash CLI directly. Limit resolution, no proxy args.
