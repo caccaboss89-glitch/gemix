@@ -83,7 +83,13 @@ function extractTitleTag(text) {
 
 function orderToolCalls(toolCalls) {
   const getPhase = (tc) => {
-    if (!DEFERRED_TOOL_NAMES.has(tc.function.name)) return 2;
+    const name = tc.function.name;
+    // Final response tools: ALWAYS last (Phase 4)
+    if (name === 'send_voice_message' || name === 'send_whatsapp_message') return 4;
+    
+    // Non-deferred tools: Standard (Phase 2)
+    if (!DEFERRED_TOOL_NAMES.has(name)) return 2;
+
     try {
       const args = JSON.parse(tc.function.arguments || '{}');
       if (args.execution_phase === 'before_all') return 1;
