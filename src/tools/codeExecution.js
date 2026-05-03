@@ -1,6 +1,6 @@
 // src/tools/codeExecution.js
 // Stateful Python execution tool, scoped to the current project. Files written
-// to projects/<slug>/output/ are auto-buffered as attachments so the AI can
+// to /workspace/output/ are auto-buffered as attachments so the AI can
 // deliver them via send_whatsapp_message / send_email afterwards.
 //
 // All the heavy lifting (snapshots, diffs, sandbox lifecycle, crash slot,
@@ -113,7 +113,7 @@ function _formatResult({ kernelResult, diff, durationMs, quotaWarning, projectNa
 
   // Post-execution write violation check (defense-in-depth: catches os.open() bypasses)
   if (projectName) {
-    const _prefix = `projects/${projectName}/`;
+    const _prefix = `/workspace/`;
     const _allFiles = [...(diff.newFiles || []), ...(diff.modifiedFiles || [])];
     const _violations = _allFiles.filter(f => {
       if (f.escaped) return false;
@@ -122,7 +122,7 @@ function _formatResult({ kernelResult, diff, durationMs, quotaWarning, projectNa
     });
     if (_violations.length > 0) {
       out.write_violations = _violations.map(f => f.path);
-      hints.push(`Write violation: ${_violations.length} file(s) created/modified outside authorized dirs (temp/, output/, code/): ${_violations.map(f => f.path).join(', ')}.`);
+      hints.push(`Write violation: ${_violations.length} file(s) created/modified outside authorized dirs (/workspace/{temp|output|code}/): ${_violations.map(f => f.path).join(', ')}.`);
     }
   }
   if (attached.length > 0) {

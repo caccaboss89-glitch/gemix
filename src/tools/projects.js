@@ -45,7 +45,7 @@ async function listProjectsTool(userCtx) {
   }).join('\n');
 
   const output = `<ProjectList count="${projects.length}" max="${MAX_PROJECTS_PER_USER}" current="${current || ''}">
-${projectLines || '  <!-- No projects found -->' }
+${projectLines || '  <!-- No projects found -->'}
 </ProjectList>`;
 
   return {
@@ -127,7 +127,7 @@ async function createProjectTool(args, userCtx) {
     success: true,
     project: slug,
     current_project: slug,
-    message: `Project "${slug}" created and selected as current. Write scripts in projects/${slug}/code/, intermediate files in temp/, final deliverables (auto-delivered to user) in output/.`,
+    message: `Project "${slug}" created and selected as current. Write scripts in /workspace/code/, intermediate files in /workspace/temp/, final deliverables (auto-delivered to user) in /workspace/output/.`,
   };
 }
 
@@ -238,17 +238,21 @@ async function cleanupProjectTool(args, userCtx) {
 }
 
 /**
- * Invoked by `gemix-project copy-to-permanent <history_filename>`. Args: { history_filename }.
- * Copies a file from history/ to permanent/ (never moves).
+ * Invoked by `gemix-project copy-to-permanent <filename>`. Args: { history_filename }.
+ * Copies a file from chat history to permanent/ (never moves).
  */
 async function copyToPermanentTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
   if (guard) return guard;
-  const name = args && args.history_filename;
+  let name = args && args.history_filename;
   if (!name) return _err('Missing "history_filename".');
-  // Reject paths that try to escape history/
+  // Support both absolute paths and bare filenames
+  if (name.startsWith('/readonly/history/')) {
+    name = name.replace('/readonly/history/', '');
+  }
+  // Reject paths that still try to escape chat history or target other zones
   if (name.includes('/') || name.includes('\\') || name.includes('..')) {
-    return _err('"history_filename" must be a bare filename present in history/.');
+    return _err('"history_filename" must be a bare filename or a path starting with /readonly/history/.');
   }
   ensureUserSkeleton(userCtx);
   const dest = getPermanentDir(userCtx);
@@ -257,14 +261,14 @@ async function copyToPermanentTool(args, userCtx) {
   if (!result.success) return _err(result.error);
   return {
     success: true,
-    message: `File copied: history/${name} -> permanent/${result.finalName}`,
+    message: `File copied: ${name} (chat history) -> permanent/${result.finalName}`,
   };
 }
 
 /**
  * Invoked by `gemix-project copy-to-project <source> [<subdir>]`.
  * Args: { source, subdir?: 'temp'|'output'|'code' }.
- * Source may be "history/<file>" or "searched_images/<file>". Default subdir = temp.
+ * Source may be a bare filename (chat history) or "searched_images/<file>". Default subdir = temp.
  * Writes into the currently selected project.
  */
 async function copyToProjectTool(args, userCtx) {
@@ -280,11 +284,11 @@ async function copyToProjectTool(args, userCtx) {
   const current = await getCurrentProject(userCtx);
   if (!current) return _err('No project is currently selected. Run `gemix-project create` (new) or `gemix-project switch <slug>` (existing) via bash first.');
 
-  // Source must be read-allowed and live in history/ or searched_images/
+  // Source must be read-allowed and live in chat history or searched_images/
   const srcCheck = isPathAllowed(userCtx, source, { op: 'read' });
   if (!srcCheck.ok) return _err(`Invalid source: ${srcCheck.reason}`);
   if (srcCheck.zone !== 'history' && srcCheck.zone !== 'searched_images') {
-    return _err('Source must be inside history/ or searched_images/.');
+    return _err('Source must be inside chat history or searched_images/.');
   }
 
   if (!fs.existsSync(srcCheck.absPath)) return _err(`Source file not found: ${source}.`);
@@ -316,7 +320,7 @@ async function copyToProjectTool(args, userCtx) {
   }
   return {
     success: true,
-    message: `File copied: ${source} -> projects/${current}/${subdir}/${finalName}`,
+    message: `File copied: ${source} -> /workspace/${subdir}/${finalName}`,
   };
 }
 
@@ -330,14 +334,14 @@ async function quotaTool(userCtx) {
   const totalBytes = userQuotaBytes();
   const freeBytes = Math.max(0, totalBytes - usedBytes);
   const toMb = b => Math.round(b / 1024 / 1024 * 10) / 10;
-  
+
   const projectsXml = listProjects(userCtx).map(p => {
     const size = toMb(projectSizeBytes(userCtx, p.name));
     return `  <Project name="${p.name}" size_mb="${size}" />`;
   }).join('\n');
 
   const output = `<StorageQuota used_mb="${toMb(usedBytes)}" total_mb="${toMb(totalBytes)}" free_mb="${toMb(freeBytes)}">
-${projectsXml || '  <!-- No projects found -->' }
+${projectsXml || '  <!-- No projects found -->'}
 </StorageQuota>`;
 
   return {

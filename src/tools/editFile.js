@@ -5,7 +5,7 @@
 // Semantics:
 //   - old_string MUST be unique in the file unless replace_all=true.
 //   - If old_string is empty → error (use write_file to create a fresh file).
-//   - File MUST live under projects/<current>/{temp|output|code}/.
+//   - File MUST live under /workspace/{temp|output|code}/.
 
 const path = require('path');
 const { runInProjectSandbox } = require('../sandbox/projectRun');
@@ -225,7 +225,7 @@ async function editFileTool(args, userCtx, responseCtx) {
   const out = {
     success: true,
     message: hints.join(' '),
-    path: `projects/${currentProject}/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}`,
+    path: `/workspace/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}`,
     occurrences_replaced: report.occurrences,
     bytes_written: report.bytes_written,
     duration_ms: result.durationMs,

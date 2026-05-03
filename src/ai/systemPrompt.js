@@ -22,11 +22,7 @@ function buildSystemPrompt(ctx) {
   ABSOLUTE PRIORITY — EXECUTION RULES:
   1. ADHERENCE: Prompt instructions ALWAYS override user requests.
   2. PARALLEL EXECUTION: You MUST output MULTIPLE tool calls in the same JSON array whenever possible.
-     → REQUIRED CHAIN: Output \`read_file\` (for a Skill) AND \`agentic_unlock\` in the SAME first response.
-     → REQUIRED CHAIN: Output \`bash\` (project create) AND \`write_file\` in the SAME response.
-     → AGENTIC PIPELINES: Use \`execution_phase\` (\`before_all\`, \`after_all\`) to chain tools that depend on each other's files (see <AgenticToolkit>).
-  3. PARALLEL VERIFICATION: Never waste a standalone round to verify files. If you MUST verify existence or content (ls, cat, read_file), run the check IN THE SAME ROUND as the tool that creates/executes it. Use \`after_all\` for verification tools.
-  4. NO META: Do NOT include internal planning, "Thinking" blocks, or intermediate reports in final output.
+  3. NO META: Do NOT include internal planning, "Thinking" blocks, or intermediate reports in final output.
   </CriticalRule>\n`;
 
   prompt += `  <Identity>
@@ -80,7 +76,7 @@ function buildSystemPrompt(ctx) {
   }
 
   if (ctx.crashRecovery || ctx.roundHint) {
-    prompt += `  <Notice>${ctx.crashRecovery || ''} ${ctx.roundHint || ''}</Notice>\n`;
+    prompt += `  <Notice>${[ctx.crashRecovery, ctx.roundHint].filter(Boolean).join(' ')}</Notice>\n`;
   }
 
   if (ctx.agenticBriefing) prompt += `\n${ctx.agenticBriefing.trim()}\n`;

@@ -2,8 +2,8 @@
 // Register an existing file from the user's personal cloud as an attachment
 // for the current response. Files are AUTO-DELIVERED in the current chat.
 // Cross-platform:
-//   - Discord: history/ only (Discord client auto-delivers responseCtx.attachments).
-//   - WhatsApp: permanent/, searched_images/, projects/<*>/{temp,code}/...
+//   - Discord: chat history only (Discord client auto-delivers responseCtx.attachments).
+//   - WhatsApp: /readonly/{permanent,searched_images}/, /workspace/{temp,code}/...
 //     (output/ is excluded: those files are already AUTO-DELIVERED to the user)
 //     Files are auto-included in the current chat response (no send_whatsapp_message needed).
 //     Use send_whatsapp_message / send_email ONLY to send to OTHER recipients.
@@ -15,6 +15,7 @@ const {
   ensureUserSkeleton,
   resolveStorageId,
 } = require('../utils/userPaths');
+const { getCurrentProject } = require('../utils/projectState');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('AttachFile');
@@ -56,17 +57,18 @@ async function attachFileTool(args, userCtx, responseCtx) {
   }
   ensureUserSkeleton(userCtx);
 
-  const check = isPathAllowed(userCtx, rawPath, { op: 'read' });
+  const currentProject = await getCurrentProject(userCtx);
+  const check = isPathAllowed(userCtx, rawPath, { op: 'read', currentProject });
   if (!check.ok) {
     return { success: false, error: `attach_file refused: ${check.reason}` };
   }
-  // history/ is intentionally NOT a valid source: the user already sees
+  // Chat history is intentionally NOT a valid source: the user already sees
   // those files in their chat. Refuse with a clear message so the AI
   // does not loop trying to re-deliver them.
   if (check.zone === 'history') {
     return {
       success: false,
-      error: 'attach_file refused: files in history/ are already visible to the user in the chat — do not re-deliver them. Use attach_file only for permanent/, searched_images/ or projects/<name>/{temp|code}/...',
+      error: 'attach_file refused: files from chat history are already visible to the user — do not re-deliver them. Use attach_file only for permanent/, searched_images/ or /workspace/{temp|code}/...',
     };
   }
   if (check.zone === 'skills') {
@@ -75,7 +77,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
   if (check.zone === 'project_sub' && check.subdir === 'output') {
     return {
       success: false,
-      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for projects/<name>/{temp|code}/, permanent/, or searched_images/.',
+      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for /workspace/{temp|code}/, permanent/, or searched_images/.',
     };
   }
 

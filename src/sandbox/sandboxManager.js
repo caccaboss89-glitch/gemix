@@ -125,8 +125,8 @@ async function _spawnContainer(userCtx, projectName) {
     ensureProjectSkeleton(userCtx, projectName);
   }
 
-  // Read-only mounts: history/permanent/searched_images so the AI can
-  // import them but cannot mutate the sources.
+  // Read-only mounts: chat history, permanent storage, searched images so the AI can
+  // reference them in scripts.
   const historyDir = getHistoryDir(userCtx);
   const permanentDir = getPermanentDir(userCtx);
   const searchedDir = getSearchedImagesDir(userCtx);

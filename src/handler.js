@@ -328,7 +328,7 @@ async function handleMessage(ctx) {
     messages.push({ role: 'user', content: transcribedUserContent });
 
     // ── Deterministic history prune ─────────────────────────────────────
-    // Every file under history/<userId>/ that is no longer reachable from
+    // Every file in chat history that is no longer reachable from
     // the chat buffer the AI is about to see gets removed (100%, no
     // probabilistic GC). On Discord we additionally enforce a 30-day cap
     // even on still-referenced files (replies can keep old attachments

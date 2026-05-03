@@ -193,7 +193,7 @@ async function handleGemixProjectCmd(command, userCtx) {
 
     case 'copy-to-project': {
       if (subArgs.length === 0) {
-        return { success: false, error: 'gemix-project copy-to-project <source> [subdir]: missing source. Source must be like "history/foo.jpg" or "searched_images/bar.png".' };
+        return { success: false, error: 'gemix-project copy-to-project <source> [subdir]: missing source. Source must be like "foo.jpg" (from chat history) or "searched_images/bar.png".' };
       }
       // If we have 2 args, second is subdir. If 1 arg, source only.
       // But source might have spaces if NOT quoted, though _parseArgs handles quoted ones.

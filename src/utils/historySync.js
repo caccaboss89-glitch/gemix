@@ -217,8 +217,8 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
  * Save a file to the user's history folder. Handles deduplication by uniqueId.
  *
  * **PDFs** are stored as directories:
- *   `history/<name>/` containing `transcription.md` and an `assets/` subfolder
- *   with extracted images. The returned path still looks like `history/<name>/`.
+ *   `<name>/` (inside chat history) containing `transcription.md` and an `assets/` subfolder
+ *   with extracted images. The returned path is the bare directory name (e.g. `name/`).
  *
  * All other file types are stored as flat files (unchanged behaviour).
  *
@@ -226,7 +226,7 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
  * @param {string} uniqueId - A unique ID for the attachment (e.g., Discord attachment ID or WA message ID)
  * @param {function} fetchBufferFn - Async function returning the file Buffer (called only if needed)
  * @param {string} originalName - Original file name
- * @returns {Promise<string>} The relative contextual path like 'history/filename.ext' or 'history/name/'
+ * @returns {Promise<string>} The relative filename like 'filename.ext' or 'name/'
  */
 async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) {
   if (!userId || !uniqueId) return null;
@@ -247,7 +247,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
         // Works for both files and directories
         fs.utimesSync(existingPath, now, now);
       } catch { /* best-effort */ }
-      return `history/${existingName}`;
+      return existingName;
     }
     // Entry missing on disk, clear from meta and re-save
     delete meta[uniqueId];
@@ -306,7 +306,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
       const finalName = dirName + '/';
       meta[uniqueId] = { filename: finalName, type: 'pdf-dir' };
       _saveMeta(metaFile, meta, userId);
-      return `history/${finalName}`;
+      return finalName;
     } catch (err) {
       log.error(`Failed to save PDF history dir for user ${userId}: ${err.message}`);
       // Clean up partial directory
@@ -331,7 +331,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     fs.writeFileSync(filePath, buffer);
     meta[uniqueId] = { filename: finalName };
     _saveMeta(metaFile, meta, userId);
-    return `history/${finalName}`;
+    return finalName;
   } catch (err) {
     log.error(`Failed to save history file for user ${userId}: ${err.message}`);
     return null;
@@ -340,9 +340,9 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
 
 /**
  * Deterministic prune. Called by the handler at the start of EVERY user
- * message, before the AI call. Removes from `history/<userId>/` every file
+ * message, before the AI call. Removes from chat history every file
  * that is no longer reachable from the current chat history (i.e. its
- * filename does not appear in the set of `[Attachment: history/<name>]`
+ * filename does not appear in the set of `[Attachment: <name>]`
  * tags the AI is about to see).
  *
  * Optionally also removes files older than `maxAgeMs` (used on Discord to
@@ -361,7 +361,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
   if (!fs.existsSync(historyDir)) return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
 
   // Build referenced set. For PDF dirs stored as "name/", the attachment tag
-  // path is "history/name/" so the bare filename reaching us is "name/".
+  // path is "name/" so the bare filename reaching us is "name/".
   const referenced = referencedFilenames instanceof Set
     ? referencedFilenames
     : new Set(referencedFilenames || []);
@@ -445,7 +445,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
 }
 
 /**
- * Extract the bare filenames from every `[Attachment: history/<file>]` tag
+ * Extract the bare filenames from every `[Attachment: <file>]` tag
  * found in the provided chat history. Used by the handler to feed pruneHistory.
  *
  * @param {Array<{content: any}>} historyMsgs
@@ -457,8 +457,10 @@ function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
   const _scan = (text) => {
     if (typeof text !== 'string' || text.length === 0) return;
     for (const taggedPath of extractAttachmentTagPaths(text)) {
-      if (!taggedPath.startsWith('history/')) continue;
-      const name = taggedPath.slice('history/'.length).trim();
+      let name = taggedPath.trim();
+      if (name.startsWith('history/')) {
+        name = name.slice('history/'.length).trim();
+      }
       if (name) out.add(name);
     }
   };
@@ -493,11 +495,11 @@ function _uniqueFilename(destDir, baseName) {
 }
 
 /**
- * Copy a file from history/ to a destination directory inside the same user folder.
+ * Copy a file from chat history to a destination directory inside the same user folder.
  * Never moves — the source must stay intact so the chat history keeps pointing to it.
  *
  * @param {string} userId - storageId used for the user folder
- * @param {string} historyFilename - filename as stored inside history/ (no "history/" prefix)
+ * @param {string} historyFilename - filename as stored inside chat history (no "history/" prefix)
  * @param {string} destAbsDir - absolute path to the destination directory (must already exist)
  * @returns {{success: boolean, finalName?: string, error?: string}}
  */
@@ -507,7 +509,7 @@ function copyFromHistory(userId, historyFilename, destAbsDir) {
   const diskName = historyFilename.endsWith('/') ? historyFilename.slice(0, -1) : historyFilename;
   const src = path.join(historyDir, diskName);
   if (!fs.existsSync(src)) {
-    return { success: false, error: `history/${historyFilename} not found.` };
+    return { success: false, error: `${historyFilename} (chat history) not found.` };
   }
   if (!fs.existsSync(destAbsDir)) {
     return { success: false, error: `Destination directory does not exist.` };

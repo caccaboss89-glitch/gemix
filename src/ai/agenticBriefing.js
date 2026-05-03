@@ -25,16 +25,16 @@ function buildAgenticBriefing(ctx = {}) {
   <PersonalCloud>
     <Layout>
       Quota: 1 GB.
-      Immutable folders: history/ (read-only), permanent/ (storage), searched_images/ (image_search saves with save_to_disk=true).
-      Project folders: projects/<slug>/ (contains code/, temp/, output/).
+      Global folders (read-only): /readonly/ (contains history/ (chat history), permanent/ (user(s) cloud), searched_images/ (searched images saved with save_to_disk=true), skills/).
+      Project folders (writable): /workspace/ (contains code/, temp/, output/).
     </Layout>
     <Rules>
       - One project per user request. Use \`gemix-project create\` before writing files.
       - Write/edit access ONLY inside the current project: code/ (scripts), temp/ (intermediate), output/ (final files).
-      - Sandbox root (\`/workspace\`) is mapped to the current project.
+      - Standard Paths: ALWAYS use \`/workspace/{code|temp|output}/file\` for project files and \`/readonly/{history|permanent|searched_images|skills}/file\` for global storage.
     </Rules>
     <ProjectManagement>
-      Run via \`bash\` as standalone \`gemix-project <subcmd>\` (no chaining/redirection).
+      Run via \`bash\` as standalone \`gemix-project <subcmd>\` (no shell concatenation or piping).
       Commands:
       - list
       - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}'
@@ -62,39 +62,41 @@ ${formatSkillsForPrompt(loadSkills())}
 
   <PythonSandbox>
     <Runtime>
-      Python 3.12, stateful. Root /workspace is your project. Read-only: /readonly/.
-      Resources: 1.5GB RAM, 120s timeout. Network: NO INTERNET except Polygon API, astropy, yt-dlp. pip: DISABLED. Only pre-installed libraries.
+      Python 3.12, stateful. Root: /workspace/. Read-only: /readonly/.
+      Resources: 1.5GB RAM, 120s timeout. Network: NO INTERNET except specific domains used by: Polygon API, astropy data services, yt-dlp (video/media domains). pip: DISABLED. Only pre-installed libraries.
     </Runtime>
     <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
-    <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, docx, openpyxl, pptx, reportlab, pypdf, jinja2, PyYAML, yt-dlp</Libraries>
+    <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, docx, openpyxl, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
     <Pitfalls>
-      - Matplotlib: Always call plt.close() after savefig().
-      - Moviepy: Use codec='libx264' and audio_codec='aac'.
-      - Flush plots: savefig() → plt.close() → then open with PIL.
-      - yt-dlp: MUST use bash CLI directly. NEVER use python -c or import yt_dlp. Always -o '/workspace/output/%(title)s.%(ext)s', limit resolution (-f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"). Only videos, no images. No proxy args. If fails with a network/connection error (sandbox proxy not working), do NOT retry — report via bug_report and inform the user.
-      - Python Strings: ALWAYS use raw strings (r"...") for LaTeX equations, regex, or paths with backslashes.
+      - Project Management: \`gemix-project\` commands MUST run as a standalone bash command. NO shell concatenation (\`&&\`, \`||\`, \`;\`, \`|\`, redirection). Concatenation causes an immediate error.
+      - Atomic Creation: If \`gemix-project create\` fails in a round (e.g., due to invalid JSON or shell concatenation), ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
+      - SymPy: NEVER use \`sympy.hbar\` or \`from sympy import hbar\`. Use \`sp.symbols('hbar')\` for a generic symbol, or \`from sympy.physics.quantum.constants import hbar\` for the physical constant.
+      - Matplotlib: Always call \`plt.close()\` after \`savefig()\`.
+      - yt-dlp: MUST use bash CLI directly. Limit resolution, no proxy args.
+      - Strings: Use raw strings (\`r"..."\`) for LaTeX/regex/paths.
+      - Escaping: ALWAYS escape backticks (\`) with a backslash (\\\`) inside tool arguments or strings to avoid breaking the prompt/JSON structure.
     </Pitfalls>
   </PythonSandbox>
 
-  <ToolExecution>
-    - **GOLDEN RULE 1: READ SKILL FIRST**. If a request matches a skill, you **MUST** call \`read_file\` on its \`<Source>\` path. DO NOT do any other work in that round.
-    - **GOLDEN RULE 2: PATHS**. \`read_file\`, \`write_file\`, \`edit_file\` **ALWAYS** need the full path: \`projects/<slug>/{code|temp|output}/filename\`. NEVER omit the \`path\` argument.
-    - **GOLDEN RULE 3: PROJECT CREATION**. Use \`gemix-project create '{\"name\":\"slug\",\"user_request\":\"...\"}'\`. You **MUST** use single quotes \`'\` around the JSON and double quotes \`"\` inside. Ensure the JSON is valid and complete.
-    - **GOLDEN RULE 4: 1-ROUND PIPELINE**. After reading the skill, you can do everything in ONE round using phases:
-        1. \`before_all\`: \`bash\` (to create project OR generate snippets/files needed by \`write_file\`)
-        2. \`standard\`: \`write_file\` / \`edit_file\` (to create data JSONs or main templates)
-        3. \`after_all\`: \`bash\` / \`code_execution\` (to compile, run, or verify)
-    - **GOLDEN RULE 5: OUTPUT HYGIENE**. Only put the FINAL PDF/Video in \`output/\`. Put figures, logs, and temp files in \`temp/\`. Garbage in \`output/\` results in garbage delivered to the user.
-    - **GOLDEN RULE 6: SYMPY**. Use \`sp.symbols('hbar')\` or \`sympy.physics.units\`. \`sp.hbar\` does NOT exist. NEVER use \`from sympy import hbar\`; constants must be imported from \`sympy.physics.quantum.constants\`.
-    - **SANDBOX PATHS**: Inside \`bash\` or \`code_execution\`, the project is already at \`/workspace\`. Use \`code/file.py\` or \`temp/data.json\`.
-    - **EXECUTION PHASES**: 
-        - \`before_all\` (Phase 1): Setup/Preparation (e.g., \`gemix-project create\`, \`latex_helper.py\` to create snippets).
-        - \`standard\` (Phase 2): I/O (e.g., \`write_file\`). This phase runs AFTER Phase 1.
-        - \`after_all\` (Phase 3 - DEFAULT for \`bash\` / \`code_execution\`): Execution/Compilation (e.g., \`unified_pdf_generator.py\`). This runs AFTER Phase 2.
-    - **CRITICAL: ROUND OUTPUT DEPENDENCIES**.
-        - You **CANNOT** use the text output (stdout) of tool A as an argument for tool B in the same round. If tool B needs text from tool A, use TWO rounds.
-        - You **CAN** use a **FILE** created by tool A as input for tool B in the same round by putting tool A in a previous phase (\`before_all\` → \`standard\` → \`after_all\`).
-  </ToolExecution>
+  <AgenticOrchestration>
+    <OrchestrationRules>
+      1. READ SKILL FIRST: If a task matches a skill, call \`read_file\` on its \`<Source>\` path and **STOP** the round. DO NOT call other tools in Round 1.
+      2. PROJECT PATHS: Always use \`/workspace/{code|temp|output}/filename\`.
+      3. HYGIENE: Final deliverables in \`/workspace/output/\`. Logs, figures, and snippets in \`/workspace/temp/\`.
+      4. PARALLEL EFFICIENCY: Emit MULTIPLE tool calls in the SAME round whenever possible (e.g. \`gemix-project create\` + \`write_file\` + \`bash/code\`). Run verification checks (\`ls\`, \`cat\`, \`read_file\`) in the SAME round as the tool that creates/executes them (use \`after_all\` for verification).
+    </OrchestrationRules>
+
+    <ExecutionPhases>
+      The \`execution_phase\` parameter exists ONLY for \`bash\` and \`code_execution\`. 
+      The order in a multi-tool round is:
+      - Phase 1 [before_all]: \`bash\`/\`code_execution\` with \`execution_phase="before_all"\`.
+      - Phase 2 [standard]: ALL other tools (\`write_file\`, \`edit_file\`, \`read_file\`, \`web_search\`, etc.) — automatic, no parameter to set.
+      - Phase 3 [after_all]: \`bash\`/\`code_execution\` without \`execution_phase\` (default) or with \`execution_phase="after_all"\`.
+
+      Within the same phase, tools execute in emission order.
+      Tool B can read a FILE written by Tool A in a previous phase, but NOT its textual output.
+    </ExecutionPhases>
+  </AgenticOrchestration>
 </AgenticToolkit>`;
 }
 

@@ -271,7 +271,7 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
         if (syncedPath && syncedPath.endsWith('/')) {
           try {
             const { historyDir } = getUserHistoryPaths(userId);
-            const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+            const dirName = syncedPath.replace(/\/$/, '');
             const mdPath = path.join(historyDir, dirName, 'transcription.md');
             if (fs.existsSync(mdPath)) {
               const transcription = fs.readFileSync(mdPath, 'utf-8');
@@ -423,7 +423,7 @@ async function processCurrentMedia(msg, userId) {
       if (syncedPath && syncedPath.endsWith('/')) {
         try {
           const { historyDir } = getUserHistoryPaths(userId);
-          const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+          const dirName = syncedPath.replace(/\/$/, '');
           const mdPath = path.join(historyDir, dirName, 'transcription.md');
           if (fs.existsSync(mdPath)) {
             const transcription = fs.readFileSync(mdPath, 'utf-8');

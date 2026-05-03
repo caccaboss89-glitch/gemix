@@ -59,6 +59,34 @@ function getProjectSubdir(userCtx, projectName, subdir) {
   return r && path.join(r, subdir);
 }
 
+/**
+ * Translates sandbox-style paths into host-style project paths.
+ * - /workspace/... -> projects/<slug>/...
+ * - /readonly/...  -> ... (history, permanent, etc.)
+ * Used to unify the AI's perspective across host tools and sandbox execution.
+ */
+function normalizeAgenticPath(rawPath, currentProject) {
+  if (typeof rawPath !== 'string') return rawPath;
+  const trimmed = rawPath.trim();
+
+  // Project-relative normalization
+  if (currentProject) {
+    if (trimmed.startsWith('/workspace/')) {
+      return trimmed.replace('/workspace/', `projects/${currentProject}/`);
+    }
+    if (trimmed === '/workspace' || trimmed === '/workspace/') {
+      return `projects/${currentProject}/`;
+    }
+  }
+
+  // Global read-only normalization (chat history, permanent/, searched_images/, etc.)
+  if (trimmed.startsWith('/readonly/')) {
+    return trimmed.replace('/readonly/', '');
+  }
+
+  return rawPath;
+}
+
 // ── Skeleton & creation ──
 
 function ensureDir(p) {
@@ -221,7 +249,12 @@ function classifyUserPath(userCtx, rawPath) {
  */
 function isPathAllowed(userCtx, rawPath, opts = {}) {
   const op = opts.op || 'read';
-  const c = classifyUserPath(userCtx, rawPath);
+  const currentProject = opts.currentProject;
+
+  // Normalize /workspace/ -> projects/<slug>/ if a project is active
+  const effectivePath = normalizeAgenticPath(rawPath, currentProject);
+
+  const c = classifyUserPath(userCtx, effectivePath);
   if (!c.ok) return c;
 
   const isDiscord = userCtx.platform === PLATFORM_DISCORD;
@@ -237,8 +270,10 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
       if (isDiscord) return { ok: false, reason: 'Skills are not available on Discord.' };
       return c;
     }
-    if (isDiscord && c.zone !== 'history') {
-      return { ok: false, reason: 'On Discord you can only read files under history/.' };
+    if (!opts.agenticUnlocked && c.zone !== 'history') {
+      return { ok: false, reason: isDiscord 
+        ? 'On Discord you can only read files from chat history.' 
+        : 'Access to advanced storage (/workspace/, /readonly/permanent/, etc.) denied. Unlock agentic mode first.' };
     }
     return c;
   }
@@ -248,8 +283,8 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
     return { ok: false, reason: 'Write operations are not available on Discord.' };
   }
   // History is strictly read-only from the AI side.
-  if (c.zone === 'history' && !opts.allowHistoryWrite) {
-    return { ok: false, reason: 'history/ is read-only. Copy files to permanent/ or a project instead.' };
+  if (c.zone === 'history') {
+    return { ok: false, reason: 'Chat history is read-only. Copy files to permanent/ or a project instead.' };
   }
   if (c.zone === 'skills') {
     return { ok: false, reason: 'skills/ is read-only.' };
@@ -363,7 +398,7 @@ function projectSizeBytes(userCtx, projectName) {
 
 /**
  * Aggregate size of everything the AI controls under the user root:
- * projects/ (all of them) + searched_images/. history/ and permanent/ are
+ * projects/ (all of them) + searched_images/. Chat history and permanent/ are
  * user-driven and excluded from the agentic quota on purpose.
  */
 function userTotalBytes(userCtx) {
@@ -411,6 +446,7 @@ module.exports = {
   userQuotaBytes,
   isUserOverQuota,
   dirSizeBytes,
+  normalizeAgenticPath,
   // constants
   FIXED_TOP_DIRS,
   FIXED_PROJECT_SUBDIRS,

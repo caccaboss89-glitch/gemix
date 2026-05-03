@@ -269,7 +269,7 @@ async function runInProjectSandbox({
   for (const [absPath, info] of after) {
     const prev = before.get(absPath);
     const rel = path.relative(projectDir, absPath).split(path.sep).join('/');
-    const item = { path: usingScratch ? `scratch/${rel}` : `projects/${projectName}/${rel}`, size: info.size };
+    const item = { path: usingScratch ? `scratch/${rel}` : `/workspace/${rel}`, size: info.size };
 
     // ── Symlink-escape guard ──
     let isEscaped = false;

@@ -221,7 +221,7 @@ async function onDiscordMessage(msg) {
               if (syncedPath && syncedPath.endsWith('/')) {
                 try {
                   const { historyDir } = require('../../utils/historySync').getUserHistoryPaths(msg.author.id);
-                  const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+                  const dirName = syncedPath.replace(/\/$/, '');
                   const mdPath = path.join(historyDir, dirName, 'transcription.md');
                   if (fs.existsSync(mdPath)) {
                     const transcription = fs.readFileSync(mdPath, 'utf-8');
@@ -288,7 +288,7 @@ async function onDiscordMessage(msg) {
       if (syncedPath && syncedPath.endsWith('/')) {
         try {
           const { historyDir } = require('../../utils/historySync').getUserHistoryPaths(msg.author.id);
-          const dirName = syncedPath.replace('history/', '').replace(/\/$/, '');
+          const dirName = syncedPath.replace(/\/$/, '');
           const mdPath = path.join(historyDir, dirName, 'transcription.md');
           if (fs.existsSync(mdPath)) {
             const transcription = fs.readFileSync(mdPath, 'utf-8');

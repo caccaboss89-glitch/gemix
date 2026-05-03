@@ -45,22 +45,11 @@ const TOOL_WEB_SEARCH = makeTool({
   required: ['query'],
 });
 
-const TOOL_IMAGE_SEARCH = makeTool({
-  name: 'image_search',
-  description: 'Search for images and inspect the returned previews. Results are buffered for delivery; use discard to remove unwanted ones. Call multiple times to refine.',
-  properties: {
-    query: {
-      type: 'string',
-      description: 'Specific image search query.',
-    },
-    count: {
-      type: 'integer',
-      description: 'Images to retrieve (1-4, default 1).',
-    },
-    language: {
-      type: 'string',
-      description: 'Language hint (default "it", use "en" for international results).',
-    },
+function buildImageSearchTool(agenticUnlocked = false) {
+  const properties = {
+    query: { type: 'string', description: 'Specific image search query.' },
+    count: { type: 'integer', description: 'Images to retrieve (1-4, default 1).' },
+    language: { type: 'string', description: 'Language hint (default "it", use "en" for international results).' },
     image_type: {
       type: 'string',
       enum: ['any', 'photo', 'gif', 'clipart', 'lineart'],
@@ -71,19 +60,28 @@ const TOOL_IMAGE_SEARCH = makeTool({
       items: { type: 'integer' },
       description: 'Image IDs to remove from buffer (from previous search results).',
     },
-    save_to_disk: {
+  };
+
+  if (agenticUnlocked) {
+    properties.save_to_disk = {
       type: 'boolean',
       description: 'If true, save the downloaded image(s) to searched_images/ (use only if you need them with agentic tools, e.g. image editing, include in documents, etc.). Default false.',
-    },
-  },
-  required: ['query'],
-});
+    };
+  }
+
+  return makeTool({
+    name: 'image_search',
+    description: 'Search for images and inspect the returned previews. Results are buffered for delivery; use discard to remove unwanted ones. Call multiple times to refine.',
+    properties,
+    required: ['query'],
+  });
+}
 
 const TOOL_ATTACH_FILE = makeTool({
   name: 'attach_file',
-  description: 'Buffer a file for delivery (NOT output/<file> or history/<file>). Allowed: permanent/<file>, searched_images/<file>, projects/<name>/{temp|code}/<file>. To send buffered files to other recipients, use send_whatsapp_message / send_voice_message / send_email with includeAttachments=true.',
+  description: 'Buffer a file for delivery (NOT /workspace/output/ or chat history). Allowed: /readonly/{permanent|searched_images|skills}/<file> or /workspace/{temp|code}/<file>. To send buffered files to other recipients, use send_whatsapp_message / send_voice_message / send_email with includeAttachments=true.',
   properties: {
-    path: { type: 'string', description: 'Relative path under the user root.' },
+    path: { type: 'string', description: 'Unified path: "/readonly/permanent/file.txt" or "/workspace/code/main.py".' },
   },
   required: ['path'],
 });
@@ -95,13 +93,19 @@ const TOOL_AGENTIC_UNLOCK = makeTool({
   properties: {},
 });
 
-function buildReadFileTool(isDiscord) {
-  const description = isDiscord
-    ? 'Read the contents of a file from chat history (text, code, images, audio, pdf).'
-    : 'Read the contents of a file from chat history, cloud or project artefacts (text, code, images, audio, pdf).';
-  const pathDesc = isDiscord
-    ? 'Filename from chat history (history/ prefix optional, e.g. "report.pdf").'
-    : 'Relative path from user root: history/<file>, permanent/<file>, searched_images/<file>, projects/<name>/{temp|output|code}/<file>. Use skills:<name>.md to read a skill guide.';
+function buildReadFileTool(isDiscord, agenticUnlocked = false) {
+  const description = !agenticUnlocked
+    ? 'Read the contents of a file from chat history (text, code, images, video, audio, pdf).'
+    : 'Read the contents of a file from chat history, cloud, searched images or project artefacts (text, code, images, video, audio, pdf).';
+
+  let pathDesc = !agenticUnlocked
+    ? 'Filename from chat history (e.g. "report.pdf").'
+    : 'Absolute path: /readonly/{history|permanent|searched_images|skills}/<file> or /workspace/{temp|output|code}/<file>. Bare filenames (no slash) are resolved to chat history automatically.';
+
+  if (!isDiscord && agenticUnlocked) {
+    pathDesc += ' Use skills:<name>.md to read a skill guide.';
+  }
+
   return makeTool({
     name: 'read_file',
     description,
@@ -114,7 +118,7 @@ function buildReadFileTool(isDiscord) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run Python in the sandbox. For calculations, data analysis, scripts. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,permanent,searched_images}. output/ files are auto-delivered. Can combine with write_file/edit_file or other bash/code_execution in the same round. Set execution_phase to control ordering.',
+  description: 'Run Python in the sandbox. For calculations, data analysis, scripts. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,permanent,searched_images,skills}. output/ files are auto-delivered. Can combine with write_file/edit_file or other bash/code_execution in the same round.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
@@ -131,7 +135,7 @@ const TOOL_WRITE_FILE = makeTool({
   name: 'write_file',
   description: 'Create or overwrite a file in the current project ({temp|output|code}). output/ files are auto-delivered. Max 5 MB.',
   properties: {
-    path: { type: 'string', description: 'Relative path under the current project, e.g. "projects/<current>/code/main.py".' },
+    path: { type: 'string', description: 'Path under current project: "/workspace/{temp|output|code}/file".' },
     content: { type: 'string', description: 'File content.' },
     encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Content encoding (default "utf-8").' },
     mode: { type: 'string', enum: ['overwrite', 'append'], description: 'Write mode (default "overwrite").' },
@@ -143,7 +147,7 @@ const TOOL_EDIT_FILE = makeTool({
   name: 'edit_file',
   description: 'Edit an existing UTF-8 text file in the current project by replacing old_string with new_string. old_string must be unique unless replace_all=true. Same path limits as write_file.',
   properties: {
-    path: { type: 'string', description: 'Relative path under projects/<current>/{temp|output|code}/.' },
+    path: { type: 'string', description: 'Path under current project: "/workspace/{temp|output|code}/file".' },
     old_string: { type: 'string', description: 'Exact text to replace. Must appear at least once. Provide enough surrounding context to be unique unless replace_all=true.' },
     new_string: { type: 'string', description: 'Replacement text (use empty string to delete the matched region).' },
     replace_all: { type: 'boolean', description: 'Replace every occurrence (default false). Required when old_string is not unique.' },
@@ -155,9 +159,9 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (ffmpeg, zip, ls, cp...), yt-dlp downloads. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Can combine with write_file/edit_file or other bash/code_execution in the same round. Set execution_phase to control ordering.',
+  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (ffmpeg, zip, ls, cp...), yt-dlp downloads. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,permanent,searched_images,skills}. Can combine with write_file/edit_file or other bash/code_execution in the same round.',
   properties: {
-    command: { type: 'string', description: 'Shell command (bash -c). Single line or `&&`-chained statements.' },
+    command: { type: 'string', description: 'Shell command (bash -c). Single line or \`&&\`-chained statements. Exception: \`gemix-project\` commands MUST be standalone (no shell concatenation or piping).' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
     background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results. Default false.' },
     execution_phase: {
@@ -508,7 +512,12 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const tools = [];
 
   // 1. Search & Information Retrieval
-  tools.push(TOOL_WEB_SEARCH, TOOL_IMAGE_SEARCH, TOOL_BROWSE_PAGE, buildReadFileTool(isDiscord));
+  tools.push(
+    TOOL_WEB_SEARCH,
+    buildImageSearchTool(userCtx.agenticUnlocked),
+    TOOL_BROWSE_PAGE,
+    buildReadFileTool(isDiscord, userCtx.agenticUnlocked)
+  );
 
   // 2. Agentic Workspace (Gated)
   if (!isDiscord) {

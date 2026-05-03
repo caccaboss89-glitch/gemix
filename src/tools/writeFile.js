@@ -5,7 +5,7 @@
 //
 // The path MUST be relative to the user root and resolve inside the
 // CURRENT project's temp/ output/ or code/ subfolder. All other
-// destinations (history/, permanent/, project root, projects root, user
+// destinations (chat history, permanent/, project root, projects root, user
 // root, skills/) are rejected by isPathAllowed.
 
 const path = require('path');
@@ -50,7 +50,7 @@ function _toContainerPath(absHostPath, projectName, projectDir) {
 /**
  * write_file tool entry-point.
  * @param {object} args { path, content, encoding?, mode? }
- *   - path:     relative path under projects/<current>/{temp|output|code}/
+ *   - path:     relative path under /workspace/{temp|output|code}/
  *   - content:  string (utf-8) or base64 if encoding='base64'
  *   - encoding: 'utf-8' (default) | 'base64'
  *   - mode:     'overwrite' (default) | 'append'
@@ -159,7 +159,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
   const out = {
     success: true,
     message: hints.join(' '),
-    path: auth.absPath ? `projects/${currentProject}/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}` : rawPath,
+    path: `/workspace/${path.relative(projectDir, auth.absPath).split(path.sep).join('/')}`,
     bytes_written: buf.length,
     mode,
     encoding,

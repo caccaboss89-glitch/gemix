@@ -126,7 +126,7 @@ async function executeYtDlpOnHost(args, userCtx, command, responseCtx) {
   for (const [absPath, info] of after) {
     const prev = before.get(absPath);
     const rel = path.relative(projectDir, absPath).split(path.sep).join('/');
-    const item = { path: `projects/${projectName}/${rel}`, size: info.size };
+    const item = { path: `/workspace/${rel}`, size: info.size };
 
     if (!prev) {
       // Auto-attach files in output/
@@ -355,7 +355,7 @@ async function bashTool(args, userCtx, responseCtx) {
     const out = {
       success: true,
       background: true,
-      output_path: `projects/${bgResult.projectName}/${outputRel}`,
+      output_path: `/workspace/${outputRel}`,
       message: 'Command started in background. Use read_file on output_path to get results (will wait automatically if still running).',
       duration_ms: bgResult.durationMs,
     };
@@ -469,7 +469,7 @@ async function bashTool(args, userCtx, responseCtx) {
   // Post-execution write violation check: bash can bypass Python's open() guard
   // so we verify here that nothing was written outside the authorized dirs.
   const _BASH_ALLOWED = ['temp/', 'output/', 'code/'];
-  const _projectPrefix = `projects/${result.projectName}/`;
+  const _projectPrefix = `/workspace/`;
   const _allDiff = [
     ...(result.diff.newFiles || []),
     ...(result.diff.modifiedFiles || []),
@@ -481,7 +481,7 @@ async function bashTool(args, userCtx, responseCtx) {
   });
   if (_violations.length > 0) {
     out.write_violations = _violations.map(f => f.path);
-    out.message = `Write violation: ${_violations.length} file(s) created/modified outside authorized dirs (temp/, output/, code/): ${_violations.map(f => f.path).join(', ')}. Only write to those subdirectories.`;
+    out.message = `Write violation: ${_violations.length} file(s) created/modified outside authorized dirs (/workspace/{temp|output|code}/): ${_violations.map(f => f.path).join(', ')}. Only write to those subdirectories.`;
   } else {
     const hints = [out.success ? 'Command executed successfully.' : 'Command failed.'];
     if (result.sandboxRestarted) {

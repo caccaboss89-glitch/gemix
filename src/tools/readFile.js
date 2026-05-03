@@ -6,6 +6,7 @@ const { extractTextFromPdfBuffer, mediaToContentPart } = require('../utils/media
 const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
 const { isSandboxAlive } = require('../sandbox/sandboxManager');
+const { getCurrentProject } = require('../utils/projectState');
 
 const NON_READABLE_EXTS = new Set(['.xls', '.xlsx', '.doc', '.docx', '.ppt', '.pptx', '.exe', '.dll', '.bin', '.so', '.zip', '.tar', '.gz', '.7z', '.rar', '.jar', '.class', '.pyc', '.db', '.sqlite', '.iso', '.dmg']);
 
@@ -48,7 +49,7 @@ function _collectRecentProjectWriteViolations(projectDir, startedAt) {
       if (st.mtimeMs < startedAt) continue;
       const rel = path.relative(projectDir, abs).split(path.sep).join('/');
       if (!rel.startsWith('temp/') && !rel.startsWith('output/') && !rel.startsWith('code/')) {
-        violations.push(`projects/${path.basename(projectDir)}/${rel}`);
+        violations.push(`/workspace/${rel}`);
       }
     }
   }
@@ -57,9 +58,9 @@ function _collectRecentProjectWriteViolations(projectDir, startedAt) {
 
 /**
  * Read file tool execution logic.
- * On Discord, paths are implicitly relative to history/. On WhatsApp paths
- * are relative to the user root and may target history/, permanent/,
- * searched_images/, projects/**, or the special skills: prefix.
+ * On Discord, paths are implicitly relative to chat history. On WhatsApp paths
+ * can target /readonly/{history|permanent|searched_images}/, /workspace/**, or skills:.
+ * Bare filenames (no slash) are automatically resolved to chat history.
  */
 async function readFileTool(filePath, userCtx, responseCtx) {
   if (responseCtx.imagesReadCount === undefined) responseCtx.imagesReadCount = 0;
@@ -72,18 +73,21 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   ensureUserSkeleton(userCtx);
 
   const isDiscord = userCtx.platform === PLATFORM_DISCORD;
-
-  // On Discord, allow both "file.pdf" and "history/file.pdf" by normalizing.
+  const agenticUnlocked = userCtx.agenticUnlocked;
   let rawPath = (filePath || '').trim();
-  if (isDiscord) {
-    if (rawPath.startsWith('./')) rawPath = rawPath.slice(2);
-    if (rawPath.startsWith('/')) rawPath = rawPath.replace(/^\/+/, '');
-    if (!rawPath.startsWith('history/') && !rawPath.startsWith('skills:') && !rawPath.startsWith('skills/')) {
-      rawPath = 'history/' + rawPath;
-    }
+
+  // Automatically normalize bare filenames to history/.
+  // This allows the AI to use "file.pdf" instead of "history/file.pdf".
+  if (!rawPath.includes('/') && !rawPath.startsWith('skills:')) {
+    rawPath = 'history/' + rawPath;
+  } else if (rawPath.startsWith('./')) {
+    rawPath = rawPath.slice(2);
+  } else if (rawPath.startsWith('/')) {
+    rawPath = rawPath.replace(/^\/+/, '');
   }
 
-  const check = isPathAllowed(userCtx, rawPath, { op: 'read' });
+  const currentProject = await getCurrentProject(userCtx);
+  const check = isPathAllowed(userCtx, rawPath, { op: 'read', currentProject, agenticUnlocked });
   if (!check.ok) {
     return { success: false, error: `Access denied: ${check.reason}` };
   }

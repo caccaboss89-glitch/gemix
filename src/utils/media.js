@@ -327,12 +327,15 @@ function _getMediaTypeFromContentPart(part) {
 
 /**
  * Build a standardized attachment tag for AI context (always English).
- * @param {string|null} syncedPath - The synced history path (e.g. 'history/file.pdf'), or null if expired
+ * @param {string|null} syncedPath - The synced history path (e.g. 'file.pdf'), or null if expired
  * @param {string|null} fallbackName - Fallback filename for expired attachments
- * @returns {string} Tag like '[Attachment: history/file.pdf]' or '[Attachment (expired): file.pdf]'
+ * @returns {string} Tag like '[Attachment: file.pdf]' or '[Attachment (expired): file.pdf]'
  */
 function buildAttachmentTag(syncedPath, fallbackName) {
-  if (syncedPath) return `[Attachment: ${syncedPath}]`;
+  if (syncedPath) {
+    const clean = syncedPath.startsWith('history/') ? syncedPath.slice('history/'.length) : syncedPath;
+    return `[Attachment: ${clean}]`;
+  }
   return `[Attachment (expired): ${fallbackName || 'file'}]`;
 }
 
