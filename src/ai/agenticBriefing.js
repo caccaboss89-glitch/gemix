@@ -71,8 +71,8 @@ ${formatSkillsForPrompt(loadSkills())}
       - Project Management: \`gemix-project\` commands MUST run as a standalone bash command. NO shell concatenation (\`&&\`, \`||\`, \`;\`, \`|\`, redirection). Concatenation causes an immediate error.
       - Atomic Creation: If \`gemix-project create\` fails in a round (e.g., due to invalid JSON or shell concatenation), ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
       - SymPy Syntax: Input for \`latex_helper.py sympy\` MUST be a mathematical expression, NOT LaTeX code.
-        • WRONG: \`\\frac{a}{b} = c\` (LaTeX)
-        • RIGHT: \`a/b = c\` (Math expression)
+        • WRONG: \`\\frac{a}{b} = c\` (LaTeX), \`a == b\` (Comparison)
+        • RIGHT: \`a/b = c\` (Math expression), \`Eq(a, b)\` (Explicit SymPy)
         • If you need physical constants (hbar, grad, etc.) and the tool fails, use \`code_execution\` for explicit definitions.
       - PDF Generation Timing: The system now has a 2s auto-wait for files. If \`unified_pdf_generator.py\` still fails in a phased round with "missing file" warnings, retry it in a dedicated round.
       - Matplotlib: Always call \`plt.close()\` after \`savefig()\`.
