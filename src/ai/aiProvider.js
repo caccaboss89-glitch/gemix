@@ -6,24 +6,13 @@
 // avoids the quality drop of running entire complex tasks on a small
 // multimodal model just because the request happens to contain audio.
 
-const { OPENROUTER_API_KEY, AGENTIC_MODEL, FAST_MODEL, SKILLS_MODEL } = require('../config/env');
+const { OPENROUTER_API_KEY, AGENTIC_MODEL, FAST_MODEL } = require('../config/env');
 const { OPENROUTER_BASE_URL, MAX_TOKENS } = require('../config/constants');
 const { callModel } = require('./apiClient');
 const { describeMediaInMessages } = require('./mediaDescriber');
 
-function getAIModel({ agenticUnlocked = false, skillsModelActive = false } = {}) {
-  if (skillsModelActive && SKILLS_MODEL) {
-    return SKILLS_MODEL;
-  }
+function getQwenModel({ agenticUnlocked = false } = {}) {
   return agenticUnlocked ? AGENTIC_MODEL : FAST_MODEL;
-}
-
-function getReasoningConfig(model) {
-  if (!model) return { effort: 'medium' };
-  if (model === FAST_MODEL) return { effort: 'medium' };
-  if (model === AGENTIC_MODEL) return { effort: 'xhigh' };
-  if (/^x-ai\/grok-/i.test(model)) return null;
-  return { effort: 'medium' };
 }
 
 /**
@@ -38,23 +27,18 @@ function getReasoningConfig(model) {
  */
 async function callAI(messages, tools = null, options = {}) {
   const processedMessages = await describeMediaInMessages(messages);
-  const model = getAIModel(options);
-  const reasoning = getReasoningConfig(model);
+  const model = getQwenModel(options);
 
   const body = {
     model,
     messages: processedMessages,
     max_tokens: MAX_TOKENS,
+    reasoning: { effort: 'high' },
   };
-  if (reasoning) body.reasoning = reasoning;
-  if (tools && tools.length > 0) {
-    body.tools = tools;
-    body.tool_choice = 'auto';
-    body.parallel_tool_calls = true;
-  }
+  if (tools && tools.length > 0) body.tools = tools;
 
-  const message = await callModel(model, `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
-  return { message, provider: 'OpenRouter', model };
+  const message = await callModel('Qwen', `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
+  return { message, provider: 'Qwen', model };
 }
 
 module.exports = { callAI };

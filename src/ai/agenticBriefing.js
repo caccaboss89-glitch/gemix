@@ -37,7 +37,7 @@ function buildAgenticBriefing(ctx = {}) {
       Run via \`bash\` as standalone \`gemix-project <subcmd>\` (no shell concatenation or piping).
       Commands:
       - list
-      - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}'
+      - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}' # JSON
       - switch <slug>
       - quota
       - delete <slug> --confirmed  # ASK user for confirmation
