@@ -68,7 +68,7 @@ ${formatSkillsForPrompt(loadSkills())}
     <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
     <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, docx, openpyxl, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
     <Pitfalls>
-      - Project Management: \`gemix-project\` commands MUST run as a standalone bash command. NO shell concatenation (\`&&\`, \`||\`, \`;\`, \`|\`, redirection).
+      - Bash Tool: Every Python script or heavy command MUST run as a standalone \`bash\` call. NEVER use shell concatenation (\`&&\`, \`;\`, \`|\`) to run multiple scripts in one tool call. \`gemix-project\` commands MUST run as a standalone bash command.
       - Atomic Creation: If \`gemix-project create\` fails in a round, ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
       - SymPy Syntax: Input for \`latex_helper.py sympy\` MUST be a mathematical expression, NOT LaTeX code.
         • WRONG: \`\\frac{a}{b} = c\` (LaTeX), \`a == b\` (Comparison)

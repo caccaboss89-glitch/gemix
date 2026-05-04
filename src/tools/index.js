@@ -238,6 +238,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           for (let i = 0; i < imageResult.attachments.length; i++) {
             const att = imageResult.attachments[i];
             att._imageSearchId = startId + i;
+            let wasSaved = false;
             // Persist to searched_images/ when requested
             if (savedDir && att.buffer) {
               try {
@@ -253,11 +254,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
                 }
                 fs.writeFileSync(dest, att.buffer);
                 savedPaths.push(`searched_images/${path.basename(dest)}`);
+                wasSaved = true;
               } catch (err) {
                 log.warn(`save_to_disk: failed to write ${att.name}: ${err.message}`);
               }
             }
-            responseCtx.attachments.push(att);
+            // Only push to attachments (to be sent to user) if not saved to disk
+            if (!wasSaved) {
+              responseCtx.attachments.push(att);
+            }
           }
         }
 
