@@ -21,7 +21,7 @@ function getAIModel({ agenticUnlocked = false, skillsModelActive = false } = {})
 function getReasoningConfig(model) {
   if (!model) return { effort: 'medium' };
   if (model === FAST_MODEL) return { effort: 'medium' };
-  if (model === AGENTIC_MODEL) return { effort: 'high' };
+  if (model === AGENTIC_MODEL) return { effort: 'xhigh' };
   if (/^x-ai\/grok-/i.test(model)) return null;
   return { effort: 'medium' };
 }
