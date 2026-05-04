@@ -20,6 +20,7 @@ const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
 const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
+const { SKILLS_MODEL } = require('./config/env');
 
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
@@ -145,6 +146,7 @@ async function handleMessage(ctx) {
     // user's chat without ending the tool loop. Set by platform handlers
     // (WhatsApp / Discord).
     sendIntermediate: ctx._sendIntermediate || null,
+    skillsModelPending: false,
   };
   let projectLockCtx = null;
   let projectLockOwnerId = null;
@@ -361,6 +363,7 @@ async function handleMessage(ctx) {
     let lastModelUsed = null;
     let maxRounds = MAX_TOOL_ROUNDS;
     let agenticUnlocked = false;
+    let skillsModelActive = false;
     let lastAgenticTool = null;
     const runToolCall = async (tc) => {
       if (projectLockCtx && AGENTIC_TOOL_NAMES.has(tc.function.name)) {
@@ -421,7 +424,7 @@ async function handleMessage(ctx) {
         break;
       }
 
-      log.info(`🤖 [${ctx.platform.toUpperCase()}] AI call (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
+      log.info(`🤖 [${ctx.platform.toUpperCase()}] AI call (round ${rounds}/${maxRounds}${skillsModelActive ? ' skills' : (agenticUnlocked ? ' agentic' : '')})`);
       const _roundsLeft = maxRounds - rounds;
       const _roundHint = _roundsLeft <= 2
         ? `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
@@ -436,6 +439,7 @@ async function handleMessage(ctx) {
 
       const { message: assistantMsg, provider, model } = await callAI(messages, tools, {
         agenticUnlocked: agenticUnlocked || userCtx.agenticUnlocked,
+        skillsModelActive,
       });
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
@@ -513,6 +517,14 @@ async function handleMessage(ctx) {
           }
 
           messages.push(await runToolCall(tc));
+        }
+
+        if (responseCtx.skillsModelPending) {
+          responseCtx.skillsModelPending = false;
+          if (!skillsModelActive && SKILLS_MODEL) {
+            skillsModelActive = true;
+            log.info('   📘 Skill read detected → switching to SKILLS_MODEL from next round');
+          }
         }
 
         // If agentic_unlock was just executed, swap the tool list and

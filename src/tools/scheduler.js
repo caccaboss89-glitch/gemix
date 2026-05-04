@@ -162,7 +162,7 @@ async function scheduleTasks(tasks, ctx) {
     const destStr = Object.keys(destinations).join(', ');
     const recLabel = recurrence ? ` 🔁${recurrence.freq} until ${recurrence.endAt}` : '';
     const scheduledAtRome = formatTimestamp(scheduledAt);
-    let msg = `Task "${task.content.substring(0, 50)}..." scheduled for ${scheduledAtRome} (Europe/Rome) [${destStr}]${recLabel}. Make sure the time matches what the user requested; if not, cancel it and set it again.`;
+    let msg = `Task "${task.content.substring(0, 50)}..." scheduled for ${scheduledAtRome} [${destStr}]${recLabel}. Make sure the time matches what the user requested; if not, cancel it and set it again.`;
     if (dstWarning) {
       msg = dstWarning + '\n' + msg;
     }

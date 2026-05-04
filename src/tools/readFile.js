@@ -94,6 +94,13 @@ async function readFileTool(filePath, userCtx, responseCtx) {
 
   const absolutePath = check.absPath;
   const displayPath = rawPath;
+  const isSkillRead = check.zone === 'skills';
+  const finalizeSuccess = (result) => {
+    if (isSkillRead && responseCtx) {
+      responseCtx.skillsModelPending = true;
+    }
+    return result;
+  };
 
   if (!fs.existsSync(absolutePath)) {
     const bgTask = getBgTask(absolutePath);
@@ -235,7 +242,7 @@ ${text}
 </Transcription>${assetsInfo}
 </FileAnalysis>${bgWriteViolationWarning}`;
 
-      return { success: true, message: output };
+      return finalizeSuccess({ success: true, message: output });
     }
     return { success: false, error: `Path is a directory, not a file.` };
   }
@@ -279,34 +286,34 @@ ${text}
     }
     responseCtx.imagesReadCount++;
     const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
-    return [
+    return finalizeSuccess([
       { type: 'text', text: `Contents of ${sanitizedPath}:` },
       mediaToContentPart(buffer, mimeMap[ext])
-    ];
+    ]);
   }
 
   // ── Audio ──
   if (AUDIO_EXTS.includes(ext)) {
     const mimeMap = { '.ogg': 'audio/ogg', '.mp3': 'audio/mp3', '.wav': 'audio/wav', '.m4a': 'audio/m4a' };
-    return [
+    return finalizeSuccess([
       { type: 'text', text: `Audio contents of ${sanitizedPath}:` },
       mediaToContentPart(buffer, mimeMap[ext], {
         historyPath: rawPath.startsWith('history/') ? rawPath : null,
         historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,
       })
-    ];
+    ]);
   }
 
   // ── Video ──
   if (VIDEO_EXTS.includes(ext)) {
     const mimeMap = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
-    return [
+    return finalizeSuccess([
       { type: 'text', text: `Video contents of ${sanitizedPath}:` },
       mediaToContentPart(buffer, mimeMap[ext], {
         historyPath: rawPath.startsWith('history/') ? rawPath : null,
         historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,
       })
-    ];
+    ]);
   }
 
   // ── PDF (raw .pdf file, not a parsed directory) ──
@@ -327,7 +334,7 @@ ${text}
 </Transcription>
 </FileAnalysis>${bgWriteViolationWarning}`;
 
-    return { success: true, message: output };
+    return finalizeSuccess({ success: true, message: output });
   }
 
   // ── Text/Code ──
@@ -346,7 +353,7 @@ ${text}
 ${numberedText}
 </FileContent>${bgWriteViolationWarning}`;
 
-  return { success: true, message: output };
+  return finalizeSuccess({ success: true, message: output });
 }
 
 module.exports = { readFileTool };
