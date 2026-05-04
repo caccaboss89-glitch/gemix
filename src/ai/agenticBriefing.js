@@ -96,6 +96,7 @@ ${formatSkillsForPrompt(loadSkills())}
       - Phase 1 [before_all]: \`bash\`/\`code_execution\` with \`execution_phase="before_all"\`.
       - Phase 2 [standard]: ALL other tools (\`write_file\`, \`edit_file\`, \`read_file\`, \`web_search\`, etc.) — automatic, no parameter to set.
       - Phase 3 [after_all]: \`bash\`/\`code_execution\` without \`execution_phase\` (default) or with \`execution_phase="after_all"\`.
+      - Phase 4 [final_response]: \`send_voice_message\`, \`send_whatsapp_message\` — always last.
 
       Within the same phase, tools execute in emission order.
       Tool B can read a FILE written by Tool A in a previous phase, but NOT its textual output.
