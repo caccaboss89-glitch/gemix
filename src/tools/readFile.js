@@ -2,7 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 const { PLATFORM_DISCORD } = require('../config/constants');
-const { extractTextFromPdfBuffer, mediaToContentPart } = require('../utils/media');
+const { transcribePdfBuffer, mediaToContentPart } = require('../utils/media');
+const { persistParsedPdfToHistory, getUserHistoryPaths } = require('../utils/historySync');
 const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
 const { isSandboxAlive } = require('../sandbox/sandboxManager');
@@ -92,8 +93,20 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return { success: false, error: `Access denied: ${check.reason}` };
   }
 
-  const absolutePath = check.absPath;
-  const displayPath = rawPath;
+  let absolutePath = check.absPath;
+  let displayPath = rawPath;
+
+  if (!fs.existsSync(absolutePath) && rawPath.startsWith('history/') && /\.pdf$/i.test(rawPath)) {
+    try {
+      const storageId = resolveStorageId(userCtx);
+      const persisted = await persistParsedPdfToHistory(storageId, rawPath);
+      if (persisted.success && persisted.historyPath) {
+        displayPath = `history/${persisted.historyPath}`;
+        const { historyDir } = getUserHistoryPaths(storageId);
+        absolutePath = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''));
+      }
+    } catch { }
+  }
 
   if (!fs.existsSync(absolutePath)) {
     const bgTask = getBgTask(absolutePath);
@@ -206,8 +219,8 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return { success: false, error: `Cannot read file "${displayPath}": ${err.message}` };
   }
 
-  // ── PDF directory (created by Heavy/Hybrid parser) ──
-  // PDF history entries are stored as directories with transcription.md + assets/
+  // ── Legacy PDF directory support ──
+  // Older history entries may still be directories with transcription.md + assets/
   if (stat.isDirectory()) {
     const transcriptionPath = path.join(absolutePath, 'transcription.md');
     if (fs.existsSync(transcriptionPath)) {
@@ -311,20 +324,44 @@ ${text}
 
   // ── PDF (raw .pdf file, not a parsed directory) ──
   if (ext === '.pdf') {
-    const info = await extractTextFromPdfBuffer(buffer);
-    if (!info.success) {
-      return { success: false, error: `Failed to extract text from PDF.` };
+    let text = '';
+    let analysisPath = sanitizedPath;
+    let assetsInfo = '';
+
+    if (rawPath.startsWith('history/')) {
+      const persisted = await persistParsedPdfToHistory(resolveStorageId(userCtx), rawPath, buffer);
+      if (!persisted.success) {
+        return { success: false, error: `Failed to extract text from PDF.` };
+      }
+      text = persisted.text;
+      analysisPath = `history/${persisted.historyPath}`;
+      try {
+        const { historyDir } = getUserHistoryPaths(resolveStorageId(userCtx));
+        const assetsDir = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''), 'assets');
+        if (fs.existsSync(assetsDir)) {
+          const assetFiles = fs.readdirSync(assetsDir);
+          if (assetFiles.length > 0) {
+            assetsInfo = `\n<Assets count="${assetFiles.length}">\n${assetFiles.map(f => `  ${analysisPath}assets/${f}`).join('\n')}\n</Assets>`;
+          }
+        }
+      } catch { }
+    } else {
+      const result = await transcribePdfBuffer(buffer);
+      if (!result.success) {
+        return { success: false, error: `Failed to extract text from PDF.` };
+      }
+      text = result.text;
     }
-    let text = info.text;
+
     const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
     if (isTruncated) {
       text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';
     }
     
-    const output = `<FileAnalysis path="${sanitizedPath}" type="pdf" size="${fileSize}"${isTruncated ? ' truncated="true"' : ''}>
+    const output = `<FileAnalysis path="${analysisPath}" type="pdf" size="${fileSize}"${isTruncated ? ' truncated="true"' : ''}>
 <Transcription>
 ${text}
-</Transcription>
+</Transcription>${assetsInfo}
 </FileAnalysis>${bgWriteViolationWarning}`;
 
     return { success: true, message: output };

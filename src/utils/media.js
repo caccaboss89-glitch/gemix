@@ -23,6 +23,30 @@ function isSupportedMedia(type) {
  * @param {object} contentPart - Content part with type='image_url' containing PDF base64
  * @returns {Promise<{success: boolean, text?: string, error?: string}>} Transcription result
  */
+async function transcribePdfBuffer(buffer) {
+  try {
+    const info = await extractTextFromPdfBuffer(buffer);
+
+    if (!info || !info.success || !info.text) {
+      return { success: false, error: info?.error || 'OpenDataLoader returned invalid text' };
+    }
+
+    if (info.pages > MAX_DOC_PAGES) {
+      return {
+        success: true,
+        text: `[Document too long to process: ${info.pages} pages (max ${MAX_DOC_PAGES})]`,
+      };
+    }
+
+    return {
+      success: true,
+      text: info.text,
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 async function transcribeDocumentFromContentPart(contentPart) {
   try {
     if (!contentPart || !contentPart.image_url || !contentPart.image_url.url) {
@@ -44,26 +68,20 @@ async function transcribeDocumentFromContentPart(contentPart) {
     }
 
     const buffer = Buffer.from(base64Data, 'base64');
-    const info = await extractTextFromPdfBuffer(buffer);
-
-    if (!info || !info.success || !info.text) {
-      return { success: false, error: info?.error || 'OpenDataLoader returned invalid text' };
-    }
-
-    if (info.pages > MAX_DOC_PAGES) {
-      return {
-        success: true,
-        text: `[Document too long to process: ${info.pages} pages (max ${MAX_DOC_PAGES})]`,
-      };
-    }
-
-    return {
-      success: true,
-      text: info.text,
-    };
+    return transcribePdfBuffer(buffer);
   } catch (err) {
     return { success: false, error: err.message };
   }
+}
+
+function _replaceAttachmentPathInText(text, oldPath, newPath) {
+  if (typeof text !== 'string' || !text) return text;
+  const oldTagPath = String(oldPath || '').replace(/^history\//, '').trim();
+  const newTagPath = String(newPath || '').replace(/^history\//, '').trim();
+  if (!oldTagPath || !newTagPath || oldTagPath === newTagPath) return text;
+  return text
+    .split(`[Attachment: ${oldTagPath}]`).join(`[Attachment: ${newTagPath}]`)
+    .split(`[Attachment (expired): ${oldTagPath}]`).join(`[Attachment (expired): ${newTagPath}]`);
 }
 
 /**
@@ -280,6 +298,7 @@ async function transcribeDocumentsInMessageContent(content) {
   }
 
   const transcribed = [];
+  const attachmentPathReplacements = new Map();
 
   for (const part of content) {
     if (!part) {
@@ -289,7 +308,32 @@ async function transcribeDocumentsInMessageContent(content) {
 
     // Check if this is a document content part
     if (_getMediaTypeFromContentPart(part) === 'document') {
-      const result = await transcribeDocumentFromContentPart(part);
+      let result = null;
+      const historyPath = typeof part._historyPath === 'string' ? part._historyPath.trim() : null;
+      const historyUserId = typeof part._historyUserId === 'string' ? part._historyUserId.trim() : null;
+
+      if (historyPath && historyUserId) {
+        try {
+          const dataUrl = part.image_url?.url || '';
+          const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+          if (match && match[1].toLowerCase() === 'application/pdf') {
+            const buffer = Buffer.from(match[2], 'base64');
+            const { persistParsedPdfToHistory } = require('./historySync');
+            const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
+            if (persisted.success && typeof persisted.text === 'string') {
+              result = { success: true, text: persisted.text };
+              if (persisted.historyPath && persisted.historyPath !== historyPath) {
+                attachmentPathReplacements.set(historyPath, persisted.historyPath);
+              }
+            }
+          }
+        } catch { }
+      }
+
+      if (!result) {
+        result = await transcribeDocumentFromContentPart(part);
+      }
+
       if (result.success && result.text) {
         // Replace document with text containing transcription
         transcribed.push({
@@ -308,6 +352,15 @@ async function transcribeDocumentsInMessageContent(content) {
     } else {
       // Keep non-document parts as-is
       transcribed.push(part);
+    }
+  }
+
+  if (attachmentPathReplacements.size > 0) {
+    for (const part of transcribed) {
+      if (!part || part.type !== 'text' || typeof part.text !== 'string') continue;
+      for (const [oldPath, newPath] of attachmentPathReplacements.entries()) {
+        part.text = _replaceAttachmentPathInText(part.text, oldPath, newPath);
+      }
     }
   }
 
@@ -356,6 +409,7 @@ module.exports = {
   mediaToContentPart,
   mediaTag,
   extractTextFromPdfBuffer,
+  transcribePdfBuffer,
   transcribeDocumentFromContentPart,
   transcribeDocumentsInMessageContent,
   buildAttachmentTag,

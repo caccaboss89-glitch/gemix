@@ -1,6 +1,4 @@
 // src/platforms/discord/client.js
-const fs = require('fs');
-const path = require('path');
 const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
 const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../../config/constants');
@@ -142,7 +140,7 @@ async function onDiscordMessage(msg) {
     discordNickname: guildMember?.nickname,
   });
 
-  const history = await buildDiscordHistory(channel, starterMessage?.id, msg.author.id);
+  const { history, recentMessageIds } = await buildDiscordHistory(channel, starterMessage?.id, msg.author.id);
 
   let textBody = msg.content || '';
   let quotedMediaParts = [];
@@ -150,6 +148,7 @@ async function onDiscordMessage(msg) {
     try {
       const quotedMsg = await channel.messages.fetch(msg.reference.messageId);
       if (quotedMsg) {
+        const isQuotedInRecentHistory = recentMessageIds instanceof Set && recentMessageIds.has(quotedMsg.id);
         if (quotedMsg.attachments.size > 0) {
           const filetags = [...quotedMsg.attachments.values()]
             .map(att => `[${att.name}]`)
@@ -217,16 +216,13 @@ async function onDiscordMessage(msg) {
                 } catch { }
               }
             } else if (isPdf) {
-              // PDF is stored as a directory with transcription.md — read it
-              if (syncedPath && syncedPath.endsWith('/')) {
+              if (isQuotedInRecentHistory) {
                 try {
-                  const { historyDir } = require('../../utils/historySync').getUserHistoryPaths(msg.author.id);
-                  const dirName = syncedPath.replace(/\/$/, '');
-                  const mdPath = path.join(historyDir, dirName, 'transcription.md');
-                  if (fs.existsSync(mdPath)) {
-                    const transcription = fs.readFileSync(mdPath, 'utf-8');
-                    replyPrefix = `[In reply to: ${filetags}]\n\n<Transcription>\n${transcription}\n</Transcription>\n`;
-                  }
+                  const buffer = await fetchBuffer();
+                  quotedMediaParts.push(mediaToContentPart(buffer, att.contentType || 'application/pdf', {
+                    historyPath: syncedPath,
+                    historyUserId: msg.author.id,
+                  }));
                 } catch { }
               }
             }
@@ -283,24 +279,15 @@ async function onDiscordMessage(msg) {
           textBody = `${attachmentTag} ${textBody}`.trim();
         }
       }
-    } else if (isDoc && att.contentType === 'application/pdf') {
-      // PDF is stored as a directory — read the pre-parsed transcription
-      if (syncedPath && syncedPath.endsWith('/')) {
-        try {
-          const { historyDir } = require('../../utils/historySync').getUserHistoryPaths(msg.author.id);
-          const dirName = syncedPath.replace(/\/$/, '');
-          const mdPath = path.join(historyDir, dirName, 'transcription.md');
-          if (fs.existsSync(mdPath)) {
-            const transcription = fs.readFileSync(mdPath, 'utf-8');
-            const docText = `\n<Transcription>\n${transcription}\n</Transcription>`;
-            textBody = `${attachmentTag}${docText} ${textBody}`.trim();
-          } else {
-            textBody = `${attachmentTag} ${textBody}`.trim();
-          }
-        } catch {
-          textBody = `${attachmentTag} ${textBody}`.trim();
-        }
-      } else {
+    } else if (isDoc && (att.contentType === 'application/pdf' || ext === 'pdf')) {
+      try {
+        const buffer = await fetchBuffer();
+        contentParts.push(mediaToContentPart(buffer, att.contentType || 'application/pdf', {
+          historyPath: syncedPath,
+          historyUserId: msg.author.id,
+        }));
+        textBody = `${attachmentTag} ${textBody}`.trim();
+      } catch {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }
     } else if (isDoc) {
@@ -444,6 +431,7 @@ async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
     .filter(m => !starterMessageId || m.id !== starterMessageId)
     .reverse()
     .slice(-MAX_HISTORY);
+  const recentMessageIds = new Set(messages.map(m => m.id));
 
   const history = [];
 
@@ -503,7 +491,7 @@ async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
     });
   }
 
-  return history;
+  return { history, recentMessageIds };
 }
 
 module.exports = { initDiscord };

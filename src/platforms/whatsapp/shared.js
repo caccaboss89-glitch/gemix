@@ -1,13 +1,10 @@
 // src/platforms/whatsapp/shared.js
-const fs = require('fs');
 const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
-const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S, MAX_DOC_PAGES } = require('../../config/constants');
+const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
-
-const { isSystemMessage } = require('../../config/systemMessages');
 
 /**
  * Detect if a WhatsApp message body is a system-generated notification.
@@ -18,9 +15,12 @@ const { isSystemMessage } = require('../../config/systemMessages');
 function _isSystemMessage(body) {
   return isSystemMessage(body);
 }
+
+const { isSystemMessage } = require('../../config/systemMessages');
+
 const { isSupportedMedia, mediaToContentPart, mediaTag, buildAttachmentTag } = require('../../utils/media');
 const { normalizeMarkdown } = require('../../utils/text');
-const { syncFileToHistory, getUserHistoryPaths, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
+const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 
 const _MIME_TO_EXT = {
@@ -41,6 +41,20 @@ function _resolveWaFilename(givenName, mediaType, mimetype) {
   const ext = _MIME_TO_EXT[baseMime] || '';
   const base = givenName || mediaType || 'file';
   return ext ? `${base}${ext}` : base;
+}
+
+function _waMessageKey(msg) {
+  return msg?.id?._serialized || msg?.id?.id || null;
+}
+
+async function _getRecentWhatsAppMessageIds(msg) {
+  try {
+    const chat = await msg.getChat();
+    const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
+    return new Set(rawMessages.slice(-MAX_HISTORY).map(_waMessageKey).filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 /**
@@ -197,7 +211,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
  * @param {string} chatId - Chat ID for voice cache lookup
  * @returns {Promise<object>} { prefix: string, mediaParts: array }
  */
-async function extractQuotedMessageContent(msg, chatId, userId) {
+async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds) {
   if (!msg.hasQuotedMsg) return { prefix: '', mediaParts: [] };
 
   try {
@@ -219,6 +233,8 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
       };
       const syncedPath = await syncFileToHistory(userId, quoted.id.id, fetchBuffer, filename);
       const tag = buildAttachmentTag(syncedPath, filename);
+      const quotedMessageKey = _waMessageKey(quoted);
+      const isQuotedInRecentHistory = Boolean(quotedMessageKey) && recentMessageIds instanceof Set && recentMessageIds.has(quotedMessageKey);
 
       const isVideo = mediaType === 'video';
       if (isAudio) {
@@ -267,25 +283,23 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
       }
 
       if (mediaType === 'document' && quoted._data?.mimetype === 'application/pdf') {
-        // PDF is stored as a directory — read the pre-parsed transcription
-        if (syncedPath && syncedPath.endsWith('/')) {
+        prefix = `[In reply to: ${tag}]\n`;
+        if (isQuotedInRecentHistory) {
           try {
-            const { historyDir } = getUserHistoryPaths(userId);
-            const dirName = syncedPath.replace(/\/$/, '');
-            const mdPath = path.join(historyDir, dirName, 'transcription.md');
-            if (fs.existsSync(mdPath)) {
-              const transcription = fs.readFileSync(mdPath, 'utf-8');
-              const docText = ` <Transcription>\n${transcription}\n</Transcription>`;
-              prefix = `[In reply to: ${tag}${docText}]\n`;
-            } else {
-              prefix = `[In reply to: ${tag}]\n`;
+            const buffer = await fetchBuffer();
+            if (buffer) {
+              mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
+                historyPath: syncedPath,
+                historyUserId: userId,
+              }));
             }
-          } catch {
-            prefix = `[In reply to: ${tag}]\n`;
-          }
-        } else {
-          prefix = `[In reply to: ${tag}]\n`;
+          } catch { }
         }
+        return { prefix, mediaParts };
+      }
+
+      if (mediaType === 'document') {
+        prefix = `[In reply to: ${tag}]\n`;
         return { prefix, mediaParts };
       }
 
@@ -316,7 +330,6 @@ async function extractQuotedMessageContent(msg, chatId, userId) {
     return { prefix: '', mediaParts: [] };
   }
 }
-
 
 /**
  * Send response back to WhatsApp chat.
@@ -416,47 +429,22 @@ async function processCurrentMedia(msg, userId) {
     return { skipped: true, tag, reason: 'file unavailable' };
   }
 
-  try {
-    if (mimetype === 'application/pdf') {
-      // PDF is already parsed and stored as a directory by syncFileToHistory.
-      // Read the pre-parsed transcription if the directory exists.
-      if (syncedPath && syncedPath.endsWith('/')) {
-        try {
-          const { historyDir } = getUserHistoryPaths(userId);
-          const dirName = syncedPath.replace(/\/$/, '');
-          const mdPath = path.join(historyDir, dirName, 'transcription.md');
-          if (fs.existsSync(mdPath)) {
-            const transcription = fs.readFileSync(mdPath, 'utf-8');
-            return {
-              skipped: false,
-              transcription,
-              mimetype,
-              filename,
-              tag,
-            };
-          }
-        } catch { }
-      }
-      return {
-        skipped: false,
-        transcription: null,
-        mimetype,
-        filename,
-        tag,
-      };
-    }
-
+  if (mediaType === 'document' && mimetype !== 'application/pdf') {
     return {
-      skipped: false,
-      buffer,
-      mimetype,
-      filename,
-      syncedPath,
+      skipped: true,
       tag,
+      reason: null,
     };
-  } catch {
-    return null;
   }
+
+  return {
+    skipped: false,
+    buffer,
+    mimetype,
+    filename,
+    syncedPath,
+    tag,
+  };
 }
 
 /**
@@ -477,7 +465,8 @@ async function buildIncomingContentParts(msg, chatId, userId) {
     textBody = formatWhatsAppPollText(msg, `[Poll] ${textBody}`);
   }
 
-  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId);
+  const recentMessageIds = await _getRecentWhatsAppMessageIds(msg);
+  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId, recentMessageIds);
   if (quotedContent && quotedContent.prefix) {
     textBody = quotedContent.prefix + textBody;
   }
@@ -490,9 +479,6 @@ async function buildIncomingContentParts(msg, chatId, userId) {
     if (mediaResult.skipped) {
       const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
       textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
-    } else if (mediaResult.transcription !== undefined) {
-      const docText = mediaResult.transcription ? `\n<Transcription>\n${mediaResult.transcription}\n</Transcription>` : '';
-      textBody = `${mediaResult.tag}${docText} ${textBody}`.trim();
     } else {
       contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype, {
         historyPath: mediaResult.syncedPath,
