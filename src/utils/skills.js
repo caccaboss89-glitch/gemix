@@ -72,7 +72,7 @@ function formatSkillsForPrompt(skills) {
   }
 
   let xml = '  <Skills>\n';
-  xml += '    <Instruction>CRITICAL: If a skill matches the request, you MUST call `read_file` on its &lt;Source&gt; path IMMEDIATELY. DO NOT write manual scripts or guess code before reading the documentation.</Instruction>\n';
+  xml += '    <Instruction>CRITICAL: If a skill matches the request, you MUST call `read_file` on its &lt;Source&gt; path IMMEDIATELY. DO NOT write manual scripts, guess code before reading the documentation or search images with save_to_disk=false.</Instruction>\n';
   for (const skill of skills) {
     xml += `    <Skill name="${skill.name}">\n      <Description>${skill.description}</Description>\n      <Source>skills:${skill.filename}</Source>\n    </Skill>\n`;
   }
