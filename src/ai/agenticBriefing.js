@@ -68,15 +68,15 @@ ${formatSkillsForPrompt(loadSkills())}
     <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
     <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, docx, openpyxl, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
     <Pitfalls>
-      - Project Management: \`gemix-project\` commands MUST run as a standalone bash command. NO shell concatenation (\`&&\`, \`||\`, \`;\`, \`|\`, redirection). Concatenation causes an immediate error.
-      - Atomic Creation: If \`gemix-project create\` fails in a round (e.g., due to invalid JSON or shell concatenation), ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
+      - Project Management: \`gemix-project\` commands MUST run as a standalone bash command. NO shell concatenation (\`&&\`, \`||\`, \`;\`, \`|\`, redirection).
+      - Atomic Creation: If \`gemix-project create\` fails in a round, ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
       - SymPy Syntax: Input for \`latex_helper.py sympy\` MUST be a mathematical expression, NOT LaTeX code.
         • WRONG: \`\\frac{a}{b} = c\` (LaTeX), \`a == b\` (Comparison)
         • RIGHT: \`a/b = c\` (Math expression), \`Eq(a, b)\` (Explicit SymPy)
-        • If you need physical constants (hbar, grad, etc.) and the tool fails, use \`code_execution\` for explicit definitions.
-      - PDF Generation Timing: The system now has a 2s auto-wait for files. If \`unified_pdf_generator.py\` still fails in a phased round with "missing file" warnings, retry it in a dedicated round.
+        • For physical constants (hbar, grad, etc.), use \`code_execution\`.
       - Matplotlib: Always call \`plt.close()\` after \`savefig()\`.
-      - yt-dlp: MUST use bash CLI directly. Limit resolution, no proxy args.
+      - yt-dlp: MUST use bash CLI directly. Max 1080p resolution, no proxy args.
+      - Image Search: When searching for images intended for modification or inclusion in documents, ALWAYS set \`save_to_disk=true\`.
       - Strings: Use raw strings (\`r"..."\`) for LaTeX/regex/paths.
       - Escaping: ALWAYS escape backticks (\`) with a backslash (\\\`) inside tool arguments or strings to avoid breaking the prompt/JSON structure.
     </Pitfalls>

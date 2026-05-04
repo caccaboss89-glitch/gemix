@@ -65,7 +65,7 @@ function buildImageSearchTool(agenticUnlocked = false) {
   if (agenticUnlocked) {
     properties.save_to_disk = {
       type: 'boolean',
-      description: 'If true, save the downloaded image(s) to searched_images/ (use only if you need them with agentic tools, e.g. image editing, include in documents, etc.). Default false.',
+      description: 'If true, save the downloaded image(s) to searched_images/ (USE this if you need them with agentic tools, e.g. image editing, include in documents, etc.). Default false.',
     };
   }
 
