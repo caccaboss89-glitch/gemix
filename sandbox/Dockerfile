@@ -42,6 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         texlive-science \
         cm-super \
         dvipng \
+        libreoffice-calc \
+        libreoffice-core \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ──

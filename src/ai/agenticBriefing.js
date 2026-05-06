@@ -66,7 +66,7 @@ ${formatSkillsForPrompt(loadSkills())}
       Python 3.12, stateful. Root: /workspace/. Read-only: /readonly/.
       Resources: 1.5GB RAM, 120s timeout. Network: NO INTERNET except specific domains used by: Polygon API, astropy data services, yt-dlp (video/media domains). pip: DISABLED. Only pre-installed libraries.
     </Runtime>
-    <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
+    <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils, libreoffice</OSTools>
     <Libraries>numpy, scipy, sympy, mpmath, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, docx, openpyxl, pandas, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
     <Pitfalls>
       - Bash Tool: Every shell command, Python script, or heavy command MUST run as a standalone \`bash\` call. NEVER use shell concatenation/piping/redirection (\`&&\`, \`||\`, \`;\`, \`|\`, \`>\`, \`<\`, \`()\`...) to combine steps in one tool call. Emit multiple \`bash\` calls in the same round, using \`execution_phase\` when ordering is needed.
