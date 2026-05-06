@@ -12,6 +12,7 @@ const {
   cleanupProjectTool,
   copyToPermanentTool,
   copyToProjectTool,
+  deleteStorageTool,
   quotaTool,
 } = require('./projects');
 
@@ -19,7 +20,7 @@ const GEMIX_PREFIX = 'gemix-project';
 const FIXED_SUBDIRS = ['temp', 'output', 'code'];
 
 const SUBCMD_HELP =
-  'Valid subcommands: list, create, switch, delete, cleanup, quota, copy-to-permanent, copy-to-project.';
+  'Valid subcommands: list, create, switch, delete, cleanup, quota, copy-to-permanent, copy-to-project, delete-storage.';
 
 function _stripShellQuotes(s) {
   const t = s.trim();
@@ -39,6 +40,10 @@ function hasShellChaining(cmd) {
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
     const next = cmd[i + 1];
+    if (c === '\\' && (inSingle || inDouble) && i + 1 < cmd.length) {
+      i++;
+      continue;
+    }
     if (!inDouble && c === "'") { inSingle = !inSingle; continue; }
     if (!inSingle && c === '"') { inDouble = !inDouble; continue; }
     if (inSingle || inDouble) continue;
@@ -146,6 +151,15 @@ async function handleGemixProjectCmd(command, userCtx) {
       const confirmed = subArgs.includes('--confirmed');
       if (!name) return { success: false, error: 'gemix-project delete <slug> --confirmed: missing project name.' };
       return await deleteProjectTool({ name, user_confirmed: confirmed }, userCtx);
+    }
+
+    case 'delete-storage': {
+      const confirmed = subArgs.includes('--confirmed');
+      const pathParts = subArgs.filter(a => a !== '--confirmed');
+      if (pathParts.length === 0) {
+        return { success: false, error: 'gemix-project delete-storage </readonly/{permanent|searched_images}/path> --confirmed: missing path.' };
+      }
+      return await deleteStorageTool({ path: pathParts.join(' '), user_confirmed: confirmed }, userCtx);
     }
 
     case 'cleanup': {

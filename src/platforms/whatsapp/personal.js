@@ -230,11 +230,6 @@ async function _handlePersonalBatch(entries) {
         : allParts,
       history,
       waJid: phoneJid,
-      _sendIntermediate: async (text) => {
-        const { normalizeMarkdown } = require('../../utils/text');
-        const { addFooter } = require('../../utils/footer');
-        await chat.sendMessage(addFooter(normalizeMarkdown(text), ''));
-      },
     };
 
     try {

@@ -1,10 +1,11 @@
 // src/utils/historySync.js
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, MAX_DOC_PAGES } = require('../config/constants');
+const { DATA_DIR } = require('../config/constants');
 const { createLogger } = require('./logger');
-const { extractAttachmentTagPaths, extractTextFromPdfBuffer } = require('./media');
+const { extractAttachmentTagPaths } = require('./media');
 const { sanitizeFilename } = require('./text');
+const { buildParsedPdfStructure, ensureHeaderInTranscription } = require('./pdfStructure');
 
 const log = createLogger('HistorySync');
 
@@ -331,10 +332,11 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
     return { success: false, error: 'Invalid history filename.' };
   }
 
+  // ── Already-parsed: return existing dir, backfilling the header for legacy folders ──
   const existingDir = _findPdfDirName(historyDir, normalized);
   if (existingDir) {
     const diskName = existingDir.slice(0, -1);
-    const transcriptionPath = path.join(historyDir, diskName, 'transcription.md');
+    const parsedDirAbs = path.join(historyDir, diskName);
     try {
       if (existingDir !== normalized) {
         const meta = _loadMeta(metaFile, userId);
@@ -348,9 +350,7 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
           throw new Error('Failed to update history_meta.json for parsed PDF.');
         }
       }
-      const text = fs.existsSync(transcriptionPath)
-        ? fs.readFileSync(transcriptionPath, 'utf-8')
-        : '';
+      const text = ensureHeaderInTranscription(parsedDirAbs, `history/${diskName}`);
       return { success: true, historyPath: existingDir, text };
     } catch (err) {
       return { success: false, error: err.message };
@@ -371,66 +371,46 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
     }
   }
 
-  const baseName = normalized.slice(0, -ext.length);
-  let dirName = baseName;
-  let counter = 1;
-  while (fs.existsSync(path.join(historyDir, dirName)) && dirName !== baseName) {
-    dirName = `${baseName}(${counter})`;
-    counter++;
-  }
-  if (fs.existsSync(path.join(historyDir, dirName)) && dirName === baseName) {
-    dirName = `${baseName}(${counter})`;
-    counter++;
-    while (fs.existsSync(path.join(historyDir, dirName))) {
-      dirName = `${baseName}(${counter})`;
-      counter++;
-    }
+  // Make sure the source file actually exists on disk before delegating
+  // (buildParsedPdfStructure moves it inside the new folder).
+  if (!fs.existsSync(filePath)) {
+    try { fs.writeFileSync(filePath, buffer); }
+    catch (err) { return { success: false, error: `Cannot stage PDF for parsing: ${err.message}` }; }
   }
 
-  const pdfDir = path.join(historyDir, dirName);
+  const built = await buildParsedPdfStructure({
+    absPdfPath: filePath,
+    buffer,
+    virtualPdfPath: `history/${normalized}`,
+  });
+  if (!built.success) {
+    return { success: false, error: built.error };
+  }
+
+  const parsedHistoryPath = `${built.dirName}/`;
   try {
-    fs.mkdirSync(pdfDir, { recursive: true });
-    const info = await extractTextFromPdfBuffer(buffer, { persistDir: pdfDir });
-    if (!info || !info.success || !info.text) {
-      throw new Error(info?.error || 'OpenDataLoader returned invalid text');
-    }
-
-    const transcription = info.pages > MAX_DOC_PAGES
-      ? `[Document too long to process: ${info.pages} pages (max ${MAX_DOC_PAGES})]`
-      : info.text;
-
-    fs.writeFileSync(path.join(pdfDir, 'transcription.md'), transcription, 'utf-8');
-    try {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    } catch (err) {
-      throw new Error(`Failed to delete original PDF: ${err.message}`);
-    }
-
-    const parsedHistoryPath = `${dirName}/`;
     const meta = _loadMeta(metaFile, userId);
     const replaced = _replaceHistoryMetaFilename(meta, normalized, parsedHistoryPath);
     if (!replaced) {
       const target = _upsertMetaEntry(meta, normalized);
-      if (!target.id) {
-        try { fs.writeFileSync(filePath, buffer); } catch { }
-        throw new Error('Failed to create history_meta.json entry for parsed PDF.');
-      }
+      if (!target.id) throw new Error('Failed to create history_meta.json entry for parsed PDF.');
       meta[target.id] = { ...target.entry, filename: parsedHistoryPath, type: 'pdf-dir' };
     }
     if (!_saveMeta(metaFile, meta, userId)) {
-      try { fs.writeFileSync(filePath, buffer); } catch { }
       throw new Error('Failed to update history_meta.json for parsed PDF.');
     }
-
-    return {
-      success: true,
-      historyPath: parsedHistoryPath,
-      text: transcription,
-    };
   } catch (err) {
-    try { fs.rmSync(pdfDir, { recursive: true, force: true }); } catch { }
+    // Roll back: dump the buffer back to the original location and remove the parsed dir.
+    try { fs.writeFileSync(filePath, buffer); } catch {}
+    try { fs.rmSync(built.parsedDirAbs, { recursive: true, force: true }); } catch {}
     return { success: false, error: err.message };
   }
+
+  return {
+    success: true,
+    historyPath: parsedHistoryPath,
+    text: built.mdText,
+  };
 }
 
 /**

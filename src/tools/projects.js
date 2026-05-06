@@ -1,13 +1,13 @@
 // src/tools/projects.js
 // Project-management functions: list / create / switch / delete / cleanup,
-// plus copy helpers from history and searched_images into the project space.
+// plus copy/delete helpers for user storage.
 // These are NOT exposed as AI-callable tools anymore — they are invoked by
 // gemixProjectCmds.js when the AI runs `gemix-project <subcmd>` via bash.
 
 const fs = require('fs');
 const path = require('path');
 const { MAX_PROJECTS_PER_USER, MAX_USER_TOTAL_MB, PLATFORM_DISCORD } = require('../config/constants');
-const { resolveStorageId, ensureUserSkeleton, ensureProjectSkeleton, sanitizeProjectName, listProjects, readProjectMeta, writeProjectMeta, projectExists, getProjectRoot, getProjectSubdir, getPermanentDir, userTotalBytes, userQuotaBytes, projectSizeBytes, FIXED_PROJECT_SUBDIRS, isPathAllowed } = require('../utils/userPaths');
+const { resolveStorageId, ensureUserSkeleton, ensureProjectSkeleton, sanitizeProjectName, listProjects, readProjectMeta, writeProjectMeta, projectExists, getProjectRoot, getProjectSubdir, getPermanentDir, getSearchedImagesDir, userTotalBytes, userQuotaBytes, projectSizeBytes, FIXED_PROJECT_SUBDIRS, isPathAllowed } = require('../utils/userPaths');
 const { getCurrentProject, setCurrentProject } = require('../utils/projectState');
 const { copyFromHistory } = require('../utils/historySync');
 const { createLogger } = require('../utils/logger');
@@ -16,7 +16,37 @@ const log = createLogger('Projects');
 
 // ── Guards ──
 
-function _err(msg) { return { success: false, error: msg }; }
+function _err(message) {
+  return { success: false, error: message };
+}
+
+function _uniqueDestName(destDir, baseName) {
+  let finalName = baseName;
+  if (!fs.existsSync(path.join(destDir, finalName))) return finalName;
+  const m = finalName.match(/\.([^.]+)$/);
+  const ext = m ? `.${m[1]}` : '';
+  const stem = m ? finalName.slice(0, -ext.length) : finalName;
+  let i = 1;
+  while (fs.existsSync(path.join(destDir, `${stem}(${i})${ext}`))) i++;
+  return `${stem}(${i})${ext}`;
+}
+
+function _normalizeHistoryCopySource(name) {
+  if (typeof name !== 'string') return null;
+  let clean = name.trim().replace(/\\/g, '/');
+  if (clean.startsWith('/readonly/history/')) {
+    clean = clean.slice('/readonly/history/'.length);
+  } else if (clean.startsWith('history/')) {
+    clean = clean.slice('history/'.length);
+  }
+  if (!clean || clean.includes('..') || clean.startsWith('/') || clean.includes('//')) return null;
+  if (clean.includes('/') && !clean.endsWith('/')) return null;
+  if (clean.endsWith('/')) {
+    const dirName = clean.slice(0, -1);
+    if (!dirName || dirName.includes('/')) return null;
+  }
+  return clean;
+}
 
 function _guardPlatform(userCtx) {
   if (userCtx.platform === PLATFORM_DISCORD) {
@@ -246,14 +276,8 @@ async function copyToPermanentTool(args, userCtx) {
   if (guard) return guard;
   let name = args && args.history_filename;
   if (!name) return _err('Missing "history_filename".');
-  // Support both absolute paths and bare filenames
-  if (name.startsWith('/readonly/history/')) {
-    name = name.replace('/readonly/history/', '');
-  }
-  // Reject paths that still try to escape chat history or target other zones
-  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
-    return _err('"history_filename" must be a bare filename or a path starting with /readonly/history/.');
-  }
+  name = _normalizeHistoryCopySource(name);
+  if (!name) return _err('"history_filename" must be a file in chat history, or a parsed PDF folder ending with "/". Accepted examples: "file.pdf", "pdf_name/", "/readonly/history/pdf_name/".');
   ensureUserSkeleton(userCtx);
   const dest = getPermanentDir(userCtx);
   const storageId = resolveStorageId(userCtx);
@@ -268,7 +292,7 @@ async function copyToPermanentTool(args, userCtx) {
 /**
  * Invoked by `gemix-project copy-to-project <source> [<subdir>]`.
  * Args: { source, subdir?: 'temp'|'output'|'code' }.
- * Source may be a bare filename (chat history) or "searched_images/<file>". Default subdir = temp.
+ * Source may be history, permanent, or searched_images. Default subdir = temp.
  * Writes into the currently selected project.
  */
 async function copyToProjectTool(args, userCtx) {
@@ -284,15 +308,19 @@ async function copyToProjectTool(args, userCtx) {
   const current = await getCurrentProject(userCtx);
   if (!current) return _err('No project is currently selected. Run `gemix-project create` (new) or `gemix-project switch <slug>` (existing) via bash first.');
 
-  // Source must be read-allowed and live in chat history or searched_images/
+  // Source must be read-allowed and live in chat history, permanent, or searched_images.
   const srcCheck = isPathAllowed(userCtx, source, { op: 'read' });
   if (!srcCheck.ok) return _err(`Invalid source: ${srcCheck.reason}`);
-  if (srcCheck.zone !== 'history' && srcCheck.zone !== 'searched_images') {
-    return _err('Source must be inside chat history or searched_images/.');
+  if (srcCheck.zone !== 'history' && srcCheck.zone !== 'permanent' && srcCheck.zone !== 'searched_images') {
+    return _err('Source must be inside chat history, permanent/, or searched_images/.');
   }
 
   if (!fs.existsSync(srcCheck.absPath)) return _err(`Source file not found: ${source}.`);
-  if (fs.statSync(srcCheck.absPath).isDirectory()) return _err('Source must be a file, not a directory.');
+  const srcStat = fs.statSync(srcCheck.absPath);
+  if (srcStat.isDirectory() && srcCheck.zone !== 'history') return _err('Directory sources are only allowed for parsed PDF folders in chat history.');
+  if (srcStat.isDirectory() && !fs.existsSync(path.join(srcCheck.absPath, 'transcription.md'))) {
+    return _err('Directory source must be a parsed PDF folder with transcription.md.');
+  }
 
   // Per-user quota check (aggregate of projects/ + searched_images/)
   if (userTotalBytes(userCtx) >= userQuotaBytes()) {
@@ -302,19 +330,14 @@ async function copyToProjectTool(args, userCtx) {
   ensureProjectSkeleton(userCtx, current);
   const destDir = getProjectSubdir(userCtx, current, subdir);
   const origName = path.basename(srcCheck.absPath);
-  // Re-use the same unique-name logic as copyFromHistory by piggybacking its helper
-  // via a fresh copy: we simply write ourselves to avoid exporting another internal.
-  let finalName = origName;
-  if (fs.existsSync(path.join(destDir, finalName))) {
-    const m = finalName.match(/\.([^.]+)$/);
-    const ext = m ? `.${m[1]}` : '';
-    const stem = m ? finalName.slice(0, -ext.length) : finalName;
-    let i = 1;
-    while (fs.existsSync(path.join(destDir, `${stem}(${i})${ext}`))) i++;
-    finalName = `${stem}(${i})${ext}`;
-  }
+  const finalName = _uniqueDestName(destDir, origName);
   try {
-    fs.copyFileSync(srcCheck.absPath, path.join(destDir, finalName));
+    const destPath = path.join(destDir, finalName);
+    if (srcStat.isDirectory()) {
+      fs.cpSync(srcCheck.absPath, destPath, { recursive: true });
+    } else {
+      fs.copyFileSync(srcCheck.absPath, destPath);
+    }
   } catch (err) {
     return _err(`Copy failed: ${err.message}`);
   }
@@ -322,6 +345,45 @@ async function copyToProjectTool(args, userCtx) {
     success: true,
     message: `File copied: ${source} -> /workspace/${subdir}/${finalName}`,
   };
+}
+
+/**
+ * Invoked by `gemix-project delete-storage <path> --confirmed`.
+ * Deletes a file or directory from user-managed global storage only.
+ */
+async function deleteStorageTool(args, userCtx) {
+  const guard = _guardPlatform(userCtx);
+  if (guard) return guard;
+
+  const target = args && args.path;
+  const confirmed = args && args.user_confirmed === true;
+  if (!target) return _err('Missing "path".');
+  if (!confirmed) {
+    return _err('user_confirmed must be true. First ask the user to explicitly confirm deletion of this storage item, then retry with --confirmed.');
+  }
+
+  const check = isPathAllowed(userCtx, target, { op: 'read' });
+  if (!check.ok) return _err(`Invalid path: ${check.reason}`);
+  if (check.zone !== 'permanent' && check.zone !== 'searched_images') {
+    return _err('delete-storage can only delete inside /readonly/permanent/ or /readonly/searched_images/. It cannot delete chat history, skills, or projects.');
+  }
+  if (!fs.existsSync(check.absPath)) return _err(`Path not found: ${target}.`);
+
+  const zoneRoot = check.zone === 'permanent'
+    ? getPermanentDir(userCtx)
+    : getSearchedImagesDir(userCtx);
+  if (path.resolve(check.absPath) === path.resolve(zoneRoot)) {
+    return _err(`Refusing to delete the entire ${check.zone}/ root. Specify a file or subfolder inside it.`);
+  }
+
+  try {
+    const stat = fs.statSync(check.absPath);
+    if (stat.isDirectory()) fs.rmSync(check.absPath, { recursive: true, force: true });
+    else fs.unlinkSync(check.absPath);
+  } catch (err) {
+    return _err(`Failed to delete storage item: ${err.message}`);
+  }
+  return { success: true, message: `Deleted ${target} from ${check.zone}.` };
 }
 
 /**
@@ -359,5 +421,6 @@ module.exports = {
   cleanupProjectTool,
   copyToPermanentTool,
   copyToProjectTool,
+  deleteStorageTool,
   quotaTool,
 };

@@ -196,10 +196,6 @@ async function _handleDedicatedBatch(entries) {
         : allParts,
       history,
       waJid: phoneJid,
-      _sendIntermediate: async (text) => {
-        const { normalizeMarkdown } = require('../../utils/text');
-        await chat.sendMessage(normalizeMarkdown(text));
-      },
     };
 
     try {

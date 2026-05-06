@@ -4,6 +4,11 @@ const path = require('path');
 const { PLATFORM_DISCORD } = require('../config/constants');
 const { transcribePdfBuffer, mediaToContentPart } = require('../utils/media');
 const { persistParsedPdfToHistory, getUserHistoryPaths } = require('../utils/historySync');
+const {
+  buildParsedPdfStructure,
+  findExistingParsedDirFor,
+  ensureHeaderInTranscription,
+} = require('../utils/pdfStructure');
 const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
 const { isSandboxAlive } = require('../sandbox/sandboxManager');
@@ -96,16 +101,63 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   let absolutePath = check.absPath;
   let displayPath = rawPath;
 
-  if (!fs.existsSync(absolutePath) && rawPath.startsWith('history/') && /\.pdf$/i.test(rawPath)) {
-    try {
-      const storageId = resolveStorageId(userCtx);
-      const persisted = await persistParsedPdfToHistory(storageId, rawPath);
-      if (persisted.success && persisted.historyPath) {
-        displayPath = `history/${persisted.historyPath}`;
-        const { historyDir } = getUserHistoryPaths(storageId);
-        absolutePath = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''));
+  // ── Canonical PDF resolution ──
+  // Any read on a `.pdf` path resolves to a self-contained parsed-PDF folder
+  // (folder/, original .pdf inside, transcription.md with header, assets/).
+  // History paths get extra meta bookkeeping; everything else uses the
+  // generic structure builder. If the .pdf already became a folder on a
+  // previous read, we redirect to that folder so the AI keeps using the
+  // original .pdf path consistently.
+  if (/\.pdf$/i.test(rawPath)) {
+    // Guard: if the .pdf is the original sitting inside an already-parsed
+    // folder (i.e. its parent has a transcription.md), redirect to that
+    // folder instead of triggering a recursive re-parse.
+    if (fs.existsSync(absolutePath)) {
+      try {
+        const st0 = fs.statSync(absolutePath);
+        if (st0.isFile()) {
+          const parentDir = path.dirname(absolutePath);
+          if (fs.existsSync(path.join(parentDir, 'transcription.md'))) {
+            absolutePath = parentDir;
+            const parentName = path.basename(parentDir);
+            displayPath = displayPath.replace(/[^/]*\.pdf$/i, parentName + '/');
+          }
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  if (/\.pdf$/i.test(rawPath) && (!fs.existsSync(absolutePath) || fs.statSync(absolutePath).isFile())) {
+    if (rawPath.startsWith('history/')) {
+      try {
+        const storageId = resolveStorageId(userCtx);
+        const persisted = await persistParsedPdfToHistory(storageId, rawPath);
+        if (persisted.success && persisted.historyPath) {
+          displayPath = `history/${persisted.historyPath}`;
+          const { historyDir } = getUserHistoryPaths(storageId);
+          absolutePath = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''));
+        }
+      } catch { /* fall through to normal not-found / file handling */ }
+    } else if (fs.existsSync(absolutePath)) {
+      try {
+        const st0 = fs.statSync(absolutePath);
+        if (st0.isFile()) {
+          const built = await buildParsedPdfStructure({
+            absPdfPath: absolutePath,
+            virtualPdfPath: rawPath.startsWith('/') ? rawPath : `/${rawPath}`,
+          });
+          if (built.success) {
+            absolutePath = built.parsedDirAbs;
+            displayPath = displayPath.replace(/[^/]*\.pdf$/i, built.dirName + '/');
+          }
+        }
+      } catch { /* fall through */ }
+    } else {
+      const existing = findExistingParsedDirFor(absolutePath);
+      if (existing) {
+        absolutePath = existing;
+        displayPath = displayPath.replace(/[^/]*\.pdf$/i, path.basename(existing) + '/');
       }
-    } catch { }
+    }
   }
 
   if (!fs.existsSync(absolutePath)) {
@@ -219,12 +271,16 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return { success: false, error: `Cannot read file "${displayPath}": ${err.message}` };
   }
 
-  // ── Legacy PDF directory support ──
-  // Older history entries may still be directories with transcription.md + assets/
+  // ── Parsed-PDF directory ──
+  // Both the new flow (created by buildParsedPdfStructure) and legacy folders
+  // converge here. ensureHeaderInTranscription backfills the canonical paths/
+  // rules header for legacy md files that were written before this feature.
   if (stat.isDirectory()) {
     const transcriptionPath = path.join(absolutePath, 'transcription.md');
     if (fs.existsSync(transcriptionPath)) {
-      let text = fs.readFileSync(transcriptionPath, 'utf-8');
+      const virtualDir = displayPath.endsWith('/') ? displayPath.slice(0, -1) : displayPath;
+      let text = ensureHeaderInTranscription(absolutePath, virtualDir);
+      if (!text) text = fs.readFileSync(transcriptionPath, 'utf-8');
       const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
       if (isTruncated) {
         text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';

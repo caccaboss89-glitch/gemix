@@ -118,7 +118,7 @@ function _resolveTargetEmail(args, userCtx) {
 }
 
 // Tools that produce identical results every time in the same round — block duplicates.
-const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock', 'list_projects', 'quota']);
+const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock']);
 
 /**
  * Execute a tool call and return the result.

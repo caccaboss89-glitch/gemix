@@ -14,7 +14,7 @@ const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
 const { getCurrentProject, getLastProject, setCurrentProject, consumeLastCrash, saveLastCrash, acquireLock, releaseLock, startAutoRenewLock } = require('./utils/projectState');
-const { listProjects, ensureUserSkeleton, getProjectRoot } = require('./utils/userPaths');
+const { listProjects, ensureUserSkeleton, getProjectRoot, resolveStorageId } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
@@ -141,10 +141,6 @@ async function handleMessage(ctx) {
       this._imageSearchNextId += count;
       return start;
     },
-    // Platform-provided callback: sends an intermediate text message to the
-    // user's chat without ending the tool loop. Set by platform handlers
-    // (WhatsApp / Discord).
-    sendIntermediate: ctx._sendIntermediate || null,
   };
   let projectLockCtx = null;
   let projectLockOwnerId = null;
@@ -341,7 +337,7 @@ async function handleMessage(ctx) {
     // alive forever otherwise).
     try {
       const isDiscord = ctx.platform === PLATFORM_DISCORD;
-      const historyUserId = ctx.isGroup ? (ctx.groupId || ctx.userId) : ctx.userId;
+      const historyUserId = resolveStorageId(ctx);
       if (historyUserId) {
         const referenced = collectReferencedHistoryFilenames(ctx.history, transcribedUserContent);
         const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};

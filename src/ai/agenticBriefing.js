@@ -40,10 +40,11 @@ function buildAgenticBriefing(ctx = {}) {
       - create '{"name":"slug","description":"...","user_request":"...","strategy":"..."}' # JSON
       - switch <slug>
       - quota
-      - delete <slug> --confirmed  # ASK user for confirmation
-      - cleanup [<slug_default_current>] <subdir>...  # subdirs: temp|output|code
-      - copy-to-permanent <history_filename>
-      - copy-to-project <source> [<subdir_default_temp>]
+      - delete <slug> --confirmed  # deletes an entire project only; ASK user for confirmation
+      - cleanup [<slug_default_current>] <subdir>...  # deletes contents of project subdirs only;
+      - copy-to-permanent </readonly/history/file_or_pdf_folder>  # source must be chat history; parsed PDF folders end with /
+      - copy-to-project </readonly/{history|permanent|searched_images}/file_or_history_pdf_folder> [<subdir_default_temp>]  # dirs allowed only for parsed PDF folders in history
+      - delete-storage </readonly/{permanent|searched_images}/file_or_folder> --confirmed  # deletes a cloud/search-image file; ASK user for confirmation
     </ProjectManagement>
     <FileDelivery>
       CRITICAL: Files in output/ are AUTO-DELIVERED after your text response. 
@@ -66,9 +67,9 @@ ${formatSkillsForPrompt(loadSkills())}
       Resources: 1.5GB RAM, 120s timeout. Network: NO INTERNET except specific domains used by: Polygon API, astropy data services, yt-dlp (video/media domains). pip: DISABLED. Only pre-installed libraries.
     </Runtime>
     <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils</OSTools>
-    <Libraries>numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, docx, openpyxl, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
+    <Libraries>numpy, scipy, sympy, mpmath, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, polygon-api-client, docx, openpyxl, pandas, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
     <Pitfalls>
-      - Bash Tool: Every Python script or heavy command MUST run as a standalone \`bash\` call. NEVER use shell concatenation (\`&&\`, \`;\`, \`|\`) to run multiple scripts in one tool call. \`gemix-project\` commands MUST run as a standalone bash command.
+      - Bash Tool: Every shell command, Python script, or heavy command MUST run as a standalone \`bash\` call. NEVER use shell concatenation/piping/redirection (\`&&\`, \`||\`, \`;\`, \`|\`, \`>\`, \`<\`, \`()\`...) to combine steps in one tool call. Emit multiple \`bash\` calls in the same round, using \`execution_phase\` when ordering is needed.
       - Atomic Creation: If \`gemix-project create\` fails in a round, ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
       - SymPy Syntax: Input for \`latex_helper.py sympy\` MUST be a mathematical expression, NOT LaTeX code.
         • WRONG: \`\\frac{a}{b} = c\` (LaTeX), \`a == b\` (Comparison)

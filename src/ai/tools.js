@@ -89,7 +89,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'MUST be called ALONE (no other tools in the same call) BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, cloud storage, project management, advance computations, yt-dlp downloads, OCR, charts, data work, finance... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
+  description: 'MUST be called BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, cloud storage, project management, advance computations, yt-dlp downloads, OCR, charts, data work, finance... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
   properties: {},
 });
 
@@ -159,9 +159,9 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (ffmpeg, zip, ls, cp...), yt-dlp downloads. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,permanent,searched_images,skills}. Can combine with write_file/edit_file or other bash/code_execution in the same round.',
+  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (ffmpeg, zip, ls, cp...), yt-dlp downloads... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,permanent,searched_images,skills}. Can combine with write_file/edit_file or other bash/code_execution in the same round.',
   properties: {
-    command: { type: 'string', description: 'Shell command (bash -c). Single line or \`&&\`-chained statements. Exception: \`gemix-project\` commands MUST be standalone (no shell concatenation or piping).' },
+    command: { type: 'string', description: 'Single standalone shell command. Do NOT use shell concatenation or piping (&&, ||, ;, |, redirection, subshells) to combine steps. Emit multiple bash tool calls, using execution_phase when ordering is needed.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
     background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results. Default false.' },
     execution_phase: {

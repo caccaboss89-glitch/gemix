@@ -90,6 +90,7 @@ function snapshotProject(dir) {
     for (const entry of entries) {
       const full = path.join(cur, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name.startsWith('.')) continue;
         stack.push(full);
       } else if (entry.isFile()) {
         try {
@@ -232,13 +233,14 @@ async function runInProjectSandbox({
     kernelResult = await entry.kernel.execute(code, { timeoutMs: effTimeoutMs });
   } catch (err) {
     entry.busy = false;
-    await clearLastCrash(userCtx);
     if (_isKernelTransportFailure(err)) {
       try {
         await sandboxManager.shutdown(userCtx, projectName);
       } catch (shutdownErr) {
         log.warn(`failed to recycle stale sandbox (${toolLabel}): ${shutdownErr.message}`);
       }
+    } else {
+      await clearLastCrash(userCtx);
     }
     log.error(`kernel execute threw (${toolLabel}): ${err.message}`);
     return { error: `Sandbox execution failed: ${err.message}` };

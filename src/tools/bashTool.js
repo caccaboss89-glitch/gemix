@@ -290,6 +290,10 @@ async function bashTool(args, userCtx, responseCtx) {
   }
 
   let commandToRun = command;
+  if (hasShellChaining(commandToRun)) {
+    return { success: false, error: 'bash commands must be standalone — no chaining, piping, redirection, or subshells. Use multiple bash tool calls with execution_phase instead.' };
+  }
+
   if (commandToRun.includes('yt-dlp')) {
     // Execute yt-dlp on the Host OS to directly access 127.0.0.1:5040 and local chromium profiles
     return await executeYtDlpOnHost(args, userCtx, commandToRun, responseCtx);
@@ -329,7 +333,7 @@ async function bashTool(args, userCtx, responseCtx) {
       timeoutMs: 10_000,
       crashPayload: { command_preview: command.slice(0, 300), background: true },
       autoAttach: false,
-      requireProject: false,
+      requireProject: true,
     });
 
     if (bgResult.error) {
@@ -493,21 +497,10 @@ async function bashTool(args, userCtx, responseCtx) {
     out.message = hints.join(' ');
   }
 
-  // CRITICAL: Protect README.md and .project.json. If bash modified them, restore them
-  // to avoid breaking the project's meta-structure.
   for (const f of _violations) {
     const rel = f.path.slice(_projectPrefix.length);
     if (rel === 'README.md' || rel === '.project.json') {
-      const absPath = path.join(getProjectRoot(userCtx, result.projectName), rel);
-      const isProjectMeta = rel === '.project.json';
-      
-      // For .project.json we can just overwrite from memory if we had it, 
-      // but simpler to just warn the AI that they shouldn't do that.
-      // However, the user wants us to "solve" it.
-      // If we have a snapshot before, we could restore.
-      // For now, let's just make sure we LOG it clearly and if it's README, maybe we don't care that much
-      // as long as the AI gets the violation.
-      log.warn(`   🛡️ Critical file modified by bash: ${rel}. Restoring if possible.`);
+      log.warn(`   🛡️ Critical file modified by bash: ${rel}. Warn only.`);
     }
   }
 
