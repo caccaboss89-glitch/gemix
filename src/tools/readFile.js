@@ -88,8 +88,6 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     rawPath = 'history/' + rawPath;
   } else if (rawPath.startsWith('./')) {
     rawPath = rawPath.slice(2);
-  } else if (rawPath.startsWith('/')) {
-    rawPath = rawPath.replace(/^\/+/, '');
   }
 
   const currentProject = await getCurrentProject(userCtx);

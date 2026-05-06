@@ -250,6 +250,7 @@ function classifyUserPath(userCtx, rawPath) {
 function isPathAllowed(userCtx, rawPath, opts = {}) {
   const op = opts.op || 'read';
   const currentProject = opts.currentProject;
+  const agenticUnlocked = Boolean(opts.agenticUnlocked || userCtx.agenticUnlocked);
 
   // Normalize /workspace/ -> projects/<slug>/ if a project is active
   const effectivePath = normalizeAgenticPath(rawPath, currentProject);
@@ -270,7 +271,7 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
       if (isDiscord) return { ok: false, reason: 'Skills are not available on Discord.' };
       return c;
     }
-    if (!opts.agenticUnlocked && c.zone !== 'history') {
+    if (!agenticUnlocked && c.zone !== 'history') {
       return { ok: false, reason: isDiscord 
         ? 'On Discord you can only read files from chat history.' 
         : 'Access to advanced storage (/workspace/, /readonly/permanent/, etc.) denied. Unlock agentic mode first.' };
