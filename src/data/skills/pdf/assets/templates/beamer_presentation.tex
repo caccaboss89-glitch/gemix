@@ -1,0 +1,69 @@
+\documentclass[10pt,aspectratio=169]{beamer}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{textcomp}
+\usepackage{microtype}
+\usepackage{siunitx}
+\usepackage{cleveref}
+\usepackage{bm}
+
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamerfont{title}{size=\Large}
+\setbeamerfont{frametitle}{size=\large}
+\setbeamercolor{title}{fg=black}
+\setbeamercolor{frametitle}{fg=black}
+
+\title{\VAR{title | latex_escape}}
+\BLOCK{if subtitle}\subtitle{\VAR{subtitle | latex_escape}}\BLOCK{endif}
+\author{\VAR{author | latex_escape}}
+\BLOCK{if institute}\institute{\VAR{institute | latex_escape}}\BLOCK{endif}
+\date{\VAR{date | latex_escape}}
+
+\begin{document}
+
+\begin{frame}
+    \maketitle
+\end{frame}
+
+\BLOCK{if show_toc}
+\begin{frame}{Outline}
+    \tableofcontents
+\end{frame}
+\BLOCK{endif}
+
+\BLOCK{for frame in frames}
+\begin{frame}\BLOCK{if frame.options}[\VAR{frame.options}]\BLOCK{endif}{\VAR{frame.title | latex_escape}}
+    \VAR{frame.content}
+
+    \BLOCK{if frame.figure_path}
+    \begin{figure}
+        \centering
+        \includegraphics[width=0.85\textwidth,height=0.62\textheight,keepaspectratio]{\VAR{frame.figure_path}}
+        \BLOCK{if frame.caption}
+        \vspace{-0.4em}
+        \caption{\VAR{frame.caption}}
+        \BLOCK{endif}
+    \end{figure}
+    \BLOCK{endif}
+\end{frame}
+\BLOCK{endfor}
+
+\BLOCK{if thank_you_slide}
+\begin{frame}
+    \centering
+    {\LARGE \textbf{Thank you for your attention!}}
+
+    \vfill
+    {\large Questions?}
+\end{frame}
+\BLOCK{endif}
+
+\end{document}

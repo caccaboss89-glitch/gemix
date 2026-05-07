@@ -8,5 +8,5 @@ __pycache__/
 *.pyc
 
 src/data/**
-!src/data/scripts/
-!src/data/scripts/**
+!src/data/skills/
+!src/data/skills/**
