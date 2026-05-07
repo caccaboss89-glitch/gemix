@@ -58,14 +58,14 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /opt/sandbox
-COPY requirements-sandbox.txt /opt/sandbox/requirements-sandbox.txt
+COPY sandbox/requirements-sandbox.txt /opt/sandbox/requirements-sandbox.txt
 RUN pip install --no-cache-dir -r /opt/sandbox/requirements-sandbox.txt
 
 # ── unoserver for LibreOffice field updates (TOC, indexes) ──
 RUN pip install --no-cache-dir unoserver
 
 # ── Preload heavy models at build time (offline runtime) ──
-COPY preload_models.py /opt/sandbox/preload_models.py
+COPY sandbox/preload_models.py /opt/sandbox/preload_models.py
 RUN python /opt/sandbox/preload_models.py
 
 # ── Non-root sandbox user ──
@@ -81,7 +81,7 @@ RUN if [ -d /root/.u2net ]; then \
         chown -R sandbox:sandbox /home/sandbox/.u2net; \
     fi
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY sandbox/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Disable pip at build time so the AI cannot install arbitrary packages at runtime.
