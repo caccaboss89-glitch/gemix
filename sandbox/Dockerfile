@@ -43,6 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cm-super \
         dvipng \
         libreoffice-calc \
+        libreoffice-writer \
+        libreoffice-impress \
         libreoffice-core \
     && rm -rf /var/lib/apt/lists/*
 
