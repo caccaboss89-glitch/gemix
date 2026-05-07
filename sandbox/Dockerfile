@@ -46,6 +46,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libreoffice-writer \
         libreoffice-impress \
         libreoffice-core \
+        libreoffice-common \
+        libreoffice-java-common \
+        default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ──
