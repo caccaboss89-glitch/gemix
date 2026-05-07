@@ -2,10 +2,11 @@ node_modules/
 .env
 .wwebjs_auth/
 .wwebjs_cache/
-src/data/
-!data/scripts/
-!data/scripts/**
 src/logs/
 package-lock.json
 __pycache__/
 *.pyc
+
+src/data/**
+!src/data/scripts/
+!src/data/scripts/**
