@@ -11,6 +11,7 @@ and styles in use. Optionally extracts embedded images.
 """
 import argparse
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -19,26 +20,27 @@ from typing import Any, Dict, List, Optional
 from docx import Document
 from docx.oxml.ns import qn
 
+try:
+    from lxml import etree
+except ImportError:
+    etree = None
 
-W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
+# Word unit conversion constants
+EMU_PER_INCH = 914400  # 1 inch = 914400 EMUs (English Metric Units)
 
 def _emu_to_in(value: Optional[int]) -> Optional[float]:
     if value is None:
         return None
-    return round(value / 914400.0, 3)
-
-
-def _twips_to_in(value: Optional[int]) -> Optional[float]:
-    if value is None:
-        return None
-    return round(value / 1440.0, 3)
+    return round(value / EMU_PER_INCH, 3)
 
 
 def _named_page_size(width_in: Optional[float], height_in: Optional[float]) -> str:
     """Best-effort match against well-known sizes (tolerance ±0.1")."""
     if width_in is None or height_in is None:
         return "unknown"
+    if width_in <= 0 or height_in <= 0:
+        return "custom"
     candidates = {
         "letter": (8.5, 11.0),
         "legal":  (8.5, 14.0),
@@ -74,21 +76,20 @@ def _section_summary(section) -> Dict[str, Any]:
     }
 
 
-def _paragraph_text(para) -> str:
-    return para.text or ""
-
-
 def _heading_level(para) -> Optional[int]:
     style_name = (para.style.name if para.style else "") or ""
     # Standard names are "Heading 1" .. "Heading 9"
+    # Also handle "Heading1", "Heading-1", "Heading 1" formats
     if style_name.lower().startswith("heading"):
-        tail = style_name.split()[-1] if " " in style_name else ""
-        try:
-            lvl = int(tail)
-            if 1 <= lvl <= 9:
-                return lvl
-        except ValueError:
-            pass
+        # Extract digits from the style name
+        match = re.search(r'\d+', style_name)
+        if match:
+            try:
+                lvl = int(match.group())
+                if 1 <= lvl <= 9:
+                    return lvl
+            except ValueError:
+                pass
     return None
 
 
@@ -145,7 +146,7 @@ def _list_images_in_zip(path: Path) -> List[Dict[str, Any]]:
 def _count_tracked_changes(path: Path) -> Dict[str, int]:
     """Count w:ins / w:del elements across document.xml, header*.xml, footer*.xml."""
     counts = {"insertions": 0, "deletions": 0, "moves": 0, "format_changes": 0}
-    targets = ("word/document.xml",)
+    targets = ["word/document.xml"]
     extra_prefixes = ("word/header", "word/footer", "word/footnotes", "word/endnotes")
     try:
         with zipfile.ZipFile(path) as zf:
@@ -166,11 +167,12 @@ def _count_tracked_changes(path: Path) -> Dict[str, int]:
 def _extract_comments(path: Path, max_comments: int = 50) -> List[Dict[str, Any]]:
     """Return up to `max_comments` items from word/comments.xml."""
     out: List[Dict[str, Any]] = []
+    if etree is None:
+        return out
     try:
         with zipfile.ZipFile(path) as zf:
             if "word/comments.xml" not in zf.namelist():
                 return out
-            from lxml import etree  # pylint: disable=import-outside-toplevel
             xml = zf.read("word/comments.xml")
             root = etree.fromstring(xml)
             for c in root.findall(qn("w:comment"))[:max_comments]:
@@ -211,19 +213,20 @@ def _styles_used(doc) -> List[str]:
 def _iter_body_blocks(doc):
     """Yield body-level paragraphs and tables in document order."""
     body = doc.element.body
+    # Build element-to-object mappings once for O(n) lookup
+    para_map = {p._element: p for p in doc.paragraphs}
+    table_map = {t._element: t for t in doc.tables}
+    
     for child in body.iterchildren():
         tag = child.tag
         if tag == qn("w:p"):
-            # Find the python-docx Paragraph wrapper for this XML element
-            for para in doc.paragraphs:
-                if para._element is child:
-                    yield ("paragraph", para)
-                    break
+            obj = para_map.get(child)
+            if obj is not None:
+                yield ("paragraph", obj)
         elif tag == qn("w:tbl"):
-            for tbl in doc.tables:
-                if tbl._element is child:
-                    yield ("table", tbl)
-                    break
+            obj = table_map.get(child)
+            if obj is not None:
+                yield ("table", obj)
 
 
 def _has_field(para, name: str) -> bool:

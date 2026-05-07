@@ -40,6 +40,10 @@ except Exception:
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
+# Word unit conversion constants
+EMU_PER_INCH = 914400  # 1 inch = 914400 EMUs (English Metric Units)
+TWIPS_PER_INCH = 1440  # 1 inch = 1440 twips (twentieths of a point)
+
 PLACEHOLDER_PATTERNS = [
     r"\blorem\b", r"\bipsum\b", r"\bxxxx+\b", r"\btbd\b", r"\btodo\b",
     r"\bplaceholder\b", r"\bclick\s+here\b", r"\binsert\s+(?:text|name)\b",
@@ -52,11 +56,11 @@ PLACEHOLDER_RE = re.compile("|".join(PLACEHOLDER_PATTERNS), re.IGNORECASE)
 def _hex_to_rgb(value: str) -> Tuple[int, int, int]:
     s = value.strip().lstrip("#")
     if len(s) != 6:
-        return (0, 0, 0)
+        raise ValueError(f"Invalid hex color '{value}': expected 6 characters")
     try:
         return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
-    except ValueError:
-        return (0, 0, 0)
+    except ValueError as exc:
+        raise ValueError(f"Invalid hex color '{value}': {exc}") from exc
 
 
 def _luma(rgb: Tuple[int, int, int]) -> float:
@@ -67,14 +71,18 @@ def _luma(rgb: Tuple[int, int, int]) -> float:
 # ── Heading helpers ────────────────────────────────────────────────────────
 def _heading_level(para) -> Optional[int]:
     style_name = (para.style.name if para.style else "") or ""
+    # Standard names are "Heading 1" .. "Heading 9"
+    # Also handle "Heading1", "Heading-1", "Heading 1" formats
     if style_name.lower().startswith("heading"):
-        tail = style_name.split()[-1] if " " in style_name else ""
-        try:
-            lvl = int(tail)
-            if 1 <= lvl <= 9:
-                return lvl
-        except ValueError:
-            pass
+        # Extract digits from the style name
+        match = re.search(r'\d+', style_name)
+        if match:
+            try:
+                lvl = int(match.group())
+                if 1 <= lvl <= 9:
+                    return lvl
+            except ValueError:
+                pass
     return None
 
 
@@ -154,7 +162,7 @@ def _enumerate_images(path: Path) -> List[Dict[str, Any]]:
                 rels = _load_rels(tgt)
                 xml = zf.read(tgt)
                 root = etree.fromstring(xml)
-                for drawing in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}drawing"):
+                for drawing in root.iter(qn("w:drawing")):
                     # docPr → alt-text
                     descr = None
                     title = None
@@ -166,7 +174,7 @@ def _enumerate_images(path: Path) -> List[Dict[str, Any]]:
                     # extent (cx, cy in EMU)
                     cx = cy = None
                     for el in drawing.iter():
-                        if el.tag.endswith("}extent"):
+                        if el.tag == qn("wp:extent"):
                             try:
                                 cx = int(el.get("cx") or 0)
                                 cy = int(el.get("cy") or 0)
@@ -176,13 +184,13 @@ def _enumerate_images(path: Path) -> List[Dict[str, Any]]:
                     # blip embed id
                     rel_id = None
                     for el in drawing.iter():
-                        if el.tag.endswith("}blip"):
+                        if el.tag == qn("a:blip"):
                             rel_id = el.get(qn("r:embed"))
                             break
                     media_name = None
                     nat_w = nat_h = None
                     embed_size = None
-                    if rel_id is not None and rel_id in rels:
+                    if rel_id is not None and rel_id in rels and rels[rel_id]:
                         rel_target = rels[rel_id]
                         media_name = Path(rel_target).name
                         if media_name in media_cache:
@@ -229,13 +237,14 @@ def _has_unrefreshed_field(path: Path) -> bool:
     w:fldCharType='begin'/> followed immediately by <w:instrText>...</w:instrText>
     and <w:fldChar w:fldCharType='end'/>, with no separate text run between
     'separate' and 'end'. This is hard to detect 100% reliably, so we just
-    flag any TOC field code: it always needs refresh on first open."""
+    flag any TOC or PAGE field code: it always needs refresh on first open."""
     try:
         with zipfile.ZipFile(path) as zf:
             if "word/document.xml" not in zf.namelist():
                 return False
             xml = zf.read("word/document.xml").decode("utf-8", errors="ignore")
-            return "TOC " in xml or "TOC\\" in xml
+            # Use regex to match TOC or PAGE field code patterns
+            return bool(re.search(r'(TOC\s+\\[a-z]|PAGE\s*\\|NUMPAGES\s*\\)', xml, re.IGNORECASE))
     except Exception:
         return False
 
@@ -243,7 +252,7 @@ def _has_unrefreshed_field(path: Path) -> bool:
 def _printable_width_in(doc) -> Optional[float]:
     try:
         sec = doc.sections[0]
-        return round(((sec.page_width or 0) - (sec.left_margin or 0) - (sec.right_margin or 0)) / 914400.0, 3)
+        return round(((sec.page_width or 0) - (sec.left_margin or 0) - (sec.right_margin or 0)) / EMU_PER_INCH, 3)
     except Exception:
         return None
 
@@ -257,10 +266,10 @@ def _table_total_width_in(table) -> Optional[float]:
             cols = grid.findall(qn("w:gridCol"))
             for col in cols:
                 w = col.get(qn("w:w"))
-                if w is not None and w.isdigit():
+                if w is not None and str(w).isdigit():
                     total += int(w)
             if total > 0:
-                return round(total / 1440.0, 3)
+                return round(total / TWIPS_PER_INCH, 3)
     except Exception:
         pass
     return None
@@ -310,10 +319,21 @@ def qa(input_path: Path, *, min_font_pt: float, contrast_threshold: float,
 
     # Walk paragraphs
     last_heading_level = 0
-    placeholder_locations: List[Dict[str, Any]] = []
     for p_idx, para in enumerate(doc.paragraphs):
         paragraph_count += 1
         text = para.text or ""
+
+        # Check for empty cover page title (first large paragraph)
+        if p_idx == 0:
+            for run, sz_pt in _para_runs_with_size(para):
+                if sz_pt is not None and sz_pt >= 16 and not text.strip():
+                    issues.append({
+                        "type": "empty_required_block",
+                        "severity": "critical",
+                        "location": f"p#{p_idx}",
+                        "message": "First large paragraph (likely cover page title) is empty.",
+                    })
+                    break
 
         lvl = _heading_level(para)
         if lvl is not None:
@@ -358,7 +378,6 @@ def qa(input_path: Path, *, min_font_pt: float, contrast_threshold: float,
                 "match": m.group(0),
                 "text_sample": text[:160],
             })
-            placeholder_locations.append({"location": f"p#{p_idx}", "match": m.group(0)})
 
         # Long paragraph (warning)
         if len(text) > max_paragraph_chars:
@@ -396,6 +415,47 @@ def qa(input_path: Path, *, min_font_pt: float, contrast_threshold: float,
                     })
 
         # Same checks inside table cells in this paragraph's vicinity? handled below.
+
+    # Walk headers and footers for placeholder, tiny font, low contrast
+    for section in doc.sections:
+        for kind, container in [("header", section.header), ("footer", section.footer)]:
+            for h_idx, para in enumerate(container.paragraphs):
+                text = para.text or ""
+                # Placeholder text
+                m = PLACEHOLDER_RE.search(text)
+                if m:
+                    issues.append({
+                        "type": "placeholder_text",
+                        "severity": "critical",
+                        "location": f"{kind}#{h_idx}",
+                        "match": m.group(0),
+                        "text_sample": text[:160],
+                    })
+                # Tiny / low-contrast runs
+                for run, sz_pt in _para_runs_with_size(para):
+                    text_run = (run.text or "")
+                    if not text_run.strip():
+                        continue
+                    if sz_pt is not None and sz_pt < min_font_pt:
+                        issues.append({
+                            "type": "tiny_font",
+                            "severity": "critical",
+                            "location": f"{kind}#{h_idx}",
+                            "size_pt": sz_pt,
+                            "min_pt": min_font_pt,
+                            "text_sample": text_run[:60],
+                        })
+                    rgb = _para_run_color(run)
+                    if rgb is not None:
+                        if abs(_luma(rgb) - bg_luma) < contrast_threshold:
+                            issues.append({
+                                "type": "low_contrast",
+                                "severity": "critical",
+                                "location": f"{kind}#{h_idx}",
+                                "text_rgb": list(rgb),
+                                "background_rgb": list(bg_rgb),
+                                "text_sample": text_run[:60],
+                            })
 
     # Walk tables
     printable_w_in = _printable_width_in(doc)
@@ -481,13 +541,15 @@ def qa(input_path: Path, *, min_font_pt: float, contrast_threshold: float,
                         "deviation_pct": round(delta * 100, 1),
                         "message": "Displayed aspect ratio differs from the source image's natural ratio by >5%.",
                     })
-        # Broken path: missing media file
-        if img.get("rel_id") and not img.get("media"):
+        # Broken path: missing media file or blob not found
+        # Check both: media name missing, or rel_id exists but embed_size is None
+        if img.get("rel_id") and (not img.get("media") or img.get("embed_size_bytes") is None):
             issues.append({
                 "type": "broken_image_path",
                 "severity": "critical",
                 "location": f"image#{i}",
-                "message": "Image relationship has no embedded blob.",
+                "media": img.get("media"),
+                "message": "Image relationship has no embedded blob or media file not found.",
             })
 
     # TOC presence vs heading count

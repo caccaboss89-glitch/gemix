@@ -20,13 +20,10 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from docx import Document
 from docx.oxml.ns import qn
-
-
-W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 def _check_bin(name: str) -> str:
@@ -130,14 +127,18 @@ def docx2html(input_docx: Path, output_html: Path, timeout: int) -> Path:
 # ── docx → markdown text ───────────────────────────────────────────────────
 def _heading_level(para) -> Optional[int]:
     style_name = (para.style.name if para.style else "") or ""
+    # Standard names are "Heading 1" .. "Heading 9"
+    # Also handle "Heading1", "Heading-1", "Heading 1" formats
     if style_name.lower().startswith("heading"):
-        tail = style_name.split()[-1] if " " in style_name else ""
-        try:
-            lvl = int(tail)
-            if 1 <= lvl <= 9:
-                return lvl
-        except ValueError:
-            pass
+        # Extract digits from the style name
+        match = re.search(r'\d+', style_name)
+        if match:
+            try:
+                lvl = int(match.group())
+                if 1 <= lvl <= 9:
+                    return lvl
+            except ValueError:
+                pass
     return None
 
 
@@ -147,18 +148,19 @@ def _is_list_paragraph(para) -> Tuple[bool, str, int]:
     s = style_name.lower()
     is_bullet = "bullet" in s
     is_number = "number" in s
-    if not (is_bullet or is_number):
-        # Check numPr presence too (manual numbering)
-        pPr = para._element.find(qn("w:pPr"))
-        if pPr is not None and pPr.find(qn("w:numPr")) is not None:
-            return (True, "bullet", 0)
-        return (False, "", 0)
-    # Try to extract level from style name suffix
-    level = 0
-    m = re.search(r"\d+$", style_name)
-    if m:
-        level = max(0, int(m.group(0)) - 1)
-    return (True, "number" if is_number else "bullet", level)
+    if is_bullet or is_number:
+        # Try to extract level from style name suffix
+        level = 0
+        m = re.search(r"\d+$", style_name)
+        if m:
+            level = max(0, int(m.group(0)) - 1)
+        return (True, "number" if is_number else "bullet", level)
+    # Check numPr presence too (manual numbering)
+    pPr = para._element.find(qn("w:pPr"))
+    if pPr is not None and pPr.find(qn("w:numPr")) is not None:
+        return (True, "number", 0)
+    # Not a list paragraph
+    return (False, "", 0)
 
 
 def _para_to_md(para) -> List[str]:
@@ -267,7 +269,7 @@ def docx2text(input_docx: Path, output_md: Path,
                     if image_dir is not None and img_seen <= len(image_map):
                         # Pair drawings with extracted media in document order — rough, but useful
                         media_paths = sorted(image_map.values())
-                        if img_seen <= len(media_paths):
+                        if img_seen - 1 < len(media_paths):
                             ref = Path(media_paths[img_seen - 1]).name
                             lines.append(f"![image{img_seen}]({image_dir.name}/{ref})")
         elif kind == "table":

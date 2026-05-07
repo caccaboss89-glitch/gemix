@@ -19,16 +19,18 @@ theme token name (`accent`, `accent_dark`, `surface`, `surface_alt`,
 Coordinates / sizes are in INCHES.
 """
 import argparse
-import copy
 import json
-import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# Word unit conversion constants
+TWIPS_PER_INCH = 1440  # 1 inch = 1440 twips (twentieths of a point)
+EMU_PER_INCH = 914400  # 1 inch = 914400 EMUs (English Metric Units)
 
 from PIL import Image as PILImage
 
@@ -40,11 +42,7 @@ from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import nsmap, qn
-from docx.shared import Cm, Emu, Inches, Pt, RGBColor
-
-
-W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+from docx.shared import Inches, Pt, RGBColor
 
 
 # ── Built-in themes (semantic tokens) ──────────────────────────────────────
@@ -126,8 +124,11 @@ def _resolve_color(theme: Dict[str, Any], value: Any) -> Optional[str]:
         return None
     if isinstance(value, str):
         v = value.strip().lstrip("#")
-        if v in theme and isinstance(theme[v], str):
-            return theme[v].lstrip("#")
+        if v in theme:
+            token_val = theme[v]
+            if isinstance(token_val, str):
+                return token_val.lstrip("#")
+            raise ValueError(f"Theme token '{v}' is not a string: {type(token_val).__name__}")
         if len(v) == 6 and all(c in "0123456789abcdefABCDEF" for c in v):
             return v.upper()
         # Fall through: invalid string → raise
@@ -185,18 +186,26 @@ def _apply_section_setup(section, spec: Dict[str, Any]) -> None:
         section.footer_distance = Inches(margins["footer"])
 
     # Columns
-    cols = int(spec.get("columns") or 1)
+    try:
+        cols = int(spec.get("columns") or 1)
+    except (ValueError, TypeError):
+        cols = 1
+    # Always remove existing <w:cols/> to ensure clean state
+    sectPr = section._sectPr
+    for existing in sectPr.findall(qn("w:cols")):
+        sectPr.remove(existing)
     if cols > 1:
-        sectPr = section._sectPr
-        # Remove existing <w:cols/> if any
-        for existing in sectPr.findall(qn("w:cols")):
-            sectPr.remove(existing)
         cols_el = OxmlElement("w:cols")
         cols_el.set(qn("w:num"), str(cols))
         space_in = float(spec.get("column_space_in") or 0.5)
-        cols_el.set(qn("w:space"), str(int(space_in * 1440)))
+        cols_el.set(qn("w:space"), str(int(space_in * TWIPS_PER_INCH)))
         if spec.get("column_separator"):
             cols_el.set(qn("w:sep"), "1")
+        sectPr.append(cols_el)
+    else:
+        # Explicitly set single column to reset from previous multi-column sections
+        cols_el = OxmlElement("w:cols")
+        cols_el.set(qn("w:num"), "1")
         sectPr.append(cols_el)
 
     # Different first page header/footer
@@ -239,9 +248,12 @@ def _add_hyperlink(paragraph, url: str, text: str, theme: Dict[str, Any],
                    font_name: Optional[str], size_pt: Optional[float],
                    color_hex: Optional[str], bold: bool, italic: bool, underline: bool) -> None:
     part = paragraph.part
-    rid = part.relate_to(url,
-                         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
-                         is_external=True)
+    try:
+        rid = part.relate_to(url,
+                             "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                             is_external=True)
+    except Exception as exc:
+        raise ValueError(f"Failed to create hyperlink for URL '{url}': {exc}") from exc
     hyperlink = OxmlElement("w:hyperlink")
     hyperlink.set(qn("r:id"), rid)
     new_run = OxmlElement("w:r")
@@ -392,7 +404,10 @@ def _apply_paragraph_properties(paragraph, spec: Dict[str, Any]) -> None:
 # ── Block renderers ────────────────────────────────────────────────────────
 def _render_heading(container, block: Dict[str, Any], theme: Dict[str, Any]) -> None:
     text = block.get("text", "")
-    level = int(block.get("level") or 1)
+    try:
+        level = int(block.get("level") or 1)
+    except (ValueError, TypeError):
+        level = 1
     if level < 1:
         level = 1
     if level > 9:
@@ -543,7 +558,7 @@ def _set_cell_padding(cell, top_in: float, left_in: float, bottom_in: float, rig
         if el is None:
             el = OxmlElement(f"w:{side}")
             tcMar.append(el)
-        el.set(qn("w:w"), str(int(value * 1440)))
+        el.set(qn("w:w"), str(int(value * TWIPS_PER_INCH)))
         el.set(qn("w:type"), "dxa")
 
 
@@ -552,6 +567,8 @@ def _set_cell_text(cell, text: str, theme: Dict[str, Any], *,
                    size_pt: Optional[float] = None, color_hex: Optional[str] = None,
                    align: Optional[str] = None) -> None:
     cell.text = ""  # clear default run
+    if not cell.paragraphs:
+        cell.add_paragraph()  # Ensure at least one paragraph exists
     para = cell.paragraphs[0]
     if align:
         a = _alignment_enum(align)
@@ -594,17 +611,22 @@ def _render_table(container, block: Dict[str, Any], theme: Dict[str, Any]) -> No
         table.alignment = WD_TABLE_ALIGNMENT.LEFT
 
     column_widths = block.get("column_widths_in") or []
-    if column_widths and len(column_widths) == n_cols:
-        for col_idx, w in enumerate(column_widths):
-            for row in table.rows:
-                row.cells[col_idx].width = Inches(float(w))
-        table.width = Inches(sum(float(x) for x in column_widths))
+    if column_widths:
+        if len(column_widths) != n_cols:
+            print(f"Warning: column_widths_in has {len(column_widths)} values but table has {n_cols} columns. Widths will not be applied.", file=sys.stderr)
+        else:
+            for col_idx, w in enumerate(column_widths):
+                for row in table.rows:
+                    row.cells[col_idx].width = Inches(float(w))
+            table.width = Inches(sum(float(x) for x in column_widths))
 
     # Borders
     borders_spec = block.get("borders") or {}
     border_style = "single"
     border_size_pt = 0.5
-    border_color = _resolve_color(theme, borders_spec.get("color") or "muted") or "BFBFBF"
+    border_color = _resolve_color(theme, borders_spec.get("color") or "muted")
+    if border_color is None:
+        border_color = "BFBFBF"
     which = "all"
     if borders_spec.get("none"):
         which = "none"
@@ -706,7 +728,11 @@ def _render_image(container, block: Dict[str, Any], theme: Dict[str, Any]) -> No
     width_in = block.get("width_in")
     height_in = block.get("height_in")
     nat_w, nat_h = _natural_size(img_path)
-    nat_ratio = nat_h / nat_w if nat_w > 0 else 1.0
+    
+    if nat_w == 0 or nat_h == 0:
+        raise ValueError(f"Image has invalid dimensions: {nat_w}x{nat_h} pixels")
+    
+    nat_ratio = nat_h / nat_w
 
     # Auto-compute missing dimension to preserve aspect ratio
     if width_in and not height_in:
@@ -809,7 +835,7 @@ def _render_callout(container, block: Dict[str, Any], theme: Dict[str, Any]) -> 
     icon_cell = table.rows[0].cells[0]
     _set_cell_text(icon_cell, str(icon), theme,
                    bold=True, font_name=theme.get("font_name") or "Calibri",
-                   size_pt=14, color_hex=_resolve_color(theme, preset["border_color"]),
+                   size_pt=14, color_hex=_resolve_color(theme, preset.get("border_color", "muted")),
                    align="center")
     icon_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
     if fill:
@@ -961,24 +987,27 @@ def _render_toc(container, block: Dict[str, Any], theme: Dict[str, Any]) -> None
     para._element.append(r_sep)
 
     # Placeholder text shown until the field is updated
-    placeholder = container.add_paragraph()
-    plc_run = placeholder.add_run("Right-click and select 'Update Field' to populate the table of contents.")
-    plc_run.italic = True
-    _set_run_font(plc_run, theme,
-                  theme.get("font_name") or "Calibri",
-                  max(9, float(theme.get("body_size", DEFAULT_BODY_SIZE)) - 1),
-                  _resolve_color(theme, "muted"))
+    # This must be inside the field (between separate and end) as a run with instrText
+    r_placeholder = OxmlElement("w:r")
+    instr_placeholder = OxmlElement("w:instrText")
+    instr_placeholder.set(qn("xml:space"), "preserve")
+    instr_placeholder.text = "Right-click and select 'Update Field' to populate the table of contents."
+    r_placeholder.append(instr_placeholder)
+    para._element.append(r_placeholder)
 
     r_end = OxmlElement("w:r")
     fld_end = OxmlElement("w:fldChar")
     fld_end.set(qn("w:fldCharType"), "end")
     r_end.append(fld_end)
-    placeholder._element.append(r_end)
+    para._element.append(r_end)
 
 
 def _render_kpi_grid(container, block: Dict[str, Any], theme: Dict[str, Any]) -> None:
     items = block.get("items") or []
-    columns = int(block.get("columns") or min(4, max(1, len(items))))
+    try:
+        columns = int(block.get("columns") or min(4, max(1, len(items))))
+    except (ValueError, TypeError):
+        columns = min(4, max(1, len(items)))
     if not items:
         return
     rows = (len(items) + columns - 1) // columns
@@ -1030,7 +1059,10 @@ def _render_kpi_grid(container, block: Dict[str, Any], theme: Dict[str, Any]) ->
 
 def _render_signature_block(container, block: Dict[str, Any], theme: Dict[str, Any]) -> None:
     signers = block.get("signers") or []
-    columns = int(block.get("columns") or min(2, max(1, len(signers))))
+    try:
+        columns = int(block.get("columns") or min(2, max(1, len(signers))))
+    except (ValueError, TypeError):
+        columns = min(2, max(1, len(signers)))
     if not signers:
         return
     rows = (len(signers) + columns - 1) // columns
@@ -1261,6 +1293,11 @@ def _set_core_properties(doc: DocumentObject, properties: Dict[str, Any]) -> Non
 def _render_header_footer(section, kind: str, blocks: Sequence[Dict[str, Any]],
                           theme: Dict[str, Any]) -> None:
     container = section.header if kind == "header" else section.footer
+    # Unlink from previous section to avoid propagation
+    if kind == "header":
+        container.is_linked_to_previous = False
+    else:
+        container.is_linked_to_previous = False
     # Wipe the default empty paragraph if any blocks are provided
     for p in list(container.paragraphs):
         if not p.text and not p._element.findall(qn("w:r")):
@@ -1293,21 +1330,40 @@ def _add_default_page_numbers(section, options: Any, theme: Dict[str, Any]) -> N
 
     parts = fmt
     # Replace tokens with PAGE / NUMPAGES fields
+    # Supports both {X}/{N} (braced) and X/N (unbraced) for backward compatibility
     seq: List[Tuple[str, str]] = []  # (text, kind) where kind ∈ "text", "PAGE", "NUMPAGES"
     cursor = parts
     while cursor:
-        idx_x = cursor.find("X")
-        idx_n = cursor.find("N")
-        candidates = [c for c in (idx_x, idx_n) if c >= 0]
+        # Find literal {X} and {N} tokens (braced)
+        idx_x_brace = cursor.find("{X}")
+        idx_n_brace = cursor.find("{N}")
+        # Find unbraced X/N tokens (word boundary to avoid matching in words)
+        import re
+        m_x = re.search(r'\bX\b', cursor)
+        m_n = re.search(r'\bN\b', cursor)
+        idx_x_unbraced = m_x.start() if m_x else -1
+        idx_n_unbraced = m_n.start() if m_n else -1
+
+        # Use braced form if present, otherwise unbraced
+        candidates = []
+        if idx_x_brace >= 0:
+            candidates.append((idx_x_brace, "X", True))
+        elif idx_x_unbraced >= 0:
+            candidates.append((idx_x_unbraced, "X", False))
+        if idx_n_brace >= 0:
+            candidates.append((idx_n_brace, "N", True))
+        elif idx_n_unbraced >= 0:
+            candidates.append((idx_n_unbraced, "N", False))
+
         if not candidates:
             seq.append((cursor, "text"))
             break
-        nxt = min(candidates)
+        nxt, token, braced = min(candidates, key=lambda x: x[0])
         if nxt > 0:
             seq.append((cursor[:nxt], "text"))
-        token = cursor[nxt]
         seq.append(("", "PAGE" if token == "X" else "NUMPAGES"))
-        cursor = cursor[nxt + 1:]
+        skip = 3 if braced else 1  # {X} is 3 chars, X is 1
+        cursor = cursor[nxt + skip:]
 
     for text, kind in seq:
         if kind == "text":
@@ -1347,7 +1403,7 @@ def build(spec: Dict[str, Any], output: Path,
             "header": spec.get("header"),
             "footer": spec.get("footer"),
             "page_numbers": spec.get("page_numbers"),
-            "blocks": spec["blocks"],
+            "blocks": spec.get("blocks", []),
         }]
 
     # First section is the auto-created one

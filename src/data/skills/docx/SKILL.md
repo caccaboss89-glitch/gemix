@@ -100,11 +100,11 @@ A document is built from a flat list of `blocks` (or from `sections[]` if you ne
 
 | Block | Purpose | Required fields | Notable options |
 | :--- | :--- | :--- | :--- |
-| `heading` | Section title (TOC-eligible) | `text`, `level` (1-9) | `align`, `color`, `size`, `bold`, `italic`, `page_break_before`, `numbered` |
+| `heading` | Section title (TOC-eligible) | `text`, `level` (1-9) | `align`, `color`, `size`, `bold`, `italic`, `page_break_before` |
 | `paragraph` | Body text (text or rich runs) | `text` OR `runs[]` | `runs:[{text,bold,italic,underline,color,size,font,strike,subscript,superscript,highlight,hyperlink}]`, `align`, `style`, `indent_in`, `first_line_in`, `space_before_pt`, `space_after_pt`, `line_spacing` |
 | `list` | Bullet/numbered list (nested) | `items[]` | `style:"bullet"\|"number"\|"check"`, `items:[str\|{text,level,bold,color,runs}]` |
 | `table` | Styled table (header fill, zebra, borders) | `headers`, `rows` | `column_widths_in`, `header_fill`, `header_fg`, `zebra`, `body_size`, `align`, `header_align`, `borders`, `merge_cells:[[r1,c1,r2,c2]]`, `repeat_header`, `cell_padding_in` |
-| `image` | Inline picture with caption + alt-text | `path`, `alt_text` | `width_in`, `height_in`, `align`, `caption`, `caption_align`, `wrap` |
+| `image` | Inline picture with caption + alt-text | `path`, `alt_text` | `width_in`, `height_in`, `align`, `caption`, `caption_align` |
 | `page_break` | Force a new page | — | — |
 | `divider` | Horizontal line | — | `color`, `thickness_pt`, `space_before_pt`, `space_after_pt` |
 | `callout` | Shaded note/warning/info/danger box | `text` OR `lines[]` | `kind:"info"\|"success"\|"warning"\|"danger"\|"note"`, `icon`, `fill`, `fg`, `border_color`, `padding_in` |
@@ -116,7 +116,7 @@ A document is built from a flat list of `blocks` (or from `sections[]` if you ne
 | `table_of_figures` | Field for list of captioned figures | — | `title`, `caption_label` (default "Figure") |
 | `cover_page` | Hero cover (title + subtitle + meta) | `title` | `subtitle`, `author`, `date`, `accent_band`, `logo_path` |
 
-> Coordinates for inline blocks are NOT free-form (Word is flow-based, not absolute like PowerPoint). Use `align`, `indent_in`, `first_line_in` for placement. For absolute positioning use `image` with `wrap` (`"square"`, `"tight"`, `"behind"`) — but prefer flow layout for true Word documents.
+> Coordinates for inline blocks are NOT free-form (Word is flow-based, not absolute like PowerPoint). Use `align`, `indent_in`, `first_line_in` for placement.
 
 ### Section-level options (top-level OR per-section)
 
@@ -396,14 +396,14 @@ python /readonly/skills/docx/scripts/docx_inspect.py \
 # Optional flags:
 #   --extract-images /workspace/temp/extracted/    # save embedded images for re-use
 #   --text-only                                    # skip tables/images, just text
-#   --paragraphs-sample N                          # default 30 (per section)
+#   --paragraphs-sample N                          # default 30 (global limit, not per-section)
 ```
 
 **Inspection JSON schema:**
 ```json
 {
   "file": "/readonly/history/contract.docx",
-  "page_setup": {"size": "a4", "orientation": "portrait", "margins_in": {"top": 1, "right": 1, "bottom": 1, "left": 1}},
+  "page_setup": {"page_size": "a4", "page_width_in": 8.27, "page_height_in": 11.69, "orientation": "portrait", "margins_in": {"top": 1, "right": 1, "bottom": 1, "left": 1}},
   "section_count": 2,
   "paragraph_count": 142,
   "heading_outline": [
@@ -414,7 +414,7 @@ python /readonly/skills/docx/scripts/docx_inspect.py \
     {"index": 0, "rows": 6, "cols": 4, "header_row": ["Metric", "Q4", "Budget", "Δ"]}
   ],
   "images": [
-    {"index": 0, "ext": "png", "size_bytes": 482103, "width_emu": 5486400, "height_emu": 3657600}
+    {"name": "image1.png", "ext": "png", "size_bytes": 482103}
   ],
   "comments": [{"id": 0, "author": "Mario", "text": "Verify Q3 number"}],
   "tracked_changes": {"insertions": 3, "deletions": 1},
@@ -439,7 +439,7 @@ python /readonly/skills/docx/scripts/docx_build.py \
   --output /workspace/output/document.docx
 # Optional flags: --font-name "Calibri" (overrides theme default)
 #                 --font-size 11 (overrides theme default)
-#                 --refresh-fields  (try to update TOC/PAGE fields via LibreOffice headless)
+#                 --refresh-fields  (try to update TOC/PAGE fields via LibreOffice headless convert-to)
 ```
 
 **Top-level spec keys** (every key is optional except `blocks` or `sections`):
@@ -504,8 +504,8 @@ python /readonly/skills/docx/scripts/docx_qa.py \
 - `image_distorted`: image with width/height ratio that does NOT match the source's natural ratio (tolerance ±5%)
 - `table_overflow`: total `column_widths_in` exceeds the printable area
 - `heading_skip`: heading level jumped (e.g., H1 → H3 with no H2)
-- `broken_image_path`: `image.path` doesn't exist on disk
-- `unfilled_field`: TOC/PAGE/PAGES field code present but never refreshed (warning, not critical — opens correctly in Word/LibreOffice)
+- `broken_image_path`: image relationship exists but embedded blob is missing or media file not found
+- `unfilled_field`: TOC field code present but never refreshed (warning, not critical — opens correctly in Word/LibreOffice)
 - `empty_required_block`: `heading.text` or `cover_page.title` is empty
 
 **Warning types** (severity = info/warning, optional improvements):
@@ -553,7 +553,7 @@ python /readonly/skills/docx/scripts/docx_manipulate.py split \
 python /readonly/skills/docx/scripts/docx_manipulate.py info \
   --input /workspace/output/full.docx
 
-# Replace-text: literal find/replace, run-aware (preserves formatting)
+# Replace-text: literal find/replace (LIMITATION: merges all text into first run, losing mixed formatting)
 python /readonly/skills/docx/scripts/docx_manipulate.py replace-text \
   --input /workspace/temp/template.docx \
   --replacements /workspace/temp/replacements.json \
@@ -586,7 +586,7 @@ python /readonly/skills/docx/scripts/docx_convert.py doc2docx \
   --input /readonly/history/legacy.doc \
   --output /workspace/temp/legacy.docx
 # Also supports .rtf files
-# Optional: --timeout 90
+# Optional: --timeout 120
 
 # DOCX → PDF (LibreOffice headless; refreshes TOC/PAGE fields automatically)
 python /readonly/skills/docx/scripts/docx_convert.py docx2pdf \
@@ -772,7 +772,7 @@ LibreOffice cold-start is slow (~5–10s on the first call in a kernel session).
 - **Fix**: Bump `--timeout 180`. Subsequent calls in the same kernel session reuse the profile and finish faster.
 
 ### 9. `accept-changes` left some changes in place
-LibreOffice headless macro processes all changes for the body but may miss tracked changes inside complex tables or footnotes.
+The XML-only processing accepts insertions, removes deletions, and drops format change records. Move operations are not handled and may leave artifacts.
 - **Fix**: Pass `--strip-comments` for a cleaner result, or open in Word once and accept manually.
 
 ### 10. `Sandbox quirk` — `Unix socket` collision when running multiple LibreOffice calls

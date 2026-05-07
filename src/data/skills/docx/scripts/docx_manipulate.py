@@ -3,19 +3,18 @@
 accept-changes.
 
 Body copying uses python-docx + lxml deepcopy of the body XML onto a fresh
-document. Explicit text/tables/images survive; styles RESOLVE against the
-FIRST input's styles map. For 100% theme-faithful merges, ensure all inputs
-share the same template OR convert each to PDF first via docx_convert.py.
+document. Text and tables survive; styles RESOLVE against the FIRST input's
+styles map. WARNING: images from documents after the first may break because
+merge does NOT copy media/relationships. For image-safe merges, ensure all
+inputs share the same template OR convert each to PDF first via docx_convert.py.
 """
 import argparse
 import copy
 import json
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -23,9 +22,6 @@ from docx import Document
 from docx.enum.text import WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-
-
-W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -37,18 +33,33 @@ def _check_extension(path: Path) -> None:
 
 def _parse_indices(spec: str, total: int) -> List[int]:
     out: List[int] = []
+    invalid_parts = []
     for part in spec.split(","):
         part = part.strip()
         if not part:
             continue
         if "-" in part:
-            a, b = part.split("-", 1)
-            a_i, b_i = int(a), int(b)
+            parts = part.split("-", 1)
+            if len(parts) != 2:
+                invalid_parts.append(part)
+                continue  # Invalid range format, skip
+            a, b = parts
+            try:
+                a_i, b_i = int(a), int(b)
+            except ValueError:
+                invalid_parts.append(part)
+                continue  # Invalid numbers, skip
             if a_i > b_i:
                 a_i, b_i = b_i, a_i
             out.extend(range(a_i, b_i + 1))
         else:
-            out.append(int(part))
+            try:
+                out.append(int(part))
+            except ValueError:
+                invalid_parts.append(part)
+                continue  # Invalid number, skip
+    if invalid_parts:
+        print(f"Warning: Invalid index parts ignored: {', '.join(invalid_parts)}", file=sys.stderr)
     out = [i for i in out if 1 <= i <= total]
     return sorted(set(out))
 
@@ -185,6 +196,7 @@ def cmd_extract(input_path: Path, output: Path, *,
             for child in src.element.body.iterchildren():
                 if child.tag == qn("w:tbl") or child.tag == qn("w:p"):
                     current.append(child)
+                # Check for sectPr in pPr (inside paragraph)
                 if child.tag == qn("w:p"):
                     pPr = child.find(qn("w:pPr"))
                     if pPr is not None:
@@ -192,6 +204,10 @@ def cmd_extract(input_path: Path, output: Path, *,
                         if sectPr is not None:
                             section_groups.append(current)
                             current = []
+                # Also check for standalone sectPr as direct child of body
+                elif child.tag == qn("w:sectPr"):
+                    section_groups.append(current)
+                    current = []
             if current:
                 section_groups.append(current)
             indices = _parse_indices(sections, len(section_groups))
@@ -334,8 +350,8 @@ def _merge_runs_in_paragraph(para) -> None:
         b = runs[i + 1]
         a_rPr = a.find(qn("w:rPr"))
         b_rPr = b.find(qn("w:rPr"))
-        a_xml = "" if a_rPr is None else __xml_signature(a_rPr)
-        b_xml = "" if b_rPr is None else __xml_signature(b_rPr)
+        a_xml = "" if a_rPr is None else _xml_signature(a_rPr)
+        b_xml = "" if b_rPr is None else _xml_signature(b_rPr)
         if a_xml != b_xml:
             i += 1
             continue
@@ -345,12 +361,14 @@ def _merge_runs_in_paragraph(para) -> None:
             if child.tag == qn("w:rPr"):
                 continue
             a.append(child)
-        b.getparent().remove(b)
+        parent = b.getparent()
+        if parent is not None:
+            parent.remove(b)
         runs.pop(i + 1)
         # Don't advance i: try to merge again with the new neighbor
 
 
-def __xml_signature(el) -> str:
+def _xml_signature(el) -> str:
     from lxml import etree  # pylint: disable=import-outside-toplevel
     return etree.tostring(el, method="c14n").decode("utf-8")
 
@@ -392,8 +410,10 @@ def _replace_in_paragraph(para, replacements: Dict[str, str], *,
     if n_replacements == 0:
         return 0
 
-    # Distribute the new text back across runs preserving formatting:
-    # we put ALL the new text in the FIRST run's first <w:t>, blank out the rest.
+    # Distribute the new text back across runs.
+    # LIMITATION: puts ALL new text in the FIRST run's first <w:t>, blanks others.
+    # This means mixed formatting (bold/italic/colors within paragraph) is lost.
+    # For simple replacements with uniform formatting this is acceptable.
     first_run = runs[0]
     # Find or create the first <w:t>
     first_t = first_run.find(qn("w:t"))
@@ -427,11 +447,7 @@ def _walk_all_paragraphs(doc, include_headers_footers: bool, include_tables: boo
                                 yield from icell.paragraphs
     if include_headers_footers:
         for section in doc.sections:
-            for hf in (section.header, section.footer,
-                       getattr(section, "first_page_header", None),
-                       getattr(section, "first_page_footer", None),
-                       getattr(section, "even_page_header", None),
-                       getattr(section, "even_page_footer", None)):
+            for hf in (section.header, section.footer):
                 if hf is None:
                     continue
                 yield from hf.paragraphs
@@ -465,7 +481,6 @@ def cmd_replace_text(input_path: Path, output: Path, replacements_path: Path, *,
         shutil.copyfile(input_path, work_copy)
         doc = Document(str(work_copy))
 
-        per_pattern_counts: Dict[str, int] = {k: 0 for k in replacements}
         total = 0
 
         for para in _walk_all_paragraphs(doc, include_headers_footers, include_tables):
@@ -506,7 +521,6 @@ def _libreoffice_accept_or_reject(input_path: Path, output: Path, reject: bool,
         shutil.copyfile(input_path, work_copy)
 
         from lxml import etree  # pylint: disable=import-outside-toplevel
-        import zipfile as _zf  # pylint: disable=import-outside-toplevel
 
         edited = _accept_or_reject_via_xml(work_copy, reject=reject,
                                            strip_comments=strip_comments)
@@ -535,7 +549,6 @@ def _accept_or_reject_via_xml(path: Path, *, reject: bool,
     from lxml import etree  # pylint: disable=import-outside-toplevel
 
     out_path = path.with_suffix(path.suffix + ".tmp.docx")
-    namespaces = {"w": W_NS}
 
     with zipfile.ZipFile(path, "r") as zin, zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
@@ -550,13 +563,15 @@ def _accept_or_reject_via_xml(path: Path, *, reject: bool,
             if target_xml:
                 try:
                     root = etree.fromstring(data)
-                    _process_tracked_changes(root, reject=reject, namespaces=namespaces)
+                    _process_tracked_changes(root, reject=reject)
                     if strip_comments:
-                        _strip_comment_refs(root, namespaces=namespaces)
+                        _strip_comment_refs(root)
                     data = etree.tostring(root, xml_declaration=True, encoding="UTF-8",
                                           standalone=True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Log warning but continue with original data to avoid corruption
+                    import sys
+                    print(f"Warning: failed to process tracked changes in {item.filename}: {exc}", file=sys.stderr)
             elif strip_comments and item.filename == "word/comments.xml":
                 # Drop all comments
                 try:
@@ -565,8 +580,10 @@ def _accept_or_reject_via_xml(path: Path, *, reject: bool,
                         root.remove(c)
                     data = etree.tostring(root, xml_declaration=True, encoding="UTF-8",
                                           standalone=True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Log warning but continue with original data to avoid corruption
+                    import sys
+                    print(f"Warning: failed to strip comments from {item.filename}: {exc}", file=sys.stderr)
             zout.writestr(item, data)
     # Replace original
     final = path.with_name(path.stem + ".accepted.docx")
@@ -574,7 +591,7 @@ def _accept_or_reject_via_xml(path: Path, *, reject: bool,
     return final
 
 
-def _process_tracked_changes(root, *, reject: bool, namespaces: Dict[str, str]) -> None:
+def _process_tracked_changes(root, *, reject: bool) -> None:
     """Drop deleted runs (or restore them on reject) and unwrap inserted runs
     (or drop them on reject)."""
     # Process w:ins
@@ -619,7 +636,7 @@ def _process_tracked_changes(root, *, reject: bool, namespaces: Dict[str, str]) 
                 parent.remove(el)
 
 
-def _strip_comment_refs(root, *, namespaces: Dict[str, str]) -> None:
+def _strip_comment_refs(root) -> None:
     for tag in ("w:commentRangeStart", "w:commentRangeEnd", "w:commentReference"):
         for el in list(root.iter(qn(tag))):
             parent = el.getparent()
