@@ -439,7 +439,6 @@ python /readonly/skills/docx/scripts/docx_build.py \
   --output /workspace/output/document.docx
 # Optional flags: --font-name "Calibri" (overrides theme default)
 #                 --font-size 11 (overrides theme default)
-#                 --refresh-fields  (try to update TOC/PAGE fields via LibreOffice headless convert-to)
 ```
 
 **Top-level spec keys** (every key is optional except `blocks` or `sections`):
@@ -738,55 +737,50 @@ for rel_id, rel in doc.part.rels.items():
 
 ## Troubleshooting & Common Fails
 
-### 1. TOC shows empty / "right-click → update field"
-The TOC block writes a Word field code. The values are populated by Word/LibreOffice when the file is opened, NOT by python-docx.
-- **Fix (deliverable as PDF)**: Run `docx_convert.py docx2pdf` — LibreOffice refreshes fields automatically during conversion. The PDF will show the resolved TOC.
-- **Fix (deliverable as DOCX)**: Pass `--refresh-fields` to `docx_build.py` (invokes `soffice --headless --calc-fields`), OR tell the user to press F9 / right-click → "Update Field" in Word.
-
-### 2. `replace-text` finds nothing even though the placeholder is visible
+### 1. `replace-text` finds nothing even though the placeholder is visible
 The placeholder is split across multiple runs (Word stores authoring history as separate runs). `docx_manipulate.py replace-text` already merges adjacent runs per paragraph. If you wrote your own loop, do the same merge first.
 - **Fix**: Use `docx_manipulate.py replace-text` instead of a hand-written `code_execution` loop.
 
-### 3. Table renders with no borders / black backgrounds
+### 2. Table renders with no borders / black backgrounds
 - python-docx applies default table style `"Table Grid"` if no style is set. Specify `"borders": {"all": "thin", "color": "muted"}` explicitly to avoid surprises.
 - Cell shading must use solid color hex (or theme tokens), NEVER named colors.
 
-### 4. Image distorted (squashed / stretched)
+### 3. Image distorted (squashed / stretched)
 You set both `width_in` AND `height_in` to arbitrary numbers.
 - **Fix**: Set ONE dimension and leave the other null/unset. `docx_build.py` reads the source image with `Pillow` and computes the missing dimension from the natural aspect ratio.
 
-### 5. Heading 4+ doesn't appear in TOC
+### 4. Heading 4+ doesn't appear in TOC
 The default TOC field code is `\o "1-3"` (levels 1–3 only).
 - **Fix**: In your `toc` block, set `"levels": [1, 2, 3, 4, 5, 6]` to include deeper headings.
 
-### 6. Document opens with the wrong page size (A4 instead of US Letter or vice versa)
+### 5. Document opens with the wrong page size (A4 instead of US Letter or vice versa)
 The user expected a specific page size and you didn't set it.
 - **Fix**: Always set `page_size` explicitly in the spec — `"a4"` or `"letter"` (the script defaults to `a4`).
 
-### 7. Multi-column layout: text doesn't flow into the second column
+### 6. Multi-column layout: text doesn't flow into the second column
 The section has only one block, or the column count is wrong.
 - **Fix**: Multi-column flow requires `sections[].columns >= 2` AND enough text content to fill the first column. Check `column_space_in` is reasonable (0.3–0.5 inches). For forced column breaks use a separate section with `columns: 1`.
 
-### 8. `docx_convert.py docx2pdf` times out
+### 7. `docx_convert.py docx2pdf` times out
 LibreOffice cold-start is slow (~5–10s on the first call in a kernel session). On a complex document with many fields it can take 30–60s.
 - **Fix**: Bump `--timeout 180`. Subsequent calls in the same kernel session reuse the profile and finish faster.
 
-### 9. `accept-changes` left some changes in place
+### 8. `accept-changes` left some changes in place
 The XML-only processing accepts insertions, removes deletions, and drops format change records. Move operations are not handled and may leave artifacts.
 - **Fix**: Pass `--strip-comments` for a cleaner result, or open in Word once and accept manually.
 
-### 10. `Sandbox quirk` — `Unix socket` collision when running multiple LibreOffice calls
+### 9. `Sandbox quirk` — `Unix socket` collision when running multiple LibreOffice calls
 Two `soffice` processes share a default profile and one fails.
 - **Fix**: All `docx_convert.py` and `docx_manipulate.py accept-changes` invocations isolate to a per-run `--user-profile`. NEVER call `soffice` directly — use the wrappers.
 
-### 11. `File not found` after `docx_manipulate.py split`
+### 10. `File not found` after `docx_manipulate.py split`
 Output filenames are zero-padded to 3 digits (`part_001.docx`, `part_002.docx`, ...). Always parse the script's stdout (a JSON `outputs` list) instead of guessing.
 
-### 12. `low_contrast` flagged by QA on dark-mode tokens
+### 11. `low_contrast` flagged by QA on dark-mode tokens
 You overrode `defaults.body_color` to a value too close to `defaults.background`.
 - **Fix**: Pick a body color whose luma differs from the background by ≥ 0.25. Word documents are usually printed on white — keep the body dark.
 
-### 13. Bullets show as literal `•` characters with no indentation
+### 12. Bullets show as literal `•` characters with no indentation
 You manually wrote `"text": "• Item 1"` instead of using a `list` block.
 - **Fix**: Use `{"type": "list", "style": "bullet", "items": ["Item 1", "Item 2"]}`.
 

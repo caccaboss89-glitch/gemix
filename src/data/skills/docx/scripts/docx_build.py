@@ -1375,12 +1375,21 @@ def _add_default_page_numbers(section, options: Any, theme: Dict[str, Any]) -> N
 
 # ── Top-level builder ──────────────────────────────────────────────────────
 def build(spec: Dict[str, Any], output: Path,
-          cli_font: Optional[str], cli_size: Optional[float],
-          refresh_fields: bool) -> Path:
+          cli_font: Optional[str], cli_size: Optional[float]) -> Path:
     if "blocks" not in spec and "sections" not in spec:
         raise ValueError("Spec must contain `blocks` (single section) or `sections` (multi-section).")
     if "blocks" in spec and "sections" in spec:
         raise ValueError("Spec must contain EITHER `blocks` OR `sections`, not both.")
+
+    # Auto-detect if TOC block is present
+    has_toc = False
+    if "blocks" in spec:
+        has_toc = any(b.get("type") == "toc" for b in spec.get("blocks", []))
+    elif "sections" in spec:
+        for sec in spec.get("sections", []):
+            has_toc = any(b.get("type") == "toc" for b in sec.get("blocks", []))
+            if has_toc:
+                break
 
     theme = _resolve_theme(spec)
     doc = Document()
@@ -1426,7 +1435,8 @@ def build(spec: Dict[str, Any], output: Path,
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output))
 
-    if refresh_fields:
+    # Auto-refresh TOC if present
+    if has_toc:
         try:
             _refresh_fields_via_libreoffice(output)
         except Exception as exc:
@@ -1466,8 +1476,6 @@ def main() -> None:
     p.add_argument("--output", required=True, help="Destination .docx path")
     p.add_argument("--font-name", help="Override theme default font name")
     p.add_argument("--font-size", type=float, help="Override theme default body size (pt)")
-    p.add_argument("--refresh-fields", action="store_true",
-                   help="Run LibreOffice headless once to update TOC / PAGE fields")
     args = p.parse_args()
 
     spec_path = Path(args.spec)
@@ -1486,7 +1494,6 @@ def main() -> None:
             Path(args.output),
             cli_font=args.font_name,
             cli_size=args.font_size,
-            refresh_fields=args.refresh_fields,
         )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
