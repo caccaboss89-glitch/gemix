@@ -61,6 +61,9 @@ WORKDIR /opt/sandbox
 COPY requirements-sandbox.txt /opt/sandbox/requirements-sandbox.txt
 RUN pip install --no-cache-dir -r /opt/sandbox/requirements-sandbox.txt
 
+# ── unoserver for LibreOffice field updates (TOC, indexes) ──
+RUN pip install --no-cache-dir unoserver
+
 # ── Preload heavy models at build time (offline runtime) ──
 COPY preload_models.py /opt/sandbox/preload_models.py
 RUN python /opt/sandbox/preload_models.py

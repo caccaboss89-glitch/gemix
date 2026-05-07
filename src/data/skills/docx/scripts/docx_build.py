@@ -1436,27 +1436,23 @@ def build(spec: Dict[str, Any], output: Path,
 
 
 def _refresh_fields_via_libreoffice(docx_path: Path) -> None:
-    """Open the file in headless LibreOffice once, which auto-updates TOC / PAGE
-    fields, and save it back."""
-    soffice = shutil.which("soffice")
-    if not soffice:
+    """Open the file with unoserver to update TOC and other indexes, then save back."""
+    unoconvert = shutil.which("unoconvert")
+    if not unoconvert:
         return
     work_dir = Path(tempfile.mkdtemp(prefix="docx_fields_"))
     try:
-        profile = work_dir / f"lo_profile_{uuid.uuid4().hex}"
-        profile.mkdir(parents=True, exist_ok=True)
+        output = work_dir / docx_path.name
         cmd = [
-            soffice,
-            f"-env:UserInstallation=file://{profile}",
-            "--headless", "--norestore", "--nolockcheck",
-            "--convert-to", "docx",
-            "--outdir", str(work_dir),
+            unoconvert,
+            "--update-index",
+            "--format", "docx",
             str(docx_path),
+            str(output),
         ]
         subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
-        produced = work_dir / docx_path.name
-        if produced.exists():
-            shutil.copyfile(produced, docx_path)
+        if output.exists():
+            shutil.copyfile(output, docx_path)
     finally:
         try:
             shutil.rmtree(work_dir)
