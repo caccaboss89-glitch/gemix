@@ -1,6 +1,6 @@
 ---
 name: xlsx
-description: Use for spreadsheet files (.xlsx, .xlsm, .csv, .tsv) as primary input/output. Triggers for creating, editing, cleaning, formatting, charts, financial models, dashboards, and format conversion (csv↔xlsx, xlsx→pdf). Also triggers when referencing a spreadsheet by name/path. DO NOT trigger for Word/PDF/HTML reports or standalone scripts.
+description: Spreadsheets (.xlsx, .xlsm, .csv, .tsv). Create, edit, clean, format, charts, dashboards, convert (csv↔xlsx, xlsx→pdf). NOT for Word/PDF/HTML.
 ---
 
 # Spreadsheet Skill Guide

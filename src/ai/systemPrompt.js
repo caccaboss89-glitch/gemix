@@ -57,7 +57,7 @@ function buildSystemPrompt(ctx) {
     prompt += '    <ResponsePreferences>\n';
     prompt += '- Use send_voice_message for short/casual replies; text for technical or long replies. Vary format based on your past messages.\n';
     if (isActiveMember) {
-      prompt += '- Formal request PDFs (for Discord regulations): redirect the user to Discord (GemiX — Legal Division). Only generic PDFs are available in agentic mode.\n';
+      prompt += '- Formal request PDFs (for Discord regulations): redirect the user to Discord (rules RAG system). Only generic PDFs are available in agentic mode.\n';
     }
     prompt += '    </ResponsePreferences>\n';
   }

@@ -1,6 +1,6 @@
 ---
 name: pdf
-description: Use this skill to create/edit PDFs (LaTeX for professional, reportlab for simple, merge, split, rotate, encrypt). DO NOT use for reading or analysis; use read_file instead.
+description: PDFs: create/edit (LaTeX, reportlab, merge, split, rotate, encrypt). DO NOT use for reading/analysis; use read_file instead.
 ---
 
 # PDF Skill Guide
@@ -42,10 +42,10 @@ For complex documents (equations, multi-column, figures, high-end typography) us
 - **No Pass-through JSON**: Never use `--data '{"json":...}'`. Always use `--data-file`.
 - **Absolute Paths**: Strict enforcement of `/workspace/` or `/readonly/` prefixes.
 - **Scripts vs Tools**: All utilities (like `latex_helper.py`, `pdf_manipulate.py`, etc.) are SCRIPTS. Call them via `bash`. DO NOT try to use them as tool names.
-- **Image Search**: You can include image search tools in the document. When doing so, ALWAYS set `save_to_disk=true`. Otherwise, images are only sent to the user and cannot be included in the document as they won't be available in `/readonly/searched_images/` or `/workspace/`.
 - **No Concatenation**: NEVER combine multiple PDF scripts in a single `bash` command using `&&` or `;`. Emit them as separate tool calls.
 - **Unified Generator MANDATORY**: Use `unified_pdf_generator.py` for ALL professional documents. DO NOT manually chain `render_latex_template.py` and `compile_tex.py` unless the unified script is technically insufficient.
 - **PDF Manipulation (Split)**: The `split` action generates files with a 3-digit zero-padded suffix (e.g., `prefix_001.pdf`). Always check the tool output for the exact filenames.
+- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `image_search` with `save_to_disk=true` to make them available under `/readonly/searched_images/`. Use the EXACT path returned by the tool.
 
 ---
 

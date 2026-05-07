@@ -1,6 +1,6 @@
 ---
 name: docx
-description: Use for Word documents (.docx, .dotx) as primary input/output. Triggers for creating reports/letters/memos/CVs/contracts/manuals as Word files, editing existing .docx (find/replace, accept tracked changes, fill templates), extracting content (text, tables, images, comments, tracked changes), and format conversion (docx↔pdf, docx→html, docx→markdown, doc→docx). Also triggers for "Word doc", ".docx", ".dotx", "Word template", or any .docx reference. DO NOT trigger for spreadsheets/presentations/PDFs.
+description: Word documents (.docx, .dotx). Create, edit, inspect, convert. Triggers for "Word doc", ".docx", ".dotx", "Word template". NOT for spreadsheets/presentations/PDFs.
 ---
 
 # Word Document Skill Guide
@@ -47,11 +47,11 @@ The sandbox has **no Node.js / no `docx-js` / no `pandoc`**. All creation, editi
 - **Scripts vs Tools**: All utilities are SCRIPTS, called via `bash`. DO NOT try to use them as tool names.
 - **No Concatenation**: NEVER combine multiple docx scripts in a single `bash` command using `&&`/`;`/`|`. Emit them as separate tool calls in the same round.
 - **Readonly writes**: NEVER write back to `/readonly/...`. To edit a user-provided document, first `cp /readonly/history/<file>.docx /workspace/temp/<file>.docx` in a standalone `bash` call, then operate on the writable copy.
-- **Image inclusion**: When using `image_search`, ALWAYS set `save_to_disk=true`. Without it the image lives only in chat and cannot be embedded — `docx_build.py` needs a real path under `/workspace/` or `/readonly/searched_images/`. Use the EXACT path returned by the `image_search` tool output. NEVER guess or construct filenames.
 - **Auto-delivery**: The final `.docx` (or its `.pdf` export) MUST end up in `/workspace/output/`. Anything in `/workspace/temp/` will NOT be auto-delivered to the user.
 - **Pre-existing templates**: When EDITING a user-provided `.docx`/`.dotx` template, study its style with `docx_inspect.py` and EXACTLY match existing fonts, colors, page size, margins, and heading styles. Existing template conventions ALWAYS override the defaults in this guide.
 - **Heading levels are 1-based** (1 to 9). Don't skip levels (H1 → H3); QA flags `heading_skip`.
 - **Page sizes** in the spec accept names (`"letter"`, `"a4"`, `"a5"`, `"legal"`) OR explicit inches (`{"width_in": 8.5, "height_in": 11}`). Default: A4.
+- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `image_search` with `save_to_disk=true` to make them available under `/readonly/searched_images/`. Use the EXACT path returned by the tool.
 
 ---
 

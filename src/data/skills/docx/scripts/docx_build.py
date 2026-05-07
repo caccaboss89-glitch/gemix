@@ -987,12 +987,12 @@ def _render_toc(container, block: Dict[str, Any], theme: Dict[str, Any]) -> None
     para._element.append(r_sep)
 
     # Placeholder text shown until the field is updated
-    # This must be inside the field (between separate and end) as a run with instrText
+    # This must be regular text (w:t) between separate and end for LibreOffice to update
     r_placeholder = OxmlElement("w:r")
-    instr_placeholder = OxmlElement("w:instrText")
-    instr_placeholder.set(qn("xml:space"), "preserve")
-    instr_placeholder.text = "Right-click and select 'Update Field' to populate the table of contents."
-    r_placeholder.append(instr_placeholder)
+    t_placeholder = OxmlElement("w:t")
+    t_placeholder.set(qn("xml:space"), "preserve")
+    t_placeholder.text = "Right-click and select 'Update Field' to populate the table of contents."
+    r_placeholder.append(t_placeholder)
     para._element.append(r_placeholder)
 
     r_end = OxmlElement("w:r")

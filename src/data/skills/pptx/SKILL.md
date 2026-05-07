@@ -1,6 +1,6 @@
 ---
 name: pptx
-description: Use for presentation files (.pptx) as primary input/output. Triggers for creating decks, editing (text, images, slides, layout), extracting content (text, tables, images, notes), and format conversion (pptx→pdf, pptx→images, pptx→markdown). Also triggers for "deck", "slides", "presentation", or .pptx references. DO NOT trigger for Word/PDF/HTML reports or standalone scripts.
+description: Presentations (.pptx). Create, edit, extract content, convert (pptx→pdf/images/markdown). Triggers for "deck", "slides", "presentation". NOT for Word/PDF/HTML.
 ---
 
 # Presentation Skill Guide
@@ -46,10 +46,10 @@ The sandbox has **no Node.js / no `pptxgenjs` / no `markitdown`**. All creation,
 - **Scripts vs Tools**: All utilities are SCRIPTS, called via `bash`. DO NOT try to use them as tool names.
 - **No Concatenation**: NEVER combine multiple pptx scripts in a single `bash` command using `&&`/`;`/`|`. Emit them as separate tool calls in the same round.
 - **Readonly writes**: NEVER write back to `/readonly/...`. To edit a user-provided deck, first `cp /readonly/history/<file>.pptx /workspace/temp/<file>.pptx` in a standalone `bash call, then operate on the writable copy.
-- **Image inclusion**: When using `image_search`, ALWAYS set `save_to_disk=true`. Without it the image lives only in chat and cannot be embedded — `pptx_build.py` needs a real path under `/workspace/` or `/readonly/searched_images/`. Use the EXACT path returned by the `image_search` tool output. NEVER guess or construct filenames.
 - **Auto-delivery**: The final `.pptx` (or its `.pdf` export) MUST end up in `/workspace/output/`. Anything in `/workspace/temp/` will NOT be auto-delivered to the user.
 - **Pre-existing templates**: When EDITING a user-provided deck, study its style with `pptx_inspect.py` and EXACTLY match existing fonts, colors, slide size, and layout names. Existing template conventions ALWAYS override the defaults in this guide.
 - **Slide indices are 1-based** in every script.
+- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `image_search` with `save_to_disk=true` to make them available under `/readonly/searched_images/`. Use the EXACT path returned by the tool.
 
 ---
 
