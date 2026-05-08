@@ -293,7 +293,7 @@ def main() -> None:
     p_pdf = sub.add_parser("docx2pdf", help="Convert .docx -> .pdf via LibreOffice headless")
     p_pdf.add_argument("--input", required=True)
     p_pdf.add_argument("--output", required=True)
-    p_pdf.add_argument("--timeout", type=int, default=120)
+    p_pdf.add_argument("--timeout", type=int, default=180)
 
     p_html = sub.add_parser("docx2html", help="Convert .docx -> .html via LibreOffice headless")
     p_html.add_argument("--input", required=True)

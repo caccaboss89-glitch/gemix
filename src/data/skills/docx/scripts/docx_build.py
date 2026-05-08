@@ -620,7 +620,7 @@ def _render_table(container, block: Dict[str, Any], theme: Dict[str, Any]) -> No
                     row.cells[col_idx].width = Inches(float(w))
             table.width = Inches(sum(float(x) for x in column_widths))
 
-    # Borders
+    # Borders - apply default thin borders if not specified or empty
     borders_spec = block.get("borders") or {}
     border_style = "single"
     border_size_pt = 0.5
@@ -637,6 +637,12 @@ def _render_table(container, block: Dict[str, Any], theme: Dict[str, Any]) -> No
             border_size_pt = {"thin": 0.5, "medium": 1.0, "thick": 1.5}[thickness]
     elif "thickness_pt" in borders_spec:
         border_size_pt = float(borders_spec["thickness_pt"])
+    # If no borders spec at all or empty dict, apply default thin borders
+    if not borders_spec or not any(k in borders_spec for k in ["none", "all", "thickness_pt", "color"]):
+        border_style = "single"
+        border_size_pt = 0.5
+        border_color = _resolve_color(theme, "muted") or "BFBFBF"
+        which = "all"
 
     cell_pad = block.get("cell_padding_in") or {}
     pad_top = float(cell_pad.get("top", 0.05))
@@ -954,7 +960,7 @@ def _render_toc(container, block: Dict[str, Any], theme: Dict[str, Any]) -> None
         # Use heading 1 size unless overridden, but render as a "toc heading"
         heading_block = {"text": title, "level": 1, "color": block.get("title_color")}
         _render_heading(container, heading_block, theme)
-    levels = block.get("levels") or [1, 2, 3]
+    levels = block.get("levels") or [1, 2, 3, 4, 5, 6]
     if isinstance(levels, list):
         lo = min(levels)
         hi = max(levels)

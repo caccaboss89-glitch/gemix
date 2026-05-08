@@ -653,6 +653,7 @@ python /readonly/skills/pptx/scripts/pptx_manipulate.py extract \
 python /readonly/skills/pptx/scripts/pptx_manipulate.py split \
   --input /workspace/output/full_deck.pptx \
   --output-prefix /workspace/temp/part
+# Output: JSON with "outputs" list containing generated file paths
 
 # Info: metadata + slide inventory (lighter than pptx_inspect.py)
 python /readonly/skills/pptx/scripts/pptx_manipulate.py info \
@@ -754,29 +755,15 @@ The block catalog is closed — there is no auto-discovery. Use one of: `title|t
 ### 4. "Invalid color" / "Unsupported layout"
 Colors must be either a theme token (`accent`, `surface`, …) or a 6-char hex (`RRGGBB`). Layouts (legacy mode only) must be one of `title|title_content|two_content|section|picture|blank`. Themes must be one of `minimal|corporate|executive|dark|mono`.
 
-### 5. `image not found` from `pptx_build.py`
-The image path in `spec.json` did not exist when the script ran. Causes:
-- `image_search` was called with `save_to_disk=false`.
-- Image was generated AFTER `pptx_build.py` in the same Phase-3 batch — emit the generator BEFORE the build call.
-- Verify with `ls /readonly/searched_images/` or `ls /workspace/temp/` in the previous round.
-
-### 6. Edited deck looks unstyled
+### 5. Edited deck looks unstyled
 You loaded a templated `.pptx`, replaced the text, but the new run inherited a default font.
 - KEEP the original `run` object and only change `run.text`. Do NOT delete + re-add.
 
-### 7. `pptx_manipulate.py merge` lost the source theme
+### 6. `pptx_manipulate.py merge` lost the source theme
 Expected — see the limitation in that section. Use the `pdf_manipulate.py` route via `pptx_convert.py pptx2pdf` for theme-faithful merges.
 
-### 8. `File not found` after `pptx_manipulate.py split`
-Output filenames are zero-padded to 3 digits (`part_001.pptx`). Always parse the script's stdout (a JSON `outputs` list).
-
-### 9. `low_contrast` flagged on the `executive` / `dark` theme
+### 7. `low_contrast` flagged on the `executive` / `dark` theme
 The `executive` theme uses `body_color: D1D5DB` on `background: 0B1220` — the luma delta is around 0.7, well above threshold. If QA flags it, you probably overrode `defaults.body_color` to something close to the background. Revert or pick a body color whose luma differs from the background by ≥ 0.25.
-
-### 10. `chart` renders without value labels / wrong colors
-- Set `"show_values": true` to get data labels.
-- Pass `"colors": ["accent", "accent_dark", ...]` to override the default palette. Tokens are auto-resolved.
-- Pie/doughnut charts only honor the first series; multiple series are ignored by python-pptx.
 
 ---
 

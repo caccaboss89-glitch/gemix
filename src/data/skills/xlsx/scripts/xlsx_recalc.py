@@ -138,7 +138,7 @@ def _scan_errors(input_path: Path) -> Dict[str, Any]:
 def main() -> None:
     p = argparse.ArgumentParser(description="Recalculate xlsx formulas via headless LibreOffice.")
     p.add_argument("--input", required=True)
-    p.add_argument("--timeout", type=int, default=60)
+    p.add_argument("--timeout", type=int, default=90)
     p.add_argument("--output", help="Write status JSON here (default: stdout)")
     args = p.parse_args()
 

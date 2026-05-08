@@ -375,7 +375,7 @@ python /readonly/skills/xlsx/scripts/xlsx_build.py \
 python /readonly/skills/xlsx/scripts/xlsx_recalc.py \
   --input /workspace/output/report.xlsx \
   --output /workspace/temp/recalc.json
-# Optional flags: --timeout 60 (default seconds), --output <json-path> (default: stdout)
+# Optional flags: --timeout 90 (default seconds), --output <json-path> (default: stdout)
 ```
 
 **Result JSON:**
@@ -489,7 +489,7 @@ python /readonly/skills/xlsx/scripts/xlsx_manipulate.py extract-sheet \
 python /readonly/skills/xlsx/scripts/xlsx_manipulate.py split \
   --input /workspace/output/full.xlsx \
   --output-prefix /workspace/temp/part
-# Generates part_001_<sheet>.xlsx, part_002_<sheet>.xlsx, ...
+# Output: JSON with "outputs" list containing generated file paths
 
 # Info: workbook metadata + sheet inventory (lighter than xlsx_inspect.py)
 python /readonly/skills/xlsx/scripts/xlsx_manipulate.py info \
@@ -556,21 +556,17 @@ Formulas were written but never recalculated.
 Cross-sheet references break when their target sheet is removed.
 - **Fix**: Either include the referenced sheet in the extract, or accept/report that the standalone split sheet has broken cross-sheet links. If the user asked for clean standalone files, copy `/readonly/...` to `/workspace/temp/`, run `xlsx_recalc.py` on the copy, then create a values-only workbook from `load_workbook(copy, data_only=True)` instead of preserving formulas.
 
-### 2b. `Read-only file system` in `xlsx_recalc.py`
+### 3. `Read-only file system` in `xlsx_recalc.py`
 You tried to recalculate a file in `/readonly/...`.
 - **Fix**: Copy it first with a standalone `bash` call such as `cp /readonly/history/file.xlsx /workspace/temp/file.xlsx`, then run `xlsx_recalc.py --input /workspace/temp/file.xlsx`.
 
-### 3. `#NAME?` after building the file
+### 4. `#NAME?` after building the file
 Function name typo or locale issue (LibreOffice expects English names internally — they ARE English even in Italian Excel).
 - **Fix**: Verify spelling. Common offenders: `MEDIA` (use `AVERAGE`), `CERCA.VERT` (use `VLOOKUP`), `SE` (use `IF`).
 
-### 4. `#DIV/0!`
+### 5. `#DIV/0!`
 Division denominators must be guarded.
 - **Fix**: Wrap with `IFERROR` or `IF`: `=IFERROR(A2/B2, 0)` or `=IF(B2=0, 0, A2/B2)`.
-
-### 5. `xlsx_recalc.py` times out
-LibreOffice startup is slow on the first call (~5–10s).
-- **Fix**: Bump `--timeout 90`. Subsequent calls in the same kernel session reuse the profile and finish in 2–3s.
 
 ### 6. "Formula stored as text" (Excel shows the literal `=SUM(...)`)
 The cell's `data_type` was forced to text or the value lacked the leading `=`.
@@ -583,10 +579,6 @@ openpyxl returns datetimes for true date cells, but CSV imports often produce st
 ### 8. Wrong column letter (e.g. column 64 = BL, not BK)
 Off-by-one in manual A1 generation.
 - **Fix**: Use `openpyxl.utils.get_column_letter(idx)` — never compute letters by hand.
-
-### 9. `File not found` after `xlsx_manipulate.py split`
-The AI guessed the sanitized output filename. Example: a sheet named `P&L` becomes `PL` in the generated filename, not necessarily `P_L`.
-- **Fix**: Use the exact paths printed by `split` stdout, or run `ls /workspace/output/` and use those exact filenames. Do not infer them.
 
 ---
 

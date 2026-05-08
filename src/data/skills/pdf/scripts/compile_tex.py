@@ -39,8 +39,17 @@ def compile_tex(tex_file, engine="pdflatex", clean=True):
             )
             if result.returncode != 0:
                 print("Compilation error:")
-                print(result.stdout[-1000:])
+                # Show full stdout/stderr for better error diagnosis
+                print("=== STDOUT ===")
+                print(result.stdout)
+                print("=== STDERR ===")
                 print(result.stderr)
+                # Extract and highlight error lines
+                error_lines = [line for line in result.stdout.split('\n') if 'Error:' in line or '!' in line]
+                if error_lines:
+                    print("=== KEY ERROR LINES ===")
+                    for line in error_lines[-10:]:  # Last 10 error lines
+                        print(line)
                 raise RuntimeError(f"LaTeX compilation failed with return code {result.returncode}")
 
         pdf_file = tex_file.with_suffix(".pdf")

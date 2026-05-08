@@ -102,10 +102,10 @@ def cmd_extract_sheet(input_path: Path, sheet_name: str, output: Path) -> None:
     print(f"Extracted sheet '{sheet_name}' -> {output}")
 
 
-def cmd_split(input_path: Path, output_prefix: Path) -> List[Path]:
+def cmd_split(input_path: Path, output_prefix: Path) -> Dict[str, Any]:
     wb = load_workbook(_validate_xlsx(input_path), data_only=False)
     output_prefix.parent.mkdir(parents=True, exist_ok=True)
-    created: List[Path] = []
+    created: List[str] = []
     for i, sheet_name in enumerate(wb.sheetnames, start=1):
         out_wb = Workbook()
         out_wb.remove(out_wb.active)
@@ -113,9 +113,14 @@ def cmd_split(input_path: Path, output_prefix: Path) -> List[Path]:
         safe_part = "".join(c for c in sheet_name if c.isalnum() or c in "-_")[:40] or "sheet"
         out_path = output_prefix.parent / f"{output_prefix.name}_{i:03d}_{safe_part}.xlsx"
         out_wb.save(out_path)
-        created.append(out_path)
+        created.append(str(out_path))
         print(f"Sheet '{sheet_name}' -> {out_path}")
-    return created
+    return {
+        "action": "split",
+        "input": str(input_path),
+        "outputs": created,
+        "count": len(created),
+    }
 
 
 def cmd_info(input_path: Path) -> None:
@@ -176,7 +181,8 @@ def main() -> None:
         elif args.action == "extract-sheet":
             cmd_extract_sheet(Path(args.input), args.sheet, Path(args.output))
         elif args.action == "split":
-            cmd_split(Path(args.input), Path(args.output_prefix))
+            result = cmd_split(Path(args.input), Path(args.output_prefix))
+            print(json.dumps(result, indent=2))
         elif args.action == "info":
             cmd_info(Path(args.input))
     except Exception as exc:

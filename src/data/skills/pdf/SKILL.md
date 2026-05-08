@@ -161,10 +161,6 @@ This is often a **race condition** (file not yet flushed to disk).
 - `hbar` is NOT in the main `sympy` namespace. Use: `from sympy.physics.quantum.constants import hbar`.
 - `grad`, `div`, `curl` are NOT standard functions. Use `diff()` or `sympy.vector`.
 
-### 3. Template Errors
-If a template fails to compile, the error message from `pdflatex` is often hidden. 
-- **Debug**: Run `compile_tex.py /workspace/temp/main.tex` and read the **full stdout/stderr** to find the missing `\usepackage` or syntax error.
-
 ---
 
 ## LaTeX Snippets & Tables (`latex_helper.py`)
