@@ -426,7 +426,12 @@ async function cleanupOrphanSandboxes() {
         await container.remove({ force: true });
         log.info(`Cleaned up orphan container ${cInfo.Names[0]} (${cInfo.Id.slice(0, 12)})`);
       } catch (err) {
-        log.warn(`Failed to cleanup orphan container ${cInfo.Id.slice(0, 12)}: ${err.message}`);
+        // HTTP 409 means container removal is already in progress - normal temporary state
+        if (err.message && err.message.includes('409') && err.message.includes('already in progress')) {
+          log.debug(`Orphan container ${cInfo.Id.slice(0, 12)} removal already in progress, skipping`);
+        } else {
+          log.warn(`Failed to cleanup orphan container ${cInfo.Id.slice(0, 12)}: ${err.message}`);
+        }
       }
     }
   } catch (err) {
