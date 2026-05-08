@@ -103,14 +103,14 @@ def main() -> None:
     p_extract.add_argument("--duration", type=float)
     p_extract.add_argument("--bitrate", default="192k")
     p_extract.add_argument("--sample-rate", type=int, default=48000)
-    p_extract.add_argument("--timeout", type=int, default=120)
+    p_extract.add_argument("--timeout", type=int, default=300)
 
     p_norm = sub.add_parser("normalize", help="Normalize loudness to podcast/web target")
     p_norm.add_argument("--input", required=True)
     p_norm.add_argument("--output", required=True)
     p_norm.add_argument("--bitrate", default="192k")
     p_norm.add_argument("--sample-rate", type=int, default=48000)
-    p_norm.add_argument("--timeout", type=int, default=120)
+    p_norm.add_argument("--timeout", type=int, default=300)
 
     p_mix = sub.add_parser("mix", help="Mix voice over looped background music")
     p_mix.add_argument("--voice", required=True)
@@ -132,7 +132,7 @@ def main() -> None:
     p_fade.add_argument("--normalize", action="store_true")
     p_fade.add_argument("--bitrate", default="192k")
     p_fade.add_argument("--sample-rate", type=int, default=48000)
-    p_fade.add_argument("--timeout", type=int, default=120)
+    p_fade.add_argument("--timeout", type=int, default=300)
 
     args = parser.parse_args()
     try:

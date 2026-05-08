@@ -32,7 +32,7 @@ The sandbox already includes **ffmpeg**, **ffprobe**, `pydub`, `librosa`, `movie
 ### Execution Strategy
 
 - **Reading existing file**: `av_inspect.py` in `execution_phase: "before_all"` so the JSON report lands before edit logic. Then run edits in Phase 3.
-- **Simple trim from start/end**: use `av_trim.py trim` with `--start` and/or `--end` (negative offset for end) directly without inspection. Then run `av_qa.py`.
+- **Simple trim from start/end**: use `av_trim.py trim` with `--remove-start` and/or `--remove-end` directly without inspection. Then run `av_qa.py`.
 - **Complex edits (crop/resize/precise trim)**: inspect (Phase 1) + edit script (Phase 3) + `av_qa.py` (Phase 3 after the edit) in the same round when parameters are already clear.
 - **JSON-driven composition**: `write_file` the slideshow spec in Phase 2 + `av_compose.py slideshow` + `av_qa.py` in Phase 3.
 - **Preview thumbnails**: generate thumbnails with `av_inspect.py --thumbnails` or `av_video.py thumbnails`; read the generated JPGs in the **next** round only if visual review is genuinely needed.
@@ -126,10 +126,11 @@ python /readonly/skills/audio_video/scripts/av_trim.py trim \
 # Remove first 3 seconds and last 5 seconds (no inspection needed)
 python /readonly/skills/audio_video/scripts/av_trim.py trim \
   --input /readonly/history/source.mp4 \
-  --start 00:00:03 \
-  --end -00:00:05 \
+  --remove-start 00:00:03 \
+  --remove-end 00:00:05 \
   --output /workspace/output/final_video.mp4
-# --end with negative offset removes N seconds from the end
+# --remove-start removes N seconds from the start
+# --remove-end removes N seconds from the end
 # Error if video is too short for both cuts
 ```
 
@@ -168,7 +169,7 @@ python /readonly/skills/audio_video/scripts/av_audio.py extract \
   --output /workspace/output/audio_clean.m4a \
   --normalize
 # Optional flags: --fade-in 0.5, --fade-out 1.0, --duration <seconds>,
-#                 --bitrate 192k, --sample-rate 48000, --timeout 120
+#                 --bitrate 192k, --sample-rate 48000, --timeout 300
 ```
 
 ### Normalize existing audio

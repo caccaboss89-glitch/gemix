@@ -128,7 +128,7 @@ def main() -> None:
     parser.add_argument("--max-size-mb", type=float)
     parser.add_argument("--max-bitrate-kbps", type=int)
     parser.add_argument("--check-silence", action="store_true")
-    parser.add_argument("--silence-noise", default="-35dB")
+    parser.add_argument("--silence-noise", default="-35dB", help="Noise threshold (e.g. -35dB)")
     parser.add_argument("--silence-duration", type=float, default=2.0)
     parser.add_argument("--check-black", action="store_true")
     parser.add_argument("--black-threshold", type=float, default=0.10)

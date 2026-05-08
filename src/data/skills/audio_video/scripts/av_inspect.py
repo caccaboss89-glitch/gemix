@@ -94,7 +94,7 @@ def main() -> None:
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", help="Write JSON report here (default: stdout)")
     parser.add_argument("--silence", action="store_true", help="Run silence detector")
-    parser.add_argument("--silence-noise", default="-35dB")
+    parser.add_argument("--silence-noise", default="-35dB", help="Noise threshold (e.g. -35dB)")
     parser.add_argument("--silence-duration", type=float, default=0.5)
     parser.add_argument("--black", action="store_true", help="Run black-frame detector for videos")
     parser.add_argument("--black-threshold", type=float, default=0.10)

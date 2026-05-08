@@ -25,14 +25,20 @@ def trim(args: argparse.Namespace) -> str:
     end = parse_time(args.end) if args.end else None
     duration = parse_time(args.duration) if args.duration else None
 
-    # Support negative offset for end (e.g., --end -00:00:05 means "remove last 5 seconds")
-    if end is not None and args.end and args.end.startswith("-"):
+    # Support remove-start flag (e.g. --remove-start 00:00:03 means "remove first 3 seconds")
+    if args.remove_start:
+        remove_seconds = parse_time(args.remove_start)
+        start = remove_seconds
+
+    # Support remove-end flag (e.g. --remove-end 00:00:05 means "remove last 5 seconds")
+    if args.remove_end:
+        remove_seconds = parse_time(args.remove_end)
         total_duration = media_duration(src)
         if total_duration <= 0:
-            raise ValueError("Cannot determine video duration for negative offset")
-        end = total_duration + end  # end is negative, so this subtracts from total
+            raise ValueError("Cannot determine video duration for remove-end")
+        end = total_duration - remove_seconds
         if end <= 0:
-            raise ValueError(f"Video duration ({total_duration}s) is too short to remove {-end}s from end")
+            raise ValueError(f"Video duration ({total_duration}s) is too short to remove {remove_seconds}s from end")
         if start is not None and start >= end:
             raise ValueError(f"Start time ({start}s) is at or after calculated end time ({end}s)")
 
@@ -139,6 +145,8 @@ def main() -> None:
     p_trim.add_argument("--start")
     p_trim.add_argument("--end")
     p_trim.add_argument("--duration")
+    p_trim.add_argument("--remove-start", help="Remove N seconds from the start (e.g. 00:00:03)")
+    p_trim.add_argument("--remove-end", help="Remove N seconds from the end (e.g. 00:00:05)")
     common(p_trim)
 
     p_remove = sub.add_parser("remove-segments", help="Remove one or more START-END ranges")
