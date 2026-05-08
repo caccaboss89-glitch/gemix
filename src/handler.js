@@ -326,7 +326,29 @@ async function handleMessage(ctx) {
     }
 
     // Transcribe documents in ctx.content before adding
-    const transcribedUserContent = await transcribeDocumentsInMessageContent(ctx.content);
+    const transcribedUserContent = await transcribeDocumentsInMessageContent(ctx.content, {
+      ctx,
+      onTranscriptionStart: async (message) => {
+        // Send intermediate message to the current chat
+        try {
+          if (ctx.platform === 'discord' && ctx.discordChannel) {
+            await ctx.discordChannel.send({ content: message });
+            log.info(`   📤 Sent transcription notification to Discord: ${message}`);
+          } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
+            // For WhatsApp, we need to send via the client
+            // We'll use the sendWhatsAppDirect function which can send to any chat
+            const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
+            if (targetJid) {
+              const { sendWhatsAppDirect } = require('./tools/whatsappSender');
+              await sendWhatsAppDirect(targetJid, message);
+              log.info(`   📤 Sent transcription notification to WhatsApp: ${message}`);
+            }
+          }
+        } catch (err) {
+          log.warn(`Failed to send transcription notification: ${err.message}`);
+        }
+      },
+    });
     messages.push({ role: 'user', content: transcribedUserContent });
 
     // ── Deterministic history prune ─────────────────────────────────────

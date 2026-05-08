@@ -1,13 +1,14 @@
 // src/tools/readFile.js
 const fs = require('fs');
 const path = require('path');
-const { PLATFORM_DISCORD } = require('../config/constants');
 const { mediaToContentPart } = require('../utils/media');
 const { persistParsedPdfToHistory, getUserHistoryPaths } = require('../utils/historySync');
 const {
   buildParsedPdfStructure,
   findExistingParsedDirFor,
   ensureHeaderInTranscription,
+  HEADER_BEGIN,
+  HEADER_END,
 } = require('../utils/pdfStructure');
 const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
@@ -78,16 +79,19 @@ async function readFileTool(filePath, userCtx, responseCtx) {
 
   ensureUserSkeleton(userCtx);
 
-  const isDiscord = userCtx.platform === PLATFORM_DISCORD;
   const agenticUnlocked = userCtx.agenticUnlocked;
   let rawPath = (filePath || '').trim();
 
-  // Automatically normalize bare filenames to history/.
-  // This allows the AI to use "file.pdf" instead of "history/file.pdf".
-  if (!rawPath.includes('/') && !rawPath.startsWith('skills:')) {
-    rawPath = 'history/' + rawPath;
-  } else if (rawPath.startsWith('./')) {
-    rawPath = rawPath.slice(2);
+  // Automatically normalize relative paths to history/ (NON-agentic only).
+  // This allows the AI to use "file.pdf" → "history/file.pdf" or "CV/transcription.md" → "history/CV/transcription.md".
+  // Agentic mode MUST use absolute paths as instructed.
+  if (!agenticUnlocked && !rawPath.startsWith('/') && !rawPath.startsWith('skills:')) {
+    if (rawPath.startsWith('./')) {
+      rawPath = rawPath.slice(2);
+    }
+    if (!rawPath.startsWith('history/')) {
+      rawPath = 'history/' + rawPath;
+    }
   }
 
   const currentProject = await getCurrentProject(userCtx);
@@ -397,6 +401,43 @@ ${text}
 
   // ── Text/Code ──
   let text = buffer.toString('utf-8');
+  
+  // ── Normalize PDF transcription header paths for non-agentic mode ──
+  // In non-agentic mode, the AI can only use relative history paths.
+  // When reading a transcription.md file, temporarily convert absolute paths
+  // in the header to relative paths for the AI to use (e.g. /readonly/history/CV/ → CV/).
+  // Also remove the second rule about copying to /workspace/temp/ since non-agentic
+  // AI cannot access that path. The file on disk remains unchanged.
+  if (!agenticUnlocked && path.basename(absolutePath) === 'transcription.md') {
+    const headerBeginIdx = text.indexOf(HEADER_BEGIN);
+    const headerEndIdx = text.indexOf(HEADER_END);
+    
+    if (headerBeginIdx !== -1 && headerEndIdx !== -1) {
+      const header = text.slice(headerBeginIdx, headerEndIdx + HEADER_END.length);
+      const rest = text.slice(headerEndIdx + HEADER_END.length);
+      
+      // Convert absolute paths to relative paths in the header
+      // /readonly/history/CV/ → CV/
+      // /readonly/history/CV/transcription.md → CV/transcription.md
+      let normalizedHeader = header.replace(
+        /\/readonly\/history\/([^/\s]+)/g,
+        '$1'
+      ).replace(
+        /\/readonly\/history\//g,
+        ''
+      );
+      
+      // Remove the second rule about copying to /workspace/temp/ (non-agentic AI cannot access it)
+      // The rule starts with "   - If you need to use any of these files..."
+      normalizedHeader = normalizedHeader.replace(
+        /   - If you need to use any of these files[\s\S]*?operate on the copy\.\n/,
+        ''
+      );
+      
+      text = normalizedHeader + rest;
+    }
+  }
+  
   const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
   if (isTruncated) {
     const truncatedBuffer = buffer.slice(0, MAX_TEXT_BYTES);

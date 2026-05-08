@@ -31,8 +31,9 @@ function stripVoiceTags(text) {
 }
 
 /**
- * Normalize Markdown formatting by converting double delimiters to single.
- * WhatsApp uses single delimiters:
+ * Normalize Markdown for WhatsApp (which has limited MD support).
+ * - ### → removed (headings not supported)
+ * - * bullet points → - bullet points (better compatibility)
  * - **text** → *text* (bold)
  * - __text__ → _text_ (italic)
  * - ~~text~~ → ~text~ (strikethrough)
@@ -41,6 +42,10 @@ function stripVoiceTags(text) {
  */
 function normalizeMarkdown(text) {
   if (!text || typeof text !== 'string') return text;
+  // Remove heading markers (###) completely - WhatsApp doesn't support them
+  text = text.replace(/^#{1,6}\s+/gm, '');
+  // * bullet points → - bullet points (better WhatsApp compatibility)
+  text = text.replace(/^\*\s+/gm, '- ');
   // **text** → *text* (bold)
   text = text.replace(/\*\*([^\*]+)\*\*/g, '*$1*');
   // __text__ → _text_ (italic)

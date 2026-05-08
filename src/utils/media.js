@@ -239,9 +239,13 @@ function mediaTag(filename, mimetype) {
  * `bug_report` and stop, NOT retry parsing in agentic mode).
  *
  * @param {Array|string} content - Message content (can be string or array of parts)
+ * @param {object} [opts] - Options
+ * @param {object} [opts.ctx] - Handler context for notifications
+ * @param {function} [opts.onTranscriptionStart] - Callback when transcription starts (message)
+ * @param {function} [opts.onTranscriptionEnd] - Callback when transcription ends
  * @returns {Promise<Array|string>} Transcribed content
  */
-async function transcribeDocumentsInMessageContent(content) {
+async function transcribeDocumentsInMessageContent(content, opts = {}) {
   if (typeof content === 'string') {
     return content;
   }
@@ -252,75 +256,100 @@ async function transcribeDocumentsInMessageContent(content) {
 
   const transcribed = [];
   const attachmentPathReplacements = new Map();
-
-  for (const part of content) {
-    if (!part) {
-      transcribed.push(part);
-      continue;
-    }
-
-    if (_getMediaTypeFromContentPart(part) !== 'document') {
-      transcribed.push(part);
-      continue;
-    }
-
-    const dataUrl = part.image_url?.url || '';
-    const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-    if (!match || match[1].toLowerCase() !== 'application/pdf') {
-      transcribed.push({
-        type: 'text',
-        text: `[PDF parsing skipped: unsupported document type "${match ? match[1] : 'unknown'}"]. Inform the user and call bug_report.`,
-      });
-      continue;
-    }
-
-    const historyPath = typeof part._historyPath === 'string' ? part._historyPath.trim() : null;
-    const historyUserId = typeof part._historyUserId === 'string' ? part._historyUserId.trim() : null;
-
-    if (!historyPath || !historyUserId) {
-      // Defensive: every PDF reaching this point should originate from a
-      // platform handler that always tags content parts with these fields.
-      log.error(`❌ PDF content part missing history metadata — refusing to parse.`);
-      transcribed.push({
-        type: 'text',
-        text: `[PDF parsing skipped: internal error — missing history metadata]. STOP. Do NOT retry in agentic mode. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later.`,
-      });
-      continue;
-    }
-
-    const buffer = Buffer.from(match[2], 'base64');
-    const { persistParsedPdfToHistory } = require('./historySync');
-    const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
-
-    if (persisted.success && typeof persisted.text === 'string' && persisted.text.trim()) {
-      transcribed.push({
-        type: 'text',
-        text: `<Transcription>\n${persisted.text}\n</Transcription>`,
-      });
-      if (persisted.historyPath && persisted.historyPath !== historyPath) {
-        attachmentPathReplacements.set(historyPath, persisted.historyPath);
-      }
-      continue;
-    }
-
-    const errorMsg = persisted.error || 'Unknown PDF parsing error';
-    log.error(`❌ PDF round-pre-call parsing failed for ${historyPath}: ${errorMsg}`);
-    transcribed.push({
-      type: 'text',
-      text: `[PDF parsing failed: ${errorMsg}]. STOP. Do NOT enter agentic mode to retry parsing yourself. Use bug_report (source="pdf-parser", details=brief) to notify the admin, then tell the user there is a system error and to retry later.`,
-    });
-  }
-
-  if (attachmentPathReplacements.size > 0) {
-    for (const part of transcribed) {
-      if (!part || part.type !== 'text' || typeof part.text !== 'string') continue;
-      for (const [oldPath, newPath] of attachmentPathReplacements.entries()) {
-        part.text = _replaceAttachmentPathInText(part.text, oldPath, newPath);
-      }
+  const { ctx, onTranscriptionStart, onTranscriptionEnd } = opts;
+  
+  // Use tracker if context and callbacks are provided
+  const useTracker = ctx && typeof onTranscriptionStart === 'function';
+  let trackerData = null;
+  
+  if (useTracker) {
+    const { incrementTranscription, buildNotificationMessage } = require('./pdfTranscriptionTracker');
+    trackerData = incrementTranscription(ctx);
+    if (trackerData.shouldNotify && onTranscriptionStart) {
+      const message = buildNotificationMessage(trackerData.count);
+      await onTranscriptionStart(message);
     }
   }
 
-  return transcribed;
+  try {
+    for (const part of content) {
+      if (!part) {
+        transcribed.push(part);
+        continue;
+      }
+
+      if (_getMediaTypeFromContentPart(part) !== 'document') {
+        transcribed.push(part);
+        continue;
+      }
+
+      const dataUrl = part.image_url?.url || '';
+      const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+      if (!match || match[1].toLowerCase() !== 'application/pdf') {
+        transcribed.push({
+          type: 'text',
+          text: `[PDF parsing skipped: unsupported document type "${match ? match[1] : 'unknown'}"]. Inform the user and call bug_report.`,
+        });
+        continue;
+      }
+
+      const historyPath = typeof part._historyPath === 'string' ? part._historyPath.trim() : null;
+      const historyUserId = typeof part._historyUserId === 'string' ? part._historyUserId.trim() : null;
+
+      if (!historyPath || !historyUserId) {
+        // Defensive: every PDF reaching this point should originate from a
+        // platform handler that always tags content parts with these fields.
+        log.error(`❌ PDF content part missing history metadata — refusing to parse.`);
+        transcribed.push({
+          type: 'text',
+          text: `[PDF parsing skipped: internal error — missing history metadata]. STOP. Do NOT retry in agentic mode. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later.`,
+        });
+        continue;
+      }
+
+      const buffer = Buffer.from(match[2], 'base64');
+      const { persistParsedPdfToHistory } = require('./historySync');
+      const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
+
+      if (persisted.success && typeof persisted.text === 'string' && persisted.text.trim()) {
+        transcribed.push({
+          type: 'text',
+          text: `<Transcription>\n${persisted.text}\n</Transcription>`,
+        });
+        if (persisted.historyPath && persisted.historyPath !== historyPath) {
+          attachmentPathReplacements.set(historyPath, persisted.historyPath);
+        }
+        continue;
+      }
+
+      const errorMsg = persisted.error || 'Unknown PDF parsing error';
+      log.error(`❌ PDF round-pre-call parsing failed for ${historyPath}: ${errorMsg}`);
+      transcribed.push({
+        type: 'text',
+        text: `[PDF parsing failed: ${errorMsg}]. STOP. Do NOT enter agentic mode to retry parsing yourself. Use bug_report (source="pdf-parser", details=brief) to notify the admin, then tell the user there is a system error and to retry later.`,
+      });
+    }
+
+    if (attachmentPathReplacements.size > 0) {
+      for (const part of transcribed) {
+        if (!part || part.type !== 'text' || typeof part.text !== 'string') continue;
+        for (const [oldPath, newPath] of attachmentPathReplacements.entries()) {
+          part.text = _replaceAttachmentPathInText(part.text, oldPath, newPath);
+        }
+      }
+    }
+
+    return transcribed;
+  } finally {
+    // Decrement tracker count when done
+    if (useTracker && ctx) {
+      const { decrementTranscription } = require('./pdfTranscriptionTracker');
+      decrementTranscription(ctx);
+      if (onTranscriptionEnd) {
+        await onTranscriptionEnd();
+      }
+    }
+  }
 }
 
 function _getMediaTypeFromContentPart(part) {

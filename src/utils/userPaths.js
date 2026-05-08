@@ -267,14 +267,13 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
 
   // ── Read rules ──
   if (op === 'read') {
-    if (c.zone === 'skills') {
-      if (isDiscord) return { ok: false, reason: 'Skills are not available on Discord.' };
-      return c;
-    }
     if (!agenticUnlocked && c.zone !== 'history') {
       return { ok: false, reason: isDiscord 
-        ? 'On Discord you can only read files from chat history.' 
-        : 'Access to advanced storage (/workspace/, /readonly/permanent/, etc.) denied. Unlock agentic mode first.' };
+        ? 'Access to advanced storage denied.' 
+        : 'Access to advanced storage denied. Unlock agentic mode first.' };
+    }
+    if (c.zone === 'skills') {
+      return c;
     }
     return c;
   }
