@@ -39,8 +39,9 @@ function _resolveWaFilename(givenName, mediaType, mimetype, msgId = null) {
   if (givenName && path.extname(givenName)) return givenName;
   const baseMime = (mimetype || '').split(';')[0].trim().toLowerCase();
   const ext = _MIME_TO_EXT[baseMime] || '';
-  // Use unique ID-based name instead of caption to avoid message text as filename
-  const base = givenName || (msgId ? `attachment_${msgId}` : mediaType || 'file');
+  // Use unique short ID-based name instead of caption to avoid message text as filename
+  const shortId = msgId ? msgId.slice(-8) : Date.now().toString(36);
+  const base = givenName || `file_${shortId}`;
   return ext ? `${base}${ext}` : base;
 }
 
