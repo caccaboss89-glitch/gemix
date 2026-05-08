@@ -132,7 +132,7 @@ def main() -> None:
         p.add_argument("--crf", type=int, default=18)
         p.add_argument("--preset", default="medium", choices=["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"])
         p.add_argument("--audio-bitrate", default="192k")
-        p.add_argument("--timeout", type=int, default=120)
+        p.add_argument("--timeout", type=int, default=300)
 
     p_trim = sub.add_parser("trim", help="Extract a time range")
     p_trim.add_argument("--input", required=True)

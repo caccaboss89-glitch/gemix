@@ -104,7 +104,7 @@ def main() -> None:
         p.add_argument("--crf", type=int, default=18)
         p.add_argument("--preset", default="medium", choices=["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"])
         p.add_argument("--audio-bitrate", default="192k")
-        p.add_argument("--timeout", type=int, default=120)
+        p.add_argument("--timeout", type=int, default=300)
 
     p_replace = sub.add_parser("replace-audio", help="Replace a video's audio track")
     p_replace.add_argument("--video", required=True)

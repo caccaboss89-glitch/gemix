@@ -133,7 +133,7 @@ def main() -> None:
     parser.add_argument("--check-black", action="store_true")
     parser.add_argument("--black-threshold", type=float, default=0.10)
     parser.add_argument("--black-duration", type=float, default=1.0)
-    parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
     try:
         write_json_report(qa(args), args.output)

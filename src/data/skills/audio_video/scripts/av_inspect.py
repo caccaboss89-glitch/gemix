@@ -101,7 +101,7 @@ def main() -> None:
     parser.add_argument("--black-duration", type=float, default=0.5)
     parser.add_argument("--thumbnails", type=int, default=0, help="Generate N thumbnails for visual review")
     parser.add_argument("--thumbnails-dir", default="/workspace/temp/av_thumbnails")
-    parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
     try:
         write_json_report(inspect(args), args.output)

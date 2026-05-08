@@ -121,7 +121,7 @@ def main() -> None:
     p_mix.add_argument("--music-fade-in", type=float, default=1.5)
     p_mix.add_argument("--duration", default="first", choices=["first", "shortest", "longest"])
     p_mix.add_argument("--bitrate", default="192k")
-    p_mix.add_argument("--timeout", type=int, default=120)
+    p_mix.add_argument("--timeout", type=int, default=300)
 
     p_fade = sub.add_parser("fade", help="Apply audio fades and optional normalization")
     p_fade.add_argument("--input", required=True)

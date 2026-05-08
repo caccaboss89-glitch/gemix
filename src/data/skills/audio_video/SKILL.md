@@ -85,7 +85,7 @@ python /readonly/skills/audio_video/scripts/av_inspect.py \
 # Optional flags: --silence, --silence-noise -35dB, --silence-duration 0.5,
 #                 --black, --black-threshold 0.10, --black-duration 0.5,
 #                 --thumbnails N, --thumbnails-dir /workspace/temp/thumbs,
-#                 --timeout 120
+#                 --timeout 300
 ```
 
 **Inspection JSON schema:**
@@ -118,7 +118,7 @@ python /readonly/skills/audio_video/scripts/av_trim.py trim \
   --output /workspace/output/final_video.mp4
 # Optional flags: --duration 12.5, --mode encode|copy (default encode),
 #                 --audio-only, --crf 18, --preset medium, --audio-bitrate 192k,
-#                 --timeout 120
+#                 --timeout 300
 ```
 
 **Trim from start or end without inspection:**
@@ -141,7 +141,7 @@ python /readonly/skills/audio_video/scripts/av_trim.py remove-segments \
   --segments 00:00:00-00:00:02.2,00:01:13.5-00:01:18 \
   --output /workspace/output/interview_clean.mp4
 # Optional flags: --workdir /workspace/temp/av_trim, --mode encode|copy,
-#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 ### Concatenate clips
@@ -151,7 +151,7 @@ python /readonly/skills/audio_video/scripts/av_trim.py concat \
   --inputs /readonly/history/clip1.mp4 /readonly/history/clip2.mp4 /readonly/history/clip3.mp4 \
   --output /workspace/output/combined.mp4
 # Optional flags: --workdir /workspace/temp/av_concat, --audio-only, --fps N,
-#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 **Do not guess generated piece names** after `remove-segments` or `concat`; read stdout or inspect `/workspace/temp/av_trim` only if needed.
@@ -177,7 +177,7 @@ python /readonly/skills/audio_video/scripts/av_audio.py extract \
 python /readonly/skills/audio_video/scripts/av_audio.py normalize \
   --input /readonly/history/podcast.wav \
   --output /workspace/output/podcast_normalized.mp3
-# Optional flags: --bitrate 192k, --sample-rate 48000, --timeout 120
+# Optional flags: --bitrate 192k, --sample-rate 48000, --timeout 300
 ```
 
 ### Mix voice over background music
@@ -188,8 +188,7 @@ python /readonly/skills/audio_video/scripts/av_audio.py mix \
   --music /readonly/history/music.mp3 \
   --output /workspace/output/voice_music_mix.m4a \
   --music-gain 0.18
-# Optional flags: --voice-gain 1.0, --music-fade-in 1.5,
-#                 --duration first|shortest|longest, --bitrate 192k, --timeout 120
+# Optional flags: --duration first|shortest|longest, --bitrate 192k, --timeout 300
 ```
 
 ### Apply fades
@@ -202,7 +201,7 @@ python /readonly/skills/audio_video/scripts/av_audio.py fade \
   --fade-out 2.0 \
   --duration 60 \
   --normalize
-# Optional flags: --bitrate 192k, --sample-rate 48000, --timeout 120
+# Optional flags: --bitrate 192k, --sample-rate 48000, --timeout 300
 ```
 
 > `--duration` is required for `--fade-out` because the fade-out start must be computed from the known final duration. Get it from `av_inspect.py`.
@@ -221,7 +220,7 @@ python /readonly/skills/audio_video/scripts/av_video.py resize \
   --fit contain \
   --output /workspace/output/video_1080p.mp4
 # Optional flags: --fit contain|cover|stretch, --pad-color black,
-#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 Common targets:
@@ -240,7 +239,7 @@ python /readonly/skills/audio_video/scripts/av_video.py crop \
   --input /readonly/history/source.mp4 \
   --x 320 --y 0 --width 1080 --height 1080 \
   --output /workspace/output/cropped_square.mp4
-# Optional flags: --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+# Optional flags: --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 ### Rotate
@@ -251,7 +250,7 @@ python /readonly/skills/audio_video/scripts/av_video.py rotate \
   --angle 90 \
   --output /workspace/output/rotated.mp4
 # angle: 90, 180, 270, -90, -180, -270
-# Optional flags: --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+# Optional flags: --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 ### Speed change
@@ -262,7 +261,7 @@ python /readonly/skills/audio_video/scripts/av_video.py speed \
   --factor 1.25 \
   --output /workspace/output/faster.mp4
 # factor > 1 speeds up; factor < 1 slows down
-# Optional flags: --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+# Optional flags: --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 ### Watermark
@@ -277,7 +276,7 @@ python /readonly/skills/audio_video/scripts/av_video.py watermark \
   --output /workspace/output/watermarked.mp4
 # Optional flags: --position top-left|top-right|bottom-left|bottom-right|center,
 #                 --width 220, --opacity 0.85, --crf 18, --preset medium,
-#                 --audio-bitrate 192k, --timeout 120
+#                 --audio-bitrate 192k, --timeout 300
 ```
 
 ### Thumbnails for visual review
@@ -287,7 +286,7 @@ python /readonly/skills/audio_video/scripts/av_video.py thumbnails \
   --input /workspace/output/final_video.mp4 \
   --output-dir /workspace/temp/final_thumbs \
   --count 6
-# Optional flags: --width 640, --pattern thumb_%03d.jpg, --timeout 120
+# Optional flags: --width 640, --pattern thumb_%03d.jpg, --timeout 300
 ```
 
 ---
@@ -304,7 +303,7 @@ python /readonly/skills/audio_video/scripts/av_compose.py replace-audio \
   --copy-video \
   --output /workspace/output/final_with_audio.mp4
 # Optional flags: --shortest, --copy-video, --crf 18, --preset medium,
-#                 --audio-bitrate 192k, --timeout 120
+#                 --audio-bitrate 192k, --timeout 300
 ```
 
 ### Add subtitles
@@ -322,7 +321,7 @@ python /readonly/skills/audio_video/scripts/av_compose.py add-subtitles \
   --subtitles /workspace/temp/captions.srt \
   --burn-in \
   --output /workspace/output/subtitled_burned.mp4
-# Optional flags: --burn-in, --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+# Optional flags: --burn-in, --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 ### Image slideshow from JSON spec
@@ -347,7 +346,7 @@ python /readonly/skills/audio_video/scripts/av_compose.py slideshow \
   --output /workspace/output/slideshow.mp4
 # Optional flags: --workdir /workspace/temp/av_slideshow, --default-duration 4.0,
 #                 --background black, --fps 30, --music <path>, --crf 18,
-#                 --preset medium, --audio-bitrate 192k, --timeout 120
+#                 --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 ### Split-screen video grid
@@ -360,7 +359,7 @@ python /readonly/skills/audio_video/scripts/av_compose.py grid \
   --cell-height 540 \
   --output /workspace/output/grid.mp4
 # Optional flags: --columns N, --cell-width 960, --cell-height 540,
-#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 120
+#                 --crf 18, --preset medium, --audio-bitrate 192k, --timeout 300
 ```
 
 ---
@@ -382,7 +381,7 @@ python /readonly/skills/audio_video/scripts/av_qa.py \
   --output /workspace/temp/final_video_qa.json
 # Optional flags: --max-bitrate-kbps N, --silence-noise -35dB,
 #                 --silence-duration 2.0, --black-threshold 0.10,
-#                 --black-duration 1.0, --timeout 120
+#                 --black-duration 1.0, --timeout 300
 ```
 
 **QA JSON schema:**
