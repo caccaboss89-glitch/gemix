@@ -91,7 +91,7 @@ function buildPersonalCloudPointer(ctx) {
   const count = Array.isArray(ctx.projects) ? ctx.projects.length : 0;
   return `  <PersonalCloud lite="true">
   - Selected project: ${escapeXml(current)} (Last used: ${escapeXml(last)}) [Total projects: ${count}].
-  - Need to compute, create/edit files, run scripts, download, OCR, generate charts/PDFs? → Call agentic_unlock FIRST, ALONE (no other tools). After unlock, the full toolkit is available the next round.
+  - Need to compute, create/edit files, audio/video, run scripts, download, OCR, charts → Call agentic_unlock FIRST, ALONE (no other tools). After unlock, the full toolkit is available the next round.
   - DO NOT call the unlock service for: standard chat, web search, voice responses, programming, memory, and other already accessible tools.
   </PersonalCloud>\n`;
 }
