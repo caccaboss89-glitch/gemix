@@ -567,7 +567,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         const bugSource = String(args.source || 'unknown').slice(0, 100);
         const bugDetails = String(args.details || '').slice(0, 500);
         await notifyAdmin(`Bug Report — ${bugSource}`, bugDetails);
-        result = { success: true, message: 'Bug report sent to admin.' };
+        result = {
+          success: true,
+          message: 'Bug report sent to admin. REMINDER: tell the user in your final reply that you encountered a problem and notified the admin (do NOT stay silent about it).',
+        };
         break;
       }
 

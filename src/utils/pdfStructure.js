@@ -24,6 +24,9 @@ const fs = require('fs');
 const path = require('path');
 const { extractTextFromPdfBuffer } = require('./media');
 const { MAX_DOC_PAGES } = require('../config/constants');
+const { createLogger } = require('./logger');
+
+const log = createLogger('PdfStructure');
 
 const HEADER_BEGIN = '<!-- ===== GEMIX_PDF_PARSER_HEADER:BEGIN ===== -->';
 const HEADER_END   = '<!-- ===== GEMIX_PDF_PARSER_HEADER:END ===== -->';
@@ -244,6 +247,7 @@ async function buildParsedPdfStructure({ absPdfPath, buffer, virtualPdfPath }) {
       }
     }
 
+    log.info(`✅ Parsed PDF structure built: ${cleanVirtualPdf} → ${virtualDir}/ (pages=${info.pages || '?'}, assets=${assetCount})`);
     return {
       success: true,
       parsedDirAbs: parsedDir,
@@ -261,6 +265,7 @@ async function buildParsedPdfStructure({ absPdfPath, buffer, virtualPdfPath }) {
     };
   } catch (err) {
     try { fs.rmSync(parsedDir, { recursive: true, force: true }); } catch {}
+    log.error(`❌ Parsed PDF structure build failed for ${cleanVirtualPdf}: ${err.message}`);
     return { success: false, error: err.message };
   }
 }

@@ -481,9 +481,9 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
 
 const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
-  description: 'Report a system problem to the admin (bug, tool failure, unexpected behavior). Use when a tool fails, something behaves wrongly, or there is a system issue worth reporting.',
+  description: 'Report a system problem to the admin (bug, tool failure, unexpected behavior). Use when a tool fails, something behaves wrongly, or there is a system issue worth reporting. After calling this, you MUST also inform the user in your final reply that you encountered a problem and reported it to the admin (do NOT call this silently).',
   properties: {
-    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "bash", "yt-dlp", "proxy")' },
+    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "bash", "yt-dlp", "proxy", "pdf-parser")' },
     details: { type: 'string', description: 'Brief but clear description of the problem' },
   },
   required: ['source', 'details'],

@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { PLATFORM_DISCORD } = require('../config/constants');
-const { transcribePdfBuffer, mediaToContentPart } = require('../utils/media');
+const { mediaToContentPart } = require('../utils/media');
 const { persistParsedPdfToHistory, getUserHistoryPaths } = require('../utils/historySync');
 const {
   buildParsedPdfStructure,
@@ -126,29 +126,39 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   }
   if (/\.pdf$/i.test(rawPath) && (!fs.existsSync(absolutePath) || fs.statSync(absolutePath).isFile())) {
     if (rawPath.startsWith('history/')) {
+      const storageId = resolveStorageId(userCtx);
+      let persisted;
       try {
-        const storageId = resolveStorageId(userCtx);
-        const persisted = await persistParsedPdfToHistory(storageId, rawPath);
-        if (persisted.success && persisted.historyPath) {
-          displayPath = `history/${persisted.historyPath}`;
-          const { historyDir } = getUserHistoryPaths(storageId);
-          absolutePath = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''));
-        }
-      } catch { /* fall through to normal not-found / file handling */ }
+        persisted = await persistParsedPdfToHistory(storageId, rawPath);
+      } catch (err) {
+        return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+      }
+      if (persisted.success && persisted.historyPath) {
+        displayPath = `history/${persisted.historyPath}`;
+        const { historyDir } = getUserHistoryPaths(storageId);
+        absolutePath = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''));
+      } else {
+        return { success: false, error: `PDF parsing failed for "${displayPath}": ${persisted.error || 'unknown error'}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+      }
     } else if (fs.existsSync(absolutePath)) {
-      try {
-        const st0 = fs.statSync(absolutePath);
-        if (st0.isFile()) {
-          const built = await buildParsedPdfStructure({
+      const st0 = fs.statSync(absolutePath);
+      if (st0.isFile()) {
+        let built;
+        try {
+          built = await buildParsedPdfStructure({
             absPdfPath: absolutePath,
             virtualPdfPath: rawPath.startsWith('/') ? rawPath : `/${rawPath}`,
           });
-          if (built.success) {
-            absolutePath = built.parsedDirAbs;
-            displayPath = displayPath.replace(/[^/]*\.pdf$/i, built.dirName + '/');
-          }
+        } catch (err) {
+          return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
         }
-      } catch { /* fall through */ }
+        if (built.success) {
+          absolutePath = built.parsedDirAbs;
+          displayPath = displayPath.replace(/[^/]*\.pdf$/i, built.dirName + '/');
+        } else {
+          return { success: false, error: `PDF parsing failed for "${displayPath}": ${built.error || 'unknown error'}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+        }
+      }
     } else {
       const existing = findExistingParsedDirFor(absolutePath);
       if (existing) {
@@ -376,49 +386,13 @@ ${text}
     ];
   }
 
-  // ── PDF (raw .pdf file, not a parsed directory) ──
+  // ── PDF (raw .pdf file) ──
+  // Should be unreachable: any .pdf path is rerouted above to its parsed
+  // folder (handled in the directory branch). If a stray raw .pdf reaches
+  // this point, the canonical parser failed silently and we surface a
+  // clear error instead of triggering a second parse attempt.
   if (ext === '.pdf') {
-    let text = '';
-    let analysisPath = sanitizedPath;
-    let assetsInfo = '';
-
-    if (rawPath.startsWith('history/')) {
-      const persisted = await persistParsedPdfToHistory(resolveStorageId(userCtx), rawPath, buffer);
-      if (!persisted.success) {
-        return { success: false, error: `Failed to extract text from PDF.` };
-      }
-      text = persisted.text;
-      analysisPath = `history/${persisted.historyPath}`;
-      try {
-        const { historyDir } = getUserHistoryPaths(resolveStorageId(userCtx));
-        const assetsDir = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''), 'assets');
-        if (fs.existsSync(assetsDir)) {
-          const assetFiles = fs.readdirSync(assetsDir);
-          if (assetFiles.length > 0) {
-            assetsInfo = `\n<Assets count="${assetFiles.length}">\n${assetFiles.map(f => `  ${analysisPath}assets/${f}`).join('\n')}\n</Assets>`;
-          }
-        }
-      } catch { }
-    } else {
-      const result = await transcribePdfBuffer(buffer);
-      if (!result.success) {
-        return { success: false, error: `Failed to extract text from PDF.` };
-      }
-      text = result.text;
-    }
-
-    const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
-    if (isTruncated) {
-      text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';
-    }
-    
-    const output = `<FileAnalysis path="${analysisPath}" type="pdf" size="${fileSize}"${isTruncated ? ' truncated="true"' : ''}>
-<Transcription>
-${text}
-</Transcription>${assetsInfo}
-</FileAnalysis>${bgWriteViolationWarning}`;
-
-    return { success: true, message: output };
+    return { success: false, error: `PDF "${sanitizedPath}" could not be parsed into the canonical folder structure. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
   }
 
   // ── Text/Code ──

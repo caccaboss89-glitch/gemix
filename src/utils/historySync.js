@@ -351,8 +351,10 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
         }
       }
       const text = ensureHeaderInTranscription(parsedDirAbs, `history/${diskName}`);
+      log.info(`✅ PDF parser: cache hit for history/${normalized} → history/${existingDir}`);
       return { success: true, historyPath: existingDir, text };
     } catch (err) {
+      log.error(`❌ PDF parser: meta update failed for history/${normalized}: ${err.message}`);
       return { success: false, error: err.message };
     }
   }
@@ -367,6 +369,7 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
     try {
       buffer = fs.readFileSync(filePath);
     } catch (err) {
+      log.error(`❌ PDF parser: cannot read history/${normalized}: ${err.message}`);
       return { success: false, error: `Cannot read PDF from history: ${err.message}` };
     }
   }
@@ -375,7 +378,10 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
   // (buildParsedPdfStructure moves it inside the new folder).
   if (!fs.existsSync(filePath)) {
     try { fs.writeFileSync(filePath, buffer); }
-    catch (err) { return { success: false, error: `Cannot stage PDF for parsing: ${err.message}` }; }
+    catch (err) {
+      log.error(`❌ PDF parser: cannot stage history/${normalized}: ${err.message}`);
+      return { success: false, error: `Cannot stage PDF for parsing: ${err.message}` };
+    }
   }
 
   const built = await buildParsedPdfStructure({
@@ -384,6 +390,7 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
     virtualPdfPath: `history/${normalized}`,
   });
   if (!built.success) {
+    log.error(`❌ PDF parser: failed to build parsed structure for history/${normalized}: ${built.error}`);
     return { success: false, error: built.error };
   }
 
@@ -403,9 +410,11 @@ async function persistParsedPdfToHistory(userId, historyFilename, buffer = null)
     // Roll back: dump the buffer back to the original location and remove the parsed dir.
     try { fs.writeFileSync(filePath, buffer); } catch {}
     try { fs.rmSync(built.parsedDirAbs, { recursive: true, force: true }); } catch {}
+    log.error(`❌ PDF parser: rollback after meta failure for history/${normalized}: ${err.message}`);
     return { success: false, error: err.message };
   }
 
+  log.info(`✅ PDF parser: history/${normalized} → history/${parsedHistoryPath} (assets=${built.assetCount}, pointer updated)`);
   return {
     success: true,
     historyPath: parsedHistoryPath,

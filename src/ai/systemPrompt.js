@@ -46,7 +46,7 @@ function buildSystemPrompt(ctx) {
   prompt += '- Execute all tools silently. Reply ONLY once after all tools complete.\n';
   prompt += `- You MUST provide a final response${isWhatsApp ? ' (text or send_voice_message)' : ''} to the user.\n`;
   prompt += '- Buffered files arrive AFTER (below) your text response; do not announce them.\n';
-  prompt += '- Use bug_report if a tool fails or there is a system issue worth reporting to the admin.\n';
+  prompt += '- Use bug_report if a tool fails or there is a system issue worth reporting to the admin. After that you MUST also tell the user in your final reply that you encountered a problem and notified the admin.\n';
   if (!isActiveMember) {
     prompt += '- Some tools (email, messages to others) are NOT available for this user.\n';
   }

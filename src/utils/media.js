@@ -1,5 +1,5 @@
 // src/utils/media.js
-const { SUPPORTED_MEDIA, MAX_DOC_PAGES } = require('../config/constants');
+const { SUPPORTED_MEDIA } = require('../config/constants');
 const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
@@ -15,63 +15,6 @@ const log = createLogger('Media');
  */
 function isSupportedMedia(type) {
   return SUPPORTED_MEDIA.includes(type);
-}
-
-/**
- * Extract text transcription from a PDF document content part (base64).
- * Used to convert binary PDFs to text before sending to AI provider.
- * @param {object} contentPart - Content part with type='image_url' containing PDF base64
- * @returns {Promise<{success: boolean, text?: string, error?: string}>} Transcription result
- */
-async function transcribePdfBuffer(buffer) {
-  try {
-    const info = await extractTextFromPdfBuffer(buffer);
-
-    if (!info || !info.success || !info.text) {
-      return { success: false, error: info?.error || 'OpenDataLoader returned invalid text' };
-    }
-
-    if (info.pages > MAX_DOC_PAGES) {
-      return {
-        success: true,
-        text: `[Document too long to process: ${info.pages} pages (max ${MAX_DOC_PAGES})]`,
-      };
-    }
-
-    return {
-      success: true,
-      text: info.text,
-    };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-}
-
-async function transcribeDocumentFromContentPart(contentPart) {
-  try {
-    if (!contentPart || !contentPart.image_url || !contentPart.image_url.url) {
-      return { success: false, error: 'Invalid content part structure' };
-    }
-
-    const dataUrl = contentPart.image_url.url;
-    const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-    if (!match) {
-      return { success: false, error: 'Invalid base64 data URI format' };
-    }
-
-    const mimetype = match[1].toLowerCase();
-    const base64Data = match[2];
-
-    // Only transcribe PDFs for now
-    if (mimetype !== 'application/pdf') {
-      return { success: false, error: `Unsupported document type: ${mimetype}` };
-    }
-
-    const buffer = Buffer.from(base64Data, 'base64');
-    return transcribePdfBuffer(buffer);
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
 }
 
 function _replaceAttachmentPathInText(text, oldPath, newPath) {
@@ -147,11 +90,12 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
     await fs.mkdir(outputDir, { recursive: true });
     await fs.mkdir(imageDir, { recursive: true });
 
+    let convert;
     try {
       const mod = await import('@opendataloader/pdf');
       convert = mod.convert;
     } catch (err) {
-      log.error(`@opendataloader/pdf not found. Make sure it is installed: ${err.message}`);
+      log.error(`❌ PDF parser dependency missing (@opendataloader/pdf): ${err.message}`);
       return { success: false, error: 'PDF transcription service is currently unavailable (missing dependency).' };
     }
 
@@ -205,6 +149,7 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
     }
 
     if (!text) {
+      log.error('❌ PDF parser returned no text (markdown empty, JSON empty)');
       return { success: false, error: 'OpenDataLoader returned no text' };
     }
 
@@ -230,7 +175,9 @@ async function extractTextFromPdfBuffer(buffer, opts = {}) {
       assetsDir: hasAssets ? imageDir : undefined,
     };
   } catch (err) {
-    return { success: false, error: err?.message || String(err) };
+    const msg = err?.message || String(err);
+    log.error(`❌ PDF parsing failed: ${msg}`);
+    return { success: false, error: msg };
   } finally {
     // Only clean up the temp workDir; if persistDir was used, the assets
     // directory lives outside workDir and must NOT be deleted.
@@ -280,11 +227,17 @@ function mediaTag(filename, mimetype) {
 }
 
 /**
- * Transcribe all documents in a message content array.
- * Replaces PDF content parts with text transcriptions.
- * Used to ensure documents are always transcribed before sending to AI.
- * **IMPORTANT**: If transcription fails, removes the PDF entirely and replaces with error text.
- * PDFs are NEVER sent to the AI provider - either as text or not at all.
+ * Pre-API-call hook: every PDF that is part of the round content (incoming
+ * attachment, reply to a recent PDF, or any other source that sets a PDF
+ * content part) is parsed in place into the canonical parsed-PDF folder
+ * (history zone — meta pointers are updated so future history reads keep
+ * working). The base64 PDF is then **replaced** with the resulting markdown
+ * transcription so the AI never sees raw PDF bytes.
+ *
+ * Single parse, no fallback re-parsing: if `persistParsedPdfToHistory`
+ * fails, an explicit error message is injected for the AI (it must call
+ * `bug_report` and stop, NOT retry parsing in agentic mode).
+ *
  * @param {Array|string} content - Message content (can be string or array of parts)
  * @returns {Promise<Array|string>} Transcribed content
  */
@@ -306,53 +259,56 @@ async function transcribeDocumentsInMessageContent(content) {
       continue;
     }
 
-    // Check if this is a document content part
-    if (_getMediaTypeFromContentPart(part) === 'document') {
-      let result = null;
-      const historyPath = typeof part._historyPath === 'string' ? part._historyPath.trim() : null;
-      const historyUserId = typeof part._historyUserId === 'string' ? part._historyUserId.trim() : null;
-
-      if (historyPath && historyUserId) {
-        try {
-          const dataUrl = part.image_url?.url || '';
-          const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-          if (match && match[1].toLowerCase() === 'application/pdf') {
-            const buffer = Buffer.from(match[2], 'base64');
-            const { persistParsedPdfToHistory } = require('./historySync');
-            const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
-            if (persisted.success && typeof persisted.text === 'string') {
-              result = { success: true, text: persisted.text };
-              if (persisted.historyPath && persisted.historyPath !== historyPath) {
-                attachmentPathReplacements.set(historyPath, persisted.historyPath);
-              }
-            }
-          }
-        } catch { }
-      }
-
-      if (!result) {
-        result = await transcribeDocumentFromContentPart(part);
-      }
-
-      if (result.success && result.text) {
-        // Replace document with text containing transcription
-        transcribed.push({
-          type: 'text',
-          text: `<Transcription>\n${result.text}\n</Transcription>`,
-        });
-      } else {
-        // If transcription fails, DO NOT keep the PDF (it causes "image format illegal" errors).
-        // Replace with error message instead.
-        const errorMsg = result.error || 'Unknown error in document transcription';
-        transcribed.push({
-          type: 'text',
-          text: `Document not transcribed (${errorMsg}). The file cannot be processed by the AI model.`,
-        });
-      }
-    } else {
-      // Keep non-document parts as-is
+    if (_getMediaTypeFromContentPart(part) !== 'document') {
       transcribed.push(part);
+      continue;
     }
+
+    const dataUrl = part.image_url?.url || '';
+    const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+    if (!match || match[1].toLowerCase() !== 'application/pdf') {
+      transcribed.push({
+        type: 'text',
+        text: `[PDF parsing skipped: unsupported document type "${match ? match[1] : 'unknown'}"]. Inform the user and call bug_report.`,
+      });
+      continue;
+    }
+
+    const historyPath = typeof part._historyPath === 'string' ? part._historyPath.trim() : null;
+    const historyUserId = typeof part._historyUserId === 'string' ? part._historyUserId.trim() : null;
+
+    if (!historyPath || !historyUserId) {
+      // Defensive: every PDF reaching this point should originate from a
+      // platform handler that always tags content parts with these fields.
+      log.error(`❌ PDF content part missing history metadata — refusing to parse.`);
+      transcribed.push({
+        type: 'text',
+        text: `[PDF parsing skipped: internal error — missing history metadata]. STOP. Do NOT retry in agentic mode. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later.`,
+      });
+      continue;
+    }
+
+    const buffer = Buffer.from(match[2], 'base64');
+    const { persistParsedPdfToHistory } = require('./historySync');
+    const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
+
+    if (persisted.success && typeof persisted.text === 'string' && persisted.text.trim()) {
+      transcribed.push({
+        type: 'text',
+        text: `<Transcription>\n${persisted.text}\n</Transcription>`,
+      });
+      if (persisted.historyPath && persisted.historyPath !== historyPath) {
+        attachmentPathReplacements.set(historyPath, persisted.historyPath);
+      }
+      continue;
+    }
+
+    const errorMsg = persisted.error || 'Unknown PDF parsing error';
+    log.error(`❌ PDF round-pre-call parsing failed for ${historyPath}: ${errorMsg}`);
+    transcribed.push({
+      type: 'text',
+      text: `[PDF parsing failed: ${errorMsg}]. STOP. Do NOT enter agentic mode to retry parsing yourself. Use bug_report (source="pdf-parser", details=brief) to notify the admin, then tell the user there is a system error and to retry later.`,
+    });
   }
 
   if (attachmentPathReplacements.size > 0) {
@@ -409,8 +365,6 @@ module.exports = {
   mediaToContentPart,
   mediaTag,
   extractTextFromPdfBuffer,
-  transcribePdfBuffer,
-  transcribeDocumentFromContentPart,
   transcribeDocumentsInMessageContent,
   buildAttachmentTag,
   extractAttachmentTagPaths,
