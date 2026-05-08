@@ -35,11 +35,12 @@ const _MIME_TO_EXT = {
   'text/plain': '.txt', 'text/markdown': '.md', 'text/html': '.html', 'text/csv': '.csv', 'application/json': '.json',
 };
 
-function _resolveWaFilename(givenName, mediaType, mimetype) {
+function _resolveWaFilename(givenName, mediaType, mimetype, msgId = null) {
   if (givenName && path.extname(givenName)) return givenName;
   const baseMime = (mimetype || '').split(';')[0].trim().toLowerCase();
   const ext = _MIME_TO_EXT[baseMime] || '';
-  const base = givenName || mediaType || 'file';
+  // Use unique ID-based name instead of caption to avoid message text as filename
+  const base = givenName || (msgId ? `attachment_${msgId}` : mediaType || 'file');
   return ext ? `${base}${ext}` : base;
 }
 
@@ -146,7 +147,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
     if (msg.hasMedia) {
       const mediaType = msg.type;
-      const filename = _resolveWaFilename(msg._data?.filename || msg._data?.caption, msg.type, msg._data?.mimetype);
+      const filename = _resolveWaFilename(msg._data?.filename, msg.type, msg._data?.mimetype, msg.id.id);
       const duration = Number(msg.duration || msg._data?.duration || 0);
       const isAudioType = mediaType === 'audio' || mediaType === 'ptt';
 
@@ -222,7 +223,7 @@ async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds
     const mediaParts = [];
 
     if (quoted.hasMedia) {
-      const filename = _resolveWaFilename(quoted._data?.filename || quoted._data?.caption, quoted.type, quoted._data?.mimetype);
+      const filename = _resolveWaFilename(quoted._data?.filename, quoted.type, quoted._data?.mimetype, quoted.id.id);
       const mediaType = quoted.type;
       const isAudio = mediaType === 'audio' || mediaType === 'ptt';
       const duration = Number(quoted.duration || quoted._data?.duration || 0);
@@ -413,7 +414,7 @@ async function processCurrentMedia(msg, userId) {
     if (media) {
       buffer = Buffer.from(media.data, 'base64');
       mimetype = media.mimetype;
-      filename = _resolveWaFilename(filename, msg.type, mimetype);
+      filename = _resolveWaFilename(filename, msg.type, mimetype, msg.id.id);
     }
   } catch { }
 
