@@ -22,7 +22,7 @@ The sandbox already includes **ffmpeg**, **ffprobe**, `pydub`, `librosa`, `movie
 
 | Script | Purpose | Use when |
 | :--- | :--- | :--- |
-| `av_inspect.py` | Structured inspection via ffprobe; optional silence/black-frame detection and thumbnails | ✅ **Always run first** on existing media unless user asks a trivial conversion |
+| `av_inspect.py` | Structured inspection via ffprobe; optional silence/black-frame detection and thumbnails | ✅ **Run first** for complex edits; optional for simple trim from start/end |
 | `av_trim.py` | Trim ranges, remove segments, concatenate files after normalization | Cutting intros/outros, ads, mistakes, joining clips |
 | `av_audio.py` | Extract audio, normalize loudness, fades, mix voice over background music | Podcast/social audio cleanup and replacement tracks |
 | `av_video.py` | Resize, crop, rotate, speed change, watermark, thumbnails | Visual transforms and preview frames |
@@ -32,7 +32,8 @@ The sandbox already includes **ffmpeg**, **ffprobe**, `pydub`, `librosa`, `movie
 ### Execution Strategy
 
 - **Reading existing file**: `av_inspect.py` in `execution_phase: "before_all"` so the JSON report lands before edit logic. Then run edits in Phase 3.
-- **Simple trim/crop/resize**: inspect (Phase 1) + edit script (Phase 3) + `av_qa.py` (Phase 3 after the edit) in the same round when parameters are already clear.
+- **Simple trim from start/end**: use `av_trim.py trim` with `--start` and/or `--end` (negative offset for end) directly without inspection. Then run `av_qa.py`.
+- **Complex edits (crop/resize/precise trim)**: inspect (Phase 1) + edit script (Phase 3) + `av_qa.py` (Phase 3 after the edit) in the same round when parameters are already clear.
 - **JSON-driven composition**: `write_file` the slideshow spec in Phase 2 + `av_compose.py slideshow` + `av_qa.py` in Phase 3.
 - **Preview thumbnails**: generate thumbnails with `av_inspect.py --thumbnails` or `av_video.py thumbnails`; read the generated JPGs in the **next** round only if visual review is genuinely needed.
 - **Conversion-only**: use the relevant script or direct `ffmpeg` only for trivial remux/transcode; still run `av_qa.py` for final deliverables.
@@ -109,7 +110,7 @@ python /readonly/skills/audio_video/scripts/av_inspect.py \
 ### Exact trim
 
 ```bash
-# Phase 3 (after_all) — after av_inspect.py if source details matter
+# Phase 3 (after_all) — inspect first for precise timing, or skip for simple start/end cuts
 python /readonly/skills/audio_video/scripts/av_trim.py trim \
   --input /readonly/history/source.mp4 \
   --start 00:00:03.500 \
@@ -120,7 +121,17 @@ python /readonly/skills/audio_video/scripts/av_trim.py trim \
 #                 --timeout 120
 ```
 
-**To remove the last N seconds**: First run `av_inspect.py` to get total duration, then calculate `duration - N` and use it as `--end`. Example: if total duration is 42.3s and you want to remove the last 5s, use `--end 00:00:37.3` (42.3 - 5 = 37.3).
+**Trim from start or end without inspection:**
+```bash
+# Remove first 3 seconds and last 5 seconds (no inspection needed)
+python /readonly/skills/audio_video/scripts/av_trim.py trim \
+  --input /readonly/history/source.mp4 \
+  --start 00:00:03 \
+  --end -00:00:05 \
+  --output /workspace/output/final_video.mp4
+# --end with negative offset removes N seconds from the end
+# Error if video is too short for both cuts
+```
 
 ### Remove multiple bad segments
 

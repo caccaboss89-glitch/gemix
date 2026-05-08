@@ -24,6 +24,18 @@ def trim(args: argparse.Namespace) -> str:
     start = parse_time(args.start) if args.start else None
     end = parse_time(args.end) if args.end else None
     duration = parse_time(args.duration) if args.duration else None
+
+    # Support negative offset for end (e.g., --end -00:00:05 means "remove last 5 seconds")
+    if end is not None and args.end and args.end.startswith("-"):
+        total_duration = media_duration(src)
+        if total_duration <= 0:
+            raise ValueError("Cannot determine video duration for negative offset")
+        end = total_duration + end  # end is negative, so this subtracts from total
+        if end <= 0:
+            raise ValueError(f"Video duration ({total_duration}s) is too short to remove {-end}s from end")
+        if start is not None and start >= end:
+            raise ValueError(f"Start time ({start}s) is at or after calculated end time ({end}s)")
+
     if end is not None and start is not None:
         duration = max(0.0, end - start)
     if start is not None:
