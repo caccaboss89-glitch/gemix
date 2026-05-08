@@ -120,6 +120,8 @@ python /readonly/skills/audio_video/scripts/av_trim.py trim \
 #                 --timeout 120
 ```
 
+**To remove the last N seconds**: First run `av_inspect.py` to get total duration, then calculate `duration - N` and use it as `--end`. Example: if total duration is 42.3s and you want to remove the last 5s, use `--end 00:00:37.3` (42.3 - 5 = 37.3).
+
 ### Remove multiple bad segments
 
 ```bash
