@@ -71,10 +71,9 @@ def _thumbnails(path: Path, output_dir: Path, count: int, timeout: int) -> List[
 
 def inspect(args: argparse.Namespace) -> Dict[str, Any]:
     path = input_path(args.input)
-    if path.suffix.lower() not in MEDIA_EXTS:
-        raise ValueError(f"Unsupported media file: {path.suffix}. Allowed: {', '.join(sorted(MEDIA_EXTS))}")
     report = stream_summary(path)
-    report["extension_kind"] = "video" if path.suffix.lower() in VIDEO_EXTS else "audio"
+    # Determine kind from actual streams, not extension (files may have no extension)
+    report["extension_kind"] = "video" if report["video"] else "audio"
     report["warnings"] = []
     if not report["video"] and path.suffix.lower() in VIDEO_EXTS:
         report["warnings"].append("Container extension suggests video, but no video stream was found")

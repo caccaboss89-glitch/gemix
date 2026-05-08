@@ -42,17 +42,20 @@ def _detect_black(path: Path, threshold: float, duration: float, timeout: int) -
     ], timeout=timeout)
     events: List[Dict[str, Any]] = []
     for line in proc.stderr.splitlines():
-        if "black_start:" not in line:
-            continue
-        item: Dict[str, Any] = {}
-        for key in ("black_start", "black_end", "black_duration"):
-            if key + ":" in line:
-                try:
-                    item[key.replace("black_", "")] = float(line.split(key + ":", 1)[1].split()[0])
-                except Exception:
-                    pass
-        if item:
-            events.append(item)
+        if "black_start:" in line:
+            try:
+                import re
+                start_match = re.search(r"black_start:\s*([\d.]+)", line)
+                end_match = re.search(r"black_end:\s*([\d.]+)", line)
+                dur_match = re.search(r"black_duration:\s*([\d.]+)", line)
+                if start_match and end_match and dur_match:
+                    events.append({
+                        "start": float(start_match.group(1)),
+                        "end": float(end_match.group(1)),
+                        "duration": float(dur_match.group(1))
+                    })
+            except Exception:
+                pass
     return events
 
 
