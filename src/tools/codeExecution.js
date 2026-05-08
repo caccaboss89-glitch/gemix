@@ -154,7 +154,7 @@ async function codeExecutionTool(args, userCtx, responseCtx) {
     code: WRITE_GUARD_PREAMBLE + code,
     toolLabel: 'code_execution',
     timeoutMs: args.timeout_ms,
-    crashPayload: { code_preview: String(code).slice(0, 400) },
+    crashPayload: { code_preview: String(code).slice(0, 5000) },
     autoAttach: true,
     requireProject: false,
   });

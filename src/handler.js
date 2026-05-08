@@ -291,10 +291,10 @@ async function handleMessage(ctx) {
       ];
       if (crashRecovery.project) lines.push(`Project: ${_sanitize(crashRecovery.project)}`);
       if (crashRecovery.code_preview) {
-        lines.push(`Code preview: ${_sanitize(String(crashRecovery.code_preview).slice(0, 300)).replace(/\n/g, ' ⏎ ')}`);
+        lines.push(`Code preview: ${_sanitize(String(crashRecovery.code_preview).slice(0, 1000)).replace(/\n/g, ' ⏎ ')}`);
       }
       if (crashRecovery.command_preview) {
-        lines.push(`Command preview: ${_sanitize(String(crashRecovery.command_preview).slice(0, 300))}`);
+        lines.push(`Command preview: ${_sanitize(String(crashRecovery.command_preview).slice(0, 1000))}`);
       }
       lines.push('Before doing anything else, briefly check the project state (read_file / list new files in output/) and then resume the user request.');
       ctx.crashRecovery = lines.join('\n');
@@ -401,9 +401,9 @@ async function handleMessage(ctx) {
         let argsPreview = '';
         try {
           const parsed = JSON.parse(tc.function.arguments || '{}');
-          argsPreview = JSON.stringify(parsed).slice(0, 200);
+          argsPreview = JSON.stringify(parsed).slice(0, 1000);
         } catch {
-          argsPreview = String(tc.function.arguments || '').slice(0, 200);
+          argsPreview = String(tc.function.arguments || '').slice(0, 1000);
         }
         log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
         const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
@@ -411,7 +411,7 @@ async function handleMessage(ctx) {
         if (Array.isArray(result)) {
           resultPreview = `multimodal[${result.length}] parts=${result.map(p => p.type).join(',')}`;
         } else if (typeof result === 'string') {
-          resultPreview = `text(${result.length}) ${result.slice(0, 200).replace(/\s+/g, ' ')}`;
+          resultPreview = `text(${result.length}) ${result.slice(0, 1000).replace(/\s+/g, ' ')}`;
         } else {
           resultPreview = typeof result;
         }

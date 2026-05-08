@@ -331,7 +331,7 @@ async function bashTool(args, userCtx, responseCtx) {
       code: bgCode,
       toolLabel: 'bash_bg',
       timeoutMs: 10_000,
-      crashPayload: { command_preview: command.slice(0, 300), background: true },
+      crashPayload: { command_preview: command.slice(0, 1000), background: true },
       autoAttach: false,
       requireProject: true,
     });
@@ -384,7 +384,7 @@ async function bashTool(args, userCtx, responseCtx) {
     code,
     toolLabel: 'bash',
     timeoutMs,
-    crashPayload: { command_preview: command.slice(0, 300) },
+    crashPayload: { command_preview: command.slice(0, 1000) },
     autoAttach: true,
     requireProject: false,
   });
