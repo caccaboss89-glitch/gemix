@@ -598,6 +598,47 @@ async function handleMessage(ctx) {
         }
       }
 
+      // Filter image attachments based on [image:N] tags in final message
+      // AI can selectively send images by including tags like [image:1] [image:3]
+      // If no tags are present, NO images are sent to the user
+      // Tags are removed from the final text before sending to user
+      if (responseCtx.attachments && responseCtx.attachments.length > 0) {
+        const imageTagPattern = /\[image:(\d+)\]/g;
+        const matches = [...text.matchAll(imageTagPattern)];
+
+        if (matches.length > 0) {
+          // Extract requested image IDs
+          const requestedIds = new Set(matches.map(m => parseInt(m[1], 10)));
+
+          // Filter attachments to only include those with requested _imageSearchId
+          const before = responseCtx.attachments.length;
+          responseCtx.attachments = responseCtx.attachments.filter(
+            att => !att._imageSearchId || requestedIds.has(att._imageSearchId)
+          );
+          const after = responseCtx.attachments.length;
+
+          if (before !== after) {
+            log.info(`   🖼️  Image selection: ${after}/${before} images selected based on [image:N] tags`);
+          }
+
+          // Remove [image:N] tags from final text
+          text = text.replace(imageTagPattern, '');
+          // Clean up extra whitespace left after tag removal
+          text = text.replace(/\s+/g, ' ').trim();
+        } else {
+          // No tags found: remove all image_search attachments (but keep non-image attachments)
+          const before = responseCtx.attachments.length;
+          responseCtx.attachments = responseCtx.attachments.filter(
+            att => !att._imageSearchId
+          );
+          const after = responseCtx.attachments.length;
+
+          if (before !== after) {
+            log.info(`   🖼️  No [image:N] tags found: ${before - after} image(s) not sent to user`);
+          }
+        }
+      }
+
       if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
         log.warn('   ⚠️ Empty AI response, sending fallback');
         text = FALLBACK_ERROR_PREFIX;

@@ -186,17 +186,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
 
       case 'image_search': {
-        // Handle discards first — remove previously buffered images by their global ID
-        if (Array.isArray(args.discard) && args.discard.length > 0) {
-          const discardSet = new Set(args.discard);
-          const before = responseCtx.attachments.length;
-          responseCtx.attachments = responseCtx.attachments.filter(
-            a => !a._imageSearchId || !discardSet.has(a._imageSearchId)
-          );
-          const removed = before - responseCtx.attachments.length;
-          if (removed > 0) log.info(`   🗑️ Discarded ${removed} image(s): [${[...discardSet].join(', ')}]`);
-        }
-
         const imageResult = await imageSearch(
           args.query,
           args.count,
@@ -209,10 +198,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
         // Tag each attachment with a global ID and accumulate into delivery buffer
         // CRITICAL: Reserve IDs atomically using reserveImageIds to prevent race conditions in parallel calls.
-        const startId = typeof responseCtx.reserveImageIds === 'function' 
+        const startId = typeof responseCtx.reserveImageIds === 'function'
           ? responseCtx.reserveImageIds(imageResult.attachments.length)
           : (responseCtx._imageSearchNextId || 1);
-        
+
         const savedPaths = [];
         const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
         const wantSave = Boolean(args.save_to_disk) && isWhatsApp && resolveStorageId(userCtx);
@@ -238,8 +227,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           for (let i = 0; i < imageResult.attachments.length; i++) {
             const att = imageResult.attachments[i];
             att._imageSearchId = startId + i;
-            let wasSaved = false;
-            // Persist to searched_images/ when requested
+            // Persist to searched_images/ when requested (in addition to buffering for delivery)
             if (savedDir && att.buffer) {
               try {
                 if (!fs.existsSync(savedDir)) fs.mkdirSync(savedDir, { recursive: true });
@@ -254,15 +242,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
                 }
                 fs.writeFileSync(dest, att.buffer);
                 savedPaths.push(`searched_images/${path.basename(dest)}`);
-                wasSaved = true;
               } catch (err) {
                 log.warn(`save_to_disk: failed to write ${att.name}: ${err.message}`);
               }
             }
-            // Only push to attachments (to be sent to user) if not saved to disk
-            if (!wasSaved) {
-              responseCtx.attachments.push(att);
-            }
+            // Always push to attachments buffer for potential delivery
+            // AI can selectively send using [image:N] tags in final message
+            responseCtx.attachments.push(att);
           }
         }
 

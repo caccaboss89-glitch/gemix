@@ -7,17 +7,17 @@ and the outside world — the sandbox itself runs with no default route.
 
 Protocol support:
 - HTTP CONNECT  (HTTPS tunneling) — by far the common case (requests, httpx,
-  polygon-api-client, astropy data downloads all use HTTPS).
+  astropy data downloads all use HTTPS).
 - Plain HTTP GET/POST              — forwarded verbatim when host matches.
 
 Allowlist rules:
 - Matched against the request host (for CONNECT) or the Host header / URL
   (for plain HTTP).
 - Match semantics: exact domain OR suffix match with a leading dot.
-  Example: ".polygon.io" matches "api.polygon.io" and "files.polygon.io",
-  but "api.polygon.io" only matches exactly.
+  Example: ".stsci.edu" matches "archive.stsci.edu" and "mast.stsci.edu",
+  but "archive.stsci.edu" only matches exactly.
 - Configured via env var ALLOWED_HOSTS (comma-separated). Defaults cover
-  polygon + common astropy/astroquery backends.
+  common astropy/astroquery backends.
 
 Operational:
 - Listens on 0.0.0.0:${PROXY_PORT:-8080} (only reachable from the internal
@@ -44,8 +44,6 @@ from urllib.parse import urlparse
 # ── Configuration ───────────────────────────────────────────────────────────
 
 DEFAULT_ALLOWED = [
-    # Polygon
-    ".polygon.io",
     # Astropy / astroquery common data servers
     "data.astropy.org",
     ".stsci.edu",  # archive.stsci.edu, mast.stsci.edu, ...

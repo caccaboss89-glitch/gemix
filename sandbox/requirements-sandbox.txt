@@ -2,9 +2,9 @@
 # Install with: pip install -r requirements-sandbox.txt
 #
 # NOTE: the sandbox has NO free internet access. Only controlled backend APIs
-# (polygon-api-client for finance, astropy data servers for astronomy) are
-# reachable through the proxy. Every other network call will fail — use the
-# AI's dedicated web_search / browse_page / read_url_content tools instead.
+# (astropy data servers for astronomy) are reachable through the proxy. Every
+# other network call will fail — use the AI's dedicated web_search / browse_page
+# / read_url_content tools instead.
 
 # ── Kernel runtime (required) ──
 jupyter_server==2.14.2
@@ -42,9 +42,6 @@ imageio-ffmpeg==0.5.1      # bundled ffmpeg locator used by moviepy
 # ── Physics & astronomy ──
 astropy==6.1.5
 qutip==5.0.4
-
-# ── Finance ──
-polygon-api-client==1.14.5
 
 # ── Document creation ──
 python-docx==1.1.2

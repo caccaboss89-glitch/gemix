@@ -327,7 +327,7 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   const metaText = `<ImageSearchResults query="${q}" count="${prepared.length}">
 ${imageXml}
 </ImageSearchResults>
-Review the previews below. Use 'discard' with IDs to remove unwanted results from the buffer.`;
+Review the previews below. In your final message, include [image:N] tags (e.g., [image:1] [image:3]) to selectively send only those images to the user. If you omit tags, NO images are sent to the user (but they are saved to disk if save_to_disk=true).`;
 
   contentParts.push({ type: 'text', text: metaText });
 

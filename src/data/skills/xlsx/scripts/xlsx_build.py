@@ -66,10 +66,10 @@ SEMANTIC_FONT_COLOR = {
     "assumption": "000000",
 }
 SEMANTIC_FILL = {
-    "assumption": "FFFF00",
+    "assumption": "FFF9C4",
 }
 
-HEADER_FILL = "D9D9D9"
+HEADER_FILL = "E0E0E0"
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$")
 

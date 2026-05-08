@@ -55,23 +55,18 @@ function buildImageSearchTool(agenticUnlocked = false) {
       enum: ['any', 'photo', 'gif', 'clipart', 'lineart'],
       description: 'Filter by type (default "any").',
     },
-    discard: {
-      type: 'array',
-      items: { type: 'integer' },
-      description: 'Image IDs to remove from buffer (from previous search results).',
-    },
   };
 
   if (agenticUnlocked) {
     properties.save_to_disk = {
       type: 'boolean',
-      description: 'If true, save the downloaded image(s) to searched_images/ (USE this if you need them with agentic tools, e.g. image editing, include in documents, etc.). Default false.',
+      description: 'If true, ALL images are saved to searched_images/ regardless of your final selection. Default false.',
     };
   }
 
   return makeTool({
     name: 'image_search',
-    description: 'Search for images and inspect the returned previews. Results are buffered for delivery; use discard to remove unwanted ones. Call multiple times to refine.',
+    description: 'Search for images and inspect the returned previews. Results are buffered with sequential IDs (1, 2, 3...). In your final message, include [image:N] tags (e.g., "Here are the images: [image:1] [image:3]") to selectively send only those images to the user. If you omit tags, NO images are sent to the user. Call multiple times to refine results.',
     properties,
     required: ['query'],
   });
@@ -89,7 +84,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'MUST be called BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, cloud storage, project management, advance computations, yt-dlp downloads, OCR, charts, data work, finance... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
+  description: 'MUST be called BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, cloud storage, project management, advance computations, yt-dlp downloads, OCR, charts, data work... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
   properties: {},
 });
 

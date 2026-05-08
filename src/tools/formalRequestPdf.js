@@ -63,7 +63,7 @@ function renderMotivation(doc, content) {
       doc.moveDown(0.3);
       const x = doc.x;
       const y = doc.y;
-      doc.moveTo(x, y).lineTo(doc.page.width - doc.page.margins.right, y).lineWidth(0.5).strokeColor('#999999').stroke();
+      doc.moveTo(x, y).lineTo(doc.page.width - doc.page.margins.right, y).lineWidth(0.5).strokeColor('#666666').stroke();
       doc.moveDown(0.3);
       doc.strokeColor('#000000').lineWidth(1);
     } else if (/^\s*[-*]\s/.test(cleanLine)) {
@@ -115,7 +115,7 @@ function generateFormalRequestPdf({ fullName, title, motivation, requesterSignat
     // ── Intestazione ──
     doc.fontSize(22).font('Helvetica-Bold').text('RICHIESTA FORMALE', { align: 'center' });
     doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica').fillColor('#666666')
+    doc.fontSize(10).font('Helvetica').fillColor('#333333')
       .text('ai sensi dell\'Art. 6 dello Statuto Albertino', { align: 'center' });
     doc.fillColor('#000000');
     doc.moveDown(0.5);
@@ -124,7 +124,7 @@ function generateFormalRequestPdf({ fullName, title, motivation, requesterSignat
     const lx = doc.x;
     doc.moveTo(lx, doc.y)
       .lineTo(doc.page.width - doc.page.margins.right, doc.y)
-      .lineWidth(1).strokeColor('#333333').stroke();
+      .lineWidth(1).strokeColor('#000000').stroke();
     doc.strokeColor('#000000').lineWidth(1);
     doc.moveDown(0.5);
 
@@ -156,9 +156,9 @@ function generateFormalRequestPdf({ fullName, title, motivation, requesterSignat
     doc.moveDown(2);
     doc.moveTo(lx, doc.y)
       .lineTo(doc.page.width - doc.page.margins.right, doc.y)
-      .lineWidth(0.5).strokeColor('#999999').stroke();
+      .lineWidth(0.5).strokeColor('#666666').stroke();
     doc.moveDown(0.5);
-    doc.fontSize(8).fillColor('#999999')
+    doc.fontSize(8).fillColor('#666666')
       .text(`Documento generato da GemiX — Divisione Legale — ${getRomeTime()}`, { align: 'center' });
 
     doc.end();
