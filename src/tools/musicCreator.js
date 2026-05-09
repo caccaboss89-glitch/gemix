@@ -20,7 +20,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   let textChunks = [];
 
   try {
-    log.info(`🎵 Lyria streaming call → ${model} (format: wav)`);
+    log.info(`🎵 Lyria streaming call → ${model}`);
 
     const res = await fetch(apiUrl, {
       method: 'POST',
@@ -60,32 +60,11 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
 
           const delta = data.choices?.[0]?.delta || {};
 
-          // === DIAGNOSTIC LOG (only first 3 chunks to avoid spam) ===
-          if (rawChunks.length <= 3) {
-            log.info(`🔍 Chunk #${rawChunks.length} keys:`, Object.keys(data));
-            log.info(`🔍 Delta keys:`, Object.keys(delta));
-            if (delta.content) log.info(`🔍 Content preview:`, delta.content.substring(0, 150));
-          }
-
-          // Standard OpenRouter audio parsing
           if (delta.audio?.data) {
             audioChunks.push(delta.audio.data);
-            log.info('✅ Found delta.audio.data');
           }
-          if (delta.audio?.transcript) textChunks.push(delta.audio.transcript);
-
-          // Fallback lyrics
-          if (delta.content) {
-            textChunks.push(delta.content);
-          }
-
-          // Fallback base64 hidden in content (possible with Google models)
-          if (typeof delta.content === 'string') {
-            const b64Match = delta.content.match(/([A-Za-z0-9+/=]{200,})/);
-            if (b64Match) {
-              audioChunks.push(b64Match[1]);
-              log.info('✅ Found possible base64 in content!');
-            }
+          if (delta.audio?.transcript || delta.content) {
+            textChunks.push(delta.audio?.transcript || delta.content);
           }
 
         } catch (e) {}
@@ -93,13 +72,13 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
     }
 
     const fullAudioBase64 = audioChunks.join('');
-    const fullTranscript = textChunks.join('').trim();
+    const fullLyrics = textChunks.join('').trim();
 
-    log.info(`📊 Stream finished → Audio chunks: ${audioChunks.length} | Base64 length: ${fullAudioBase64.length}`);
+    log.info(`📊 Stream finished → Audio chunks: ${audioChunks.length} | Lyrics length: ${fullLyrics.length}`);
 
     return {
       audio: { data: fullAudioBase64 },
-      content: fullTranscript || 'Lyrics not available'
+      lyrics: fullLyrics || 'Lyrics not available'
     };
 
   } finally {
@@ -117,6 +96,7 @@ async function musicCreator(prompt, userCtx) {
   const member = findMemberByWa(userId);
   const userIsAdmin = isAdmin(member);
 
+  // Daily Limit
   if (!userIsAdmin) {
     const today = getRomeISO().split('T')[0];
     const userKey = `${userId}_${today}`;
@@ -126,13 +106,13 @@ async function musicCreator(prompt, userCtx) {
       return { toolResult: { success: false, error: 'Daily limit reached. You can generate 1 song per day. Try again tomorrow!' }, attachments: [] };
     }
     if (pendingGenerations.has(userId)) {
-      return { toolResult: { success: false, error: 'A music generation is already in progress. Please wait for it to finish.' }, attachments: [] };
+      return { toolResult: { success: false, error: 'A music generation is already in progress...' }, attachments: [] };
     }
     pendingGenerations.add(userId);
   }
 
   try {
-    if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 5) {
+    if (!prompt || prompt.trim().length < 5) {
       throw new Error('Prompt missing or too short.');
     }
 
@@ -142,37 +122,44 @@ async function musicCreator(prompt, userCtx) {
 
     if (!apiKey) throw new Error('OPENROUTER_API_KEY is missing in environment.');
 
-    log.info(`🎵 Generating music for ${userId}: "${prompt.substring(0, 80)}..."`);
+    log.info(`🎵 Generating for ${userId}`);
 
     const body = {
       model,
-      messages: [{ role: 'user', content: prompt.trim() }],
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: prompt.trim() }]   // Array format as per OpenRouter docs
+        }
+      ],
       modalities: ['text', 'audio'],
-      audio: {
-        voice: 'alloy',
-        format: 'wav'          // changed to wav (official OpenRouter example)
-      }
+      audio: { voice: 'alloy', format: 'mp3' }
     };
 
-    const assistantMessage = await callLyriaStreaming(model, apiUrl, body, apiKey);
+    const result = await callLyriaStreaming(model, apiUrl, body, apiKey);
 
-    let audioBase64 = assistantMessage.audio?.data || '';
-    const lyrics = assistantMessage.content;
+    // === IF AUDIO EXISTS (Future-proofing) ===
+    if (result.audio.data && result.audio.data.length > 100) {
+      let audioBase64 = result.audio.data;
+      if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
 
-    // === FALLBACK IF NO AUDIO IS RECEIVED ===
-    if (!audioBase64 || audioBase64.length < 100) {
-      log.warn('⚠️ No audio received → returning only lyrics');
+      const buffer = Buffer.from(audioBase64, 'base64');
+      const filename = `song_${Date.now()}.mp3`;
+
+      if (!userIsAdmin) {
+        const today = getRomeISO().split('T')[0];
+        const userKey = `${userId}_${today}`;
+        await systemState.update('musicDailyUsage', (current) => ({ ...current, [userKey]: true }));
+      }
+
       return {
-        toolResult: {
-          success: true,
-          message: '🎵 Lyrics generated (audio temporarily unavailable):',
-          lyrics: lyrics
-        },
-        attachments: []
+        toolResult: { success: true, message: '🎵 Song generated successfully!', lyrics: result.lyrics },
+        attachments: [{ name: filename, buffer, mimetype: 'audio/mp3', sendAudioAsVoice: true }]
       };
     }
 
-    if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
+    // === CURRENT FALLBACK (lyrics only) ===
+    log.warn('⚠️ Audio not received → returning only lyrics');
 
     if (!userIsAdmin) {
       const today = getRomeISO().split('T')[0];
@@ -180,17 +167,13 @@ async function musicCreator(prompt, userCtx) {
       await systemState.update('musicDailyUsage', (current) => ({ ...current, [userKey]: true }));
     }
 
-    const buffer = Buffer.from(audioBase64, 'base64');
-    const filename = `song_${Date.now()}.mp3`;
-
     return {
-      toolResult: { success: true, message: '🎵 Music generated successfully!', lyrics },
-      attachments: [{
-        name: filename,
-        buffer,
-        mimetype: 'audio/mp3',
-        sendAudioAsVoice: true
-      }]
+      toolResult: {
+        success: true,
+        message: '🎵 Lyrics generated successfully!\n\n' + result.lyrics,
+        lyrics: result.lyrics
+      },
+      attachments: []
     };
 
   } catch (err) {
