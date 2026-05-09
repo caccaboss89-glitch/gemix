@@ -153,7 +153,11 @@ async function musicCreator(prompt, userCtx) {
     const body = {
       model,
       messages: [{ role: 'user', content: prompt.trim() }],
-      modalities: ['text', 'audio']
+      modalities: ['text', 'audio'],
+      audio: {
+        voice: 'alloy',
+        format: 'mp3'
+      }
     };
 
     const assistantMessage = await callLyriaStreaming(model, apiUrl, body, apiKey);
