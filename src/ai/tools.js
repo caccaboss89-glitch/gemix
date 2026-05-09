@@ -74,7 +74,7 @@ function buildImageSearchTool(agenticUnlocked = false) {
 
 const TOOL_ATTACH_FILE = makeTool({
   name: 'attach_file',
-  description: 'Buffer a file for delivery (NOT /workspace/output/ or chat history). Allowed: /readonly/{permanent|searched_images|skills}/<file> or /workspace/{temp|code}/<file>. To send buffered files to other recipients, use send_whatsapp_message / send_voice_message / send_email with includeAttachments=true.',
+  description: 'Buffer a file for delivery (NOT /workspace/output/ or chat history). Allowed: /readonly/{permanent|searched_images|skills}/<file> or /workspace/{temp|code}/<file>. To send ALL currently buffered files (images from search, PDFs, etc.) to other recipients, use delivery tools with includeAttachments=true. [image:N] tags are NOT supported for delivery tools.',
   properties: {
     path: { type: 'string', description: 'Unified path: "/readonly/permanent/file.txt" or "/workspace/code/main.py".' },
   },
@@ -275,7 +275,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Delivery tool — Send a voice message. Without a recipient, it replies to the current chat and ends the turn (ignoring further tool calls). With a recipient, it sends the message and allows you to continue the turn. Buffered files are always included in current-chat replies and optional for other recipients.',
+    description: 'Delivery tool — Send a voice message. Without a recipient, it replies to the current chat and ends the turn (ignoring further tool calls). With a recipient, it sends the message and allows you to continue the turn. Buffered files (e.g. from image_search) are included if includeAttachments=true (all or nothing, [image:N] tags not supported here).',
     properties,
     required: ['text'],
   });
@@ -312,7 +312,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — Send a WhatsApp message to another recipient. Use includeAttachments to send buffered files too.',
+    description: 'Delivery tool — Send a WhatsApp message to another recipient. Use includeAttachments to send ALL currently buffered files (images, PDFs, etc.). [image:N] tags are NOT supported here.',
     properties,
     required: isAdmin ? ['message'] : ['recipient', 'message'],
   });
@@ -350,7 +350,7 @@ function buildEmailTool(isAdmin) {
 
   return makeTool({
     name: 'send_email',
-    description: 'Delivery tool — Send an email. Use includeAttachments to send buffered files too.',
+    description: 'Delivery tool — Send an email. Use includeAttachments to send ALL currently buffered files (images, PDFs, etc.). [image:N] tags are NOT supported here.',
     properties,
     required: isAdmin ? ['subject', 'body'] : ['recipient', 'subject', 'body'],
   });

@@ -10,23 +10,34 @@ const { MessageMedia } = require('whatsapp-web.js');
 
 const log = createLogger('ReleaseMonitor');
 
-const STATE_FILE = path.join(DATA_DIR, 'releaseMonitor.json');
+const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
+
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 let lastCheckedReleaseId = null;
 let lastCheckTime = 0;
 
 function _loadState() {
-  try {
-    if (!fs.existsSync(STATE_FILE)) return;
-    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
-    if (raw.lastReleaseId) lastCheckedReleaseId = raw.lastReleaseId;
-  } catch { }
+  const state = getSystemState('releases');
+  if (state && state.lastReleaseId) {
+    lastCheckedReleaseId = state.lastReleaseId;
+    return;
+  }
+
+  // Migration: Try loading from old file if exists
+  const OLD_FILE = path.join(DATA_DIR, 'releaseMonitor.json');
+  if (fs.existsSync(OLD_FILE)) {
+    try {
+      const oldState = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
+      if (oldState.lastReleaseId) {
+        lastCheckedReleaseId = oldState.lastReleaseId;
+      }
+    } catch { }
+  }
 }
 
-function _saveState() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify({ lastReleaseId: lastCheckedReleaseId }, null, 2), 'utf-8');
+async function _saveState() {
+  await updateSystemState('releases', { lastReleaseId: lastCheckedReleaseId });
 }
 
 _loadState();
@@ -106,7 +117,7 @@ async function checkNewRelease(waClient) {
     // First run: just store the current release, don't notify
     if (lastCheckedReleaseId === null) {
       lastCheckedReleaseId = releaseId;
-      _saveState();
+      await _saveState();
       log.info(`📌 Initial release recorded: ${release.tag_name}`);
       return;
     }
@@ -115,7 +126,7 @@ async function checkNewRelease(waClient) {
 
     // New release detected
     lastCheckedReleaseId = releaseId;
-    _saveState();
+    await _saveState();
 
     const title = release.name || release.tag_name || 'Nuova release';
     const body = release.body || '';

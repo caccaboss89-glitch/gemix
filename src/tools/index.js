@@ -24,7 +24,7 @@ const { writeFileTool } = require('./writeFile');
 const { editFileTool } = require('./editFile');
 const { bashTool } = require('./bashTool');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
-const { sanitizeFilename } = require('../utils/text');
+const { sanitizeFilename, stripImageTags } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
@@ -303,7 +303,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
 
       case 'send_voice_message': {
-        let cleanText = removeDiscordEmoji(args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
+        let cleanText = stripImageTags(removeDiscordEmoji(args.text || '')).replace(/<a?:[\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
           .replace(/<Transcription>[\s\S]*?<\/Transcription>/gi, '')
           .replace(/\s{2,}/g, ' ')
@@ -461,8 +461,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             : [];
           await sendEmailDirect(
             targetEmail.email,
-            args.subject,
-            `<div style="font-family:sans-serif">${_escapeHtml(args.body || '').replace(/\n/g, '<br>')}</div>`,
+            stripImageTags(args.subject),
+            `<div style="font-family:sans-serif">${_escapeHtml(stripImageTags(args.body || '')).replace(/\n/g, '<br>')}</div>`,
             emailAttachments
           );
           deliveryCtx.contactedEmail.add(targetEmail.email);
@@ -492,7 +492,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           break;
         }
         try {
-          await sendWhatsAppDirect(targetJid.jid, args.message);
+          await sendWhatsAppDirect(targetJid.jid, stripImageTags(args.message));
           if (includeAttachments && responseCtx.attachments.length > 0) {
             for (const att of responseCtx.attachments) {
               const m = toWhatsAppMediaArgs(att);
@@ -546,7 +546,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       case 'toggle_release_notify': {
         const chatId = userCtx.chatId || userCtx.groupId || userCtx.waJid;
         const waJid = userCtx.isGroup ? userCtx.groupId : (userCtx.waJid || (userCtx.member ? userCtx.member.wa : null));
-        result = toggleReleaseNotify(Boolean(args.enabled), chatId, waJid);
+        result = await toggleReleaseNotify(Boolean(args.enabled), chatId, waJid);
         break;
       }
       case 'bug_report': {

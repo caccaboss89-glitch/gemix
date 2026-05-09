@@ -10,33 +10,39 @@ const log = createLogger('MusicWrap');
 
 const { MUSIC_WRAP_PASSWORD } = require('../config/env');
 
-const MONITOR_STATE_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
+const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
 
 const MUSIC_WRAP_URL = 'https://sito-music-bot.vercel.app/';
 
 /**
- * Load monitor state from persistent file.
+ * Load monitor state from unified system state.
  * State tracks last stats timestamp, dates messages were sent to members, and last check date.
  * @returns {object} Monitor state { lastStatsTimestamp, lastSentDate, lastCheckDate }
  */
 function loadMonitorState() {
-  if (!fs.existsSync(MONITOR_STATE_FILE)) {
-    return { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
+  const state = getSystemState('musicWrap');
+  if (state) return state;
+
+  // Migration: Try loading from old file if exists
+  const OLD_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
+  if (fs.existsSync(OLD_FILE)) {
+    try {
+      const oldState = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
+      // We don't save it here yet, it will be saved on first update
+      return oldState;
+    } catch { }
   }
-  try {
-    return JSON.parse(fs.readFileSync(MONITOR_STATE_FILE, 'utf-8'));
-  } catch {
-    return { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
-  }
+  
+  return { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
 }
 
 /**
- * Save monitor state to persistent file.
+ * Save monitor state to unified system state.
  * @param {object} state - Monitor state object to save
- * @returns {void}
+ * @returns {Promise<void>}
  */
-function saveMonitorState(state) {
-  fs.writeFileSync(MONITOR_STATE_FILE, JSON.stringify(state, null, 2));
+async function saveMonitorState(state) {
+  await updateSystemState('musicWrap', state);
 }
 
 /**
@@ -167,7 +173,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     log.info('ℹ️  No new update detected (timestamp: ' + statsTimestamp + ')');
     // Record the check even without updates so it is not re-checked today after a reboot
     state.lastCheckDate = today;
-    saveMonitorState(state);
+    await saveMonitorState(state);
     return;
   }
 
@@ -198,7 +204,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
 
   state.lastStatsTimestamp = statsTimestamp;
   state.lastCheckDate = today;
-  saveMonitorState(state);
+  await saveMonitorState(state);
 
   if (sentCount > 0) {
     log.info(`✅ Done: ${sentCount}/${ACTIVE_MEMBERS.length} messages sent`);

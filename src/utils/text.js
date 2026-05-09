@@ -55,4 +55,14 @@ function normalizeMarkdown(text) {
   return text;
 }
 
-module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown };
+/**
+ * Strip [image:N] tags from a string.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripImageTags(text) {
+  if (!text) return text;
+  return text.replace(/\[image:\d+\]/gi, '');
+}
+
+module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripImageTags };

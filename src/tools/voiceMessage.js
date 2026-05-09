@@ -18,7 +18,7 @@ const log = createLogger('TTS');
  */
 function stripVocalTags(text) {
   return text
-    .replace(/\[[\w-]+\]/g, '')        // [pause], [laugh], etc.
+    .replace(/\[[\w:-]+\]/g, '')       // [pause], [laugh], [image:1], etc.
     .replace(/<\/?[\w-]+>/g, '')       // <soft>, </soft>, etc.
     .replace(/\s{2,}/g, ' ')
     .trim();
