@@ -6,18 +6,17 @@ from a sandbox container. This is the ONLY bridge between the sandbox network
 and the outside world — the sandbox itself runs with no default route.
 
 Protocol support:
-- HTTP CONNECT  (HTTPS tunneling) — by far the common case (requests, httpx,
-  astropy data downloads all use HTTPS).
+- HTTP CONNECT  (HTTPS tunneling) — by far the common case (requests, httpx).
 - Plain HTTP GET/POST              — forwarded verbatim when host matches.
 
 Allowlist rules:
 - Matched against the request host (for CONNECT) or the Host header / URL
   (for plain HTTP).
 - Match semantics: exact domain OR suffix match with a leading dot.
-  Example: ".stsci.edu" matches "archive.stsci.edu" and "mast.stsci.edu",
-  but "archive.stsci.edu" only matches exactly.
+  Example: ".example.com" matches "api.example.com" and "www.example.com",
+  but "api.example.com" only matches exactly.
 - Configured via env var ALLOWED_HOSTS (comma-separated). Defaults cover
-  common astropy/astroquery backends.
+  yt-dlp and social media domains.
 
 Operational:
 - Listens on 0.0.0.0:${PROXY_PORT:-8080} (only reachable from the internal
@@ -44,15 +43,6 @@ from urllib.parse import urlparse
 # ── Configuration ───────────────────────────────────────────────────────────
 
 DEFAULT_ALLOWED = [
-    # Astropy / astroquery common data servers
-    "data.astropy.org",
-    ".stsci.edu",  # archive.stsci.edu, mast.stsci.edu, ...
-    ".ipac.caltech.edu",  # ned.ipac.caltech.edu, irsa.ipac.caltech.edu
-    ".u-strasbg.fr",  # CDS mirrors (legacy)
-    ".cds.unistra.fr",  # CDS (SIMBAD, VizieR, Aladin)
-    ".gsfc.nasa.gov",  # heasarc, skyview
-    ".eso.org",  # ESO archive
-    ".noirlab.edu",  # NOIRLab data archive
     # YouTube / Video Delivery (for yt-dlp)
     ".youtube.com",
     ".googlevideo.com",

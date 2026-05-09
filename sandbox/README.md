@@ -260,7 +260,7 @@ docker run -d \
   --name gemix-sandbox-proxy \
   --restart unless-stopped \
   --network gemix_sandbox_egress \
-  -e ALLOWED_HOSTS='data.astropy.org,.stsci.edu,.ipac.caltech.edu,.cds.unistra.fr,.gsfc.nasa.gov,files.example.com' \
+  -e ALLOWED_HOSTS='files.example.com' \
   gemix-sandbox-proxy:latest
 
 docker network connect gemix_sandbox_net gemix-sandbox-proxy 2>/dev/null || true
@@ -290,7 +290,6 @@ allowed by `proxy/proxy.py` or by `ALLOWED_HOSTS`.
 
 Default intent:
 
-- astronomy / astropy data sources
 - any extra hosts you explicitly allow
 
 Each decision is logged as `event=allow_*` or `event=deny_*`, so checking the

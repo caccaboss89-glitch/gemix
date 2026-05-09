@@ -295,21 +295,47 @@ async function runInProjectSandbox({
     if (!prev) {
       const isOutput = absPath === outputDir || absPath.startsWith(outputDir + path.sep);
       let autoAttached = false;
+      let attachSkippedReason = null;
       if (
         autoAttach && !usingScratch && isOutput &&
         attachedCount < CODE_EXEC_MAX_FILES_PER_CALL &&
         attachedTotalBytes + info.size <= CODE_EXEC_MAX_TOTAL_BYTES
       ) {
-        responseCtx.attachments.push({
-          name: path.basename(absPath),
-          mimetype: _mimeForFile(absPath),
-          filePath: absPath,
-        });
-        autoAttached = true;
-        attachedCount++;
-        attachedTotalBytes += info.size;
+        // Validate media files before auto-attaching
+        const ext = path.extname(absPath).toLowerCase();
+        const isMedia = ['.mp4', '.mov', '.mkv', '.webm', '.mp3', '.wav', '.m4a'].includes(ext);
+        let isValid = true;
+        if (isMedia) {
+          try {
+            const { execSync } = require('child_process');
+            const ffprobeCmd = `ffprobe -v error -show_format -show_streams "${absPath}"`;
+            execSync(ffprobeCmd, { stdio: 'pipe', timeout: 5000 });
+          } catch (err) {
+            isValid = false;
+            attachSkippedReason = `Invalid media file (ffprobe failed): ${err.message}`;
+            log.warn(`   ⚠️ Skipping auto-attach of corrupt media: ${rel} - ${attachSkippedReason}`);
+          }
+        }
+        if (isValid) {
+          responseCtx.attachments.push({
+            name: path.basename(absPath),
+            mimetype: _mimeForFile(absPath),
+            filePath: absPath,
+          });
+          autoAttached = true;
+          attachedCount++;
+          attachedTotalBytes += info.size;
+          log.info(`   📎 Auto-attached: ${rel} (${(info.size / 1048576).toFixed(2)} MB)`);
+        }
+      } else if (autoAttach && !usingScratch && isOutput) {
+        if (attachedCount >= CODE_EXEC_MAX_FILES_PER_CALL) {
+          attachSkippedReason = 'Max files per call reached (' + CODE_EXEC_MAX_FILES_PER_CALL + ')';
+        } else if (attachedTotalBytes + info.size > CODE_EXEC_MAX_TOTAL_BYTES) {
+          attachSkippedReason = 'Size limit reached (' + Math.floor((attachedTotalBytes + info.size) / 1048576) + ' MB > ' + Math.floor(CODE_EXEC_MAX_TOTAL_BYTES / 1048576) + ' MB)';
+        }
       }
       item.auto_attached = autoAttached;
+      if (attachSkippedReason) item.attach_skipped_reason = attachSkippedReason;
       newFiles.push(item);
     } else if (prev.size !== info.size || prev.mtimeMs !== info.mtimeMs) {
       modifiedFiles.push(item);

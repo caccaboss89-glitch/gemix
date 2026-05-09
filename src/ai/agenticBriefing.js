@@ -32,6 +32,7 @@ function buildAgenticBriefing(ctx = {}) {
       - One project per user request. Use \`gemix-project create\` before writing files.
       - Write/edit access ONLY inside the current project: code/ (scripts), temp/ (intermediate), output/ (final files).
       - Standard Paths: ALWAYS use \`/workspace/{code|temp|output}/file\` for project files and \`/readonly/{history|permanent|searched_images|skills}/file\` for global storage.
+      - CRITICAL: GemiX does NOT support audio/video editing or creation. Do not attempt to use pydub, librosa, or moviepy for media editing tasks.
     </Rules>
     <ProjectManagement>
       Run via \`bash\` as standalone \`gemix-project <subcmd>\` (no shell concatenation or piping).
@@ -64,10 +65,10 @@ ${formatSkillsForPrompt(loadSkills())}
   <PythonSandbox>
     <Runtime>
       Python 3.12, stateful. Root: /workspace/. Read-only: /readonly/.
-      Resources: 1.5GB RAM, 120s timeout. Network: NO INTERNET except specific domains used by: astropy data services, yt-dlp (video/media domains). pip: DISABLED. Only pre-installed libraries.
+      Resources: 1.5GB RAM, 120s timeout. Network: NO INTERNET except specific domains used by: yt-dlp (video/media domains). pip: DISABLED. Only pre-installed libraries.
     </Runtime>
-    <OSTools>ffmpeg, tesseract-ocr, libcairo, poppler-utils, libreoffice</OSTools>
-    <Libraries>numpy, scipy, sympy, mpmath, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, pydub, librosa, moviepy, astropy, qutip, docx, openpyxl, pandas, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
+    <OSTools>tesseract-ocr, libcairo, poppler-utils, libreoffice</OSTools>
+    <Libraries>numpy, scipy, sympy, mpmath, matplotlib, seaborn, plotly, Pillow, rembg, cairosvg, pytesseract, docx, openpyxl, pandas, pptx, reportlab, pypdf, jinja2, PyYAML</Libraries>
     <Pitfalls>
       - Bash Tool: Every shell command, Python script, or heavy command MUST run as a standalone \`bash\` call. NEVER use shell concatenation/piping/redirection (\`&&\`, \`||\`, \`;\`, \`|\`, \`>\`, \`<\`, \`()\`...) to combine steps in one tool call. Emit multiple \`bash\` calls in the same round, using \`execution_phase\` when ordering is needed.
       - Atomic Creation: If \`gemix-project create\` fails in a round, ALL subsequent \`write_file\` calls in that same round will fail with "No project selected".
@@ -76,7 +77,7 @@ ${formatSkillsForPrompt(loadSkills())}
         • RIGHT: \`a/b = c\` (Math expression), \`Eq(a, b)\` (Explicit SymPy)
         • For physical constants (hbar, grad, etc.), use \`code_execution\`.
       - Matplotlib: Always call \`plt.close()\` after \`savefig()\`.
-      - yt-dlp: MUST use bash CLI directly. Max 1080p resolution, no proxy args.
+      - yt-dlp: MUST use bash CLI directly. Max 1080p resolution, no proxy args. Allowed domains: youtube.com, twitter.com, x.com, instagram.com, tiktok.com, facebook.com (and their CDNs).
       - Image Search: When searching for images intended for modification or inclusion in documents, ALWAYS set \`save_to_disk=true\`. This saves ALL images to /readonly/searched_images/ regardless of your final selection (with [image:N] tags).
       - Strings: Use raw strings (\`r"..."\`) for LaTeX/regex/paths.
       - Escaping: ALWAYS escape backticks (\`) with a backslash (\\\`) inside tool arguments or strings to avoid breaking the prompt/JSON structure.

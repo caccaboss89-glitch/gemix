@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     # Default allowlist lives in proxy.py; override here if you need to widen it.
     environment:
-      # ALLOWED_HOSTS: "data.astropy.org,.stsci.edu,.ipac.caltech.edu,.cds.unistra.fr,.gsfc.nasa.gov"
+      # ALLOWED_HOSTS: "youtube.com,twitter.com,x.com,instagram.com,tiktok.com,facebook.com"
       PROXY_PORT: "8080"
       # URL of the host's internal notify server — set to reach the Node process.
       # On Linux Docker: http://172.17.0.1:9999/notify (host bridge IP)

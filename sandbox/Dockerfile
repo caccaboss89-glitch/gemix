@@ -15,12 +15,10 @@ FROM python:3.12-slim-bookworm
 
 # ── System packages ──
 # Build tools (gcc/g++/make, python3-dev, libpq-dev) are needed by a few wheels
-# (e.g. qutip from source on some arches); keep them installed — no pip at runtime
-# so this does not widen the attack surface for the AI.
+# keep them installed — no pip at runtime so this does not widen the attack surface.
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
-        ffmpeg \
         tesseract-ocr \
         libcairo2 \
         libpango-1.0-0 \

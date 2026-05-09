@@ -344,7 +344,7 @@ ${text}
     }
   } else if (VIDEO_EXTS.includes(ext)) {
     if (fileSize > MAX_VIDEO_BYTES) {
-      return { success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max). Trim it inside a project first.` };
+      return { success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max). GemiX does not support video editing.` };
     }
   } else if (fileSize > MAX_TEXT_BYTES * 4 && ext !== '.pdf') {
     // Heuristic: don't read more than 4x max text into memory if it's just text
