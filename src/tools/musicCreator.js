@@ -13,21 +13,21 @@ const pendingGenerations = new Set();
 
 async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000); // 3 minutes max
+  const timeout = setTimeout(() => controller.abort(), 180000);
 
   let rawChunks = [];
   let audioChunks = [];
   let textChunks = [];
 
   try {
-    log.info(`🎵 Lyria streaming call → ${model}`);
+    log.info(`🎵 Lyria streaming call → ${model} (format: wav)`);
 
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://gemix.caccaboss89.dev', // optional but useful
+        'HTTP-Referer': 'https://gemix.caccaboss89.dev',
         'X-Title': 'GemiX Music Tool'
       },
       body: JSON.stringify({ ...body, stream: true }),
@@ -60,56 +60,50 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
 
           const delta = data.choices?.[0]?.delta || {};
 
+          // === DIAGNOSTIC LOG (only first 3 chunks to avoid spam) ===
+          if (rawChunks.length <= 3) {
+            log.info(`🔍 Chunk #${rawChunks.length} keys:`, Object.keys(data));
+            log.info(`🔍 Delta keys:`, Object.keys(delta));
+            if (delta.content) log.info(`🔍 Content preview:`, delta.content.substring(0, 150));
+          }
+
+          // Standard OpenRouter audio parsing
           if (delta.audio?.data) {
             audioChunks.push(delta.audio.data);
             log.info('✅ Found delta.audio.data');
           }
-          if (delta.audio?.transcript) {
-            textChunks.push(delta.audio.transcript);
-          }
+          if (delta.audio?.transcript) textChunks.push(delta.audio.transcript);
+
+          // Fallback lyrics
           if (delta.content) {
             textChunks.push(delta.content);
-            if (typeof delta.content === 'string' && delta.content.includes('data:')) {
-              const b64Match = delta.content.match(/data:audio[^,]+,([A-Za-z0-9+/=]+)/);
-              if (b64Match) audioChunks.push(b64Match[1]);
+          }
+
+          // Fallback base64 hidden in content (possible with Google models)
+          if (typeof delta.content === 'string') {
+            const b64Match = delta.content.match(/([A-Za-z0-9+/=]{200,})/);
+            if (b64Match) {
+              audioChunks.push(b64Match[1]);
+              log.info('✅ Found possible base64 in content!');
             }
           }
-          if (delta.parts?.[0]?.inlineData?.data) {
-            audioChunks.push(delta.parts[0].inlineData.data);
-          }
 
-        } catch (e) {
-          // Malformed chunk
-        }
-      }
-    }
-
-    log.info(`📊 Stream completed - Total chunks: ${rawChunks.length} | Audio chunks found: ${audioChunks.length}`);
-
-    // Diagnostic log (first 2 complete chunks)
-    if (rawChunks.length > 0) {
-      log.info('🔍 First chunk structure:', JSON.stringify(Object.keys(rawChunks[0]), null, 2));
-      if (rawChunks[0].choices?.[0]?.delta) {
-        log.info('🔍 First chunk delta keys:', Object.keys(rawChunks[0].choices[0].delta));
+        } catch (e) {}
       }
     }
 
     const fullAudioBase64 = audioChunks.join('');
-    const fullTranscript = textChunks.join('');
+    const fullTranscript = textChunks.join('').trim();
 
-    if (!fullAudioBase64) {
-      throw new Error(`No audio data received. Partial transcript: ${fullTranscript.substring(0, 200)}`);
-    }
+    log.info(`📊 Stream finished → Audio chunks: ${audioChunks.length} | Base64 length: ${fullAudioBase64.length}`);
 
     return {
       audio: { data: fullAudioBase64 },
-      content: fullTranscript.trim()
+      content: fullTranscript || 'Lyrics not available'
     };
 
   } finally {
     clearTimeout(timeout);
-    // Final diagnostic log
-    log.info(`📦 Audio received: ${audioChunks.length > 0 ? '✅ YES' : '❌ NO'} | Base64 length: ${audioChunks.join('').length}`);
   }
 }
 
@@ -139,7 +133,7 @@ async function musicCreator(prompt, userCtx) {
 
   try {
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 5) {
-      throw new Error('Prompt missing or too short. Please provide a detailed description of the music.');
+      throw new Error('Prompt missing or too short.');
     }
 
     const apiKey = OPENROUTER_API_KEY;
@@ -156,20 +150,30 @@ async function musicCreator(prompt, userCtx) {
       modalities: ['text', 'audio'],
       audio: {
         voice: 'alloy',
-        format: 'mp3'
+        format: 'wav'          // changed to wav (official OpenRouter example)
       }
     };
 
     const assistantMessage = await callLyriaStreaming(model, apiUrl, body, apiKey);
 
     let audioBase64 = assistantMessage.audio?.data || '';
-    const lyrics = assistantMessage.content || 'Lyrics not available';
+    const lyrics = assistantMessage.content;
 
-    if (!audioBase64) throw new Error('No valid audio received from the model.');
+    // === FALLBACK IF NO AUDIO IS RECEIVED ===
+    if (!audioBase64 || audioBase64.length < 100) {
+      log.warn('⚠️ No audio received → returning only lyrics');
+      return {
+        toolResult: {
+          success: true,
+          message: '🎵 Lyrics generated (audio temporarily unavailable):',
+          lyrics: lyrics
+        },
+        attachments: []
+      };
+    }
 
     if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
 
-    // Update daily limit
     if (!userIsAdmin) {
       const today = getRomeISO().split('T')[0];
       const userKey = `${userId}_${today}`;
@@ -180,7 +184,7 @@ async function musicCreator(prompt, userCtx) {
     const filename = `song_${Date.now()}.mp3`;
 
     return {
-      toolResult: { success: true, message: '🎵 Music generated successfully!', lyrics: lyrics },
+      toolResult: { success: true, message: '🎵 Music generated successfully!', lyrics },
       attachments: [{
         name: filename,
         buffer,
