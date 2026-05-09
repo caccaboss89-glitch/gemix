@@ -11,19 +11,24 @@ const log = createLogger('MusicCreator');
 
 const pendingGenerations = new Set();
 
-/**
- * Dedicated streaming call for Lyria (required by OpenRouter for audio output)
- */
 async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000); // 2 minutes for audio generation
+  const timeout = setTimeout(() => controller.abort(), 180000); // 3 minutes max
+
+  let rawChunks = [];
+  let audioChunks = [];
+  let textChunks = [];
 
   try {
+    log.info(`🎵 Lyria streaming call → ${model}`);
+
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://gemix.caccaboss89.dev', // optional but useful
+        'X-Title': 'GemiX Music Tool'
       },
       body: JSON.stringify({ ...body, stream: true }),
       signal: controller.signal,
@@ -31,11 +36,9 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errText.substring(0, 500)}`);
+      throw new Error(`HTTP ${res.status}: ${errText}`);
     }
 
-    let fullAudioBase64 = '';
-    let fullTranscript = '';
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
 
@@ -53,34 +56,60 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
 
         try {
           const data = JSON.parse(dataStr);
-          const delta = data.choices?.[0]?.delta;
+          rawChunks.push(data);
 
-          if (delta?.audio?.data) {
-            fullAudioBase64 += delta.audio.data;
+          const delta = data.choices?.[0]?.delta || {};
+
+          if (delta.audio?.data) {
+            audioChunks.push(delta.audio.data);
+            log.info('✅ Found delta.audio.data');
           }
-          if (delta?.audio?.transcript) {
-            fullTranscript += delta.audio.transcript;
+          if (delta.audio?.transcript) {
+            textChunks.push(delta.audio.transcript);
           }
-          // Fallback: some chunks put normal text here
-          if (delta?.content) {
-            fullTranscript += delta.content;
+          if (delta.content) {
+            textChunks.push(delta.content);
+            if (typeof delta.content === 'string' && delta.content.includes('data:')) {
+              const b64Match = delta.content.match(/data:audio[^,]+,([A-Za-z0-9+/=]+)/);
+              if (b64Match) audioChunks.push(b64Match[1]);
+            }
           }
+          if (delta.parts?.[0]?.inlineData?.data) {
+            audioChunks.push(delta.parts[0].inlineData.data);
+          }
+
         } catch (e) {
-          // ignore malformed chunks
+          // Malformed chunk
         }
       }
     }
 
+    log.info(`📊 Stream completed - Total chunks: ${rawChunks.length} | Audio chunks found: ${audioChunks.length}`);
+
+    // Diagnostic log (first 2 complete chunks)
+    if (rawChunks.length > 0) {
+      log.info('🔍 First chunk structure:', JSON.stringify(Object.keys(rawChunks[0]), null, 2));
+      if (rawChunks[0].choices?.[0]?.delta) {
+        log.info('🔍 First chunk delta keys:', Object.keys(rawChunks[0].choices[0].delta));
+      }
+    }
+
+    const fullAudioBase64 = audioChunks.join('');
+    const fullTranscript = textChunks.join('');
+
     if (!fullAudioBase64) {
-      throw new Error('No audio data received from stream.');
+      throw new Error(`No audio data received. Partial transcript: ${fullTranscript.substring(0, 200)}`);
     }
 
     return {
       audio: { data: fullAudioBase64 },
       content: fullTranscript.trim()
     };
+
   } finally {
     clearTimeout(timeout);
+    // Final diagnostic log
+    log.info(`📦 Audio received: ${audioChunks.length > 0 ? '✅ YES' : '❌ NO'} | Base64 length: ${audioChunks.join('').length}`);
   }
 }
 
@@ -119,28 +148,22 @@ async function musicCreator(prompt, userCtx) {
 
     if (!apiKey) throw new Error('OPENROUTER_API_KEY is missing in environment.');
 
-    log.info(`🎵 Generating music for ${userId}: "${prompt}"`);
+    log.info(`🎵 Generating music for ${userId}: "${prompt.substring(0, 80)}..."`);
 
     const body = {
       model,
       messages: [{ role: 'user', content: prompt.trim() }],
       modalities: ['text', 'audio']
-      // stream: true is automatically added in the streaming function
     };
 
-    // Dedicated streaming call (mandatory for Lyria)
     const assistantMessage = await callLyriaStreaming(model, apiUrl, body, apiKey);
 
     let audioBase64 = assistantMessage.audio?.data || '';
-    const lyrics = assistantMessage.content || '';
+    const lyrics = assistantMessage.content || 'Lyrics not available';
 
-    if (!audioBase64) {
-      throw new Error('The model did not return a valid audio file.');
-    }
+    if (!audioBase64) throw new Error('No valid audio received from the model.');
 
-    if (audioBase64.includes(',')) {
-      audioBase64 = audioBase64.split(',')[1];
-    }
+    if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
 
     // Update daily limit
     if (!userIsAdmin) {
@@ -153,11 +176,7 @@ async function musicCreator(prompt, userCtx) {
     const filename = `song_${Date.now()}.mp3`;
 
     return {
-      toolResult: {
-        success: true,
-        message: 'Music generated successfully!',
-        lyrics: lyrics.trim() || 'Lyrics included in the audio clip.'
-      },
+      toolResult: { success: true, message: '🎵 Music generated successfully!', lyrics: lyrics },
       attachments: [{
         name: filename,
         buffer,
@@ -165,6 +184,7 @@ async function musicCreator(prompt, userCtx) {
         sendAudioAsVoice: true
       }]
     };
+
   } catch (err) {
     log.error(`Music generation failed: ${err.message}`);
     await notifyAdmin('MusicCreator', `Generation failed for ${userId}: ${err.message}`);
