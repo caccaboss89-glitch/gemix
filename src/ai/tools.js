@@ -66,7 +66,7 @@ function buildImageSearchTool(agenticUnlocked = false) {
 
   return makeTool({
     name: 'image_search',
-    description: 'Search for images and inspect the returned previews. Results are buffered with sequential IDs (1, 2, 3...). In your final message, include [image:N] tags (e.g., "Here are the images: [image:1] [image:3]") to selectively send only those images to the user. If you omit tags, NO images are sent to the user. Call multiple times to refine results.',
+    description: 'Search for images and inspect the returned previews. Results are buffered with sequential IDs (1, 2, 3...). Use [image:N] tags in your final message to selectively send images to the current user.',
     properties,
     required: ['query'],
   });
@@ -74,7 +74,7 @@ function buildImageSearchTool(agenticUnlocked = false) {
 
 const TOOL_ATTACH_FILE = makeTool({
   name: 'attach_file',
-  description: 'Buffer a file for delivery (NOT /workspace/output/ or chat history). Allowed: /readonly/{permanent|searched_images|skills}/<file> or /workspace/{temp|code}/<file>. To send ALL currently buffered files (images from search, PDFs, etc.) to other recipients, use delivery tools with includeAttachments=true. [image:N] tags are NOT supported for delivery tools.',
+  description: 'Buffer a file for delivery (from /readonly/ or /workspace/) for automatic delivery to the current user. Use delivery tools with includeAttachments=true to send to others.',
   properties: {
     path: { type: 'string', description: 'Unified path: "/readonly/permanent/file.txt" or "/workspace/code/main.py".' },
   },
@@ -113,7 +113,7 @@ function buildReadFileTool(isDiscord, agenticUnlocked = false) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run Python in the sandbox. For calculations, data analysis, scripts. Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,permanent,searched_images,skills}. output/ files are auto-delivered. Can combine with write_file/edit_file or other bash/code_execution in the same round.',
+  description: 'Run Python in the sandbox for calculations, data analysis, or scripts. Can run without a project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,permanent,searched_images,skills}. Files in /workspace/output/ are buffered for delivery.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
@@ -128,10 +128,10 @@ const TOOL_CODE_EXECUTION = makeTool({
 
 const TOOL_WRITE_FILE = makeTool({
   name: 'write_file',
-  description: 'Create or overwrite a file in the current project ({temp|output|code}). output/ files are auto-delivered. Max 5 MB.',
+  description: 'Create or overwrite a file in the current project ({temp|output|code}). Files in /workspace/output/ are buffered for delivery.',
   properties: {
     path: { type: 'string', description: 'Path under current project: "/workspace/{temp|output|code}/file".' },
-    content: { type: 'string', description: 'File content.' },
+    content: { type: 'string', description: 'File content (max 5 MB).' },
     encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Content encoding (default "utf-8").' },
     mode: { type: 'string', enum: ['overwrite', 'append'], description: 'Write mode (default "overwrite").' },
   },
@@ -238,6 +238,18 @@ const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
   required: ['fullName', 'title', 'motivation', 'requesterSignature'],
 });
 
+const TOOL_MUSIC_CREATOR = makeTool({
+  name: 'music_creator',
+  description: 'Create a 30-second music clip from a prompt. Returns lyrics and buffers the audio for delivery.',
+  properties: {
+    prompt: {
+      type: 'string',
+      description: 'Detailed description of style, instruments, and mood.',
+    },
+  },
+  required: ['prompt'],
+});
+
 // ── Dynamic tool builders (schema varies by grade/platform) ──
 
 function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = false } = {}) {
@@ -275,7 +287,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Delivery tool — Send a voice message. Without a recipient, it replies to the current chat and ends the turn (ignoring further tool calls). With a recipient, it sends the message and allows you to continue the turn. Buffered files (e.g. from image_search) are included if includeAttachments=true (all or nothing, [image:N] tags not supported here).',
+    description: 'Delivery tool — Send a voice message. Use includeAttachments=true to send ALL currently buffered files to this recipient (supports all or none; [image:N] tags not supported here).',
     properties,
     required: ['text'],
   });
@@ -312,7 +324,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — Send a WhatsApp message to another recipient. Use includeAttachments to send ALL currently buffered files (images, PDFs, etc.). [image:N] tags are NOT supported here.',
+    description: 'Delivery tool — Send a WhatsApp message to another recipient. Use includeAttachments=true to send ALL currently buffered files.',
     properties,
     required: isAdmin ? ['message'] : ['recipient', 'message'],
   });
@@ -350,7 +362,7 @@ function buildEmailTool(isAdmin) {
 
   return makeTool({
     name: 'send_email',
-    description: 'Delivery tool — Send an email. Use includeAttachments to send ALL currently buffered files (images, PDFs, etc.). [image:N] tags are NOT supported here.',
+    description: 'Delivery tool — Send an email. Use includeAttachments=true to send ALL currently buffered files.',
     properties,
     required: isAdmin ? ['subject', 'body'] : ['recipient', 'subject', 'body'],
   });
@@ -513,6 +525,9 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     TOOL_BROWSE_PAGE,
     buildReadFileTool(isDiscord, userCtx.agenticUnlocked)
   );
+  if (isWhatsApp) {
+    tools.push(TOOL_MUSIC_CREATOR);
+  }
 
   // 2. Agentic Workspace (Gated)
   if (!isDiscord) {

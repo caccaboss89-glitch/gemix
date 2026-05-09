@@ -364,7 +364,11 @@ async function sendWhatsAppResponse(chat, responseData) {
       const m = toWhatsAppMediaArgs(att);
       if (!m) continue;
       const media = new MessageMedia(m.mimetype, m.base64, m.name);
-      await chat.sendMessage(media);
+      const options = {};
+      if (att.sendAudioAsVoice) {
+        options.sendAudioAsVoice = true;
+      }
+      await chat.sendMessage(media, options);
     }
   }
 }

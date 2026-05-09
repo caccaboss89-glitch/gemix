@@ -23,6 +23,7 @@ const { attachFileTool } = require('./attachFile');
 const { writeFileTool } = require('./writeFile');
 const { editFileTool } = require('./editFile');
 const { bashTool } = require('./bashTool');
+const { musicCreator } = require('./musicCreator');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename, stripImageTags } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
@@ -352,7 +353,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
                 const m = toWhatsAppMediaArgs(att);
                 if (!m) continue;
                 const media = new MessageMedia(m.mimetype, m.base64, m.name);
-                await sendWhatsAppDirect(targetJid.jid, media);
+                const options = {};
+                if (att.sendAudioAsVoice) options.sendAudioAsVoice = true;
+                await sendWhatsAppDirect(targetJid.jid, media, options);
               }
             }
 
@@ -498,7 +501,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
               const m = toWhatsAppMediaArgs(att);
               if (!m) continue;
               const media = new MessageMedia(m.mimetype, m.base64, m.name);
-              await sendWhatsAppDirect(targetJid.jid, media);
+              const options = {};
+              if (att.sendAudioAsVoice) options.sendAudioAsVoice = true;
+              await sendWhatsAppDirect(targetJid.jid, media, options);
             }
           }
 
@@ -540,6 +545,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
       case 'bash': {
         result = await bashTool(args, userCtx, responseCtx);
+        break;
+      }
+      case 'music_creator': {
+        const musicResult = await musicCreator(args.prompt, userCtx);
+        if (musicResult.attachments && musicResult.attachments.length > 0) {
+          responseCtx.attachments.push(...musicResult.attachments);
+        }
+        result = musicResult.toolResult;
         break;
       }
 
