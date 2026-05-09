@@ -61,8 +61,13 @@ async function musicCreator(prompt, userCtx) {
   }
 
   try {
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 5) {
+      throw new Error('Prompt missing or too short. Please provide a detailed description of the music.');
+    }
+
     // 3. Prepare API Call
     const apiKey = OPENROUTER_API_KEY;
+    const model = MUSIC_MODEL || 'google/lyria-3-clip-preview';
     const apiUrl = `${OPENROUTER_BASE_URL}/chat/completions`;
 
     if (!apiKey) {
@@ -72,13 +77,15 @@ async function musicCreator(prompt, userCtx) {
     log.info(`🎵 Generating music for ${userId}: "${prompt}"`);
 
     const body = {
-      model: MUSIC_MODEL,
+      model,
       messages: [
         {
           role: 'user',
-          content: prompt,
+          content: prompt.trim(),
         },
       ],
+      modalities: ["text", "audio"],
+      stream: false,
     };
 
     const assistantMessage = await callModel('MusicCreator', apiUrl, body, apiKey);
@@ -98,6 +105,13 @@ async function musicCreator(prompt, userCtx) {
       );
       if (audioPart) {
         audioBase64 = audioPart.inline_data.data;
+      }
+    }
+    // Strategy C: Sometimes OpenRouter dumps base64 directly in the content string
+    else if (typeof assistantMessage.content === 'string' && assistantMessage.content.length > 100) {
+      const b64Match = assistantMessage.content.match(/[A-Za-z0-9+/=]{100,}/);
+      if (b64Match) {
+        audioBase64 = b64Match[0];
       }
     }
 

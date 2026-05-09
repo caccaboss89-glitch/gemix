@@ -548,6 +548,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
       case 'music_creator': {
+        if (!args.prompt) {
+          result = { success: false, error: 'Missing prompt parameter in tool call arguments.' };
+          break;
+        }
         const musicResult = await musicCreator(args.prompt, userCtx);
         if (musicResult.attachments && musicResult.attachments.length > 0) {
           responseCtx.attachments.push(...musicResult.attachments);
