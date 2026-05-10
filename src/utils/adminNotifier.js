@@ -6,6 +6,10 @@ let client = null;
 const cooldowns = new Map();
 const COOLDOWN_MS = 5 * 60 * 1000;
 
+// Standardized message suffix for AI tool errors when admin is already notified.
+// This prevents the AI from redundantly calling bug_report.
+const ADMIN_NOTIFIED_SUFFIX = ' [Admin has been notified. DO NOT use bug_report for this error. Explain the problem to the user in your final text response.]';
+
 /**
  * Set the WhatsApp dedicated client reference for admin notifications.
  * @param {object} waClient - The whatsapp-web.js Client instance
@@ -41,4 +45,4 @@ async function notifyAdmin(source, errorMessage) {
   }
 }
 
-module.exports = { setAdminNotifierClient, notifyAdmin };
+module.exports = { setAdminNotifierClient, notifyAdmin, ADMIN_NOTIFIED_SUFFIX };

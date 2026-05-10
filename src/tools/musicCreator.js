@@ -6,7 +6,7 @@ const systemState = require('../utils/systemState');
 const { findMemberByWa, isAdmin } = require('../config/members');
 const { getRomeISO } = require('../utils/time');
 const { fetchExternal } = require('../utils/fetch');
-const { notifyAdmin } = require('../utils/adminNotifier');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 
 const log = createLogger('MusicCreator');
 
@@ -194,7 +194,8 @@ async function musicCreator(prompt, userCtx) {
   } catch (err) {
     log.error(`Music generation failed: ${err.message}`);
     await notifyAdmin('MusicCreator', `Generation failed for ${userId}: ${err.message}`);
-    throw err;
+    const musicErr = new Error(`Music generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}`);
+    throw musicErr;
   } finally {
     if (!userIsAdmin) pendingGenerations.delete(userId);
   }

@@ -23,6 +23,7 @@ const { snapshotProject } = require('../sandbox/projectRun');
 const { getCurrentProject } = require('../utils/projectState');
 const net = require('net');
 const { createLogger } = require('../utils/logger');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const log = createLogger('BashTool');
 
 /**
@@ -68,9 +69,10 @@ async function executeYtDlpOnHost(args, userCtx, command, responseCtx) {
   // Check proxy before starting
   const proxyOk = await checkProxyConnectivity(SANDBOX_PROXY_HOST, SANDBOX_PROXY_PORT);
   if (!proxyOk) {
+    await notifyAdmin('yt-dlp Proxy', 'SOCKS5 proxy offline (127.0.0.1:5040). YouTube downloads will fail.');
     return { 
       success: false, 
-      error: 'YouTube download subsystem is currently unavailable (local proxy offline). Please report this bug using bug_report.' 
+      error: `YouTube download subsystem is currently unavailable (local proxy offline). ${ADMIN_NOTIFIED_SUFFIX}` 
     };
   }
   const trimmed = command.trim();

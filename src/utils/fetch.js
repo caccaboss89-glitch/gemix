@@ -1,6 +1,6 @@
 // src/utils/fetch.js
 const { FETCH_TIMEOUT_MS } = require('../config/constants');
-const { notifyAdmin } = require('./adminNotifier');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
 
 /**
  * Fetch with automatic timeout via AbortController.
@@ -40,12 +40,16 @@ async function fetchExternal(url, options = {}, source = null, timeoutMs = FETCH
   try {
     const res = await fetchWithTimeout(url, options, timeoutMs);
     if (!res.ok && source) {
-      await notifyAdmin(source, `HTTP Error ${res.status}`);
+      const errMsg = `HTTP Error ${res.status}`;
+      await notifyAdmin(source, errMsg);
+      throw new Error(`${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
     }
     return res;
   } catch (err) {
     if (source) {
       await notifyAdmin(source, err.message);
+      const notifiedErr = new Error(`${err.message}${ADMIN_NOTIFIED_SUFFIX}`);
+      throw notifiedErr;
     }
     throw err;
   }

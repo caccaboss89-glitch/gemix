@@ -41,6 +41,7 @@ const { getCurrentProject, saveLastCrash, clearLastCrash } = require('../utils/p
 const sandboxManager = require('./sandboxManager');
 const { hasActiveBgTask } = require('../utils/bgTasks');
 const { createLogger } = require('../utils/logger');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 
 const log = createLogger('ProjectRun');
 
@@ -204,7 +205,8 @@ async function runInProjectSandbox({
     entry = await sandboxManager.getOrCreate(userCtx, projectName);
   } catch (err) {
     log.error(`sandbox getOrCreate failed (${toolLabel}): ${err.message}`);
-    return { error: `Failed to start the Python sandbox: ${err.message}` };
+    await notifyAdmin(`Sandbox Manager (${toolLabel})`, `Failed to start sandbox for project "${projectName}": ${err.message}`);
+    return { error: `Failed to start the Python sandbox: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
   }
   if (entry.busy) {
     return { error: `Another sandbox call is still running for this project. Try again in a moment.` };
@@ -243,7 +245,8 @@ async function runInProjectSandbox({
       await clearLastCrash(userCtx);
     }
     log.error(`kernel execute threw (${toolLabel}): ${err.message}`);
-    return { error: `Sandbox execution failed: ${err.message}` };
+    await notifyAdmin(`Kernel Execute (${toolLabel})`, `Sandbox execution failed: ${err.message}`);
+    return { error: `Sandbox execution failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
   }
   entry.busy = false;
   await clearLastCrash(userCtx);

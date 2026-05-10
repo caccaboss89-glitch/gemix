@@ -14,6 +14,7 @@ const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../util
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
 const { isSandboxAlive } = require('../sandbox/sandboxManager');
 const { getCurrentProject } = require('../utils/projectState');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 
 const NON_READABLE_EXTS = new Set(['.xls', '.xlsx', '.doc', '.docx', '.ppt', '.pptx', '.exe', '.dll', '.bin', '.so', '.zip', '.tar', '.gz', '.7z', '.rar', '.jar', '.class', '.pyc', '.db', '.sqlite', '.iso', '.dmg']);
 
@@ -135,14 +136,17 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       try {
         persisted = await persistParsedPdfToHistory(storageId, rawPath);
       } catch (err) {
-        return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+        await notifyAdmin('PDF Parser (History)', `Failed to parse PDF ${displayPath}: ${err.message}`);
+        return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message} ${ADMIN_NOTIFIED_SUFFIX}` };
       }
       if (persisted.success && persisted.historyPath) {
         displayPath = `history/${persisted.historyPath}`;
         const { historyDir } = getUserHistoryPaths(storageId);
         absolutePath = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''));
       } else {
-        return { success: false, error: `PDF parsing failed for "${displayPath}": ${persisted.error || 'unknown error'}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+        const errMsg = persisted.error || 'unknown error';
+        await notifyAdmin('PDF Parser (History)', `Failed to parse PDF ${displayPath}: ${errMsg}`);
+        return { success: false, error: `PDF parsing failed for "${displayPath}": ${errMsg} ${ADMIN_NOTIFIED_SUFFIX}` };
       }
     } else if (fs.existsSync(absolutePath)) {
       const st0 = fs.statSync(absolutePath);
@@ -154,13 +158,16 @@ async function readFileTool(filePath, userCtx, responseCtx) {
             virtualPdfPath: rawPath.startsWith('/') ? rawPath : `/${rawPath}`,
           });
         } catch (err) {
-          return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+          await notifyAdmin('PDF Parser (Project)', `Failed to parse PDF ${displayPath}: ${err.message}`);
+          return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message} ${ADMIN_NOTIFIED_SUFFIX}` };
         }
         if (built.success) {
           absolutePath = built.parsedDirAbs;
           displayPath = displayPath.replace(/[^/]*\.pdf$/i, built.dirName + '/');
         } else {
-          return { success: false, error: `PDF parsing failed for "${displayPath}": ${built.error || 'unknown error'}. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+          const errMsg = built.error || 'unknown error';
+          await notifyAdmin('PDF Parser (Project)', `Failed to parse PDF ${displayPath}: ${errMsg}`);
+          return { success: false, error: `PDF parsing failed for "${displayPath}": ${errMsg} ${ADMIN_NOTIFIED_SUFFIX}` };
         }
       }
     } else {
@@ -396,7 +403,8 @@ ${text}
   // this point, the canonical parser failed silently and we surface a
   // clear error instead of triggering a second parse attempt.
   if (ext === '.pdf') {
-    return { success: false, error: `PDF "${sanitizedPath}" could not be parsed into the canonical folder structure. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later. Do NOT enter agentic mode to retry the parsing manually.` };
+    await notifyAdmin('PDF Parser (Unexpected)', `PDF ${sanitizedPath} reached raw read branch (silently failed parsing).`);
+    return { success: false, error: `PDF "${sanitizedPath}" could not be parsed into the canonical folder structure. ${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
   // ── Text/Code ──

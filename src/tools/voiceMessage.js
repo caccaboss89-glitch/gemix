@@ -2,9 +2,9 @@
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
 const { XAI_API_KEY, XAI_TTS_VOICE } = require('../config/env');
-const { XAI_TTS_URL } = require('../config/constants');
+const { XAI_TTS_URL, XAI_TTS_ENABLED } = require('../config/constants');
 const { fetchWithTimeout } = require('../utils/fetch');
-const { notifyAdmin } = require('../utils/adminNotifier');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('TTS');
@@ -106,20 +106,34 @@ async function generateVoice(text) {
 }
 
 async function _generateVoice(text) {
-  // Try xAI TTS first
-  if (XAI_API_KEY) {
+  // Try xAI TTS first (only if enabled)
+  if (XAI_TTS_ENABLED && XAI_API_KEY) {
     try {
       const mp3Buffer = await xaiTTS(text);
       return convertMp3ToWhatsAppOpus(mp3Buffer);
     } catch (err) {
-      log.warn('[TTS] xAI TTS failed, falling back to Google Translate:', err.message);
-      await notifyAdmin('xAI TTS', err.message);
+      log.warn('xAI TTS failed, falling back to Google Translate:', err.message);
+      await notifyAdmin('xAI TTS (Fallback)', err.message);
     }
   }
 
-  // Fallback: Google Translate TTS (strip vocal tags since Google doesn't support them)
+  // Use Google Translate TTS
+  // Strip vocal tags (Google doesn't support them, and if XAI is disabled we MUST strip them)
   const cleanText = stripVocalTags(text);
-  return googleTranslateTTS(cleanText);
+  
+  try {
+    return await googleTranslateTTS(cleanText);
+  } catch (err) {
+    if (!XAI_TTS_ENABLED) {
+      // Notify admin automatically so the AI's "already reported" claim is true
+      await notifyAdmin('Google TTS (Primary)', err.message);
+      
+      // Hard failure when XAI is disabled: explain to the AI why it failed and not to retry or report.
+      throw new Error(`TTS failed: Google Translate service error. xAI TTS is currently DISABLED by Admin.${ADMIN_NOTIFIED_SUFFIX}`);
+    }
+    // If it was a fallback failure during XAI_TTS_ENABLED=true, just rethrow normally
+    throw err;
+  }
 }
 
 /**

@@ -1,5 +1,5 @@
 // src/ai/tools.js
-const { PLATFORM_DISCORD } = require('../config/constants');
+const { PLATFORM_DISCORD, XAI_TTS_ENABLED } = require('../config/constants');
 
 // Tool definitions for AI function calling (OpenAI-compatible format).
 
@@ -256,7 +256,9 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   const properties = {
     text: {
       type: 'string',
-      description: 'TTS text (max 1000 chars), supports vocal effects. Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.',
+      description: XAI_TTS_ENABLED 
+        ? 'TTS text (max 1000 chars), supports vocal effects. Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.'
+        : 'TTS text (max 1000 chars). Note: vocal effects/tags are NOT supported at the moment.',
     },
   };
 
@@ -488,7 +490,7 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
 
 const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
-  description: 'Report a system problem to the admin (bug, tool failure, unexpected behavior). Use when a tool fails, something behaves wrongly, or there is a system issue worth reporting. After calling this, you MUST also inform the user in your final reply that you encountered a problem and reported it to the admin (do NOT call this silently).',
+  description: 'Report a bug/failure. Use ONLY if the tool error DOES NOT state the Admin was already notified, or for general logical bugs. Inform the user in your final response.',
   properties: {
     source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "bash", "yt-dlp", "proxy", "pdf-parser")' },
     details: { type: 'string', description: 'Brief but clear description of the problem' },

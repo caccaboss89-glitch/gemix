@@ -32,7 +32,7 @@ const { createLogger } = require('../utils/logger');
 const { storeRecentVoiceText } = require('../utils/historySync');
 const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
 const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId, userTotalBytes, userQuotaBytes } = require('../utils/userPaths');
-const { notifyAdmin } = require('../utils/adminNotifier');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/projectState');
 const fs = require('fs');
 const path = require('path');
@@ -139,7 +139,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
   let args;
   try {
-    args = JSON.parse(toolCall.function.arguments || '{}');
+    const rawArgs = JSON.parse(toolCall.function.arguments || '{}');
+    args = {};
+    // Normalize keys: trim spaces to handle AI formatting errors (e.g., " text" instead of "text")
+    for (const key of Object.keys(rawArgs)) {
+      args[key.trim()] = rawArgs[key];
+    }
   } catch {
     args = {};
   }
@@ -304,6 +309,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
 
       case 'send_voice_message': {
+        if (!args.text || typeof args.text !== 'string' || args.text.trim().length === 0) {
+          result = { success: false, error: 'Missing "text" parameter. You must provide the text to convert to speech.' };
+          break;
+        }
         let cleanText = stripImageTags(removeDiscordEmoji(args.text || '')).replace(/<a?:[\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
           .replace(/<Transcription>[\s\S]*?<\/Transcription>/gi, '')
@@ -366,7 +375,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             await incrementVoiceCount(userCtx, chatKey);
             storeRecentVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
-            result = { success: false, error: `Error sending voice message: ${err.message}` };
+            await notifyAdmin('Voice Message Delivery', `Failed to send voice message to ${targetJid.jid}: ${err.message}`);
+            result = { success: false, error: `Error sending voice message: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
           }
           break;
         }
@@ -433,20 +443,25 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
 
       case 'generate_formal_request_pdf': {
-        const formalPdfBuffer = await generateFormalRequestPdf({
-          fullName: args.fullName,
-          title: args.title,
-          motivation: args.motivation,
-          requesterSignature: args.requesterSignature,
-          legalSignature: args.legalSignature,
-        });
-        const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
-        responseCtx.attachments.push({
-          name: formalFileName,
-          buffer: formalPdfBuffer,
-          mimetype: 'application/pdf',
-        });
-        result = { success: true, message: `Formal request PDF "${args.title}" generated successfully.` };
+        try {
+          const formalPdfBuffer = await generateFormalRequestPdf({
+            fullName: args.fullName,
+            title: args.title,
+            motivation: args.motivation,
+            requesterSignature: args.requesterSignature,
+            legalSignature: args.legalSignature,
+          });
+          const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
+          responseCtx.attachments.push({
+            name: formalFileName,
+            buffer: formalPdfBuffer,
+            mimetype: 'application/pdf',
+          });
+          result = { success: true, message: `Formal request PDF "${args.title}" generated successfully.` };
+        } catch (err) {
+          await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
+          result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+        }
         break;
       }
 
@@ -471,7 +486,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           deliveryCtx.contactedEmail.add(targetEmail.email);
           result = { success: true, message: `Email sent successfully to ${targetEmail.display}${emailAttachments.length > 0 ? ` with ${emailAttachments.length} attachment(s)` : ''}.` };
         } catch (err) {
-          result = { success: false, error: `Error sending email: ${err.message}` };
+          await notifyAdmin('Email Tool', `Failed to send email to ${targetEmail.email}: ${err.message}`);
+          result = { success: false, error: `Error sending email: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
         }
         break;
       }
@@ -512,7 +528,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           deliveryCtx.contactedWA.add(targetJid.jid);
           result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.` };
         } catch (err) {
-          result = { success: false, error: `Error sending WhatsApp message: ${err.message}` };
+          await notifyAdmin('WhatsApp Delivery', `Failed to send WhatsApp message to ${targetJid.display}: ${err.message}`);
+          result = { success: false, error: `Error sending WhatsApp message: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
         }
         break;
       }
@@ -572,7 +589,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         await notifyAdmin(`Bug Report — ${bugSource}`, bugDetails);
         result = {
           success: true,
-          message: 'Bug report sent to admin. REMINDER: tell the user in your final reply that you encountered a problem and notified the admin (do NOT stay silent about it).',
+          message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX.replace(' DO NOT use bug_report for this error.', '')}`,
         };
         break;
       }
@@ -581,7 +598,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         result = { success: false, error: `Tool "${name}" not recognized.` };
     }
   } catch (err) {
-    result = { success: false, error: `Error executing ${name}: ${err.message}` };
+    log.error(`   ❌ Unhandled tool error (${name}): ${err.message}`, err.stack);
+    await notifyAdmin(`Tool Execution (${name})`, `Unhandled error: ${err.message}`);
+    result = { success: false, error: `Error executing ${name}: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
   // Track per-round calls for idempotent tools

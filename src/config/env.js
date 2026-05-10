@@ -1,6 +1,8 @@
 // src/config/env.js
 require('dotenv').config();
 
+const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
+
 module.exports = {
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   FAST_MODEL: process.env.FAST_MODEL,
@@ -21,5 +23,9 @@ module.exports = {
   GEMIX_NOTIFY_URL: process.env.GEMIX_NOTIFY_URL,
   OPENDATALOADER_HYBRID_URL: process.env.OPENDATALOADER_HYBRID_URL,
   OPENDATALOADER_HYBRID_TIMEOUT: Number(process.env.OPENDATALOADER_HYBRID_TIMEOUT),
-  MUSIC_MODEL: process.env.MUSIC_MODEL
+  MUSIC_MODEL: process.env.MUSIC_MODEL,
+
+  // Feature Flags / Modes
+  MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, true),
+  XAI_TTS_ENABLED: toBool(process.env.XAI_TTS_ENABLED, false),
 };

@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const { OPENDATALOADER_HYBRID_URL, OPENDATALOADER_HYBRID_TIMEOUT } = require('../config/env');
 const { createLogger } = require('./logger');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
 
 const log = createLogger('Media');
 
@@ -234,9 +235,8 @@ function mediaTag(filename, mimetype) {
  * working). The base64 PDF is then **replaced** with the resulting markdown
  * transcription so the AI never sees raw PDF bytes.
  *
- * Single parse, no fallback re-parsing: if `persistParsedPdfToHistory`
- * fails, an explicit error message is injected for the AI (it must call
- * `bug_report` and stop, NOT retry parsing in agentic mode).
+ * fails, an explicit error message is injected for the AI (the admin is
+ * notified automatically; the AI should stop and not retry).
  *
  * @param {Array|string} content - Message content (can be string or array of parts)
  * @param {object} [opts] - Options
@@ -286,9 +286,10 @@ async function transcribeDocumentsInMessageContent(content, opts = {}) {
       const dataUrl = part.image_url?.url || '';
       const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
       if (!match || match[1].toLowerCase() !== 'application/pdf') {
+        await notifyAdmin('PDF Parser (Mime)', `Unsupported document type "${match ? match[1] : 'unknown'}"`);
         transcribed.push({
           type: 'text',
-          text: `[PDF parsing skipped: unsupported document type "${match ? match[1] : 'unknown'}"]. Inform the user and call bug_report.`,
+          text: `[PDF parsing skipped: unsupported document type "${match ? match[1] : 'unknown'}"]. ${ADMIN_NOTIFIED_SUFFIX}`,
         });
         continue;
       }
@@ -300,9 +301,10 @@ async function transcribeDocumentsInMessageContent(content, opts = {}) {
         // Defensive: every PDF reaching this point should originate from a
         // platform handler that always tags content parts with these fields.
         log.error(`❌ PDF content part missing history metadata — refusing to parse.`);
+        await notifyAdmin('PDF Parser (Metadata)', 'Missing history metadata for PDF part');
         transcribed.push({
           type: 'text',
-          text: `[PDF parsing skipped: internal error — missing history metadata]. STOP. Do NOT retry in agentic mode. Use bug_report (source="pdf-parser") to notify the admin and tell the user there is a system error and to retry later.`,
+          text: `[PDF parsing skipped: internal error — missing history metadata]. STOP. Do NOT retry in agentic mode. ${ADMIN_NOTIFIED_SUFFIX}`,
         });
         continue;
       }
@@ -324,9 +326,10 @@ async function transcribeDocumentsInMessageContent(content, opts = {}) {
 
       const errorMsg = persisted.error || 'Unknown PDF parsing error';
       log.error(`❌ PDF round-pre-call parsing failed for ${historyPath}: ${errorMsg}`);
+      await notifyAdmin('PDF Parser (Auto-Transcribe)', `Failed to parse ${historyPath}: ${errorMsg}`);
       transcribed.push({
         type: 'text',
-        text: `[PDF parsing failed: ${errorMsg}]. STOP. Do NOT enter agentic mode to retry parsing yourself. Use bug_report (source="pdf-parser", details=brief) to notify the admin, then tell the user there is a system error and to retry later.`,
+        text: `[PDF parsing failed: ${errorMsg}]. STOP. Do NOT enter agentic mode to retry parsing yourself. ${ADMIN_NOTIFIED_SUFFIX}`,
       });
     }
 

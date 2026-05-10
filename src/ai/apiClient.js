@@ -1,7 +1,7 @@
 // src/ai/apiClient.js
 const fs = require('fs');
 const path = require('path');
-const { notifyAdmin } = require('../utils/adminNotifier');
+const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 
@@ -172,7 +172,7 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
 
       log.error(`   ❌ API error: ${errMsg}`);
       await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
-      throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}`);
+      throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
     }
   }
 }
