@@ -45,7 +45,7 @@ function buildSystemPrompt(ctx) {
   prompt += '    <ToolExecution>\n';
   prompt += '- Execute all tools silently. Reply ONLY once after all tools complete.\n';
   prompt += `- You MUST provide a final response${isWhatsApp ? ' (text or send_voice_message)' : ''} to the user.\n`;
-  prompt += '- Attachment Buffer: images (image_search) require [image:N] tags to be sent to current user. All other files (music, pdf, outputs) are sent AUTOMATICALLY to current user. Delivery tools send ALL buffered files if includeAttachments=true (ignoring tags).\n';
+  prompt += '- Buffered files (PDF, audio, etc.) are sent AUTOMATICALLY to the current user. Only image search results require [imageN] tags in the final response to be sent. Delivery tools ignore tags and use only includeAttachments=true (send ALL) or false (send none).\n';
   prompt += '- Always use bug_report if a tool fails. After that, tell the user you notified the admin.\n';
   if (!isActiveMember) {
     prompt += '- Some tools (email, messages to others) are NOT available for this user.\n';

@@ -109,7 +109,7 @@ async function checkDailyToolUsage(toolId, userId) {
       if (tracking.lastUser === userId) {
         result = { allowed: true }; // Same user can reuse it today
       } else {
-        result = { allowed: false, reason: 'Il tool è già stato usato da un altro utente oggi.' };
+        result = { allowed: false, reason: 'The tool has already been used by another user today.' };
       }
     } else {
       // New day, allow and record

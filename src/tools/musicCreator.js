@@ -5,6 +5,7 @@ const { MUSIC_MODEL, OPENROUTER_API_KEY } = require('../config/env');
 const systemState = require('../utils/systemState');
 const { findMemberByWa, isAdmin } = require('../config/members');
 const { getRomeISO } = require('../utils/time');
+const { fetchExternal } = require('../utils/fetch');
 const { notifyAdmin } = require('../utils/adminNotifier');
 
 const log = createLogger('MusicCreator');
@@ -12,17 +13,18 @@ const log = createLogger('MusicCreator');
 const pendingGenerations = new Set();
 
 async function callLyriaStreaming(model, apiUrl, body, apiKey) {
+  const timeoutMs = 180000;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  let rawChunks = [];
   let audioChunks = [];
   let textChunks = [];
+  let buffer = '';
 
   try {
     log.info(`🎵 Lyria streaming call → ${model}`);
 
-    const res = await fetch(apiUrl, {
+    const res = await fetchExternal(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -32,7 +34,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
       },
       body: JSON.stringify({ ...body, stream: true }),
       signal: controller.signal,
-    });
+    }, 'MusicCreator (OpenRouter)', timeoutMs);
 
     if (!res.ok) {
       const errText = await res.text();
@@ -46,8 +48,9 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
@@ -56,18 +59,30 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
 
         try {
           const data = JSON.parse(dataStr);
-          rawChunks.push(data);
-
           const delta = data.choices?.[0]?.delta || {};
 
-          if (delta.audio?.data) {
-            audioChunks.push(delta.audio.data);
-          }
-          if (delta.audio?.transcript || delta.content) {
-            textChunks.push(delta.audio?.transcript || delta.content);
-          }
+          // === DEBUG LOGS (remove after testing) ===
+          log.debug(`Delta keys: ${Object.keys(delta)}`);
+          if (delta.content) log.debug(`Content sample: ${delta.content.substring(0, 80)}...`);
 
-        } catch (e) {}
+          // 1. Official OpenAI-style audio
+          if (delta.audio?.data) audioChunks.push(delta.audio.data);
+          if (delta.audio?.transcript) textChunks.push(delta.audio.transcript);
+
+          // 2. Lyria on OpenRouter: audio often arrives as raw base64 in content
+          if (delta.content) {
+            const c = delta.content.trim();
+            // Base64 audio is long, no spaces, and typically matches base64 charset
+            if (c.length > 200 && !c.includes(' ') && /^[A-Za-z0-9+/=]+$/.test(c)) {
+              audioChunks.push(c);
+              log.info(`🎵 Found base64 audio chunk (${c.length} chars)`);
+            } else {
+              textChunks.push(c);
+            }
+          }
+        } catch (e) {
+          log.debug(`Failed to parse SSE line`);
+        }
       }
     }
 
@@ -129,11 +144,14 @@ async function musicCreator(prompt, userCtx) {
       messages: [
         {
           role: 'user',
-          content: [{ type: 'text', text: prompt.trim() }]   // Array format as per OpenRouter docs
+          content: [{ type: 'text', text: prompt.trim() }]   // mandatory array for multi-modal models
         }
       ],
       modalities: ['text', 'audio'],
-      audio: { voice: 'alloy', format: 'mp3' }
+      // For Lyria, omit the audio object or keep it empty to avoid proxy confusion
+      ...(model.includes('lyria') ? {} : {
+        audio: { voice: 'alloy', format: 'mp3' }
+      })
     };
 
     const result = await callLyriaStreaming(model, apiUrl, body, apiKey);
@@ -161,11 +179,8 @@ async function musicCreator(prompt, userCtx) {
     // === CURRENT FALLBACK (lyrics only) ===
     log.warn('⚠️ Audio not received → returning only lyrics');
 
-    if (!userIsAdmin) {
-      const today = getRomeISO().split('T')[0];
-      const userKey = `${userId}_${today}`;
-      await systemState.update('musicDailyUsage', (current) => ({ ...current, [userKey]: true }));
-    }
+    // We DO NOT consume the daily limit if audio was not received
+    // This allows the user to try again.
 
     return {
       toolResult: {
