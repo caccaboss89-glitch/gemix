@@ -12,6 +12,7 @@ const { createLogger } = require('../../utils/logger');
 const log = createLogger('WA-PERSONAL');
 const responseLock = require('../../utils/responseLock');
 const { pushMessage, hasPendingBatch } = require('../../utils/messageBatcher');
+const { WhatsAppPresence } = require('../../utils/presence');
 
 let client;
 let _reconnectAttempts = 0;
@@ -216,6 +217,11 @@ async function _handlePersonalBatch(entries) {
       log.warn(`   ⚠️ History fetch failed (${historyErr.message}), proceeding without history`);
     }
 
+    const presence = new WhatsAppPresence(chat);
+    try {
+      await presence.start('typing');
+    } catch { }
+
     const ctx = {
       platform: PLATFORM_WA_PERSONAL,
       isGroup: false,
@@ -230,13 +236,8 @@ async function _handlePersonalBatch(entries) {
         : allParts,
       history,
       waJid: phoneJid,
+      presence,
     };
-
-    try {
-      if (typeof chat.sendState === 'function') {
-        await chat.sendState('typing');
-      }
-    } catch { }
 
     const response = await handleMessage(ctx);
 
@@ -251,11 +252,7 @@ async function _handlePersonalBatch(entries) {
       log.info(`\n📤 Sending response...`);
       await sendWhatsAppResponse(chat, response);
       log.info(`   ✅ Message sent`);
-      try {
-        if (typeof chat.sendState === 'function') {
-          await chat.sendState('paused');
-        }
-      } catch { }
+      await presence.stop();
     } catch (err) {
       log.error(`\n❌ Error sending response:`);
       log.error(`   ${err.message}`);
@@ -263,6 +260,7 @@ async function _handlePersonalBatch(entries) {
   } finally {
     try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
     try { responseLock.unlock(lockKey); } catch { }
+    try { if (presence) await presence.stop(); } catch { }
   }
 }
 

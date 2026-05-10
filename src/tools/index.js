@@ -180,6 +180,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
   let result;
 
   try {
+    // Switch to recording state if the tool generates audio
+    if (name === 'send_voice_message' || name === 'music_creator') {
+      if (userCtx.presence && typeof userCtx.presence.setRecording === 'function') {
+        await userCtx.presence.setRecording();
+      }
+    }
+
     switch (name) {
       case 'web_search': {
         result = await webSearch(args.query, args.num_results, args.allowed_domains, args.excluded_domains);

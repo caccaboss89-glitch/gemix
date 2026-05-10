@@ -269,6 +269,7 @@ async function handleMessage(ctx) {
       // system message to be injected.
       agenticUnlocked: false,
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
+      presence: ctx.presence || null,
     };
     projectLockCtx = cloudProbeCtx;
     projectLockOwnerId = userCtx.requestId;
