@@ -63,6 +63,17 @@ const RELEASE_NOTIFY_ALREADY_REGEX   = /^\u2139\uFE0F Le notifiche degli aggiorn
 const FALLBACK_ERROR_PREFIX = '⚠️ GemiX: Generazione della risposta fallita. Riprova tra poco.';
 const FALLBACK_ERROR_REGEX  = /^\u26A0\uFE0F GemiX: Generazione della risposta fallita\./;
 
+// ── Temporary attachment links ────────────────────────────────────────────────
+
+/**
+ * System message indicating that some attachments couldn't be sent directly
+ * and are available via temporary download links instead.
+ * Format: "📥 Allegat(o|i) non disponibil(e|i) sulla piattaforma. Scarical(o|i) da questo link temporaneo che scadrà tra un'ora"
+ * The regex matches on the fixed emoji prefix.
+ */
+const TEMP_ATTACHMENT_PREFIX = '📥 Allegat';
+const TEMP_ATTACHMENT_REGEX  = /^\uD83D\uDCE5 Allegat/;
+
 // ── Legacy error / alert patterns (kept for backward compatibility) ──────────
 // These match older message formats that may still exist in history.
 const LEGACY_ERROR_REGEX  = /^\u274C \*ERRORE/;   // ❌ *ERRORE
@@ -79,6 +90,7 @@ const ALL_SYSTEM_MESSAGE_REGEXES = [
   RELEASE_NOTIFY_ENABLED_REGEX,
   RELEASE_NOTIFY_ALREADY_REGEX,
   FALLBACK_ERROR_REGEX,
+  TEMP_ATTACHMENT_REGEX,
   LEGACY_ERROR_REGEX,
   LEGACY_AVVISO_REGEX,
   LEGACY_REMINDER_REGEX,
@@ -104,6 +116,7 @@ module.exports = {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
+  TEMP_ATTACHMENT_PREFIX,
   // individual regexes (for targeted checks)
   RELEASE_NOTIFICATION_REGEX,
   MUSIC_WRAP_REGEX,
@@ -112,6 +125,7 @@ module.exports = {
   RELEASE_NOTIFY_ENABLED_REGEX,
   RELEASE_NOTIFY_ALREADY_REGEX,
   FALLBACK_ERROR_REGEX,
+  TEMP_ATTACHMENT_REGEX,
   LEGACY_ERROR_REGEX,
   LEGACY_AVVISO_REGEX,
   LEGACY_REMINDER_REGEX,

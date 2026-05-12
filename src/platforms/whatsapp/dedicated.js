@@ -215,6 +215,12 @@ async function _handleDedicatedBatch(entries) {
     } catch (err) {
       log.error(`\n❌ Error sending response:`);
       log.error(`   ${err.message}`);
+      try {
+        const { notifyAdmin } = require('../../utils/adminNotifier');
+        await notifyAdmin('WA Dedicated Chat Delivery', `Failed to send response to chat ${chat.id._serialized}: ${err.message}`);
+      } catch (adminErr) {
+        log.error(`Failed to notify admin: ${adminErr.message}`);
+      }
     }
   } finally {
     try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }

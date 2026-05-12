@@ -314,9 +314,18 @@ async function runInProjectSandbox({
             const ffprobeCmd = `ffprobe -v error -show_format -show_streams "${absPath}"`;
             execSync(ffprobeCmd, { stdio: 'pipe', timeout: 5000 });
           } catch (err) {
-            isValid = false;
-            attachSkippedReason = `Invalid media file (ffprobe failed): ${err.message}`;
-            log.warn(`   ⚠️ Skipping auto-attach of corrupt media: ${rel} - ${attachSkippedReason}`);
+            const isMissingTool = err.code === 'ENOENT' || 
+              String(err.message).includes('not recognized') || 
+              String(err.message).includes('not found') ||
+              err.status === 127;
+              
+            if (isMissingTool) {
+              log.warn(`   ⚠️ ffprobe is not available on this host. Bypassing media integrity validation for ${rel}.`);
+            } else {
+              isValid = false;
+              attachSkippedReason = `Invalid media file (corrupt or unreadable): ${err.message}`;
+              log.warn(`   ⚠️ Skipping auto-attach of corrupt media: ${rel} - ${attachSkippedReason}`);
+            }
           }
         }
         if (isValid) {

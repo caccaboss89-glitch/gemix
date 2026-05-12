@@ -31,6 +31,7 @@ const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { storeRecentVoiceText } = require('../utils/historySync');
 const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
+const { sendAttachmentsWithFallback } = require('../utils/attachmentFallback');
 const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId, userTotalBytes, userQuotaBytes } = require('../utils/userPaths');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/projectState');
@@ -73,8 +74,7 @@ function _resolveTargetWaJid(args, userCtx) {
     if (recipientName) {
       const member = findMemberByName(recipientName);
       if (member) return { jid: member.wa, display: member.name };
-      // If name not found, don't fail immediately if we can just use the user's own number
-      log.info(`   Target name "${recipientName}" not found among active members.`);
+      return { error: { success: false, error: `Member "${recipientName}" not found.` } };
     }
     if (userCtx.waJid) {
       return { jid: userCtx.waJid, display: userCtx.userName || 'yourself' };
@@ -363,22 +363,45 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             const voiceMedia = new MessageMedia('audio/ogg', voiceBuf.toString('base64'), 'voice.ogg');
             await sendWhatsAppDirect(targetJid.jid, voiceMedia, { sendAudioAsVoice: true });
 
-            // Send accumulated attachments
+            // Send accumulated attachments with fallback support
             if (includeAttachments && responseCtx.attachments.length > 0) {
-              for (const att of responseCtx.attachments) {
+              const sendAttachment = async (att) => {
                 const m = toWhatsAppMediaArgs(att);
-                if (!m) continue;
+                if (!m) {
+                  throw new Error(`Cannot convert attachment to WhatsApp media: ${att.name || 'unknown'}`);
+                }
                 const media = new MessageMedia(m.mimetype, m.base64, m.name);
                 const options = {};
                 if (att.sendAudioAsVoice) options.sendAudioAsVoice = true;
                 await sendWhatsAppDirect(targetJid.jid, media, options);
+              };
+
+              const sendResult = await sendAttachmentsWithFallback(
+                responseCtx.attachments,
+                sendAttachment,
+                { platform: 'whatsapp' }
+              );
+
+              // If there were failed attachments, send fallback message
+              if (sendResult.fallbackMessage) {
+                try {
+                  await sendWhatsAppDirect(targetJid.jid, sendResult.fallbackMessage);
+                  log.info(`Sent fallback message for ${sendResult.failed.length} attachment(s)`);
+                } catch (err) {
+                  log.error(`Failed to send fallback message: ${err.message}`);
+                }
               }
+
+              const attachmentsSentCount = sendResult.sent.length;
+              const attachmentsFailedCount = sendResult.failed.length;
+
+              deliveryCtx.contactedWA.add(targetJid.jid);
+              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}${attachmentsFailedCount > 0 ? ` (${attachmentsFailedCount} via temporary links)` : ''}.` };
+            } else {
+              deliveryCtx.contactedWA.add(targetJid.jid);
+              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}.` };
             }
 
-            const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
-
-            deliveryCtx.contactedWA.add(targetJid.jid);
-            result = { success: true, message: `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.` };
             await incrementVoiceCount(userCtx, chatKey);
             storeRecentVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
@@ -481,17 +504,63 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           break;
         }
         try {
-          const emailAttachments = includeAttachments
-            ? responseCtx.attachments.map(toEmailAttachment).filter(Boolean)
-            : [];
-          await sendEmailDirect(
-            targetEmail.email,
-            stripImageTags(args.subject),
-            `<div style="font-family:sans-serif">${_escapeHtml(stripImageTags(args.body || '')).replace(/\n/g, '<br>')}</div>`,
-            emailAttachments
-          );
-          deliveryCtx.contactedEmail.add(targetEmail.email);
-          result = { success: true, message: `Email sent successfully to ${targetEmail.display}${emailAttachments.length > 0 ? ` with ${emailAttachments.length} attachment(s)` : ''}.` };
+          // Try to send with fallback support for attachments
+          if (includeAttachments && responseCtx.attachments.length > 0) {
+            // Validation step: separate sent vs failed (link-fallback)
+            const sent = [];
+            const failed = [];
+            for (const att of responseCtx.attachments) {
+              const emailAtt = toEmailAttachment(att);
+              // Check if valid and not too large for direct email (arbitrary 15MB limit)
+              const MAX_EMAIL_ATT_SIZE = 15 * 1024 * 1024;
+              const { attachmentSize } = require('../utils/attachments');
+              const size = attachmentSize(att);
+
+              if (emailAtt && emailAtt.filename && (emailAtt.content || emailAtt.path) && size < MAX_EMAIL_ATT_SIZE) {
+                sent.push(emailAtt);
+              } else {
+                failed.push(att);
+              }
+            }
+
+            let fallbackMessage = null;
+            if (failed.length > 0) {
+              try {
+                const { buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
+                const fallbackData = buildFallbackAttachmentMessage(failed, { platform: 'email' });
+                fallbackMessage = fallbackData.message;
+              } catch (err) {
+                log.error(`Failed to generate email fallback links: ${err.message}`);
+                fallbackMessage = `⚠️ Alcuni allegati non hanno potuto essere inclusi direttamente nell'email e non è stato possibile creare link temporanei.`;
+              }
+            }
+
+            let emailBodyHtml = `<div style="font-family:sans-serif">${_escapeHtml(stripImageTags(args.body || '')).replace(/\n/g, '<br>')}</div>`;
+
+            if (fallbackMessage) {
+              emailBodyHtml += `<br><hr style="border:0;border-top:1px solid #ccc;margin:20px 0;"><div style="font-family:sans-serif;color:#555;">${_escapeHtml(fallbackMessage).replace(/\n/g, '<br>')}</div>`;
+            }
+
+            // Send main email with all direct attachments
+            await sendEmailDirect(
+              targetEmail.email,
+              stripImageTags(args.subject),
+              emailBodyHtml,
+              sent
+            );
+
+            deliveryCtx.contactedEmail.add(targetEmail.email);
+            result = { success: true, message: `Email sent successfully to ${targetEmail.display}${sent.length > 0 ? ` with ${sent.length} attachment(s)` : ''}${failed.length > 0 ? ` (${failed.length} via temporary links)` : ''}.` };
+          } else {
+            await sendEmailDirect(
+              targetEmail.email,
+              stripImageTags(args.subject),
+              `<div style="font-family:sans-serif">${_escapeHtml(stripImageTags(args.body || '')).replace(/\n/g, '<br>')}</div>`,
+              []
+            );
+            deliveryCtx.contactedEmail.add(targetEmail.email);
+            result = { success: true, message: `Email sent successfully to ${targetEmail.display}.` };
+          }
         } catch (err) {
           await notifyAdmin('Email Tool', `Failed to send email to ${targetEmail.email}: ${err.message}`);
           result = { success: false, error: `Error sending email: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -520,20 +589,45 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         try {
           await sendWhatsAppDirect(targetJid.jid, stripImageTags(args.message));
           if (includeAttachments && responseCtx.attachments.length > 0) {
-            for (const att of responseCtx.attachments) {
+            // Try to send attachments with fallback support
+            const sendAttachment = async (att) => {
               const m = toWhatsAppMediaArgs(att);
-              if (!m) continue;
+              if (!m) {
+                throw new Error(`Cannot convert attachment to WhatsApp media: ${att.name || 'unknown'}`);
+              }
               const media = new MessageMedia(m.mimetype, m.base64, m.name);
               const options = {};
               if (att.sendAudioAsVoice) options.sendAudioAsVoice = true;
               await sendWhatsAppDirect(targetJid.jid, media, options);
+            };
+
+            const sendResult = await sendAttachmentsWithFallback(
+              responseCtx.attachments,
+              sendAttachment,
+              { platform: 'whatsapp' }
+            );
+
+            log.info(`WhatsApp delivery: ${sendResult.sent.length} sent, ${sendResult.failed.length} failed`);
+
+            // If there were failed attachments, send fallback message
+            if (sendResult.fallbackMessage) {
+              try {
+                await sendWhatsAppDirect(targetJid.jid, sendResult.fallbackMessage);
+                log.info(`Sent fallback message for ${sendResult.failed.length} attachment(s)`);
+              } catch (err) {
+                log.error(`Failed to send fallback message: ${err.message}`);
+              }
             }
+
+            const attachmentsSentCount = sendResult.sent.length;
+            const attachmentsFailedCount = sendResult.failed.length;
+
+            deliveryCtx.contactedWA.add(targetJid.jid);
+            result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}${attachmentsFailedCount > 0 ? ` (${attachmentsFailedCount} via temporary links)` : ''}.` };
+          } else {
+            deliveryCtx.contactedWA.add(targetJid.jid);
+            result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}.` };
           }
-
-          const attachmentsSentCount = includeAttachments ? responseCtx.attachments.length : 0;
-
-          deliveryCtx.contactedWA.add(targetJid.jid);
-          result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}.` };
         } catch (err) {
           await notifyAdmin('WhatsApp Delivery', `Failed to send WhatsApp message to ${targetJid.display}: ${err.message}`);
           result = { success: false, error: `Error sending WhatsApp message: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };

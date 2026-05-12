@@ -61,6 +61,7 @@ const { setAdminNotifierClient } = require('./utils/adminNotifier');
 const { initRegolamentoRag } = require('./rag/regolamentoRag');
 const sandboxManager = require('./sandbox/sandboxManager');
 const { startInternalNotifyServer } = require('./utils/internalNotifyServer');
+const { startTempFileServer } = require('./utils/tempFileServer');
 
 log.info('🤖 GemiX — Avvio in corso...\n');
 
@@ -84,6 +85,7 @@ initRegolamentoRag()
 startScheduler();
 sandboxManager.installShutdownHook();
 startInternalNotifyServer();
+startTempFileServer();
 
 process.on('SIGINT', async () => {
   log.info('\n🛑 GemiX — Shutting down...');

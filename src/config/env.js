@@ -24,6 +24,7 @@ module.exports = {
   OPENDATALOADER_HYBRID_URL: process.env.OPENDATALOADER_HYBRID_URL,
   OPENDATALOADER_HYBRID_TIMEOUT: Number(process.env.OPENDATALOADER_HYBRID_TIMEOUT),
   MUSIC_MODEL: process.env.MUSIC_MODEL,
+  GEMIX_PUBLIC_URL: process.env.GEMIX_PUBLIC_URL,
 
   // Feature Flags / Modes
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, true),
