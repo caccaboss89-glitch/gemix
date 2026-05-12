@@ -91,7 +91,8 @@ function buildPersonalCloudPointer(ctx) {
   const count = Array.isArray(ctx.projects) ? ctx.projects.length : 0;
   return `  <PersonalCloud lite="true">
   - Selected project: ${escapeXml(current)} (Last used: ${escapeXml(last)}) [Total projects: ${count}].
-  - Need to compute, cloud access and management, create/edit files, run scripts, download, OCR, charts → Call agentic_unlock FIRST, ALONE (no other tools). After unlock, the full toolkit is available the next round.
+  - Cloud access: If the user refers to files in their cloud or asks to check/send files on the server -> Call agentic_unlock FIRST, ALONE (no other tools).
+  - Need to compute, create/edit files, run scripts, download, OCR, charts → Call agentic_unlock FIRST, ALONE (no other tools). After unlock, the full toolkit is available the next round.
   - DO NOT call the unlock service for: standard chat, web search, voice responses, programming, memory, and other already accessible tools.
   - NOTE: GemiX does NOT support audio/video editing or creation. Do not use agentic_unlock for audio/video tasks.
   - yt-dlp allowed domains: youtube.com, twitter.com, x.com, instagram.com, tiktok.com, facebook.com (and their CDNs).
