@@ -40,7 +40,7 @@ function buildAgenticBriefing(ctx = {}) {
       - One project per user request. Use \`gemix-project create\` before writing files.
       - Write/edit access ONLY inside the current project: code/ (scripts), temp/ (intermediate), output/ (final files).
       - Standard Paths: ALWAYS use \`/workspace/{code|temp|output}/file\` for project files and \`/readonly/{history|permanent|searched_images|skills}/file\` for global storage.
-      - Cloud Files: If the user asks for a file that is already present or uploaded, run \`ls -la /readonly/permanent/\` via bash to check if the file is already there. You can use \`attach_file\` tool to send it immediately.
+      - Cloud/Server Files: If the user refers to files in their cloud, server, or already uploaded, do NOT run web searches, check history directories, or create unnecessary scratch projects! You MUST run \`ls -la /readonly/directory_name/\` via bash. To attach files call \`attach_file\`.
       - NOTE: GemiX does NOT support audio/video editing or creation. Do not attempt to use pydub, librosa, or moviepy for media editing tasks.
     </Rules>
     <ProjectManagement>
