@@ -37,10 +37,11 @@ function buildAgenticBriefing(ctx = {}) {
       - /workspace/output/ (Final deliverables; files here are AUTO-DELIVERED to the user)
     </Layout>
     <Rules>
+      - Everything you access (files, folders, server paths) is strictly backend; users have zero visibility.
       - One project per user request. Use \`gemix-project create\` before writing files.
       - Write/edit access ONLY inside the current project: code/ (scripts), temp/ (intermediate), output/ (final files).
       - Standard Paths: ALWAYS use \`/workspace/{code|temp|output}/file\` for project files and \`/readonly/{history|permanent|searched_images|skills}/file\` for global storage.
-      - Cloud/Server Files: If the user refers to files in their cloud, server, or already uploaded, do NOT run web searches, check history directories, or create unnecessary scratch projects! You MUST run \`ls -la /readonly/directory_name/\` via bash. To attach files call \`attach_file\`.
+      - Cloud/Server Files: If the user refers to files in their cloud/storage run \`ls -la /readonly/directory_name/\` via bash. To attach files (to show them to the user) call \`attach_file\`.
       - NOTE: GemiX does NOT support audio/video editing or creation. Do not attempt to use pydub, librosa, or moviepy for media editing tasks.
     </Rules>
     <ProjectManagement>
