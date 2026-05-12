@@ -256,7 +256,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   const properties = {
     text: {
       type: 'string',
-      description: XAI_TTS_ENABLED 
+      description: XAI_TTS_ENABLED
         ? 'TTS text (max 1000 chars), supports vocal effects. Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.'
         : 'TTS text (max 1000 chars). Note: vocal effects/tags are NOT supported at the moment.',
     },
@@ -326,7 +326,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — Send a WhatsApp message to another recipient. Use includeAttachments=true to send ALL currently buffered files.',
+    description: 'Delivery tool — Send a WhatsApp message to another recipient. NEVER use this tool to message the current user or to send intermediate updates during a conversation. Use includeAttachments=true to send ALL currently buffered files.',
     properties,
     required: isAdmin ? ['message'] : ['recipient', 'message'],
   });

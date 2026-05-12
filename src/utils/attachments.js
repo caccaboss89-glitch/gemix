@@ -62,6 +62,11 @@ function toEmailAttachment(att) {
  * Returns { mimetype, base64, name } that can be passed to `new MessageMedia(...)`.
  */
 function toWhatsAppMediaArgs(att) {
+  const size = attachmentSize(att);
+  if (size > 100 * 1024 * 1024) {
+    // Too large for direct WhatsApp sending — return null to trigger fallback
+    return null;
+  }
   const buf = readAttachmentBuffer(att);
   if (!buf) return null;
   return { mimetype: att.mimetype, base64: buf.toString('base64'), name: att.name };

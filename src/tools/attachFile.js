@@ -20,7 +20,7 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('AttachFile');
 
-const MAX_ATTACH_BYTES = 100 * 1024 * 1024; // 100 MB per single attachment
+const MAX_ATTACH_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB per single attachment (fallback link handles large files)
 
 const MIME_BY_EXT = {
   '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv',
@@ -97,7 +97,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
     return { success: false, error: 'File is empty.' };
   }
   if (stat.size > MAX_ATTACH_BYTES) {
-    return { success: false, error: `File too large (${(stat.size / 1048576).toFixed(1)} MB; max ${MAX_ATTACH_BYTES / 1048576} MB). Compress it first.` };
+    return { success: false, error: `File too large (${(stat.size / (1024 * 1024 * 1024)).toFixed(1)} GB; max 20 GB). Please contact the Admin for manual delivery.` };
   }
 
   // Avoid attaching the same file twice in the same response.
