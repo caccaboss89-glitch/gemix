@@ -25,8 +25,16 @@ function buildAgenticBriefing(ctx = {}) {
   <PersonalCloud>
     <Layout>
       Quota: 1 GB.
-      Global folders (read-only): /readonly/ (contains history/ (chat history), permanent/ (user(s) cloud), searched_images/ (searched images saved with save_to_disk=true), skills/).
-      Project folders (writable): /workspace/ (contains code/, temp/, output/).
+      Global Absolute Paths (read-only):
+      - /readonly/history/ (Chat history logs)
+      - /readonly/permanent/ (User permanent cloud storage)
+      - /readonly/searched_images/ (Searched images with save_to_disk=true)
+      - /readonly/skills/ (Global skill catalogs)
+
+      Project Absolute Paths (writable, active project):
+      - /workspace/code/ (Scripts and project code files)
+      - /workspace/temp/ (Intermediate files, graphs and logs)
+      - /workspace/output/ (Final deliverables; files here are AUTO-DELIVERED to the user)
     </Layout>
     <Rules>
       - One project per user request. Use \`gemix-project create\` before writing files.
