@@ -1,9 +1,9 @@
 // src/tools/attachFile.js
-// Register an existing file from the user's personal cloud as an attachment
+// Register an existing file from the user's searched storage as an attachment
 // for the current response. Files are AUTO-DELIVERED in the current chat.
 // Cross-platform:
 //   - Discord: chat history only (Discord client auto-delivers responseCtx.attachments).
-//   - WhatsApp: /readonly/{permanent,searched_images}/, /workspace/{temp,code}/...
+//   - WhatsApp: /readonly/{searched_images}/, /workspace/{temp,code}/...
 //     (output/ is excluded: those files are already AUTO-DELIVERED to the user)
 //     Files are auto-included in the current chat response (no send_whatsapp_message needed).
 //     Use send_whatsapp_message / send_email ONLY to send to OTHER recipients.
@@ -68,7 +68,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
   if (check.zone === 'history') {
     return {
       success: false,
-      error: 'attach_file refused: files from chat history are already visible to the user — do not re-deliver them. Use attach_file only for permanent/, searched_images/ or /workspace/{temp|code}/...',
+      error: 'attach_file refused: files from chat history are already visible to the user — do not re-deliver them. Use attach_file only for searched_images/ or /workspace/{temp|code}/...',
     };
   }
   if (check.zone === 'skills') {
@@ -77,7 +77,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
   if (check.zone === 'project_sub' && check.subdir === 'output') {
     return {
       success: false,
-      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for /workspace/{temp|code}/, permanent/, or searched_images/.',
+      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for /workspace/{temp|code}/ or searched_images/.',,
     };
   }
 

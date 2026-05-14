@@ -1,5 +1,5 @@
 // src/utils/userPaths.js
-// Centralized filesystem helpers for the per-user "personal cloud".
+// Centralized filesystem helpers for per-user storage.
 // All agentic tools (read_file, write_file, edit_file, code_execution, bash,
 // project management) MUST go through resolveStorageId + isPathAllowed.
 
@@ -9,7 +9,7 @@ const { DATA_DIR, PLATFORM_DISCORD, MAX_PROJECT_NAME_LEN, MAX_USER_TOTAL_MB } = 
 
 // ── Constants ──
 
-const FIXED_TOP_DIRS = ['history', 'permanent', 'projects', 'searched_images'];
+const FIXED_TOP_DIRS = ['history', 'projects', 'searched_images'];
 const FIXED_PROJECT_SUBDIRS = ['temp', 'output', 'code'];
 const SKILLS_DIR = path.join(DATA_DIR, 'skills');
 
@@ -43,7 +43,6 @@ function getUserRoot(userCtx) {
 }
 
 function getHistoryDir(userCtx)         { const r = getUserRoot(userCtx); return r && path.join(r, 'history'); }
-function getPermanentDir(userCtx)       { const r = getUserRoot(userCtx); return r && path.join(r, 'permanent'); }
 function getProjectsRoot(userCtx)       { const r = getUserRoot(userCtx); return r && path.join(r, 'projects'); }
 function getSearchedImagesDir(userCtx)  { const r = getUserRoot(userCtx); return r && path.join(r, 'searched_images'); }
 function getStateFile(userCtx)          { const r = getUserRoot(userCtx); return r && path.join(r, '.state.json'); }
@@ -62,7 +61,7 @@ function getProjectSubdir(userCtx, projectName, subdir) {
 /**
  * Translates sandbox-style paths into host-style project paths.
  * - /workspace/... -> projects/<slug>/...
- * - /readonly/...  -> ... (history, permanent, etc.)
+ * - /readonly/...  -> ... (history, searched_images, etc.)
  * Used to unify the AI's perspective across host tools and sandbox execution.
  */
 function normalizeAgenticPath(rawPath, currentProject) {
@@ -79,7 +78,7 @@ function normalizeAgenticPath(rawPath, currentProject) {
     }
   }
 
-  // Global read-only normalization (chat history, permanent/, searched_images/, etc.)
+  // Global read-only normalization (chat history, searched_images/, etc.)
   if (trimmed.startsWith('/readonly/')) {
     return trimmed.replace('/readonly/', '');
   }
@@ -102,7 +101,6 @@ function ensureUserSkeleton(userCtx) {
   if (!root) return false;
   ensureDir(root);
   ensureDir(getHistoryDir(userCtx));
-  ensureDir(getPermanentDir(userCtx));
   ensureDir(getProjectsRoot(userCtx));
   ensureDir(getSearchedImagesDir(userCtx));
   return true;
@@ -175,7 +173,7 @@ function _isInside(base, target) {
  *  - Input must be a relative POSIX/Windows-ish path. Absolute paths, backslash
  *    escapes outside user root, or paths with NUL bytes are rejected.
  *  - Returns { ok, absPath, zone, projectName, subdir, reason }.
- *    zone: 'history' | 'permanent' | 'searched_images' |
+ *    zone: 'history' | 'searched_images' |
  *          'project_sub' | 'project_root' | 'projects_root' | 'user_root' | 'skills' | 'outside'
  *
  * `skills:<name>.md` → resolves to DATA_DIR/skills/<name>.md (read-only, WA only).
@@ -223,7 +221,7 @@ function classifyUserPath(userCtx, rawPath) {
     return { ok: true, absPath, zone: 'user_root' };
   }
   if (head === 'history')        return { ok: true, absPath, zone: 'history' };
-  if (head === 'permanent')      return { ok: true, absPath, zone: 'permanent' };
+
   if (head === 'searched_images') return { ok: true, absPath, zone: 'searched_images' };
   if (head === 'projects') {
     if (rel.length === 1) return { ok: true, absPath, zone: 'projects_root' };
@@ -284,7 +282,7 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
   }
   // History is strictly read-only from the AI side.
   if (c.zone === 'history') {
-    return { ok: false, reason: 'Chat history is read-only. Copy files to permanent/ or a project instead.' };
+    return { ok: false, reason: 'Chat history is read-only. Copy files to a project instead.' };
   }
   if (c.zone === 'skills') {
     return { ok: false, reason: 'skills/ is read-only.' };
@@ -297,10 +295,6 @@ function isPathAllowed(userCtx, rawPath, opts = {}) {
   }
   if (c.zone === 'project_root') {
     return { ok: false, reason: 'Cannot write directly in the project root. Use temp/, output/ or code/.' };
-  }
-  // permanent/ is managed via copy tools, not direct writes.
-  if (c.zone === 'permanent') {
-    return { ok: false, reason: 'permanent/ can only be populated via `gemix-project copy-to-permanent <history_filename>` (run via bash).' };
   }
   // searched_images/ is populated only by the image_search tool with save_to_disk.
   if (c.zone === 'searched_images') {
@@ -398,7 +392,7 @@ function projectSizeBytes(userCtx, projectName) {
 
 /**
  * Aggregate size of everything the AI controls under the user root:
- * projects/ (all of them) + searched_images/. Chat history and permanent/ are
+ * projects/ (all of them) + searched_images/. Chat history is
  * user-driven and excluded from the agentic quota on purpose.
  */
 function userTotalBytes(userCtx) {
@@ -421,7 +415,7 @@ module.exports = {
   resolveStorageId,
   getUserRoot,
   getHistoryDir,
-  getPermanentDir,
+
   getProjectsRoot,
   getSearchedImagesDir,
   getStateFile,

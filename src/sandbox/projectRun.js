@@ -195,7 +195,7 @@ async function runInProjectSandbox({
   const usedBefore = userTotalBytes(userCtx);
   if (usedBefore >= quotaBytes) {
     return {
-      error: `Your personal cloud is full (${(usedBefore / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB used across all projects + searched_images). Free space via \`gemix-project cleanup\` (per-folder) or \`gemix-project delete --confirmed\` (whole project) via bash, and ask the user which artefacts to keep.`,
+
     };
   }
 
@@ -265,7 +265,7 @@ async function runInProjectSandbox({
   let attachedCount = 0;
 
   // Resolve project root realpath once: every discovered file MUST resolve
-  // inside it. Anything pointing outside (e.g. symlink to /readonly/permanent)
+  // inside it. Anything pointing outside (e.g. symlink to /readonly/searched_images)
   // is treated as an exfiltration attempt and refused for auto-attach.
   let projectRealRoot;
   try { projectRealRoot = fs.realpathSync(projectDir); }
@@ -366,10 +366,10 @@ async function runInProjectSandbox({
   let quotaWarning = null;
   const usedAfter = userTotalBytes(userCtx);
   if (usedAfter >= quotaBytes) {
-    quotaWarning = `Personal cloud is now FULL (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Subsequent code_execution / write_file calls will fail until you run \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` via bash.`;
+
   } else if (usedAfter >= quotaBytes * 0.9) {
     const pct = Math.round((usedAfter / quotaBytes) * 100);
-    quotaWarning = `Personal cloud is ${pct}% full (${(usedAfter / 1048576).toFixed(0)} / ${MAX_USER_TOTAL_MB} MB). Consider \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` via bash before more file-producing calls.`;
+
   }
 
   return {

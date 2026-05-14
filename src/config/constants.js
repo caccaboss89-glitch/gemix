@@ -39,7 +39,7 @@ module.exports = {
   MAX_TOOL_ROUNDS: 5,
   MAX_TOOL_ROUNDS_AGENTIC: 20,
 
-  // Agentic cloud / projects
+  // Agentic projects
   MAX_PROJECTS_PER_USER: 10,
   // Total user disk quota (sum of physical projects/ + searched_images/ folders).
   MAX_USER_TOTAL_MB: 1024,

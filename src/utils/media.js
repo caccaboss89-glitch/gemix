@@ -66,7 +66,7 @@ function mediaToContentPart(buffer, mimetype, opts = {}) {
  *
  * @param {Buffer} buffer - raw PDF bytes
  * @param {object} [opts]
- * @param {string} [opts.persistDir] - if set, images are saved here permanently
+ * @param {string} [opts.persistDir] - if set, images are saved here
  *                                     (used by syncFileToHistory for directory-based storage)
  * @returns {Promise<{success:boolean, text?:string, pages?:number, assetsDir?:string, error?:string}>}
  */

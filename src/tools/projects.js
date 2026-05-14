@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { MAX_PROJECTS_PER_USER, MAX_USER_TOTAL_MB, PLATFORM_DISCORD } = require('../config/constants');
-const { resolveStorageId, ensureUserSkeleton, ensureProjectSkeleton, sanitizeProjectName, listProjects, readProjectMeta, writeProjectMeta, projectExists, getProjectRoot, getProjectSubdir, getPermanentDir, getSearchedImagesDir, userTotalBytes, userQuotaBytes, projectSizeBytes, FIXED_PROJECT_SUBDIRS, isPathAllowed } = require('../utils/userPaths');
+const { resolveStorageId, ensureUserSkeleton, ensureProjectSkeleton, sanitizeProjectName, listProjects, readProjectMeta, writeProjectMeta, projectExists, getProjectRoot, getProjectSubdir, getSearchedImagesDir, userTotalBytes, userQuotaBytes, projectSizeBytes, FIXED_PROJECT_SUBDIRS, isPathAllowed } = require('../utils/userPaths');
 const { getCurrentProject, setCurrentProject } = require('../utils/projectState');
 const { copyFromHistory } = require('../utils/historySync');
 const { createLogger } = require('../utils/logger');
@@ -268,31 +268,9 @@ async function cleanupProjectTool(args, userCtx) {
 }
 
 /**
- * Invoked by `gemix-project copy-to-permanent <filename>`. Args: { history_filename }.
- * Copies a file from chat history to permanent/ (never moves).
- */
-async function copyToPermanentTool(args, userCtx) {
-  const guard = _guardPlatform(userCtx);
-  if (guard) return guard;
-  let name = args && args.history_filename;
-  if (!name) return _err('Missing "history_filename".');
-  name = _normalizeHistoryCopySource(name);
-  if (!name) return _err('"history_filename" must be a file in chat history, or a parsed PDF folder ending with "/". Accepted examples: "file.pdf", "pdf_name/", "/readonly/history/pdf_name/".');
-  ensureUserSkeleton(userCtx);
-  const dest = getPermanentDir(userCtx);
-  const storageId = resolveStorageId(userCtx);
-  const result = copyFromHistory(storageId, name, dest);
-  if (!result.success) return _err(result.error);
-  return {
-    success: true,
-    message: `File copied: ${name} (chat history) -> permanent/${result.finalName}`,
-  };
-}
-
-/**
  * Invoked by `gemix-project copy-to-project <source> [<subdir>]`.
  * Args: { source, subdir?: 'temp'|'output'|'code' }.
- * Source may be history, permanent, or searched_images. Default subdir = temp.
+ * Source may be history or searched_images. Default subdir = temp.
  * Writes into the currently selected project.
  */
 async function copyToProjectTool(args, userCtx) {
@@ -308,11 +286,11 @@ async function copyToProjectTool(args, userCtx) {
   const current = await getCurrentProject(userCtx);
   if (!current) return _err('No project is currently selected. Run `gemix-project create` (new) or `gemix-project switch <slug>` (existing) via bash first.');
 
-  // Source must be read-allowed and live in chat history, permanent, or searched_images.
+  // Source must be read-allowed and live in chat history or searched_images.
   const srcCheck = isPathAllowed(userCtx, source, { op: 'read' });
   if (!srcCheck.ok) return _err(`Invalid source: ${srcCheck.reason}`);
-  if (srcCheck.zone !== 'history' && srcCheck.zone !== 'permanent' && srcCheck.zone !== 'searched_images') {
-    return _err('Source must be inside chat history, permanent/, or searched_images/.');
+  if (srcCheck.zone !== 'history' && srcCheck.zone !== 'searched_images') {
+    return _err('Source must be inside chat history or searched_images/.');
   }
 
   if (!fs.existsSync(srcCheck.absPath)) return _err(`Source file not found: ${source}.`);
@@ -324,7 +302,7 @@ async function copyToProjectTool(args, userCtx) {
 
   // Per-user quota check (aggregate of projects/ + searched_images/)
   if (userTotalBytes(userCtx) >= userQuotaBytes()) {
-    return _err(`Your personal cloud is full (${MAX_USER_TOTAL_MB} MB). Free space with \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` via bash before copying more files.`);
+    return _err(`Storage is full (${MAX_USER_TOTAL_MB} MB). Free space with \`gemix-project cleanup\` or \`gemix-project delete --confirmed\` via bash before copying more files.`);
   }
 
   ensureProjectSkeleton(userCtx, current);
@@ -349,7 +327,7 @@ async function copyToProjectTool(args, userCtx) {
 
 /**
  * Invoked by `gemix-project delete-storage <path> --confirmed`.
- * Deletes a file or directory from user-managed global storage only.
+ * Deletes a file or directory from searched_images storage only.
  */
 async function deleteStorageTool(args, userCtx) {
   const guard = _guardPlatform(userCtx);
@@ -364,14 +342,12 @@ async function deleteStorageTool(args, userCtx) {
 
   const check = isPathAllowed(userCtx, target, { op: 'read' });
   if (!check.ok) return _err(`Invalid path: ${check.reason}`);
-  if (check.zone !== 'permanent' && check.zone !== 'searched_images') {
-    return _err('delete-storage can only delete inside /readonly/permanent/ or /readonly/searched_images/. It cannot delete chat history, skills, or projects.');
+  if (check.zone !== 'searched_images') {
+    return _err('delete-storage can only delete inside /readonly/searched_images/. It cannot delete chat history, skills, or projects.');
   }
   if (!fs.existsSync(check.absPath)) return _err(`Path not found: ${target}.`);
 
-  const zoneRoot = check.zone === 'permanent'
-    ? getPermanentDir(userCtx)
-    : getSearchedImagesDir(userCtx);
+  const zoneRoot = getSearchedImagesDir(userCtx);
   if (path.resolve(check.absPath) === path.resolve(zoneRoot)) {
     return _err(`Refusing to delete the entire ${check.zone}/ root. Specify a file or subfolder inside it.`);
   }
@@ -383,7 +359,7 @@ async function deleteStorageTool(args, userCtx) {
   } catch (err) {
     return _err(`Failed to delete storage item: ${err.message}`);
   }
-  return { success: true, message: `Deleted ${target} from ${check.zone}.` };
+  return { success: true, message: `Deleted ${target} from searched_images.` };
 }
 
 /**
@@ -419,8 +395,4 @@ module.exports = {
   switchProjectTool,
   deleteProjectTool,
   cleanupProjectTool,
-  copyToPermanentTool,
-  copyToProjectTool,
-  deleteStorageTool,
-  quotaTool,
-};
+

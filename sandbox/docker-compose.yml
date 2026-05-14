@@ -65,7 +65,7 @@ services:
       - ./_test_workspace:/workspace
       # Optionally mount the user's read-only zones:
       # - /path/to/user/history:/readonly/history:ro
-      # - /path/to/user/permanent:/readonly/permanent:ro
+
       # - /path/to/user/searched_images:/readonly/searched_images:ro
 
 networks:

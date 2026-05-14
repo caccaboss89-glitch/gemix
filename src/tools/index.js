@@ -227,7 +227,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
               ensureUserSkeleton(userCtx);
               if (userTotalBytes(userCtx) >= userQuotaBytes()) {
                 quotaFull = true;
-                log.warn('save_to_disk: user cloud is full — skipping persistence.');
+
               } else {
                 savedDir = getSearchedImagesDir(userCtx);
               }
@@ -280,7 +280,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           if (Array.isArray(imageResult.toolResult)) {
             const first = imageResult.toolResult[0];
             const warn = quotaFull
-              ? 'Warning: save_to_disk could not persist images — your personal cloud is full. Run `gemix-project cleanup` or `gemix-project delete --confirmed` via bash and retry.'
+
               : 'Warning: save_to_disk requested but no images were persisted (see logs).';
             if (first && first.type === 'text') first.text = `${first.text}\n\n${warn}`;
           }
@@ -310,7 +310,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         result = {
           success: true,
           unlocked: true,
-          message: 'Agentic toolkit unlocked. Read the <AgenticToolkit> system message that follows for cloud rules, library catalog and delivery flow, then continue with the user request.',
+
         };
         break;
       }

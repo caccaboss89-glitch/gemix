@@ -67,7 +67,7 @@ function _collectRecentProjectWriteViolations(projectDir, startedAt) {
 /**
  * Read file tool execution logic.
  * On Discord, paths are implicitly relative to chat history. On WhatsApp paths
- * can target /readonly/{history|permanent|searched_images}/, /workspace/**, or skills:.
+ * can target /readonly/{history|searched_images}/, /workspace/**, or skills:.
  * Bare filenames (no slash) are automatically resolved to chat history.
  */
 async function readFileTool(filePath, userCtx, responseCtx) {

@@ -31,7 +31,6 @@ const {
   getProjectRoot,
   getScratchDir,
   getHistoryDir,
-  getPermanentDir,
   getSearchedImagesDir,
   ensureUserSkeleton,
   ensureProjectSkeleton,
@@ -125,14 +124,13 @@ async function _spawnContainer(userCtx, projectName) {
     ensureProjectSkeleton(userCtx, projectName);
   }
 
-  // Read-only mounts: chat history, permanent storage, searched images so the AI can
+  // Read-only mounts: chat history, searched images so the AI can
   // reference them in scripts.
   const historyDir = getHistoryDir(userCtx);
-  const permanentDir = getPermanentDir(userCtx);
   const searchedDir = getSearchedImagesDir(userCtx);
   const skillsDir = require('../utils/userPaths').SKILLS_DIR;
 
-  for (const p of [projectDir, historyDir, permanentDir, searchedDir]) {
+  for (const p of [projectDir, historyDir, searchedDir]) {
     if (fs.existsSync(p)) _ensureOwnership(p);
   }
 
@@ -175,7 +173,6 @@ async function _spawnContainer(userCtx, projectName) {
       Binds: [
         `${projectDir}:/workspace:rw`,
         `${historyDir}:/readonly/history:ro`,
-        `${permanentDir}:/readonly/permanent:ro`,
         `${searchedDir}:/readonly/searched_images:ro`,
         `${skillsDir}:/readonly/skills:ro`,
       ],

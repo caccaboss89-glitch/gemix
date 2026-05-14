@@ -13,7 +13,7 @@ const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
-const { getCurrentProject, getLastProject, setCurrentProject, consumeLastCrash, saveLastCrash, acquireLock, releaseLock, startAutoRenewLock } = require('./utils/projectState');
+const { getCurrentProject, getLastProject, setCurrentProject, acquireLock, releaseLock, startAutoRenewLock } = require('./utils/projectState');
 const { listProjects, ensureUserSkeleton, getProjectRoot, resolveStorageId } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
@@ -211,32 +211,7 @@ async function handleMessage(ctx) {
     ctx.userMemory = userMemory;
     ctx.groupMemory = groupMemory;
 
-    // Personal cloud: inject current project + project list (WhatsApp only)
-    let crashRecovery = null;
-    let cloudProbeCtx = null;
-    if (ctx.platform && !ctx.platform.startsWith('discord')) {
-      try {
-        cloudProbeCtx = {
-          platform: ctx.platform,
-          userId: ctx.userId,
-          waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
-          isGroup: ctx.isGroup,
-          groupId: ctx.groupId,
-        };
-        ensureUserSkeleton(cloudProbeCtx);
-        ctx.currentProject = await getCurrentProject(cloudProbeCtx);
-        ctx.lastProjectUsed = await getLastProject(cloudProbeCtx);
-        ctx.projects = listProjects(cloudProbeCtx);
-        // Crash recovery: if a previous run was interrupted (bot killed mid
-        // tool call), the slot survives on disk. Consume + inject once.
-        crashRecovery = await consumeLastCrash(cloudProbeCtx, INTERRUPTED_RUN_TTL_MS);
-      } catch (err) {
-        log.warn(`Failed to load project state: ${err.message}`);
-        ctx.currentProject = null;
-        ctx.lastProjectUsed = null;
-        ctx.projects = [];
-      }
-    }
+
 
     // RAG: inietta contesto regolamento per Discord
     if (ctx.platform === PLATFORM_DISCORD) {
@@ -271,7 +246,7 @@ async function handleMessage(ctx) {
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
     };
-    projectLockCtx = cloudProbeCtx;
+
     projectLockOwnerId = userCtx.requestId;
 
     let tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
@@ -384,7 +359,7 @@ async function handleMessage(ctx) {
     const runToolCall = async (tc) => {
       if (projectLockCtx && AGENTIC_TOOL_NAMES.has(tc.function.name)) {
         if (!(await acquireLock(projectLockCtx, projectLockOwnerId))) {
-          const lockError = 'Another agentic request is already using this personal cloud. Wait for it to finish before running project or sandbox tools again.';
+          const lockError = 'Another agentic request is already using this project. Wait for it to finish before running project or sandbox tools again.';
           log.warn(`   ⛔ Agentic lock denied for ${tc.function.name} (${projectLockOwnerId})`);
           return {
             role: 'tool',
@@ -469,7 +444,7 @@ async function handleMessage(ctx) {
           }
           if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
             lastAgenticTool = tc.function.name;
-            shouldAutoExitProject = shouldAutoExitProject || Boolean(cloudProbeCtx);
+            shouldAutoExitProject = shouldAutoExitProject || Boolean(agenticUnlocked);
             if (!agenticUnlocked) {
               agenticUnlocked = true;
               maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
@@ -645,7 +620,7 @@ async function handleMessage(ctx) {
         text = FALLBACK_ERROR_PREFIX;
       }
 
-      shouldAutoExitProject = shouldAutoExitProject || Boolean(agenticUnlocked && cloudProbeCtx);
+      shouldAutoExitProject = shouldAutoExitProject || Boolean(agenticUnlocked);
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
@@ -682,19 +657,7 @@ async function handleMessage(ctx) {
       };
     }
 
-    // Loop exhausted without a final answer: persist a crash slot so the
-    // next user message can ask the AI to resume gracefully (only useful
-    // when an agentic pipeline was in flight).
-    if (cloudProbeCtx && agenticUnlocked) {
-      try {
-        await saveLastCrash(cloudProbeCtx, {
-          type: 'tool_rounds_exhausted',
-          project: (await getCurrentProject(cloudProbeCtx)) || (await getLastProject(cloudProbeCtx)) || null,
-          last_tool: lastAgenticTool,
-          rounds_used: rounds,
-        });
-      } catch (e) { log.warn(`saveLastCrash failed: ${e.message}`); }
-    }
+
 
     await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
     return {

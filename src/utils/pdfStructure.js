@@ -1,7 +1,7 @@
 // src/utils/pdfStructure.js
 //
 // Canonical "parsed PDF" folder layout used everywhere in the codebase
-// (chat history, projects, permanent storage, etc.).
+
 //
 //   <basename>/
 //     ├── <basename>.pdf       ← original PDF (moved inside, never deleted)
@@ -41,7 +41,6 @@ function _toToolAbsolutePath(p) {
   if (clean.startsWith('/workspace/') || clean === '/workspace') return clean;
   if (clean.startsWith('/readonly/') || clean === '/readonly') return clean;
   if (clean.startsWith('history/')) return `/readonly/${clean}`;
-  if (clean.startsWith('permanent/')) return `/readonly/${clean}`;
   if (clean.startsWith('searched_images/')) return `/readonly/${clean}`;
   if (clean.startsWith('skills/')) return `/readonly/${clean}`;
   return clean.startsWith('/') ? clean : `/${clean}`;

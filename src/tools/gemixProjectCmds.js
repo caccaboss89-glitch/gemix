@@ -10,7 +10,6 @@ const {
   switchProjectTool,
   deleteProjectTool,
   cleanupProjectTool,
-  copyToPermanentTool,
   copyToProjectTool,
   deleteStorageTool,
   quotaTool,
@@ -20,7 +19,7 @@ const GEMIX_PREFIX = 'gemix-project';
 const FIXED_SUBDIRS = ['temp', 'output', 'code'];
 
 const SUBCMD_HELP =
-  'Valid subcommands: list, create, switch, delete, cleanup, quota, copy-to-permanent, copy-to-project, delete-storage.';
+  'Valid subcommands: list, create, switch, delete, cleanup, quota, copy-to-project, delete-storage.';
 
 function _stripShellQuotes(s) {
   const t = s.trim();
@@ -157,7 +156,7 @@ async function handleGemixProjectCmd(command, userCtx) {
       const confirmed = subArgs.includes('--confirmed');
       const pathParts = subArgs.filter(a => a !== '--confirmed');
       if (pathParts.length === 0) {
-        return { success: false, error: 'gemix-project delete-storage </readonly/{permanent|searched_images}/path> --confirmed: missing path.' };
+        return { success: false, error: 'gemix-project delete-storage </readonly/searched_images/path> --confirmed: missing path.' };
       }
       return await deleteStorageTool({ path: pathParts.join(' '), user_confirmed: confirmed }, userCtx);
     }
@@ -196,13 +195,6 @@ async function handleGemixProjectCmd(command, userCtx) {
         };
       }
       return await createProjectTool(parsed, userCtx);
-    }
-
-    case 'copy-to-permanent': {
-      if (subArgs.length === 0) {
-        return { success: false, error: 'gemix-project copy-to-permanent <history_filename>: missing filename.' };
-      }
-      return await copyToPermanentTool({ history_filename: subArgs[0] }, userCtx);
     }
 
     case 'copy-to-project': {

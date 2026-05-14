@@ -76,7 +76,7 @@ const TOOL_ATTACH_FILE = makeTool({
   name: 'attach_file',
   description: 'Buffer a file for delivery (from /readonly/ or /workspace/) for automatic delivery to the current user. Use delivery tools with includeAttachments=true to send to others.',
   properties: {
-    path: { type: 'string', description: 'Unified path: "/readonly/permanent/file.txt" or "/workspace/code/main.py".' },
+    path: { type: 'string', description: 'Unified path: "/readonly/searched_images/file.txt" or "/workspace/code/main.py".' },
   },
   required: ['path'],
 });
@@ -84,18 +84,18 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'MUST be called BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, cloud storage, project management, advance computations, yt-dlp downloads, OCR, charts, data work... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
+  description: 'MUST be called BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, project management, advance computations, yt-dlp downloads, OCR, charts, data work... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
   properties: {},
 });
 
 function buildReadFileTool(isDiscord, agenticUnlocked = false) {
   const description = !agenticUnlocked
     ? 'Read the contents of a file from chat history (text, code, images, video, audio, pdf).'
-    : 'Read the contents of a file from chat history, cloud, searched images or project artefacts (text, code, images, video, audio, pdf).';
+    : 'Read the contents of a file from chat history, searched images or project artefacts (text, code, images, video, audio, pdf).';
 
   let pathDesc = !agenticUnlocked
     ? 'Filename from chat history (e.g. "report.pdf").'
-    : 'Absolute path: /readonly/{history|permanent|searched_images|skills}/<file> or /workspace/{temp|output|code}/<file>. Bare filenames (no slash) are resolved to chat history automatically.';
+    : 'Absolute path: /readonly/{history|searched_images|skills}/<file> or /workspace/{temp|output|code}/<file>. Bare filenames (no slash) are resolved to chat history automatically.';
 
   if (!isDiscord && agenticUnlocked) {
     pathDesc += ' Use skills:<name>.md to read a skill guide.';
@@ -113,7 +113,7 @@ function buildReadFileTool(isDiscord, agenticUnlocked = false) {
 
 const TOOL_CODE_EXECUTION = makeTool({
   name: 'code_execution',
-  description: 'Run Python in the sandbox for calculations, data analysis, or scripts. Can run without a project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,permanent,searched_images,skills}. Files in /workspace/output/ are buffered for delivery.',
+  description: 'Run Python in the sandbox for calculations, data analysis, or scripts. Can run without a project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,searched_images,skills}. Files in /workspace/output/ are buffered for delivery.',
   properties: {
     code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
@@ -154,7 +154,7 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (zip, ls, cp...), yt-dlp downloads... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,permanent,searched_images,skills}. Can combine with write_file/edit_file or other bash/code_execution in the same round.',
+  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (zip, ls, cp...), yt-dlp downloads... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,searched_images,skills}. Can combine with write_file/edit_file or other bash/code_execution in the same round.',,
   properties: {
     command: { type: 'string', description: 'Single standalone shell command. Do NOT use shell concatenation or piping (&&, ||, ;, |, redirection, subshells) to combine steps. Emit multiple bash tool calls, using execution_phase when ordering is needed.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },

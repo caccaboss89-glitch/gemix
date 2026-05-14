@@ -64,7 +64,6 @@ function buildSystemPrompt(ctx) {
   }
   prompt += '  </Behavior>\n';
 
-  if (isWhatsApp && !ctx.agenticBriefing) prompt += buildPersonalCloudPointer(ctx);
 
   prompt += `  <Memory>
     <UserMemory>${ctx.userMemory || 'Empty'}</UserMemory>
@@ -86,18 +85,6 @@ function buildSystemPrompt(ctx) {
   return prompt;
 }
 
-function buildPersonalCloudPointer(ctx) {
-  const current = ctx.currentProject || 'None';
-  const last = ctx.lastProjectUsed || 'None';
-  const count = Array.isArray(ctx.projects) ? ctx.projects.length : 0;
-  return `  <PersonalCloud lite="true">
-  - Selected project: ${escapeXml(current)} (Last used: ${escapeXml(last)}) [Total projects: ${count}].
-  - CLOUD ACCESS RULE: If the user refers to files in their cloud, permanent, or files already uploaded, you MUST call agentic_unlock FIRST, ALONE. 
-  - Need to compute, create/edit files, run scripts, download, OCR, charts → Call agentic_unlock FIRST, ALONE.
-  - DO NOT call the unlock service for: standard chat, web search, voice responses, programming, memory updates.
-  - NOTE: GemiX does NOT support audio/video editing. Do not use agentic_unlock for media editing (but DO unlock it if the user wants you to retrieve/send an existing video/audio from the cloud).
-  </PersonalCloud>\n`;
-}
 
 function buildDedicatedWaInstructions(ctx) {
   let s = '  <Platform name="whatsapp_dedicated">\n';

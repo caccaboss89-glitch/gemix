@@ -5,7 +5,7 @@
 //
 // The path MUST be relative to the user root and resolve inside the
 // CURRENT project's temp/ output/ or code/ subfolder. All other
-// destinations (chat history, permanent/, project root, projects root, user
+// destinations (chat history, project root, projects root, user
 // root, skills/) are rejected by isPathAllowed.
 
 const path = require('path');
