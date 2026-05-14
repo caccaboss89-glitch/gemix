@@ -77,7 +77,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
   if (check.zone === 'project_sub' && check.subdir === 'output') {
     return {
       success: false,
-      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for /workspace/{temp|code}/ or searched_images/.',,
+      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for /workspace/{temp|code}/ or searched_images/.',
     };
   }
 

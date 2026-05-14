@@ -395,4 +395,5 @@ module.exports = {
   switchProjectTool,
   deleteProjectTool,
   cleanupProjectTool,
-
+  quotaTool,
+};
