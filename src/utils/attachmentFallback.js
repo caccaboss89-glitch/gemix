@@ -78,11 +78,11 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
   // Build the system message
   // Use singular/plural based on count
   const isPlural = fallbackLinks.length > 1;
-  const allegatiText = isPlural ? 'allegati' : 'allegato';
+  const allegatiSuffix = isPlural ? 'i' : 'o';
   const disponibiliText = isPlural ? 'disponibili' : 'disponibile';
   const scaricaloText = isPlural ? 'Scaricali' : 'Scaricalo';
 
-  let messageText = `${TEMP_ATTACHMENT_PREFIX}${allegatiText} non ${disponibiliText} sulla piattaforma.\n\n`;
+  let messageText = `${TEMP_ATTACHMENT_PREFIX}${allegatiSuffix} non ${disponibiliText} sulla piattaforma.\n\n`;
   messageText += `${scaricaloText} da questo link temporaneo che scadrà tra un'ora:\n\n`;
 
   // Add links
@@ -153,7 +153,7 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
       log.info(`✅ Attachment sent: ${result.attachment.name || 'unknown'}`);
     } else {
       results.failed.push(result.attachment);
-      log.warn(`❌ Attachment send failed (${result.attachment.name || 'unknown'}): ${result.error}`);
+      log.info(`ℹ️ Direct attachment sending unsupported/too large (${result.attachment.name || 'unknown'}), falling back to temp link.`);
     }
   }
 
