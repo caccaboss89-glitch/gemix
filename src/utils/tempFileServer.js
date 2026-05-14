@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { createLogger } = require('./logger');
 const env = require('../config/env');
+const { DATA_DIR } = require('../config/constants');
 
 const log = createLogger('TempFileServer');
 
@@ -37,6 +38,21 @@ function generateToken() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+function _isAllowedPath(target) {
+  try {
+    const absTarget = path.resolve(target).toLowerCase().replace(/\\/g, '/');
+    const absTemp = path.resolve(TEMP_DIR).toLowerCase().replace(/\\/g, '/');
+    const absData = path.resolve(DATA_DIR).toLowerCase().replace(/\\/g, '/');
+    
+    const isUnderTemp = absTarget === absTemp || absTarget.startsWith(absTemp + '/');
+    const isUnderData = absTarget === absData || absTarget.startsWith(absData + '/');
+    
+    return isUnderTemp || isUnderData;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Register a file for temporary hosting
  * @param {string} filePath - Full path to the file
@@ -47,6 +63,9 @@ function registerTempFile(filePath, originalName) {
   try {
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
+    }
+    if (!_isAllowedPath(filePath)) {
+      throw new Error(`Security check failed: path traversal attempt refused`);
     }
 
     const stat = fs.statSync(filePath);
@@ -100,8 +119,11 @@ function cleanupExpiredFiles() {
         // Only delete if file is in our temp dir (safety check)
         const absPath = path.resolve(entry.filePath);
         const tempDirAbs = path.resolve(TEMP_DIR);
-        // Case-insensitive check to guarantee cross-platform compatibility (e.g. Windows casing variation)
-        const isUnderTempDir = absPath.toLowerCase().startsWith(tempDirAbs.toLowerCase());
+        // Guarantee cross-platform compatibility and exact boundary
+        const sep = path.sep;
+        const absPathLower = absPath.toLowerCase();
+        const tempDirLower = tempDirAbs.toLowerCase();
+        const isUnderTempDir = absPathLower === tempDirLower || absPathLower.startsWith(tempDirLower + sep);
         if (isUnderTempDir && fs.existsSync(absPath)) {
           fs.unlinkSync(absPath);
           log.debug(`🗑️  Deleted expired temp file: ${entry.originalName}`);
@@ -114,8 +136,24 @@ function cleanupExpiredFiles() {
     }
   }
 
+  if (fs.existsSync(TEMP_DIR)) {
+    try {
+      const files = fs.readdirSync(TEMP_DIR);
+      for (const file of files) {
+        const filePath = path.join(TEMP_DIR, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile() && now - stat.mtimeMs > EXPIRATION_MS) {
+            fs.unlinkSync(filePath);
+            cleanedCount++;
+          }
+        } catch { }
+      }
+    } catch { }
+  }
+
   if (cleanedCount > 0) {
-    log.info(`🧹 Cleanup: removed ${cleanedCount} expired file(s), ${fileRegistry.size} remaining`);
+    log.info(`🧹 Cleanup: removed ${cleanedCount} expired/orphan file(s), ${fileRegistry.size} remaining in registry`);
   }
 }
 
@@ -164,7 +202,7 @@ function startTempFileServer() {
       const filePath = entry.filePath;
 
       // Safety check: file must exist and be inside allowed temp dir
-      if (!fs.existsSync(filePath)) {
+      if (!fs.existsSync(filePath) || !_isAllowedPath(filePath)) {
         fileRegistry.delete(token);
         res.writeHead(404, { 'Content-Type': 'text/plain' }).end('File not found');
         return;
@@ -218,7 +256,9 @@ function startTempFileServer() {
 
   // Start periodic cleanup
   if (_cleanupInterval) clearInterval(_cleanupInterval);
+  cleanupExpiredFiles();
   _cleanupInterval = setInterval(cleanupExpiredFiles, CLEANUP_INTERVAL_MS);
+  if (_cleanupInterval.unref) _cleanupInterval.unref();
   log.info(`🔄 Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
 }
 
@@ -278,9 +318,12 @@ function getDirectorySize(dir) {
     const files = fs.readdirSync(dir, { recursive: true });
     for (const file of files) {
       const filePath = path.join(dir, file);
-      if (fs.statSync(filePath).isFile()) {
-        size += fs.statSync(filePath).size;
-      }
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) {
+          size += stat.size;
+        }
+      } catch { /* ignore */ }
     }
   } catch { /* ignore */ }
   return size;
@@ -292,4 +335,5 @@ module.exports = {
   registerTempFile,
   getTempFileStats,
   cleanupExpiredFiles,
+  TEMP_DIR,
 };

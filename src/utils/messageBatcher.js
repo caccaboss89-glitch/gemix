@@ -38,6 +38,7 @@ function pushMessage(key, entry, handler) {
 
     // Absolute ceiling: fire no matter what after MAX_WAIT_MS
     batch.maxTimer = setTimeout(() => _fire(key), MAX_WAIT_MS);
+    if (batch.maxTimer.unref) batch.maxTimer.unref();
   }
 
   batch.messages.push(entry);
@@ -51,6 +52,7 @@ function pushMessage(key, entry, handler) {
   // Reset debounce timer
   if (batch.timer) clearTimeout(batch.timer);
   batch.timer = setTimeout(() => _fire(key), DEBOUNCE_MS);
+  if (batch.timer.unref) batch.timer.unref();
 }
 
 /**

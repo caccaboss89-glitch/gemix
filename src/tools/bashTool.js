@@ -84,8 +84,12 @@ async function executeYtDlpOnHost(args, userCtx, command, responseCtx) {
   const before = snapshotProject(projectDir);
   const startedAt = Date.now();
 
+  let safeCommand = command;
+  // Ensure http/https URLs are wrapped in double quotes if not already quoted
+  safeCommand = safeCommand.replace(/(^|\s)(https?:\/\/[^\s"']+)/g, '$1"$2"');
+
   // Map /workspace paths to the real host directory
-  let hostCmd = command.replace(/\/workspace/g, projectDir.replace(/\\/g, '/'));
+  let hostCmd = safeCommand.replace(/(^|\s)\/workspace(?=\/|\s|$)/g, `$1${projectDir.replace(/\\/g, '/')}`);
 
   // Decide which binary to use: local bin/yt-dlp if it exists, otherwise system yt-dlp
   const gemixRoot = path.resolve(__dirname, '../../');
@@ -96,7 +100,7 @@ async function executeYtDlpOnHost(args, userCtx, command, responseCtx) {
   if (process.platform === 'win32') {
     // Windows cmd.exe fallback (for local development testing)
     const evasionArgs = `--proxy "socks5h://${SANDBOX_PROXY_HOST}:${SANDBOX_PROXY_PORT}" --extractor-args "youtube:client=ANDROID,IOS,TV;player_client=android,ios,tv" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4`;
-    hostCmd = hostCmd.replace(/^yt-dlp\b/, `"${ytDlpBin}" ${evasionArgs}`);
+    hostCmd = hostCmd.replace(/(^|\s)yt-dlp\b/, `$1"${ytDlpBin}" ${evasionArgs}`);
   } else {
     // Robust bash function for Linux production
     const ytDlpWrapper = `yt-dlp() { "${ytDlpBin}" --proxy "socks5h://${SANDBOX_PROXY_HOST}:${SANDBOX_PROXY_PORT}" --extractor-args "youtube:client=ANDROID,IOS,TV;player_client=android,ios,tv" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4 "$@"; }; `;

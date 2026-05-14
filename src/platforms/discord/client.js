@@ -97,19 +97,21 @@ function createAttachmentBufferFetcher(att) {
   let bufferPromise = null;
   return async () => {
     if (!bufferPromise) {
-      bufferPromise = (async () => Buffer.from(await (await fetch(att.url)).arrayBuffer()))();
+      bufferPromise = (async () => {
+        if (att.size > 25 * 1024 * 1024) {
+          throw new Error(`Attachment too large (${Math.round(att.size / 1048576)}MB, max 25MB)`);
+        }
+        return Buffer.from(await (await fetch(att.url)).arrayBuffer());
+      })();
     }
     return bufferPromise;
   };
 }
 
+const { isSystemMessage } = require('../../config/systemMessages');
+
 function isDiscordSystemMessage(body) {
-  if (!body) return false;
-  return (
-    /^🌙 GemiX è temporaneamente in manutenzione/.test(body) ||
-    /^🔔 Le notifiche degli aggiornamenti di GemiX sono state attivate\./.test(body) ||
-    /^ℹ️ Le notifiche degli aggiornamenti di GemiX sono già attive\./.test(body)
-  );
+  return isSystemMessage(body);
 }
 
 async function onDiscordMessage(msg) {
@@ -165,7 +167,12 @@ async function onDiscordMessage(msg) {
             const isPdf = att.contentType === 'application/pdf' || ext === 'pdf';
             const isVideo = att.contentType?.startsWith('video/');
             const fetchBuffer = createAttachmentBufferFetcher(att);
-            const syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
+            let syncedPath = null;
+            try {
+              syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
+            } catch (err) {
+              log.warn(`Failed to sync quoted file ${att.name}: ${err.message}`);
+            }
             const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
             if (isImage) {
@@ -245,7 +252,12 @@ async function onDiscordMessage(msg) {
     const isVideo = att.contentType?.startsWith('video/');
 
     const fetchBuffer = createAttachmentBufferFetcher(att);
-    const syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
+    let syncedPath = null;
+    try {
+      syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
+    } catch (err) {
+      log.warn(`Failed to sync file ${att.name}: ${err.message}`);
+    }
     const attachmentTag = buildAttachmentTag(syncedPath, att.name);
 
     if (isVideo) {

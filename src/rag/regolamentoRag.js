@@ -97,7 +97,13 @@ function loadCache() {
 }
 
 function saveCache(embeddingsByHash) {
-  fs.writeFileSync(RAG_INDEX_PATH, JSON.stringify({ model: EMBEDDING_MODEL, embeddingsByHash }), 'utf-8');
+  const tempFile = RAG_INDEX_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tempFile, JSON.stringify({ model: EMBEDDING_MODEL, embeddingsByHash }), 'utf-8');
+    fs.renameSync(tempFile, RAG_INDEX_PATH);
+  } catch {
+    if (fs.existsSync(tempFile)) { try { fs.unlinkSync(tempFile); } catch {} }
+  }
 }
 
 // ────────────────────────────── Init & Query ──────────────────────────────

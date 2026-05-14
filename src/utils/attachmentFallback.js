@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { registerTempFile } = require('./tempFileServer');
+const { registerTempFile, TEMP_DIR } = require('./tempFileServer');
 const { createLogger } = require('./logger');
 const { TEMP_ATTACHMENT_PREFIX } = require('../config/systemMessages');
 
@@ -37,7 +37,6 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
       const pathExists = typeof filePath === 'string' && fs.existsSync(filePath);
 
       if (!pathExists && Buffer.isBuffer(att.buffer)) {
-        const TEMP_DIR = path.join(process.cwd(), '.tempfiles');
         if (!fs.existsSync(TEMP_DIR)) {
           fs.mkdirSync(TEMP_DIR, { recursive: true });
         }

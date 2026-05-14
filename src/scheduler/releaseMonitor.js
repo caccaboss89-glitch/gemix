@@ -12,10 +12,7 @@ const log = createLogger('ReleaseMonitor');
 
 const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
 
-const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
 let lastCheckedReleaseId = null;
-let lastCheckTime = 0;
 
 function _loadState() {
   const state = getSystemState('releases');
@@ -86,10 +83,6 @@ async function _fetchImageMedia(url, name, headers) {
 async function checkNewRelease(waClient) {
   if (!GITHUB_TOKEN || !GITHUB_REPO) return;
   if (!waClient) return;
-
-  const now = Date.now();
-  if (now - lastCheckTime < CHECK_INTERVAL_MS) return;
-  lastCheckTime = now;
 
   try {
     const authHeaders = {

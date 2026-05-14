@@ -36,6 +36,9 @@ class WhatsAppPresence {
       if (this._isRefreshing) return;
       await this._update();
     }, 20000);
+    if (this.intervalId && typeof this.intervalId.unref === 'function') {
+      this.intervalId.unref();
+    }
   }
 
   /**

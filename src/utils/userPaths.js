@@ -351,7 +351,15 @@ function readProjectMeta(userCtx, projectName) {
 
 function writeProjectMeta(userCtx, projectName, meta) {
   const metaFile = path.join(getProjectRoot(userCtx, projectName), '.project.json');
-  fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8');
+  const tempFile = metaFile + '.tmp';
+  try {
+    fs.writeFileSync(tempFile, JSON.stringify(meta, null, 2), 'utf-8');
+    fs.renameSync(tempFile, metaFile);
+  } catch {
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch {}
+    }
+  }
 }
 
 function projectExists(userCtx, projectName) {

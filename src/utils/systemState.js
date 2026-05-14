@@ -12,13 +12,16 @@ const { getRomeISO } = require('./time');
 // In-memory lock to ensure atomic read-modify-write
 let _lockPromise = Promise.resolve();
 
-/**
- * Executes a function with a global lock on the system state.
- */
 async function _withLock(fn) {
-  const nextLock = _lockPromise.then(() => fn());
-  _lockPromise = nextLock.catch(() => {}); // Prevent chain break on error
-  return nextLock;
+  let release;
+  const currentLock = _lockPromise;
+  _lockPromise = new Promise(r => { release = r; });
+  await currentLock;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
 }
 
 function _readRaw() {
@@ -70,16 +73,16 @@ function get(moduleName) {
  * @param {string} moduleName
  * @param {object|function} update - New state object or function receiving current module state
  */
-async function update(moduleName, update) {
+async function update(moduleName, newState) {
   return _withLock(async () => {
     const state = _readRaw();
     const current = state[moduleName] || {};
     
     let next;
-    if (typeof update === 'function') {
-      next = await update(current);
+    if (typeof newState === 'function') {
+      next = await newState(current);
     } else {
-      next = { ...current, ...update };
+      next = { ...current, ...newState };
     }
     
     state[moduleName] = next;
@@ -112,12 +115,15 @@ async function checkDailyToolUsage(toolId, userId) {
         result = { allowed: false, reason: 'The tool has already been used by another user today.' };
       }
     } else {
-      // New day, allow and record
       tracking.lastDate = today;
       tracking.lastUser = userId;
       state.toolTracking[toolId] = tracking;
-      _writeRaw(state);
-      result = { allowed: true };
+      const success = _writeRaw(state);
+      if (success) {
+        result = { allowed: true };
+      } else {
+        result = { allowed: false, reason: 'System storage error: failed to persist tool tracking state.' };
+      }
     }
   });
   

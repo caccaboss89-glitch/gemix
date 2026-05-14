@@ -13,8 +13,7 @@ const log = createLogger('ProjectState');
 const _stateLocks = new Map();
 
 async function _withStateLock(userCtx, fn) {
-  const id = resolveStorageId(userCtx);
-  if (!id) return fn(); // fallback
+  const id = resolveStorageId(userCtx) || '__global_fallback__';
 
   while (_stateLocks.get(id)) {
     await _stateLocks.get(id);
@@ -45,12 +44,17 @@ function _readRaw(userCtx) {
 function _writeRaw(userCtx, state) {
   const f = getStateFile(userCtx);
   if (!f) return false;
+  const tempFile = f + '.tmp';
   try {
     if (!fs.existsSync(getUserRoot(userCtx))) ensureUserSkeleton(userCtx);
-    fs.writeFileSync(f, JSON.stringify(state, null, 2), 'utf-8');
+    fs.writeFileSync(tempFile, JSON.stringify(state, null, 2), 'utf-8');
+    fs.renameSync(tempFile, f);
     return true;
   } catch (err) {
     log.error(`Failed to write state: ${err.message}`);
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch {}
+    }
     return false;
   }
 }
@@ -181,7 +185,7 @@ function consumeLastCrash(userCtx, ttlMs) {
 }
 
 function clearLastCrash(userCtx) {
-  return _withStateLock(userCtx, async () => {
+  return _withStateLock(userCtx, () => {
     const st = _readRaw(userCtx);
     if (!st.last_crash) return true;
     delete st.last_crash;

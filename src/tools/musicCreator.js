@@ -61,9 +61,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
           const data = JSON.parse(dataStr);
           const delta = data.choices?.[0]?.delta || {};
 
-          // === DEBUG LOGS (remove after testing) ===
-          log.debug(`Delta keys: ${Object.keys(delta)}`);
-          if (delta.content) log.debug(`Content sample: ${delta.content.substring(0, 80)}...`);
+
 
           // 1. Official OpenAI-style audio
           if (delta.audio?.data) audioChunks.push(delta.audio.data);
@@ -167,7 +165,16 @@ async function musicCreator(prompt, userCtx) {
       if (!userIsAdmin) {
         const today = getRomeISO().split('T')[0];
         const userKey = `${userId}_${today}`;
-        await systemState.update('musicDailyUsage', (current) => ({ ...current, [userKey]: true }));
+        await systemState.update('musicDailyUsage', (current) => {
+          const updated = {};
+          for (const key of Object.keys(current)) {
+            if (key.endsWith(`_${today}`)) {
+              updated[key] = current[key];
+            }
+          }
+          updated[userKey] = true;
+          return updated;
+        });
       }
 
       return {

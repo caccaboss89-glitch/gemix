@@ -30,7 +30,9 @@ function logToolExecution({ tool, input, output, meta = {} }) {
       ...meta,
     };
     const filePath = _getLogFilePath(tool, now);
-    fs.writeFileSync(filePath, JSON.stringify(entry, null, 2));
+    fs.writeFile(filePath, JSON.stringify(entry, null, 2), (err) => {
+      if (err) log.warn(`Failed to write execution log async: ${err.message}`);
+    });
     return filePath;
   } catch (err) {
     log.warn(`Failed to write execution log: ${err.message}`);

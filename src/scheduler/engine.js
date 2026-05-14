@@ -14,6 +14,7 @@ const log = createLogger('Scheduler');
 
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
+let lastReleaseCheckTime = 0;
 
 /**
  * Compute the next occurrence date for a recurring task.
@@ -23,26 +24,24 @@ let lastMusicWrapCheckDate = null;
  * @returns {string|null} Next occurrence ISO with correct offset or null if freq is invalid
  */
 function computeNextOccurrence(scheduledAtISO, freq) {
-  // Parse the ISO string to extract local time components
-  const isoRegex = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
-  const match = isoRegex.exec(scheduledAtISO);
-  if (!match) return null;
+  const baseDate = new Date(scheduledAtISO);
+  if (isNaN(baseDate.getTime())) return null;
 
-  // Create a Date from the current scheduled time to do arithmetic
-  const currentDate = new Date(scheduledAtISO);
-  if (isNaN(currentDate.getTime())) return null;
-
-  // Calculate next occurrence in UTC
-  const nextDate = new Date(currentDate);
   switch (freq) {
-    case 'hourly': nextDate.setHours(nextDate.getHours() + 1); break;
-    case 'daily': nextDate.setDate(nextDate.getDate() + 1); break;
-    case 'weekly': nextDate.setDate(nextDate.getDate() + 7); break;
-    case 'monthly': nextDate.setMonth(nextDate.getMonth() + 1); break;
+    case 'hourly': baseDate.setUTCHours(baseDate.getUTCHours() + 1); break;
+    case 'daily': baseDate.setUTCDate(baseDate.getUTCDate() + 1); break;
+    case 'weekly': baseDate.setUTCDate(baseDate.getUTCDate() + 7); break;
+    case 'monthly': {
+      const currentMonth = baseDate.getUTCMonth();
+      const targetDay = baseDate.getUTCDate();
+      baseDate.setUTCMonth(currentMonth + 1, 1);
+      const daysInNextMonth = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth() + 1, 0)).getUTCDate();
+      baseDate.setUTCDate(Math.min(targetDay, daysInNextMonth));
+      break;
+    }
     default: return null;
   }
 
-  // Format the next date as Rome local time (without offset)
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Rome',
     year: 'numeric',
@@ -55,14 +54,12 @@ function computeNextOccurrence(scheduledAtISO, freq) {
   });
 
   const parts = Object.fromEntries(
-    formatter.formatToParts(nextDate).map(p => [p.type, p.value])
+    formatter.formatToParts(baseDate).map(p => [p.type, p.value])
   );
 
-  const nextHour = parts.hour === '24' ? '00' : parts.hour;
-  const localDatetimeStr = `${parts.year}-${parts.month}-${parts.day}T${nextHour}:${parts.minute}:${parts.second}`;
-
-  // Convert local datetime back to ISO with correct DST-aware offset
-  return convertRomeLocalToISO(localDatetimeStr);
+  const hour = parts.hour === '24' ? '00' : parts.hour;
+  const localISO = `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}:${parts.second}`;
+  return convertRomeLocalToISO(localISO);
 }
 
 /**
@@ -85,13 +82,14 @@ function startScheduler() {
 
   log.info('✅ Started. Checking every', SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
 
-  setInterval(async () => {
+  const schedulerInterval = setInterval(async () => {
     try {
       await checkAndExecuteTasks();
     } catch (err) {
       log.error('Cycle error:', err);
     }
   }, SCHEDULER_INTERVAL_MS);
+  schedulerInterval.unref();
 }
 
 async function checkAndExecuteTasks() {
@@ -109,10 +107,13 @@ async function checkAndExecuteTasks() {
     }
   }
 
-  try {
-    await checkNewRelease(dedicatedClient);
-  } catch (err) {
-    log.error('ReleaseMonitor - error during check:', err);
+  if (now.getTime() - lastReleaseCheckTime >= 15 * 60 * 1000) {
+    lastReleaseCheckTime = now.getTime();
+    try {
+      await checkNewRelease(dedicatedClient);
+    } catch (err) {
+      log.error('ReleaseMonitor - error during check:', err);
+    }
   }
 
   let files;
@@ -124,6 +125,7 @@ async function checkAndExecuteTasks() {
 
   for (const file of files) {
     const fileId = file.replace('.json', '');
+    let tasksToExecute = [];
     try {
       // modifyTaskFile holds the per-file lock for the entire read→execute→write cycle,
       // preventing races between the scheduler and concurrent user tool calls.
@@ -137,14 +139,7 @@ async function checkAndExecuteTasks() {
         });
         if (dueTasks.length === 0) return data;
 
-        for (const task of dueTasks) {
-          try {
-            await executeTask(task);
-            log.info(`✅ Task executed: ${task.id}`);
-          } catch (err) {
-            log.error(`❌ Task processing error ${task.id}:`, err.message);
-          }
-        }
+        tasksToExecute = dueTasks;
 
         // Advance recurring tasks or drop one-shot tasks
         const nowAfterTime = Date.now();
@@ -174,6 +169,20 @@ async function checkAndExecuteTasks() {
       });
     } catch (err) {
       log.error(`❌ Task file processing error ${fileId}:`, err.message);
+    }
+
+    // NOTE (Concurrency & State Race): The per-file lock is released before executeTask runs.
+    // If executeTask takes longer than the scheduler interval (60s) to complete, a subsequent
+    // scheduler tick could theoretically re-evaluate the task file. However, since recurring tasks
+    // are rescheduled to their next occurrence inside the lock prior to execution, double execution
+    // is prevented unless the recurrence frequency itself is smaller than the execution duration.
+    for (const task of tasksToExecute) {
+      try {
+        await executeTask(task);
+        log.info(`✅ Task executed: ${task.id}`);
+      } catch (err) {
+        log.error(`❌ Task processing error ${task.id}:`, err.message);
+      }
     }
   }
 }

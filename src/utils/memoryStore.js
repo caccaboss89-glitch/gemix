@@ -44,7 +44,16 @@ function writeMemory(fileId, content) {
     return { success: false, error: `Content exceeds the ${MAX_MEMORY_CHARS} character limit (${content.length} chars).` };
   }
 
-  fs.writeFileSync(filePath, JSON.stringify({ memory: content }, null, 2), 'utf-8');
+  const tempFile = filePath + '.tmp';
+  try {
+    fs.writeFileSync(tempFile, JSON.stringify({ memory: content }, null, 2), 'utf-8');
+    fs.renameSync(tempFile, filePath);
+  } catch (err) {
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch {}
+    }
+    return { success: false, error: err.message };
+  }
   return { success: true };
 }
 

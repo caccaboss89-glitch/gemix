@@ -87,7 +87,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
 
   const ext = path.extname(auth.absPath).toLowerCase();
   if (NON_WRITABLE_EXTS.has(ext)) {
-    return { success: false, error: `write_file: creating or appending to files with extension "${ext}" is not allowed because they are binary formats. Use specialized scripts (e.g. via code_execution) to generate such files if needed.` };
+    return { success: false, error: `write_file: creating or appending to files with extension "${ext}" is not allowed because they are binary formats. Use specialized scripts (e.g. via code_execution) to generate such files, or use generate_formal_request_pdf for formal request documents.` };
   }
 
   // Encode content as base64 once (binary-safe transport into Python).

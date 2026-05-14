@@ -52,7 +52,9 @@ async function writeTaskFile(fileId, data) {
       try { await fsPromises.unlink(filePath); } catch { }
       return;
     }
-    await fsPromises.writeFile(filePath, JSON.stringify(data, null, 2));
+    const tempPath = filePath + '.tmp';
+    await fsPromises.writeFile(tempPath, JSON.stringify(data, null, 2));
+    await fsPromises.rename(tempPath, filePath);
   });
 }
 
@@ -80,7 +82,9 @@ async function modifyTaskFile(fileId, fn) {
       try { await fsPromises.unlink(filePath); } catch { }
       return;
     }
-    await fsPromises.writeFile(filePath, JSON.stringify(result, null, 2));
+    const tempPath = filePath + '.tmp';
+    await fsPromises.writeFile(tempPath, JSON.stringify(result, null, 2));
+    await fsPromises.rename(tempPath, filePath);
   });
 }
 

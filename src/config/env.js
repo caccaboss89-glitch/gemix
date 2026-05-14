@@ -27,6 +27,6 @@ module.exports = {
   GEMIX_PUBLIC_URL: process.env.GEMIX_PUBLIC_URL,
 
   // Feature Flags / Modes
-  MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, true),
+  MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),
   XAI_TTS_ENABLED: toBool(process.env.XAI_TTS_ENABLED, false),
 };

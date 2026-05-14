@@ -167,18 +167,6 @@ async function runInProjectSandbox({
   // Use scratch workspace for projectless execution (bash/code_execution without project)
   if (usingScratch) {
     projectName = '_scratch_';
-    const scratchDir = getScratchDir(userCtx);
-    if (scratchDir) {
-      if (fs.existsSync(scratchDir)) {
-        try {
-          fs.rmSync(scratchDir, { recursive: true, force: true });
-          log.info(`   🧹 Purged stale scratch directory: ${projectName}`);
-        } catch (err) {
-          log.warn(`   ⚠️ Failed to purge scratch directory: ${err.message}`);
-        }
-      }
-      fs.mkdirSync(scratchDir, { recursive: true });
-    }
   } else if (projectName && !projectExists(userCtx, projectName)) {
     return { error: `Current project "${projectName}" no longer exists on disk.` };
   }
@@ -211,9 +199,27 @@ async function runInProjectSandbox({
   if (entry.busy) {
     return { error: `Another sandbox call is still running for this project. Try again in a moment.` };
   }
-  
+
   const wasRestarted = !!entry.wasRestarted;
   if (wasRestarted) entry.wasRestarted = false; // consume it
+
+  if (usingScratch && wasRestarted) {
+    const scratchDir = getScratchDir(userCtx);
+    if (scratchDir) {
+      if (fs.existsSync(scratchDir)) {
+        try {
+          for (const item of fs.readdirSync(scratchDir)) {
+            fs.rmSync(path.join(scratchDir, item), { recursive: true, force: true });
+          }
+          log.info(`   🧹 Purged stale scratch directory: ${projectName}`);
+        } catch (err) {
+          log.warn(`   ⚠️ Failed to purge scratch directory: ${err.message}`);
+        }
+      } else {
+        fs.mkdirSync(scratchDir, { recursive: true });
+      }
+    }
+  }
 
   const effTimeoutMs = resolveTimeout(timeoutMs);
 
@@ -241,6 +247,7 @@ async function runInProjectSandbox({
       } catch (shutdownErr) {
         log.warn(`failed to recycle stale sandbox (${toolLabel}): ${shutdownErr.message}`);
       }
+      await clearLastCrash(userCtx);
     } else {
       await clearLastCrash(userCtx);
     }
@@ -284,7 +291,11 @@ async function runInProjectSandbox({
         const relReal = path.relative(projectRealRoot, real);
         if (relReal.startsWith('..') || path.isAbsolute(relReal)) isEscaped = true;
       }
-    } catch { /* file vanished mid-scan */ }
+    } catch {
+      // NOTE (Race Condition / Vanished File): If the file existed during directory snapshotting
+      // but vanished before realpathSync executes, fs.realpathSync throws ENOENT.
+      // We treat it as non-escaped (isEscaped = false) because a deleted file cannot be exfiltrated.
+    }
 
     if (isEscaped) {
       log.warn(`refusing symlink escape: ${rel} → outside project root`);

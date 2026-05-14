@@ -52,11 +52,16 @@ function _loadMeta(metaFile, userId) {
 }
 
 function _saveMeta(metaFile, meta, userId) {
+  const tempFile = metaFile + '.tmp';
   try {
-    fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8');
+    fs.writeFileSync(tempFile, JSON.stringify(meta, null, 2), 'utf-8');
+    fs.renameSync(tempFile, metaFile);
     return true;
   } catch (err) {
     log.warn(`Failed to write history_meta.json for user ${userId}: ${err.message}`);
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch {}
+    }
     return false;
   }
 }
@@ -85,9 +90,15 @@ function _loadRecentVoiceEntries() {
 }
 
 function _saveRecentVoiceEntries() {
+  const tempFile = RECENT_VOICE_CACHE_FILE + '.tmp';
   try {
-    fs.writeFileSync(RECENT_VOICE_CACHE_FILE, JSON.stringify(recentVoiceEntries), 'utf-8');
-  } catch {}
+    fs.writeFileSync(tempFile, JSON.stringify(recentVoiceEntries), 'utf-8');
+    fs.renameSync(tempFile, RECENT_VOICE_CACHE_FILE);
+  } catch {
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch {}
+    }
+  }
 }
 
 function _cleanupRecentVoiceEntries() {
@@ -276,14 +287,19 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   while (existingValues.has(finalName) || fs.existsSync(path.join(historyDir, finalName))) {
     finalName = `${baseName}(${counter})${ext}`;
     counter++;
+    if (counter > 1000) {
+      finalName = `${baseName}(${Date.now()}_${Math.floor(Math.random() * 10000)})${ext}`;
+      break;
+    }
   }
 
   // Write file and update meta
   const filePath = path.join(historyDir, finalName);
   try {
     fs.writeFileSync(filePath, buffer);
-    meta[uniqueId] = { filename: finalName };
-    _saveMeta(metaFile, meta, userId);
+    const freshMeta = _loadMeta(metaFile, userId);
+    freshMeta[uniqueId] = { filename: finalName };
+    _saveMeta(metaFile, freshMeta, userId);
     return finalName;
   } catch (err) {
     log.error(`Failed to save history file for user ${userId}: ${err.message}`);
@@ -502,7 +518,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
   // Sync meta file: drop entries whose target file/dir no longer exists.
   if (deletedCount > 0 && fs.existsSync(metaFile)) {
     try {
-      const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
+      const meta = _loadMeta(metaFile, userId);
       let changed = false;
       for (const [id, entry] of Object.entries(meta)) {
         const name = _getEntryFilename(entry);
@@ -515,7 +531,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
         }
       }
       if (changed) {
-        fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8');
+        _saveMeta(metaFile, meta, userId);
       }
     } catch (err) {
       log.warn(`pruneHistory meta sync failed for ${userId}: ${err.message}`);

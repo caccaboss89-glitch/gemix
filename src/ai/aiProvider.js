@@ -28,12 +28,13 @@ function getQwenModel({ agenticUnlocked = false } = {}) {
 async function callAI(messages, tools = null, options = {}) {
   const processedMessages = await describeMediaInMessages(messages);
   const model = getQwenModel(options);
+  const effort = options.agenticUnlocked ? 'high' : 'low';
 
   const body = {
     model,
     messages: processedMessages,
     max_tokens: MAX_TOKENS,
-    reasoning: { effort: 'high' },
+    reasoning: { effort },
   };
   if (tools && tools.length > 0) body.tools = tools;
 

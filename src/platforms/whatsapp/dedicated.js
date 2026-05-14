@@ -34,12 +34,21 @@ function initDedicatedWhatsApp() {
     qr_timeout: WA_QR_TIMEOUT,
   });
 
+  const watchdog = setTimeout(() => {
+    if (!client?.info?.wid?._serialized) {
+      log.error('❌ Dedicated WhatsApp client init timeout (5 min). Forcing process exit to restart.');
+      process.exit(1);
+    }
+  }, 5 * 60 * 1000);
+  watchdog.unref();
+
   client.on('qr', (qr) => {
     log.info('Scan QR code:');
     qrcode.generate(qr, { small: true });
   });
 
   client.on('ready', () => {
+    clearTimeout(watchdog);
     log.info('✅ Client ready:', client.info.wid._serialized);
     _reconnectAttempts = 0;
     setDedicatedClient(client);
@@ -95,7 +104,10 @@ async function onDedicatedMessage(msg) {
     if (!isMentioned && !isReplyToBot) return;
   }
 
-  const senderJid = msg.author || msg.from;
+  let senderJid = msg.author || msg.from;
+  if (typeof senderJid === 'string' && senderJid.includes(':')) {
+    senderJid = senderJid.replace(/:[0-9]+@/, '@');
+  }
   let userName = senderJid;
   let phoneJid = senderJid;
   try {
@@ -158,11 +170,16 @@ async function _handleDedicatedBatch(entries) {
   const { chat, senderJid, userName, phoneJid, userIdentity, isGroup, stopLockRenew } = first;
 
   const lockKey = `wa_dedicated:${chat.id._serialized}`;
-  if (!responseLock.refresh(lockKey) && !responseLock.tryLock(lockKey)) {
-    log.warn(`   ⛔ Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
-    return;
+  let activeStopRenew = stopLockRenew;
+  if (!responseLock.refresh(lockKey)) {
+    if (!responseLock.tryLock(lockKey)) {
+      log.warn(`   ⛔ Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
+      return;
+    }
+    activeStopRenew = responseLock.startAutoRenew(lockKey);
   }
 
+  let presence = null;
   try {
     // Merge all content parts from all entries
     const allParts = [];
@@ -183,7 +200,7 @@ async function _handleDedicatedBatch(entries) {
       log.warn(`   ⚠️ History fetch failed (${historyErr.message}), proceeding without history`);
     }
 
-    const presence = new WhatsAppPresence(chat);
+    presence = new WhatsAppPresence(chat);
     try {
       await presence.start('typing');
     } catch { }
@@ -211,7 +228,6 @@ async function _handleDedicatedBatch(entries) {
       log.info(`\n📤 Sending response...`);
       await sendWhatsAppResponse(chat, response);
       log.info(`   ✅ Message sent`);
-      await presence.stop();
     } catch (err) {
       log.error(`\n❌ Error sending response:`);
       log.error(`   ${err.message}`);
@@ -223,7 +239,7 @@ async function _handleDedicatedBatch(entries) {
       }
     }
   } finally {
-    try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
+    try { if (typeof activeStopRenew === 'function') activeStopRenew(); } catch { }
     try { responseLock.unlock(lockKey); } catch { }
     try { if (presence) await presence.stop(); } catch { }
   }

@@ -246,7 +246,11 @@ function _waitForKernelHttp(entry, timeoutMs = 60_000) {
         if (internalIp) tryInternal = !tryInternal;
         retry();
       });
-      req.on('timeout', () => { req.destroy(); retry(); });
+      req.on('timeout', () => {
+        req.destroy();
+        if (internalIp) tryInternal = !tryInternal;
+        retry();
+      });
     };
     const retry = () => {
       if (Date.now() - start > timeoutMs) {
@@ -308,7 +312,7 @@ async function getOrCreate(userCtx, projectName) {
         while (offset + 8 <= logsBuf.length) {
           const type = logsBuf.readUInt8(offset);
           const size = logsBuf.readUInt32BE(offset + 4);
-          const chunk = logsBuf.slice(offset + 8, offset + 8 + size);
+          const chunk = logsBuf.subarray(offset + 8, offset + 8 + size);
           logLines += chunk.toString('utf8');
           offset += 8 + size;
         }
@@ -363,6 +367,12 @@ function isSandboxAlive(userCtx, projectName) {
  * Forcibly remove a single sandbox.
  */
 async function _killEntry(entry) {
+  if (entry && entry._bootPromise) {
+    try {
+      const ready = await entry._bootPromise;
+      entry = ready;
+    } catch { return; }
+  }
   try { if (entry.kernel) await entry.kernel.shutdown(); } catch (err) { log.warn(`kernel shutdown failed for ${entry.containerName || entry.containerId || 'unknown'}: ${err.message}`); }
   if (entry.container) {
     try { await entry.container.stop({ t: 2 }); } catch (err) { log.warn(`container stop failed for ${entry.containerName || entry.containerId || 'unknown'}: ${err.message}`); }
@@ -464,8 +474,6 @@ function installShutdownHook() {
     log.info(`shutting down all sandboxes (${signal})…`);
     try { await shutdownAll(); } catch (err) { log.warn(`shutdown hook cleanup failed (${signal}): ${err.message}`); }
   };
-  process.once('SIGINT', () => handler('SIGINT'));
-  process.once('SIGTERM', () => handler('SIGTERM'));
   process.once('beforeExit', () => handler('beforeExit'));
 }
 

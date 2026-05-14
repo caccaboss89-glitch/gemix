@@ -164,7 +164,7 @@ async function handleMessage(ctx) {
         const text = alreadyEnabled
           ? buildMaintenanceReleaseAlreadyEnabledMessage()
           : buildMaintenanceReleaseEnabledMessage();
-        if (!alreadyEnabled && ctx.platform === PLATFORM_DISCORD && releaseNotifyTarget.waJid) {
+        if (ctx.platform === PLATFORM_DISCORD && releaseNotifyTarget.waJid) {
           try {
             await sendWhatsAppDirect(releaseNotifyTarget.waJid, text);
           } catch (err) {
@@ -288,23 +288,7 @@ async function handleMessage(ctx) {
     ];
 
     if (ctx.history && ctx.history.length > 0) {
-      const historyLines = ctx.history.map(h =>
-        typeof h.content === 'string'
-          ? h.content
-          : (Array.isArray(h.content)
-            ? (h.content.find(p => p.type === 'text')?.text || '[media]')
-            : String(h.content))
-      );
-
-      messages.push({
-        role: 'user',
-        content: `[RECENT MESSAGE HISTORY]\n${historyLines.join('\n')}\n[END HISTORY]`,
-      });
-
-      messages.push({
-        role: 'user',
-        content: 'Reply to the following message:',
-      });
+      messages.push(...ctx.history);
     }
 
     // Transcribe documents in ctx.content before adding
@@ -362,6 +346,8 @@ async function handleMessage(ctx) {
     let maxRounds = MAX_TOOL_ROUNDS;
     let agenticUnlocked = false;
     let lastAgenticTool = null;
+    const sessionStartTime = Date.now();
+    const SESSION_MAX_DURATION_MS = 10 * 60 * 1000; // 10 minutes max
     const runToolCall = async (tc) => {
       if (projectLockCtx && AGENTIC_TOOL_NAMES.has(tc.function.name)) {
         if (!(await acquireLock(projectLockCtx, projectLockOwnerId))) {
@@ -389,6 +375,22 @@ async function handleMessage(ctx) {
         }
         log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
         const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
+        if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
+          let isSuccess = false;
+          if (typeof result === 'string') {
+            try {
+              const resObj = JSON.parse(result);
+              if (resObj.success !== false) isSuccess = true;
+            } catch {
+              isSuccess = true;
+            }
+          } else if (Array.isArray(result) || result && typeof result === 'object') {
+            isSuccess = result.success !== false;
+          }
+          if (isSuccess) {
+            shouldAutoExitProject = true;
+          }
+        }
         let resultPreview;
         if (Array.isArray(result)) {
           resultPreview = `multimodal[${result.length}] parts=${result.map(p => p.type).join(',')}`;
@@ -416,12 +418,18 @@ async function handleMessage(ctx) {
     while (rounds < maxRounds) {
       rounds++;
 
+      if (Date.now() - sessionStartTime > SESSION_MAX_DURATION_MS) {
+        log.warn(`   ⚠️ Overall session duration limit reached (10 minutes), forcing wrap up`);
+        break;
+      }
+
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.warn(`   ⚠️ Voice already generated, skipping round`);
         break;
       }
 
-      log.info(`🤖 [${ctx.platform.toUpperCase()}] AI call (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
+      const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
+      log.info(`🤖 [${pLabel}] AI call (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
       const _roundsLeft = maxRounds - rounds;
       const _roundHint = _roundsLeft <= 2
         ? `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
@@ -441,7 +449,7 @@ async function handleMessage(ctx) {
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-        log.info(`🔧 [${ctx.platform.toUpperCase()}] ${assistantMsg.tool_calls.length} tool call(s)`);
+        log.info(`🔧 [${pLabel}] ${assistantMsg.tool_calls.length} tool call(s)`);
         // Bump the per-message round budget on first agentic tool use.
         let unlockTriggered = false;
         for (const tc of assistantMsg.tool_calls) {
@@ -450,7 +458,6 @@ async function handleMessage(ctx) {
           }
           if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
             lastAgenticTool = tc.function.name;
-            shouldAutoExitProject = shouldAutoExitProject || Boolean(agenticUnlocked);
             if (!agenticUnlocked) {
               agenticUnlocked = true;
               maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
@@ -551,16 +558,16 @@ async function handleMessage(ctx) {
         // Token optimization: strip image previews from tool results the AI has already seen.
         // The AI evaluated them in this round; keeping base64 data wastes context in future rounds.
         for (const msg of messages) {
-          if (msg.role === 'tool' && Array.isArray(msg.content) && msg._imagePreviewSeen) {
-            msg.content = msg.content.filter(p => p.type !== 'image_url');
-            if (msg.content.length === 1 && msg.content[0].type === 'text') {
-              msg.content = msg.content[0].text;
+          if (msg.role === 'tool' && Array.isArray(msg.content)) {
+            if (msg._imagePreviewSeen) {
+              msg.content = msg.content.filter(p => p.type !== 'image_url');
+              if (msg.content.length === 1 && msg.content[0].type === 'text') {
+                msg.content = msg.content[0].text;
+              }
+              delete msg._imagePreviewSeen;
+            } else if (msg.content.some(p => p.type === 'image_url')) {
+              msg._imagePreviewSeen = true;
             }
-            delete msg._imagePreviewSeen;
-          }
-          // Mark current multimodal tool results so they get stripped NEXT round (after AI sees them)
-          if (msg.role === 'tool' && Array.isArray(msg.content) && msg.content.some(p => p.type === 'image_url')) {
-            msg._imagePreviewSeen = true;
           }
         }
 
@@ -568,7 +575,7 @@ async function handleMessage(ctx) {
       }
 
       let text = stripVoiceTags(assistantMsg.content || '');
-      log.info(`✅ [${ctx.platform.toUpperCase()}] Response generated (${text.length} chars)`);
+      log.info(`✅ [${pLabel}] Response generated (${text.length} chars)`);
 
       // Extract Discord thread title from <title> XML tag if present
       if (ctx.platform === PLATFORM_DISCORD) {
@@ -606,7 +613,7 @@ async function handleMessage(ctx) {
           // Remove [image:N] tags from final text
           text = text.replace(imageTagPattern, '');
           // Clean up extra whitespace left after tag removal
-          text = text.replace(/\s+/g, ' ').trim();
+          text = text.replace(/[^\S\n]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
         } else {
           // No tags found: remove all image_search attachments (but keep non-image attachments)
           const before = responseCtx.attachments.length;
@@ -625,8 +632,6 @@ async function handleMessage(ctx) {
         log.warn('   ⚠️ Empty AI response, sending fallback');
         text = FALLBACK_ERROR_PREFIX;
       }
-
-      shouldAutoExitProject = shouldAutoExitProject || Boolean(agenticUnlocked);
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
@@ -665,7 +670,7 @@ async function handleMessage(ctx) {
 
 
 
-    await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
+    try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed: ${vcErr.message}`); }
     return {
       text: FALLBACK_ERROR_PREFIX,
       voiceBuffer: null,
@@ -682,7 +687,7 @@ async function handleMessage(ctx) {
     log.error(`\n❌ [${platformLabel}] HANDLER ERROR:`);
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
-    await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
+    try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed in catch: ${vcErr.message}`); }
     return {
       text: FALLBACK_ERROR_PREFIX,
       voiceBuffer: null,

@@ -116,7 +116,8 @@ function cleanupStaleEntries() {
 }
 
 // Cleanup stale entries every 2 minutes
-setInterval(cleanupStaleEntries, 2 * 60 * 1000);
+const cleanupInterval = setInterval(cleanupStaleEntries, 2 * 60 * 1000);
+cleanupInterval.unref();
 
 module.exports = {
   incrementTranscription,

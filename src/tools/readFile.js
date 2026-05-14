@@ -129,7 +129,19 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       } catch { /* ignore */ }
     }
   }
-  if (/\.pdf$/i.test(rawPath) && (!fs.existsSync(absolutePath) || fs.statSync(absolutePath).isFile())) {
+  let isPdfFileTarget = false;
+  if (/\.pdf$/i.test(rawPath)) {
+    if (!fs.existsSync(absolutePath)) {
+      isPdfFileTarget = true;
+    } else {
+      try {
+        if (fs.statSync(absolutePath).isFile()) {
+          isPdfFileTarget = true;
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  if (isPdfFileTarget) {
     if (rawPath.startsWith('history/')) {
       const storageId = resolveStorageId(userCtx);
       let persisted;
@@ -190,13 +202,19 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       const projectName = path.basename(projectDir);
       const pollMs = 1500;
       let waited = 0;
+      let deadCount = 0;
 
       while (waited < remaining) {
         if (fs.existsSync(bgTask.doneMarkerPath)) break;
         // Watchdog: if the sandbox for this project is gone, the bg task definitely crashed.
         if (!isSandboxAlive(userCtx, projectName)) {
-           removeBgTask(absolutePath);
-           return { success: false, error: `Background command failed: the sandbox container for project "${projectName}" was lost or restarted. The background task was terminated.` };
+          deadCount++;
+          if (deadCount > 10) {
+            removeBgTask(absolutePath);
+            return { success: false, error: `Background command failed: the sandbox container for project "${projectName}" was lost or restarted. The background task was terminated.` };
+          }
+        } else {
+          deadCount = 0;
         }
         await new Promise(r => setTimeout(r, pollMs));
         waited += pollMs;
@@ -212,7 +230,6 @@ async function readFileTool(filePath, userCtx, responseCtx) {
         return { success: false, error: 'Background command timed out. Output file was not created.' };
       }
       try {
-        const projectDir = path.dirname(path.dirname(absolutePath));
         const violations = _collectRecentProjectWriteViolations(projectDir, bgStartedAt);
         if (violations.length > 0) {
           bgWriteViolationWarning = `\n\n[Background write violation: ${violations.length} file(s) changed outside authorized dirs temp/, output/, code/: ${violations.join(', ')}]`;
@@ -222,7 +239,6 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       // These are invisible to the normal diff-based auto-attach because the diff
       // snapshot was taken before the background thread had a chance to write them.
       if (responseCtx && Array.isArray(responseCtx.attachments)) {
-        const projectDir = path.dirname(path.dirname(absolutePath));
         const outputDir = path.join(projectDir, 'output');
 
         let projectRealRoot;
@@ -409,7 +425,7 @@ ${text}
 
   // ── Text/Code ──
   let text = buffer.toString('utf-8');
-  
+
   // ── Normalize PDF transcription header paths for non-agentic mode ──
   // In non-agentic mode, the AI can only use relative history paths.
   // When reading a transcription.md file, temporarily convert absolute paths
@@ -419,11 +435,11 @@ ${text}
   if (!agenticUnlocked && path.basename(absolutePath) === 'transcription.md') {
     const headerBeginIdx = text.indexOf(HEADER_BEGIN);
     const headerEndIdx = text.indexOf(HEADER_END);
-    
+
     if (headerBeginIdx !== -1 && headerEndIdx !== -1) {
       const header = text.slice(headerBeginIdx, headerEndIdx + HEADER_END.length);
       const rest = text.slice(headerEndIdx + HEADER_END.length);
-      
+
       // Convert absolute paths to relative paths in the header
       // /readonly/history/CV/ → CV/
       // /readonly/history/CV/transcription.md → CV/transcription.md
@@ -434,18 +450,18 @@ ${text}
         /\/readonly\/history\//g,
         ''
       );
-      
+
       // Remove the second rule about copying to /workspace/temp/ (non-agentic AI cannot access it)
       // The rule starts with "   - If you need to use any of these files..."
       normalizedHeader = normalizedHeader.replace(
         /   - If you need to use any of these files[\s\S]*?operate on the copy\.\n/,
         ''
       );
-      
+
       text = normalizedHeader + rest;
     }
   }
-  
+
   const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
   if (isTruncated) {
     const truncatedBuffer = buffer.slice(0, MAX_TEXT_BYTES);

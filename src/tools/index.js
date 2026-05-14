@@ -30,8 +30,8 @@ const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { storeRecentVoiceText } = require('../utils/historySync');
-const { toWhatsAppMediaArgs, toEmailAttachment } = require('../utils/attachments');
-const { sendAttachmentsWithFallback } = require('../utils/attachmentFallback');
+const { toWhatsAppMediaArgs, toEmailAttachment, attachmentSize } = require('../utils/attachments');
+const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
 const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId, userTotalBytes, userQuotaBytes } = require('../utils/userPaths');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/projectState');
@@ -102,6 +102,9 @@ function _resolveTargetEmail(args, userCtx) {
 
   if (userCtx.isAdmin) {
     if (recipientEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+        return { error: { success: false, error: `Invalid email address format: "${recipientEmail}".` } };
+      }
       return { email: recipientEmail, display: recipientEmail };
     }
     if (recipientName) {
@@ -326,24 +329,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           .replace(/\s{2,}/g, ' ')
           .trim();
 
-        const currentCount = await getVoiceCount(userCtx, chatKey);
-        if (currentCount >= 3) {
-          log.warn(`Voice limit exceeded in chat ${chatKey}: counter=${currentCount}`);
-          await resetVoiceCount(userCtx, chatKey);
-          result = { success: false, error: 'Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.' };
-          break;
-        }
-
-        if (cleanText.length > MAX_TTS_CHARS) {
-          result = { success: false, error: `Text exceeds the ${MAX_TTS_CHARS} character limit (${cleanText.length} chars). Cannot generate a voice message. Reply with a normal text message instead.` };
-          break;
-        }
-
         // Delivery to a specific recipient
         const hasRecipient = args.recipient?.name || args.recipient?.phone || args.recipientName || args.recipientPhone;
-        if (hasRecipient) {
-          const includeAttachments = args.includeAttachments !== false;
+        let targetChatKey = chatKey;
+        let targetJid = null;
 
+        if (hasRecipient) {
           const recipientName = args.recipient?.name || args.recipientName;
           if (recipientName) {
             const member = findMemberByName(recipientName);
@@ -352,8 +343,26 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
               break;
             }
           }
-          const targetJid = _resolveTargetWaJid(args, userCtx);
+          targetJid = _resolveTargetWaJid(args, userCtx);
           if (targetJid.error) { result = targetJid.error; break; }
+          targetChatKey = targetJid.jid;
+        }
+
+        const currentCount = await getVoiceCount(userCtx, targetChatKey);
+        if (currentCount >= 3) {
+          log.warn(`Voice limit exceeded in chat ${targetChatKey}: counter=${currentCount}`);
+          await resetVoiceCount(userCtx, targetChatKey);
+          result = { success: false, error: hasRecipient ? `Voice limit exceeded: the recipient (${targetJid.display}) has already received 3 consecutive voice messages. Send a normal text message instead, no voice.` : 'Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.' };
+          break;
+        }
+
+        if (cleanText.length > MAX_TTS_CHARS) {
+          result = { success: false, error: `Text exceeds the ${MAX_TTS_CHARS} character limit (${cleanText.length} chars). Cannot generate a voice message. Reply with a normal text message instead.` };
+          break;
+        }
+
+        if (hasRecipient) {
+          const includeAttachments = args.includeAttachments !== false;
           if (deliveryCtx.contactedWA.has(targetJid.jid)) {
             result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
             break;
@@ -402,7 +411,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
               result = { success: true, message: `Voice message sent successfully to ${targetJid.display}.` };
             }
 
-            await incrementVoiceCount(userCtx, chatKey);
+            await incrementVoiceCount(userCtx, targetChatKey);
             storeRecentVoiceText(targetJid.jid, stripVocalTags(cleanText));
           } catch (err) {
             await notifyAdmin('Voice Message Delivery', `Failed to send voice message to ${targetJid.jid}: ${err.message}`);
@@ -513,7 +522,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
               const emailAtt = toEmailAttachment(att);
               // Check if valid and not too large for direct email (arbitrary 15MB limit)
               const MAX_EMAIL_ATT_SIZE = 15 * 1024 * 1024;
-              const { attachmentSize } = require('../utils/attachments');
               const size = attachmentSize(att);
 
               if (emailAtt && emailAtt.filename && (emailAtt.content || emailAtt.path) && size < MAX_EMAIL_ATT_SIZE) {
@@ -526,7 +534,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             let fallbackMessage = null;
             if (failed.length > 0) {
               try {
-                const { buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
                 const fallbackData = buildFallbackAttachmentMessage(failed, { platform: 'email' });
                 fallbackMessage = fallbackData.message;
               } catch (err) {
@@ -569,6 +576,10 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       }
 
       case 'send_whatsapp_message': {
+        if (!args.message || typeof args.message !== 'string' || args.message.trim().length === 0) {
+          result = { success: false, error: 'Missing "message" parameter. You must provide the text message to send.' };
+          break;
+        }
         const includeAttachments = args.includeAttachments !== false;
 
         const waRecipientName = args.recipient?.name || args.recipientName;

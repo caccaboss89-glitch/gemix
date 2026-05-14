@@ -6,16 +6,6 @@ const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
 const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
 
-/**
- * Detect if a WhatsApp message body is a system-generated notification.
- * Used to label messages as [System] in history without requiring a physical prefix.
- * @param {string} body
- * @returns {boolean}
- */
-function _isSystemMessage(body) {
-  return isSystemMessage(body);
-}
-
 const { isSystemMessage } = require('../../config/systemMessages');
 
 const { isSupportedMedia, mediaToContentPart, mediaTag, buildAttachmentTag } = require('../../utils/media');
@@ -87,7 +77,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
-        } else if (_isSystemMessage(msg.body)) {
+        } else if (isSystemMessage(msg.body)) {
           senderName = '[System]';
           isSystem = true;
         } else if (hasFooter(msg.body)) {
@@ -109,7 +99,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
         if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
-        } else if (_isSystemMessage(msg.body)) {
+        } else if (isSystemMessage(msg.body)) {
           senderName = '[System]';
           isSystem = true;
         } else {
@@ -175,7 +165,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
             textContent = `${textContent} ${tag} <Description kind="audio">${cachedDescription}</Description>`.trim();
           } else if (isGemiX) {
             textContent = `${textContent} ${tag} (transcription unavailable)`.trim();
-          } else if (duration > MAX_AUDIO_DURATION_S) {
+          } else if (duration > 0 && duration > MAX_AUDIO_DURATION_S) {
             textContent = `${textContent} ${tag} (audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s)`.trim();
           } else {
             textContent = `${textContent} ${tag}`.trim();
@@ -184,7 +174,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
           const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'video');
           if (cachedDescription) {
             textContent = `${textContent} ${tag} <Description kind="video">${cachedDescription}</Description>`.trim();
-          } else if (duration > MAX_VIDEO_DURATION_S) {
+          } else if (duration > 0 && duration > MAX_VIDEO_DURATION_S) {
             textContent = `${textContent} ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)`.trim();
           } else {
             textContent = `${textContent} ${tag}`.trim();
@@ -237,7 +227,12 @@ async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds
         const media = await quoted.downloadMedia();
         return media ? Buffer.from(media.data, 'base64') : null;
       };
-      const syncedPath = await syncFileToHistory(userId, quoted.id.id, fetchBuffer, filename);
+      let syncedPath = null;
+      try {
+        syncedPath = await syncFileToHistory(userId, quoted.id.id, fetchBuffer, filename);
+      } catch (err) {
+        log.warn(`Failed to sync quoted media to history: ${err.message}`);
+      }
       const tag = buildAttachmentTag(syncedPath, filename);
       const quotedMessageKey = _waMessageKey(quoted);
       const isQuotedInRecentHistory = Boolean(quotedMessageKey) && recentMessageIds instanceof Set && recentMessageIds.has(quotedMessageKey);
@@ -361,7 +356,24 @@ async function sendWhatsAppResponse(chat, responseData) {
 
   if (hasText) {
     const cleanedText = normalizeMarkdown(responseData.text);
-    await chat.sendMessage(cleanedText);
+    const chunkSize = 40000;
+    const chunks = [];
+    for (let i = 0; i < cleanedText.length; i += chunkSize) {
+      chunks.push(cleanedText.slice(i, i + chunkSize));
+    }
+    for (const chunk of chunks) {
+      let attempts = 3;
+      while (attempts > 0) {
+        try {
+          await chat.sendMessage(chunk);
+          break;
+        } catch (err) {
+          attempts--;
+          if (attempts === 0) throw err;
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
   }
 
   if (hasAttachments) {
@@ -452,7 +464,11 @@ async function processCurrentMedia(msg, userId) {
   let syncedPath = null;
   if (buffer) {
     const fetchBuffer = async () => buffer;
-    syncedPath = await syncFileToHistory(userId, msg.id.id, fetchBuffer, filename);
+    try {
+      syncedPath = await syncFileToHistory(userId, msg.id.id, fetchBuffer, filename);
+    } catch (err) {
+      log.warn(`Failed to sync current media to history: ${err.message}`);
+    }
   }
 
   const tag = syncedPath ? buildAttachmentTag(syncedPath, filename) : mediaTag(filename, mimetype);

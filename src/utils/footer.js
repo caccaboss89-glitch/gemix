@@ -7,10 +7,14 @@ const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
  * @returns {string} The human-readable model name or the original ID if not found
  */
 function getModelDisplayName(modelId) {
+  if (!modelId) return 'AI Model';
   const map = {
     'qwen/qwen3-coder:free': 'Qwen 3 Coder',
   };
-  return map[modelId] || modelId;
+  if (map[modelId]) return map[modelId];
+  const parts = modelId.split('/');
+  const name = parts[parts.length - 1].split(':')[0].replace(/[-_]/g, ' ');
+  return name.replace(/\b\w/g, c => c.toUpperCase());
 }
 
 /**
@@ -40,7 +44,7 @@ function removeFooter(text) {
  */
 function hasFooter(text) {
   if (!text) return false;
-  return text.includes('--GemiX •');
+  return /--GemiX\s*•/i.test(text);
 }
 
 /**
@@ -50,7 +54,7 @@ function hasFooter(text) {
  */
 function hasScheduledFooter(text) {
   if (!text) return false;
-  return text.includes('Messaggio Programmato il');
+  return /Messaggio Programmato il/i.test(text);
 }
 
 /**
@@ -60,7 +64,7 @@ function hasScheduledFooter(text) {
  */
 function removeScheduledFooter(text) {
   if (!text) return '';
-  return text.replace(/\n+--GemiX •\s*Messaggio Programmato il.*$/g, '').trim();
+  return text.replace(/\n+--GemiX\s*•\s*Messaggio Programmato il.*$/gi, '').trim();
 }
 
 /**

@@ -7,8 +7,8 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
-const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const LOG_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour
 const crypto = require('crypto');
 
 function ensureLogDir() {
@@ -132,9 +132,10 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
 async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
   logApiRequest(modelName, apiUrl, body);
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
+    let timer;
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+      timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
       const startTime = Date.now();
       const res = await fetch(apiUrl, {
@@ -158,6 +159,7 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
       log.debug(`   Model: ${modelName} - ${duration}ms${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
       return res;
     } catch (err) {
+      if (timer) clearTimeout(timer);
       const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
       const isNetworkError = err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message);
       const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (429|500|502|503|504)/.test(err.message));

@@ -46,7 +46,10 @@ function _findByWaJid(waJid) {
 
 function isReleaseNotifyEnabled(chatId, waJid) {
   if (!chatId && !waJid) return false;
-  if (chatId && subscribedChats.has(chatId)) return true;
+  if (chatId && waJid) {
+    return subscribedChats.get(chatId) === waJid;
+  }
+  if (chatId) return subscribedChats.has(chatId);
   return Boolean(_findByWaJid(waJid));
 }
 
@@ -54,10 +57,10 @@ async function enableReleaseNotify(chatId, waJid) {
   if (!chatId || !waJid) {
     return { success: false, alreadyEnabled: false, error: 'Unable to determine the chat or WhatsApp number.' };
   }
-  if (isReleaseNotifyEnabled(chatId, waJid)) {
+  if (subscribedChats.get(chatId) === waJid) {
     return { success: true, alreadyEnabled: true, message: 'GemiX release notifications were already enabled for this chat.' };
   }
-  for (const [existingChatId, existingWaJid] of subscribedChats.entries()) {
+  for (const [existingChatId, existingWaJid] of [...subscribedChats.entries()]) {
     if (existingChatId === chatId || existingWaJid === waJid) {
       subscribedChats.delete(existingChatId);
     }

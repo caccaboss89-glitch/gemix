@@ -31,23 +31,6 @@ function _uniqueDestName(destDir, baseName) {
   return `${stem}(${i})${ext}`;
 }
 
-function _normalizeHistoryCopySource(name) {
-  if (typeof name !== 'string') return null;
-  let clean = name.trim().replace(/\\/g, '/');
-  if (clean.startsWith('/readonly/history/')) {
-    clean = clean.slice('/readonly/history/'.length);
-  } else if (clean.startsWith('history/')) {
-    clean = clean.slice('history/'.length);
-  }
-  if (!clean || clean.includes('..') || clean.startsWith('/') || clean.includes('//')) return null;
-  if (clean.includes('/') && !clean.endsWith('/')) return null;
-  if (clean.endsWith('/')) {
-    const dirName = clean.slice(0, -1);
-    if (!dirName || dirName.includes('/')) return null;
-  }
-  return clean;
-}
-
 function _guardPlatform(userCtx) {
   if (userCtx.platform === PLATFORM_DISCORD) {
     return _err('Project tools are not available on Discord. Use WhatsApp for agentic features.');
@@ -395,5 +378,7 @@ module.exports = {
   switchProjectTool,
   deleteProjectTool,
   cleanupProjectTool,
+  copyToProjectTool,
+  deleteStorageTool,
   quotaTool,
 };

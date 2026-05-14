@@ -19,8 +19,11 @@ function _pruneStale() {
   const cutoff = Date.now() - BG_TASK_TTL_MS;
   for (const [key, val] of _pending) {
     if (val.startedAt < cutoff) {
-      if (val.projectKey) _activeProjects.delete(val.projectKey);
       _pending.delete(key);
+      if (val.projectKey) {
+        const stillActive = [..._pending.values()].some(t => t.projectKey === val.projectKey);
+        if (!stillActive) _activeProjects.delete(val.projectKey);
+      }
     }
   }
 }
@@ -42,8 +45,11 @@ function getBgTask(absOutputPath) {
   const task = _pending.get(absOutputPath);
   if (!task) return null;
   if (Date.now() - task.startedAt > BG_TASK_TTL_MS) {
-    if (task.projectKey) _activeProjects.delete(task.projectKey);
     _pending.delete(absOutputPath);
+    if (task.projectKey) {
+      const stillActive = [..._pending.values()].some(t => t.projectKey === task.projectKey);
+      if (!stillActive) _activeProjects.delete(task.projectKey);
+    }
     return null;
   }
   return task;
@@ -51,14 +57,13 @@ function getBgTask(absOutputPath) {
 
 function removeBgTask(absOutputPath) {
   const task = _pending.get(absOutputPath);
-  if (task && task.projectKey) {
-    // Only remove from _activeProjects if no other task references the same project key
-    const stillActive = [..._pending.values()].some(
-      t => t !== task && t.projectKey === task.projectKey
-    );
-    if (!stillActive) _activeProjects.delete(task.projectKey);
+  if (task) {
+    _pending.delete(absOutputPath);
+    if (task.projectKey) {
+      const stillActive = [..._pending.values()].some(t => t.projectKey === task.projectKey);
+      if (!stillActive) _activeProjects.delete(task.projectKey);
+    }
   }
-  _pending.delete(absOutputPath);
 }
 
 /**
