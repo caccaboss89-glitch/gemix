@@ -13,7 +13,7 @@ const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { queryRegolamento } = require('./rag/regolamentoRag');
-const { getCurrentProject, getLastProject, setCurrentProject, acquireLock, releaseLock, startAutoRenewLock } = require('./utils/projectState');
+const { getCurrentProject, getLastProject, setCurrentProject, acquireLock, releaseLock, startAutoRenewLock, consumeLastCrash } = require('./utils/projectState');
 const { listProjects, ensureUserSkeleton, getProjectRoot, resolveStorageId } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
@@ -248,6 +248,12 @@ async function handleMessage(ctx) {
     };
 
     projectLockOwnerId = userCtx.requestId;
+    projectLockCtx = userCtx;
+
+    let crashRecovery = null;
+    try {
+      crashRecovery = await consumeLastCrash(userCtx, INTERRUPTED_RUN_TTL_MS);
+    } catch (e) { log.warn(`consumeLastCrash failed: ${e.message}`); }
 
     let tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
