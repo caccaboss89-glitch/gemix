@@ -195,7 +195,7 @@ async function runInProjectSandbox({
   const usedBefore = userTotalBytes(userCtx);
   if (usedBefore >= quotaBytes) {
     return {
-
+      error: `Storage quota exceeded (${Math.floor(usedBefore / 1048576)} MB / ${Math.floor(quotaBytes / 1048576)} MB). Run \`gemix-project quota\` and \`gemix-project cleanup\` via bash to free space.`,
     };
   }
 
@@ -366,10 +366,10 @@ async function runInProjectSandbox({
   let quotaWarning = null;
   const usedAfter = userTotalBytes(userCtx);
   if (usedAfter >= quotaBytes) {
-
+    quotaWarning = `Warning: your storage quota is now 100% full (${Math.floor(usedAfter / 1048576)} MB / ${Math.floor(quotaBytes / 1048576)} MB). Future operations will be blocked.`;
   } else if (usedAfter >= quotaBytes * 0.9) {
     const pct = Math.round((usedAfter / quotaBytes) * 100);
-
+    quotaWarning = `Warning: your storage quota is ${pct}% full (${Math.floor(usedAfter / 1048576)} MB / ${Math.floor(quotaBytes / 1048576)} MB).`;
   }
 
   return {
