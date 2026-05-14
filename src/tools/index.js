@@ -280,7 +280,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           if (Array.isArray(imageResult.toolResult)) {
             const first = imageResult.toolResult[0];
             const warn = quotaFull
-
+              ? 'Warning: save_to_disk failed because your storage quota is full.'
               : 'Warning: save_to_disk requested but no images were persisted (see logs).';
             if (first && first.type === 'text') first.text = `${first.text}\n\n${warn}`;
           }
