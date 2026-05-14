@@ -238,7 +238,7 @@ async function cleanupProjectTool(args, userCtx) {
   const slug = sanitizeProjectName(name);
   if (!slug || !projectExists(userCtx, slug)) return _err(`Project "${name}" not found.`);
 
-  const subdirs = Array.isArray(args && args.subdirs) ? args.subdirs : [];
+  const subdirs = (Array.isArray(args && args.subdirs) ? args.subdirs : []).map(s => String(s).replace(/\/+$/, ''));
   if (subdirs.length === 0) return _err(`Missing "subdirs". Allowed: ${FIXED_PROJECT_SUBDIRS.join(', ')}.`);
 
   const invalid = subdirs.filter(s => !FIXED_PROJECT_SUBDIRS.includes(s));

@@ -193,7 +193,7 @@ async function runInProjectSandbox({
     : getProjectRoot(userCtx, projectName);
   const quotaBytes = userQuotaBytes();
   const usedBefore = userTotalBytes(userCtx);
-  if (usedBefore >= quotaBytes) {
+  if (!usingScratch && usedBefore >= quotaBytes) {
     return {
       error: `Storage quota exceeded (${Math.floor(usedBefore / 1048576)} MB / ${Math.floor(quotaBytes / 1048576)} MB). Run \`gemix-project quota\` and \`gemix-project cleanup\` via bash to free space.`,
     };

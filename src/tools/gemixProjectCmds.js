@@ -131,7 +131,7 @@ async function handleGemixProjectCmd(command, userCtx) {
 
   const args = _parseArgs(rest);
   const subcmd = args[0].toLowerCase();
-  const subArgs = args.slice(1);
+  const subArgs = args.slice(1).map(a => a.replace(/\/+$/, ''));
 
   switch (subcmd) {
     case 'list':
