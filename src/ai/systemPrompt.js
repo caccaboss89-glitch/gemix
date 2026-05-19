@@ -52,7 +52,7 @@ function buildSystemPrompt(ctx) {
     prompt += '- Some tools (email, messages to others) are NOT available for this user.\n';
   }
   prompt += '    </ToolExecution>\n';
-  prompt += `    <MediaHandling>User audio/video in history: &lt;Description kind="..."&gt; (audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s). Your past voice and current PDFs: &lt;Transcription&gt;. Use read_file for past PDFs in history. Call on multiple files for parallel analysis.</MediaHandling>\n`;
+  prompt += `    <MediaHandling>Audio, video and images sent by the user are ingested natively (Grok 4 transcribes audio, summarises video, sees images directly — no pre-captioning step). Limits: audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s. Older history items may carry legacy &lt;Description kind="..."&gt; or &lt;Transcription&gt; tags from previous bot versions: treat them as authoritative summaries of those past media files. Use read_file on past PDFs in history. Call on multiple files for parallel analysis.</MediaHandling>\n`;
 
   if (isWhatsApp) {
     prompt += '    <ResponsePreferences>\n';

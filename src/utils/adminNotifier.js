@@ -21,7 +21,7 @@ function setAdminNotifierClient(waClient) {
 /**
  * Send an error notification to the admin via WhatsApp.
  * Includes cooldown to avoid spam on repeated failures.
- * @param {string} source - Error source (e.g., 'API (Gemini)', 'API (Qwen)')
+ * @param {string} source - Error source (e.g., 'API (Grok)', 'WhatsApp Delivery')
  * @param {string} errorMessage - Error details
  */
 async function notifyAdmin(source, errorMessage) {

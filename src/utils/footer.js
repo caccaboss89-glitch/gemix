@@ -3,13 +3,16 @@ const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
 
 /**
  * Map model ID to human-readable display name.
- * @param {string} modelId - The model identifier (e.g., 'qwen/qwen3-coder:free')
+ * @param {string} modelId - The model identifier (e.g., 'grok-4-latest')
  * @returns {string} The human-readable model name or the original ID if not found
  */
 function getModelDisplayName(modelId) {
   if (!modelId) return 'AI Model';
   const map = {
-    'qwen/qwen3-coder:free': 'Qwen 3 Coder',
+    'grok-4-latest': 'Grok 4',
+    'grok-4': 'Grok 4',
+    'grok-4-fast': 'Grok 4 Fast',
+    'grok-4-fast-reasoning': 'Grok 4 Fast',
   };
   if (map[modelId]) return map[modelId];
   const parts = modelId.split('/');

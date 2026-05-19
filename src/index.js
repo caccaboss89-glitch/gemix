@@ -62,12 +62,32 @@ const { initPersonalWhatsApp } = require('./platforms/whatsapp/personal');
 const { initDiscord } = require('./platforms/discord/client');
 const { startScheduler, setSchedulerWaClient } = require('./scheduler/engine');
 const { setAdminNotifierClient } = require('./utils/adminNotifier');
-const { initRegolamentoRag } = require('./rag/regolamentoRag');
 const sandboxManager = require('./sandbox/sandboxManager');
 const { startInternalNotifyServer } = require('./utils/internalNotifyServer');
 const { startTempFileServer } = require('./utils/tempFileServer');
+const { HERMES_BASE_URL, GROK_MODEL } = require('./config/env');
 
 log.info('🤖 GemiX — Avvio in corso...\n');
+log.info(`   🔗 Hermes proxy: ${HERMES_BASE_URL} (model: ${GROK_MODEL})`);
+
+// Soft preflight: ping the Hermes proxy. We don't block startup on failure
+// because the proxy may come up after GemiX (e.g. via tmux on the VPS), but
+// a clear log line surfaces the most common misconfiguration immediately.
+(async () => {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    const res = await fetch(`${HERMES_BASE_URL.replace(/\/+$/, '')}/models`, { signal: ctrl.signal }).catch(() => null);
+    clearTimeout(timer);
+    if (res && (res.ok || res.status === 401 || res.status === 404)) {
+      log.info('   ✅ Hermes proxy reachable');
+    } else {
+      log.warn(`   ⚠️ Hermes proxy preflight returned status ${res ? res.status : 'no-response'} — first AI call may fail`);
+    }
+  } catch (err) {
+    log.warn(`   ⚠️ Hermes proxy preflight failed (${err.message}) — make sure 'hermes proxy start --provider xai --port 8000' is running`);
+  }
+})();
 
 const dedicatedWa = initDedicatedWhatsApp();
 
@@ -78,13 +98,7 @@ dedicatedWa.on('ready', () => {
 
 initPersonalWhatsApp();
 
-initRegolamentoRag()
-  .catch(err => {
-    log.warn(`⚠️ RAG init promise rejected: ${err.message}`);
-  })
-  .finally(() => {
-    initDiscord();
-  });
+initDiscord();
 
 startScheduler();
 sandboxManager.installShutdownHook();

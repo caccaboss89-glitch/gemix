@@ -676,6 +676,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         result = await bashTool(args, userCtx, responseCtx);
         break;
       }
+
       case 'music_creator': {
         if (!args.prompt) {
           result = { success: false, error: 'Missing prompt parameter in tool call arguments.' };

@@ -123,7 +123,7 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
 
 /**
  * Unified API client with retry and timeout logic.
- * @param {string} modelName - Model name for logging (e.g., 'Gemini', 'Qwen')
+ * @param {string} modelName - Model name for logging (e.g., 'Grok')
  * @param {string} apiUrl - Full API endpoint URL
  * @param {object} body - Request body
  * @param {string} apiKey - API key for authentication

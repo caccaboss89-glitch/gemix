@@ -1,45 +1,43 @@
 // src/ai/aiProvider.js
-// Single-provider router: every request goes to Qwen. Audio/video content
-// parts (which Qwen can't ingest) are pre-processed through the media
-// describer and swapped for `<Description>` text
-// parts before the call. This removes the legacy Qwen↔Gemini fork and
-// avoids the quality drop of running entire complex tasks on a small
-// multimodal model just because the request happens to contain audio.
+//
+// Single entry-point for every LLM call in GemiX. Talks to the Hermes Agent
+// proxy (http://127.0.0.1:8000/v1) which is OpenAI-compatible and forwards
+// requests to xAI Grok using a SuperGrok OAuth token managed by the proxy.
+//
+// Why a single function:
+//   - one transport, one retry policy, one log file format,
+//   - audio/video/image content parts go through unchanged: Grok ingests
+//     them natively (no more pre-pass with a separate captioning model).
+//
+// FAST vs AGENTIC: same model on Hermes/Grok. The `agenticUnlocked` flag
+// only changes the *tool list* and the *system prompt briefing* (handled
+// upstream by the handler/system prompt), it does NOT swap the model.
 
-const { OPENROUTER_API_KEY, AGENTIC_MODEL, FAST_MODEL } = require('../config/env');
-const { OPENROUTER_BASE_URL, MAX_TOKENS } = require('../config/constants');
+const { HERMES_API_KEY, HERMES_BASE_URL, GROK_MODEL } = require('../config/env');
+const { MAX_TOKENS } = require('../config/constants');
 const { callModel } = require('./apiClient');
-const { describeMediaInMessages } = require('./mediaDescriber');
-
-function getQwenModel({ agenticUnlocked = false } = {}) {
-  return agenticUnlocked ? AGENTIC_MODEL : FAST_MODEL;
-}
 
 /**
- * Call the main AI provider (Qwen) via OpenRouter.
- * Audio/video parts in `messages` are described in one batch call and
- * replaced in-place with `<Description>` text parts before the call.
- * Parts are mutated once so they are not re-described on subsequent rounds.
- *
- * @param {Array} messages - OpenAI-format messages array
- * @param {Array|null} tools - Tool definitions array
+ * Call Grok via the Hermes proxy.
+ * @param {Array} messages - OpenAI-format messages array (text + multimodal parts)
+ * @param {Array|null} tools - OpenAI tool definitions (function calling)
+ * @param {object} [options]
+ * @param {boolean} [options.agenticUnlocked] - kept for parity with the handler;
+ *   it does not change the model anymore but is forwarded to the log so we
+ *   can correlate request mode vs. behaviour during the migration.
  * @returns {Promise<{message: object, provider: string, model: string}>}
  */
 async function callAI(messages, tools = null, options = {}) {
-  const processedMessages = await describeMediaInMessages(messages);
-  const model = getQwenModel(options);
-  const effort = options.agenticUnlocked ? 'high' : 'low';
-
   const body = {
-    model,
-    messages: processedMessages,
+    model: GROK_MODEL,
+    messages,
     max_tokens: MAX_TOKENS,
-    reasoning: { effort },
   };
   if (tools && tools.length > 0) body.tools = tools;
 
-  const message = await callModel('Qwen', `${OPENROUTER_BASE_URL}/chat/completions`, body, OPENROUTER_API_KEY);
-  return { message, provider: 'Qwen', model };
+  const apiUrl = `${HERMES_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
+  const message = await callModel('Grok', apiUrl, body, HERMES_API_KEY);
+  return { message, provider: 'Grok', model: GROK_MODEL };
 }
 
 module.exports = { callAI };

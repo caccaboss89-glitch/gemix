@@ -1,4 +1,9 @@
 // src/tools/musicCreator.js
+//
+// Music generation via Lyria on OpenRouter (SSE streaming).
+// This is the ONLY remaining OpenRouter dependency after the Hermes migration:
+// Lyria is not available via xAI/Grok, so this tool keeps its own dedicated
+// OPENROUTER_API_KEY + MUSIC_MODEL env vars.
 const { createLogger } = require('../utils/logger');
 const { OPENROUTER_BASE_URL } = require('../config/constants');
 const { MUSIC_MODEL, OPENROUTER_API_KEY } = require('../config/env');
@@ -60,8 +65,6 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
         try {
           const data = JSON.parse(dataStr);
           const delta = data.choices?.[0]?.delta || {};
-
-
 
           // 1. Official OpenAI-style audio
           if (delta.audio?.data) audioChunks.push(delta.audio.data);
@@ -133,7 +136,7 @@ async function musicCreator(prompt, userCtx) {
     const model = MUSIC_MODEL || 'google/lyria-3-clip-preview';
     const apiUrl = `${OPENROUTER_BASE_URL}/chat/completions`;
 
-    if (!apiKey) throw new Error('OPENROUTER_API_KEY is missing in environment.');
+    if (!apiKey) throw new Error('OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).');
 
     log.info(`🎵 Generating for ${userId}`);
 
@@ -142,11 +145,10 @@ async function musicCreator(prompt, userCtx) {
       messages: [
         {
           role: 'user',
-          content: [{ type: 'text', text: prompt.trim() }]   // mandatory array for multi-modal models
+          content: [{ type: 'text', text: prompt.trim() }]
         }
       ],
       modalities: ['text', 'audio'],
-      // For Lyria, omit the audio object or keep it empty to avoid proxy confusion
       ...(model.includes('lyria') ? {} : {
         audio: { voice: 'alloy', format: 'mp3' }
       })
@@ -154,7 +156,7 @@ async function musicCreator(prompt, userCtx) {
 
     const result = await callLyriaStreaming(model, apiUrl, body, apiKey);
 
-    // === IF AUDIO EXISTS (Future-proofing) ===
+    // === IF AUDIO EXISTS ===
     if (result.audio.data && result.audio.data.length > 100) {
       let audioBase64 = result.audio.data;
       if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
@@ -183,11 +185,8 @@ async function musicCreator(prompt, userCtx) {
       };
     }
 
-    // === CURRENT FALLBACK (lyrics only) ===
+    // === FALLBACK: lyrics only ===
     log.warn('⚠️ Audio not received → returning only lyrics');
-
-    // We DO NOT consume the daily limit if audio was not received
-    // This allows the user to try again.
 
     return {
       toolResult: {

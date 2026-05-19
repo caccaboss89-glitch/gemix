@@ -12,7 +12,7 @@ const { transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
-const { queryRegolamento } = require('./rag/regolamentoRag');
+const { loadRegolamento } = require('./utils/regolamento');
 const { getCurrentProject, getLastProject, setCurrentProject, acquireLock, releaseLock, startAutoRenewLock, consumeLastCrash } = require('./utils/projectState');
 const { getProjectRoot, resolveStorageId } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
@@ -125,7 +125,8 @@ function buildMaintenanceReleaseAlreadyEnabledMessage() {
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
- * Sends every request to Qwen via OpenRouter; audio/video parts are captioned upstream by the media describer (see aiProvider).
+ * Sends every request to Grok via the Hermes proxy (OpenAI-compatible). Grok 4
+ * ingests audio, video and images natively — no upstream captioning step.
  * @param {object} ctx - Normalized message context { platform, userId, userName, userIdentity, content, history, isGroup, groupId, ... }
  * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle? }
  */
@@ -215,10 +216,7 @@ async function handleMessage(ctx) {
 
     // RAG: inietta contesto regolamento per Discord
     if (ctx.platform === PLATFORM_DISCORD) {
-      const queryText = typeof ctx.content === 'string'
-        ? ctx.content
-        : (Array.isArray(ctx.content) ? (ctx.content.find(p => p.type === 'text')?.text || '') : '');
-      ctx.ragContext = await queryRegolamento(queryText);
+      ctx.ragContext = loadRegolamento();
     }
 
     let currentAgenticBriefing = null;
@@ -465,7 +463,8 @@ async function handleMessage(ctx) {
             }
           }
         }
-        // Preserve reasoning_details, delete null content for OpenRouter reasoning models
+        // Preserve reasoning_details where present; delete null content
+        // (OpenAI-compatible reasoning models occasionally return content=null).
         if (assistantMsg.content === null || assistantMsg.content === undefined) {
           delete assistantMsg.content;
         }

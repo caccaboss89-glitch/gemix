@@ -1,6 +1,6 @@
 // src/tools/browsePage.js
-const { BROWSE_PAGE_MODEL } = require('../config/env');
-const { summarizePage, MAX_RAW_CHARS } = require('../ai/pageSummarizer');
+const { HERMES_API_KEY, HERMES_BASE_URL, GROK_MODEL } = require('../config/env');
+const { callModel } = require('../ai/apiClient');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { createLogger } = require('../utils/logger');
 
@@ -9,6 +9,8 @@ const log = createLogger('BrowsePage');
 // ── Constants ──
 
 const FETCH_TIMEOUT_MS = 30_000;     // generous timeout for slow pages
+const MAX_RAW_CHARS = 120_000;       // max chars extracted from page before summarization
+const MAX_SUMMARY_TOKENS = 4096;     // max tokens for the summarizer response
 
 // ── HTML → Text extraction ──
 
@@ -96,6 +98,64 @@ async function _fetchPage(url) {
   };
 }
 
+// ── LLM-powered summarizer (Hermes/Grok) ──
+
+/**
+ * Summarize page content using Grok via the Hermes proxy.
+ * Same retry/logging path as the main chat call (callModel from apiClient).
+ *
+ * @param {string} pageText - Extracted text content from the page
+ * @param {string} instructions - User instructions for what to extract/analyze
+ * @param {string} url - Original URL (for context)
+ * @param {string|null} pageTitle - Page title if available
+ * @returns {Promise<string>} Markdown-formatted summary
+ */
+async function _summarizePage(pageText, instructions, url, pageTitle = null) {
+  const systemPrompt = [
+    'Return normal Markdown text, not JSON and not XML.',
+    'Structure the answer clearly with a short title, a concise summary, key points, and relevant excerpts when useful.',
+    'Follow the user instructions, and never invent facts.',
+    'If the page is empty, paywalled, blocked, login-only, or inaccessible, say so clearly.',
+    'If content was truncated, mention it clearly.',
+    'When you include excerpts, keep them short and verbatim, not paraphrased.',
+  ].join(' ');
+
+  let content = pageText;
+  let truncated = false;
+  if (content.length > MAX_RAW_CHARS) {
+    content = content.substring(0, MAX_RAW_CHARS);
+    truncated = true;
+  }
+
+  const userPrompt = [
+    `URL: ${url}`,
+    pageTitle ? `Title: ${pageTitle}` : null,
+    `Content length: ${pageText.length}${truncated ? ` (truncated to ${MAX_RAW_CHARS})` : ''}`,
+    `Instructions: ${instructions}`,
+    '',
+    'PAGE CONTENT:',
+    content,
+    'END PAGE CONTENT',
+  ].filter(Boolean).join('\n');
+
+  const body = {
+    model: GROK_MODEL,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    max_tokens: MAX_SUMMARY_TOKENS,
+  };
+
+  const apiUrl = `${HERMES_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
+  log.info(`   🧠 Summarizing with ${GROK_MODEL} via Hermes...`);
+  const message = await callModel('GrokSummarizer', apiUrl, body, HERMES_API_KEY);
+  const summary = typeof message?.content === 'string' ? message.content.trim() : '';
+  if (!summary) throw new Error('Summarizer returned empty response');
+  log.info(`   ✅ Summary generated (${summary.length} chars)`);
+  return summary;
+}
+
 // ── Main export ──
 
 /**
@@ -125,11 +185,6 @@ async function browsePage(url, instructions, mode = 'summary') {
   // Block non-HTTP protocols
   if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
     return { success: false, error: `Unsupported protocol "${parsedUrl.protocol}". Only http and https are supported.` };
-  }
-
-  // ── Validate model ──
-  if (!BROWSE_PAGE_MODEL) {
-    return { success: false, error: 'BROWSE_PAGE_MODEL is not defined in the environment configuration.' };
   }
 
   // ── Fetch page ──
@@ -217,7 +272,7 @@ ${result}
   }
 
   try {
-    const summary = await summarizePage(pageText, instructions.trim(), finalUrl, pageTitle);
+    const summary = await _summarizePage(pageText, instructions.trim(), finalUrl, pageTitle);
     const timestamp = new Date().toISOString();
     const isTruncated = pageText.length > MAX_RAW_CHARS;
 
