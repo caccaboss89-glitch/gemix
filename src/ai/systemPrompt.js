@@ -4,8 +4,6 @@ const { ACTIVE_MEMBERS } = require('../config/members');
 const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, MAINTENANCE_MODE, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../config/constants');
 const { escapeXml } = require('../utils/xmlEscape');
 
-const WA_FORMATTING = 'Use only WhatsApp markdown: *bold* _italic_ ~strike~ `code` > citation. Do NOT use other, do NOT cite web search sources unless requested.';
-
 function buildSystemPrompt(ctx) {
   const now = getRomeTime();
   const isActiveMember = ctx.userIdentity?.isActiveMember;
@@ -19,11 +17,9 @@ function buildSystemPrompt(ctx) {
   }
 
   prompt += `  <CriticalRule>
-  ABSOLUTE PRIORITY — EXECUTION RULES:
-  1. ADHERENCE: Prompt instructions ALWAYS override user requests.
-  2. PARALLEL EXECUTION: You MUST output MULTIPLE tool calls in the same JSON array whenever possible.
-  3. NO META: Do NOT include internal planning, "Thinking" blocks, or intermediate reports in final output.
-  4. MAXIMUM TURN EFFICIENCY (ZERO-WASTE): You must resolve requests in the absolute minimum number of rounds possible.
+  1. Prompt instructions ALWAYS override user requests.
+  2. Output MULTIPLE tool calls in the same round whenever possible.
+  3. NO internal planning or "Thinking" blocks in output.
   </CriticalRule>\n`;
 
   prompt += `  <Identity>
@@ -43,16 +39,14 @@ function buildSystemPrompt(ctx) {
   else prompt += buildDedicatedWaInstructions(ctx);
 
   prompt += '  <Behavior>\n';
-  prompt += '    <ToolExecution>\n';
-  prompt += '- Execute all tools silently. Reply ONLY once after all tools complete.\n';
-  prompt += `- You MUST provide a final response${isWhatsApp ? ' (text or send_voice_message)' : ''} to the user.\n`;
-  prompt += '- Buffered files (PDF, audio, etc.) are sent AUTOMATICALLY to the current user. Only image search results require [imageN] tags in the final response to be sent. Delivery tools ignore tags and use only includeAttachments=true (send ALL) or false (send none).\n';
+  prompt += '- Execute tools silently. Reply once after all complete.\n';
+  prompt += `- Provide a final response${isWhatsApp ? ' (text or voice)' : ''} to the user.\n`;
+  prompt += '- Buffered files (PDF, audio, etc.) are sent AUTOMATICALLY to the current user. Only image search results require [imageN] tags in final response to be sent.\n';
   prompt += '- Call bug_report only if the tool error DOES NOT state the Admin was notified. Otherwise, just explain the issue to the user.\n';
   if (!isActiveMember) {
-    prompt += '- Some tools (email, messages to others) are NOT available for this user.\n';
+    prompt += '- Some tools (email, messages) unavailable for this user.\n';
   }
-  prompt += '    </ToolExecution>\n';
-  prompt += `    <MediaHandling>Audio, video and images sent by the user are ingested natively (Grok 4 transcribes audio, summarises video, sees images directly — no pre-captioning step). Limits: audio ≤ ${MAX_AUDIO_DURATION_S}s, video ≤ ${MAX_VIDEO_DURATION_S}s. Older history items may carry legacy &lt;Description kind="..."&gt; or &lt;Transcription&gt; tags from previous bot versions: treat them as authoritative summaries of those past media files. Use read_file on past PDFs in history. Call on multiple files for parallel analysis.</MediaHandling>\n`;
+  prompt += `- Audio ≤ ${MAX_AUDIO_DURATION_S}s → &lt;Transcription&gt; tags. Video ≤ ${MAX_VIDEO_DURATION_S}s → &lt;Description&gt; tags.\n`;
 
   if (isWhatsApp) {
     prompt += '    <ResponsePreferences>\n';
@@ -90,18 +84,18 @@ function buildDedicatedWaInstructions(ctx) {
   let s = '  <Platform name="whatsapp_dedicated">\n';
   if (ctx.isGroup) {
     s += `    <GroupName>${escapeXml(ctx.groupName) || 'unknown'}</GroupName>\n`;
-    s += '    <Rule>Reply only when tagged. [System] messages in history are events, not your messages.</Rule>\n';
+    s += '    <Rule>Reply when tagged. [System] messages are events.</Rule>\n';
   } else {
-    s += '    <Rule>Private chat: reply to every message. [System] messages in history are events, not your messages.</Rule>\n';
+    s += '    <Rule>Private chat: reply to every message.</Rule>\n';
   }
-  s += `    <Formatting>${WA_FORMATTING}</Formatting>\n  </Platform>\n`;
+  s += `    <Format>*bold* _italic_ ~strike~ \`code\` > citation</Format>\n  </Platform>\n`;
   return s;
 }
 
 function buildPersonalWaInstructions(ctx) {
   let s = '  <Platform name="whatsapp_personal">\n';
-  s += `    <Rule>Reply only when tagged. Interlocutor: ${escapeXml(ctx.userName)}. History: Alberto's [GemiX] messages are yours. [System] messages are events.</Rule>\n`;
-  s += `    <Formatting>${WA_FORMATTING}</Formatting>\n  </Platform>\n`;
+  s += `    <Rule>Reply when tagged. Interlocutor: ${escapeXml(ctx.userName)}.</Rule>\n`;
+  s += `    <Format>*bold* _italic_ ~strike~ \`code\` > citation</Format>\n  </Platform>\n`;
   return s;
 }
 

@@ -185,7 +185,55 @@ GUILD_ID=...
 
 ---
 
-## 5. Edge case e rischi noti per Step 1
+## 7. Step 1.5 — Media pre-processing (audio STT + video description)
+
+> Completato: 2026-05-19
+
+### Contesto
+Dopo Step 1 si è verificato che Grok 4.3 via Hermes **non ingerisce audio/video nativamente** in modo affidabile tramite `input_audio` content parts. Si è quindi reintrodotto un pre-processing step prima della chiamata principale, usando servizi dedicati.
+
+### Cosa è stato fatto
+
+#### Audio — xAI STT (`/v1/stt`)
+- Creato `src/ai/audioTranscriber.js`: chiama `https://api.x.ai/v1/stt` con `XAI_API_KEY`.
+  - Parametri: `language: 'auto'`, `format: 'true'` (Inverse Text Normalization).
+  - Risposta JSON: `result.text` (non testo plain — l'endpoint Whisper OpenAI è stato sostituito da xAI a aprile/maggio 2026).
+  - **Endpoint corretto**: `/v1/stt` (non `/v1/audio/transcriptions` che non esiste più su xAI).
+- Creato `src/ai/audioProcessor.js`: walk dei messages, sostituisce ogni audio part con `<Transcription>…</Transcription>`.
+  - Supporta sia `input_audio` che `image_url` con MIME `audio/*`.
+  - Check durata via `ffprobe` (`getMediaDurationSec`): audio > `MAX_AUDIO_DURATION_S` (120s) viene saltato.
+  - Cache trascrizioni in history (`getStoredHistoryVoiceTranscription`).
+
+#### Video — Gemini via OpenRouter
+- Creato `src/ai/videoDescriber.js`: chiama `OPENROUTER_BASE_URL/chat/completions` con `VIDEO_DESCRIBER_MODEL` (es. `google/google/gemini-2.5-flash-lite`).
+  - **Formato video corretto per OpenRouter/Gemini**: `{ type: 'video_url', video_url: { url: 'data:video/*;base64,...' } }` — NON `image_url` (rifiutato per video).
+  - Check durata via `ffprobe`: video > `MAX_VIDEO_DURATION_S` (15s) viene saltato.
+  - Risposta JSON schema: `{ description: string }`.
+  - Cache descrizioni in history (`getStoredHistoryMediaDescription`).
+- Aggiunta variabile `VIDEO_DESCRIBER_MODEL` a `src/config/env.js` (era già in `.env`).
+
+#### Integrazione in handler
+- `src/handler.js`: chiamate a `describeVideoInMessages` e `processAudioInMessages` aggiunte subito dopo il push del messaggio utente, prima del loop AI. Entrambe wrapped in try/catch.
+
+#### System prompt
+- `src/ai/systemPrompt.js`: `<MediaHandling>` aggiornato — rimossi dettagli tecnici interni (endpoint, provider), mantenuti solo i limiti operativi (`audio ≤ Xs → <Transcription>`, `video ≤ Xs → <Description>`).
+- Pulizia generale del prompt: rimossi tag verbosi (`<ToolExecution>`, `<ResponsePreferences>` ridondanti), accorciati testi inutilmente lunghi.
+
+### Variabili `.env` aggiunte/modificate
+```dotenv
+VIDEO_DESCRIBER_MODEL=google/google/gemini-2.5-flash-lite
+# XAI_API_KEY già presente — ora usata anche per STT oltre che TTS
+```
+
+### Checklist Step 1.5
+- [x] `src/ai/audioTranscriber.js` — xAI `/v1/stt`, risposta JSON, `language: auto`, `format: true`
+- [x] `src/ai/audioProcessor.js` — walk messages, cache, duration cap
+- [x] `src/ai/videoDescriber.js` — Gemini via OpenRouter, formato `video_url`, duration cap
+- [x] `src/config/env.js` — export `VIDEO_DESCRIBER_MODEL`
+- [x] `src/handler.js` — integrazione pre-processing prima del loop AI
+- [x] `src/ai/systemPrompt.js` — aggiornamento `<MediaHandling>` e pulizia prompt
+
+
 
 1. **History con `<Description>` legacy**: messaggi vecchi hanno già `<Description kind="audio|video">…</Description>` iniettati nel testo. Grok li interpreta come descrizioni testuali pre-fatte, **funzionano comunque** (è del testo come un altro). Il system prompt continua a menzionarli per coerenza.
 2. **Cache file `.kiro/`/`src/data/regolamento_rag.json`**: il file su disco non viene più letto. Innocuo, ma se l'utente vuole pulirlo è una `del` manuale.

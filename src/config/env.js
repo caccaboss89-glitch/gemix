@@ -10,9 +10,10 @@ module.exports = {
   HERMES_API_KEY: process.env.HERMES_API_KEY || 'dummy',
   GROK_MODEL: process.env.GROK_MODEL || 'grok-4.3-latest',
 
-  // OpenRouter — kept ONLY for Lyria music generation (not available via Hermes/Grok).
+  // OpenRouter — for Lyria music generation and video description (Gemini).
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   MUSIC_MODEL: process.env.MUSIC_MODEL,
+  VIDEO_DESCRIBER_MODEL: process.env.VIDEO_DESCRIBER_MODEL,
 
   // xAI TTS (direct, will be migrated to Hermes /v1/audio/speech in Step 3)
   XAI_API_KEY: process.env.XAI_API_KEY,

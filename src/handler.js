@@ -20,6 +20,8 @@ const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
 const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
+const { processAudioInMessages } = require('./ai/audioProcessor');
+const { describeVideoInMessages } = require('./ai/videoDescriber');
 
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
@@ -314,6 +316,22 @@ async function handleMessage(ctx) {
       },
     });
     messages.push({ role: 'user', content: transcribedUserContent });
+
+    // ── Media pre-processing ─────────────────────────────────────────────
+    // 1. Videos ≤ MAX_VIDEO_DURATION_S → described by Gemini via OpenRouter
+    // 2. Audio ≤ MAX_AUDIO_DURATION_S  → transcribed by xAI STT
+    // Both replace the raw media parts with text tags so Grok never sees
+    // unsupported binary content in the messages array.
+    try {
+      await describeVideoInMessages(messages);
+    } catch (e) {
+      log.warn(`describeVideoInMessages failed: ${e.message}`);
+    }
+    try {
+      await processAudioInMessages(messages);
+    } catch (e) {
+      log.warn(`processAudioInMessages failed: ${e.message}`);
+    }
 
     // ── Deterministic history prune ─────────────────────────────────────
     // Every file in chat history that is no longer reachable from
