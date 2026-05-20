@@ -16,6 +16,7 @@
 const { HERMES_API_KEY, HERMES_BASE_URL, MULTI_AGENT_MODEL } = require('../config/env');
 const { logApiRequest, logApiResponse } = require('../ai/apiClient');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
+const { getRomeTime } = require('../utils/time');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('WebXSearch');
@@ -151,10 +152,17 @@ function _extractUsageStats(data) {
  * Errors are logged and re-thrown after notifying the admin on the final attempt.
  */
 async function _callMultiAgent(prompt) {
+  // The multi-agent team runs without GemiX's system prompt and without
+  // chat history — they only see this `input`. Prepend a Context block so
+  // the agents always know the current date when interpreting "recent",
+  // "latest", "this week", etc., without relying on the calling model to
+  // remember to put it in the brief.
+  const contextBlock = `[Context]\nCurrent date and time (Europe/Rome): ${getRomeTime()}\n[/Context]\n\n[Research brief]\n${prompt}`;
+
   const body = {
     model: MULTI_AGENT_MODEL,
     reasoning: { effort: FIXED_EFFORT },
-    input: [{ role: 'user', content: prompt }],
+    input: [{ role: 'user', content: contextBlock }],
     tools: [
       { type: 'web_search' },
       { type: 'x_search' },
@@ -162,6 +170,7 @@ async function _callMultiAgent(prompt) {
   };
 
   logApiRequest(MULTI_AGENT_MODEL, RESPONSES_URL, body);
+  log.info(`   📡 → ${MULTI_AGENT_MODEL} (input: ${contextBlock.length} chars)`);
 
   let lastErr = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
