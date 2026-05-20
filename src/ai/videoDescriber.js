@@ -11,8 +11,7 @@
 // Audio is handled separately by audioTranscriber.js (xAI /v1/stt).
 // Images are passed directly to Grok as image_url (works fine).
 
-const { OPENROUTER_API_KEY, VIDEO_DESCRIBER_MODEL } = require('../config/env');
-const { OPENROUTER_BASE_URL } = require('../config/constants');
+const { OPENROUTER_API_KEY, OPENROUTER_BASE_URL, VIDEO_DESCRIBER_MODEL } = require('../config/env');
 const { callModel } = require('./apiClient');
 const { createLogger } = require('../utils/logger');
 const { getStoredHistoryMediaDescription, storeHistoryMediaDescription } = require('../utils/historySync');
@@ -25,9 +24,24 @@ const DESCRIBER_MAX_TOKENS = 2048;
 const DESCRIBER_BATCH_TIMEOUT_MS = 180_000;
 
 const DESCRIBER_SYSTEM_PROMPT = [
-  'Describe the provided video file.',
-  'Include: visible scene, people, actions, objects, on-screen text, and any audio/speech you can infer from context.',
-  'Be detailed but concise, with no preamble, and never invent unseen details.',
+  'You are a meticulous video analyst. Produce a faithful, dense, and well-structured description of the video provided.',
+  'Cover the following dimensions explicitly:',
+  '1. Setting and environment: location, indoor/outdoor, time of day, lighting, weather, season, props, background details, spatial layout.',
+  '2. Subjects: number of people, apparent age range, gender presentation, clothing, posture, facial expressions, distinctive features, body language. Identify named individuals only when visible text clearly states the name; otherwise describe them generically.',
+  '3. Actions and motion: what each subject does, in temporal order, including duration, pacing, and significance of events. Describe interactions between subjects.',
+  '4. Objects: tools, vehicles, animals, devices, food, furniture, or any item that plays a role in the scene. Note their state and usage.',
+  '5. On-screen text: transcribe ALL visible text verbatim (titles, captions, subtitles, signs, UI elements, watermarks, logos). Preserve the original language and formatting.',
+  '6. Audio cues you can infer from context: lip movement, visible instruments, environmental sounds, apparent dialogue (only if readable from captions). DO NOT invent specific dialogue you cannot read.',
+  '7. Camera work: shot type (close-up, wide, drone, handheld, POV), camera movements (pan, zoom, tilt, tracking), notable cuts, transitions, or effects.',
+  '8. Style and mood: cinematic, documentary, vlog, advertisement, meme, tutorial, educational, entertainment; emotional tone; visual aesthetic; recognizable brand or franchise references when obvious.',
+  '9. Apparent purpose: what the video seems to communicate, demonstrate, or achieve.',
+  '10. Temporal structure: if the video has distinct scenes or chapters, describe the progression and transitions between them.',
+  'Rules:',
+  '- Be detailed but factual. No preamble, no opinion, no speculation beyond what is plausible from visible/audible cues.',
+  '- Never claim to recognize a private individual; describe physical traits instead.',
+  '- If something is unclear or off-screen, say so explicitly rather than guessing.',
+  '- Use natural prose paragraphs (no bullet lists in the final description), in the same language as the dominant on-screen text or, if none, in Italian.',
+  '- Prioritize accuracy and completeness over brevity.',
 ].join(' ');
 
 function _buildDescriptionSchema() {
@@ -56,9 +70,11 @@ function _buildDescriptionSchema() {
  * Audio parts are NOT touched here — they are handled by processAudioInMessages.
  *
  * @param {Array} messages
+ * @param {object} [opts]
+ * @param {function} [opts.onStart] - Callback when video processing starts
  * @returns {Promise<Array>} Same array (mutated in-place)
  */
-async function describeVideoInMessages(messages) {
+async function describeVideoInMessages(messages, opts = {}) {
   if (!Array.isArray(messages)) return messages;
 
   const targets = [];
@@ -108,6 +124,15 @@ async function describeVideoInMessages(messages) {
       };
     }
     return messages;
+  }
+
+  // Call onStart callback if provided
+  if (typeof opts.onStart === 'function') {
+    try {
+      await opts.onStart();
+    } catch (err) {
+      log.warn(`onStart callback failed: ${err.message}`);
+    }
   }
 
   log.info(`🎬 Describing ${pendingTargets.length} video part(s) via ${VIDEO_DESCRIBER_MODEL}…`);

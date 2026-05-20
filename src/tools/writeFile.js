@@ -1,7 +1,7 @@
 // src/tools/writeFile.js
 // Agentic file-write tool. Writes are routed through the project sandbox
 // (Python kernel) so the file is created as the sandbox uid (1000) and the
-// kernel sees it immediately for any subsequent code_execution call.
+// kernel sees it immediately for any subsequent bash call.
 //
 // The path MUST be relative to the user root and resolve inside the
 // CURRENT project's temp/ output/ or code/ subfolder. All other
@@ -87,7 +87,7 @@ async function writeFileTool(args, userCtx, responseCtx) {
 
   const ext = path.extname(auth.absPath).toLowerCase();
   if (NON_WRITABLE_EXTS.has(ext)) {
-    return { success: false, error: `write_file: creating or appending to files with extension "${ext}" is not allowed because they are binary formats. Use specialized scripts (e.g. via code_execution) to generate such files, or use generate_formal_request_pdf for formal request documents.` };
+    return { success: false, error: `write_file: creating or appending to files with extension "${ext}" is not allowed because they are binary formats. Use specialized scripts (write the script with write_file then run it via bash) to generate such files, or use generate_formal_request_pdf for formal request documents.` };
   }
 
   // Encode content as base64 once (binary-safe transport into Python).

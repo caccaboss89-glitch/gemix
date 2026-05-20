@@ -4,7 +4,7 @@
 // One container per (storageId, projectName). Lazy-started on first use,
 // reused for the lifetime of the project session, and reaped after
 // SANDBOX_IDLE_TTL_MS of inactivity. The manager keeps the Jupyter kernel
-// (PythonKernel) attached to each container so successive code_execution
+// (PythonKernel) attached to each container so successive bash
 // calls share a single Python REPL state.
 //
 // Hard requirements at runtime:

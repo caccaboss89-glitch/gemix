@@ -1,13 +1,15 @@
 // src/tools/voiceMessage.js
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
-const { XAI_API_KEY, XAI_TTS_VOICE } = require('../config/env');
-const { XAI_TTS_URL, XAI_TTS_ENABLED } = require('../config/constants');
+const { HERMES_API_KEY, HERMES_BASE_URL, XAI_TTS_VOICE } = require('../config/env');
+const { XAI_TTS_ENABLED } = require('../config/constants');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('TTS');
+
+const HERMES_TTS_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/tts`;
 
 /**
  * Strip vocal effect tags from text.
@@ -106,8 +108,8 @@ async function generateVoice(text) {
 }
 
 async function _generateVoice(text) {
-  // Try xAI TTS first (only if enabled)
-  if (XAI_TTS_ENABLED && XAI_API_KEY) {
+  // Try xAI TTS via Hermes first (only if enabled)
+  if (XAI_TTS_ENABLED && HERMES_API_KEY) {
     try {
       const mp3Buffer = await xaiTTS(text);
       return convertMp3ToWhatsAppOpus(mp3Buffer);
@@ -137,13 +139,13 @@ async function _generateVoice(text) {
 }
 
 /**
- * xAI TTS — voice "eve", language "auto", output mp3 44100Hz 128kbps.
+ * xAI TTS via Hermes — voice from XAI_TTS_VOICE (default "eve"), language Italian, output mp3 44100Hz 128kbps.
  */
 async function xaiTTS(text) {
-  const res = await fetchWithTimeout(XAI_TTS_URL, {
+  const res = await fetchWithTimeout(HERMES_TTS_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${XAI_API_KEY}`,
+      Authorization: `Bearer ${HERMES_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({

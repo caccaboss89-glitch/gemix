@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # GemiX sandbox container entrypoint.
 # Starts a headless Jupyter Server whose single kernel is the stateful Python
-# REPL used by the code_execution tool. The Node side connects via HTTP+WS on
-# port 8888 and identifies itself with SANDBOX_TOKEN.
+# REPL used by the bash, write_file, and edit_file tools. The Node side
+# connects via HTTP+WS on port 8888 and identifies itself with SANDBOX_TOKEN.
+# (code_interpreter is xAI server-side; this sandbox is for workspace file operations only.)
 
 set -euo pipefail
 

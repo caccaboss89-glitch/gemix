@@ -31,7 +31,7 @@ The sandbox has **no Node.js / no `pptxgenjs` / no `markitdown`**. All creation,
 
 - **Reading existing file**: `pptx_inspect.py` in `execution_phase: "before_all"` so the JSON sample lands before any subsequent edit logic. Then write your edits in Phase 3.
 - **Creating new file**: `write_file` the JSON spec in Phase 2 + `pptx_build.py` + `pptx_qa.py` in Phase 3 (same round, in this order — `pptx_qa.py` after `pptx_build.py`).
-- **Editing existing file**: Inspect (Phase 1) → edit script via `code_execution` (Phase 3) → `pptx_qa.py` (Phase 3, after the edit).
+- **Editing existing file**: Inspect (Phase 1) → `write_file` the edit script under `/workspace/code/` (Phase 2) + `bash python /workspace/code/edit_deck.py` (Phase 3) → `pptx_qa.py` (Phase 3, after the edit).
 - **Visual verification**: `pptx_render.py` in Phase 3, then `read_file` the generated PNGs in the **next** round. Only when a visual check is genuinely needed (photographic content, intricate layout). Block-driven specs almost never need this.
 - **Conversion only**: Single `bash` call, no QA needed unless the deck was just modified.
 
@@ -39,7 +39,7 @@ The sandbox has **no Node.js / no `pptxgenjs` / no `markitdown`**. All creation,
 - **Binary format**: NEVER `read_file` a `.pptx`. Use `pptx_inspect.py` for structure or `pptx_convert.py pptx2text` for a markdown dump.
 - **Absolute paths**: Strict enforcement of `/workspace/` or `/readonly/` prefixes. Final deck goes in `/workspace/output/`, JSON specs / inspections / extracted images / rendered PNGs in `/workspace/temp/`.
 - **No `cat << EOF`**: Never build the JSON spec via bash heredoc; always `write_file`.
-- **NO code_execution on spec.json**: NEVER use `code_execution` to modify `spec.json`. Always rewrite the entire JSON using `write_file`. If you need to edit the spec, read it, modify in memory, then write the complete updated JSON with `write_file`.
+- **NO ad-hoc Python on spec.json**: NEVER edit `spec.json` from a Python script. Always rewrite the entire JSON using `write_file`. If you need to edit the spec, read it, modify in memory, then write the complete updated JSON with `write_file`.
 - **Color format**: ALWAYS use 6-character hex colors (RRGGBB) like "FFFFFF" or "000000", or theme token names like "accent", "surface", "title_color". NEVER use color names like "white", "black", "red" — these will cause build errors.
 - **Consistent output filename**: When building a presentation, use a single consistent output filename (e.g., `/workspace/output/deck.pptx`). If you need to rebuild after QA, overwrite the same file — do NOT create new filenames. Only one `.pptx` should be delivered to the user.
 - **Read temp JSON via bash if needed**: If `read_file` cannot read a newly-created `/workspace/temp/*.json`, do NOT loop. Use a standalone `bash` call: `cat /workspace/temp/file.json`.
@@ -696,7 +696,7 @@ python /readonly/skills/pptx/scripts/pptx_inspect.py \
 cp /readonly/history/template.pptx /workspace/temp/working.pptx
 ```
 ```python
-# Phase 3 — code_execution: open, edit, save into /workspace/output/
+# Phase 2 — write_file `/workspace/code/edit_deck.py`
 from pptx import Presentation
 prs = Presentation("/workspace/temp/working.pptx")
 for slide in prs.slides:
@@ -708,7 +708,11 @@ for slide in prs.slides:
 prs.save("/workspace/output/template_filled.pptx")
 ```
 ```bash
-# Phase 3 — QA the edit (emitted after the code_execution above, same round)
+# Phase 3 — run the edit script (after_all)
+python /workspace/code/edit_deck.py
+```
+```bash
+# Phase 3 — QA the edit (emitted after the python edit above, same round)
 python /readonly/skills/pptx/scripts/pptx_qa.py \
   --input /workspace/output/template_filled.pptx \
   --output /workspace/temp/qa.json
@@ -727,7 +731,7 @@ python /readonly/skills/pptx/scripts/pptx_qa.py \
 | User-provided image | `read_file` then guess dimensions | `pptx_inspect.py --extract-images` if it came from a deck, or use the path directly |
 | Background image | full-bleed `add_picture` covering text | Use `slide.background` color or place image BEHIND text via `_spTree` reorder |
 
-**Aspect-ratio safe sizing inside a `code_execution` cell:**
+**Aspect-ratio safe sizing (in a `write_file` script run via `bash`):**
 ```python
 from PIL import Image
 src = Image.open("/readonly/searched_images/photo.jpg")
@@ -771,7 +775,7 @@ The `executive` theme uses `body_color: D1D5DB` on `background: 0B1220` — the 
 
 - **`pptx_build.py`** with **blocks**: Default for any structured deck (team, project, KPI, chart, callout).
 - **`pptx_build.py`** with **layout-only fields**: Trivial recap/agenda slides only.
-- **`python-pptx`** (via `code_execution`): Editing existing files cell-by-cell, preserving master/theme, custom shapes (`MSO_SHAPE`), connectors, animations metadata.
+- **`python-pptx`** (via `write_file` + `bash python`): Editing existing files cell-by-cell, preserving master/theme, custom shapes (`MSO_SHAPE`), connectors, animations metadata.
 - **`pptx_qa.py`**: ALWAYS after any deck write. Cheaper than rendering.
 - **`pptx_render.py`**: Visual QA only — sparingly, because LibreOffice cold-start is slow.
 - **`pptx_inspect.py`**: ALWAYS before any read of an existing `.pptx`.

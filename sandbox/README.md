@@ -1,7 +1,8 @@
 # GemiX Python sandbox
 
-This folder contains the Dockerized Python sandbox used by the `code_execution`,
-`write_file`, `edit_file`, and `bash` tools.
+This folder contains the Dockerized Python sandbox used by the `bash`,
+`write_file`, and `edit_file` tools. (Ad-hoc Python without filesystem access
+goes through the xAI server-side `code_interpreter` instead.)
 
 In production the containers are **not** started through `docker compose`.
 They are created lazily by `src/sandbox/sandboxManager.js`, one container per

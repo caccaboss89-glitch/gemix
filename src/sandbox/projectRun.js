@@ -1,6 +1,6 @@
 // src/sandbox/projectRun.js
 // Shared pipeline used by all agentic tools that need to run code inside the
-// per-project sandbox (code_execution, write_file, edit_file, bash).
+// per-project sandbox (write_file, edit_file, bash).
 //
 // Responsibilities:
 //   1. Resolve + validate the user / current project (existence, quota).
@@ -164,7 +164,7 @@ async function runInProjectSandbox({
     };
   }
   
-  // Use scratch workspace for projectless execution (bash/code_execution without project)
+  // Use scratch workspace for projectless execution (bash without project)
   if (usingScratch) {
     projectName = '_scratch_';
   } else if (projectName && !projectExists(userCtx, projectName)) {

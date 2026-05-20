@@ -1,6 +1,6 @@
 // src/utils/userPaths.js
 // Centralized filesystem helpers for per-user storage.
-// All agentic tools (read_file, write_file, edit_file, code_execution, bash,
+// All agentic tools (read_file, write_file, edit_file, bash,
 // project management) MUST go through resolveStorageId + isPathAllowed.
 
 const fs = require('fs');

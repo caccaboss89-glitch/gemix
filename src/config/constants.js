@@ -1,4 +1,18 @@
 // src/config/constants.js
+//
+// Config split rule:
+//   - .env  → all deployment-specific values: external URLs, API keys,
+//             model names, voice ids, GitHub repo, public URL, feature flags.
+//             Loaded by env.js and re-exported as plain JS values; no fallback
+//             defaults in code. Missing variables surface as undefined and
+//             must crash early at first use (or be guarded explicitly).
+//   - this  → fixed code-level constants: limits, timeouts, paths derived
+//             from __dirname, format strings, file/MIME tables. Values that
+//             never change between dev/staging/prod and are part of the
+//             program logic, not its environment.
+//
+// If a value depends on the deployment, it goes in .env. Otherwise it lives
+// here.
 const path = require('path');
 const { MAINTENANCE_PREFIX } = require('./systemMessages');
 
@@ -23,19 +37,17 @@ module.exports = {
 
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
-  MAX_HISTORY: 15,
+  MAX_HISTORY: 50,
   MAX_TASK_DAYS: 365,
   SCHEDULER_INTERVAL_MS: 60_000,
   DISCORD_THREAD_NAME: 'gemix',
   SUPPORTED_MEDIA: ['image', 'audio', 'document', 'sticker', 'ptt', 'video'],
 
   // API
-  OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',  // kept for Lyria music generation only
-  XAI_TTS_URL: 'https://api.x.ai/v1/tts',
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 60_000,
   FETCH_TIMEOUT_MS: 60_000,
-  MAX_TOKENS: 8192,
+  MAX_TOKENS: 64_000,
   MAX_TOOL_ROUNDS: 5,
   MAX_TOOL_ROUNDS_AGENTIC: 20,
 

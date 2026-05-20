@@ -65,4 +65,30 @@ function stripImageTags(text) {
   return text.replace(/\[image:\d+\]/gi, '');
 }
 
-module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripImageTags };
+// Matches the history line prefix our platform code adds, e.g.
+//   "[19/05/2026, 22:41] GemiX: "
+//   "[19/05/2026 22:41] Account Owner: "
+//   "[19/05/2026, 22:41:30] [System]: "
+// The model sometimes echoes this format from history into its own reply — strip it everywhere.
+const HISTORY_TIMESTAMP_PREFIX_RE = /^\[\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\]\s*[^\n:]{1,60}:\s*/gm;
+
+// Conservative: only strip a single leading speaker label at the very start of the reply.
+// Avoids removing legitimate "GemiX:" appearances elsewhere in the text.
+const LEADING_SPEAKER_LABEL_RE = /^(?:GemiX|\[System\]|Account Owner|Bot)\s*:\s*/i;
+
+/**
+ * Strip echoes of the history conversation prefix that our platform code injects
+ * when feeding chat history to the model. Removes patterns like
+ * "[19/05/2026, 22:41] GemiX:" anywhere in the text and a single leading
+ * "GemiX:"/"[System]:"/"Account Owner:" label at the start of the reply.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripHistoryPrefixes(text) {
+  if (!text || typeof text !== 'string') return text;
+  let cleaned = text.replace(HISTORY_TIMESTAMP_PREFIX_RE, '');
+  cleaned = cleaned.replace(LEADING_SPEAKER_LABEL_RE, '');
+  return cleaned.replace(/^\s+/, '').replace(/\s+$/, '');
+}
+
+module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripImageTags, stripHistoryPrefixes };

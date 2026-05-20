@@ -27,7 +27,7 @@ description: Spreadsheets (.xlsx, .xlsm, .csv, .tsv). Create, edit, clean, forma
 
 - **Reading existing file**: `xlsx_inspect.py` in `execution_phase: "before_all"` so the JSON sample lands before any subsequent edit logic. Then write your edits in Phase 3.
 - **Creating new file**: `write_file` the JSON spec in Phase 2 + `xlsx_build.py` + `xlsx_recalc.py` in Phase 3 (same round, in this order — `xlsx_recalc.py` after `xlsx_build.py`).
-- **Editing existing file**: Inspect (Phase 1) → edit script via `code_execution` (Phase 3) → `xlsx_recalc.py` (Phase 3, after the edit).
+- **Editing existing file**: Inspect (Phase 1) → `write_file` the edit script under `/workspace/code/` (Phase 2) + `bash python /workspace/code/edit.py` (Phase 3) → `xlsx_recalc.py` (Phase 3, after the edit).
 - **Conversion only**: Single `bash` call, no recalc needed unless formulas were touched.
 
 **XLSX-Specific Rules**:
@@ -36,8 +36,8 @@ description: Spreadsheets (.xlsx, .xlsm, .csv, .tsv). Create, edit, clean, forma
 - **Always recalc**: `openpyxl` writes formulas as strings WITHOUT calculated values. Until you run `xlsx_recalc.py`, the cached values are empty and Excel/preview tools show blanks. Always recalc before delivering.
 - **Readonly Recalc**: NEVER run `xlsx_recalc.py` on `/readonly/...` files. It saves in place, so `/readonly/history/...` will fail. First copy the workbook to `/workspace/temp/` or `/workspace/output/`, then recalc the writable copy.
 - **Absolute paths**: Strict enforcement of `/workspace/` or `/readonly/` prefixes. Output goes to `/workspace/output/`, intermediate JSON specs / inspections to `/workspace/temp/`.
-- **NO code_execution on spec.json**: NEVER use `code_execution` to modify `spec.json`. Always rewrite the entire JSON using `write_file`. If you need to edit the spec, read it, modify in memory, then write the complete updated JSON with `write_file`.
-- **NO code_execution for simple calculations**: Do NOT use `code_execution` for simple aggregations, growth rates, or basic math. Use Excel formulas in the spec. Only use `code_execution` for complex data processing, pandas operations, or custom formatting logic.
+- **NO ad-hoc Python on spec.json**: NEVER edit `spec.json` with code_interpreter or with a bash python script. Always rewrite the entire JSON using `write_file`. If you need to edit the spec, read it, modify in memory, then write the complete updated JSON with `write_file`.
+- **NO ad-hoc Python for simple calculations**: Do NOT spawn a python script (or use code_interpreter) for simple aggregations, growth rates, or basic math. Use Excel formulas in the spec. Only spawn a script for complex data processing, pandas operations, or custom formatting logic — and remember `code_interpreter` cannot read /workspace/ files, so workspace work goes through `write_file` + `bash`.
 - **Consistent output filename**: When building a workbook, use a single consistent output filename (e.g., `/workspace/output/workbook.xlsx`). If you need to rebuild after QA, overwrite the same file — do NOT create new filenames. Only one `.xlsx` should be delivered to the user.
 - **Read temp JSON via bash if needed**: If `read_file` cannot read a newly-created `/workspace/temp/*.json`, do NOT loop. Use a standalone `bash` call: `cat /workspace/temp/file.json`.
 - **No `cat << EOF`**: Never build the JSON spec via bash heredoc; always `write_file`.
@@ -83,7 +83,7 @@ Every workbook delivered to the user MUST satisfy:
 
 ### Financial Model Color Coding (industry standard)
 
-Apply these in `xlsx_build.py` via `"semantic": "..."` per cell, OR via `xlsx_format.py`-style logic in your own `code_execution`:
+Apply these in `xlsx_build.py` via `"semantic": "..."` per cell, OR via your own `xlsx_format.py`-style script (write it with `write_file` then run with `bash`):
 
 | Semantic | RGB | Use for |
 | :--- | :--- | :--- |
@@ -591,7 +591,7 @@ python /readonly/skills/xlsx/scripts/xlsx_inspect.py \
   --output /workspace/temp/inspection.json
 ```
 ```python
-# Phase 3 — code_execution: open, edit, save
+# Phase 2 — write_file `/workspace/code/edit_budget.py`
 from openpyxl import load_workbook
 wb = load_workbook("/readonly/history/budget.xlsx")
 ws = wb["P&L"]
@@ -601,13 +601,17 @@ for row in range(2, ws.max_row + 1):
 wb.save("/workspace/output/budget_v2.xlsx")
 ```
 ```bash
-# Phase 3 — recalc (emitted after the code_execution above, same round)
+# Phase 3 — run the edit script (after_all)
+python /workspace/code/edit_budget.py
+```
+```bash
+# Phase 3 — recalc (emitted after the python edit above, same round)
 python /readonly/skills/xlsx/scripts/xlsx_recalc.py \
   --input /workspace/output/budget_v2.xlsx \
   --output /workspace/temp/recalc.json
 ```
 
-> **Reminder**: `xlsx_inspect.py` runs BEFORE in Phase 1; `code_execution` and the `xlsx_recalc.py` call both run in Phase 3, with `code_execution` emitted FIRST so the file exists when recalc opens it.
+> **Reminder**: `xlsx_inspect.py` runs BEFORE in Phase 1; `write_file` lands the edit script in Phase 2; the `bash python …/edit_budget.py` call and the `xlsx_recalc.py` call both run in Phase 3, with the python edit emitted FIRST so the file exists when recalc opens it.
 
 ---
 
@@ -629,9 +633,9 @@ If the deliverable is a quick CSV / printed summary (no formatting required), pa
 ## Library Selection Quick Reference
 
 - **`xlsx_build.py`**: Default for creating workbooks (data + formulas + styling + charts).
-- **`openpyxl`** (via `code_execution`): Editing existing files cell-by-cell, custom formatting, conditional formatting, data validation.
+- **`openpyxl`** (via `write_file` + `bash python`): Editing existing files cell-by-cell, custom formatting, conditional formatting, data validation.
 - **`pandas`**: Reading for analysis, bulk numeric operations, CSV import/export without styling.
 - **`xlsx_recalc.py`**: ALWAYS after any formula write.
 - **`xlsx_inspect.py`**: ALWAYS before any read of an existing `.xlsx`.
 
-> **DO NOT** mix tools in one cell: e.g. don't `pd.read_excel(..., engine="openpyxl")` and then immediately try to access `.formula` on the result — pandas drops formulas on import.
+> **DO NOT** mix tools in one script: e.g. don't `pd.read_excel(..., engine="openpyxl")` and then immediately try to access `.formula` on the result — pandas drops formulas on import.

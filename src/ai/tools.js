@@ -23,26 +23,28 @@ function makeTool({ name, description, properties = {}, required = [] }) {
   return tool;
 }
 
+// ── xAI server-side tool descriptor ──
+//
+// `code_interpreter` is a *built-in* xAI tool (like web_search/x_search). It runs
+// in xAI's own isolated sandbox — completely separate from GemiX's project
+// filesystem. The model uses it for ad-hoc calculations, data analysis, and
+// scripts that don't need access to user files. The descriptor below is sent
+// straight to Hermes /chat/completions: no JS handler is invoked because the
+// tool runs server-side at xAI.
+const TOOL_CODE_INTERPRETER = { type: 'code_interpreter' };
+
 // ── Static tool definitions (schema never varies) ──
 
-const TOOL_WEB_SEARCH = makeTool({
-  name: 'web_search',
-  description: 'Search the web. Call multiple times for deeper research. Supports operators: site:, -site:, after:/before:, filetype:, intitle:, inurl:, "exact phrase", OR/AND.',
+const TOOL_WEB_X_SEARCH = makeTool({
+  name: 'web_x_search',
+  description: 'Hand a research brief to the multi-agent research team. The team conducts web searches, navigates pages, performs X/Twitter searches, monitors citations, and summarizes the results. Do not use this tool again for the same query.',
   properties: {
-    query: { type: 'string', description: 'Search query (supports operators: site:, after:, before:, filetype:, "exact phrase", OR)' },
-    num_results: { type: 'integer', description: 'Number of results (1-30, default 15)' },
-    allowed_domains: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Restrict to these domains only (max 5). Example: ["github.com", "stackoverflow.com"]',
-    },
-    excluded_domains: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Exclude these domains (max 5). Example: ["pinterest.com", "quora.com"]',
+    prompt: {
+      type: 'string',
+      description: 'Detailed research brief for the team. Include the exact question, any URLs to consult, the desired output format, and constraints (date range, language, sources to prefer or avoid).',
     },
   },
-  required: ['query'],
+  required: ['prompt'],
 });
 
 function buildImageSearchTool(agenticUnlocked = false) {
@@ -84,7 +86,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'MUST be called BEFORE any action that needs the agentic workspace. Unlocks: Python sandbox, bash, file creation/editing, project management, advance computations, yt-dlp downloads, OCR, charts, data work... After unlock, the full toolkit is available in the NEXT round. Do NOT call for: normal chat, web search, voice replies, scheduling, memory updates.',
+  description: 'MUST be called BEFORE any action that needs the agentic workspace (the user-scoped filesystem with /workspace/ + /readonly/). Unlocks: bash, file creation/editing on /workspace/, project management, yt-dlp downloads, OCR pipelines, chart generation, etc. AFTER unlock the full toolkit is available in the NEXT round. Do NOT call for: chat replies, web search, voice, scheduling, memory, or pure calculations/analysis (those go through code_interpreter, which runs in a separate xAI sandbox without access to /workspace/).',
   properties: {},
 });
 
@@ -110,21 +112,6 @@ function buildReadFileTool(isDiscord, agenticUnlocked = false) {
 }
 
 // ── Agentic toolkit (WhatsApp only, gated behind agentic_unlock) ──
-
-const TOOL_CODE_EXECUTION = makeTool({
-  name: 'code_execution',
-  description: 'Run Python in the sandbox for calculations, data analysis, or scripts. Can run without a project. Writable: /workspace/{code,temp,output}/. Read-only: /readonly/{history,searched_images,skills}. Files in /workspace/output/ are buffered for delivery.',
-  properties: {
-    code: { type: 'string', description: 'Python code to execute. Multiline allowed; the same kernel persists across calls.' },
-    timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
-    execution_phase: {
-      type: 'string',
-      enum: ['before_all', 'after_all'],
-      description: "Execution order in multi-tool rounds. Default: 'after_all'."
-    },
-  },
-  required: ['code'],
-});
 
 const TOOL_WRITE_FILE = makeTool({
   name: 'write_file',
@@ -154,7 +141,7 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the sandbox. For: gemix-project management, running workspace scripts (python code/script.py), shell utilities (zip, ls, cp...), yt-dlp downloads... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,searched_images,skills}. Can combine with write_file/edit_file or other bash/code_execution in the same round.',
+  description: 'Run a shell command in the project sandbox. For: gemix-project management, running workspace scripts (e.g. python /workspace/code/script.py), shell utilities (zip, ls, cp...), yt-dlp downloads, LibreOffice/pandoc conversions... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,searched_images,skills}. Combine with write_file/edit_file in the same round to write a script and run it. NOTE: bash runs in the GemiX project sandbox (full filesystem access to /workspace + /readonly); for ad-hoc Python without filesystem access use code_interpreter instead.',
   properties: {
     command: { type: 'string', description: 'Single standalone shell command. Do NOT use shell concatenation or piping (&&, ||, ;, |, redirection, subshells) to combine steps. Emit multiple bash tool calls, using execution_phase when ordering is needed.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
@@ -172,27 +159,6 @@ const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
   description: 'Read the Discord server rules (aka Statuto Albertino).',
   properties: {},
-});
-
-const TOOL_BROWSE_PAGE = makeTool({
-  name: 'browse_page',
-  description: 'Fetch and analyze a web page. In summary mode, an LLM extracts what matters based on your instructions. Use after web_search for promising URLs; use raw/raw_html only when you need unprocessed content.',
-  properties: {
-    url: {
-      type: 'string',
-      description: 'Full URL to fetch (must include https://).',
-    },
-    instructions: {
-      type: 'string',
-      description: 'What to extract or analyze from the page (e.g. "list all pricing tiers", "summarize the main argument", "extract all API endpoints"). Be specific for better results. If omitted in summary mode, the page is summarized with a generic overview.',
-    },
-    mode: {
-      type: 'string',
-      enum: ['summary', 'raw', 'raw_html'],
-      description: 'Processing mode (default "summary"). Use "raw" to get unprocessed extracted text without LLM summarization. Use "raw_html" to get the full HTML source (useful for complex scraping).',
-    },
-  },
-  required: ['url'],
 });
 
 const TOOL_READ_MUSIC_STATS = makeTool({
@@ -522,20 +488,24 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 1. Search & Information Retrieval
   tools.push(
-    TOOL_WEB_SEARCH,
+    TOOL_WEB_X_SEARCH,
     buildImageSearchTool(userCtx.agenticUnlocked),
-    TOOL_BROWSE_PAGE,
     buildReadFileTool(isDiscord, userCtx.agenticUnlocked)
   );
   if (isWhatsApp) {
     tools.push(TOOL_MUSIC_CREATOR);
   }
 
+  // 1b. xAI server-side code interpreter — always available outside Discord,
+  // runs in xAI's own isolated sandbox without access to /workspace/ or /readonly/.
+  if (!isDiscord) {
+    tools.push(TOOL_CODE_INTERPRETER);
+  }
+
   // 2. Agentic Workspace (Gated)
   if (!isDiscord) {
     if (userCtx.agenticUnlocked) {
       tools.push(
-        TOOL_CODE_EXECUTION,
         TOOL_WRITE_FILE,
         TOOL_EDIT_FILE,
         TOOL_BASH,

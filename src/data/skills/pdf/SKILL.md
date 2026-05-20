@@ -126,7 +126,7 @@ python /readonly/skills/pdf/scripts/unified_pdf_generator.py \
 
 ---
 
-## Math & Physics Cheat Sheet (`latex_helper.py` vs `code_execution`)
+## Math & Physics Cheat Sheet (`latex_helper.py` vs custom Python)
 
 The AI often fails by passing LaTeX to SymPy or using undefined symbols. Use this table as a strict guide.
 
@@ -137,14 +137,14 @@ The AI often fails by passing LaTeX to SymPy or using undefined symbols. Use thi
 | Schrödinger Eq | `latex_helper` | `--expr "H\Psi = E\Psi"` | `--expr "H*Psi = E*Psi"` |
 | Derivative | `latex_helper` | `--expr "\frac{d}{dx}f(x)"` | `--expr "diff(f(x), x)"` |
 | Equality | `latex_helper` | `--expr "a == b"` | `--expr "a = b"` or `"Eq(a, b)"` |
-| Complex physics | `code_execution` | `from sympy import hbar` | `from sympy.physics.quantum.constants import hbar` |
+| Complex physics | `write_file` + `bash python` | `from sympy import hbar` | `from sympy.physics.quantum.constants import hbar` |
 
 ### 💡 The "Emergency LaTeX" Strategy
-If `latex_helper.py` fails with a conversion error, **DO NOT RETRY**. Write the raw LaTeX to a file directly via `code_execution`:
+If `latex_helper.py` fails with a conversion error, **DO NOT RETRY**. Write the raw LaTeX to a file directly via `write_file`:
 
 ```python
-with open("/workspace/temp/equation.tex", "w") as f:
-    f.write(r"E = \frac{\hbar^2 k^2}{2m}") # Use raw string r"..."
+# Phase 2 — write_file `/workspace/temp/equation.tex` directly with the raw LaTeX content.
+# (No bash/python detour needed.)
 ```
 Then proceed to compilation/rendering as usual.
 
@@ -153,11 +153,11 @@ Then proceed to compilation/rendering as usual.
 ## Troubleshooting & Common Fails
 
 ### 1. "Command failed" in `unified_pdf_generator.py`
-This is often a **race condition** (file not yet flushed to disk). 
+This is often a **race condition** (file not yet flushed to disk).
 - **Check Stderr**: If it says "Waiting for referenced file...", it's a synchronization delay.
 - **Solution**: The script now has an auto-retry, but if it still fails, run the generator alone in a dedicated round.
 
-### 2. "ImportError" in `code_execution`
+### 2. "ImportError" in a workspace Python script
 - `hbar` is NOT in the main `sympy` namespace. Use: `from sympy.physics.quantum.constants import hbar`.
 - `grad`, `div`, `curl` are NOT standard functions. Use `diff()` or `sympy.vector`.
 

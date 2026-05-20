@@ -1,7 +1,6 @@
 // src/tools/index.js
 const { isActiveMemberOnlyTool } = require('../ai/tools');
-const { webSearch } = require('./webSearch');
-const { browsePage } = require('./browsePage');
+const { webXSearch } = require('./webXSearch');
 const { imageSearch } = require('./imageSearch');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
@@ -18,7 +17,6 @@ const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
 const { toggleReleaseNotify } = require('./releaseNotify');
-const { codeExecutionTool } = require('./codeExecution');
 const { attachFileTool } = require('./attachFile');
 const { writeFileTool } = require('./writeFile');
 const { editFileTool } = require('./editFile');
@@ -191,13 +189,20 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
     }
 
     switch (name) {
-      case 'web_search': {
-        result = await webSearch(args.query, args.num_results, args.allowed_domains, args.excluded_domains);
-        break;
-      }
-
-      case 'browse_page': {
-        result = await browsePage(args.url, args.instructions, args.mode);
+      case 'web_x_search': {
+        const searchResult = await webXSearch(args.prompt);
+        // Accumulate usage stats for the final message badge.
+        // Multiple web_x_search calls in the same round are additive.
+        if (searchResult._stats) {
+          if (!responseCtx.researchStats) {
+            responseCtx.researchStats = { webSources: 0, xPosts: 0 };
+          }
+          responseCtx.researchStats.webSources += searchResult._stats.webSources;
+          responseCtx.researchStats.xPosts += searchResult._stats.xPosts;
+        }
+        // Strip internal _stats before returning to the AI (not part of the tool schema).
+        const { _stats: _ignored, ...searchResultClean } = searchResult;
+        result = searchResultClean;
         break;
       }
 
@@ -660,10 +665,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
-      case 'code_execution': {
-        result = await codeExecutionTool(args, userCtx, responseCtx);
-        break;
-      }
       case 'write_file': {
         result = await writeFileTool(args, userCtx, responseCtx);
         break;

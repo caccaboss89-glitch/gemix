@@ -10,7 +10,7 @@ const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_
 const { createLogger } = require('./utils/logger');
 const { transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
-const { stripVoiceTags } = require('./utils/text');
+const { stripVoiceTags, stripHistoryPrefixes } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
 const { getCurrentProject, getLastProject, setCurrentProject, acquireLock, releaseLock, startAutoRenewLock, consumeLastCrash } = require('./utils/projectState');
@@ -26,15 +26,14 @@ const { describeVideoInMessages } = require('./ai/videoDescriber');
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
 // MAX_TOOL_ROUNDS to MAX_TOOL_ROUNDS_AGENTIC so multi-step pipelines
-// (gemix-project create via bash → code_execution → … → send_whatsapp_message) have room.
+// (gemix-project create via bash → write_file → bash → … → send_whatsapp_message) have room.
 const AGENTIC_TOOL_NAMES = new Set([
-  'code_execution', 'write_file', 'edit_file', 'bash'
+  'write_file', 'edit_file', 'bash'
 ]);
 
-const DEFERRED_TOOL_NAMES = new Set(['bash', 'code_execution']);
+const DEFERRED_TOOL_NAMES = new Set(['bash']);
 const PARALLEL_SAFE_TOOL_NAMES = new Set([
-  'web_search',
-  'browse_page',
+  'web_x_search',
   'read_server_rules',
   'read_music_stats'
 ]);
@@ -139,6 +138,8 @@ async function handleMessage(ctx) {
     isVoiceOnly: false,
     discordTitle: '',
     _imageSearchNextId: 1,
+    // Accumulated research stats from web_x_search calls — used for the badge.
+    researchStats: null,
     reserveImageIds(count) {
       const start = this._imageSearchNextId;
       this._imageSearchNextId += count;
@@ -323,7 +324,26 @@ async function handleMessage(ctx) {
     // Both replace the raw media parts with text tags so Grok never sees
     // unsupported binary content in the messages array.
     try {
-      await describeVideoInMessages(messages);
+      await describeVideoInMessages(messages, {
+        onStart: async () => {
+          try {
+            const msg = '⏳ Sto analizzando il video, attendi un attimo...';
+            if (ctx.platform === 'discord' && ctx.discordChannel) {
+              await ctx.discordChannel.send({ content: msg });
+              log.info(`   📤 Sent video analysis notification to Discord`);
+            } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
+              const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
+              if (targetJid) {
+                const { sendWhatsAppDirect } = require('./tools/whatsappSender');
+                await sendWhatsAppDirect(targetJid, msg);
+                log.info(`   📤 Sent video analysis notification to WhatsApp`);
+              }
+            }
+          } catch (err) {
+            log.warn(`Failed to send video analysis notification: ${err.message}`);
+          }
+        },
+      });
     } catch (e) {
       log.warn(`describeVideoInMessages failed: ${e.message}`);
     }
@@ -591,7 +611,7 @@ async function handleMessage(ctx) {
         continue;
       }
 
-      let text = stripVoiceTags(assistantMsg.content || '');
+      let text = stripHistoryPrefixes(stripVoiceTags(assistantMsg.content || ''));
       log.info(`✅ [${pLabel}] Response generated (${text.length} chars)`);
 
       // Extract Discord thread title from <title> XML tag if present
@@ -648,6 +668,21 @@ async function handleMessage(ctx) {
       if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
         log.warn('   ⚠️ Empty AI response, sending fallback');
         text = FALLBACK_ERROR_PREFIX;
+      }
+
+      // ── Research badge ──────────────────────────────────────────────────
+      // Append "🌐: N sources. 𝕏: N posts." when web_x_search was used.
+      // Only shown on text replies (not voice-only). Omit a section when its
+      // count is zero so the badge stays minimal.
+      if (text.trim() && !responseCtx.isVoiceOnly && responseCtx.researchStats) {
+        const { webSources, xPosts } = responseCtx.researchStats;
+        if (webSources > 0 || xPosts > 0) {
+          const parts = [];
+          if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
+          if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
+          text = `${text}\n\n${parts.join('. ')}.`;
+          log.info(`   🔎 Research badge: ${parts.join(', ')}`);
+        }
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {

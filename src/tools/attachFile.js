@@ -91,7 +91,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
   catch (e) { return { success: false, error: `Cannot stat file: ${e.message}` }; }
 
   if (stat.isDirectory()) {
-    return { success: false, error: 'Path is a directory. attach_file requires a single file. Use code_execution / bash to zip a folder first.' };
+    return { success: false, error: 'Path is a directory. attach_file requires a single file. Use bash to zip a folder first.' };
   }
   if (stat.size === 0) {
     return { success: false, error: 'File is empty.' };

@@ -5,8 +5,7 @@
 // Lyria is not available via xAI/Grok, so this tool keeps its own dedicated
 // OPENROUTER_API_KEY + MUSIC_MODEL env vars.
 const { createLogger } = require('../utils/logger');
-const { OPENROUTER_BASE_URL } = require('../config/constants');
-const { MUSIC_MODEL, OPENROUTER_API_KEY } = require('../config/env');
+const { MUSIC_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL } = require('../config/env');
 const systemState = require('../utils/systemState');
 const { findMemberByWa, isAdmin } = require('../config/members');
 const { getRomeISO } = require('../utils/time');
@@ -133,10 +132,12 @@ async function musicCreator(prompt, userCtx) {
     }
 
     const apiKey = OPENROUTER_API_KEY;
-    const model = MUSIC_MODEL || 'google/lyria-3-clip-preview';
+    const model = MUSIC_MODEL;
     const apiUrl = `${OPENROUTER_BASE_URL}/chat/completions`;
 
     if (!apiKey) throw new Error('OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).');
+    if (!model) throw new Error('MUSIC_MODEL is missing in environment (required for Lyria music generation).');
+    if (!OPENROUTER_BASE_URL) throw new Error('OPENROUTER_BASE_URL is missing in environment.');
 
     log.info(`🎵 Generating for ${userId}`);
 

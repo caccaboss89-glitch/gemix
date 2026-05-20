@@ -30,7 +30,7 @@ The sandbox has **no Node.js / no `docx-js` / no `pandoc`**. All creation, editi
 
 - **Reading existing file**: `docx_inspect.py` in `execution_phase: "before_all"` so the JSON sample lands before any subsequent edit logic. Then write your edits in Phase 3.
 - **Creating new file**: `write_file` the JSON spec in Phase 2 + `docx_build.py` + `docx_qa.py` in Phase 3 (same round, in this order — `docx_qa.py` after `docx_build.py`).
-- **Editing existing file**: Inspect (Phase 1) → `docx_manipulate.py replace-text` OR `code_execution` with `python-docx` (Phase 3) → `docx_qa.py` (Phase 3, after the edit).
+- **Editing existing file**: Inspect (Phase 1) → `docx_manipulate.py replace-text` OR a custom `python-docx` script written via `write_file` + run via `bash` (Phase 3) → `docx_qa.py` (Phase 3, after the edit).
 - **Find/Replace only**: `docx_manipulate.py replace-text` in Phase 3, no QA needed if formatting is preserved by the run-aware replacer.
 - **Conversion only**: Single `bash` call, no QA needed unless the document was just modified.
 - **Legacy `.doc` files**: ALWAYS convert to `.docx` first via `docx_convert.py doc2docx` (Phase 1) — `python-docx` cannot open `.doc`.
@@ -40,7 +40,7 @@ The sandbox has **no Node.js / no `docx-js` / no `pandoc`**. All creation, editi
 - **`.dotx` works the same as `.docx`**: every script handles both extensions transparently. `.doc` (legacy) MUST be converted first.
 - **Absolute paths**: Strict enforcement of `/workspace/` or `/readonly/` prefixes. Final document goes in `/workspace/output/`, JSON specs / inspections / extracted images in `/workspace/temp/`.
 - **No `cat << EOF`**: Never build the JSON spec via bash heredoc; always `write_file`.
-- **NO code_execution on spec.json**: NEVER use `code_execution` to modify `spec.json`. Always rewrite the entire JSON using `write_file`. If you need to edit the spec, read it, modify in memory, then write the complete updated JSON with `write_file`.
+- **NO ad-hoc Python on spec.json**: NEVER edit `spec.json` from a Python script. Always rewrite the entire JSON using `write_file`. If you need to edit the spec, read it, modify in memory, then write the complete updated JSON with `write_file`.
 - **Color format**: ALWAYS use 6-character hex colors (RRGGBB) like `"FFFFFF"` or `"000000"`, or theme token names like `"accent"`, `"surface"`, `"title_color"`. NEVER use color names like `"white"`, `"black"`, `"red"` — these will cause build errors.
 - **Consistent output filename**: When building a document, use a single consistent output filename (e.g., `/workspace/output/document.docx`). If you need to rebuild after QA, overwrite the same file — do NOT create new filenames. Only one `.docx` should be delivered to the user.
 - **Read temp JSON via bash if needed**: If `read_file` cannot read a newly-created `/workspace/temp/*.json`, do NOT loop. Use a standalone `bash` call: `cat /workspace/temp/file.json`.
@@ -645,7 +645,7 @@ python /readonly/skills/docx/scripts/docx_qa.py \
 ### B) Programmatic editing via `python-docx`
 
 ```python
-# Phase 3 — code_execution: open, edit, save into /workspace/output/
+# Phase 2 — write_file `/workspace/code/edit_contract.py`
 from docx import Document
 doc = Document("/workspace/temp/working.docx")
 for para in doc.paragraphs:
@@ -657,7 +657,11 @@ doc.add_heading("Approved on 7 May 2026", level=2)
 doc.save("/workspace/output/contract.docx")
 ```
 ```bash
-# Phase 3 — QA the edit (emitted after the code_execution above, same round)
+# Phase 3 — run the edit script (after_all)
+python /workspace/code/edit_contract.py
+```
+```bash
+# Phase 3 — QA the edit (emitted after the python edit above, same round)
 python /readonly/skills/docx/scripts/docx_qa.py \
   --input /workspace/output/contract.docx \
   --output /workspace/temp/qa.json
@@ -685,7 +689,7 @@ The AI often distorts images, breaks tables, or stuffs everything in one paragra
 | Two-column layout | manual tabs | Use `sections[].columns: 2` |
 | Right-align text on same line | `\t\t\t\tDate` | Use `runs` with a tab + tab-stop, or `signature_block` |
 
-**Aspect-ratio safe sizing inside a `code_execution` cell:**
+**Aspect-ratio safe sizing (in a `write_file` script run via `bash`):**
 ```python
 from PIL import Image
 src = Image.open("/readonly/searched_images/photo.jpg")
@@ -739,7 +743,7 @@ for rel_id, rel in doc.part.rels.items():
 
 ### 1. `replace-text` finds nothing even though the placeholder is visible
 The placeholder is split across multiple runs (Word stores authoring history as separate runs). `docx_manipulate.py replace-text` already merges adjacent runs per paragraph. If you wrote your own loop, do the same merge first.
-- **Fix**: Use `docx_manipulate.py replace-text` instead of a hand-written `code_execution` loop.
+- **Fix**: Use `docx_manipulate.py replace-text` instead of a hand-written python-docx loop.
 
 ### 2. Document opens with the wrong page size (A4 instead of US Letter or vice versa)
 The user expected a specific page size and you didn't set it.
@@ -767,7 +771,7 @@ You manually wrote `"text": "• Item 1"` instead of using a `list` block.
 
 - **`docx_build.py`** with **blocks**: Default for any structured document (report, letter, manual, CV).
 - **`docx_manipulate.py replace-text`**: Default for filling pre-existing `.docx`/`.dotx` templates.
-- **`python-docx`** (via `code_execution`): Editing existing files paragraph-by-paragraph, custom run formatting, programmatic generation when blocks aren't enough.
+- **`python-docx`** (via `write_file` + `bash python`): Editing existing files paragraph-by-paragraph, custom run formatting, programmatic generation when blocks aren't enough.
 - **`docx_qa.py`**: ALWAYS after any document write. Cheaper than rendering.
 - **`docx_inspect.py`**: ALWAYS before any read of an existing `.docx`/`.dotx`.
 - **`docx_convert.py docx2pdf`**: Final delivery when the user asked for a PDF, OR to refresh Word fields (TOC, page numbers) into resolved values.

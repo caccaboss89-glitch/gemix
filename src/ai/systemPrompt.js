@@ -42,21 +42,28 @@ function buildSystemPrompt(ctx) {
   prompt += '- Execute tools silently. Reply once after all complete.\n';
   prompt += `- Provide a final response${isWhatsApp ? ' (text or voice)' : ''} to the user.\n`;
   prompt += '- Buffered files (PDF, audio, etc.) are sent AUTOMATICALLY to the current user. Only image search results require [imageN] tags in final response to be sent.\n';
-  prompt += '- Call bug_report only if the tool error DOES NOT state the Admin was notified. Otherwise, just explain the issue to the user.\n';
+  prompt += '- Call bug_report only if the tool error DOES NOT state the Admin was notified. Always inform the user when you use it.\n';
   if (!isActiveMember) {
-    prompt += '- Some tools (email, messages) unavailable for this user.\n';
+    prompt += '- Some tools (email, messages...) unavailable for this user.\n';
   }
-  prompt += `- Audio ≤ ${MAX_AUDIO_DURATION_S}s → &lt;Transcription&gt; tags. Video ≤ ${MAX_VIDEO_DURATION_S}s → &lt;Description&gt; tags.\n`;
+  prompt += `- Audio ≤ ${MAX_AUDIO_DURATION_S}s and PDF → &lt;Transcription&gt; tags. Video ≤ ${MAX_VIDEO_DURATION_S}s → &lt;Description&gt; tags.\n`;
 
   if (isWhatsApp) {
     prompt += '    <ResponsePreferences>\n';
     prompt += '- Use send_voice_message for short/casual replies; text for technical or long replies. Vary format based on your past messages.\n';
     if (isActiveMember) {
-      prompt += '- Formal request PDFs (for Discord regulations): redirect the user to Discord (rules RAG system). Only generic PDFs are available in agentic mode.\n';
+      prompt += '- Formal request PDFs (for Discord regulations) not available: suggest GemiX on Discord for this. Only generic PDFs are available in agentic mode.\n';
     }
     prompt += '    </ResponsePreferences>\n';
   }
   prompt += '  </Behavior>\n';
+
+  if (!isDiscord) {
+    prompt += `  <ToolBoundaries>
+- code_interpreter: ad-hoc Python (math, quick analysis). Isolated — cannot see /workspace/ or /readonly/. Never use it to verify files you wrote with write_file/bash.
+- For files, skills, downloads, deliverables: call agentic_unlock first, then use bash/write_file/edit_file.
+  </ToolBoundaries>\n`;
+  }
 
 
   prompt += `  <Memory>
@@ -103,7 +110,7 @@ function buildDiscordInstructions(ctx) {
   let s = '  <Platform name="discord">\n';
   s += '    <Role>Primary: help with Statute (Statuto Albertino/Constitution) rules, generate Art. 6 formal PDF requests. Assist in thread "gemix".</Role>\n';
   if (ctx.threadName) s += `    <ThreadTitle current="${escapeXml(ctx.threadName)}">Include <title>New Title</title> if the topic changes.</ThreadTitle>\n`;
-  s += '    <Limitations>No voice, scheduling, music stats, or agentic PDFs here. Suggest WhatsApp for these.</Limitations>\n';
+  s += '    <Limitations>No voice, scheduling, music stats, or agentic PDFs here. Suggest GemiX on WhatsApp for these.</Limitations>\n';
   if (ctx.ragContext) s += `    <RulesContext>${ctx.ragContext}</RulesContext>\n`;
   s += '    <Formatting>Markdown supported (no tables). Cite web sources with links.</Formatting>\n';
   if (ctx.availableEmojis) s += `    <Emojis>${ctx.availableEmojis}</Emojis>\n`;

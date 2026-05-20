@@ -4,7 +4,7 @@
 //
 // Also tracks which (storageId, projectName) pairs have an active background
 // task running so that projectRun.js can warn the AI before executing
-// potentially conflicting foreground calls (e.g. write_file / code_execution
+// potentially conflicting foreground calls (e.g. write_file / bash
 // while a background bash is still writing to the same /workspace).
 
 const BG_TASK_TTL_MS = 5 * 60 * 1000; // auto-expire after 5 min

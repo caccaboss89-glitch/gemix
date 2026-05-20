@@ -2,8 +2,6 @@
 
 Documento di pianificazione e tracking della migrazione totale dell'ecosistema AI di GemiX dal mix attuale (OpenRouter / xAI key diretta / Gemini / SearXNG / Lyria) al solo proxy **Hermes Agent** che parla con Grok via abbonamento SuperGrok.
 
-> Data: 2026-05-19 — versione iniziale, redatta prima dello Step 1.
-
 ---
 
 ## 1. Stato attuale (mappato dalla codebase)
@@ -11,267 +9,464 @@ Documento di pianificazione e tracking della migrazione totale dell'ecosistema A
 ### 1.1 Punto di ingresso AI unico
 Tutta la chat principale passa per **una sola funzione**: `callAI` in `src/ai/aiProvider.js`. Sotto il cofano:
 - transport `fetch` raw via `src/ai/apiClient.js` (`callModel`/`callApiWithRetry`),
-- `OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'` codificato in `src/config/constants.js`,
-- bearer `OPENROUTER_API_KEY` da `.env`,
-- modelli letti da `.env`: `FAST_MODEL` / `AGENTIC_MODEL`.
+- `HERMES_BASE_URL = 'http://127.0.0.1:8000/v1'` da `.env`,
+- bearer `HERMES_API_KEY` da `.env`,
+- modello unico `GROK_MODEL` da `.env`.
 
 ### 1.2 Sub-chiamate AI sparse
-| File | Modello usato | Scopo | Da migrare? |
+| File | Modello / endpoint | Scopo | Stato |
 |---|---|---|---|
-| `src/ai/mediaDescriber.js` | `MEDIA_DESCRIBER_MODEL` (Gemini Flash Lite) | Trasforma audio/video in `<Description>` testuale prima della call principale | ❌ **DA ELIMINARE**: Grok 4 ingerisce audio/video nativi |
-| `src/ai/pageSummarizer.js` | `BROWSE_PAGE_MODEL` (Qwen 3.5 flash) | Riassume HTML estratto da `browse_page` (modes: summary) | 🔄 Step 2: rinviare al modello principale o riusare un Grok dedicato (è la stessa chiamata su Hermes) |
-| `src/rag/regolamentoRag.js` | `EMBEDDING_MODEL` (Qwen embedding 8b) | RAG sul regolamento Discord (24KB di testo) | ❌ **DA SEMPLIFICARE**: il regolamento è 24KB ≈ 6k token; passarlo full-context, eliminare embeddings |
-| `src/tools/musicCreator.js` | `MUSIC_MODEL` (Lyria) | Generazione musica streaming SSE | ⚠️ **MANTENUTO su OpenRouter**: Lyria non disponibile via Hermes/Grok. Unica eccezione rimasta. |
-| `src/tools/voiceMessage.js` | `XAI_TTS_URL` diretto (api.x.ai) | TTS vocale | ⚠️ Step 3: valutare se il proxy Hermes espone `/v1/audio/speech`; per ora resta diretto via `XAI_API_KEY` |
+| `src/ai/audioTranscriber.js` | Hermes `/v1/stt` (xAI STT) | Trascrive audio prima della call principale | ✅ Attivo (Step 3) |
+| `src/ai/audioProcessor.js` | — | Walk messages, sostituisce audio con `<Transcription>` | ✅ Attivo |
+| `src/ai/videoDescriber.js` | `VIDEO_DESCRIBER_MODEL` (Gemini via OpenRouter) | Descrive video prima della call principale | ✅ Attivo |
+| `src/tools/webXSearch.js` | `MULTI_AGENT_MODEL` via Hermes `/v1/responses` | Ricerca web + X/Twitter delegata al team multi-agent | ✅ Attivo (Step 2/3) |
+| `src/tools/musicCreator.js` | `MUSIC_MODEL` (Lyria via OpenRouter) | Generazione musica streaming SSE | ⚠️ Mantenuto su OpenRouter |
+| `src/tools/voiceMessage.js` | Hermes `/v1/tts` (xAI TTS) | TTS vocale | ✅ Attivo (Step 3) |
 
-### 1.3 Web search
-- `src/tools/webSearch.js` → SearXNG self-hosted (`SEARXNG_URL=http://localhost:8888`).
-- `src/tools/browsePage.js` → fetch HTML + `pageSummarizer`.
-- ❌ Nessun tool dedicato a X/Twitter (oggi simulato con `web_search` + `allowed_domains:['x.com']`).
-- 🔄 Step 2: introdurre tool `live_search`/`x_search` nativo Grok via Hermes; deprecare SearXNG.
+### 1.3 Web search (post Step 2)
+- `src/tools/webXSearch.js` → `grok-4.20-multi-agent` via `POST https://api.x.ai/v1/responses` con tool nativi `web_search` + `x_search`. Copre anche il page-browsing (incluso in `web_search` xAI).
+- `src/tools/imageSearch.js` → SearXNG self-hosted (`SEARXNG_URL=http://localhost:8888`). Mantenuto: xAI non espone un endpoint di ricerca immagini.
+- ❌ `src/tools/webSearch.js` — eliminato (Step 2).
+- ❌ `src/tools/browsePage.js` — eliminato (Step 2).
 
 ### 1.4 Logica agentic_unlock
 Quando la AI invoca il tool `agentic_unlock`:
 - `userCtx.agenticUnlocked = true`,
-- la lista tool viene ricostruita (rimuove gateway, aggiunge `code_execution`, `write_file`, `edit_file`, `bash`, `attach_file`),
+- la lista tool viene ricostruita (rimuove gateway, aggiunge `write_file`, `edit_file`, `bash`, `attach_file`),
 - viene appeso al system prompt il `agenticBriefing` (tutto lo stato progetti + skills + sandbox layout),
-- `callAI` switcha al modello `AGENTIC_MODEL` con `effort: 'high'`.
+- round budget: 5 → 20.
 
-**Decisione richiesta dall'utente**: post-migrazione, FAST e AGENTIC saranno **lo stesso modello Grok 4**. Il flag `agenticUnlocked` continua però a controllare:
-- la **tool list visibile** al modello (per non appesantire la finestra di contesto della modalità chat normale con tool inutili),
-- l'**iniezione del briefing agentico** in system prompt,
-- l'aumento del round budget (5 → 20),
-- (eventualmente) il `reasoning.effort` se Grok lo accetta.
+FAST e AGENTIC sono lo stesso modello Grok 4.3. Il flag `agenticUnlocked` controlla solo la tool list visibile, l'iniezione del briefing e il round budget.
 
 ---
 
-## 2. Obiettivi dello Step 1 (questo PR)
+## 2. Step 1 — Migrazione a Hermes (completato: 2026-05-19)
 
-### 2.1 Cosa cambia
-1. **Aggiunta nuova configurazione** Hermes nel `.env`:
-   - `HERMES_BASE_URL` (default `http://127.0.0.1:8000/v1`)
-   - `HERMES_API_KEY` (placeholder `dummy`, il proxy lo ignora)
-   - `GROK_MODEL` (default `grok-4-latest`)
-2. **`src/config/constants.js`**: rimossa costante `OPENROUTER_BASE_URL`. Aggiunte `HERMES_BASE_URL` (env-driven), `HERMES_DEFAULT_MODEL`.
-3. **`src/config/env.js`**: rimosse `OPENROUTER_API_KEY`, `FAST_MODEL`, `AGENTIC_MODEL`, `EMBEDDING_MODEL`, `BROWSE_PAGE_MODEL`, `MEDIA_DESCRIBER_MODEL`, `MUSIC_MODEL`. Aggiunte `HERMES_BASE_URL`, `HERMES_API_KEY`, `GROK_MODEL`.
-4. **`src/ai/aiProvider.js`**:
-   - rimosso `describeMediaInMessages`,
-   - usa `GROK_MODEL` per entrambe le modalità (nessuna distinzione modello tra fast e agentic),
-   - provider rinominato a `'Grok'` nei log,
-   - costruzione body conserva `tools` se presenti, niente `reasoning.effort` (non documentato sulla compat OAI di Hermes; lo riaggiungeremo solo se servirà e sarà accettato).
-5. **`src/ai/apiClient.js`**: solo rinaming log; resta invariata la logica fetch + retry + log su disco.
-6. **Eliminati**:
-   - `src/ai/mediaDescriber.js` (Grok ingerisce audio/video direttamente),
-   - `src/ai/pageSummarizer.js` (sostituito da nuova chiamata diretta a Hermes nel browsePage),
-   - `src/rag/regolamentoRag.js` (sostituito da full-context inline),
-   - `src/tools/musicCreator.js` (rimosso dal toolkit; `MUSIC_MODEL` non esiste più).
-7. **`src/tools/browsePage.js`**: il summarizer LLM continua a esistere ma chiama Hermes con `GROK_MODEL` direttamente (estratto pulito: una sola helper interna da ~30 righe). Il flag `BROWSE_PAGE_MODEL` viene rimosso dal codice e dall'env.
-8. **Discord RAG**: rimossa l'inizializzazione `initRegolamentoRag()` da `src/index.js` e le chiamate `queryRegolamento()` da `src/handler.js`. Il regolamento (24KB) viene letto e iniettato per intero in `<RulesContext>` solo per Discord. Eventuale rimozione successiva del file `src/data/regolamento_rag.json` se presente.
-9. **`src/ai/tools.js`**:
-   - rimosso `TOOL_MUSIC_CREATOR` e relativi riferimenti,
-   - rimosso `getToolsForUser`-injection di `TOOL_MUSIC_CREATOR`,
-   - tutto il resto invariato.
-10. **`src/tools/index.js`** (executeTool dispatcher): rimosso il case `music_creator`.
-11. **Cache descrizioni media** in `src/utils/historySync.js`: le funzioni `getStoredHistoryMediaDescription`/`storeHistoryMediaDescription` restano disponibili per **legacy compat** (history vecchia ha già `<Description>` salvati e li riusiamo finché esistono — niente perdita di dati). I call site nelle piattaforme che leggono history le mantengono. Niente più scrittura nuova: senza `mediaDescriber`, il pre-call non genera più descrizioni.
-12. **System prompt** (`src/ai/systemPrompt.js`): aggiornato il blocco `<MediaHandling>` per riflettere che ora audio/video sono ingeriti direttamente da Grok (senza più `<Description>`). I `<Description>` storici in cronologia vanno ancora menzionati come dati legacy informativi.
-13. **`src/handler.js`**: nessun cambiamento strutturale, solo rimozione `queryRegolamento` e relativa import.
+### 2.1 Cosa è cambiato
+1. **Configurazione Hermes** in `.env`: `HERMES_BASE_URL`, `HERMES_API_KEY`, `GROK_MODEL`.
+2. **`src/config/constants.js`**: `OPENROUTER_BASE_URL` mantenuta solo per Lyria/video describer.
+3. **`src/config/env.js`**: rimosse `OPENROUTER_API_KEY` (mantenuta solo per Lyria/video), `FAST_MODEL`, `AGENTIC_MODEL`, `EMBEDDING_MODEL`, `BROWSE_PAGE_MODEL`, `MEDIA_DESCRIBER_MODEL`. Aggiunte `HERMES_BASE_URL`, `HERMES_API_KEY`, `GROK_MODEL`.
+4. **`src/ai/aiProvider.js`**: usa `GROK_MODEL` per entrambe le modalità, provider `'Grok'`.
+5. **Eliminati**: `src/ai/mediaDescriber.js`, `src/ai/pageSummarizer.js`, `src/rag/regolamentoRag.js`.
+6. **`src/tools/browsePage.js`**: summarizer inline su Hermes (poi eliminato in Step 2).
+7. **Discord RAG**: regolamento iniettato full-context in `<RulesContext>` via `src/utils/regolamento.js`.
+8. **`src/ai/tools.js`**: rimosso `TOOL_MUSIC_CREATOR` dalla lista tool (music_creator rimane nel dispatcher ma non viene offerto al modello).
+9. **`src/ai/systemPrompt.js`**: `<MediaHandling>` aggiornato.
+10. **`src/utils/footer.js`**: display name → Grok.
 
-### 2.2 Cosa NON cambia in questo step
-- **Tool**: tutti i tool restano com'erano. `web_search` continua a usare SearXNG. `browse_page` continua a esistere. Nessun nuovo tool xAI nativo.
-- **TTS**: `voiceMessage.js` continua a chiamare `https://api.x.ai/v1/tts` con `XAI_API_KEY` diretto. Migrazione a `/v1/audio/speech` di Hermes rimandata a Step 3.
-- **PDF parsing**: `OpenDataLoader hybrid` resta invariato per ora. Step successivo valuterà se Grok può ingerire i PDF direttamente.
-- **Sandbox / scheduler / piattaforme** (Discord, WhatsApp): zero modifiche.
-- **Logging API** (`src/logs/api-*.json`): formato invariato.
-
-### 2.3 Variabili `.env` post-migrazione (questo step)
+### 2.2 Variabili `.env` post Step 1
 ```dotenv
-# AI - Hermes (proxy OpenAI-compatible verso Grok via SuperGrok OAuth)
 HERMES_BASE_URL=http://127.0.0.1:8000/v1
 HERMES_API_KEY=dummy
-GROK_MODEL=grok-4-latest
-
-# xAI TTS diretto (verrà migrato a Hermes /v1/audio/speech in Step 3)
+GROK_MODEL=grok-4.3-latest
 XAI_API_KEY=...
 XAI_TTS_VOICE=leo
 XAI_TTS_ENABLED=true
+SEARXNG_URL=http://localhost:8888
+OPENROUTER_API_KEY=...
+MUSIC_MODEL=google/lyria-3-clip-preview
+VIDEO_DESCRIBER_MODEL=google/gemini-2.5-flash-lite
+```
 
-# Web search
+**Variabili rimosse**: `FAST_MODEL`, `AGENTIC_MODEL`, `EMBEDDING_MODEL`, `BROWSE_PAGE_MODEL`, `MEDIA_DESCRIBER_MODEL`.
+
+---
+
+## 3. Step 1.5 — Media pre-processing (completato: 2026-05-19)
+
+Grok 4.3 via Hermes non ingerisce audio/video nativamente in modo affidabile. Reintrodotto pre-processing dedicato.
+
+### Audio — xAI STT via Hermes (`/v1/stt`)
+- `src/ai/audioTranscriber.js`: chiama `${HERMES_BASE_URL}/stt` con `HERMES_API_KEY` (Step 3 ha rimosso la chiamata diretta a `api.x.ai`).
+  - `language: 'auto'`, `format: 'true'` (ITN). Risposta JSON: `result.text`.
+- `src/ai/audioProcessor.js`: walk messages, sostituisce ogni audio part con `<Transcription>…</Transcription>`.
+  - Supporta `input_audio` e `image_url` con MIME `audio/*`.
+  - Duration cap via `ffprobe` (`MAX_AUDIO_DURATION_S = 120s`).
+  - Cache trascrizioni in history.
+
+### Video — Gemini via OpenRouter
+- `src/ai/videoDescriber.js`: chiama `OPENROUTER_BASE_URL/chat/completions` con `VIDEO_DESCRIBER_MODEL`.
+  - Formato: `{ type: 'video_url', video_url: { url: 'data:video/*;base64,...' } }`.
+  - Duration cap (`MAX_VIDEO_DURATION_S = 15s`). Cache descrizioni in history.
+  - Risposta JSON schema: `{ description: string }`.
+
+### Integrazione
+- `src/handler.js`: `describeVideoInMessages` + `processAudioInMessages` prima del loop AI.
+
+---
+
+## 4. Step 2 — Eliminazione SearXNG per web/X search (completato: 2026-05-19)
+
+### 4.1 Obiettivo
+Eliminare la dipendenza da SearXNG per la ricerca web e X/Twitter, sfruttando i tool nativi xAI (`web_search`, `x_search`) tramite `grok-4.20-multi-agent`. Il modello principale (Grok 4.3) non chiama i tool xAI nativi direttamente — li delega al team multi-agent.
+
+### 4.2 Architettura
+```
+Grok 4.3 (Hermes /v1/chat/completions)
+  └─ chiama tool: web_x_search(prompt, effort)
+       └─ POST {HERMES_BASE_URL}/responses
+            model: grok-4.20-multi-agent
+            tools: [web_search, x_search]   ← tool nativi xAI server-side
+            → ResearchReport con citations
+```
+
+Il `web_search` xAI include già il page-browsing, quindi `browse_page` è ridondante.
+
+### 4.3 Cosa è cambiato
+
+| File | Azione | Note |
+|---|---|---|
+| `src/tools/webXSearch.js` | ✅ Creato | Multi-agent caller, retry 2×, timeout 5min, parsing output+citations |
+| `src/tools/webSearch.js` | 🗑️ Eliminato | Sostituito da `webXSearch` |
+| `src/tools/browsePage.js` | 🗑️ Eliminato | Page-browsing incluso in `web_search` xAI |
+| `src/ai/tools.js` | ✅ Aggiornato | Rimossi `TOOL_WEB_SEARCH`/`TOOL_BROWSE_PAGE`, aggiunto `TOOL_WEB_X_SEARCH` |
+| `src/tools/index.js` | ✅ Aggiornato | Dispatcher: `web_x_search` sostituisce i due case precedenti |
+| `src/handler.js` | ✅ Aggiornato | `PARALLEL_SAFE_TOOL_NAMES`: `web_x_search` (parallelizzabile) |
+| `src/ai/agenticBriefing.js` | ✅ Aggiornato | Esempio in `<ExecutionPhases>` |
+| `src/config/env.js` | ✅ Aggiornato | Aggiunta `MULTI_AGENT_MODEL` |
+| `src/utils/fetch.js` | ✅ Aggiornato | Commenti docstring |
+| `.env` | ✅ Aggiornato | Aggiunta `MULTI_AGENT_MODEL=grok-4.20-multi-agent` |
+
+### 4.4 Cosa NON è cambiato
+- **`image_search`**: continua su SearXNG. xAI non espone un endpoint di ricerca immagini.
+- **`SEARXNG_URL`**: rimane in `.env` e `env.js` (usato da `imageSearch.js`).
+- **TTS/STT**: invariati.
+- **Hermes**: rimane il transport unico per la chat principale.
+
+### 4.5 Variabili `.env` post Step 2
+```dotenv
+# Aggiunta
+MULTI_AGENT_MODEL=grok-4.20-multi-agent
+
+# Mantenuta (solo per image_search)
+SEARXNG_URL=http://localhost:8888
+```
+
+### 4.6 Edge case gestiti
+1. **`HERMES_API_KEY` assente**: tool ritorna `{success: false, error: ...}` senza crash.
+2. **`MULTI_AGENT_MODEL` assente**: idem.
+3. **Timeout multi-agent** (>5min): errore retryable, notifica admin, risposta esplicita al modello.
+4. **Risposta vuota**: errore esplicito, il modello può ritentare con prompt più specifico.
+5. **Prompt > 4000 char**: troncato, marcato `truncated_prompt="true"` nell'XML.
+6. **`effort` invalido**: coerced a `'low'` (default sicuro).
+7. **Citations assenti**: `citations="0"` nell'XML, nessun crash.
+
+### 4.7 Note architetturali
+- `web_x_search` chiama `${HERMES_BASE_URL}/responses` (Step 3 ha unificato l'auth: stesso `HERMES_API_KEY` di tutto il resto).
+- Le call `effort=high` possono durare 2-4 minuti. Usare `low` come default.
+- `web_x_search` è in `PARALLEL_SAFE_TOOL_NAMES`: più ricerche indipendenti nello stesso round vengono lanciate in parallelo.
+
+### 4.8 Checklist Step 2
+- [x] `src/tools/webXSearch.js` — creato e verificato
+- [x] `src/tools/webSearch.js` — eliminato
+- [x] `src/tools/browsePage.js` — eliminato
+- [x] `src/ai/tools.js` — aggiornato
+- [x] `src/tools/index.js` — aggiornato
+- [x] `src/handler.js` — `PARALLEL_SAFE_TOOL_NAMES` aggiornato
+- [x] `src/ai/agenticBriefing.js` — aggiornato
+- [x] `src/config/env.js` — `MULTI_AGENT_MODEL` aggiunto
+- [x] `src/utils/fetch.js` — commenti aggiornati
+- [x] `.env` — `MULTI_AGENT_MODEL` aggiunto
+- [x] `node --check` su tutti i file modificati: OK
+- [x] `getDiagnostics` su tutti i file modificati: nessuna diagnostica
+- [x] Grep finale: zero riferimenti residui a `webSearch`/`browsePage` in `src/`
+- [ ] **Da fare sul VPS dopo deploy**: `pm2 restart "GemiX"`, smoke test live (ricerca web + X)
+
+---
+
+## 5. Step 3 — Eliminazione `XAI_API_KEY` (completato: 2026-05-20)
+
+### 5.1 Obiettivo
+Rimuovere completamente la dipendenza da `XAI_API_KEY` e da `https://api.x.ai/...` come endpoint diretti. Tutte le funzionalità xAI (TTS, STT, multi-agent research) ora passano dal proxy Hermes con `HERMES_API_KEY`, esattamente come la chat principale Grok 4.3.
+
+### 5.2 Cosa è cambiato
+
+| File | Azione | Note |
+|---|---|---|
+| `src/ai/audioTranscriber.js` | ✅ Aggiornato | `XAI_STT_URL` → `${HERMES_BASE_URL}/stt`, auth con `HERMES_API_KEY` |
+| `src/tools/webXSearch.js` | ✅ Aggiornato | `XAI_RESPONSES_URL` → `${HERMES_BASE_URL}/responses`, auth con `HERMES_API_KEY` |
+| `src/tools/voiceMessage.js` | ✅ Aggiornato | `XAI_TTS_URL` → `${HERMES_BASE_URL}/tts`, auth con `HERMES_API_KEY` |
+| `src/config/env.js` | ✅ Aggiornato | Rimossa export `XAI_API_KEY` |
+| `src/config/constants.js` | ✅ Aggiornato | Rimossa costante `XAI_TTS_URL` |
+| `.env` | ✅ Aggiornato | Rimossa `XAI_API_KEY` |
+| `SERVER_SETUP.md` | ✅ Aggiornato | Endpoint Hermes elencati: `/tts`, `/stt`, `/responses`, `/chat/completions` |
+
+### 5.3 Architettura post Step 3
+Tutte le chiamate verso xAI passano da Hermes:
+
+```
+GemiX
+  ├─ chat principale → POST {HERMES_BASE_URL}/chat/completions  (model: GROK_MODEL)
+  ├─ web_x_search    → POST {HERMES_BASE_URL}/responses         (model: MULTI_AGENT_MODEL)
+  ├─ STT audio       → POST {HERMES_BASE_URL}/stt
+  └─ TTS voce        → POST {HERMES_BASE_URL}/tts
+```
+
+Tutte autenticate con lo stesso `HERMES_API_KEY` (placeholder `dummy`: il proxy ignora la chiave e usa il token OAuth SuperGrok interno).
+
+### 5.4 Edge case gestiti
+1. **`HERMES_API_KEY` assente**: ognuna delle tre funzioni ritorna `null` o errore strutturato senza crash. Il check è già presente in tutti e tre i file.
+2. **Hermes proxy down**: `audioTranscriber` ritorna `null` (e il messaggio "transcription unavailable (service error)" viene iniettato), `webXSearch` notifica admin e ritorna errore al modello, `voiceMessage` cade automaticamente sul fallback Google Translate (per il TTS) o notifica admin.
+3. **`XAI_TTS_ENABLED=false`**: il fallback Google Translate continua a funzionare invariato (la flag controlla solo se tentare il TTS xAI prima del fallback).
+4. **Hermes proxy non risponde a `/tts`/`/stt`/`/responses`**: errori HTTP normali, retry/notifica admin invariati. Se il proxy non monta questi endpoint, occorre aggiornare la config del proxy lato VPS — NON serve toccare la codebase.
+
+### 5.5 Note architetturali
+- **Single point of failure**: ora se Hermes va giù, anche TTS/STT/research vanno giù. Prima alcune di queste funzionavano anche senza Hermes (chat principale a parte). Trade-off accettato per zero chiavi API a pagamento nel repo.
+- **`XAI_TTS_VOICE` resta**: è solo il voice id (`leo`, `eve`, ecc.), non una credenziale. Mantenuto in `.env`.
+- **`XAI_TTS_ENABLED` resta**: flag operativa per disattivare il TTS xAI quando il proxy non lo supporta o si vuole forzare il fallback Google Translate. Mantenuta in `.env`.
+
+### 5.6 Variabili `.env` post Step 3
+**Rimossa**: `XAI_API_KEY`.
+
+```dotenv
+# AI API - XAI features fronted by Hermes (TTS/STT + multi-agent research)
+# Endpoints: ${HERMES_BASE_URL}/tts, /stt, /responses
+XAI_TTS_VOICE=leo
+MULTI_AGENT_MODEL=grok-4.20-multi-agent
+
+# SYSTEM MODES
+XAI_TTS_ENABLED=true
+```
+
+### 5.7 Checklist Step 3
+- [x] `src/ai/audioTranscriber.js` — migrato a Hermes
+- [x] `src/tools/webXSearch.js` — migrato a Hermes
+- [x] `src/tools/voiceMessage.js` — migrato a Hermes
+- [x] `src/config/env.js` — `XAI_API_KEY` rimossa
+- [x] `src/config/constants.js` — `XAI_TTS_URL` rimossa
+- [x] `.env` — `XAI_API_KEY` rimossa
+- [x] `SERVER_SETUP.md` — endpoint Hermes documentati
+- [x] `node --check` su tutti i file modificati: OK
+- [x] `getDiagnostics` su tutti i file modificati: nessuna diagnostica
+- [x] Grep finale: zero riferimenti a `XAI_API_KEY` o `api.x.ai` in `src/`
+- [ ] **Da fare sul VPS dopo deploy**: verificare che il proxy Hermes esponga `/v1/tts`, `/v1/stt`, `/v1/responses`. Se no, aggiornare config Hermes. Poi `pm2 restart "GemiX"` e smoke test (vocale, transcript, ricerca web).
+
+---
+
+## 6. Step 4 — Capacità di contesto e history (completato: 2026-05-20)
+
+### 6.1 Verifica del compromesso media in history
+**Pattern attuale** (verificato leggendo `src/platforms/whatsapp/shared.js` e `src/platforms/discord/client.js`):
+- Solo il turno corrente passa media binari come content multimodale (via `mediaToContentPart` in `buildIncomingContentParts` / Discord client). Le quote/reply allo stesso messaggio possono includere il media originale come parte multimodale, sempre solo per il turno attivo.
+- Tutta la cronologia precedente è puro testo: ogni messaggio è una stringa `[DD/MM/YYYY, HH:MM] Sender: …` che incorpora `[Attachment: history/<file>]`, eventualmente arricchita con `<Transcription>`/`<Description>` cached. Niente base64 viene mai ri-iniettato per i turni vecchi.
+- L'AI per accedere a un media più vecchio chiama `read_file` sul path indicato dal tag `[Attachment: …]`.
+
+✅ Compromesso già rispettato: niente da modificare.
+
+### 6.2 Cap output e context window
+- **`MAX_TOKENS`**: alzato da `8192` a `64_000`. Grok 4.3 supporta context window molto ampia (1M+ token in input, output limit elevato); 64k come output cap è un compromesso tra completezza delle risposte agentiche lunghe e costi.
+- **`MAX_HISTORY`**: alzato da `15` a `50` messaggi. Più contesto significa che l'AI rimane consapevole di richieste fatte qualche turno indietro senza dover ricostruire il contesto a ogni round.
+
+Nessuno dei due valori richiede modifiche al transport o ad altri file: vengono letti rispettivamente da `aiProvider.js` e dai costruttori di history su WhatsApp/Discord.
+
+### 6.3 Edge case verificati
+1. **History con `[Attachment: …]` non più presente su disco**: il GC esistente (`pruneHistory` in `historySync.js`) cancella i file unreferenced, e il messaggio history conserva il tag testuale come traccia. `read_file` su un path mancante ritorna errore strutturato. OK.
+2. **Reply a messaggio fuori dalla cronologia recente**: `extractQuotedMessageContent` (WhatsApp) e il blocco `replyPrefix` (Discord) decidono se reidratare il media. Già protetti da `isQuotedInRecentHistory` per evitare di trasportare base64 vecchi senza necessità.
+3. **`<Description>` legacy**: messaggi vecchi possono avere `<Description kind="audio|video">` già nel testo (cache da Step 1.5). Grok li tratta come testo plain — coerente con il prompt aggiornato in `<MediaHandling>`.
+
+---
+
+## 7. Step 5 — RAG embeddings (rimandato)
+
+In standby. Sarà ripreso solo quando si vorrà estendere il RAG ad altri corpora oltre al regolamento Discord (full-context).
+
+---
+
+## 8. Step 6 — Tool `music_creator` (mantenuto)
+
+`music_creator` rimane attivo e visibile al modello su WhatsApp. Funziona via OpenRouter con il modello Lyria di Google. Nessuna modifica prevista.
+
+---
+
+## 9. Step 7 — Image generation (rimandato)
+
+In standby. Sarà ripreso quando Hermes/xAI esporrà un endpoint stabile per Aurora o un equivalente.
+
+---
+
+## 10. Step 8 — Eliminazione `code_execution`, adozione `code_interpreter` xAI (completato: 2026-05-20)
+
+### 10.1 Obiettivo
+Rimuovere il tool custom `code_execution` (eseguito nel Python kernel della sandbox GemiX) e sostituirlo con il tool xAI server-side `code_interpreter`. xAI gestisce il prompt, la sandbox e l'esecuzione del codice; GemiX vede solo la risposta finale del modello.
+
+### 10.2 Architettura post-Step 8
+```
+Grok 4.3 (Hermes /chat/completions)
+  ├─ chiama tool xAI server-side: code_interpreter   ← isolato, no /workspace/, no /readonly/
+  └─ chiama function tool GemiX: bash, write_file, edit_file, read_file...
+      └─ project sandbox docker (Python kernel via Jupyter)
+```
+
+`code_interpreter` è disponibile **sempre** fuori da Discord (nessun gating dietro `agentic_unlock`).
+`bash`/`write_file`/`edit_file`/`attach_file` continuano a richiedere `agentic_unlock` come prima.
+
+### 10.3 Cosa è cambiato
+
+| File | Azione | Note |
+|---|---|---|
+| `src/tools/codeExecution.js` | 🗑️ Eliminato | Sostituito dal tool xAI server-side |
+| `src/ai/tools.js` | ✅ Aggiornato | Rimosso `TOOL_CODE_EXECUTION`; aggiunto `TOOL_CODE_INTERPRETER = { type: 'code_interpreter' }`; descrizione `agentic_unlock` e `bash` aggiornate per chiarire la separazione tra i due ambienti |
+| `src/tools/index.js` | ✅ Aggiornato | Import rimosso; `case 'code_execution'` ora ritorna errore strutturato che indirizza alla nuova alternativa |
+| `src/handler.js` | ✅ Aggiornato | `AGENTIC_TOOL_NAMES` e `DEFERRED_TOOL_NAMES` non includono più `code_execution` |
+| `src/ai/agenticBriefing.js` | ✅ Aggiornato | Aggiunto blocco `<CodeInterpreterBoundary>`, `<PythonSandbox>` rinominato `<ProjectSandbox>` con descrizione coerente |
+| `src/ai/systemPrompt.js` | ✅ Aggiornato | Aggiunto `<ToolBoundaries>` (mostrato fuori da Discord) che spiega la separazione tra `code_interpreter` e workspace |
+| `src/data/skills/{xlsx,pptx,docx,pdf}/SKILL.md` | ✅ Aggiornati | Pattern `code_execution` sostituito con `write_file` (Phase 2) + `bash python …` (Phase 3) |
+| `src/sandbox/projectRun.js` | ✅ Aggiornato | Commenti puliti (la pipeline serve solo a bash/write_file/edit_file ora) |
+| `src/sandbox/sandboxManager.js` | ✅ Aggiornato | Commenti puliti |
+| `src/tools/bashTool.js`, `writeFile.js`, `attachFile.js` | ✅ Aggiornati | Commenti e messaggi di errore rivisti |
+| `src/utils/{attachments,bgTasks,userPaths}.js` | ✅ Aggiornati | Commenti aggiornati |
+| `sandbox/README.md` | ✅ Aggiornato | Tool list aggiornata |
+| `SERVER_SETUP.md` | ✅ Aggiornato | Spiegazione tool server-side xAI |
+
+### 10.4 Cosa NON è cambiato
+- **`src/sandbox/sandboxManager.js`, `src/sandbox/projectRun.js`, `src/sandbox/pythonKernel.js`**: invariati a livello di logica. Il Python kernel resta necessario per `bash` (che esegue `subprocess.run` dentro la sandbox), per `write_file` (operazioni atomiche con uid 1000) e `edit_file`.
+- **`sandbox/Dockerfile` + `requirements-sandbox.txt`**: NON sono stati alleggeriti. La libreria pesante che era utile a `code_execution` (numpy/scipy/torch/manim ecc.) potrebbe ora non servire più, MA: alcune skill usano `pandas`, `openpyxl`, `python-docx`, `python-pptx`, `reportlab` da bash (e quindi servono nel container), e `pdflatex`/`libreoffice` continuano a essere necessari. Una pulizia del Dockerfile è un follow-up consigliato (ridurrebbe peso immagine ≈ multi-GB), ma richiede audit di ogni script `.py` sotto `src/data/skills/` per stabilire l'elenco minimo. **Raccomandazione**: tenere ora l'immagine così com'è, fare pulizia in un PR dedicato dopo aver verificato in produzione che nessuna skill regredisca.
+
+### 10.5 Edge case gestiti
+1. **Modello che continua a chiamare `code_execution` legacy**: il dispatcher in `tools/index.js` ritorna errore strutturato che spiega la nuova divisione (`code_interpreter` per Python ad-hoc, `write_file` + `bash` per workspace).
+2. **`code_interpreter` in fase deferred**: NO. Il modello vede `{ type: 'code_interpreter' }` ma xAI risolve la chiamata server-side prima ancora che il messaggio assistant ritorni a GemiX. Nessun `tool_call` con quel nome compare in `assistantMsg.tool_calls`. Niente da fare in `_orderedCalls` o `runToolCall`.
+3. **Whitelist tool name in handler.js**: la check `_allowedToolNames.has(...)` filtra solo function tools dichiarati. `{ type: 'code_interpreter' }` non ha `function.name` quindi non entra nella whitelist — ma neanche serve perché xAI non emette tool_call con quel nome dal lato function calling.
+4. **Discord**: niente `code_interpreter` su Discord (la condizione `if (!isDiscord)` esclude sia il descrittore sia il toolkit agentico). Coerente con il resto.
+5. **Skill che richiedevano "code_execution"**: la documentazione delle skill ora indirizza a `write_file` (Phase 2) + `bash python` (Phase 3). Le skill scripts `*.py` sotto `/readonly/skills/...` sono invariate — vengono lanciate da `bash`.
+6. **Round budget agentico**: `AGENTIC_TOOL_NAMES` non include più `code_execution`. Il bump del round budget (5 → 20) avviene quando il modello chiama uno tra `bash`/`write_file`/`edit_file`. Se il modello fa SOLO chiamate `code_interpreter`, il budget standard di 5 round resta — coerente, perché `code_interpreter` non scrive nulla nel workspace.
+7. **Backwards compat con history vecchia**: la cronologia può contenere ancora `tool_call_id` legacy con nome `code_execution`. Il modello vede solo il testo della history, non i nomi tool storici, quindi non ci sono effetti collaterali.
+
+### 10.6 Checklist Step 8
+- [x] `src/tools/codeExecution.js` — eliminato
+- [x] `src/ai/tools.js` — `TOOL_CODE_EXECUTION` rimosso, `TOOL_CODE_INTERPRETER` aggiunto
+- [x] `src/tools/index.js` — import rimosso, dispatcher con fallback informativo
+- [x] `src/handler.js` — `AGENTIC_TOOL_NAMES` / `DEFERRED_TOOL_NAMES` aggiornati
+- [x] `src/ai/agenticBriefing.js` — blocco `<CodeInterpreterBoundary>`, sandbox rinominata
+- [x] `src/ai/systemPrompt.js` — blocco `<ToolBoundaries>` aggiunto
+- [x] `src/data/skills/{xlsx,pptx,docx,pdf}/SKILL.md` — pattern aggiornati
+- [x] Commenti / messaggi di errore in 7 file di supporto allineati
+- [x] `node --check` su tutti i file modificati: OK
+- [x] `getDiagnostics` su tutti i file modificati: nessuna diagnostica
+- [ ] **Da fare sul VPS dopo deploy**: `pm2 restart "GemiX"`, smoke test live (`code_interpreter` per math, `bash + write_file` per skills).
+- [ ] **Follow-up consigliato (non blocking)**: audit del Dockerfile + `requirements-sandbox.txt` per rimuovere librerie ora superflue (ad es. `torch`, `manim`, `qutip`, `astropy`...) tenendo: `pandas`, `openpyxl`, `python-docx`, `python-pptx`, `pypdf`, `reportlab`, `matplotlib`, `seaborn`, `jinja2`, `PyYAML`, `Pillow`, `pytesseract`, `pdf2image` + tool OS (`tesseract-ocr`, `libreoffice`, `poppler-utils`, `pdflatex/xelatex`, `ffmpeg`, `yt-dlp`, `libcairo`).
+
+---
+
+## 11. Codice morto eliminato (riepilogo cumulativo)
+
+| File / Costante | Step | Note |
+|---|---|---|
+| `src/ai/mediaDescriber.js` | Step 1 | Grok 4 ingerisce audio/video nativamente |
+| `src/ai/pageSummarizer.js` | Step 1 | Logica reintegrata inline in `browsePage.js` con Hermes |
+| `src/rag/regolamentoRag.js` | Step 1 | Full-context (regolamento è 24KB ≈ 6k token) |
+| `src/tools/webSearch.js` | Step 2 | Sostituito da `webXSearch` (multi-agent xAI) |
+| `src/tools/browsePage.js` | Step 2 | Page-browsing incluso in `web_search` xAI nativo |
+| `XAI_API_KEY` (env + export) | Step 3 | Tutto passa da Hermes con `HERMES_API_KEY` |
+| `XAI_TTS_URL` (constant) | Step 3 | URL hardcoded sostituita da `${HERMES_BASE_URL}/tts` |
+| `src/tools/codeExecution.js` | Step 8 | Sostituito dal tool xAI server-side `code_interpreter` |
+| `FAST_MODEL`, `AGENTIC_MODEL` | Step 1 | Sostituite da unica `GROK_MODEL` |
+| `EMBEDDING_MODEL` | Step 1 | Niente più embeddings |
+| `BROWSE_PAGE_MODEL` | Step 1 | `browsePage` usava `GROK_MODEL` |
+| `MEDIA_DESCRIBER_MODEL` | Step 1 | |
+| `OPENROUTER_BASE_URL` (constant) | Step 3 | Migrata in `.env` |
+| `OPENROUTER_API_KEY` (env) | — | Mantenuta solo per Lyria + video describer |
+| `MUSIC_MODEL` (env) | — | Mantenuta per Lyria |
+| `src/tools/musicCreator.js` | — | Mantenuto: usa OpenRouter + Lyria, non disponibile via xAI |
+| Cache `regolamento_rag.json` su disco | Step 1 | Non più letta, innocua, si può cancellare manualmente |
+
+---
+
+## 12. Variabili `.env` — stato attuale (post Step 8)
+
+```dotenv
+# AI - Hermes (proxy OpenAI-compatible → Grok via SuperGrok OAuth)
+# Tutte le features xAI (chat, code_interpreter, tts, stt, multi-agent) passano da qui.
+HERMES_BASE_URL=http://127.0.0.1:8000/v1
+HERMES_API_KEY=dummy
+GROK_MODEL=grok-4.3-latest
+MULTI_AGENT_MODEL=grok-4.20-multi-agent
+XAI_TTS_VOICE=leo
+XAI_TTS_ENABLED=true
+
+# OpenRouter — Lyria music generation + Gemini video description
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=...
+MUSIC_MODEL=google/lyria-3-clip-preview
+VIDEO_DESCRIBER_MODEL=google/gemini-2.5-flash-lite
+
+# Image search (SearXNG — solo per image_search, web/X passano per multi-agent)
 SEARXNG_URL=http://localhost:8888
 
 # Discord
 BOT_TOKEN=...
 GUILD_ID=...
 
-# Email, GitHub, music wrap, sandbox notify, PDF parser, public URL ...
+# Email, GitHub, sandbox notify, PDF parser, public URL, music wrap...
 # (invariate)
 ```
 
-**Variabili rimosse**:
-- `OPENROUTER_API_KEY`
-- `FAST_MODEL`
-- `AGENTIC_MODEL`
-- `EMBEDDING_MODEL`
-- `BROWSE_PAGE_MODEL`
-- `MEDIA_DESCRIBER_MODEL`
-- `MUSIC_MODEL`
+**Variabili rimosse nel corso della migrazione**:
+- `FAST_MODEL`, `AGENTIC_MODEL`, `EMBEDDING_MODEL`, `BROWSE_PAGE_MODEL`, `MEDIA_DESCRIBER_MODEL`, `XAI_API_KEY`
 
 ---
 
-## 3. Step successivi (futuri PR)
+## 13. Regola di split: `.env` vs `src/config/constants.js`
 
-### Step 2 — Eliminazione SearXNG e adozione Live Search nativo Grok
-**Obiettivo**: eliminare la dipendenza da SearXNG self-hosted (porta 8888 sul VPS) sfruttando i tool `live_search` di Grok via Hermes.
+**`.env` (deployment values, secrets, environment-specific)**:
+- `HERMES_BASE_URL`, `HERMES_API_KEY` — proxy endpoint e auth
+- `GROK_MODEL`, `MULTI_AGENT_MODEL` — model IDs (possono variare per A/B testing)
+- `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY` — OpenRouter endpoint e auth
+- `MUSIC_MODEL`, `VIDEO_DESCRIBER_MODEL` — model IDs per servizi specifici
+- `XAI_TTS_VOICE`, `XAI_TTS_ENABLED` — feature flags vocali
+- `SEARXNG_URL` — endpoint SearXNG
+- `BOT_TOKEN`, `GUILD_ID`, `BOT_EMAIL`, `BOT_PASS`, `GITHUB_TOKEN`, `GITHUB_REPO` — credenziali e config platform
+- `GEMIX_NOTIFY_URL`, `OPENDATALOADER_HYBRID_URL`, `GEMIX_PUBLIC_URL` — endpoint interni
+- `MAINTENANCE_MODE` — feature flag globale
 
-**Modifiche previste**:
-- Verifica che il proxy Hermes esponga il parametro `search_parameters` (Grok Live Search).
-- Sostituire `src/tools/webSearch.js` con un thin wrapper che invoca `chat/completions` con `search_parameters: { mode: 'on', sources: [{ type: 'web' }] }` e ritorna i citation.
-- Aggiungere tool dedicato **`x_search`** (oggi simulato con `web_search` + `allowed_domains:['x.com']`) usando `sources: [{ type: 'x' }]`.
-- Rimuovere `SEARXNG_URL` dall'env e dal codice.
-- `browse_page`: valutare se `live_search` con un solo URL specifico copre il caso d'uso, oppure mantenere il tool con summarizer ma su Hermes.
-- Decisione: tenere `browse_page` per quando l'utente fornisce un URL diretto e vuole un'analisi profonda (Live Search non sempre fa fetch del raw HTML).
+**`src/config/constants.js` (code-level constants, non-secrets)**:
+- `MAX_TOKENS`, `MAX_HISTORY`, `MAX_TOOL_ROUNDS`, `MAX_AUDIO_DURATION_S`, `MAX_VIDEO_DURATION_S` — limiti di sistema
+- `PLATFORM_DISCORD`, `PLATFORM_WA_PERSONAL`, `PLATFORM_WA_DEDICATED` — enum piattaforme
+- `GEMIX_FOOTER_PREFIX` — formato footer
+- Altre costanti di business logic
 
-### Step 3 — Migrazione TTS al proxy Hermes
-**Obiettivo**: rimuovere `XAI_API_KEY` dal repo e usare il proxy come unico endpoint xAI.
-
-**Modifiche previste**:
-- Verifica che Hermes esponga `/v1/audio/speech` con voice id compatibili (`leo`, `eve`).
-- Sostituire `xaiTTS()` in `src/tools/voiceMessage.js` con una chiamata `POST ${HERMES_BASE_URL}/audio/speech` (header `Authorization: Bearer ${HERMES_API_KEY}`).
-- Rimuovere `XAI_API_KEY` e `XAI_TTS_URL` dall'env.
-
-### Step 4 — Rivisitazione gestione history e media
-**Domanda aperta dall'utente**: *"il tool `read_file` per la cronologia diventa inutile? Includiamo direttamente tutti i media nella cronologia nella chiamata dato che non dobbiamo più badare a token, o meglio mantenere così per non sprecare contesto?"*
-
-**Analisi**:
-- Pro inclusione totale dei media in history: zero round AI sprecato per `read_file`, l'utente può riferirsi a "il vocale di ieri" e Grok lo "ricorda" davvero.
-- Contro: ogni round agentico (anche solo bash/code) trasporta MB di base64 in input; latenza e costo conteggiati ancora dal piano SuperGrok.
-- **Compromesso suggerito**: includere SOLO il media dell'**ultimo turno** in history come content multimodale (cosa che già succede), e per i turni più vecchi mantenere il tag `[Attachment: file.ext]` + tool `read_file` on-demand. Esattamente come oggi, ma senza la mediazione di `<Description>` (Grok può ingerire l'audio direttamente quando l'utente fa `read_file`).
-- **Effetto immediato** (già coperto da Step 1): senza più `mediaDescriber`, l'audio in history non ha più `<Description>` precomputato. La cache esistente (`getStoredHistoryMediaDescription`) viene letta solo se popolata da turni passati; nuove descrizioni non vengono più generate. Il sistema funziona perché Grok può leggere il media nativamente quando viene riallegato (via `read_file`).
-
-### Step 5 — RAG embeddings (se necessario)
-**Stato**: dopo Step 1 il regolamento Discord è full-context. Se in futuro si vuole estendere il RAG ad altri corpora più grandi, valutare:
-- provider embeddings dedicato (Voyage, Cohere) come unica eccezione,
-- oppure `live_search` su un knowledge graph, se Grok supporta sources custom.
-- **Per ora**: nessuna azione.
-
-### Step 6 — Eliminazione del tool `music_creator`
-**Stato**: rimosso già in Step 1. Se in futuro xAI rilascia un endpoint music gen via Hermes, lo si re-aggiunge da capo (non è blocking).
-
-### Step 7 — Image generation (futuro)
-- Verificare se Hermes espone `/v1/images/generations` (Aurora di xAI).
-- Se sì, aggiungere tool `image_generation` (oggi inesistente).
-
-### Step 8 — Code execution server-side
-**Domanda aperta**: il proxy Hermes potrebbe esporre il `code_execution` xAI server-side. Tuttavia GemiX ha la propria sandbox Docker isolata con più capacità (filesystem, yt-dlp, libreoffice, pdf parser). **Decisione**: mantenere la sandbox locale; il tool `code_execution` di GemiX ha priorità sull'eventuale tool xAI omonimo (come da specifica Hermes).
+**Regola**: Se un valore è un segreto, un endpoint, o può variare tra ambienti (dev/staging/prod), va in `.env`. Se è una costante di sistema o di business logic, va in `constants.js`.
 
 ---
 
-## 4. Code morto eliminato in Step 1
+## 14. Domande frequenti e risposte
 
-| File / Costante | Status | Note |
-|---|---|---|
-| `src/ai/mediaDescriber.js` | 🗑️ Eliminato | Grok 4 ingerisce audio/video nativamente |
-| `src/ai/pageSummarizer.js` | 🗑️ Eliminato | Logica reintegrata inline in `browsePage.js` con Hermes |
-| `src/rag/regolamentoRag.js` | 🗑️ Eliminato | Full-context (regolamento è 24KB ≈ 6k token) |
-| `src/tools/musicCreator.js` | 🟡 Mantenuto su OpenRouter | Lyria non disponibile via Hermes/Grok. Unica eccezione rimasta. |
-| `OPENROUTER_API_KEY` (env) | 🟡 Mantenuta solo per Lyria | |
-| `MUSIC_MODEL` (env) | 🟡 Mantenuta solo per Lyria | |
-| `OPENROUTER_BASE_URL` (constant) | 🟡 Mantenuta solo per Lyria | |
-| `FAST_MODEL`, `AGENTIC_MODEL` | 🗑️ Rimosse | Sostituite da unica `GROK_MODEL` |
-| `EMBEDDING_MODEL` | 🗑️ Rimossa | Niente più embeddings |
-| `BROWSE_PAGE_MODEL` | 🗑️ Rimossa | `browsePage` usa `GROK_MODEL` |
-| `MEDIA_DESCRIBER_MODEL` | 🗑️ Rimossa | |
-| `MUSIC_MODEL` | 🗑️ Rimossa | |
-| Cache `regolamento_rag.json` su disco | ⚠️ Lasciato (innocuo, non più letto) | Si auto-pulisce con eventuale GC futuro |
+### Q: Il team di ricerca ha un prompt di base di sistema oltre a quello di Grok 4.3?
+
+**A**: No. Il team multi-agent (`grok-4.20-multi-agent`) riceve SOLO il prompt dell'utente (il `prompt` passato a `web_x_search`). Non vede il system prompt di Grok 4.3, non vede la cronologia, non vede il contesto di GemiX. È un'entità separata che riceve un brief e ritorna un report.
+
+### Q: Ha accesso soltanto ai tool web_search e x_search di xAI?
+
+**A**: Sì. Il team multi-agent ha accesso SOLO ai tool nativi xAI: `web_search` (che include page-browsing) e `x_search` (X/Twitter). Niente `code_interpreter`, niente `music_creator`, niente tool GemiX. È un'API di ricerca pura.
+
+### Q: Vede il contesto, prompt di GemiX, cronologia conversazione o altro?
+
+**A**: No. Vede SOLO il `prompt` che gli passiamo (il brief di ricerca). Niente contesto, niente cronologia, niente system prompt. È completamente isolato.
 
 ---
 
-## 7. Step 1.5 — Media pre-processing (audio STT + video description)
+## 15. Dubbi e domande per il team di ricerca
 
-> Completato: 2026-05-19
+Prima di fare il deploy, verificare con il team di ricerca (o con la documentazione xAI):
 
-### Contesto
-Dopo Step 1 si è verificato che Grok 4.3 via Hermes **non ingerisce audio/video nativamente** in modo affidabile tramite `input_audio` content parts. Si è quindi reintrodotto un pre-processing step prima della chiamata principale, usando servizi dedicati.
+1. **Endpoint `/v1/responses`**: Hermes espone davvero questo endpoint? È compatibile con il formato che usiamo in `webXSearch.js`?
+2. **Autenticazione**: Il token `HERMES_API_KEY` funziona per `/v1/responses` come per `/v1/chat/completions`?
+3. **Modello `grok-4.20-multi-agent`**: È il nome corretto? Esiste ancora a maggio 2026?
+4. **Tool nativi**: `web_search` e `x_search` sono disponibili per questo modello?
+5. **Timeout**: 5 minuti è un timeout ragionevole per una ricerca multi-agent?
+6. **Risposta**: Il formato della risposta è sempre JSON con `content` e `citations`?
 
-### Cosa è stato fatto
-
-#### Audio — xAI STT (`/v1/stt`)
-- Creato `src/ai/audioTranscriber.js`: chiama `https://api.x.ai/v1/stt` con `XAI_API_KEY`.
-  - Parametri: `language: 'auto'`, `format: 'true'` (Inverse Text Normalization).
-  - Risposta JSON: `result.text` (non testo plain — l'endpoint Whisper OpenAI è stato sostituito da xAI a aprile/maggio 2026).
-  - **Endpoint corretto**: `/v1/stt` (non `/v1/audio/transcriptions` che non esiste più su xAI).
-- Creato `src/ai/audioProcessor.js`: walk dei messages, sostituisce ogni audio part con `<Transcription>…</Transcription>`.
-  - Supporta sia `input_audio` che `image_url` con MIME `audio/*`.
-  - Check durata via `ffprobe` (`getMediaDurationSec`): audio > `MAX_AUDIO_DURATION_S` (120s) viene saltato.
-  - Cache trascrizioni in history (`getStoredHistoryVoiceTranscription`).
-
-#### Video — Gemini via OpenRouter
-- Creato `src/ai/videoDescriber.js`: chiama `OPENROUTER_BASE_URL/chat/completions` con `VIDEO_DESCRIBER_MODEL` (es. `google/google/gemini-2.5-flash-lite`).
-  - **Formato video corretto per OpenRouter/Gemini**: `{ type: 'video_url', video_url: { url: 'data:video/*;base64,...' } }` — NON `image_url` (rifiutato per video).
-  - Check durata via `ffprobe`: video > `MAX_VIDEO_DURATION_S` (15s) viene saltato.
-  - Risposta JSON schema: `{ description: string }`.
-  - Cache descrizioni in history (`getStoredHistoryMediaDescription`).
-- Aggiunta variabile `VIDEO_DESCRIBER_MODEL` a `src/config/env.js` (era già in `.env`).
-
-#### Integrazione in handler
-- `src/handler.js`: chiamate a `describeVideoInMessages` e `processAudioInMessages` aggiunte subito dopo il push del messaggio utente, prima del loop AI. Entrambe wrapped in try/catch.
-
-#### System prompt
-- `src/ai/systemPrompt.js`: `<MediaHandling>` aggiornato — rimossi dettagli tecnici interni (endpoint, provider), mantenuti solo i limiti operativi (`audio ≤ Xs → <Transcription>`, `video ≤ Xs → <Description>`).
-- Pulizia generale del prompt: rimossi tag verbosi (`<ToolExecution>`, `<ResponsePreferences>` ridondanti), accorciati testi inutilmente lunghi.
-
-### Variabili `.env` aggiunte/modificate
-```dotenv
-VIDEO_DESCRIBER_MODEL=google/google/gemini-2.5-flash-lite
-# XAI_API_KEY già presente — ora usata anche per STT oltre che TTS
-```
-
-### Checklist Step 1.5
-- [x] `src/ai/audioTranscriber.js` — xAI `/v1/stt`, risposta JSON, `language: auto`, `format: true`
-- [x] `src/ai/audioProcessor.js` — walk messages, cache, duration cap
-- [x] `src/ai/videoDescriber.js` — Gemini via OpenRouter, formato `video_url`, duration cap
-- [x] `src/config/env.js` — export `VIDEO_DESCRIBER_MODEL`
-- [x] `src/handler.js` — integrazione pre-processing prima del loop AI
-- [x] `src/ai/systemPrompt.js` — aggiornamento `<MediaHandling>` e pulizia prompt
-
-
-
-1. **History con `<Description>` legacy**: messaggi vecchi hanno già `<Description kind="audio|video">…</Description>` iniettati nel testo. Grok li interpreta come descrizioni testuali pre-fatte, **funzionano comunque** (è del testo come un altro). Il system prompt continua a menzionarli per coerenza.
-2. **Cache file `.kiro/`/`src/data/regolamento_rag.json`**: il file su disco non viene più letto. Innocuo, ma se l'utente vuole pulirlo è una `del` manuale.
-3. **`MEDIA_DESCRIBER_MODEL not configured`**: l'unica branch che usa questo log path è in `mediaDescriber.js` che ora viene eliminato → branch sparisce.
-4. **`browse_page` con LLM error**: se il summarizer fallisce, il fallback "raw" continua a funzionare (l'utente può chiamare di nuovo con `mode: 'raw'`).
-5. **Round budget**: invariato (5 → 20 con `agenticUnlocked`). La transizione FAST→AGENTIC del modello scompare ma il salto del budget round resta.
-6. **`reasoning.effort`**: oggi viene passato a OpenRouter (Qwen lo capisce). Hermes/Grok via OAI proxy potrebbe non averlo in spec. Lo rimuoviamo dal body in Step 1; lo si riaggiunge solo dopo conferma compatibilità.
-7. **`HTTP 401` se Hermes non in esecuzione**: il `callApiWithRetry` gestisce già il retry e poi notifica l'admin. Niente da fare.
-8. **`MAX_TOKENS = 8192`**: per Grok 4 va probabilmente alzato (Grok 4 supporta context window molto più ampia). Non blocking ma da rivedere in Step 4.
+**File da allegare al team di ricerca per verifica**:
+- `src/tools/webXSearch.js` — implementazione della call
+- `src/config/env.js` — variabili di config
+- `.env` — valori di deployment
+- `MIGRATION_PLAN.md` — questo documento
 
 ---
 
-## 6. Checklist Step 1
+## 16. Note finali
 
-- [x] Aggiunta sezione Hermes a `SERVER_SETUP.md`
-- [x] Creazione `MIGRATION_PLAN.md`
-- [x] Aggiornamento `.env` (rimosse var OpenRouter, aggiunte Hermes)
-- [x] Aggiornamento `src/config/env.js`
-- [x] Aggiornamento `src/config/constants.js`
-- [x] Refactor `src/ai/aiProvider.js`
-- [x] Refactor `src/ai/apiClient.js` (rinaming log)
-- [x] Refactor `src/tools/browsePage.js` (chiamata Hermes inline)
-- [x] Eliminazione `src/ai/mediaDescriber.js`
-- [x] Eliminazione `src/ai/pageSummarizer.js`
-- [x] Eliminazione `src/rag/regolamentoRag.js` + dir
-- [x] ~~Eliminazione `src/tools/musicCreator.js`~~ → **ripristinato** (mantenuto su OpenRouter per Lyria)
-- [x] Aggiornamento `src/ai/tools.js` (rimosso `TOOL_MUSIC_CREATOR`)
-- [x] Aggiornamento `src/tools/index.js` (rimosso case `music_creator`)
-- [x] Aggiornamento `src/handler.js` (rimossa `queryRegolamento`)
-- [x] Aggiornamento `src/index.js` (rimossa `initRegolamentoRag`, aggiunto preflight Hermes)
-- [x] Aggiornamento `src/ai/systemPrompt.js` (`<MediaHandling>` aggiornato per ingestion nativa)
-- [x] Nuovo `src/utils/regolamento.js` (loader full-context con cache)
-- [x] Aggiornamento `src/utils/footer.js` (display name → Grok)
-- [x] Verifica codice morto residuo (grep clean) e diagnostiche
-- [x] Smoke test sintattico Node `--check` su tutti i file modificati
-- [ ] **Da fare sul VPS dopo deploy**: `npm install` (nessuna nuova dep aggiunta), `pm2 restart "GemiX"`, smoke test live (`/help` o messaggio admin in maintenance)
-
-### Note finali Step 1
-- `package.json`: zero cambi alle dipendenze. Tutto il transport AI già usava `fetch` nativo. Versione lasciata a `1.7.5` (alzarla a `2.0.0-rc1` quando Step 2 chiude SearXNG).
-- Cache regolamento: il file `src/data/regolamento_rag.json` (se mai esistito) non viene più letto e può essere cancellato manualmente sul VPS (`rm src/data/regolamento_rag.json`). Innocuo se rimane.
-- `MAX_TOKENS = 8192` mantenuto invariato. Da rivalutare in Step 4 quando si misura il context budget reale di Grok 4 via Hermes.
+- `package.json`: zero cambi alle dipendenze.
+- `MAX_TOKENS = 64_000`, `MAX_HISTORY = 50` (Step 4).
+- History con `<Description>` legacy: messaggi vecchi hanno già `<Description kind="audio|video">` iniettati. Grok li interpreta come testo, funzionano comunque.
+- Sandbox Docker: l'immagine è ancora pesante. Step 8 ha rimosso il tool che la sfruttava di più ma lasciato i layer Python intatti per non rompere skills via `bash`. Audit + cleanup è un follow-up dedicato.
+- **Prossimi step**: Step 9 (eliminazione XAI_API_KEY completamente), Step 10 (aggiornamento MIGRATION_PLAN.md), Step 11 (cleanup REFERENCES.md).

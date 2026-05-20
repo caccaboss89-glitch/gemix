@@ -1,5 +1,5 @@
 """
-Preload heavy models so the first code_execution call is fast and
+Preload heavy models so the first sandbox call is fast and
 so the sandbox is fully offline-ready (no download at runtime).
 
 Executed once at Docker build time.

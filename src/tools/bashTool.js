@@ -1,8 +1,8 @@
 // src/tools/bashTool.js
-// Run a shell command inside the project sandbox container. Backed by the
-// same Jupyter kernel used by code_execution: the snippet shells out via
-// subprocess.run() with cwd=/workspace and the same network/cap restrictions
-// as the rest of the sandbox.
+// Run a shell command inside the project sandbox container. The snippet
+// shells out via subprocess.run() inside the per-project Jupyter kernel,
+// with cwd=/workspace and the same network/cap restrictions as the rest
+// of the sandbox.
 //
 // The cwd is preserved across calls in the same kernel session through a
 // global `_GEMIX_CWD` Python variable, so `cd subdir` followed by `pwd`

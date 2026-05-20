@@ -1,14 +1,14 @@
 // src/ai/audioTranscriber.js
 //
-// Transcribes audio buffers using the xAI STT endpoint (/v1/stt).
+// Transcribes audio buffers via xAI STT, fronted by the Hermes proxy.
 // Used as a pre-processing step before the main Grok call.
 
-const { XAI_API_KEY } = require('../config/env');
+const { HERMES_API_KEY, HERMES_BASE_URL } = require('../config/env');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('AudioTranscriber');
 
-const XAI_STT_URL = 'https://api.x.ai/v1/stt';
+const STT_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/stt`;
 const TRANSCRIPTION_TIMEOUT_MS = 60_000;
 
 // Map MIME type → file extension supported by xAI STT.
@@ -27,7 +27,7 @@ const MIME_TO_EXT = {
 };
 
 /**
- * Transcribe an audio buffer via xAI /v1/stt.
+ * Transcribe an audio buffer via the Hermes proxy → xAI /v1/stt.
  * Response is always JSON: { text, language, duration, words, ... }
  *
  * @param {Buffer} buffer - Raw audio bytes
@@ -37,8 +37,8 @@ const MIME_TO_EXT = {
 async function transcribeAudio(buffer, mimetype) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) return null;
 
-  if (!XAI_API_KEY) {
-    log.warn('   ⚠️ XAI_API_KEY not configured — cannot transcribe audio');
+  if (!HERMES_API_KEY) {
+    log.warn('   ⚠️ HERMES_API_KEY not configured — cannot transcribe audio');
     return null;
   }
 
@@ -58,10 +58,10 @@ async function transcribeAudio(buffer, mimetype) {
 
     let res;
     try {
-      res = await fetch(XAI_STT_URL, {
+      res = await fetch(STT_URL, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${XAI_API_KEY}`,
+          'Authorization': `Bearer ${HERMES_API_KEY}`,
           // Do NOT set Content-Type — fetch sets it with boundary automatically
         },
         body: form,
