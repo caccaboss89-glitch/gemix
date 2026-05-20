@@ -1,6 +1,7 @@
 // src/tools/index.js
 const { isActiveMemberOnlyTool } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
+const { codeInterpreter } = require('./codeInterpreter');
 const { imageSearch } = require('./imageSearch');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
@@ -119,8 +120,9 @@ function _resolveTargetEmail(args, userCtx) {
   return { email: userCtx.email, display: 'yourself' };
 }
 
-// Tools that produce identical results every time in the same round — block duplicates.
-const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock']);
+// Tools that should only be called once per round — calling them again produces
+// identical results and wastes a round trip.
+const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock', 'web_x_search']);
 
 /**
  * Execute a tool call and return the result.
@@ -156,7 +158,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
       toolCallId: toolCall.id,
       result: JSON.stringify({
         success: false,
-        error: `"${name}" was already called this round — result is identical. Use the previous tool result instead of calling again.`,
+        error: `"${name}" can only be called once per round. Use the result from the previous call in this round.`,
       }),
     };
   }
@@ -203,6 +205,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         // Strip internal _stats before returning to the AI (not part of the tool schema).
         const { _stats: _ignored, ...searchResultClean } = searchResult;
         result = searchResultClean;
+        break;
+      }
+
+      case 'code_interpreter': {
+        result = await codeInterpreter(args.code);
         break;
       }
 

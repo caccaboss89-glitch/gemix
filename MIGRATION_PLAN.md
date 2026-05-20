@@ -278,7 +278,7 @@ In standby. Sarà ripreso solo quando si vorrà estendere il RAG ad altri corpor
 
 ---
 
-## 9. Step 7 — Image generation (rimandato)
+## 9. Step 7 — Image/video generation (rimandato)
 
 In standby. Sarà ripreso quando Hermes/xAI esporrà un endpoint stabile per Aurora o un equivalente.
 
@@ -305,17 +305,18 @@ Grok 4.3 (Hermes /chat/completions)
 | File | Azione | Note |
 |---|---|---|
 | `src/tools/codeExecution.js` | 🗑️ Eliminato | Sostituito dal tool xAI server-side |
-| `src/ai/tools.js` | ✅ Aggiornato | Rimosso `TOOL_CODE_EXECUTION`; aggiunto `TOOL_CODE_INTERPRETER = { type: 'code_interpreter' }`; descrizione `agentic_unlock` e `bash` aggiornate per chiarire la separazione tra i due ambienti |
-| `src/tools/index.js` | ✅ Aggiornato | Import rimosso; `case 'code_execution'` ora ritorna errore strutturato che indirizza alla nuova alternativa |
-| `src/handler.js` | ✅ Aggiornato | `AGENTIC_TOOL_NAMES` e `DEFERRED_TOOL_NAMES` non includono più `code_execution` |
-| `src/ai/agenticBriefing.js` | ✅ Aggiornato | Aggiunto blocco `<CodeInterpreterBoundary>`, `<PythonSandbox>` rinominato `<ProjectSandbox>` con descrizione coerente |
-| `src/ai/systemPrompt.js` | ✅ Aggiornato | Aggiunto `<ToolBoundaries>` (mostrato fuori da Discord) che spiega la separazione tra `code_interpreter` e workspace |
+| `src/tools/codeInterpreter.js` | ✅ Creato | Dispatcher verso `/v1/responses` con `{ type: 'code_interpreter' }` |
+| `src/ai/tools.js` | ✅ Aggiornato | Rimosso `TOOL_CODE_EXECUTION`; aggiunto `TOOL_CODE_INTERPRETER` come function tool standard (Hermes `/chat/completions` accetta solo `type:'function'`; il dispatcher lo delega a `/v1/responses` dove `code_interpreter` è valido) |
+| `src/tools/index.js` | ✅ Aggiornato | Import + `case 'code_interpreter'` aggiunto |
+| `src/handler.js` | ✅ Aggiornato | `AGENTIC_TOOL_NAMES`/`DEFERRED_TOOL_NAMES` aggiornati; `code_interpreter` aggiunto a `PARALLEL_SAFE_TOOL_NAMES` (è stateless, sicuro in parallelo con `web_x_search` e altri read tool) |
+| `src/ai/agenticBriefing.js` | ✅ Aggiornato | Aggiunto blocco `<CodeInterpreterBoundary>`, `<PythonSandbox>` rinominato `<ProjectSandbox>` |
+| `src/ai/systemPrompt.js` | ✅ Aggiornato | Aggiunto `<ToolBoundaries>` (fuori da Discord) |
 | `src/data/skills/{xlsx,pptx,docx,pdf}/SKILL.md` | ✅ Aggiornati | Pattern `code_execution` sostituito con `write_file` (Phase 2) + `bash python …` (Phase 3) |
-| `src/sandbox/projectRun.js` | ✅ Aggiornato | Commenti puliti (la pipeline serve solo a bash/write_file/edit_file ora) |
+| `src/sandbox/projectRun.js` | ✅ Aggiornato | Commenti puliti |
 | `src/sandbox/sandboxManager.js` | ✅ Aggiornato | Commenti puliti |
 | `src/tools/bashTool.js`, `writeFile.js`, `attachFile.js` | ✅ Aggiornati | Commenti e messaggi di errore rivisti |
 | `src/utils/{attachments,bgTasks,userPaths}.js` | ✅ Aggiornati | Commenti aggiornati |
-| `sandbox/README.md` | ✅ Aggiornato | Tool list aggiornata |
+| `sandbox/README.md`, `entrypoint.sh`, `preload_models.py` | ✅ Aggiornati | Riferimenti a `code_execution` rimossi |
 | `SERVER_SETUP.md` | ✅ Aggiornato | Spiegazione tool server-side xAI |
 
 ### 10.4 Cosa NON è cambiato
@@ -323,19 +324,21 @@ Grok 4.3 (Hermes /chat/completions)
 - **`sandbox/Dockerfile` + `requirements-sandbox.txt`**: NON sono stati alleggeriti. La libreria pesante che era utile a `code_execution` (numpy/scipy/torch/manim ecc.) potrebbe ora non servire più, MA: alcune skill usano `pandas`, `openpyxl`, `python-docx`, `python-pptx`, `reportlab` da bash (e quindi servono nel container), e `pdflatex`/`libreoffice` continuano a essere necessari. Una pulizia del Dockerfile è un follow-up consigliato (ridurrebbe peso immagine ≈ multi-GB), ma richiede audit di ogni script `.py` sotto `src/data/skills/` per stabilire l'elenco minimo. **Raccomandazione**: tenere ora l'immagine così com'è, fare pulizia in un PR dedicato dopo aver verificato in produzione che nessuna skill regredisca.
 
 ### 10.5 Edge case gestiti
-1. **Modello che continua a chiamare `code_execution` legacy**: il dispatcher in `tools/index.js` ritorna errore strutturato che spiega la nuova divisione (`code_interpreter` per Python ad-hoc, `write_file` + `bash` per workspace).
-2. **`code_interpreter` in fase deferred**: NO. Il modello vede `{ type: 'code_interpreter' }` ma xAI risolve la chiamata server-side prima ancora che il messaggio assistant ritorni a GemiX. Nessun `tool_call` con quel nome compare in `assistantMsg.tool_calls`. Niente da fare in `_orderedCalls` o `runToolCall`.
-3. **Whitelist tool name in handler.js**: la check `_allowedToolNames.has(...)` filtra solo function tools dichiarati. `{ type: 'code_interpreter' }` non ha `function.name` quindi non entra nella whitelist — ma neanche serve perché xAI non emette tool_call con quel nome dal lato function calling.
-4. **Discord**: niente `code_interpreter` su Discord (la condizione `if (!isDiscord)` esclude sia il descrittore sia il toolkit agentico). Coerente con il resto.
-5. **Skill che richiedevano "code_execution"**: la documentazione delle skill ora indirizza a `write_file` (Phase 2) + `bash python` (Phase 3). Le skill scripts `*.py` sotto `/readonly/skills/...` sono invariate — vengono lanciate da `bash`.
-6. **Round budget agentico**: `AGENTIC_TOOL_NAMES` non include più `code_execution`. Il bump del round budget (5 → 20) avviene quando il modello chiama uno tra `bash`/`write_file`/`edit_file`. Se il modello fa SOLO chiamate `code_interpreter`, il budget standard di 5 round resta — coerente, perché `code_interpreter` non scrive nulla nel workspace.
-7. **Backwards compat con history vecchia**: la cronologia può contenere ancora `tool_call_id` legacy con nome `code_execution`. Il modello vede solo il testo della history, non i nomi tool storici, quindi non ci sono effetti collaterali.
+1. **Hermes `/chat/completions` rifiuta `type:'code_interpreter'`**: Hermes accetta solo `type:'function'` o `type:'live_search'` su `/chat/completions`. `TOOL_CODE_INTERPRETER` è quindi un function tool standard; il dispatcher lo intercetta e lo delega a `/v1/responses` dove `{ type: 'code_interpreter' }` è valido.
+2. **Esecuzione parallela**: `code_interpreter` è in `PARALLEL_SAFE_TOOL_NAMES` — se il modello chiama `code_interpreter` e `web_x_search` nello stesso round, vengono eseguiti in parallelo.
+3. **`GROK_MODEL` non configurato**: guard esplicito in `codeInterpreter.js` (oltre al fail-fast in `env.js`).
+4. **Risposta vuota**: errore strutturato, il modello può riformulare.
+5. **Timeout** (>2min): errore retryable, notifica admin.
+6. **Codice > 20k char**: troncato, marcato nel messaggio di risposta.
+7. **Discord**: `code_interpreter` non è nella tool list Discord (condizione `if (!isDiscord)` in `getToolsForUser`).
+8. **Round budget**: `code_interpreter` non è in `AGENTIC_TOOL_NAMES` — non bumpa il budget a 20 round. Corretto: è stateless e non scrive nel workspace.
 
 ### 10.6 Checklist Step 8
 - [x] `src/tools/codeExecution.js` — eliminato
-- [x] `src/ai/tools.js` — `TOOL_CODE_EXECUTION` rimosso, `TOOL_CODE_INTERPRETER` aggiunto
-- [x] `src/tools/index.js` — import rimosso, dispatcher con fallback informativo
-- [x] `src/handler.js` — `AGENTIC_TOOL_NAMES` / `DEFERRED_TOOL_NAMES` aggiornati
+- [x] `src/tools/codeInterpreter.js` — creato (dispatcher verso `/v1/responses`)
+- [x] `src/ai/tools.js` — `TOOL_CODE_EXECUTION` rimosso, `TOOL_CODE_INTERPRETER` aggiunto come function tool
+- [x] `src/tools/index.js` — import + dispatcher `case 'code_interpreter'`
+- [x] `src/handler.js` — `AGENTIC_TOOL_NAMES`/`DEFERRED_TOOL_NAMES` aggiornati; `code_interpreter` in `PARALLEL_SAFE_TOOL_NAMES`
 - [x] `src/ai/agenticBriefing.js` — blocco `<CodeInterpreterBoundary>`, sandbox rinominata
 - [x] `src/ai/systemPrompt.js` — blocco `<ToolBoundaries>` aggiunto
 - [x] `src/data/skills/{xlsx,pptx,docx,pdf}/SKILL.md` — pattern aggiornati
@@ -343,7 +346,6 @@ Grok 4.3 (Hermes /chat/completions)
 - [x] `node --check` su tutti i file modificati: OK
 - [x] `getDiagnostics` su tutti i file modificati: nessuna diagnostica
 - [ ] **Da fare sul VPS dopo deploy**: `pm2 restart "GemiX"`, smoke test live (`code_interpreter` per math, `bash + write_file` per skills).
-- [ ] **Follow-up consigliato (non blocking)**: audit del Dockerfile + `requirements-sandbox.txt` per rimuovere librerie ora superflue (ad es. `torch`, `manim`, `qutip`, `astropy`...) tenendo: `pandas`, `openpyxl`, `python-docx`, `python-pptx`, `pypdf`, `reportlab`, `matplotlib`, `seaborn`, `jinja2`, `PyYAML`, `Pillow`, `pytesseract`, `pdf2image` + tool OS (`tesseract-ocr`, `libreoffice`, `poppler-utils`, `pdflatex/xelatex`, `ffmpeg`, `yt-dlp`, `libcairo`).
 
 ---
 

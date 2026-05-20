@@ -32,10 +32,17 @@ const AGENTIC_TOOL_NAMES = new Set([
 ]);
 
 const DEFERRED_TOOL_NAMES = new Set(['bash']);
-const PARALLEL_SAFE_TOOL_NAMES = new Set([
+
+// Tools that should only be called once per round — calling them again in the
+// same round wastes a round trip and produces identical results.
+// The handler rejects duplicate calls with a clear error before they reach the dispatcher.
+// Note: agentic_unlock, read_server_rules, read_music_stats are also in ONCE_PER_ROUND_TOOLS
+// inside tools/index.js (dispatcher-level guard). This set adds web_x_search at the
+// handler level so the check happens before the expensive HTTP call.
+const ONCE_PER_ROUND_TOOL_NAMES = new Set([
   'web_x_search',
   'read_server_rules',
-  'read_music_stats'
+  'read_music_stats',
 ]);
 
 const log = createLogger('Handler');
@@ -540,20 +547,20 @@ async function handleMessage(ctx) {
             continue;
           }
 
-          if (PARALLEL_SAFE_TOOL_NAMES.has(tc.function.name)) {
-            const parallelCalls = [tc];
-            while (i + 1 < _orderedCalls.length && PARALLEL_SAFE_TOOL_NAMES.has(_orderedCalls[i + 1].function.name)) {
-              parallelCalls.push(_orderedCalls[i + 1]);
-              i++;
+          if (ONCE_PER_ROUND_TOOL_NAMES.has(tc.function.name)) {
+            if (deliveryCtx.roundCalledTools.has(tc.function.name)) {
+              log.warn(`   ⛔ "${tc.function.name}" already called this round — rejecting duplicate`);
+              messages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify({
+                  success: false,
+                  error: `"${tc.function.name}" can only be called once per round. Use the result from the previous call in this round.`,
+                }),
+              });
+              continue;
             }
-            if (parallelCalls.length > 1) {
-              log.info(`   ⚡ Executing ${parallelCalls.length} independent read/research tools in parallel`);
-            }
-            const toolMessages = await Promise.all(parallelCalls.map(runToolCall));
-            for (const toolMessage of toolMessages) {
-              messages.push(toolMessage);
-            }
-            continue;
+            deliveryCtx.roundCalledTools.add(tc.function.name);
           }
 
           messages.push(await runToolCall(tc));

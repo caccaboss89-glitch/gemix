@@ -23,15 +23,23 @@ function makeTool({ name, description, properties = {}, required = [] }) {
   return tool;
 }
 
-// ── xAI server-side tool descriptor ──
+// ── xAI code_interpreter — exposed as a function tool ──
 //
-// `code_interpreter` is a *built-in* xAI tool (like web_search/x_search). It runs
-// in xAI's own isolated sandbox — completely separate from GemiX's project
-// filesystem. The model uses it for ad-hoc calculations, data analysis, and
-// scripts that don't need access to user files. The descriptor below is sent
-// straight to Hermes /chat/completions: no JS handler is invoked because the
-// tool runs server-side at xAI.
-const TOOL_CODE_INTERPRETER = { type: 'code_interpreter' };
+// Hermes /chat/completions only accepts type:'function' or type:'live_search'.
+// We expose code_interpreter as a regular function tool; when the model calls
+// it, the dispatcher in tools/index.js forwards the request to xAI /v1/responses
+// (same path as web_x_search) where code_interpreter IS a valid server-side tool.
+const TOOL_CODE_INTERPRETER = makeTool({
+  name: 'code_interpreter',
+  description: 'Run Python for calculations, data analysis, plots, or any ad-hoc script. Isolated sandbox — no access to /workspace/ or /readonly/. For project files use write_file + bash instead.',
+  properties: {
+    code: {
+      type: 'string',
+      description: 'Python code to execute.',
+    },
+  },
+  required: ['code'],
+});
 
 // ── Static tool definitions (schema never varies) ──
 
@@ -86,7 +94,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'MUST be called BEFORE any action that needs the agentic workspace (the user-scoped filesystem with /workspace/ + /readonly/). Unlocks: bash, file creation/editing on /workspace/, project management, yt-dlp downloads, OCR pipelines, chart generation, etc. AFTER unlock the full toolkit is available in the NEXT round. Do NOT call for: chat replies, web search, voice, scheduling, memory, or pure calculations/analysis (those go through code_interpreter, which runs in a separate xAI sandbox without access to /workspace/).',
+  description: 'MUST be called BEFORE any action that needs the agentic workspace (the user-scoped filesystem with /workspace/ + /readonly/). Unlocks: bash, file creation/editing on /workspace/, project management, yt-dlp downloads, OCR pipelines, chart generation, etc. AFTER unlock the full toolkit is available in the NEXT round. Do NOT call for: chat replies, web search, voice, scheduling, memory, or pure calculations/analysis (those go through code_interpreter, which has no access to /workspace/).',
   properties: {},
 });
 
