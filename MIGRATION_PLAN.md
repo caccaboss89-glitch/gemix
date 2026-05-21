@@ -384,6 +384,68 @@ VIDEO_GEN_MODEL=grok-imagine-video
 - [x] `getDiagnostics` su tutti i file modificati: nessuna diagnostica
 - [ ] **Da fare sul VPS dopo deploy**: verificare che il proxy Hermes esponga `/v1/images/generations` e `/v1/videos/generations` (entrambi formato OpenAI SDK con `b64_json`). Se no, aggiornare config Hermes. Poi `pm2 restart "GemiX"` e smoke test (text-to-image, image-to-image con reference da history, text-to-video, image-to-video con singola reference, reference-to-video con 2-3 reference, ricerca immagini con `image_search` — tutte le immagini devono arrivare automaticamente, niente più filtraggio).
 
+> **NOTA STORICA — Vedi Step 7.5**: l'assunzione di Step 7 si è rivelata sbagliata in produzione. Hermes v0.14 NON inoltra `/v1/images/generations` né `/v1/videos/generations`. Imagine è stato migrato a `/v1/responses` con tool server-side `image_generate` / `video_generate` nello Step 7.5.
+
+---
+
+## 9.bis Step 7.5 — Imagine migrato a `/responses` (server-side tool) — completato: 2026-05-21
+
+### 9.bis.1 Sintomo
+Errore in produzione subito dopo il deploy di Step 7:
+
+```
+[ImagineGenerator] ❌ imagine/image error: HTTP 404:
+{"error": {"message": "Path /v1/images/generations is not forwarded by this proxy.
+Allowed: /chat/completions, /completions, /embeddings, /models, /responses",
+"type": "path_not_allowed", "code": "path_not_allowed"}}
+```
+
+### 9.bis.2 Diagnosi
+Hermes Agent v0.14 espone solo cinque path: `/chat/completions`, `/completions`, `/embeddings`, `/models`, `/responses`. Gli endpoint REST dedicati di Grok Imagine (`/images/generations`, `/videos/generations`) non sono proxati. xAI Imagine viene esposto come **tool server-side** dentro `/responses`, lo stesso pattern già usato da `web_search`/`x_search` (in `webXSearch.js`) e `code_interpreter` (in `codeInterpreter.js`).
+
+### 9.bis.3 Architettura post Step 7.5
+```
+Grok 4.3 (Hermes /chat/completions)
+  ├─ chiama function tool: generate_image(prompt, reference_images?, aspect_ratio?)
+  │    └─ POST {HERMES_BASE_URL}/responses  (model: IMAGE_GEN_MODEL)
+  │         tools: [{ type: 'image_generate', aspect_ratio? }]
+  │         input: [{ role: 'user', content: [text + input_image data URLs] }]
+  │         → base64 → responseCtx.attachments → AUTO-DELIVERED
+  │
+  └─ chiama function tool: generate_video(prompt, reference_images?, aspect_ratio?)
+       └─ POST {HERMES_BASE_URL}/responses  (model: VIDEO_GEN_MODEL)
+            tools: [{ type: 'video_generate', duration: 10, aspect_ratio, resolution: '720p' }]
+            input: [{ role: 'user', content: [text + input_image data URLs] }]
+            → base64 → responseCtx.attachments → AUTO-DELIVERED
+```
+
+Le reference images viaggiano dentro `input[].content[]` come `{ type: 'input_image', image_url: 'data:<mime>;base64,...' }` (lo stesso shape multimodale OpenAI già usato per il chat completions). I parametri di shaping (aspect ratio, durata, risoluzione) viaggiano sull'oggetto tool descriptor.
+
+### 9.bis.4 Cosa è cambiato
+
+| File | Azione | Note |
+|---|---|---|
+| `src/tools/imagineGenerator.js` | ✅ Riscritto | Endpoint unico `${HERMES_BASE_URL}/responses` con tool `image_generate` / `video_generate`. Helpers `_resolveReferenceImages`, `_loadReferenceImage`, `_cleanPrompt`, validazioni e attachment buffering invariati. Nuovo `_extractBase64Payload` ricorsivo (la Responses API può mettere il base64 in `data[].b64_json`, `output[].content[].source.data`, `output[].image.b64_json`, ecc.) con fallback URL → fetch inline. |
+| `MIGRATION_PLAN.md` | ✅ Aggiornato | Aggiunto questo Step 7.5. |
+| `.env` | (nessun cambio) | `IMAGE_GEN_MODEL` / `VIDEO_GEN_MODEL` rimangono validi: cambia solo l'endpoint. |
+| `src/config/env.js`, `src/ai/tools.js`, `src/tools/index.js`, `src/ai/systemPrompt.js` | (nessun cambio) | Le interfacce esposte (`generateImage` / `generateVideo`) sono identiche a Step 7. |
+
+### 9.bis.5 Edge case gestiti (delta rispetto a Step 7)
+1. **Parsing risposta**: il vecchio parser cercava solo `data[].b64_json|b64|url` (shape "openai images"). La Responses API usa shape "responses" con `output[].content[].{type:image|output_image|video, source:{data:...}|image:{b64_json:...}|video:{b64_json:...}}`. Il nuovo parser è ricorsivo, prova ogni nodo dell'albero (`b64_json`, `b64`, `image_base64`, `video_base64`, `base64`, nested `image.b64_json`, `video.b64_json`, `source.data`), e raccoglie le URL come fallback per fare il fetch inline.
+2. **Reference images come data URL**: prima viaggiavano come array di stringhe base64 nel body; ora come `{type:'input_image', image_url:'data:...'}` dentro il content multimodale. È il formato standard OpenAI, accettato da `/responses`.
+3. **Aspect ratio sul tool descriptor**: prima sul body (`body.aspect_ratio`), ora sul tool (`tools[0].aspect_ratio`). I parametri di shaping appartengono al tool, non alla request.
+4. **Niente `n`, niente `response_format`**: la Responses API non accetta questi campi (tipici di `/images/generations`); la richiesta si limita a un singolo output e il formato è binary base64 di default.
+5. **Tutti gli edge case di Step 7 invariati**: limiti reference, aspect ratio whitelist, prompt cap 2000 char, validazione MIME, dimensioni 8 MB, timeout 3 min/8 min, `ONCE_PER_ROUND_TOOLS`, gating Discord.
+
+### 9.bis.6 Variabili `.env`
+Nessuna modifica. `IMAGE_GEN_MODEL` e `VIDEO_GEN_MODEL` continuano a essere `grok-imagine-image-quality` e `grok-imagine-video`. Cambia solo il path su cui Hermes inoltra la chiamata.
+
+### 9.bis.7 Checklist Step 7.5
+- [x] `src/tools/imagineGenerator.js` — riscritto (endpoint `/responses`, tool `image_generate` / `video_generate`, parser ricorsivo, reference images come data URL multimodali)
+- [x] `node --check src/tools/imagineGenerator.js`: OK
+- [x] `getDiagnostics`: nessuna diagnostica
+- [ ] **Da fare sul VPS dopo deploy**: `pm2 restart "GemiX"` e smoke test (text-to-image, image-to-image con reference da history, text-to-video, image-to-video, reference-to-video con 2-3 reference). Se il tool type esatto sul proxy fosse diverso (`image_generation` / `video_generation` invece di `image_generate` / `video_generate`), basta toggleare le costanti `IMAGE_TOOL_TYPE` / `VIDEO_TOOL_TYPE` in cima al file e ridistribuire.
+
 ---
 
 ## 10. Step 8 — Eliminazione `code_execution`, adozione `code_interpreter` xAI (completato: 2026-05-20)

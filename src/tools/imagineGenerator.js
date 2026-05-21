@@ -2,19 +2,22 @@
 //
 // Grok Imagine — generate images and short videos via the Hermes proxy.
 //
-// Endpoints (proxied to xAI by Hermes; auth uses HERMES_API_KEY → SuperGrok OAuth):
-//   POST {HERMES_BASE_URL}/images/generations  (model: IMAGE_GEN_MODEL)
-//   POST {HERMES_BASE_URL}/videos/generations  (model: VIDEO_GEN_MODEL)
+// Hermes Agent v0.14 only forwards a handful of paths to xAI:
+//   /chat/completions, /completions, /embeddings, /models, /responses
+// The dedicated /images/generations and /videos/generations endpoints are NOT
+// proxied. Imagine is therefore consumed as server-side tools inside
+// POST {HERMES_BASE_URL}/responses, exactly like webXSearch and
+// codeInterpreter do for web_search / x_search / code_interpreter.
 //
-// Reference images are resolved through the same path rules used by read_file
-// (chat history, /readonly/searched_images, /workspace/...). They are read
-// from disk, validated as image files, and forwarded as base64 in the
-// request body. We never accept URLs or arbitrary buffers — the AI can only
+// Tool names sent in the body:
+//   - generate_image  → tools: [{ type: 'image_generation' }]
+//   - generate_video  → tools: [{ type: 'video_generation' }]
+//
+// Reference images are still resolved through the same path rules used by
+// read_file (chat history, /readonly/searched_images, /workspace/...). They
+// are read from disk, validated, and forwarded as base64 in the request
+// body. We never accept URLs or arbitrary buffers — the AI can only
 // reference files it could already read.
-//
-// We always request `response_format: "b64_json"` so the result is a Buffer
-// we can hand straight to responseCtx.attachments. URLs from xAI are
-// short-lived, base64 is more reliable for our delivery pipeline.
 
 const fs = require('fs');
 const path = require('path');
@@ -26,17 +29,20 @@ const {
 } = require('../config/env');
 const { logApiRequest, logApiResponse } = require('../ai/apiClient');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
+const { isPathAllowed, ensureUserSkeleton } = require('../utils/userPaths');
 const { getCurrentProject } = require('../utils/projectState');
 const { sanitizeFilename } = require('../utils/text');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('ImagineGenerator');
 
-// ── Endpoints ───────────────────────────────────────────────────────────────
+// ── Endpoint (single, shared) ───────────────────────────────────────────────
 
-const IMAGE_GEN_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/images/generations`;
-const VIDEO_GEN_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/videos/generations`;
+const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
+
+// xAI Imagine tool type names inside /responses.
+const IMAGE_TOOL_TYPE = 'image_generate';
+const VIDEO_TOOL_TYPE = 'video_generate';
 
 // ── Limits ──────────────────────────────────────────────────────────────────
 
@@ -153,7 +159,7 @@ function _loadReferenceImage(absPath, displayPath) {
  * Sanitize the prompt: strip control chars, collapse whitespace, trim, cap length.
  */
 function _cleanPrompt(prompt) {
-  if (typeof prompt !== 'string') return '';
+  if (typeof prompt !== 'string') return { prompt: '', truncated: false };
   let p = prompt
     // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
@@ -206,15 +212,15 @@ async function _resolveReferenceImages(refPaths, max, userCtx) {
   return { ok: true, items };
 }
 
-// ── Network call (shared retry/timeout) ─────────────────────────────────────
+// ── Network call (shared) ───────────────────────────────────────────────────
 
-async function _postJson(url, body, timeoutMs, label) {
-  logApiRequest(label, url, body);
+async function _callResponses(body, timeoutMs, label) {
+  logApiRequest(label, RESPONSES_URL, body);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const startTime = Date.now();
   try {
-    const res = await fetch(url, {
+    const res = await fetch(RESPONSES_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -230,7 +236,7 @@ async function _postJson(url, body, timeoutMs, label) {
     }
     const data = await res.json();
     const duration = Date.now() - startTime;
-    try { logApiResponse(label, url, data); } catch { /* best effort */ }
+    try { logApiResponse(label, RESPONSES_URL, data); } catch { /* best effort */ }
     log.info(`   ✅ ${label} reply in ${duration}ms`);
     return data;
   } catch (err) {
@@ -244,32 +250,106 @@ async function _postJson(url, body, timeoutMs, label) {
 }
 
 /**
- * Extract a base64 payload from xAI's images/videos response.
- * The native shape is `{ data: [{ b64_json }] }`, but we tolerate `{ b64 }`
- * or `{ url }` (downloaded inline) as fallbacks.
+ * Walk the /responses payload looking for any embedded base64 media.
+ *
+ * The Responses API can place generated artefacts in several spots, depending
+ * on the proxy build and on whether the underlying endpoint shape is the
+ * "openai-style" one (`{ data: [{ b64_json }] }`) or the "responses-style"
+ * one (`{ output: [{ content: [{ type: 'image'|'output_image'|'video', ... }] }] }`).
+ *
+ * We try every plausible location and fall back to downloading a temporary
+ * URL inline if that's the only thing we get.
+ *
+ * @param {object} data
+ * @returns {Promise<string|null>} base64 string or null
  */
 async function _extractBase64Payload(data) {
   if (!data || typeof data !== 'object') return null;
-  const arr = Array.isArray(data.data) ? data.data : null;
-  if (!arr || arr.length === 0) return null;
-  const item = arr[0];
-  if (!item || typeof item !== 'object') return null;
-  if (typeof item.b64_json === 'string' && item.b64_json.length > 0) return item.b64_json;
-  if (typeof item.b64 === 'string' && item.b64.length > 0) return item.b64;
 
-  // Fallback: download a temporary URL inline. xAI URLs expire quickly so we
-  // turn them into base64 right here.
-  if (typeof item.url === 'string' && item.url.startsWith('http')) {
+  const urlsToTry = [];
+
+  const visit = (node, depth = 0) => {
+    if (!node || depth > 8) return null;
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = visit(item, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    if (typeof node !== 'object') return null;
+
+    // Common base64 fields, in order of likelihood.
+    const candidates = [
+      node.b64_json,
+      node.b64,
+      node.image_base64,
+      node.video_base64,
+      node.base64,
+      // Some shapes nest the bytes under image / video objects.
+      node.image && (node.image.b64_json || node.image.b64 || node.image.base64),
+      node.video && (node.video.b64_json || node.video.b64 || node.video.base64),
+      // Responses API tool results: `{ type: 'output_image', image: { ... } }` or
+      // `{ type: 'image', source: { data: '...' } }`.
+      node.source && (node.source.data || node.source.b64_json),
+      node.data && typeof node.data === 'string' ? node.data : null,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.length >= 64 && /^[A-Za-z0-9+/=\s]+$/.test(c)) {
+        return c.replace(/\s+/g, '');
+      }
+    }
+
+    // Collect URLs as a last-resort fallback.
+    if (typeof node.url === 'string' && node.url.startsWith('http')) {
+      urlsToTry.push(node.url);
+    }
+    if (node.image && typeof node.image.url === 'string' && node.image.url.startsWith('http')) {
+      urlsToTry.push(node.image.url);
+    }
+    if (node.video && typeof node.video.url === 'string' && node.video.url.startsWith('http')) {
+      urlsToTry.push(node.video.url);
+    }
+
+    // Recurse into known container fields plus any nested object/array.
+    const containers = ['data', 'output', 'content', 'results', 'items', 'parts', 'attachments', 'tool_results', 'tool_outputs'];
+    for (const key of containers) {
+      if (key in node) {
+        const found = visit(node[key], depth + 1);
+        if (found) return found;
+      }
+    }
+
+    // Generic fallback: walk every value once.
+    for (const key of Object.keys(node)) {
+      if (containers.includes(key)) continue;
+      const v = node[key];
+      if (v && typeof v === 'object') {
+        const found = visit(v, depth + 1);
+        if (found) return found;
+      }
+    }
+
+    return null;
+  };
+
+  const direct = visit(data);
+  if (direct) return direct;
+
+  // Last resort: download the first reachable URL.
+  for (const url of urlsToTry) {
     try {
-      const r = await fetch(item.url);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const r = await fetch(url);
+      if (!r.ok) continue;
       const arrBuf = await r.arrayBuffer();
       return Buffer.from(arrBuf).toString('base64');
     } catch (e) {
-      log.warn(`Failed to download generated artefact from URL: ${e.message}`);
-      return null;
+      log.warn(`Failed to download generated artefact from URL (${url}): ${e.message}`);
     }
   }
+
   return null;
 }
 
@@ -293,7 +373,7 @@ async function generateImage(args, userCtx, responseCtx) {
   }
 
   // aspect_ratio: omit the field entirely when not specified so the proxy
-  // uses its own default (some builds reject the literal string "auto").
+  // uses its own default.
   const aspect = (args && typeof args.aspect_ratio === 'string' && args.aspect_ratio.trim())
     ? args.aspect_ratio.trim()
     : null;
@@ -308,24 +388,34 @@ async function generateImage(args, userCtx, responseCtx) {
   const refs = await _resolveReferenceImages(refList, MAX_REF_IMAGES_FOR_IMAGE, userCtx);
   if (!refs.ok) return { success: false, error: refs.reason };
 
+  // Build the user content. The prompt always goes in as text. Reference
+  // images, if any, are attached as data URLs alongside it — the same OpenAI
+  // multimodal shape we already use for chat completions, which xAI's
+  // image_generation tool understands.
+  const userContent = [{ type: 'input_text', text: prompt }];
+  for (const ref of refs.items) {
+    userContent.push({
+      type: 'input_image',
+      image_url: `data:${ref.mime};base64,${ref.base64}`,
+    });
+  }
+
+  // The `image_generation` tool descriptor carries the image-shaping params.
+  // Only include aspect_ratio when explicitly requested.
+  const imageTool = { type: IMAGE_TOOL_TYPE };
+  if (aspect !== null) imageTool.aspect_ratio = aspect;
+
   const body = {
     model: IMAGE_GEN_MODEL,
-    prompt,
-    n: 1,
-    response_format: 'b64_json',
+    input: [{ role: 'user', content: userContent }],
+    tools: [imageTool],
   };
-  if (aspect !== null) {
-    body.aspect_ratio = aspect;
-  }
-  if (refs.items.length > 0) {
-    body.reference_images = refs.items.map(it => it.base64);
-  }
 
   log.info(`🎨 generate_image: aspect=${aspect || 'omitted'}, refs=${refs.items.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
 
   let data;
   try {
-    data = await _postJson(IMAGE_GEN_URL, body, IMAGE_REQUEST_TIMEOUT_MS, 'imagine/image');
+    data = await _callResponses(body, IMAGE_REQUEST_TIMEOUT_MS, 'imagine/image');
   } catch (err) {
     await notifyAdmin('GenerateImage', `Image generation failed: ${err.message}`);
     return { success: false, error: `Image generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -333,7 +423,7 @@ async function generateImage(args, userCtx, responseCtx) {
 
   const b64 = await _extractBase64Payload(data);
   if (!b64) {
-    await notifyAdmin('GenerateImage', 'Empty response from /images/generations');
+    await notifyAdmin('GenerateImage', 'Empty response from /responses (image_generation tool)');
     return { success: false, error: `Image generation returned an empty response.${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
@@ -396,29 +486,38 @@ async function generateVideo(args, userCtx, responseCtx) {
   const refs = await _resolveReferenceImages(refList, MAX_REF_IMAGES_FOR_VIDEO, userCtx);
   if (!refs.ok) return { success: false, error: refs.reason };
 
-  // Backend rules:
+  // Build the user content (prompt + optional reference images as data URLs).
+  const userContent = [{ type: 'input_text', text: prompt }];
+  for (const ref of refs.items) {
+    userContent.push({
+      type: 'input_image',
+      image_url: `data:${ref.mime};base64,${ref.base64}`,
+    });
+  }
+
+  // video_generation tool descriptor carries the video-shaping params.
+  // Backend rules (handled server-side by xAI):
   //   - 0 references: text-to-video
-  //   - 1 reference : image-to-video, sent as the singular `reference_image`
-  //   - 2..7 refs   : reference-to-video, sent as `reference_images` array
-  const body = {
-    model: VIDEO_GEN_MODEL,
-    prompt,
+  //   - 1 reference : image-to-video
+  //   - 2..7 refs   : reference-to-video
+  const videoTool = {
+    type: VIDEO_TOOL_TYPE,
     duration: 10,
     aspect_ratio: aspect,
     resolution: '720p',
-    response_format: 'b64_json',
   };
-  if (refs.items.length === 1) {
-    body.reference_image = refs.items[0].base64;
-  } else if (refs.items.length > 1) {
-    body.reference_images = refs.items.map(it => it.base64);
-  }
+
+  const body = {
+    model: VIDEO_GEN_MODEL,
+    input: [{ role: 'user', content: userContent }],
+    tools: [videoTool],
+  };
 
   log.info(`🎬 generate_video: aspect=${aspect}, refs=${refs.items.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
 
   let data;
   try {
-    data = await _postJson(VIDEO_GEN_URL, body, VIDEO_REQUEST_TIMEOUT_MS, 'imagine/video');
+    data = await _callResponses(body, VIDEO_REQUEST_TIMEOUT_MS, 'imagine/video');
   } catch (err) {
     await notifyAdmin('GenerateVideo', `Video generation failed: ${err.message}`);
     return { success: false, error: `Video generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -426,7 +525,7 @@ async function generateVideo(args, userCtx, responseCtx) {
 
   const b64 = await _extractBase64Payload(data);
   if (!b64) {
-    await notifyAdmin('GenerateVideo', 'Empty response from /videos/generations');
+    await notifyAdmin('GenerateVideo', 'Empty response from /responses (video_generation tool)');
     return { success: false, error: `Video generation returned an empty response.${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
