@@ -140,7 +140,7 @@ async function createProjectTool(args, userCtx) {
     success: true,
     project: slug,
     current_project: slug,
-    message: `Project "${slug}" created and selected as current. Write scripts in /workspace/code/, intermediate files in /workspace/temp/, final deliverables (auto-delivered to user) in /workspace/output/.`,
+    message: `Project "${slug}" created and selected as current. Write scripts in /workspace/code/, intermediate files in /workspace/temp/, final deliverables in /workspace/output/ (these are pushed to the delivery buffer automatically).`,
   };
 }
 

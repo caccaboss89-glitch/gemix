@@ -9,7 +9,7 @@ const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = r
 const { isSystemMessage } = require('../../config/systemMessages');
 
 const { isSupportedMedia, mediaToContentPart, mediaTag, buildAttachmentTag } = require('../../utils/media');
-const { normalizeMarkdown } = require('../../utils/text');
+const { normalizeMarkdown, cleanIncomingText } = require('../../utils/text');
 const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
@@ -119,16 +119,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
     const isFromBot = isGemiX || isScheduled || isSystem;
 
     const ts = formatTimestamp(msg.timestamp * 1000);
-    let textContent;
-    if (isScheduled) {
-      textContent = removeScheduledFooter(msg.body || '');
-    } else if (isSystem) {
-      textContent = msg.body || '';
-    } else if (isGemiX) {
-      textContent = removeFooter(msg.body || '');
-    } else {
-      textContent = msg.body || '';
-    }
+    let textContent = cleanIncomingText(msg.body || '');
 
     if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
       textContent = `[Shared contact] ${textContent || ''}`;
@@ -193,7 +184,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
     historyMessages.push({
       role: isFromBot ? 'assistant' : 'user',
-      content: `${prefix}${textContent}`,
+      content: isFromBot ? textContent : `${prefix}${textContent}`,
     });
   }
 
@@ -318,10 +309,7 @@ async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds
     }
 
     if (quoted.body) {
-      let quotedText = quoted.body;
-      if (hasFooter(quotedText)) {
-        quotedText = removeFooter(quotedText);
-      }
+      let quotedText = cleanIncomingText(quoted.body);
       prefix = `[In reply to: ${quotedText}]\n`;
       return { prefix, mediaParts };
     }

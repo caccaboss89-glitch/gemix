@@ -3,6 +3,7 @@ const { isActiveMemberOnlyTool } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
 const { codeInterpreter } = require('./codeInterpreter');
 const { imageSearch } = require('./imageSearch');
+const { generateImage, generateVideo } = require('./imagineGenerator');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
@@ -24,7 +25,7 @@ const { editFileTool } = require('./editFile');
 const { bashTool } = require('./bashTool');
 const { musicCreator } = require('./musicCreator');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
-const { sanitizeFilename, stripImageTags } = require('../utils/text');
+const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
@@ -122,7 +123,7 @@ function _resolveTargetEmail(args, userCtx) {
 
 // Tools that should only be called once per round — calling them again produces
 // identical results and wastes a round trip.
-const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock', 'web_x_search']);
+const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock', 'web_x_search', 'generate_image', 'generate_video']);
 
 /**
  * Execute a tool call and return the result.
@@ -192,6 +193,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
 
     switch (name) {
       case 'web_x_search': {
+        // Fire the "consulting research team" banner once per AI call.
+        if (typeof userCtx.sendIntermediateNotification === 'function') {
+          const { buildResearchNotificationMessage } = require('../utils/notificationDedup');
+          await userCtx.sendIntermediateNotification('research', buildResearchNotificationMessage());
+        }
         const searchResult = await webXSearch(args.prompt);
         // Accumulate usage stats for the final message badge.
         // Multiple web_x_search calls in the same round are additive.
@@ -213,6 +219,28 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         break;
       }
 
+      case 'generate_image': {
+        if (typeof userCtx.sendIntermediateNotification === 'function') {
+          await userCtx.sendIntermediateNotification(
+            'image_gen',
+            '🎨 Sto generando l\'immagine, attendi un attimo...',
+          );
+        }
+        result = await generateImage(args, userCtx, responseCtx);
+        break;
+      }
+
+      case 'generate_video': {
+        if (typeof userCtx.sendIntermediateNotification === 'function') {
+          await userCtx.sendIntermediateNotification(
+            'video_gen',
+            '🎬 Sto generando il video (può richiedere fino a un paio di minuti), attendi un attimo...',
+          );
+        }
+        result = await generateVideo(args, userCtx, responseCtx);
+        break;
+      }
+
       case 'image_search': {
         const imageResult = await imageSearch(
           args.query,
@@ -220,15 +248,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           {
             language: args.language,
             image_type: args.image_type,
-            _startId: 1, // Will be overridden by the manual ID tagging below
           }
         );
-
-        // Tag each attachment with a global ID and accumulate into delivery buffer
-        // CRITICAL: Reserve IDs atomically using reserveImageIds to prevent race conditions in parallel calls.
-        const startId = typeof responseCtx.reserveImageIds === 'function'
-          ? responseCtx.reserveImageIds(imageResult.attachments.length)
-          : (responseCtx._imageSearchNextId || 1);
 
         const savedPaths = [];
         const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
@@ -252,9 +273,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             }
           }
 
-          for (let i = 0; i < imageResult.attachments.length; i++) {
-            const att = imageResult.attachments[i];
-            att._imageSearchId = startId + i;
+          for (const att of imageResult.attachments) {
             // Persist to searched_images/ when requested (in addition to buffering for delivery)
             if (savedDir && att.buffer) {
               try {
@@ -274,8 +293,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
                 log.warn(`save_to_disk: failed to write ${att.name}: ${err.message}`);
               }
             }
-            // Always push to attachments buffer for potential delivery
-            // AI can selectively send using [image:N] tags in final message
+            // Push every result to the delivery buffer; everything in the
+            // buffer is sent automatically with the final reply.
             responseCtx.attachments.push(att);
           }
         }
@@ -335,7 +354,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           result = { success: false, error: 'Missing "text" parameter. You must provide the text to convert to speech.' };
           break;
         }
-        let cleanText = stripImageTags(removeDiscordEmoji(args.text || '')).replace(/<a?:[\w]+:\d+>/g, '')
+        let cleanText = removeDiscordEmoji(args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
           .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, '')
           .replace(/<Transcription>[\s\S]*?<\/Transcription>/gi, '')
           .replace(/\s{2,}/g, ' ')
@@ -554,7 +573,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
               }
             }
 
-            let emailBodyHtml = `<div style="font-family:sans-serif">${_escapeHtml(stripImageTags(args.body || '')).replace(/\n/g, '<br>')}</div>`;
+            let emailBodyHtml = `<div style="font-family:sans-serif">${_escapeHtml(args.body || '').replace(/\n/g, '<br>')}</div>`;
 
             if (fallbackMessage) {
               emailBodyHtml += `<br><hr style="border:0;border-top:1px solid #ccc;margin:20px 0;"><div style="font-family:sans-serif;color:#555;">${_escapeHtml(fallbackMessage).replace(/\n/g, '<br>')}</div>`;
@@ -563,7 +582,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
             // Send main email with all direct attachments
             await sendEmailDirect(
               targetEmail.email,
-              stripImageTags(args.subject),
+              args.subject,
               emailBodyHtml,
               sent
             );
@@ -573,8 +592,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           } else {
             await sendEmailDirect(
               targetEmail.email,
-              stripImageTags(args.subject),
-              `<div style="font-family:sans-serif">${_escapeHtml(stripImageTags(args.body || '')).replace(/\n/g, '<br>')}</div>`,
+              args.subject,
+              `<div style="font-family:sans-serif">${_escapeHtml(args.body || '').replace(/\n/g, '<br>')}</div>`,
               []
             );
             deliveryCtx.contactedEmail.add(targetEmail.email);
@@ -610,7 +629,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
           break;
         }
         try {
-          await sendWhatsAppDirect(targetJid.jid, stripImageTags(args.message));
+          await sendWhatsAppDirect(targetJid.jid, args.message);
           if (includeAttachments && responseCtx.attachments.length > 0) {
             // Try to send attachments with fallback support
             const sendAttachment = async (att) => {

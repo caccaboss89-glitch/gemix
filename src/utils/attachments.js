@@ -11,7 +11,7 @@
 const fs = require('fs');
 
 /**
- * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string, _imageSearchId?: number }} Attachment
+ * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string }} Attachment
  */
 
 function isValidAttachment(att) {

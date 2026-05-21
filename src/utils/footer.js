@@ -9,10 +9,8 @@ const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
 function getModelDisplayName(modelId) {
   if (!modelId) return 'AI Model';
   const map = {
-    'grok-4-latest': 'Grok 4',
-    'grok-4': 'Grok 4',
-    'grok-4-fast': 'Grok 4 Fast',
-    'grok-4-fast-reasoning': 'Grok 4 Fast',
+    'grok-4.3-latest': 'Grok 4.3',
+    'grok-4.3': 'Grok 4.3',
   };
   if (map[modelId]) return map[modelId];
   const parts = modelId.split('/');

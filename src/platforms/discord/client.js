@@ -12,6 +12,7 @@ const { createLogger } = require('../../utils/logger');
 const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
+const { cleanIncomingText } = require('../../utils/text');
 
 const log = createLogger('DISCORD');
 
@@ -237,7 +238,7 @@ async function onDiscordMessage(msg) {
           }
           textBody = replyPrefix + textBody;
         } else if (quotedMsg.content) {
-          textBody = `[In reply to: ${quotedMsg.content}]\n` + textBody;
+          textBody = `[In reply to: ${cleanIncomingText(quotedMsg.content)}]\n` + textBody;
         }
       }
     } catch { }
@@ -481,7 +482,7 @@ async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
     const ts = formatTimestamp(m.createdAt);
     const isBot = m.author.id === discordClient.user.id;
     const isSystem = isBot && isDiscordSystemMessage(m.content || '');
-    let textContent = m.content || '';
+    let textContent = cleanIncomingText(m.content || '');
 
     for (const att of m.attachments.values()) {
       const isImage = att.contentType?.startsWith('image/');
@@ -529,7 +530,7 @@ async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
 
     history.push({
       role: isBot ? 'assistant' : 'user',
-      content: `${prefix}${textContent}`,
+      content: isBot ? textContent : `${prefix}${textContent}`,
     });
   }
 

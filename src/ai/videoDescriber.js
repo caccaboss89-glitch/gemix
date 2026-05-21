@@ -126,10 +126,11 @@ async function describeVideoInMessages(messages, opts = {}) {
     return messages;
   }
 
-  // Call onStart callback if provided
+  // Call onStart callback if provided. Pass the actual number of pending
+  // (un-cached) videos so the caller can build a singular/plural message.
   if (typeof opts.onStart === 'function') {
     try {
-      await opts.onStart();
+      await opts.onStart(pendingTargets.length);
     } catch (err) {
       log.warn(`onStart callback failed: ${err.message}`);
     }

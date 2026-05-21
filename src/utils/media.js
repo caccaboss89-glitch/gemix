@@ -6,6 +6,8 @@ const path = require('path');
 const { OPENDATALOADER_HYBRID_URL, OPENDATALOADER_HYBRID_TIMEOUT } = require('../config/env');
 const { createLogger } = require('./logger');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
+const { persistParsedPdfToHistory } = require('./historySync');
+const { incrementTranscription, decrementTranscription, buildNotificationMessage } = require('./pdfTranscriptionTracker');
 
 const log = createLogger('Media');
 
@@ -235,14 +237,13 @@ function mediaTag(filename, mimetype) {
  * working). The base64 PDF is then **replaced** with the resulting markdown
  * transcription so the AI never sees raw PDF bytes.
  *
- * fails, an explicit error message is injected for the AI (the admin is
- * notified automatically; the AI should stop and not retry).
+ * If parsing fails, an explicit error message is injected for the AI (the
+ * admin is notified automatically; the AI should stop and not retry).
  *
  * @param {Array|string} content - Message content (can be string or array of parts)
  * @param {object} [opts] - Options
  * @param {object} [opts.ctx] - Handler context for notifications
- * @param {function} [opts.onTranscriptionStart] - Callback when transcription starts (message)
- * @param {function} [opts.onTranscriptionEnd] - Callback when transcription ends
+ * @param {function} [opts.onTranscriptionStart] - Called with the notification message when transcription starts
  * @returns {Promise<Array|string>} Transcribed content
  */
 async function transcribeDocumentsInMessageContent(content, opts = {}) {
@@ -254,22 +255,25 @@ async function transcribeDocumentsInMessageContent(content, opts = {}) {
     return content;
   }
 
-  const transcribed = [];
-  const attachmentPathReplacements = new Map();
-  const { ctx, onTranscriptionStart, onTranscriptionEnd } = opts;
-  
-  // Use tracker if context and callbacks are provided
-  const useTracker = ctx && typeof onTranscriptionStart === 'function';
-  let trackerData = null;
-  
+  const { ctx, onTranscriptionStart } = opts;
+
+  // Count how many PDF parts are actually present before touching the tracker.
+  // We only increment/notify when there is real work to do.
+  const pdfCount = content.filter(
+    (part) => part && _getMediaTypeFromContentPart(part) === 'document'
+  ).length;
+
+  const useTracker = pdfCount > 0 && ctx && typeof onTranscriptionStart === 'function';
+
   if (useTracker) {
-    const { incrementTranscription, buildNotificationMessage } = require('./pdfTranscriptionTracker');
-    trackerData = incrementTranscription(ctx);
-    if (trackerData.shouldNotify && onTranscriptionStart) {
-      const message = buildNotificationMessage(trackerData.count);
-      await onTranscriptionStart(message);
+    const { count, shouldNotify } = incrementTranscription(ctx);
+    if (shouldNotify) {
+      await onTranscriptionStart(buildNotificationMessage(count));
     }
   }
+
+  const transcribed = [];
+  const attachmentPathReplacements = new Map();
 
   try {
     for (const part of content) {
@@ -310,7 +314,6 @@ async function transcribeDocumentsInMessageContent(content, opts = {}) {
       }
 
       const buffer = Buffer.from(match[2], 'base64');
-      const { persistParsedPdfToHistory } = require('./historySync');
       const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
 
       if (persisted.success && typeof persisted.text === 'string' && persisted.text.trim()) {
@@ -344,13 +347,8 @@ async function transcribeDocumentsInMessageContent(content, opts = {}) {
 
     return transcribed;
   } finally {
-    // Decrement tracker count when done
-    if (useTracker && ctx) {
-      const { decrementTranscription } = require('./pdfTranscriptionTracker');
+    if (useTracker) {
       decrementTranscription(ctx);
-      if (onTranscriptionEnd) {
-        await onTranscriptionEnd();
-      }
     }
   }
 }

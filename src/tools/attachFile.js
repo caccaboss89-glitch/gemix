@@ -1,12 +1,12 @@
 // src/tools/attachFile.js
-// Register an existing file from the user's searched storage as an attachment
-// for the current response. Files are AUTO-DELIVERED in the current chat.
+// Push an existing file from the user's storage into the delivery buffer.
 // Cross-platform:
-//   - Discord: chat history only (Discord client auto-delivers responseCtx.attachments).
+//   - Discord: chat history only.
 //   - WhatsApp: /readonly/{searched_images}/, /workspace/{temp,code}/...
-//     (output/ is excluded: those files are already AUTO-DELIVERED to the user)
-//     Files are auto-included in the current chat response (no send_whatsapp_message needed).
-//     Use send_whatsapp_message / send_email ONLY to send to OTHER recipients.
+//     (output/ is excluded: those files already land in the buffer
+//     automatically when written.)
+// All tools that produce files share the same buffer; callers do NOT need
+// to re-attach output/ files manually.
 
 const fs = require('fs');
 const path = require('path');
@@ -77,7 +77,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
   if (check.zone === 'project_sub' && check.subdir === 'output') {
     return {
       success: false,
-      error: 'attach_file refused: output/ files are already AUTO-DELIVERED to the user — do not attach them again. Use attach_file only for /workspace/{temp|code}/ or searched_images/.',
+      error: 'attach_file refused: output/ files are already in the delivery buffer — do not attach them again. Use attach_file only for /workspace/{temp|code}/ or searched_images/.',
     };
   }
 
@@ -119,7 +119,7 @@ async function attachFileTool(args, userCtx, responseCtx) {
     name: path.basename(abs),
     path: rawPath,
     size: stat.size,
-    message: 'File buffered for delivery in the current chat (auto-delivered with your reply). To send to other recipients, use send_whatsapp_message / send_email with includeAttachments=true.',
+    message: 'File pushed to the delivery buffer.',
   };
 }
 

@@ -10,7 +10,7 @@ const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_
 const { createLogger } = require('./utils/logger');
 const { transcribeDocumentsInMessageContent } = require('./utils/media');
 const { readMemory } = require('./utils/memoryStore');
-const { stripVoiceTags, stripHistoryPrefixes } = require('./utils/text');
+const { stripVoiceTags, stripHistoryPrefixes, cleanAssistantResponse } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
 const { getCurrentProject, getLastProject, setCurrentProject, acquireLock, releaseLock, startAutoRenewLock, consumeLastCrash } = require('./utils/projectState');
@@ -22,6 +22,11 @@ const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
 const { processAudioInMessages } = require('./ai/audioProcessor');
 const { describeVideoInMessages } = require('./ai/videoDescriber');
+const {
+  markNotifiedInCall,
+  clearCallNotifications,
+  buildVideoNotificationMessage,
+} = require('./utils/notificationDedup');
 
 // Tools that unlock the larger agentic round budget. As soon as any of these
 // is invoked in a message, the per-message round cap is bumped from
@@ -34,6 +39,36 @@ const AGENTIC_TOOL_NAMES = new Set([
 const DEFERRED_TOOL_NAMES = new Set(['bash']);
 
 const log = createLogger('Handler');
+
+/**
+ * Send an intermediate notification message to the active chat (Discord channel
+ * or WhatsApp JID), suppressing duplicates within the same AI call.
+ *
+ * Each (call, kind) pair is allowed at most ONE notification. This keeps the
+ * UX calm even when several rounds of the same call would otherwise fire the
+ * same banner repeatedly.
+ *
+ * @param {object} ctx - Handler context (must include `requestId` and platform info)
+ * @param {string} kind - 'pdf' | 'video' | 'audio' | 'research'
+ * @param {string} message - Text to send
+ */
+async function sendIntermediateNotification(ctx, kind, message) {
+  if (!markNotifiedInCall(ctx, kind)) return;
+  try {
+    if (ctx.platform === PLATFORM_DISCORD && ctx.discordChannel) {
+      await ctx.discordChannel.send({ content: message });
+      log.info(`   📤 ${kind} notification → Discord: ${message}`);
+    } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
+      const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
+      if (targetJid) {
+        await sendWhatsAppDirect(targetJid, message);
+        log.info(`   📤 ${kind} notification → WhatsApp: ${message}`);
+      }
+    }
+  } catch (err) {
+    log.warn(`Failed to send ${kind} notification: ${err.message}`);
+  }
+}
 
 /**
  * Walk the project directory and return relative file paths (excludes hidden files and README.md).
@@ -121,7 +156,7 @@ function buildMaintenanceReleaseAlreadyEnabledMessage() {
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
- * Sends every request to Grok via the Hermes proxy (OpenAI-compatible). Grok 4
+ * Sends every request to Grok via the Hermes proxy (OpenAI-compatible).
  * ingests audio, video and images natively — no upstream captioning step.
  * @param {object} ctx - Normalized message context { platform, userId, userName, userIdentity, content, history, isGroup, groupId, ... }
  * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle? }
@@ -132,14 +167,8 @@ async function handleMessage(ctx) {
     voiceBuffer: null,
     isVoiceOnly: false,
     discordTitle: '',
-    _imageSearchNextId: 1,
     // Accumulated research stats from web_x_search calls — used for the badge.
     researchStats: null,
-    reserveImageIds(count) {
-      const start = this._imageSearchNextId;
-      this._imageSearchNextId += count;
-      return start;
-    },
   };
   let projectLockCtx = null;
   let projectLockOwnerId = null;
@@ -241,7 +270,16 @@ async function handleMessage(ctx) {
       agenticUnlocked: false,
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
+      // Bound helper for tools that want to fire an intermediate notification
+      // (e.g. web_x_search → "🔎 Sto consultando il team di ricerca...").
+      // Dedup is enforced per (call, kind) inside sendIntermediateNotification.
+      sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message),
     };
+
+    // ctx.requestId is set here so that sendIntermediateNotification (which
+    // receives ctx, not userCtx) uses the same call-scoped ID as the dedup
+    // keys written by the tools dispatcher (which receives userCtx).
+    ctx.requestId = userCtx.requestId;
 
     projectLockOwnerId = userCtx.requestId;
     projectLockCtx = userCtx;
@@ -291,24 +329,7 @@ async function handleMessage(ctx) {
     const transcribedUserContent = await transcribeDocumentsInMessageContent(ctx.content, {
       ctx,
       onTranscriptionStart: async (message) => {
-        // Send intermediate message to the current chat
-        try {
-          if (ctx.platform === 'discord' && ctx.discordChannel) {
-            await ctx.discordChannel.send({ content: message });
-            log.info(`   📤 Sent transcription notification to Discord: ${message}`);
-          } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-            // For WhatsApp, we need to send via the client
-            // We'll use the sendWhatsAppDirect function which can send to any chat
-            const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
-            if (targetJid) {
-              const { sendWhatsAppDirect } = require('./tools/whatsappSender');
-              await sendWhatsAppDirect(targetJid, message);
-              log.info(`   📤 Sent transcription notification to WhatsApp: ${message}`);
-            }
-          }
-        } catch (err) {
-          log.warn(`Failed to send transcription notification: ${err.message}`);
-        }
+        await sendIntermediateNotification(ctx, 'pdf', message);
       },
     });
     messages.push({ role: 'user', content: transcribedUserContent });
@@ -320,23 +341,9 @@ async function handleMessage(ctx) {
     // unsupported binary content in the messages array.
     try {
       await describeVideoInMessages(messages, {
-        onStart: async () => {
-          try {
-            const msg = '⏳ Sto analizzando il video, attendi un attimo...';
-            if (ctx.platform === 'discord' && ctx.discordChannel) {
-              await ctx.discordChannel.send({ content: msg });
-              log.info(`   📤 Sent video analysis notification to Discord`);
-            } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-              const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
-              if (targetJid) {
-                const { sendWhatsAppDirect } = require('./tools/whatsappSender');
-                await sendWhatsAppDirect(targetJid, msg);
-                log.info(`   📤 Sent video analysis notification to WhatsApp`);
-              }
-            }
-          } catch (err) {
-            log.warn(`Failed to send video analysis notification: ${err.message}`);
-          }
+        onStart: async (pendingCount) => {
+          const msg = buildVideoNotificationMessage(pendingCount || 1);
+          await sendIntermediateNotification(ctx, 'video', msg);
         },
       });
     } catch (e) {
@@ -376,7 +383,6 @@ async function handleMessage(ctx) {
     let lastModelUsed = null;
     let maxRounds = MAX_TOOL_ROUNDS;
     let agenticUnlocked = false;
-    let lastAgenticTool = null;
     const sessionStartTime = Date.now();
     const SESSION_MAX_DURATION_MS = 10 * 60 * 1000; // 10 minutes max
     const runToolCall = async (tc) => {
@@ -488,7 +494,6 @@ async function handleMessage(ctx) {
             unlockTriggered = true;
           }
           if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
-            lastAgenticTool = tc.function.name;
             if (!agenticUnlocked) {
               agenticUnlocked = true;
               maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
@@ -590,7 +595,7 @@ async function handleMessage(ctx) {
         continue;
       }
 
-      let text = stripHistoryPrefixes(stripVoiceTags(assistantMsg.content || ''));
+      let text = cleanAssistantResponse(assistantMsg.content || '');
       log.info(`✅ [${pLabel}] Response generated (${text.length} chars)`);
 
       // Extract Discord thread title from <title> XML tag if present
@@ -600,47 +605,6 @@ async function handleMessage(ctx) {
         if (title) {
           responseCtx.discordTitle = title.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
           log.info(`   📝 Thread title extracted: "${responseCtx.discordTitle}"`);
-        }
-      }
-
-      // Filter image attachments based on [image:N] tags in final message
-      // AI can selectively send images by including tags like [image:1] [image:3]
-      // If no tags are present, NO images are sent to the user
-      // Tags are removed from the final text before sending to user
-      if (responseCtx.attachments && responseCtx.attachments.length > 0) {
-        const imageTagPattern = /\[image:(\d+)\]/g;
-        const matches = [...text.matchAll(imageTagPattern)];
-
-        if (matches.length > 0) {
-          // Extract requested image IDs
-          const requestedIds = new Set(matches.map(m => parseInt(m[1], 10)));
-
-          // Filter attachments to only include those with requested _imageSearchId
-          const before = responseCtx.attachments.length;
-          responseCtx.attachments = responseCtx.attachments.filter(
-            att => !att._imageSearchId || requestedIds.has(att._imageSearchId)
-          );
-          const after = responseCtx.attachments.length;
-
-          if (before !== after) {
-            log.info(`   🖼️  Image selection: ${after}/${before} images selected based on [image:N] tags`);
-          }
-
-          // Remove [image:N] tags from final text
-          text = text.replace(imageTagPattern, '');
-          // Clean up extra whitespace left after tag removal
-          text = text.replace(/[^\S\n]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-        } else {
-          // No tags found: remove all image_search attachments (but keep non-image attachments)
-          const before = responseCtx.attachments.length;
-          responseCtx.attachments = responseCtx.attachments.filter(
-            att => !att._imageSearchId
-          );
-          const after = responseCtx.attachments.length;
-
-          if (before !== after) {
-            log.info(`   🖼️  No [image:N] tags found: ${before - after} image(s) not sent to user`);
-          }
         }
       }
 
@@ -666,6 +630,7 @@ async function handleMessage(ctx) {
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
+        await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
         return {
           text: null,
           voiceBuffer: responseCtx.voiceBuffer,
@@ -689,6 +654,7 @@ async function handleMessage(ctx) {
 
     if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
       log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
+      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
       return {
         text: null,
         voiceBuffer: responseCtx.voiceBuffer,
@@ -740,6 +706,9 @@ async function handleMessage(ctx) {
     if (projectLockHeld && projectLockCtx && projectLockOwnerId) {
       try { await releaseLock(projectLockCtx, projectLockOwnerId); } catch (e) { log.warn(`releaseLock failed: ${e.message}`); }
     }
+    // Drop per-call notification dedup entries so the next AI call can fire
+    // intermediate notifications again.
+    try { clearCallNotifications(ctx); } catch { /* best effort */ }
   }
 }
 

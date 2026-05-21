@@ -127,8 +127,10 @@ function _extractCitations(data) {
 
 /**
  * Extract research usage stats from the xAI Responses API payload.
- * Uses the documented `usage.num_sources_used` (web sources) and
- * `usage.server_side_tool_usage_details.x_search_calls` (X/Twitter posts).
+ *
+ * Reads `usage.server_side_tool_usage_details.{web_search_calls, x_search_calls}`,
+ * which is what the Hermes proxy actually populates. `usage.num_sources_used`
+ * tends to stay at 0 in this setup, so we ignore it.
  *
  * @param {object} data - Parsed JSON response body
  * @returns {{ webSources: number, xPosts: number }}
@@ -139,9 +141,7 @@ function _extractUsageStats(data) {
     ? usage.server_side_tool_usage_details
     : {};
 
-  // num_sources_used is the most reliable count (web + browse).
-  // Fall back to web_search_calls if the field is absent.
-  const webSources = Number(usage.num_sources_used ?? details.web_search_calls ?? 0) || 0;
+  const webSources = Number(details.web_search_calls ?? 0) || 0;
   const xPosts = Number(details.x_search_calls ?? 0) || 0;
 
   return { webSources, xPosts };

@@ -55,16 +55,6 @@ function normalizeMarkdown(text) {
   return text;
 }
 
-/**
- * Strip [image:N] tags from a string.
- * @param {string} text
- * @returns {string}
- */
-function stripImageTags(text) {
-  if (!text) return text;
-  return text.replace(/\[image:\d+\]/gi, '');
-}
-
 // Matches the history line prefix our platform code adds, e.g.
 //   "[19/05/2026, 22:41] GemiX: "
 //   "[19/05/2026 22:41] Account Owner: "
@@ -75,6 +65,17 @@ const HISTORY_TIMESTAMP_PREFIX_RE = /^\[\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d
 // Conservative: only strip a single leading speaker label at the very start of the reply.
 // Avoids removing legitimate "GemiX:" appearances elsewhere in the text.
 const LEADING_SPEAKER_LABEL_RE = /^(?:GemiX|\[System\]|Account Owner|Bot)\s*:\s*/i;
+
+// Matches self-generated research badges like:
+//   "🌐: 3 sources. 𝕏: 2 posts."
+//   "🌐: 1 source."
+//   "𝕏: 5 posts"
+const RESEARCH_BADGE_RE = /\n*\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*posts?)(?:\.\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*posts?))?\.?/gi;
+
+// Matches accidental echoed reply prefix patterns like:
+//   "[In reply to: ...]"
+//   "[In reply to: [Poll] color?]"
+const IN_REPLY_TO_PREFIX_RE = /^\[In reply to:\s*(?:\[[^\]]*\]|[^\]])*\](?:\n|\s)*/i;
 
 /**
  * Strip echoes of the history conversation prefix that our platform code injects
@@ -91,4 +92,53 @@ function stripHistoryPrefixes(text) {
   return cleaned.replace(/^\s+/, '').replace(/\s+$/, '');
 }
 
-module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripImageTags, stripHistoryPrefixes };
+/**
+ * Clean up the final assistant response text before any platform processing.
+ * Applies outgoing filters:
+ * 1. Strips voice effect tags (e.g. [pause], <soft>)
+ * 2. Strips any duplicated history conversation prefixes (e.g. "[timestamp] GemiX:")
+ * 3. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N posts.")
+ * 4. Strips any accidental footers (e.g. "--GemiX • ...")
+ * 5. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
+ * @param {string} text
+ * @returns {string} Cleaned response text
+ */
+function cleanAssistantResponse(text) {
+  if (!text || typeof text !== 'string') return '';
+  let cleaned = stripVoiceTags(text);
+  cleaned = stripHistoryPrefixes(cleaned);
+  cleaned = cleaned.replace(IN_REPLY_TO_PREFIX_RE, '');
+  cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
+  
+  // Lazy require to avoid circular dependencies
+  const { removeFooter, removeScheduledFooter } = require('./footer');
+  cleaned = removeFooter(cleaned);
+  cleaned = removeScheduledFooter(cleaned);
+  
+  return cleaned.trim();
+}
+
+/**
+ * Clean up any incoming message text from chat history/replies before feeding to the LLM context.
+ * Applies incoming filters:
+ * 1. Strips any GemiX footer (e.g. "--GemiX • ...")
+ * 2. Strips any scheduled message footer
+ * @param {string} text
+ * @returns {string} Cleaned text
+ */
+function cleanIncomingText(text) {
+  if (!text || typeof text !== 'string') return '';
+  // Lazy require to avoid circular dependencies
+  const { removeFooter, removeScheduledFooter } = require('./footer');
+  let cleaned = removeFooter(text);
+  cleaned = removeScheduledFooter(cleaned);
+
+  // Clean voice tags, research badges, and reply headers from history/replies
+  cleaned = stripVoiceTags(cleaned);
+  cleaned = cleaned.replace(IN_REPLY_TO_PREFIX_RE, '');
+  cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
+
+  return cleaned.trim();
+}
+
+module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripHistoryPrefixes, cleanAssistantResponse, cleanIncomingText };

@@ -22,6 +22,7 @@ Tutta la chat principale passa per **una sola funzione**: `callAI` in `src/ai/ai
 | `src/tools/webXSearch.js` | `MULTI_AGENT_MODEL` via Hermes `/v1/responses` | Ricerca web + X/Twitter delegata al team multi-agent | ✅ Attivo (Step 2/3) |
 | `src/tools/musicCreator.js` | `MUSIC_MODEL` (Lyria via OpenRouter) | Generazione musica streaming SSE | ⚠️ Mantenuto su OpenRouter |
 | `src/tools/voiceMessage.js` | Hermes `/v1/tts` (xAI TTS) | TTS vocale | ✅ Attivo (Step 3) |
+| `src/tools/imagineGenerator.js` | Hermes `/v1/images/generations` + `/v1/videos/generations` (Grok Imagine) | Generazione immagini/video | ✅ Attivo (Step 7) |
 
 ### 1.3 Web search (post Step 2)
 - `src/tools/webXSearch.js` → `grok-4.20-multi-agent` via `POST https://api.x.ai/v1/responses` con tool nativi `web_search` + `x_search`. Copre anche il page-browsing (incluso in `web_search` xAI).
@@ -120,8 +121,8 @@ Il `web_search` xAI include già il page-browsing, quindi `browse_page` è ridon
 | `src/tools/webSearch.js` | 🗑️ Eliminato | Sostituito da `webXSearch` |
 | `src/tools/browsePage.js` | 🗑️ Eliminato | Page-browsing incluso in `web_search` xAI |
 | `src/ai/tools.js` | ✅ Aggiornato | Rimossi `TOOL_WEB_SEARCH`/`TOOL_BROWSE_PAGE`, aggiunto `TOOL_WEB_X_SEARCH` |
-| `src/tools/index.js` | ✅ Aggiornato | Dispatcher: `web_x_search` sostituisce i due case precedenti |
-| `src/handler.js` | ✅ Aggiornato | `PARALLEL_SAFE_TOOL_NAMES`: `web_x_search` (parallelizzabile) |
+| `src/tools/index.js` | ✅ Aggiornato | Dispatcher: `web_x_search` sostituisce i due case precedenti; `ONCE_PER_ROUND_TOOLS` impedisce chiamate duplicate nello stesso round |
+| `src/handler.js` | ✅ Aggiornato | `AGENTIC_TOOL_NAMES`, `DEFERRED_TOOL_NAMES` aggiornati |
 | `src/ai/agenticBriefing.js` | ✅ Aggiornato | Esempio in `<ExecutionPhases>` |
 | `src/config/env.js` | ✅ Aggiornato | Aggiunta `MULTI_AGENT_MODEL` |
 | `src/utils/fetch.js` | ✅ Aggiornato | Commenti docstring |
@@ -154,15 +155,15 @@ SEARXNG_URL=http://localhost:8888
 ### 4.7 Note architetturali
 - `web_x_search` chiama `${HERMES_BASE_URL}/responses` (Step 3 ha unificato l'auth: stesso `HERMES_API_KEY` di tutto il resto).
 - Le call `effort=high` possono durare 2-4 minuti. Usare `low` come default.
-- `web_x_search` è in `PARALLEL_SAFE_TOOL_NAMES`: più ricerche indipendenti nello stesso round vengono lanciate in parallelo.
+- `web_x_search` è in `ONCE_PER_ROUND_TOOLS` in `tools/index.js`: se il modello chiama lo stesso tool più volte nello stesso round (es. due `web_x_search` identici), la seconda chiamata viene bloccata con un errore esplicito. Questo vale anche per `read_music_stats`, `read_server_rules` e `agentic_unlock`.
 
 ### 4.8 Checklist Step 2
 - [x] `src/tools/webXSearch.js` — creato e verificato
 - [x] `src/tools/webSearch.js` — eliminato
 - [x] `src/tools/browsePage.js` — eliminato
 - [x] `src/ai/tools.js` — aggiornato
-- [x] `src/tools/index.js` — aggiornato
-- [x] `src/handler.js` — `PARALLEL_SAFE_TOOL_NAMES` aggiornato
+- [x] `src/tools/index.js` — aggiornato (`ONCE_PER_ROUND_TOOLS`)
+- [x] `src/handler.js` — aggiornato
 - [x] `src/ai/agenticBriefing.js` — aggiornato
 - [x] `src/config/env.js` — `MULTI_AGENT_MODEL` aggiunto
 - [x] `src/utils/fetch.js` — commenti aggiornati
@@ -278,9 +279,110 @@ In standby. Sarà ripreso solo quando si vorrà estendere il RAG ad altri corpor
 
 ---
 
-## 9. Step 7 — Image/video generation (rimandato)
+## 9. Step 7 — Image/video generation (completato: 2026-05-20)
 
-In standby. Sarà ripreso quando Hermes/xAI esporrà un endpoint stabile per Aurora o un equivalente.
+### 9.1 Obiettivo
+Esporre Grok Imagine come due tool nativi GemiX (`generate_image` e `generate_video`) tramite il proxy Hermes (`/v1/images/generations` e `/v1/videos/generations`). Entrambi sono disponibili per qualsiasi utente (membro attivo o no), in modalità agentic e non, su tutte le piattaforme **eccetto Discord**.
+
+### 9.2 Architettura
+```
+Grok 4.3 (Hermes /chat/completions)
+  ├─ chiama function tool: generate_image(prompt, reference_images?, aspect_ratio?)
+  │    └─ POST {HERMES_BASE_URL}/images/generations  (model: IMAGE_GEN_MODEL)
+  │         response_format: "b64_json"
+  │         → buffer PNG → responseCtx.attachments → AUTO-DELIVERED
+  │
+  └─ chiama function tool: generate_video(prompt, reference_images?, aspect_ratio?)
+       └─ POST {HERMES_BASE_URL}/videos/generations  (model: VIDEO_GEN_MODEL)
+            duration: 10, resolution: "720p", n: 1, response_format: "b64_json"
+            → buffer MP4 → responseCtx.attachments → AUTO-DELIVERED
+```
+
+Backend fissa i parametri "tecnici" (`n=1`, `duration=10`, `resolution=720p`, `response_format=b64_json`), il modello sceglie solo `prompt`, `reference_images` e `aspect_ratio`.
+
+### 9.3 Reference images
+`reference_images` accetta path ai file che l'AI può già vedere (stessa policy di `read_file` / `attach_file`):
+- **Non-agentic**: nome file della chat history (es. `"foto.jpg"` o `"sub/foto.jpg"`). Il backend prefissa automaticamente `history/` per coerenza con `read_file`. Niente menzione di `/readonly/` o `/workspace/` nella description del tool — l'AI in non-agentic non li vede.
+- **Agentic**: path assoluti (`/readonly/history/...`, `/readonly/searched_images/...`, `/workspace/{temp|output|code}/...`) **oppure** bare filename (auto-risolto a chat history come per `read_file`).
+
+Il path viene validato da `isPathAllowed` (la stessa funzione usata da `read_file`/`attach_file`), letto da disco, controllato per estensione (PNG/JPG/JPEG/WEBP/GIF/BMP), MIME e dimensione (max 8 MB), e infine convertito in base64 prima dell'invio al proxy.
+
+**Niente URL, niente buffer arbitrari**: l'AI non scarica immagini dal web — usa solo file già accessibili (sia che provengano da `image_search` con `save_to_disk=true`, da chat history, o da output di un progetto). Questo elimina download opachi e mantiene la superficie del tool coerente con il resto della codebase.
+
+### 9.4 Limiti hard-coded
+| Tool | Max ref images | Aspect ratios | Output |
+|---|---|---|---|
+| `generate_image` | 3 | `1:1`, `16:9`, `9:16`, `4:3`, `3:4` (omesso = automatico) | PNG |
+| `generate_video` | 7 (1 → image-to-video, 2-7 → reference-to-video) | `16:9` (default), `9:16`, `1:1` | MP4 720p, 10s |
+
+- Prompt cap: 2000 char (truncato con avviso nel risultato).
+- Singola reference image: max 8 MB.
+- Timeout: 3 min per immagini, 8 min per video (request abort + notifica admin in caso di errore o timeout).
+
+### 9.5 Cosa è cambiato
+
+| File | Azione | Note |
+|---|---|---|
+| `src/tools/imagineGenerator.js` | ✅ Creato | Implementazione `generateImage` + `generateVideo`, condivide `_resolveReferenceImages` e `_postJson`. |
+| `src/ai/tools.js` | ✅ Aggiornato | Nuovi builder `buildGenerateImageTool` / `buildGenerateVideoTool` con descrizioni dinamiche per agentic / non-agentic. Registrati nella tool list dopo `image_search`, condizionati a `!isDiscord`. |
+| `src/tools/index.js` | ✅ Aggiornato | Import + dispatcher `case 'generate_image'` / `case 'generate_video'` con notifica intermedia. Entrambi aggiunti a `ONCE_PER_ROUND_TOOLS`. |
+| `src/config/env.js` | ✅ Aggiornato | `IMAGE_GEN_MODEL` e `VIDEO_GEN_MODEL` aggiunti a `REQUIRED` e all'export. |
+| `.env` | ✅ Aggiornato | `IMAGE_GEN_MODEL=grok-imagine-image-quality`, `VIDEO_GEN_MODEL=grok-imagine-video`. Endpoint Imagine documentati nel commento. |
+| `src/ai/systemPrompt.js` | ✅ Aggiornato | `<PoweredBy>` ora elenca anche `generate_image` / `generate_video` come capability Grok. |
+
+### 9.6 Edge case gestiti
+1. **Discord**: i tool non sono nella tool list (`!isDiscord` in `getToolsForUser`). Se per errore venissero invocati, il whitelist enforcement in `handler.js` li respinge senza chiamare il dispatcher.
+2. **Non-agentic + path assoluto**: `isPathAllowed` rifiuta con "Access denied: Access to advanced storage denied. Unlock agentic mode first." (stesso comportamento di `read_file`).
+3. **Reference image non esistente / corrotta / troppo grande / formato non supportato**: errore esplicito con il path che ha causato il problema.
+4. **Una sola reference per video**: inviata come `reference_image` (singolare). Più di una: inviata come `reference_images` (array) — gestito dal backend.
+5. **Risposta vuota / URL al posto di base64**: il parser tenta b64_json → b64 → fetch della URL temporanea inline (xAI URL scadono in pochi minuti, conversione subito in base64 per mantenere tutto in memoria coerente con il resto delle attachments).
+6. **`HERMES_API_KEY` / `IMAGE_GEN_MODEL` / `VIDEO_GEN_MODEL` mancanti**: errore strutturato senza crash.
+7. **Same round, due chiamate**: bloccate da `ONCE_PER_ROUND_TOOLS` (`generate_image` o `generate_video` può essere chiamato al massimo una volta per round → il modello può comunque chiamare entrambi nello stesso round, ma non due immagini o due video insieme).
+8. **Aspect ratio non valido**: errore con la lista degli ammessi. Se omesso, il campo non viene incluso nel body della request (alcuni build del proxy rifiutano il valore letterale `"auto"`).
+9. **Prompt > 2000 char**: troncato con marker nel messaggio di risposta finale.
+10. **Output vuoto / base64 invalido**: errore esplicito + notifica admin.
+
+### 9.7 Notifiche intermedie
+Coerenti con il pattern esistente (PDF, video describe, research):
+- Image gen → 🎨 "Sto generando l'immagine, attendi un attimo..."
+- Video gen → 🎬 "Sto generando il video (può richiedere fino a un paio di minuti), attendi un attimo..."
+
+Dedup automatico per (call, kind) tramite `markNotifiedInCall` — se il modello ritenta nello stesso round dopo errore, la notifica non si ripete (anche se di fatto non può, per via di `ONCE_PER_ROUND_TOOLS`).
+
+### 9.8 Pulizia delivery buffer e descrizioni dei tool
+
+In contemporanea con l'aggiunta di `generate_image` / `generate_video` è stato unificato il modello del **delivery buffer** del bot:
+
+- **Rimosso** il filtro selettivo `[image:N]` per `image_search`. Ora ogni risultato di `image_search` finisce nel buffer come tutti gli altri allegati (PDF, immagini generate, video generati, file di `output/`, `attach_file`, `formal_request_pdf`, `music_creator`). L'AI non può più scegliere "in finale" quali immagini inviare: tutto ciò che è nel buffer arriva all'utente con la risposta. **Niente eccezioni, niente codice morto**.
+- Rimossi: `_imageSearchId`, `_imageSearchNextId`, `reserveImageIds` da `responseCtx`; `stripImageTags` da `utils/text.js`; il blocco di filtraggio in `handler.js`; gli ID nel `<ImageSearchResults>` XML; il commento in `voiceMessage.js`; il typedef `_imageSearchId` in `attachments.js`.
+- Le descrizioni dei tool che producono allegati ora dicono solo "pushed to the delivery buffer" senza ripetere ogni volta "auto-delivered to the current user / use includeAttachments=true". La logica del buffer è spiegata **una volta sola** nel `<Behavior>` del system prompt:
+  > Delivery buffer: any tool that produces a file ... pushes the result into a per-call buffer. Everything in the buffer is sent AUTOMATICALLY to the current user with your reply. To forward those same files to another recipient, call a delivery tool ... with includeAttachments=true.
+- L'agentic briefing non duplica più questa spiegazione: `<Layout>` e `<FileDelivery>` rimandano a `<Behavior>` con un breve "pushed to the delivery buffer".
+- Anche le skill `pptx`/`docx` SKILL.md sono state aggiornate: `Auto-delivery` → `Output buffer`, con riferimento al concetto unificato.
+- **Verifica architetturale**: `output/` files e qualsiasi file generato/aggiunto al buffer **vengono inclusi automaticamente** nei delivery tool (`send_email`, `send_whatsapp_message`, `send_voice_message`) quando `includeAttachments=true`. Non esiste più una categoria "files che si vedono solo nella chat corrente": il buffer è uno solo. Confermato leggendo `handler.js` (i delivery tool prendono `responseCtx.attachments` che è popolato anche da `bash`/`write_file` quando si scrive in `output/` via `projectRun.js`).
+
+### 9.9 Variabili `.env` post Step 7
+**Aggiunte**:
+```dotenv
+IMAGE_GEN_MODEL=grok-imagine-image-quality
+VIDEO_GEN_MODEL=grok-imagine-video
+```
+
+### 9.10 Checklist Step 7
+- [x] `src/tools/imagineGenerator.js` — creato (path resolution + chiamate Hermes + parsing risposta + buffering attachments)
+- [x] `src/ai/tools.js` — `buildGenerateImageTool`, `buildGenerateVideoTool` aggiunti, registrati condizionati a `!isDiscord`
+- [x] `src/tools/index.js` — import, dispatcher, `ONCE_PER_ROUND_TOOLS` aggiornato, notifiche intermedie
+- [x] `src/config/env.js` — `IMAGE_GEN_MODEL` / `VIDEO_GEN_MODEL` in REQUIRED + export
+- [x] `.env` — modelli aggiunti, commenti endpoint aggiornati
+- [x] `src/ai/systemPrompt.js` — `<PoweredBy>` aggiornato + nuovo blocco `<Behavior>` che spiega il delivery buffer una sola volta
+- [x] **Cleanup `[image:N]`**: rimosso il filtro selettivo da `handler.js`, da `tools/index.js`, da `imageSearch.js`; `stripImageTags` rimosso da `utils/text.js` e dai callsite; `_imageSearchId` rimosso da `responseCtx` e dal typedef di `attachments.js`; voiceMessage commento aggiornato.
+- [x] **Cleanup descrizioni tool**: `image_search`, `attach_file`, `write_file`, `generate_formal_request_pdf`, `generate_image`, `generate_video`, `send_voice_message`, `send_whatsapp_message`, `send_email` — tutti ora dicono "pushed to the delivery buffer" o "Set includeAttachments=true to forward the buffered files" senza ripetere la meccanica auto-delivery.
+- [x] **Cleanup briefing agentico**: `<Layout>` e `<FileDelivery>` allineati al concetto di buffer unificato.
+- [x] **Cleanup skill markdown**: `pptx/SKILL.md` e `docx/SKILL.md` da `Auto-delivery` → `Output buffer`.
+- [x] **Cleanup tool runtime messages**: `attachFile.js` (`message: 'File pushed to the delivery buffer.'`), `projects.js` (`/workspace/output/` "pushed to the delivery buffer"), `imagineGenerator.js` (image/video success messages).
+- [x] `node --check` su tutti i file modificati: OK
+- [x] `getDiagnostics` su tutti i file modificati: nessuna diagnostica
+- [ ] **Da fare sul VPS dopo deploy**: verificare che il proxy Hermes esponga `/v1/images/generations` e `/v1/videos/generations` (entrambi formato OpenAI SDK con `b64_json`). Se no, aggiornare config Hermes. Poi `pm2 restart "GemiX"` e smoke test (text-to-image, image-to-image con reference da history, text-to-video, image-to-video con singola reference, reference-to-video con 2-3 reference, ricerca immagini con `image_search` — tutte le immagini devono arrivare automaticamente, niente più filtraggio).
 
 ---
 
@@ -308,7 +410,7 @@ Grok 4.3 (Hermes /chat/completions)
 | `src/tools/codeInterpreter.js` | ✅ Creato | Dispatcher verso `/v1/responses` con `{ type: 'code_interpreter' }` |
 | `src/ai/tools.js` | ✅ Aggiornato | Rimosso `TOOL_CODE_EXECUTION`; aggiunto `TOOL_CODE_INTERPRETER` come function tool standard (Hermes `/chat/completions` accetta solo `type:'function'`; il dispatcher lo delega a `/v1/responses` dove `code_interpreter` è valido) |
 | `src/tools/index.js` | ✅ Aggiornato | Import + `case 'code_interpreter'` aggiunto |
-| `src/handler.js` | ✅ Aggiornato | `AGENTIC_TOOL_NAMES`/`DEFERRED_TOOL_NAMES` aggiornati; `code_interpreter` aggiunto a `PARALLEL_SAFE_TOOL_NAMES` (è stateless, sicuro in parallelo con `web_x_search` e altri read tool) |
+| `src/handler.js` | ✅ Aggiornato | `AGENTIC_TOOL_NAMES`/`DEFERRED_TOOL_NAMES` aggiornati |
 | `src/ai/agenticBriefing.js` | ✅ Aggiornato | Aggiunto blocco `<CodeInterpreterBoundary>`, `<PythonSandbox>` rinominato `<ProjectSandbox>` |
 | `src/ai/systemPrompt.js` | ✅ Aggiornato | Aggiunto `<ToolBoundaries>` (fuori da Discord) |
 | `src/data/skills/{xlsx,pptx,docx,pdf}/SKILL.md` | ✅ Aggiornati | Pattern `code_execution` sostituito con `write_file` (Phase 2) + `bash python …` (Phase 3) |
@@ -325,7 +427,7 @@ Grok 4.3 (Hermes /chat/completions)
 
 ### 10.5 Edge case gestiti
 1. **Hermes `/chat/completions` rifiuta `type:'code_interpreter'`**: Hermes accetta solo `type:'function'` o `type:'live_search'` su `/chat/completions`. `TOOL_CODE_INTERPRETER` è quindi un function tool standard; il dispatcher lo intercetta e lo delega a `/v1/responses` dove `{ type: 'code_interpreter' }` è valido.
-2. **Esecuzione parallela**: `code_interpreter` è in `PARALLEL_SAFE_TOOL_NAMES` — se il modello chiama `code_interpreter` e `web_x_search` nello stesso round, vengono eseguiti in parallelo.
+2. **Chiamate duplicate nello stesso round**: `code_interpreter` può essere chiamato più volte nello stesso round con codice diverso — è stateless e non scrive nel workspace, quindi non è in `ONCE_PER_ROUND_TOOLS`.
 3. **`GROK_MODEL` non configurato**: guard esplicito in `codeInterpreter.js` (oltre al fail-fast in `env.js`).
 4. **Risposta vuota**: errore strutturato, il modello può riformulare.
 5. **Timeout** (>2min): errore retryable, notifica admin.
@@ -338,7 +440,7 @@ Grok 4.3 (Hermes /chat/completions)
 - [x] `src/tools/codeInterpreter.js` — creato (dispatcher verso `/v1/responses`)
 - [x] `src/ai/tools.js` — `TOOL_CODE_EXECUTION` rimosso, `TOOL_CODE_INTERPRETER` aggiunto come function tool
 - [x] `src/tools/index.js` — import + dispatcher `case 'code_interpreter'`
-- [x] `src/handler.js` — `AGENTIC_TOOL_NAMES`/`DEFERRED_TOOL_NAMES` aggiornati; `code_interpreter` in `PARALLEL_SAFE_TOOL_NAMES`
+- [x] `src/handler.js` — `AGENTIC_TOOL_NAMES`/`DEFERRED_TOOL_NAMES` aggiornati
 - [x] `src/ai/agenticBriefing.js` — blocco `<CodeInterpreterBoundary>`, sandbox rinominata
 - [x] `src/ai/systemPrompt.js` — blocco `<ToolBoundaries>` aggiunto
 - [x] `src/data/skills/{xlsx,pptx,docx,pdf}/SKILL.md` — pattern aggiornati
@@ -349,7 +451,62 @@ Grok 4.3 (Hermes /chat/completions)
 
 ---
 
-## 11. Codice morto eliminato (riepilogo cumulativo)
+## 11. Step 9 — Fix UX, badge e refactoring notifiche (completato: 2026-05-20)
+
+### 11.1 Obiettivo
+Risolvere cinque problemi emersi nei test e rifattorizzare la logica delle notifiche intermedie:
+1. Footer di ricerca mostrava solo `𝕏: N posts` (bug: `num_sources_used` è sempre 0 col proxy Hermes).
+2. Notifiche intermedie video sempre al singolare e ripetute a ogni round.
+3. Indicatore "sta scrivendo / registrando" su WhatsApp si fermava per ~10s.
+4. AI inconsapevole della divisione di responsabilità Gemini ↔ Grok e non avvisava l'utente quando delegava la ricerca.
+5. `pdfTranscriptionTracker.js` conteneva logica video/ricerca non correlata ai PDF.
+
+### 11.2 Cosa è cambiato
+
+| File | Azione | Note |
+|---|---|---|
+| `src/tools/webXSearch.js` | ✅ Aggiornato | `_extractUsageStats` legge `usage.server_side_tool_usage_details.{web_search_calls, x_search_calls}`. `num_sources_used` ignorato (sempre 0 col proxy Hermes). |
+| `src/utils/notificationDedup.js` | ✅ Creato | Dedup per (call, kind): `markNotifiedInCall`, `clearCallNotifications`. Builder di messaggi per tutti i tipi: `buildPdfNotificationMessage`, `buildVideoNotificationMessage`, `buildResearchNotificationMessage`. |
+| `src/utils/pdfTranscriptionTracker.js` | ✅ Ridotto | Solo logica PDF: contatore attivo per chat (`incrementTranscription`, `decrementTranscription`). Usa `notificationDedup` internamente. `getTranscriptionCount` rimosso (codice morto). |
+| `src/utils/media.js` | ✅ Aggiornato | Import statici in cima (rimosso `require` inline). Tracker incrementato solo se ci sono PDF effettivi nel contenuto. `onTranscriptionEnd` rimosso (mai usato). |
+| `src/ai/videoDescriber.js` | ✅ Aggiornato | `onStart(pendingCount)` riceve il numero di video non-cached per singolare/plurale. |
+| `src/handler.js` | ✅ Aggiornato | Helper `sendIntermediateNotification(ctx, kind, message)` con dedup integrato. `ctx.requestId` propagato per allineare i key di dedup tra pre-processing e tools. `clearCallNotifications` nel `finally`. `resetVoiceCount` aggiunto ai due return voice-only che lo saltavano. `lastAgenticTool` rimosso (variabile mai letta). |
+| `src/tools/index.js` | ✅ Aggiornato | `case 'web_x_search'` invia `🔎 Sto consultando il team di ricerca, attendi un attimo...` prima della call (dedup automatico via `userCtx.sendIntermediateNotification`). |
+| `src/utils/presence.js` | ✅ Aggiornato | Refresh interval `20s → 10s`. Per-update timeout 4s con `_withTimeout` per evitare stalli. |
+| `src/ai/systemPrompt.js` | ✅ Aggiornato | Blocco `<PoweredBy>` (Grok: chat/code_interpreter/web_x_search/TTS/STT; Gemini-Lyria: video description/music_creator). |
+| `src/ai/tools.js` | ✅ Aggiornato | `web_x_search`: AI istruita a dire all'utente che ha delegato la ricerca. `music_creator`: annotato "powered by Google Lyria". |
+| `src/utils/footer.js` | ✅ Aggiornato | Aggiunta entry `grok-4.3-latest` / `grok-4.3` → `'Grok 4.3'` nella map. |
+
+### 11.3 Edge case gestiti
+1. **Più round della stessa call con video/PDF/ricerche**: una sola notifica intermedia per (call, kind). I round successivi restano silenziosi.
+2. **Contenuto senza PDF**: il tracker non viene incrementato se non ci sono parti PDF effettive nell'array.
+3. **Più video o PDF nello stesso turno**: contatore mostra "N video / N documenti".
+4. **Una sola ricerca per round** (vincolo `ONCE_PER_ROUND_TOOLS`): nessuna gestione plurale necessaria.
+5. **Notifica con piattaforma sconosciuta**: `sendIntermediateNotification` fallisce silenziosamente (try/catch interno).
+6. **Cleanup dedup**: `clearCallNotifications(ctx)` nel `finally` di `handleMessage`. Safety valve: il Set viene svuotato se supera 5000 voci.
+7. **Footer badge**: solo `web_search_calls` e `x_search_calls` da `server_side_tool_usage_details`.
+8. **Presence stutter su WA**: refresh ogni 10s + timeout 4s per `sendStateTyping/Recording`.
+9. **Voice-only senza reset**: `resetVoiceCount` ora chiamato anche nei due return `isVoiceOnly: true`.
+
+### 11.4 Checklist Step 9
+- [x] `src/tools/webXSearch.js` — fix conteggio web sources
+- [x] `src/utils/notificationDedup.js` — creato (dedup + builders)
+- [x] `src/utils/pdfTranscriptionTracker.js` — ridotto a solo logica PDF
+- [x] `src/utils/media.js` — import statici, tracker condizionale, `onTranscriptionEnd` rimosso
+- [x] `src/ai/videoDescriber.js` — `onStart(count)`
+- [x] `src/handler.js` — helper unificato, voice-only reset, `lastAgenticTool` rimosso
+- [x] `src/tools/index.js` — notifica `web_x_search`
+- [x] `src/utils/presence.js` — interval 10s + per-update timeout
+- [x] `src/ai/systemPrompt.js` — `<PoweredBy>`
+- [x] `src/ai/tools.js` — descrizioni `web_x_search` e `music_creator`
+- [x] `src/utils/footer.js` — entry `grok-4.3-latest` / `grok-4.3`
+- [x] `node --check` su tutti i file modificati: OK
+- [x] `getDiagnostics` su tutti i file modificati: nessuna diagnostica
+- [ ] **Da fare sul VPS dopo deploy**: `pm2 restart "GemiX"`, smoke test live: ricerca complessa (badge `🌐: N sources. 𝕏: M posts.` corretto, AI menziona delega), turno con più PDF/video (singolare-plurale corretto, niente ripetizioni nei round successivi), conversazione lunga su WA (indicatore typing stabile), risposta vocale (footer corretto "Grok 4.3").
+
+---
+
+## 12. Codice morto eliminato (riepilogo cumulativo)
 
 | File / Costante | Step | Note |
 |---|---|---|
@@ -373,15 +530,17 @@ Grok 4.3 (Hermes /chat/completions)
 
 ---
 
-## 12. Variabili `.env` — stato attuale (post Step 8)
+## 13. Variabili `.env` — stato attuale (post Step 7)
 
 ```dotenv
 # AI - Hermes (proxy OpenAI-compatible → Grok via SuperGrok OAuth)
-# Tutte le features xAI (chat, code_interpreter, tts, stt, multi-agent) passano da qui.
+# Tutte le features xAI (chat, code_interpreter, tts, stt, multi-agent, imagine) passano da qui.
 HERMES_BASE_URL=http://127.0.0.1:8000/v1
 HERMES_API_KEY=dummy
 GROK_MODEL=grok-4.3-latest
 MULTI_AGENT_MODEL=grok-4.20-multi-agent
+IMAGE_GEN_MODEL=grok-imagine-image-quality
+VIDEO_GEN_MODEL=grok-imagine-video
 XAI_TTS_VOICE=leo
 XAI_TTS_ENABLED=true
 
@@ -407,11 +566,11 @@ GUILD_ID=...
 
 ---
 
-## 13. Regola di split: `.env` vs `src/config/constants.js`
+## 14. Regola di split: `.env` vs `src/config/constants.js`
 
 **`.env` (deployment values, secrets, environment-specific)**:
 - `HERMES_BASE_URL`, `HERMES_API_KEY` — proxy endpoint e auth
-- `GROK_MODEL`, `MULTI_AGENT_MODEL` — model IDs (possono variare per A/B testing)
+- `GROK_MODEL`, `MULTI_AGENT_MODEL`, `IMAGE_GEN_MODEL`, `VIDEO_GEN_MODEL` — model IDs (possono variare per A/B testing)
 - `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY` — OpenRouter endpoint e auth
 - `MUSIC_MODEL`, `VIDEO_DESCRIBER_MODEL` — model IDs per servizi specifici
 - `XAI_TTS_VOICE`, `XAI_TTS_ENABLED` — feature flags vocali
@@ -430,7 +589,7 @@ GUILD_ID=...
 
 ---
 
-## 14. Domande frequenti e risposte
+## 15. Domande frequenti e risposte
 
 ### Q: Il team di ricerca ha un prompt di base di sistema oltre a quello di Grok 4.3?
 
@@ -446,7 +605,7 @@ GUILD_ID=...
 
 ---
 
-## 15. Dubbi e domande per il team di ricerca
+## 16. Dubbi e domande per il team di ricerca
 
 Prima di fare il deploy, verificare con il team di ricerca (o con la documentazione xAI):
 
@@ -465,10 +624,10 @@ Prima di fare il deploy, verificare con il team di ricerca (o con la documentazi
 
 ---
 
-## 16. Note finali
+## 17. Note finali
 
 - `package.json`: zero cambi alle dipendenze.
 - `MAX_TOKENS = 64_000`, `MAX_HISTORY = 50` (Step 4).
 - History con `<Description>` legacy: messaggi vecchi hanno già `<Description kind="audio|video">` iniettati. Grok li interpreta come testo, funzionano comunque.
 - Sandbox Docker: l'immagine è ancora pesante. Step 8 ha rimosso il tool che la sfruttava di più ma lasciato i layer Python intatti per non rompere skills via `bash`. Audit + cleanup è un follow-up dedicato.
-- **Prossimi step**: Step 9 (eliminazione XAI_API_KEY completamente), Step 10 (aggiornamento MIGRATION_PLAN.md), Step 11 (cleanup REFERENCES.md).
+- **Prossimi step**: cleanup `REFERENCES.md`, eventuale audit dipendenze sandbox per ridurre l'immagine Docker.

@@ -181,7 +181,7 @@ async function _searchCandidates(query, maxCandidates, language = 'it', imageTyp
  * @param {number} index - 0-based index (for filename)
  * @returns {Promise<{preview: string, attachment: object, meta: object}|null>}
  */
-async function _prepareImage(candidate, query, index, startId) {
+async function _prepareImage(candidate, query, index) {
   const previewUrl = candidate.thumbnail_url || candidate.img_url;
   const fullUrl = candidate.img_url;
 
@@ -224,7 +224,7 @@ async function _prepareImage(candidate, query, index, startId) {
 
   const ext = _extFromMime(attachmentMime);
   const base = sanitizeFilename(query, 40) || 'image';
-  const filename = `${base}_${startId + index}.${ext}`;
+  const filename = `${base}_${index + 1}.${ext}`;
 
   return {
     preview: previewDataUrl,
@@ -250,10 +250,9 @@ async function _prepareImage(candidate, query, index, startId) {
  * @param {object} [options]
  * @param {string} [options.language='it'] - Language hint for SearXNG
  * @param {string} [options.image_type='any'] - Image type: 'any' | 'photo' | 'gif' | 'clipart' | 'lineart'
- * @param {number} [options._startId=1] - Starting image ID for labeling (managed by tools/index.js)
  * @returns {Promise<{toolResult: string|Array, attachments: Array}>}
  */
-async function imageSearch(query, count = 1, { language = 'it', image_type = 'any', _startId = 1 } = {}) {
+async function imageSearch(query, count = 1, { language = 'it', image_type = 'any' } = {}) {
   // ── Validate query ──
   const q = _sanitizeQuery(query);
   if (!q) {
@@ -295,7 +294,7 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   for (let i = 0; i < candidates.length && prepared.length < wantCount; i += concurrency) {
     const chunk = candidates.slice(i, i + concurrency);
     const results = await Promise.all(
-      chunk.map((c, idx) => _prepareImage(c, q, i + idx, _startId))
+      chunk.map((c, idx) => _prepareImage(c, q, i + idx))
     );
 
     for (const img of results) {
@@ -317,8 +316,8 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
   // ── Build multimodal tool result for AI vision ──
   const contentParts = [];
 
-  const imageXml = prepared.map((img, i) => {
-    return `  <Image id="${_startId + i}">
+  const imageXml = prepared.map((img) => {
+    return `  <Image>
     <Title>${img.meta.title}</Title>
     <Source>${img.meta.source_url}</Source>
   </Image>`;
@@ -326,8 +325,7 @@ async function imageSearch(query, count = 1, { language = 'it', image_type = 'an
 
   const metaText = `<ImageSearchResults query="${q}" count="${prepared.length}">
 ${imageXml}
-</ImageSearchResults>
-Review the previews below. In your final message, include [image:N] tags (e.g., [image:1] [image:3]) to selectively send only those images to the user. If you omit tags, NO images are sent to the user (but they are saved to disk if save_to_disk=true).`;
+</ImageSearchResults>`;
 
   contentParts.push({ type: 'text', text: metaText });
 
@@ -338,7 +336,7 @@ Review the previews below. In your final message, include [image:N] tags (e.g., 
     });
   }
 
-  log.info(`   📦 ${prepared.length} image(s) with vision preview (ID ${_startId}-${_startId + prepared.length - 1})`);
+  log.info(`   📦 ${prepared.length} image(s) with vision preview`);
 
   return {
     toolResult: contentParts,

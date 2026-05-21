@@ -1,128 +1,92 @@
 // src/utils/pdfTranscriptionTracker.js
-/**
- * Tracks active PDF transcriptions to avoid spamming notification messages.
- * Used to send dynamic "transcribing X document(s)" messages.
- */
+//
+// Tracks concurrent PDF transcriptions per chat so that:
+//   1. The "transcribing N document(s)" notification uses the correct count.
+//   2. The notification is sent at most once per AI call (dedup via notificationDedup).
+//
+// Used exclusively by media.js → transcribeDocumentsInMessageContent.
+// All other notification kinds (video, research) go through notificationDedup directly.
 
 const { createLogger } = require('./logger');
+const { markNotifiedInCall, buildPdfNotificationMessage, getChatKey } = require('./notificationDedup');
 
 const log = createLogger('PdfTranscriptionTracker');
 
-// Map: chatKey -> { count: number, notified: boolean, startTime: number }
-const activeTranscriptions = new Map();
+// Map: chatKey → { count: number, startTime: number }
+// Tracks how many PDF parts are currently being transcribed for a given chat.
+const _active = new Map();
+
+// ── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Get a unique key for the chat/user context.
- * @param {object} ctx - Handler context
- * @returns {string} Unique key
- */
-function getChatKey(ctx) {
-  if (ctx.platform === 'discord') {
-    return `discord:${ctx.chatId}`;
-  }
-  if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-    return `${ctx.platform}:${ctx.chatId || ctx.groupId || ctx.userId}`;
-  }
-  return `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}`;
-}
-
-/**
- * Increment transcription count for a chat.
- * @param {object} ctx - Handler context
- * @returns {object} { count, isFirst, shouldNotify }
+ * Call before starting a PDF transcription.
+ * Returns whether the caller should fire the intermediate notification.
+ *
+ * @param {object} ctx - Handler context (must have `requestId` set)
+ * @returns {{ count: number, shouldNotify: boolean }}
  */
 function incrementTranscription(ctx) {
   const key = getChatKey(ctx);
-  const current = activeTranscriptions.get(key) || { count: 0, notified: false, startTime: Date.now() };
-  current.count++;
-  activeTranscriptions.set(key, current);
-  
-  const isFirst = current.count === 1;
-  const shouldNotify = isFirst && !current.notified;
-  
-  if (shouldNotify) {
-    current.notified = true;
-  }
-  
-  log.debug(`Incremented transcription for ${key}: count=${current.count}, isFirst=${isFirst}, shouldNotify=${shouldNotify}`);
-  
-  return { count: current.count, isFirst, shouldNotify };
+  const entry = _active.get(key) || { count: 0, startTime: Date.now() };
+  entry.count++;
+  _active.set(key, entry);
+
+  // Dedup: only notify once per (call, kind='pdf').
+  const shouldNotify = markNotifiedInCall(ctx, 'pdf');
+
+  log.debug(`PDF transcription started for ${key}: count=${entry.count}, shouldNotify=${shouldNotify}`);
+  return { count: entry.count, shouldNotify };
 }
 
 /**
- * Decrement transcription count for a chat.
+ * Call after a PDF transcription completes (success or failure).
+ *
  * @param {object} ctx - Handler context
- * @returns {object} { count, isLast }
+ * @returns {{ count: number, isLast: boolean }}
  */
 function decrementTranscription(ctx) {
   const key = getChatKey(ctx);
-  const current = activeTranscriptions.get(key);
-  
-  if (!current) {
-    return { count: 0, isLast: false };
-  }
-  
-  current.count--;
-  const isLast = current.count <= 0;
-  
+  const entry = _active.get(key);
+  if (!entry) return { count: 0, isLast: false };
+
+  entry.count--;
+  const isLast = entry.count <= 0;
   if (isLast) {
-    activeTranscriptions.delete(key);
+    _active.delete(key);
   } else {
-    activeTranscriptions.set(key, current);
+    _active.set(key, entry);
   }
-  
-  log.debug(`Decremented transcription for ${key}: count=${current.count}, isLast=${isLast}`);
-  
-  return { count: current.count, isLast };
+
+  log.debug(`PDF transcription finished for ${key}: count=${entry.count}, isLast=${isLast}`);
+  return { count: entry.count, isLast };
 }
 
 /**
- * Get current transcription count for a chat.
- * @param {object} ctx - Handler context
- * @returns {number} Current count
+ * Build the "transcribing N document(s)" notification message.
+ * Kept as `buildNotificationMessage` for backward compatibility with media.js.
+ *
+ * @param {number} count
+ * @returns {string}
  */
-function getTranscriptionCount(ctx) {
-  const key = getChatKey(ctx);
-  const current = activeTranscriptions.get(key);
-  return current ? current.count : 0;
-}
+const buildNotificationMessage = buildPdfNotificationMessage;
 
-/**
- * Build a dynamic transcription notification message.
- * @param {number} count - Number of documents being transcribed
- * @returns {string} Message text
- */
-function buildNotificationMessage(count) {
-  if (count === 1) {
-    return '⏳ Sto trascrivendo il documento, attendi un attimo...';
-  }
-  return `⏳ Sto trascrivendo ${count} documenti, attendi un attimo...`;
-}
+// ── Stale-entry cleanup ─────────────────────────────────────────────────────
+// Guard against entries that were never decremented (e.g. process crash mid-transcription).
 
-/**
- * Clean up stale entries (older than 5 minutes).
- * Called periodically to prevent memory leaks.
- */
-function cleanupStaleEntries() {
+const _STALE_THRESHOLD_MS = 5 * 60 * 1000;
+const _cleanupTimer = setInterval(() => {
   const now = Date.now();
-  const staleThreshold = 5 * 60 * 1000; // 5 minutes
-  
-  for (const [key, data] of activeTranscriptions.entries()) {
-    if (now - data.startTime > staleThreshold) {
-      log.warn(`Cleaning up stale transcription entry for ${key}`);
-      activeTranscriptions.delete(key);
+  for (const [key, entry] of _active.entries()) {
+    if (now - entry.startTime > _STALE_THRESHOLD_MS) {
+      log.warn(`Removing stale PDF transcription entry for ${key}`);
+      _active.delete(key);
     }
   }
-}
-
-// Cleanup stale entries every 2 minutes
-const cleanupInterval = setInterval(cleanupStaleEntries, 2 * 60 * 1000);
-cleanupInterval.unref();
+}, 2 * 60 * 1000);
+_cleanupTimer.unref();
 
 module.exports = {
   incrementTranscription,
   decrementTranscription,
-  getTranscriptionCount,
   buildNotificationMessage,
-  getChatKey,
 };
