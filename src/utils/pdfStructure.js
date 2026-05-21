@@ -22,7 +22,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { extractTextFromPdfBuffer } = require('./media');
 const { MAX_DOC_PAGES } = require('../config/constants');
 const { createLogger } = require('./logger');
 
@@ -182,6 +181,7 @@ function findOriginalPdfInside(parsedDirAbs) {
  *                                       e.g. "history/foo.pdf" or "/workspace/temp/foo.pdf"
  */
 async function buildParsedPdfStructure({ absPdfPath, buffer, virtualPdfPath }) {
+  const { extractTextFromPdfBuffer } = require('./media');
   if (!absPdfPath || typeof absPdfPath !== 'string') {
     return { success: false, error: 'Missing absPdfPath.' };
   }
