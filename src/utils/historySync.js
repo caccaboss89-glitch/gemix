@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { createLogger } = require('./logger');
-const { extractAttachmentTagPaths } = require('./media');
 const { sanitizeFilename } = require('./text');
 const { buildParsedPdfStructure, ensureHeaderInTranscription } = require('./pdfStructure');
 
@@ -554,6 +553,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
  */
 function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
   const out = new Set();
+  const { extractAttachmentTagPaths } = require('./media');
   const _scan = (text) => {
     if (typeof text !== 'string' || text.length === 0) return;
     for (const taggedPath of extractAttachmentTagPaths(text)) {
