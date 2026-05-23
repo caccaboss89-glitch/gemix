@@ -61,12 +61,13 @@ ${INSTRUCTION}"
 # Run hermes in one-shot mode, restricted to the relevant toolset and with
 # rule injection disabled so AGENTS.md / memory / preloaded skills don't
 # pollute the prompt. --yolo bypasses any approval prompt for the tool call.
+# NOTE: -z must come LAST before the prompt argument, or hermes misparses it.
 TMP_OUT="$(mktemp)"
 TMP_ERR="$(mktemp)"
 cleanup() { rm -f "$TMP_OUT" "$TMP_ERR"; }
 trap cleanup EXIT
 
-if ! hermes -z --yolo --ignore-rules -t "$TOOLSET" "$FULL_PROMPT" >"$TMP_OUT" 2>"$TMP_ERR"; then
+if ! hermes --yolo --ignore-rules -t "$TOOLSET" -z "$FULL_PROMPT" >"$TMP_OUT" 2>"$TMP_ERR"; then
   echo "imagine.sh: hermes -z exited non-zero" >&2
   echo "--- hermes stdout ---" >&2
   cat "$TMP_OUT" >&2
