@@ -54,23 +54,20 @@ case "$KIND" in
     ;;
 esac
 
-FULL_PROMPT="${PROMPT}
-
-${INSTRUCTION}"
+# Single line: no newlines in the prompt — hermes -z treats newlines as
+# prompt terminators and only processes the first line.
+FULL_PROMPT="${PROMPT} | ${INSTRUCTION}"
 
 # Run hermes in one-shot mode, restricted to the relevant toolset and with
 # rule injection disabled so AGENTS.md / memory / preloaded skills don't
 # pollute the prompt. --yolo bypasses any approval prompt for the tool call.
 # NOTE: -z must come LAST before the prompt argument, or hermes misparses it.
+# NOTE: FULL_PROMPT must be a single line — hermes treats newlines as prompt
+# terminators and only processes the first line.
 TMP_OUT="$(mktemp)"
 TMP_ERR="$(mktemp)"
 cleanup() { rm -f "$TMP_OUT" "$TMP_ERR"; }
 trap cleanup EXIT
-
-# DEBUG: log the exact command being run
-echo "DEBUG: Running: hermes --yolo --ignore-rules -t $TOOLSET -z" >&2
-echo "DEBUG: Prompt length: ${#FULL_PROMPT}" >&2
-echo "DEBUG: Prompt (first 200 chars): ${FULL_PROMPT:0:200}" >&2
 
 if ! hermes --yolo --ignore-rules -t "$TOOLSET" -z "$FULL_PROMPT" >"$TMP_OUT" 2>"$TMP_ERR"; then
   echo "imagine.sh: hermes -z exited non-zero" >&2
