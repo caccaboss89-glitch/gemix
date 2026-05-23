@@ -67,6 +67,11 @@ TMP_ERR="$(mktemp)"
 cleanup() { rm -f "$TMP_OUT" "$TMP_ERR"; }
 trap cleanup EXIT
 
+# DEBUG: log the exact command being run
+echo "DEBUG: Running: hermes --yolo --ignore-rules -t $TOOLSET -z" >&2
+echo "DEBUG: Prompt length: ${#FULL_PROMPT}" >&2
+echo "DEBUG: Prompt (first 200 chars): ${FULL_PROMPT:0:200}" >&2
+
 if ! hermes --yolo --ignore-rules -t "$TOOLSET" -z "$FULL_PROMPT" >"$TMP_OUT" 2>"$TMP_ERR"; then
   echo "imagine.sh: hermes -z exited non-zero" >&2
   echo "--- hermes stdout ---" >&2
