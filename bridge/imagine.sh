@@ -76,10 +76,11 @@ if ! hermes --yolo --ignore-rules -t "$TOOLSET" -z "$FULL_PROMPT" >"$TMP_OUT" 2>
   exit 3
 fi
 
-# Extract the first https URL from stdout. Strip any trailing punctuation
-# that sometimes shows up if the model adds a period etc.
-URL="$(grep -oE 'https?://[A-Za-z0-9._~:/?#@!$&'"'"'()*+,;=%-]+' "$TMP_OUT" | head -n 1 || true)"
-URL="${URL%%[\".,)\]\}\>]*}"
+# Extract the first https URL from stdout. The bridge already reduces stdout
+# to one line, but we still verify it's a clean URL. Use a simpler, more
+# robust regex that captures the full URL including domain and path.
+URL="$(grep -oE 'https://[^ "'"'"'<>]+' "$TMP_OUT" | head -n 1 || true)"
+URL="${URL%%[\".,)\]\}\>]*}"  # Strip trailing punctuation if present
 
 if [[ -z "$URL" ]]; then
   echo "imagine.sh: hermes returned no parseable URL" >&2
