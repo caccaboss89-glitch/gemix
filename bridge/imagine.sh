@@ -78,10 +78,19 @@ if ! hermes --yolo --ignore-rules -t "$TOOLSET" -z "$FULL_PROMPT" >"$TMP_OUT" 2>
   exit 3
 fi
 
-# Extract the first https URL from stdout. The bridge already reduces stdout
-# to one line, but we still verify it's a clean URL. Use a simpler, more
-# robust regex that captures the full URL including domain and path.
-URL="$(grep -oE 'https://[^ "'"'"'<>]+' "$TMP_OUT" | head -n 1 || true)"
+# DEBUG: dump the full stdout to stderr so we can see what hermes returned
+echo "DEBUG: TMP_OUT byte count: $(wc -c < "$TMP_OUT")" >&2
+echo "DEBUG: TMP_OUT content (raw):" >&2
+cat "$TMP_OUT" >&2
+echo "DEBUG: TMP_OUT content (cat -A):" >&2
+cat -A "$TMP_OUT" >&2
+echo "DEBUG: --- end TMP_OUT ---" >&2
+
+# Strip all whitespace (newlines, tabs, CR) before extracting the URL.
+# Sometimes hermes wraps the URL across multiple lines, which breaks
+# line-based grep matching.
+URL_FLAT="$(tr -d '\r\n\t ' < "$TMP_OUT")"
+URL="$(echo "$URL_FLAT" | grep -oE 'https://[^"<>]+' | head -n 1 || true)"
 URL="${URL%%[\".,)\]\}\>]*}"  # Strip trailing punctuation if present
 
 if [[ -z "$URL" ]]; then
