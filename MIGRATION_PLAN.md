@@ -388,59 +388,106 @@ VIDEO_GEN_MODEL=grok-imagine-video
 
 ---
 
-## 9.bis Step 7.5 — Imagine migrato a `/chat/completions` (compatibile Hermes v0.14) — completato: 2026-05-22
+## 9.bis Step 7.5 — Imagine via CLI bridge (`hermes -z`) — completato: 2026-05-23
 
 ### 9.bis.0 Storia del problema
 
 | Tentativo | Endpoint | Errore | Esito |
 |---|---|---|---|
-| 1 (Step 7) | `POST /v1/images/generations` + `POST /v1/videos/generations` | `HTTP 404 path_not_allowed: Allowed: /chat/completions, /completions, /embeddings, /models, /responses` | Hermes v0.14 non inoltra questi path. |
-| 2 (Step 7.5 v1) | `POST /v1/responses` con `tools: [{ type: 'image_generate' }]` / `'video_generate'` | `HTTP 422 unknown variant 'image_generate', expected one of function, web_search, x_search, collections_search, file_search, code_execution, code_interpreter, mcp, shell` | `/responses` non riconosce nessuna variante "imagine". |
-| 3 (Step 7.5 v2 — definitivo) | `POST /v1/chat/completions` con `model: IMAGE_GEN_MODEL` / `VIDEO_GEN_MODEL` | OK | Unico path effettivamente inoltrato che accetta i modelli Imagine. |
+| 1 (Step 7) | `POST /v1/images/generations` + `POST /v1/videos/generations` | `HTTP 404 path_not_allowed` | Hermes v0.14 non inoltra questi path. |
+| 2 (Step 7.5 v1) | `POST /v1/responses` con `tools: [{ type: 'image_generate' }]` / `'video_generate'` | `HTTP 422 unknown variant`, lista valida: `function, web_search, x_search, collections_search, file_search, code_execution, code_interpreter, mcp, shell` | Imagine non è esposto come tool su `/responses`. |
+| 3 (Step 7.5 v2) | `POST /v1/chat/completions` con `model: IMAGE_GEN_MODEL` / `VIDEO_GEN_MODEL` | Errore proxy (modelli Imagine non risolti su `/chat/completions`) | I modelli Imagine non sono esposti come modelli chat. |
+| 4 (Step 7.5 v3 — definitivo) | CLI: `hermes -z "<prompt>"` con `-t image_gen` o `-t video_gen` | OK, stdout = una sola riga con la URL del media | Hermes ha i toolset interni `image_gen` / `video_gen` (verificato da `~/.hermes/config.yaml`), ma sono accessibili solo da CLI/TUI, non dal proxy. |
 
-### 9.bis.1 Diagnosi finale
-Hermes Agent v0.14 inoltra solo cinque path: `/chat/completions`, `/completions`, `/embeddings`, `/models`, `/responses`. Il messaggio di errore HTTP 422 ha rivelato la lista esatta dei tool type supportati dentro `/responses`: `function, web_search, x_search, collections_search, file_search, code_execution, code_interpreter, mcp, shell`. Imagine non è esposto come tool server-side. L'unica opzione tra gli endpoint inoltrati è `/chat/completions` con i modelli dedicati `grok-imagine-image-quality` e `grok-imagine-video`. I modelli Imagine restituiscono il media generato come base64 dentro `choices[0].message.content` nello shape multimodale OpenAI standard.
+Verifica manuale sul VPS:
+```
+$ hermes -z "Genera un'immagine di un cerchio rosso. Usa solo image_generate. Rispondi solo con l'URL."
+https://imgen.x.ai/xai-imgen/xai-tmp-imgen-...jpeg
 
-### 9.bis.2 Architettura post Step 7.5
+$ hermes -z "Genera un video di un cerchio rosso che ruota. Usa solo video_generate. Duration 10s, 720p. Rispondi solo con l'URL."
+https://vidgen.x.ai/xai-vidgen-bucket/xai-video-...mp4
+```
+
+### 9.bis.1 Architettura post Step 7.5
 ```
 Grok 4.3 (Hermes /chat/completions)
-  ├─ chiama function tool: generate_image(prompt, reference_images?, aspect_ratio?)
-  │    └─ POST {HERMES_BASE_URL}/chat/completions  (model: IMAGE_GEN_MODEL)
-  │         body: { model, messages: [{ role:'user', content:[text + image_url data URLs] }], aspect_ratio? }
-  │         → choices[0].message.content → base64 → responseCtx.attachments → AUTO-DELIVERED
-  │
-  └─ chiama function tool: generate_video(prompt, reference_images?, aspect_ratio?)
-       └─ POST {HERMES_BASE_URL}/chat/completions  (model: VIDEO_GEN_MODEL)
-            body: { model, messages: [{ role:'user', content:[text + image_url data URLs] }],
-                    aspect_ratio, duration: 10, resolution: '720p' }
-            → choices[0].message.content → base64 → responseCtx.attachments → AUTO-DELIVERED
+  └─ chiama function tool: generate_image(prompt, aspect_ratio?)
+      └─ src/tools/imagineGenerator.js
+           └─ spawn('bash', ['bridge/imagine.sh', 'image', prompt, aspect])
+                └─ hermes -z --yolo --ignore-rules -t image_gen "<prompt + instr>"
+                     → stdout: https://imgen.x.ai/...jpeg
+           └─ fetch(url) → Buffer → responseCtx.attachments → AUTO-DELIVERED
+
+Stessa pipeline per generate_video con -t video_gen e 10s/720p.
 ```
 
-Reference images viaggiano dentro `messages[].content[]` come `{ type: 'image_url', image_url: { url: 'data:<mime>;base64,...' } }`. Parametri di shaping (aspect_ratio, duration, resolution) viaggiano al top level del body — Hermes inoltra i campi sconosciuti al provider xAI.
+`hermes -z` è invocato senza shell (Node spawn diretto su `bash` + script path + args posizionali) — niente injection possibile sui prompt.
+Lo script wrapper (`bridge/imagine.sh`):
+- usa `--yolo` per evitare prompt di approvazione TTY (richiesto da headless / pm2)
+- usa `--ignore-rules` per non iniettare AGENTS.md / SOUL.md / memory / skill preloaded
+- usa `-t image_gen` o `-t video_gen` per limitare la toolset disponibile in quella run
+- aggiunge un'istruzione fissa al prompt utente che dice al modello di rispondere con SOLO la URL su una riga (e applica un'estrazione regex come safety net se il modello aggiunge testo)
+- forwarda Hermes stderr al nostro stderr (utile nei log pm2 anche su success)
+- emette su stdout solo la URL pulita
 
-### 9.bis.3 Cosa è cambiato
+### 9.bis.2 Cosa è cambiato
 
 | File | Azione | Note |
 |---|---|---|
-| `src/tools/imagineGenerator.js` | ✅ Riscritto | Endpoint `${HERMES_BASE_URL}/chat/completions` con i modelli Imagine. Helper `_resolveReferenceImages`, `_loadReferenceImage`, `_cleanPrompt` invariati. Nuovo `_extractBase64Payload` ricorsivo che tollera tutte le shape OpenAI plausibili (`choices[].message.content` come stringa con data URL, come array multimodale, `data[].b64_json` legacy, fallback URL → fetch inline). |
+| `bridge/imagine.sh` | ✅ Creato | Wrapper di `hermes -z`, parse URL, exit codes definiti. |
+| `bridge/README.md` | ✅ Creato | Documenta scopo, contratto, limitazioni del bridge. |
+| `src/tools/imagineGenerator.js` | ✅ Riscritto | Ora spawna `bash bridge/imagine.sh ...`, parse stdout, fetch URL → Buffer → attachments. Helper di reference path/load (storici di Step 7) rimossi: il bridge non li accetta. |
+| `src/ai/tools.js` | ✅ Aggiornato | Schema dei tool senza `reference_images`. Description aggiornata: "describe entirely in the prompt". |
+| `.gitattributes` | ✅ Creato | Forza LF su `*.sh` e `bridge/**` per evitare CRLF su checkout Windows che romperebbe lo shebang. |
 | `MIGRATION_PLAN.md` | ✅ Aggiornato | Tabella tentativi, architettura definitiva. |
-| `SERVER_SETUP.md` | ✅ Aggiornato | Endpoint Hermes elencati con nota sul pivot Imagine. |
+| `SERVER_SETUP.md` | ✅ Aggiornato | Endpoint Hermes corretti, sezione dedicata al bridge CLI. |
 | `.env` | ✅ Aggiornato | Commento sopra `IMAGE_GEN_MODEL`/`VIDEO_GEN_MODEL` allineato. |
-| `src/config/env.js`, `src/ai/tools.js`, `src/tools/index.js`, `src/ai/systemPrompt.js` | (nessun cambio) | Le interfacce esposte (`generateImage` / `generateVideo`) sono identiche a Step 7. |
 
-### 9.bis.4 Edge case gestiti (delta rispetto alle versioni precedenti)
-1. **Parsing risposta**: il modello Imagine restituisce il media come `choices[0].message.content`, ma può farlo come stringa con `data:image/png;base64,...`, come array di parti `{ type: 'image_url', image_url: { url: 'data:...' } }`, o come `{ type: 'output_image', b64_json: '...' }`. Il nuovo parser è ricorsivo, prova ogni shape (`b64_json`, `b64`, `image_base64`, `video_base64`, `base64`, nested `image.b64_json`, `video.b64_json`, `source.data`, data URL inline) e raccoglie le URL HTTP come fallback per fetch inline.
-2. **Reference images come data URL multimodale**: shape `{ type: 'image_url', image_url: { url: 'data:...' } }` (con oggetto wrapper), che è il formato OpenAI standard accettato da `/chat/completions`. La v1 di Step 7.5 usava `{ type: 'input_image', image_url: 'data:...' }` (shape Responses API) — non valido qui.
-3. **Tutti gli edge case di Step 7 invariati**: limiti reference, aspect ratio whitelist, prompt cap 2000 char, validazione MIME, dimensioni 8 MB, timeout 3 min/8 min, `ONCE_PER_ROUND_TOOLS`, gating Discord.
+### 9.bis.3 Limitazioni note (rispetto a Step 7)
+1. **Reference images: temporaneamente non supportate**. La CLI di Hermes non accetta input binari per i toolset `image_gen` / `video_gen`. Se il modello passa `reference_images`, il tool ritorna un errore strutturato che lo invita a riprovare descrivendo le caratteristiche desiderate nel prompt. Se in futuro Hermes esporrà un modo per fornire reference (file path, base64 inline, ecc.), il bridge è un singolo file da estendere.
+2. **`aspect_ratio` per image è gestito via prompt**: il bridge inietta "Aspect ratio: 16:9" nel testo. Il modello Imagine lo rispetta ma non c'è una garanzia hard. Per video l'argomento viaggia esplicitamente nell'instruction insieme a duration e resolution.
+3. **Dipendenza da `hermes` su PATH**: il bridge fallisce con exit code 3 e messaggio chiaro se `hermes` non è in `PATH`. Su sviluppo Windows il tool semplicemente non funziona (non è installato lì), ma il caricamento di GemiX rimane sano.
+4. **Latenza**: hermes -z carica il proprio runtime ad ogni invocazione (~1-3 s di overhead) sopra al tempo di generazione effettivo. Accettabile per un tool a bassa frequenza.
+
+### 9.bis.4 Edge case gestiti
+1. **Timeout del bridge**: 3 min image / 8 min video, kill SIGKILL al child se sfora.
+2. **Bridge exit non-zero**: stderr (max 500 char tail) viene inoltrato al modello in errore strutturato + notifica admin.
+3. **Bridge restituisce stdout senza URL**: errore strutturato ("produced no URL") + dump dei primi 300 char di stdout nella notifica admin.
+4. **Download URL fallito o body vuoto**: errore strutturato + notifica admin (la URL xAI scade in pochi minuti, quindi se il download fallisce è quasi sempre per network sull'host).
+5. **Estensione URL**: viene mappata a MIME type appropriato (`.jpeg`/`.jpg`/`.png`/`.webp`/`.gif` per image; `.mp4`/`.webm`/`.mov` per video). Default fallback `image/png` o `video/mp4`.
+6. **Prompt > 2000 char**: troncato con marker nel messaggio di risposta.
+7. **Same round, due chiamate**: bloccato da `ONCE_PER_ROUND_TOOLS` (invariato da Step 7).
+8. **Discord**: tool non in lista (invariato da Step 7).
+9. **`HERMES_API_KEY` / `IMAGE_GEN_MODEL` / `VIDEO_GEN_MODEL` mancanti**: errore strutturato senza crash. (Le env restano gating logici anche se la CLI legge da `~/.hermes/config.yaml`.)
 
 ### 9.bis.5 Variabili `.env`
-Nessuna modifica funzionale. `IMAGE_GEN_MODEL` e `VIDEO_GEN_MODEL` rimangono `grok-imagine-image-quality` e `grok-imagine-video`. Cambia solo l'endpoint su cui sono invocati.
+Nessuna modifica funzionale. `IMAGE_GEN_MODEL` e `VIDEO_GEN_MODEL` restano `grok-imagine-image-quality` e `grok-imagine-video` per coerenza documentale, ma in pratica Hermes legge i modelli dalla sua config interna (`~/.hermes/config.yaml`):
+```yaml
+image_gen:
+  provider: xai
+  use_gateway: false
+  model: grok-imagine-image-quality
+video_gen:
+  provider: xai
+  use_gateway: false
+  model: grok-imagine-video
+```
 
 ### 9.bis.6 Checklist Step 7.5
-- [x] `src/tools/imagineGenerator.js` — riscritto (endpoint `/chat/completions`, body con `messages`, parser ricorsivo che copre stringa/array/legacy)
-- [x] `node --check src/tools/imagineGenerator.js`: OK
+- [x] `bridge/imagine.sh` — creato (wrapper `hermes -z`, parse URL, exit codes)
+- [x] `bridge/README.md` — creato (contratto del bridge)
+- [x] `src/tools/imagineGenerator.js` — riscritto (spawn bridge, fetch URL, attachment buffering)
+- [x] `src/ai/tools.js` — schema senza reference_images, description aggiornata
+- [x] `.gitattributes` — LF forzato per `*.sh` e `bridge/**`
+- [x] `MIGRATION_PLAN.md`, `SERVER_SETUP.md`, `.env` — documentazione allineata
+- [x] `node --check`: OK
 - [x] `getDiagnostics`: nessuna diagnostica
-- [ ] **Da fare sul VPS dopo deploy**: `pm2 restart "GemiX"` e smoke test (text-to-image, image-to-image con reference da history, text-to-video, image-to-video, reference-to-video con 2-3 reference). Se la risposta `/chat/completions` restituisce il media in una shape non riconosciuta dal parser, mandare il JSON completo (livello `choices[0].message`) e adattare `_extractBase64Payload` in 30 secondi.
+- [ ] **Da fare sul VPS dopo deploy**:
+  1. `git pull` sul VPS (porterà `bridge/imagine.sh` con permessi 644).
+  2. `chmod +x bridge/imagine.sh` (opzionale: il bridge è invocato come `bash imagine.sh`, quindi anche senza +x funziona).
+  3. Verificare che `hermes` sia in `PATH` per l'utente che gira il processo pm2 (`which hermes` da quell'utente).
+  4. `pm2 restart "GemiX"`.
+  5. Smoke test: text-to-image semplice ("disegna un cerchio rosso"), text-to-video semplice. Niente reference, è atteso che il modello non le passi più (schema tool aggiornato).
 
 ---
 

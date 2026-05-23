@@ -227,28 +227,20 @@ const TOOL_MUSIC_CREATOR = makeTool({
 // ── Grok Imagine — image and video generation ──
 //
 // Available to all users (active or not) on every platform except Discord.
-// `reference_images` accepts file paths the AI can already access (chat
-// history in non-agentic mode; chat history + searched_images + project
-// files in agentic mode). No URLs, no buffers — keeps the surface in sync
-// with read_file / attach_file.
+//
+// IMPORTANT: the current Hermes bridge (CLI-based, see bridge/imagine.sh)
+// does NOT support reference images. The model must rely entirely on the
+// textual prompt to describe the desired look. If/when reference image
+// support is restored, the schema can grow back a `reference_images` field.
 
-function buildGenerateImageTool(agenticUnlocked = false) {
-  const refDesc = agenticUnlocked
-    ? 'Paths to reference images (max 3): bare history filename (e.g. "photo.jpg") or absolute path under /readonly/{history|searched_images}/ or /workspace/{temp|output|code}/.'
-    : 'Paths to reference images from chat history (max 3), e.g. "photo.jpg" or "subdir/photo.jpg".';
-
+function buildGenerateImageTool(_agenticUnlocked = false) {
   return makeTool({
     name: 'generate_image',
-    description: 'Generate an image from a prompt. Optionally provide up to 3 reference images for image-to-image / editing. Result is pushed to the delivery buffer.',
+    description: 'Generate an image from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
     properties: {
       prompt: {
         type: 'string',
-        description: 'Image description: subject, style, lighting, mood.',
-      },
-      reference_images: {
-        type: 'array',
-        items: { type: 'string' },
-        description: refDesc,
+        description: 'Image description: subject, style, lighting, mood, composition.',
       },
       aspect_ratio: {
         type: 'string',
@@ -260,23 +252,14 @@ function buildGenerateImageTool(agenticUnlocked = false) {
   });
 }
 
-function buildGenerateVideoTool(agenticUnlocked = false) {
-  const refDesc = agenticUnlocked
-    ? 'Paths to reference images: 1 image → image-to-video; 2-7 images → reference-to-video (characters, environments, framing). Bare history filename or absolute path under /readonly/{history|searched_images}/ or /workspace/{temp|output|code}/.'
-    : 'Paths to reference images from chat history: 1 image → image-to-video; 2-7 images → reference-to-video (characters, environments, framing). E.g. "photo.jpg".';
-
+function buildGenerateVideoTool(_agenticUnlocked = false) {
   return makeTool({
     name: 'generate_video',
-    description: 'Generate a 10-second 720p video from a prompt. Optionally provide reference images. Result is pushed to the delivery buffer.',
+    description: 'Generate a 10-second 720p video from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
     properties: {
       prompt: {
         type: 'string',
         description: 'Video description: subject, action, camera movement, style, lighting.',
-      },
-      reference_images: {
-        type: 'array',
-        items: { type: 'string' },
-        description: refDesc,
       },
       aspect_ratio: {
         type: 'string',
