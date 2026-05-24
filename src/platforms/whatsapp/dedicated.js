@@ -26,7 +26,7 @@ function initDedicatedWhatsApp() {
   client = new Client({
     authStrategy: new LocalAuth({ clientId: 'dedicated' }),
     puppeteer: {
-      executablePath: process.platform === 'linux' ? '/usr/bin/chromium' : undefined,
+      executablePath: '/usr/bin/chromium',
       headless: true,
       args: PUPPETEER_ARGS,
       protocolTimeout: 120000,
@@ -134,7 +134,7 @@ async function onDedicatedMessage(msg) {
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
-  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, isGroup ? chat.id._serialized : phoneJid);
+  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, isGroup ? chat.id._serialized : phoneJid, isGroup);
 
   if (contentParts.length === 0) return;
 

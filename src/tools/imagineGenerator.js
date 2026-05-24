@@ -91,7 +91,6 @@ function _runBridge(args, timeoutMs) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [BRIDGE_SCRIPT, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
     });
 
     let stdout = '';

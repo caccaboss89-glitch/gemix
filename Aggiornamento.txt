@@ -1,0 +1,97 @@
+*GemiX v2.0* - Sistema Agentico Completo, Multimodalità Universale e Potenziamento Radicale delle Capacità.
+
+*GemiX v2.0*, l'aggiornamento più grande e rivoluzionario di sempre: *Sistema Agentico Completo*, nuovi tool multimodali, riscrive da zero e potenzia i componenti core di GemiX.
+
+*🎨 Generazione Media*
+- *NEW* 🎨 `generate_image`: genera immagini originali con *Grok Imagine* direttamente in chat (5 aspect ratio, qualità alta).
+- *NEW* 🎬 `generate_video`: genera video da prompt testuali con *Grok Imagine* (10s, 720p, 3 aspect ratio).
+- *NEW* 🔊 Voce naturale: messaggi vocali generati con TTS xAI (voce "Leo").
+- *NEW* 🎵 `music_creator`: genera canzoni da 30 secondi con *Gemini*.
+
+
+*🧠 Nuovo Cervello: Grok 4.3*
+- Nuovo modello principale unico: *Grok 4.3* di xAI, sia in modalità standard che agentica.
+- Context window potenziato: fino a *64.000 token in output* e *50 messaggi in cronologia*, per conversazioni più lunghe e risposte più complete.
+- Tutto il ragionamento interno dell'AI è stato standardizzato in *inglese* (System Prompt, definizioni tool, feedback ed errori). Le risposte all'utente finale rimangono sempre in *italiano*.
+- Video descritti da modello dedicato (Gemini 2.5 Flash Lite), audio trascritti dal sistema STT xAI nativo.
+
+*� Ricerca Web e 𝕏 di Nuova Generazione*
+- *NEW* `web_x_search`: le ricerche su web sono ora gestite da un *team di ricerca specializzato* (Grok 4.20 Multi-Agent 4x) che cerca su web e 𝕏 in parallelo, con citazioni e fonti verificate (con statistiche di ricerca nel footer finale).
+- *NEW* `image_search` con anteprime low quality.
+
+*🏗️ Sistema Agentico Completo*
+- *NEW* `agentic_unlock` intelligente che sblocca la suite agentica completa quando necessario.
+- *NEW* `code_interpreter` server-side xAI: esecuzione Python isolata e sicura per matematica, calcoli, plot e analisi dati. Disponibile sempre, anche fuori dalla modalità agentica.
+- *NEW* `write_file`, `edit_file`, `bash` (shell persistente) e `attach_file`: operativi all'interno del progetto attivo in modalità agentica.
+- *NEW* Tool di gestione progetti completi: `list_projects`, `create_project`, `switch_project`, `delete_project`, `cleanup_project`, `copy_to_project`.
+- *NEW* Workspace per ogni utente: `history/`, `searched_images/` e `projects/<project_name>/` con cartelle rigide (`temp/`, `output/`, `code/`) + `README.md` e metadata (max 10 progetti per utente + quota totale di *1 GB*).
+- *NEW* Tool *universale `read_file`* multimodale (testo, codice, PDF, immagini, audio) con trascrizione in tag dedicati.
+- *NEW* Skill avanzate native per PDF/PPTX/XLSX/DOCX e parser PDF potenziato.
+- Crash recovery automatico e briefing completo del toolkit.
+- Download di dati/immagini/video da YouTube 𝕏, Facebook, TikTok, Instagram (con proxy backend per bypass blocchi).
+
+
+*✨ Miglioramenti UX e Amministrazione*
+- *Indicatore typing e "sta registrando vocale" su WhatsApp*.
+- *Notifiche intermedie*: GemiX ti avvisa quando sta lavorando per compiti prolungati (ricerca, generazione immagine/video, descrizione media).
+- Download di allegati grandi tramite link temporanei (valido 1 ora).
+- Modalità manutenzione (GemiX risponde solo all'amministratore; agli altri utenti viene mostrato messaggio di sistema).
+- Nuovo comando `/updates` disponibile anche in manutenzione.
+- Admin notify tool `bug_report` per segnalazioni automatiche.
+
+*💾 Persistenza, Sicurezza e Pulizia*
+- Sistema di sincronizzazione persistente: ogni allegato in crologia chat (eliminato altrimenti) è salvato su disco (con deduplicazione intelligente).
+- Sicurezza percorsi rigorosa con `path.relative` + `realpath` (anti path traversal).
+- Rimosso sistema RAG per regolamento su Discord (ora iniettato nel system prompt).
+- Adozione estesa di XML strutturato e grande operazione di pulizia/standardizzazione del codebase (bug, codice morto, velocità, formati adottati).
+
+*🚀 Ora GemiX può fare cose come*
+- Generare immagini originali e video brevi direttamente in chat con un semplice prompt.
+- Cercare informazioni aggiornate in tempo reale combinando ricerca web + post recenti su 𝕏/Twitter, con citazioni verificate.
+- Creare una simulazione completa della traiettoria di un buco nero rotante e visualizzarla in un grafico 3D interattivo.
+- Risolvere equazioni di fisica quantistica complesse e generare grafici scientifici pronti per una pubblicazione.
+- Produrre un report finanziario professionale con Excel completo di formule, grafici e formattazione automatica, poi convertirlo in PDF elegante con watermark.
+- Generare da zero una presentazione PowerPoint aziendale con grafici, immagini e layout professionali.
+- Processare decine di foto di prodotto: rimuovere sfondi, estrarre testi con OCR e creare un catalogo PDF impaginato e pronto all'uso.
+- Analizzare dati di vendita e trasformarli automaticamente in un report Word completo di indice, tabelle e grafici.
+- Leggere un CV in PDF, migliorarlo e trasformarlo in una presentazione accattivante per un colloquio.
+- Creare fatture ricorrenti personalizzate, calcolare totali e imposte, e consegnarle pronte da inviare.
+- Risolvere problemi di ottimizzazione aziendale (produzione, logistica, ecc.) e generare report chiari con grafici e risultati.
+- Realizzare materiale didattico o ebook con equazioni, grafici, immagini e impaginazione professionale.
+
+[IMMAGINE 1 – Inserisci qui la prima immagine di esempio]
+[IMMAGINE 2 – Inserisci qui la seconda immagine di esempio]
+[IMMAGINE 3 – Inserisci qui la terza immagine di esempio]
+
+[Qui allega un'immagine generata con generate_image come demo di Grok Imagine]
+[Qui allega un video generato con generate_video come demo di Grok Imagine]
+[Qui allega la canzone generata da GemiX v2.0 come demo della nuova creatività musicale]
+
+Questa release rende GemiX un vero *agente autonomo* e professionale: più intelligente, più veloce, più sicuro e infinitamente più utile. Il salto è enorme, ma il risultato è un sistema stabile, pulito e pronto per compiti reali.
+
+Un ringraziamento speciale a tutto il team che ha lavorato questi mesi per realizzare un sistema così complesso:
+- Grok 4.20 fast/fast thinking: researcher e troubleshooting engineer
+- Grok 4.20 expert 1x: deep code analyst e performance optimizer
+- Grok 4.20 expert 4x: expert researcher and plans engineer
+- Grok 4.20 multi-agent: research team specialist (web + X search)
+- Grok 4.3: cervello principale di GemiX v2.0 + image/video generation //RINGRAZIAMENTO SPECIALE
+- Claude 4.5 Haiku: lightweight prompt architect e rapid idea generator
+- Claude 4.5 Sonnet: structured reasoning specialist e logic validator
+- Claude 4.6 Opus: advanced system designer e architecture master
+- Claude 4.7 Opus: max coder plan engineer e migration architect
+- Gemini 3 flash: multimodal vision & audio specialist
+- Gemini 3.1 pro medium: creative content & presentation engineer
+- Gemini 3.1 pro xhigh: high-precision document & data architect
+- Kimi 2.6: ultra-fast parallel thinker e research accelerator
+- SWE-1.6: software engineering veteran e codebase cleaner
+- GPT 5.3 codex: legacy-to-modern code migrator e refactoring expert
+- GPT 5.4 mini High: token-efficient prompt engineer
+- GPT 5.4 High: complex workflow orchestrator
+- GPT 5.5 high Thinking: strategic planner e long-horizon agent coordinator
+
+*Statistiche di crescita del codebase:*
+- Gemix 1.0: Total 35 files, 6153 codes, 448 comments, 487 blanks, all 7088 lines
+- Gemix 1.75: Total 49 files, 4980 codes, 780 comments, 915 blanks, all 6675 lines
+- *GemiX 2.0: Total 121 files, 21884 codes, 2889 comments, 3707 blanks, all 28480 lines*
+
+GemiX v2.0 è online. Pronti a creare? 🚀

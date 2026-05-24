@@ -5,7 +5,7 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATI
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { mediaToContentPart, buildAttachmentTag } = require('../../utils/media');
+const { mediaToContentPart, buildAttachmentTag, isInlineableTextFile, buildInlineTextFilePart } = require('../../utils/media');
 const { getMediaDurationSec } = require('../../utils/mediaDuration');
 const responseLock = require('../../utils/responseLock');
 const { createLogger } = require('../../utils/logger');
@@ -304,8 +304,18 @@ async function onDiscordMessage(msg) {
       } catch {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }
+    } else if (isInlineableTextFile(att.name, att.contentType)) {
+      // Plain-text / source-code file — inline its content directly so the
+      // model sees it without a read_file roundtrip.
+      try {
+        const buffer = await fetchBuffer();
+        const inlinePart = buildInlineTextFilePart(att.name, buffer);
+        textBody = `${attachmentTag} ${inlinePart} ${textBody}`.trim();
+      } catch {
+        textBody = `${attachmentTag} ${textBody}`.trim();
+      }
     } else if (isDoc) {
-      // Non-image, non-PDF documents: tag only.
+      // Non-image, non-PDF, non-text documents (docx, xlsx, zip…): tag only.
       textBody = `${attachmentTag} ${textBody}`.trim();
     } else if (isImage) {
       try {

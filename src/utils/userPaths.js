@@ -170,7 +170,7 @@ function _isInside(base, target) {
  * anchored at the user root, and classify what zone it belongs to.
  *
  * Rules:
- *  - Input must be a relative POSIX/Windows-ish path. Absolute paths, backslash
+ *  - Input must be a relative POSIX path. Absolute paths, backslash
  *    escapes outside user root, or paths with NUL bytes are rejected.
  *  - Returns { ok, absPath, zone, projectName, subdir, reason }.
  *    zone: 'history' | 'searched_images' |

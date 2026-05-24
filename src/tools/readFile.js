@@ -83,15 +83,23 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   const agenticUnlocked = userCtx.agenticUnlocked;
   let rawPath = (filePath || '').trim();
 
-  // Automatically normalize relative paths to history/ (NON-agentic only).
-  // This allows the AI to use "file.pdf" → "history/file.pdf" or "CV/transcription.md" → "history/CV/transcription.md".
-  // Agentic mode MUST use absolute paths as instructed.
-  if (!agenticUnlocked && !rawPath.startsWith('/') && !rawPath.startsWith('skills:')) {
+  // Automatically normalize bare filenames / relative paths to chat history.
+  //
+  // - Non-agentic: any non-absolute path is treated as relative to history/
+  //   (e.g. "file.pdf" → "history/file.pdf", "CV/transcription.md" → "history/CV/transcription.md").
+  // - Agentic: absolute paths are required for /workspace and /readonly,
+  //   but a BARE filename with no slash (e.g. "file.pdf") is still routed to
+  //   chat history — this matches the tool description and keeps reads of
+  //   in-history files convenient regardless of mode.
+  if (!rawPath.startsWith('/') && !rawPath.startsWith('skills:')) {
     if (rawPath.startsWith('./')) {
       rawPath = rawPath.slice(2);
     }
-    if (!rawPath.startsWith('history/')) {
-      rawPath = 'history/' + rawPath;
+    const isBareFilename = !rawPath.includes('/');
+    if (!agenticUnlocked || isBareFilename) {
+      if (!rawPath.startsWith('history/')) {
+        rawPath = 'history/' + rawPath;
+      }
     }
   }
 
@@ -333,11 +341,11 @@ async function readFileTool(filePath, userCtx, responseCtx) {
         } catch { /* ignore */ }
       }
 
-      const output = `<FileAnalysis path="${displayPath}" type="pdf-transcription"${isTruncated ? ' truncated="true"' : ''}>
+      const output = `<FileContent path="${displayPath}" type="pdf-transcription"${isTruncated ? ' truncated="true"' : ''}>
 <Transcription>
 ${text}
 </Transcription>${assetsInfo}
-</FileAnalysis>${bgWriteViolationWarning}`;
+</FileContent>${bgWriteViolationWarning}`;
 
       return { success: true, message: output };
     }
@@ -384,7 +392,7 @@ ${text}
     responseCtx.imagesReadCount++;
     const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
     return [
-      { type: 'text', text: `Contents of ${sanitizedPath}:` },
+      { type: 'text', text: `[Attachment: ${sanitizedPath}]` },
       mediaToContentPart(buffer, mimeMap[ext])
     ];
   }
@@ -393,7 +401,7 @@ ${text}
   if (AUDIO_EXTS.includes(ext)) {
     const mimeMap = { '.ogg': 'audio/ogg', '.mp3': 'audio/mp3', '.wav': 'audio/wav', '.m4a': 'audio/m4a' };
     return [
-      { type: 'text', text: `Audio contents of ${sanitizedPath}:` },
+      { type: 'text', text: `[Attachment: ${sanitizedPath}]` },
       mediaToContentPart(buffer, mimeMap[ext], {
         historyPath: rawPath.startsWith('history/') ? rawPath : null,
         historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,
@@ -405,7 +413,7 @@ ${text}
   if (VIDEO_EXTS.includes(ext)) {
     const mimeMap = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
     return [
-      { type: 'text', text: `Video contents of ${sanitizedPath}:` },
+      { type: 'text', text: `[Attachment: ${sanitizedPath}]` },
       mediaToContentPart(buffer, mimeMap[ext], {
         historyPath: rawPath.startsWith('history/') ? rawPath : null,
         historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,

@@ -13,7 +13,7 @@ function buildSystemPrompt(ctx) {
   let prompt = '<SystemPrompt>\n';
 
   if (MAINTENANCE_MODE) {
-    prompt += '  <MaintenanceMode>Bot in maintenance: only admins can interact. Non-admin requests are auto-dropped.</MaintenanceMode>\n';
+    prompt += '  <MaintenanceMode>You are talking to the Admin.</MaintenanceMode>\n';
   }
 
   prompt += `  <CriticalRule>
@@ -45,27 +45,33 @@ function buildSystemPrompt(ctx) {
   prompt += '  <Behavior>\n';
   prompt += '- Execute tools silently. Reply once after all complete.\n';
   prompt += `- Provide a final response${isWhatsApp ? ' (text or voice)' : ''} to the user.\n`;
-  prompt += '- Delivery buffer: everything in the buffer is sent AUTOMATICALLY to the current user with your reply. To forward to another recipient use a delivery tool with includeAttachments=true.\n';
+  prompt += '- Delivery buffer: everything in the buffer is sent AUTOMATICALLY to the current user with your reply.\n';
+  prompt += '- Forwarding to another recipient: any delivery tool accepts an "includeAttachments" boolean (default true) — set to false only if you do NOT want the buffered files attached to that specific outgoing message.\n';
   prompt += '- Call bug_report only if the tool error DOES NOT state the Admin was notified. Always inform the user when you use it.\n';
   if (!isActiveMember) {
     prompt += '- Some tools (email, messages...) unavailable for this user.\n';
   }
-  prompt += `- Audio ≤ ${MAX_AUDIO_DURATION_S}s and PDF → &lt;Transcription&gt; tags. Video ≤ ${MAX_VIDEO_DURATION_S}s → &lt;Description&gt; tags.\n`;
+  prompt += `- Audio ≤ ${MAX_AUDIO_DURATION_S}s → &lt;Transcription&gt; tags. PDF → &lt;FileContent type="pdf-transcription"&gt; with inner &lt;Transcription&gt;. Video ≤ ${MAX_VIDEO_DURATION_S}s → &lt;Description&gt; tags. Inlined text/code attachments → &lt;FileContent path=... size=...&gt;.\n`;
 
   if (isWhatsApp) {
     prompt += '    <ResponsePreferences>\n';
     prompt += '- Use send_voice_message for short/casual replies; text for technical or long replies. Vary format based on your past messages.\n';
     if (isActiveMember) {
-      prompt += '- Formal request PDFs (for Discord regulations) not available: suggest GemiX on Discord for this. Only generic PDFs are available in agentic mode.\n';
+      prompt += '- Discord regulations formal request PDFs not available: suggest GemiX on Discord for this. Other type of PDFs are available in agentic mode.\n';
     }
     prompt += '    </ResponsePreferences>\n';
   }
   prompt += '  </Behavior>\n';
 
   if (!isDiscord) {
+    const isAgenticActive = Boolean(ctx.agenticBriefing);
+    const filesLine = isAgenticActive
+      ? '- For files, skills, downloads, deliverables: use bash/write_file/edit_file.'
+      : '- For files, skills, downloads, deliverables: call agentic_unlock first, then use bash/write_file/edit_file.';
     prompt += `  <ToolBoundaries>
 - code_interpreter: isolated ad-hoc Python (math, analysis) — no user workspace access.
-- For files, skills, downloads, deliverables: call agentic_unlock first, then use bash/write_file/edit_file.
+${filesLine}
+- generate_image / generate_video: text-to-image/video only. Reference images are NOT supported. If the user asks to edit/modify/use an existing image as reference, tell them clearly you cannot do that and generate from text only.
   </ToolBoundaries>\n`;
   }
 
@@ -106,6 +112,7 @@ function buildDedicatedWaInstructions(ctx) {
 function buildPersonalWaInstructions(ctx) {
   let s = '  <Platform name="whatsapp_personal">\n';
   s += `    <Rule>Reply when tagged. Interlocutor: ${escapeXml(ctx.userName)}.</Rule>\n`;
+  s += '    <AccountOwner>The "Account Owner" appearing in chat history is Alberto Gagliardi.</AccountOwner>\n';
   s += `    <Format>*bold* _italic_ ~strike~ \`code\` > citation</Format>\n  </Platform>\n`;
   return s;
 }

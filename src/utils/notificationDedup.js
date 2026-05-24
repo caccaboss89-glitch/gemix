@@ -99,12 +99,14 @@ function buildVideoNotificationMessage(count) {
 }
 
 /**
- * Fixed research notification. Searches are capped at one per round so no
- * plural variant is needed.
+ * Fixed research notification. Sent BEFORE the multi-agent team is queried,
+ * so the user knows GemiX is actively consulting the research team and is
+ * about to wait for their report before answering. Searches are capped at
+ * one per round so no plural variant is needed.
  * @returns {string}
  */
 function buildResearchNotificationMessage() {
-  return '🔎 Sto consultando il team di ricerca, attendi un attimo...';
+  return '🔎 Sto consultando il team di ricerca prima di risponderti, attendi un attimo...';
 }
 
 // ── Safety valve ────────────────────────────────────────────────────────────

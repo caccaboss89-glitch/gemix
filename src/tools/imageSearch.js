@@ -88,7 +88,7 @@ async function _shrinkForPreview(buf, mime) {
 async function _downloadImage(url) {
   const res = await fetchWithTimeout(url, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'Accept': 'image/*,*/*;q=0.8',
     },
   });

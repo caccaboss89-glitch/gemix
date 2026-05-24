@@ -317,9 +317,13 @@ async function transcribeDocumentsInMessageContent(content, opts = {}) {
       const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
 
       if (persisted.success && typeof persisted.text === 'string' && persisted.text.trim()) {
+        // Wrap in the same <FileContent type="pdf-transcription"> envelope
+        // produced by the read_file tool, so the model treats inline PDFs
+        // and read_file results identically.
+        const pdfDisplayPath = persisted.historyPath || historyPath;
         transcribed.push({
           type: 'text',
-          text: `<Transcription>\n${persisted.text}\n</Transcription>`,
+          text: `<FileContent path="${pdfDisplayPath}" type="pdf-transcription">\n<Transcription>\n${persisted.text}\n</Transcription>\n</FileContent>`,
         });
         if (persisted.historyPath && persisted.historyPath !== historyPath) {
           attachmentPathReplacements.set(historyPath, persisted.historyPath);
@@ -390,6 +394,105 @@ function extractAttachmentTagPaths(text) {
   return paths;
 }
 
+// ── Inline text-file ingestion ──────────────────────────────────────────────
+//
+// Source-code and plain-text files are not multimodal: feeding them as
+// base64 inside an image_url part is wasteful and unreliable. Instead we
+// inline the file content directly inside the user message text, wrapped
+// in a small XML envelope so the model can clearly distinguish
+// per-attachment content from the user's own typing.
+//
+// This applies ONLY to the message that triggers the current AI call
+// (current Discord/WhatsApp message). In chat history the same files are
+// referenced via [Attachment: filename] tags — the model can request the
+// content via read_file when needed.
+const INLINE_TEXT_EXTS = new Set([
+  // Plain text / docs
+  '.txt', '.md', '.rst', '.log', '.csv', '.tsv',
+  // Web / config
+  '.html', '.htm', '.xml', '.svg', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
+  // Shell / build
+  '.sh', '.bash', '.zsh', '.bat', '.ps1', '.makefile', '.dockerfile',
+  // Languages
+  '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.pyw', '.rb', '.php',
+  '.java', '.kt', '.scala', '.groovy', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cc', '.cs',
+  '.swift', '.m', '.mm', '.dart', '.lua', '.pl', '.r', '.jl',
+  // Web-frontend
+  '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
+  // Data / queries
+  '.sql', '.graphql', '.gql',
+  // Patches / diffs
+  '.patch', '.diff',
+]);
+
+const INLINE_TEXT_MIME_PREFIXES = ['text/'];
+const INLINE_TEXT_MIME_EXTRA = new Set([
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/x-yaml',
+  'application/x-sh',
+  'application/x-httpd-php',
+  'application/x-shellscript',
+]);
+
+const INLINE_TEXT_MAX_BYTES = 200 * 1024; // 200 KB cap per file
+
+/**
+ * Decide whether a (filename, mimetype) pair is an inline-able text file.
+ * Returns false for binary docs (pdf, docx, xlsx, zip, …) and unknown types.
+ */
+function isInlineableTextFile(filename, mimetype) {
+  const mime = (mimetype || '').split(';')[0].trim().toLowerCase();
+  if (mime) {
+    if (INLINE_TEXT_MIME_PREFIXES.some(p => mime.startsWith(p))) return true;
+    if (INLINE_TEXT_MIME_EXTRA.has(mime)) return true;
+  }
+  if (typeof filename === 'string' && filename) {
+    const idx = filename.lastIndexOf('.');
+    if (idx >= 0) {
+      const ext = filename.slice(idx).toLowerCase();
+      if (INLINE_TEXT_EXTS.has(ext)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Build an XML-tagged text part to inline a text-file body inside the user
+ * message content. Mirrors the exact format produced by the read_file tool:
+ *
+ *   <FileContent path="..." size="N" [truncated="true"]>
+ *   1: line1
+ *   2: line2
+ *   ...
+ *   </FileContent>
+ *
+ * Keeping the format consistent means the model treats inlined attachments
+ * and read_file outputs the same way (line refs, citations, edit prompts).
+ *
+ * Handles size cap and truncation marker. The returned string never exceeds
+ * INLINE_TEXT_MAX_BYTES + a small wrapper.
+ *
+ * @param {string} filename
+ * @param {Buffer} buffer
+ * @returns {string}
+ */
+function buildInlineTextFilePart(filename, buffer) {
+  const totalSize = buffer.length;
+  let text = buffer.toString('utf-8');
+  let truncated = false;
+  if (Buffer.byteLength(text, 'utf-8') > INLINE_TEXT_MAX_BYTES) {
+    text = Buffer.from(text, 'utf-8').slice(0, INLINE_TEXT_MAX_BYTES).toString('utf-8') + '\n... (file truncated)';
+    truncated = true;
+  }
+  const lines = text.split(/\r?\n/);
+  const numberedText = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
+  const safePath = String(filename || 'file').replace(/[<>"'&]/g, '_');
+  const truncAttr = truncated ? ' truncated="true"' : '';
+  return `<FileContent path="${safePath}" size="${totalSize}"${truncAttr}>\n${numberedText}\n</FileContent>`;
+}
+
 module.exports = {
   isSupportedMedia,
   mediaToContentPart,
@@ -398,4 +501,6 @@ module.exports = {
   transcribeDocumentsInMessageContent,
   buildAttachmentTag,
   extractAttachmentTagPaths,
+  isInlineableTextFile,
+  buildInlineTextFilePart,
 };

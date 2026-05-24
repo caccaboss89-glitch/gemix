@@ -94,25 +94,15 @@ async function executeYtDlpOnHost(args, userCtx, command, responseCtx) {
   // Decide which binary to use: local bin/yt-dlp if it exists, otherwise system yt-dlp
   const gemixRoot = path.resolve(__dirname, '../../');
   const localYtDlpBin = path.join(gemixRoot, 'bin', 'yt-dlp');
-  const ytDlpBin = fs.existsSync(localYtDlpBin) ? localYtDlpBin.replace(/\\/g, '/') : 'yt-dlp';
+  const ytDlpBin = fs.existsSync(localYtDlpBin) ? localYtDlpBin : 'yt-dlp';
 
-  // Inject the infallible evasion wrapper (adapted for Video instead of Audio-only)
-  if (process.platform === 'win32') {
-    // Windows cmd.exe fallback (for local development testing)
-    const evasionArgs = `--proxy "socks5h://${SANDBOX_PROXY_HOST}:${SANDBOX_PROXY_PORT}" --extractor-args "youtube:client=ANDROID,IOS,TV;player_client=android,ios,tv" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4`;
-    hostCmd = hostCmd.replace(/(^|\s)yt-dlp\b/, `$1"${ytDlpBin}" ${evasionArgs}`);
-  } else {
-    // Robust bash function for Linux production
-    const ytDlpWrapper = `yt-dlp() { "${ytDlpBin}" --proxy "socks5h://${SANDBOX_PROXY_HOST}:${SANDBOX_PROXY_PORT}" --extractor-args "youtube:client=ANDROID,IOS,TV;player_client=android,ios,tv" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4 "$@"; }; `;
-    hostCmd = ytDlpWrapper + hostCmd;
-  }
+  // Robust bash function with the infallible evasion wrapper.
+  const ytDlpWrapper = `yt-dlp() { "${ytDlpBin}" --proxy "socks5h://${SANDBOX_PROXY_HOST}:${SANDBOX_PROXY_PORT}" --extractor-args "youtube:client=ANDROID,IOS,TV;player_client=android,ios,tv" --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --force-ipv4 "$@"; }; `;
+  hostCmd = ytDlpWrapper + hostCmd;
 
   let rc = 0, stdout = '', stderr = '';
   try {
-    const opts = { cwd: projectDir, timeout: 120_000 };
-    if (process.platform !== 'win32') {
-      opts.shell = '/bin/bash';
-    }
+    const opts = { cwd: projectDir, timeout: 120_000, shell: '/bin/bash' };
     const result = await exec(hostCmd, opts);
     stdout = result.stdout;
     stderr = result.stderr;

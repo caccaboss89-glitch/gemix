@@ -27,7 +27,7 @@ function initPersonalWhatsApp() {
   client = new Client({
     authStrategy: new LocalAuth({ clientId: 'personal' }),
     puppeteer: {
-      executablePath: process.platform === 'linux' ? '/usr/bin/chromium' : undefined,
+      executablePath: '/usr/bin/chromium',
       headless: true,
       args: PUPPETEER_ARGS,
       protocolTimeout: 120000,
@@ -170,7 +170,9 @@ async function onPersonalMessage(msg) {
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
-  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, phoneJid);
+  // Personal account never serves groups (filtered earlier in onPersonalMessage),
+  // so isGroup=false here is structural, not a runtime check.
+  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, phoneJid, false);
 
   if (contentParts.length === 0) return;
 

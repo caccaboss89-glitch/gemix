@@ -29,17 +29,22 @@ function makeTool({ name, description, properties = {}, required = [] }) {
 // We expose code_interpreter as a regular function tool; when the model calls
 // it, the dispatcher in tools/index.js forwards the request to xAI /v1/responses
 // (same path as web_x_search) where code_interpreter IS a valid server-side tool.
-const TOOL_CODE_INTERPRETER = makeTool({
-  name: 'code_interpreter',
-  description: 'Run Python for calculations, data analysis, plots, or any ad-hoc script. Isolated sandbox — no access to user workspace. For project files use write_file + bash in agentic mode instead.',
-  properties: {
-    code: {
-      type: 'string',
-      description: 'Python code to execute.',
+function buildCodeInterpreterTool(agenticUnlocked = false) {
+  const description = agenticUnlocked
+    ? 'Run Python for calculations, data analysis, plots, or any ad-hoc script. Isolated sandbox — no access to user workspace. For project files use write_file + bash instead.'
+    : 'Run Python for calculations, data analysis, plots, or any ad-hoc script. Isolated sandbox — no access to user workspace.';
+  return makeTool({
+    name: 'code_interpreter',
+    description,
+    properties: {
+      code: {
+        type: 'string',
+        description: 'Python code to execute.',
+      },
     },
-  },
-  required: ['code'],
-});
+    required: ['code'],
+  });
+}
 
 // ── Static tool definitions (schema never varies) ──
 
@@ -70,7 +75,7 @@ function buildImageSearchTool(agenticUnlocked = false) {
   if (agenticUnlocked) {
     properties.save_to_disk = {
       type: 'boolean',
-      description: 'If true, ALL images are saved to searched_images/ regardless of your final selection. Default false.',
+      description: 'If true, ALL images are saved to searched_images/. Default false.',
     };
   }
 
@@ -94,7 +99,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'MUST be called BEFORE any action that needs the agentic workspace (the user-scoped filesystem with /workspace/ + /readonly/). Unlocks: bash, file creation/editing on /workspace/, project management, yt-dlp downloads, OCR pipelines, chart generation, etc. AFTER unlock the full toolkit is available in the NEXT round. Do NOT call for: chat replies, web search, voice, scheduling, memory, or pure calculations/analysis (those go through code_interpreter, which has no access to /workspace/).',
+  description: 'Unlock the agentic toolkit (bash, write_file, edit_file, project management, downloads, OCR, charts) on the user-scoped /workspace + /readonly filesystem. Full toolkit becomes available in the next round. Do NOT call for chat replies, web search, voice, scheduling, memory, or pure calculations (use code_interpreter for those — it has no /workspace access).',
   properties: {},
 });
 
@@ -149,7 +154,7 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the project sandbox. For: gemix-project management, running workspace scripts (e.g. python /workspace/code/script.py), shell utilities (zip, ls, cp...), yt-dlp downloads, LibreOffice/pandoc conversions... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,searched_images,skills}. Combine with write_file/edit_file in the same round to write a script and run it. NOTE: bash runs in the GemiX project sandbox (full filesystem access to /workspace + /readonly); for ad-hoc Python without filesystem access use code_interpreter instead.',
+  description: 'Run a shell command in the project sandbox. For: gemix-project management, running workspace scripts, shell utilities (zip, ls, cp...), yt-dlp downloads, LibreOffice/pandoc conversions... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,searched_images,skills}. Combine with write_file/edit_file in the same round to write a script and run it. NOTE: bash runs in the GemiX project sandbox (full filesystem access to /workspace + /readonly); for ad-hoc Python without filesystem access use code_interpreter instead.',
   properties: {
     command: { type: 'string', description: 'Single standalone shell command. Do NOT use shell concatenation or piping (&&, ||, ;, |, redirection, subshells) to combine steps. Emit multiple bash tool calls, using execution_phase when ordering is needed.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
@@ -286,7 +291,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   if (includeRecipientName || includeRecipientPhone) {
     properties.includeAttachments = {
       type: 'boolean',
-      description: 'Attach buffered files (default true)',
+      description: 'Forward buffered files to this recipient (default true).',
     };
     const recipientProps = {};
     if (includeRecipientName) {
@@ -310,7 +315,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Delivery tool — Send a voice message. Set includeAttachments=true to forward the buffered files to this recipient (all or none).',
+    description: 'Delivery tool — send a voice message. Without "recipient" replies in the current chat; with it, sends to that recipient.',
     properties,
     required: ['text'],
   });
@@ -335,7 +340,7 @@ function buildWhatsAppTool(isAdmin) {
     message: { type: 'string', description: 'Message text' },
     includeAttachments: {
       type: 'boolean',
-      description: 'Attach buffered files (default true)',
+      description: 'Forward buffered files to this recipient (default true).',
     },
     recipient: {
       type: 'object',
@@ -347,7 +352,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — Send a WhatsApp message to another recipient. NEVER use this tool to message the current user or to send intermediate updates during a conversation. Set includeAttachments=true to forward the buffered files to this recipient.',
+    description: 'Delivery tool — send a WhatsApp message to a specific recipient (never the current user; never use for intermediate updates).',
     properties,
     required: isAdmin ? ['message'] : ['recipient', 'message'],
   });
@@ -373,7 +378,7 @@ function buildEmailTool(isAdmin) {
     body: { type: 'string', description: 'HTML body (no markdown)' },
     includeAttachments: {
       type: 'boolean',
-      description: 'Attach buffered files (default true)',
+      description: 'Forward buffered files to this recipient (default true).',
     },
     recipient: {
       type: 'object',
@@ -385,7 +390,7 @@ function buildEmailTool(isAdmin) {
 
   return makeTool({
     name: 'send_email',
-    description: 'Delivery tool — Send an email. Set includeAttachments=true to forward the buffered files to this recipient.',
+    description: 'Delivery tool — send an email.',
     properties,
     required: isAdmin ? ['subject', 'body'] : ['recipient', 'subject', 'body'],
   });
@@ -551,10 +556,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(TOOL_MUSIC_CREATOR);
   }
 
-  // 1c. Grok Imagine — image and video generation. Available to all users
-  // (active or not) on every platform except Discord. Both go in the
+  // 1c. Grok Imagine — image and video generation. Available only on
+  // WhatsApp (same gating as music_creator) since both produce binary media
+  // that is delivered through the WA attachment pipeline. Both go in the
   // ONCE_PER_ROUND_TOOLS set in tools/index.js.
-  if (!isDiscord) {
+  if (isWhatsApp) {
     tools.push(
       buildGenerateImageTool(userCtx.agenticUnlocked),
       buildGenerateVideoTool(userCtx.agenticUnlocked),
@@ -564,7 +570,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // 1b. xAI server-side code interpreter — always available outside Discord,
   // runs in xAI's own isolated sandbox without access to /workspace/ or /readonly/.
   if (!isDiscord) {
-    tools.push(TOOL_CODE_INTERPRETER);
+    tools.push(buildCodeInterpreterTool(userCtx.agenticUnlocked));
   }
 
   // 2. Agentic Workspace (Gated)

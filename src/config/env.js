@@ -37,8 +37,9 @@ module.exports = {
   MUSIC_MODEL: process.env.MUSIC_MODEL,
   VIDEO_DESCRIBER_MODEL: process.env.VIDEO_DESCRIBER_MODEL,
 
-  // xAI features fronted by Hermes (TTS, STT, multi-agent research, Imagine).
-  // Endpoints: ${HERMES_BASE_URL}/tts, /stt, /responses, /images/generations, /videos/generations
+  // xAI features fronted by Hermes (TTS, STT, multi-agent research).
+  // Endpoints: ${HERMES_BASE_URL}/tts, /stt, /responses
+  // Imagine (image/video gen) uses the CLI bridge (bridge/imagine.sh), NOT the proxy.
   XAI_TTS_VOICE: process.env.XAI_TTS_VOICE,
   // Multi-agent research model used by the web_x_search tool (web + X/Twitter via xAI native search).
   MULTI_AGENT_MODEL: process.env.MULTI_AGENT_MODEL,

@@ -1,6 +1,6 @@
 # Force LF line endings for shell scripts and the bridge directory.
-# Without this, git on Windows can convert *.sh to CRLF on checkout, which
-# breaks the shebang line on the Linux VPS where the scripts actually run.
+# These scripts run on the production Linux VPS — keep LF on commit so
+# checkouts on any platform don't break the shebang line.
 *.sh                text eol=lf
 bridge/**           text eol=lf
 sandbox/entrypoint.sh text eol=lf

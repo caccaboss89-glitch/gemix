@@ -8,7 +8,7 @@ const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = r
 
 const { isSystemMessage } = require('../../config/systemMessages');
 
-const { isSupportedMedia, mediaToContentPart, mediaTag, buildAttachmentTag } = require('../../utils/media');
+const { isSupportedMedia, mediaToContentPart, mediaTag, buildAttachmentTag, isInlineableTextFile, buildInlineTextFilePart } = require('../../utils/media');
 const { normalizeMarkdown, cleanIncomingText } = require('../../utils/text');
 const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
@@ -43,6 +43,74 @@ function _waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
 }
 
+/**
+ * Replace WhatsApp @<digits> mention tags inside a body with @<DisplayName>
+ * so the AI can understand who is being mentioned.
+ *
+ * WhatsApp encodes mentions in `msg.body` as `@<phone-digits>` (e.g.
+ * `@233079671120038`); the human-readable name lives in the contact metadata
+ * fetched via `msg.getMentions()`. We resolve each numeric tag to the best
+ * available display name with the following priority:
+ *
+ *   1. contact.pushname  → public profile name the contact set on their own
+ *                          WhatsApp profile. Preferred because it's how the
+ *                          person presents themselves and is consistent for
+ *                          everyone reading the chat.
+ *   2. contact.name      → name as saved in the OWNER's phone address book
+ *                          (only set when the contact is in rubrica AND has
+ *                          been synced via Multi-Device).
+ *   3. contact.shortName → the abbreviated form of `name` (rare, but useful
+ *                          when neither pushname nor full name are available).
+ *   4. contact.number    → formatted phone number.
+ *   5. contact.id.user   → raw digits, last-resort fallback.
+ *
+ * There is no single getFormattedName()-style helper in whatsapp-web.js;
+ * the priority must be coded manually. See https://docs.wwebjs.dev/Contact.html.
+ *
+ * Falls through silently when mentions can't be resolved (e.g. group
+ * membership data unavailable) — the original numeric tag is kept.
+ *
+ * @param {string} body - raw msg.body
+ * @param {Array} contacts - resolved Contact objects from msg.getMentions()
+ * @returns {string}
+ */
+function _replaceMentionsInBody(body, contacts) {
+  if (typeof body !== 'string' || !body || !Array.isArray(contacts) || contacts.length === 0) {
+    return body || '';
+  }
+  let out = body;
+  for (const c of contacts) {
+    if (!c || !c.id) continue;
+    const userPart = (c.id.user || '').toString().replace(/\D/g, '');
+    if (!userPart) continue;
+    const display = (
+      c.pushname ||                      // (a) public profile name
+      c.name ||                          // (b) name as saved in owner's phone book
+      c.shortName ||                     // (c) abbreviated form of name
+      c.number ||                        // (d) formatted number
+      userPart                           // (e) raw digits
+    ).toString().trim();
+    if (!display) continue;
+    // Replace `@<digits>` only when it's not part of a longer digit run.
+    const re = new RegExp(`@${userPart}(?!\\d)`, 'g');
+    out = out.replace(re, `@${display}`);
+  }
+  return out;
+}
+
+async function _resolveMentionsForMessage(msg, isGroup) {
+  // WhatsApp @<digits> mentions are a group-chat feature: in 1-1 chats the
+  // library either doesn't populate mentions or returns the chat partner
+  // every time, so resolution has no upside and risks false positives.
+  if (!isGroup) return [];
+  try {
+    const mentions = await msg.getMentions();
+    return Array.isArray(mentions) ? mentions : [];
+  } catch {
+    return [];
+  }
+}
+
 async function _getRecentWhatsAppMessageIds(msg) {
   try {
     const chat = await msg.getChat();
@@ -63,6 +131,7 @@ async function _getRecentWhatsAppMessageIds(msg) {
 async function buildWhatsAppHistory(chat, platform, userId) {
   const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
   const messages = rawMessages.slice(-MAX_HISTORY);
+  const isGroup = Boolean(chat?.isGroup);
 
   const historyMessages = [];
 
@@ -119,7 +188,9 @@ async function buildWhatsAppHistory(chat, platform, userId) {
     const isFromBot = isGemiX || isScheduled || isSystem;
 
     const ts = formatTimestamp(msg.timestamp * 1000);
-    let textContent = cleanIncomingText(msg.body || '');
+    const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
+    const rawBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
+    let textContent = cleanIncomingText(rawBody);
 
     if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
       textContent = `[Shared contact] ${textContent || ''}`;
@@ -198,7 +269,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
  * @param {string} chatId - Chat ID for voice cache lookup
  * @returns {Promise<object>} { prefix: string, mediaParts: array }
  */
-async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds) {
+async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup = false) {
   if (!msg.hasQuotedMsg) return { prefix: '', mediaParts: [] };
 
   try {
@@ -309,7 +380,9 @@ async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds
     }
 
     if (quoted.body) {
-      let quotedText = cleanIncomingText(quoted.body);
+      const quotedMentionContacts = await _resolveMentionsForMessage(quoted, isGroup);
+      const rawQuoted = _replaceMentionsInBody(quoted.body, quotedMentionContacts);
+      const quotedText = cleanIncomingText(rawQuoted);
       prefix = `[In reply to: ${quotedText}]\n`;
       return { prefix, mediaParts };
     }
@@ -466,6 +539,17 @@ async function processCurrentMedia(msg, userId) {
   }
 
   if (mediaType === 'document' && mimetype !== 'application/pdf') {
+    // Plain-text / source-code documents are inlined directly into the
+    // user message so the model sees the file content without a read_file
+    // roundtrip. Other binary docs (docx, xlsx, zip, …) keep tag-only.
+    if (isInlineableTextFile(filename, mimetype)) {
+      return {
+        skipped: true,
+        tag,
+        reason: null,
+        inlineText: buildInlineTextFilePart(filename, buffer),
+      };
+    }
     return {
       skipped: true,
       tag,
@@ -491,9 +575,10 @@ async function processCurrentMedia(msg, userId) {
  * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
  * @returns {Promise<Array>} contentParts array (may be empty if message has no usable content)
  */
-async function buildIncomingContentParts(msg, chatId, userId) {
+async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
   const contentParts = [];
-  let textBody = msg.body || '';
+  const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
+  let textBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
 
   if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
     textBody = `[Shared contact] ${textBody}`;
@@ -502,7 +587,7 @@ async function buildIncomingContentParts(msg, chatId, userId) {
   }
 
   const recentMessageIds = await _getRecentWhatsAppMessageIds(msg);
-  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId, recentMessageIds);
+  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup);
   if (quotedContent && quotedContent.prefix) {
     textBody = quotedContent.prefix + textBody;
   }
@@ -514,7 +599,8 @@ async function buildIncomingContentParts(msg, chatId, userId) {
   if (mediaResult) {
     if (mediaResult.skipped) {
       const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
-      textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
+      const inlineSuffix = mediaResult.inlineText ? ` ${mediaResult.inlineText}` : '';
+      textBody = `${mediaResult.tag}${suffix}${inlineSuffix} ${textBody}`.trim();
     } else {
       contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype, {
         historyPath: mediaResult.syncedPath,

@@ -234,7 +234,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
         if (typeof userCtx.sendIntermediateNotification === 'function') {
           await userCtx.sendIntermediateNotification(
             'video_gen',
-            '🎬 Sto generando il video (può richiedere fino a un paio di minuti), attendi un attimo...',
+            '🎬 Sto generando il video (può richiedere qualche minuto), attendi un attimo...',
           );
         }
         result = await generateVideo(args, userCtx, responseCtx);

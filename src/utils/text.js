@@ -78,6 +78,38 @@ const RESEARCH_BADGE_RE = /\n*\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*posts?)
 const IN_REPLY_TO_PREFIX_RE = /^\[In reply to:\s*(?:\[[^\]]*\]|[^\]])*\](?:\n|\s)*/i;
 
 /**
+ * Strip any GemiX-generated system-message lines that the AI may have
+ * accidentally echoed into its own reply (e.g. release banners, maintenance
+ * banner, fallback error, temp-attachment notice).
+ *
+ * Detection is delegated to the canonical isSystemMessage() registry so the
+ * filter automatically tracks any new system message added to the codebase.
+ *
+ * Implementation: walks the response line by line, drops every line that is
+ * an exact system message (or starts with one followed by a paragraph),
+ * collapses any leftover empty paragraphs.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripSystemMessages(text) {
+  if (!text || typeof text !== 'string') return text;
+  // Lazy require to avoid circular dependency.
+  const { isSystemMessage } = require('../config/systemMessages');
+  const lines = text.split(/\r?\n/);
+  const kept = [];
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    // isSystemMessage() looks at the leading prefix (anchored regexes), so it
+    // matches both bare system messages and paragraphs that start with one.
+    if (trimmed && isSystemMessage(trimmed)) continue;
+    kept.push(line);
+  }
+  // Collapse runs of >2 consecutive empty lines that may appear after removal.
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/**
  * Strip echoes of the history conversation prefix that our platform code injects
  * when feeding chat history to the model. Removes patterns like
  * "[19/05/2026, 22:41] GemiX:" anywhere in the text and a single leading
@@ -100,6 +132,8 @@ function stripHistoryPrefixes(text) {
  * 3. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N posts.")
  * 4. Strips any accidental footers (e.g. "--GemiX • ...")
  * 5. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
+ * 6. Strips any GemiX system-message lines accidentally echoed by the AI
+ *    (release banners, maintenance, temp-attachment notice, fallback error…)
  * @param {string} text
  * @returns {string} Cleaned response text
  */
@@ -109,12 +143,13 @@ function cleanAssistantResponse(text) {
   cleaned = stripHistoryPrefixes(cleaned);
   cleaned = cleaned.replace(IN_REPLY_TO_PREFIX_RE, '');
   cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
-  
+  cleaned = stripSystemMessages(cleaned);
+
   // Lazy require to avoid circular dependencies
   const { removeFooter, removeScheduledFooter } = require('./footer');
   cleaned = removeFooter(cleaned);
   cleaned = removeScheduledFooter(cleaned);
-  
+
   return cleaned.trim();
 }
 
@@ -141,4 +176,4 @@ function cleanIncomingText(text) {
   return cleaned.trim();
 }
 
-module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripHistoryPrefixes, cleanAssistantResponse, cleanIncomingText };
+module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripHistoryPrefixes, stripSystemMessages, cleanAssistantResponse, cleanIncomingText };

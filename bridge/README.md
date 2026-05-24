@@ -63,9 +63,7 @@ the single URL line.
 
 ## Notes / limitations
 
-- Only runs on the production Linux VPS. On Windows dev machines the script
-  doesn't run; the JS layer still loads but the tool returns a structured
-  error if `hermes` is not on `PATH`.
+- Runs only on the production Linux VPS (the only environment GemiX supports).
 - Reference images: not supported in this bridge (Hermes' `image_gen` /
   `video_gen` toolsets don't accept binary inputs from the CLI). The JS
   layer rejects `reference_images` with a clear error so the model knows
