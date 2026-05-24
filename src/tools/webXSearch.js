@@ -27,6 +27,11 @@ const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
 // Hardcoded here so the main model can't accidentally request the unsupported tier.
 const FIXED_EFFORT = 'high';
 
+// Number of results requested per web/X search call.
+// Higher values give the sub-agents more raw material per query.
+const WEB_NUM_RESULTS = 15;
+const X_LIMIT = 15;
+
 // 4-agent runs typically resolve in 30-90s. Give some headroom for slow searches.
 const REQUEST_TIMEOUT_MS = 3 * 60 * 1000;
 const MAX_ATTEMPTS = 2;
@@ -126,104 +131,94 @@ function _extractCitations(data) {
 // ── Usage stats extraction ──────────────────────────────────────────────────
 
 /**
- * Extract actual search results from the xAI Responses API output.
+ * Extract search usage stats from an xAI Responses API payload.
  *
- * Counts the actual number of URLs found in web_search_calls and results
- * from x_search_calls, not just how many times the tools were invoked.
+ * Priority 1 — server-side totals (most accurate, covers all sub-agents):
+ *   data.usage.server_side_tool_usage_details.web_search_calls  → total web searches
+ *   data.usage.server_side_tool_usage_details.x_search_calls    → total X searches
  *
- * Web search:
- *   - type="search": `action.sources[]` array with URLs
- *   - type="open_page": single URL in `action.url` (counts as 1)
+ *   These are the same numbers the official Grok app displays. The multi-agent
+ *   team spawns sub-agents whose tool calls are NOT visible in `output[]` (they
+ *   are encrypted/hidden), so counting visible items always under-reports.
  *
- * X search:
- *   - Tries to extract from `item.result` (multiple format support)
- *   - Fallback: parses input JSON to extract limit from tool params
- *   - Last resort: count 1 per invocation if tool was called
+ * Priority 2 — visible output items (fallback when server totals are absent):
+ *   Walk output[] and count sources from web_search_call actions and
+ *   x_keyword_search / x_search custom_tool_call items.
  *
  * @param {object} data - Parsed JSON response body
- * @returns {{ webSources: number, xPosts: number, _debugWebCalls?: number, _debugXCalls?: string }}
+ * @returns {{ webSources: number, xPosts: number, _source: string, _debugWebCalls?: number, _debugXCalls?: string }}
  */
 function _extractUsageStats(data) {
-  let webSources = 0;
-  let xPosts = 0;
-  let debugWebSearchCount = 0;  // Track actual web_search_call invocations
-  let debugXCalls = [];         // Track X search calls for debugging
-
-  if (!data || !Array.isArray(data.output)) {
-    return { webSources, xPosts };
+  // ── Priority 1: authoritative server-side totals ─────────────────────────
+  const details = data?.usage?.server_side_tool_usage_details;
+  if (details && (details.web_search_calls > 0 || details.x_search_calls > 0)) {
+    return {
+      webSources: details.web_search_calls || 0,
+      xPosts: details.x_search_calls || 0,
+      _source: 'server_side_tool_usage_details',
+      _debugWebCalls: details.web_search_calls || 0,
+      _debugXCalls: `x_search_calls=${details.x_search_calls || 0}`,
+    };
   }
 
-  // Count actual results from tool calls, not invocation count
+  // ── Priority 2: fallback — count visible tool calls in output[] ──────────
+  // Only reached when the server omits usage details (e.g. older API versions).
+  let webSources = 0;
+  let xPosts = 0;
+  let debugWebSearchCount = 0;
+  const debugXCalls = [];
+
+  if (!Array.isArray(data?.output)) {
+    return { webSources, xPosts, _source: 'none' };
+  }
+
   for (const item of data.output) {
     if (!item) continue;
 
-    // ── Web Search Calls ────────────────────────────────────────────────
+    // ── Web Search Calls ──────────────────────────────────────────────────
     if (item.type === 'web_search_call' && item.action) {
       debugWebSearchCount++;
-
-      // Type: "search" → array of sources
       if (item.action.type === 'search' && Array.isArray(item.action.sources)) {
-        const count = item.action.sources.length;
-        webSources += count;
-      }
-      // Type: "open_page" → single URL
-      else if (item.action.type === 'open_page' && typeof item.action.url === 'string') {
+        webSources += item.action.sources.length;
+      } else if (item.action.type === 'open_page' && typeof item.action.url === 'string') {
         webSources += 1;
       }
     }
 
-    // ── X / Twitter Search Calls ────────────────────────────────────────
-    if (item.type === 'custom_tool_call' && 
+    // ── X / Twitter Search Calls ──────────────────────────────────────────
+    if (item.type === 'custom_tool_call' &&
         (item.name === 'x_keyword_search' || item.name === 'x_search')) {
       let xCount = 0;
       let xCountSource = 'unknown';
 
-      // Strategy 1: Count from direct result fields
       if (item.result && typeof item.result === 'object') {
         if (Array.isArray(item.result.data)) {
-          xCount = item.result.data.length;
-          xCountSource = 'result.data';
+          xCount = item.result.data.length; xCountSource = 'result.data';
         } else if (Array.isArray(item.result.tweets)) {
-          xCount = item.result.tweets.length;
-          xCountSource = 'result.tweets';
+          xCount = item.result.tweets.length; xCountSource = 'result.tweets';
         } else if (Array.isArray(item.result.results)) {
-          xCount = item.result.results.length;
-          xCountSource = 'result.results';
+          xCount = item.result.results.length; xCountSource = 'result.results';
         } else if (item.result.count) {
-          xCount = Number(item.result.count) || 0;
-          xCountSource = 'result.count';
+          xCount = Number(item.result.count) || 0; xCountSource = 'result.count';
         }
       }
 
-      // Strategy 2: If result wasn't accessible, try parsing input JSON for limit
       if (xCount === 0 && typeof item.input === 'string') {
         try {
           const inputObj = JSON.parse(item.input);
-          if (inputObj.limit) {
-            xCount = Number(inputObj.limit) || 0;
-            xCountSource = 'input.limit';
-          }
-        } catch {
-          // Input is not valid JSON, skip
-        }
+          if (inputObj.limit) { xCount = Number(inputObj.limit) || 0; xCountSource = 'input.limit'; }
+        } catch { /* not JSON */ }
       }
 
-      // If we still couldn't extract a count, mark as -1 to indicate data unavailable
-      // (don't fake it with 1, which would mislead the user into thinking the search worked)
-      if (xCount === 0) {
-        xCount = -1;
-        xCountSource = 'unavailable';
-      }
-
-      xPosts += Math.max(xCount, 0);  // Only add non-negative counts to the total
-      debugXCalls.push(`x_keyword_search→${xCount}(${xCountSource})`);
+      xPosts += Math.max(xCount, 0);
+      debugXCalls.push(`${item.name}→${xCount}(${xCountSource})`);
     }
   }
 
   return {
     webSources,
     xPosts,
-    // Debug fields (removed from final output, but available for logging)
+    _source: 'visible_output_fallback',
     _debugWebCalls: debugWebSearchCount,
     _debugXCalls: debugXCalls.join(', ') || 'none',
   };
@@ -248,13 +243,17 @@ async function _callMultiAgent(prompt) {
     tools: [
       {
         type: 'web_search',
-        num_results: 10,
+        num_results: WEB_NUM_RESULTS,
       },
       {
         type: 'x_search',
-        limit: 10,
+        limit: X_LIMIT,
       },
     ],
+    include: [
+      "reasoning.encrypted_content",
+      "verbose_streaming"
+    ]
   };
 
   logApiRequest(MULTI_AGENT_MODEL, RESPONSES_URL, body);
@@ -374,10 +373,10 @@ async function webXSearch(prompt) {
 
   const citations = _extractCitations(data);
   const statsResult = _extractUsageStats(data);
-  const { webSources, xPosts, _debugWebCalls, _debugXCalls } = statsResult;
+  const { webSources, xPosts, _source, _debugWebCalls, _debugXCalls } = statsResult;
 
   // Log debug info for monitoring
-  log.debug(`   📊 Research stats: ${_debugWebCalls} web calls → ${webSources} sources; X calls: ${_debugXCalls} → ${xPosts} posts`);
+  log.debug(`   📊 Research stats [${_source}]: web=${webSources}, x=${xPosts} | calls: ${_debugWebCalls} web, ${_debugXCalls}`);
 
   const citationsBlock = citations.length > 0
     ? `\nSources:\n${citations.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}\n`
