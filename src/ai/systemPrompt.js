@@ -64,9 +64,9 @@ function buildSystemPrompt(ctx) {
     const isAgenticActive = Boolean(ctx.agenticBriefing);
     const filesLine = isAgenticActive
       ? '- For files, skills, downloads, deliverables: use bash/write_file/edit_file.'
-      : '- For files, skills, downloads, deliverables: call agentic_unlock first, then use bash/write_file/edit_file.';
+      : '- For files editing/creation, skills, downloads, deliverables: call agentic_unlock FIRST (Do NOT use code interpreters for these things).';
     prompt += `  <ToolBoundaries>
-- code_interpreter: isolated ad-hoc Python (math, analysis) — no user workspace access.
+- code_interpreter: isolated ad-hoc Python (math, analysis, quick calculations) — no user workspace access, cannot save files to the user.
 ${filesLine}
 - generate_image / generate_video: text-to-image/video only. Reference images are NOT supported. If the user asks to edit/modify/use an existing image as reference, tell them clearly you cannot do that and generate from text only.
   </ToolBoundaries>\n`;
