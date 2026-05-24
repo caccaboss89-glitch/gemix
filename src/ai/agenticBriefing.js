@@ -62,14 +62,9 @@ ${formatSkillsForPrompt(loadSkills())}
     <Runtime>Linux container. /workspace/ writable, /readonly/ read-only. No internet except yt-dlp domains. pip disabled.</Runtime>
     <OSTools>tesseract-ocr, libcairo, poppler-utils, libreoffice, pdflatex/xelatex/lualatex, ffmpeg, yt-dlp</OSTools>
     <Pitfalls>
-      - bash: standalone calls only — no \`&&\`, \`||\`, \`;\`, \`|\`, \`>\`, \`<\`, subshells. Emit multiple bash calls when you need several commands; they run in emission order, after any write_file/edit_file/read_file calls in the same round.
-      - Atomic creation: if \`gemix-project create\` fails, all write_file calls in the same round fail.
-      - SymPy → LaTeX: pass math expressions, not LaTeX, to \`sympy.latex(...)\`. \`a/b\` ✓, \`\\frac{a}{b}\` ✗. For hbar use \`from sympy.physics.quantum.constants import hbar\`; for grad/curl use \`sympy.vector\` or write the LaTeX directly.
-      - Matplotlib: call \`plt.close()\` after every \`savefig()\`.
-      - yt-dlp: bash CLI only, max 1080p, no proxy args. Domains: youtube.com, x.com, instagram.com, tiktok.com, facebook.com.
-      - Image search for documents: set \`save_to_disk=true\` to persist to /readonly/searched_images/.
-      - Raw strings for LaTeX/regex/paths: \`r"..."\`.
-      - Escape backticks inside tool args: \\\`.
+      - bash: standalone calls only — no \`&&\`, \`||\`, \`;\`, \`|\`, \`>\`, \`<\`, subshells. Emit one bash call per command; multiple bash calls in the same round run in emission order, after write_file/edit_file/read_file.
+      - yt-dlp: max 1080p enforced by the sandbox (the AI cannot raise this). Allowed domains only: youtube.com, x.com, instagram.com, tiktok.com, facebook.com.
+      - image_search for documents/figures: set \`save_to_disk=true\`, otherwise the image is not persisted under /readonly/searched_images/ and cannot be referenced from a script.
     </Pitfalls>
   </ProjectSandbox>
 

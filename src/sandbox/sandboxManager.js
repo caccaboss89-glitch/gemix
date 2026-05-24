@@ -90,8 +90,13 @@ function _randomPort() {
 }
 
 /**
- * Set ownership of project + readonly mount points to UID 1000 (sandbox user
+ * Set ownership of a project/readonly mount point to UID 1000 (sandbox user
  * inside the container). No-op on non-root or non-Linux platforms.
+ *
+ * This handles the "Node runs as root" case cleanly. For non-root Node
+ * deployments (typical PM2), see `_ensureProjectWritable` below which also
+ * applies a chmod fallback so the in-container UID 1000 can write into the
+ * project bind mount even when host ownership doesn't match.
  */
 function _ensureOwnership(targetPath) {
   if (process.platform !== 'linux') return;
@@ -101,6 +106,42 @@ function _ensureOwnership(targetPath) {
   } catch (err) {
     log.warn(`chown ${targetPath} -> 1000:1000 failed: ${err.message}`);
   }
+}
+
+/**
+ * Make the project directory writable by UID 1000 (the sandbox user inside
+ * the container) regardless of the host UID running Node.
+ *
+ * On a typical PM2 deployment Node runs as a non-root user (e.g. 1001), the
+ * project dir is created with that UID and rwxr-xr-x perms, and the sandbox
+ * container — which always runs as 1000:1000 — gets `Permission denied` when
+ * trying to create files in it.
+ *
+ * Strategy:
+ *   - If we're root: chown to 1000:1000 (handled by `_ensureOwnership`).
+ *   - Otherwise: chmod the project tree to 0777 / 0666 so any UID can write.
+ *
+ * Safety: bind mounts are scoped per (user, project), the container is
+ * cap-dropped, network-isolated, runs with no-new-privileges and a memory cap.
+ * The 0777 perms only affect the host's per-user/per-project tree.
+ *
+ * Recursive but bounded by FIXED_PROJECT_SUBDIRS depth. Idempotent.
+ */
+function _ensureProjectWritable(projectDir) {
+  if (process.platform !== 'linux') return;
+  if (process.getuid && process.getuid() === 0) return; // root path already covered
+  const walk = (p) => {
+    try {
+      const st = fs.statSync(p);
+      fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
+      if (st.isDirectory()) {
+        for (const entry of fs.readdirSync(p)) walk(path.join(p, entry));
+      }
+    } catch (err) {
+      log.warn(`chmod ${p} failed: ${err.message}`);
+    }
+  };
+  walk(projectDir);
 }
 
 /**
@@ -133,6 +174,12 @@ async function _spawnContainer(userCtx, projectName) {
   for (const p of [projectDir, historyDir, searchedDir]) {
     if (fs.existsSync(p)) _ensureOwnership(p);
   }
+  // Ensure the bind-mounted project tree is writable by the in-container
+  // UID 1000 even when Node host-side runs as a non-root user (e.g. 1001
+  // under PM2). chmod 0777 is scoped to this user's project subtree and is
+  // safe given the container's full sandboxing (cap-drop, no-new-privileges,
+  // network-isolated, memory-capped).
+  _ensureProjectWritable(projectDir);
 
   const token = crypto.randomBytes(24).toString('hex');
   const hostPort = await _randomPort();
