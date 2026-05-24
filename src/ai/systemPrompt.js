@@ -56,9 +56,6 @@ function buildSystemPrompt(ctx) {
   if (isWhatsApp) {
     prompt += '    <ResponsePreferences>\n';
     prompt += '- Use send_voice_message for short/casual replies; text for technical or long replies. Vary format based on your past messages.\n';
-    if (isActiveMember) {
-      prompt += '- Discord regulations formal request PDFs not available: suggest GemiX on Discord for this. Other type of PDFs are available in agentic mode.\n';
-    }
     prompt += '    </ResponsePreferences>\n';
   }
   prompt += '  </Behavior>\n';
