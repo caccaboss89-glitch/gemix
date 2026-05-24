@@ -113,21 +113,17 @@ function extractTitleTag(text) {
 }
 
 function orderToolCalls(toolCalls) {
+  // Stable phase ordering:
+  //   1. Standard tools (write_file, edit_file, read_file, ...): run first
+  //   2. bash (and any other deferred tool): runs after, so it can execute
+  //      scripts written/edited earlier in the same round.
+  //   3. Final-response delivery tools (send_voice_message, send_whatsapp_message):
+  //      always last.
   const getPhase = (tc) => {
     const name = tc.function.name;
-    // Final response tools: ALWAYS last (Phase 4)
-    if (name === 'send_voice_message' || name === 'send_whatsapp_message') return 4;
-    
-    // Non-deferred tools: Standard (Phase 2)
-    if (!DEFERRED_TOOL_NAMES.has(name)) return 2;
-
-    try {
-      const args = JSON.parse(tc.function.arguments || '{}');
-      if (args.execution_phase === 'before_all') return 1;
-      return 3;
-    } catch {
-      return 3;
-    }
+    if (name === 'send_voice_message' || name === 'send_whatsapp_message') return 3;
+    if (DEFERRED_TOOL_NAMES.has(name)) return 2;
+    return 1;
   };
   return [...toolCalls].sort((a, b) => getPhase(a) - getPhase(b));
 }

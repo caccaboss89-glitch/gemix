@@ -222,16 +222,11 @@ const TOOL_EDIT_FILE = makeTool({
 
 const TOOL_BASH = makeTool({
   name: 'bash',
-  description: 'Run a shell command in the project sandbox. For: gemix-project management, running workspace scripts, shell utilities (zip, ls, cp...), yt-dlp downloads, LibreOffice/pandoc conversions... Can run WITHOUT a project for stateless tasks, but creating/modifying files REQUIRES an active project. Project mounted at /workspace. Read-only: /readonly/{history,searched_images,skills}. Combine with write_file/edit_file in the same round to write a script and run it. NOTE: bash runs in the GemiX project sandbox (full filesystem access to /workspace + /readonly); for ad-hoc Python without filesystem access use code_interpreter instead.',
+  description: 'Run shell commands in the project sandbox. Project at /workspace, read-only /readonly. Combine with write_file/edit_file to write and execute scripts in the same round (bash always runs AFTER write_file/edit_file/read_file in the same round, so a script written in this round can be executed by bash in the same round). Use code_interpreter for Python without filesystem access.',
   properties: {
-    command: { type: 'string', description: 'Single standalone shell command. Do NOT use shell concatenation or piping (&&, ||, ;, |, redirection, subshells) to combine steps. Emit multiple bash tool calls, using execution_phase when ordering is needed.' },
+    command: { type: 'string', description: 'Single standalone shell command. Do NOT use shell concatenation or piping (&&, ||, ;, |, redirection, subshells) to combine steps. Emit multiple bash tool calls instead — they run in emission order within the same round, after any write_file/edit_file/read_file calls.' },
     timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
     background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results. Default false.' },
-    execution_phase: {
-      type: 'string',
-      enum: ['before_all', 'after_all'],
-      description: "Execution order in multi-tool rounds. Default: 'after_all'."
-    },
   },
   required: ['command'],
 });

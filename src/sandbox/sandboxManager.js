@@ -57,7 +57,7 @@ function _getDocker() {
   try { Docker = require('dockerode'); }
   catch (e) {
     throw new Error(
-      'dockerode is not installed. Run `npm install` to fetch the new dependencies (Phase C.3).'
+      'dockerode is not installed. Run `npm install` to fetch the new dependencies.'
     );
   }
   _docker = new Docker();

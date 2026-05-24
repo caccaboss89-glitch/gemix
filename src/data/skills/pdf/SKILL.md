@@ -1,310 +1,589 @@
 ---
 name: pdf
-description: PDFs: create/edit (LaTeX, reportlab, merge, split, rotate, encrypt). DO NOT use for reading/analysis; use read_file instead.
+description: Create or manipulate PDFs (build from scratch, merge/split/rotate/crop, watermark, encrypt/decrypt, extract images, render). Skip this skill for plain reading of unencrypted PDFs — the GemiX PDF parser auto-transcribes them into your context.
 ---
 
 # PDF Skill Guide
 
 > [!IMPORTANT]
-> **MANDATORY RULE**: Use ONLY the CLI flags explicitly documented for each script in this guide. **DO NOT invent flags** (e.g., NEVER use `--no-env` or `--verbose`). If a flag is not listed here, it is NOT supported.
+> This skill is intentionally template-free. Pick the right engine for the request — `reportlab` for quick documents, raw LaTeX for professional/scientific output, `pypdf` for manipulation. No fixed templates, no rigid JSON specs.
 
-**PDF Analysis**: Use `read_file` for text, tables, and OCR (GemiX Hybrid Parser). This skill is for **creation and manipulation only**. If a PDF is password-protected, `read_file` will fail; use `pdf_manipulate.py decrypt` to create a clear version in `/workspace/temp/` before processing.
+## Don't Use This Skill For Plain Reading
+
+When a user attaches an unencrypted PDF, GemiX's PDF parser already transcribes it for you. The content arrives **inline in the chat** as `<FileContent type="pdf-transcription"><Transcription>…</Transcription></FileContent>`. **Just read that text and reply** — do NOT call this skill, do NOT call `read_file` on the PDF, do NOT create a project.
+
+Call this skill only when the user asks you to **produce or manipulate** a PDF (create, merge, split, rotate, watermark, encrypt, decrypt, OCR a non-parsed scan, extract images, …).
+
+## When You Need The Original PDF File
+
+If you must operate on the original bytes (watermark, encrypt, merge, rotate, custom OCR…), call `read_file` on the user's PDF path **once**. The GemiX PDF parser materialises a structured folder next to the file:
+
+```
+/readonly/history/<name>/
+    ├── <name>.pdf          ← the original file (moved here, never deleted)
+    ├── transcription.md    ← parsed text (also returned to you on read)
+    └── assets/             ← extracted images (may be empty)
+```
+
+The first `read_file` returns `transcription.md` plus a header listing those exact paths. Calling `read_file` on the original `.pdf` path again will keep returning the same markdown — that is by design, no re-parsing happens.
+
+To manipulate the file, **copy it into your workspace first** (it lives under `/readonly/`, which is read-only):
+
+```bash
+cp /readonly/history/<name>/<name>.pdf /workspace/temp/<name>.pdf
+```
+
+Then operate on `/workspace/temp/<name>.pdf` and write the deliverable to `/workspace/output/`.
+
+To use an extracted image:
+
+```bash
+cp /readonly/history/<name>/assets/<image> /workspace/temp/<image>
+```
+
+**Encrypted PDFs**: the parser cannot read them and `read_file` will fail. Decrypt first:
+
+```python
+# /workspace/code/decrypt.py
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/readonly/history/secured.pdf")
+if r.is_encrypted:
+    r.decrypt("the_password")
+w = PdfWriter()
+for p in r.pages:
+    w.add_page(p)
+with open("/workspace/temp/clear.pdf", "wb") as f:
+    w.write(f)
+```
+
+Then `read_file /workspace/temp/clear.pdf` — the parser will transcribe the cleared copy normally.
 
 ---
 
-## LaTeX Pipeline (Professional & Scientific PDFs)
+## Paths & Layout
 
-For complex documents (equations, multi-column, figures, high-end typography) use **LaTeX + Matplotlib**, not `reportlab`.
+- **Read-only inputs**: `/readonly/history/<file>.pdf`, `/readonly/searched_images/<image>` (for figures), `/readonly/skills/pdf/` (this guide).
+- **Writable working dirs**: `/workspace/code/<script>.py` (Python scripts you write), `/workspace/temp/<file>` (intermediate `.tex`, `.aux`, `.log`, figures, decrypted copies), `/workspace/output/<file>.pdf` (final deliverable — pushed to the user automatically).
+- **Never write outside** `/workspace/{code|temp|output}/`. Never write back into `/readonly/`.
 
-### Script Reference
+---
 
-| Script | Purpose | Use when |
+## Decision Matrix — Which Tool
+
+| User request | Use | Why |
 | :--- | :--- | :--- |
-| `unified_pdf_generator.py` | Full pipeline: figures → render → compile | ✅ **Default choice** |
-| `render_latex_template.py` | Jinja2 template rendering only | Pre-existing figures with fixed paths |
-| `generate_matplotlib_figure.py` | Standalone Matplotlib figure | Single figure, no template |
-| `compile_tex.py` | `.tex` → `.pdf` compilation | Manual `.tex` already created |
-| `latex_helper.py` | Generate LaTeX snippets (tables, SymPy equations) | Before rendering, Phase 1 |
-| `pdf_manipulate.py` | Merge, split, rotate, encrypt PDFs | Post-generation cleanup |
+| Simple PDF: text, basic styling, a few images, basic tables | **reportlab** (Canvas or Platypus) | Pure Python, fastest path, no LaTeX compile step |
+| Professional/scientific PDF: equations, footnotes, citations, multi-column, beamer slides, CV with custom typography | **LaTeX** (`pdflatex` / `xelatex` / `lualatex`) | TeX Live full + `science` + `cm-super` are installed, output quality is unmatched |
+| Invoice, report, deck with charts | **reportlab** + matplotlib OR **LaTeX** + matplotlib | Either works — reportlab is faster, LaTeX looks better |
+| Merge / split / rotate / encrypt / watermark / crop / extract metadata | **pypdf** | Single dependency, no LaTeX, no external CLI |
+| Render PDF page → PNG/JPG (for visual QA, OCR pre-processing, previews) | **`pdftoppm`** (poppler) via `bash` | Native, fast, lossless |
+| Extract embedded raster images (originals, not page renders) | **`pdfimages`** (poppler) via `bash` | Pulls original bitmaps without re-rendering |
+| Reading text/tables from a user-supplied PDF | **the GemiX PDF parser** (auto, no tool call) | The PDF transcription is already in your context as `<FileContent type="pdf-transcription">` |
 
-> `latex_utils.py` is an internal utility used by the scripts above — ignore it.
-
-### Execution Strategy
-
-- **Default Choice**: Use `unified_pdf_generator.py` for standard documents and figures.
-- **Low-Level**: Use individual scripts for manual debugging or custom compilation flags.
-- **Workflow**: Combine `write_file` (JSON data) with `bash` (Python script) in the same round.
-
-**PDF-Specific Rules**:
-- **JSON Escaping**: LaTeX backslashes MUST be doubled in `.json` files (e.g., `"\\input"`).
-- **No `cat << EOF`**: Never use bash to create LaTeX/JSON files; use `write_file`.
-- **Snippet Phase**: Use `execution_phase: "before_all"` for `latex_helper.py` snippet generation.
-- **No Pass-through JSON**: Never use `--data '{"json":...}'`. Always use `--data-file`.
-- **Absolute Paths**: Strict enforcement of `/workspace/` or `/readonly/` prefixes.
-- **Scripts vs Tools**: All utilities (like `latex_helper.py`, `pdf_manipulate.py`, etc.) are SCRIPTS. Call them via `bash`. DO NOT try to use them as tool names.
-- **No Concatenation**: NEVER combine multiple PDF scripts in a single `bash` command using `&&` or `;`. Emit them as separate tool calls.
-- **Unified Generator MANDATORY**: Use `unified_pdf_generator.py` for ALL professional documents. DO NOT manually chain `render_latex_template.py` and `compile_tex.py` unless the unified script is technically insufficient.
-- **PDF Manipulation (Split)**: The `split` action generates files with a 3-digit zero-padded suffix (e.g., `prefix_001.pdf`). Always check the tool output for the exact filenames.
-- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `image_search` with `save_to_disk=true` to make them available under `/readonly/searched_images/`. Use the EXACT path returned by the tool.
+**Rule of thumb**: if the document has math, footnotes, or needs to look like a real publication → LaTeX. Otherwise reportlab.
 
 ---
 
-## Template Catalog
+## Available Toolchain (sandbox)
 
-All templates use **Jinja2** with LaTeX-safe delimiters (`\VAR{}`, `\BLOCK{}`).
-
-> **Field escaping**: `latex_escape` is applied automatically to all fields **not** marked **(Raw)**. Fields marked **(Raw)** accept raw LaTeX (math, `\input{}`, etc.) and are passed directly.
-
-**Notation:** **(Raw)** = raw LaTeX · **(Optional)** = can be omitted · **(bool)** = `true`/`false` · **(Flat)** = plain string/path
-
----
-
-### `scientific_template.tex` — Professional 2-column paper
-- **Data**: `title`, `author`, `date`, `abstract` (Optional, Raw), `show_toc` (Optional, bool, default: `false`)
-- **Sections**: Array of `{title, content (Raw)}` objects, and optionally one of:
-  - `figure`: `{path (Flat), caption (Raw), label}`
-  - `figure_path`: simple path (Flat, no caption)
-
-### `beamer_presentation.tex` — Slides (Madrid theme)
-- **Data**: `title`, `author`, `date`, `subtitle` (Optional), `institute` (Optional), `show_toc` (Optional, bool), `thank_you_slide` (Optional, bool)
-- **Frames**: Array of `{title, content (Raw), options (Optional, e.g. "t"), figure_path (Optional, Flat), caption (Optional, Raw)}`
-
-### `modern_cv_professional.tex` — Elegant CV
-- **Data**: `name`, `title`, `email` (Optional), `phone` (Optional), `linkedin` (Optional), `location` (Optional), `summary` (Optional, Raw)
-- **Sections**: Array of `{title, type}` where `type` is one of:
-  - `"experience"` → `entries`: `[{position, company, dates, location, description (Raw)}]`
-  - `"education"` → `entries`: `[{degree, institution, dates, location, description (Raw)}]`
-  - `"skills"` → `categories`: `[{name, items (String or List)}]`
-  - `"other"` → `content` (Raw)
-
-### `technical_report.tex` — Single-column report (`\chapter` per section)
-- **Data**: `title`, `author`, `date`, `subtitle` (Optional), `abstract` (Optional, Raw), `conclusion` (Optional, Raw)
-- **Sections**: Array of `{title, content (Raw), figures (Optional Array of {path, caption, label})}`
-
-### `business_invoice.tex` — Business invoice
-- **Data**: `invoice_number`, `date`, `due_date`, `subtotal`, `total`, `logo_path` (Optional, Flat), `tax_rate` (Optional), `tax_amount` (Optional), `notes` (Optional, Raw)
-- **sender** / **recipient**: Objects with `{name, address, city, zip, vat (Optional), email (Optional)}`
-- **items**: Array of `{description, quantity, unit_price, amount}`
-- **payment_info**: Object with `{method, bank_details (Raw)}`
+- **Python**: `pypdf`, `reportlab`, `Pillow`, `cairosvg`, `matplotlib`, `seaborn`, `numpy`, `scipy`, `sympy`, `pandas`, `jinja2`, `pytesseract`.
+- **LaTeX (TeX Live)**: `pdflatex`, `xelatex`, `lualatex` + `texlive-latex-recommended`, `texlive-latex-extra`, `texlive-fonts-extra`, `texlive-science`, `cm-super`, `dvipng`, `ghostscript`. Notable packages available: `microtype`, `booktabs`, `siunitx`, `cleveref`, `bm`, `amsmath`, `amssymb`, `mathtools`, `xcolor`, `tcolorbox`, `tikz`, `pgfplots`, `geometry`, `fancyhdr`, `hyperref`, `multicol`, `enumitem`, `tabularx`, `longtable`, `listings`, `minted` (with `-shell-escape`), `biblatex` (with local `.bib`), `fontspec` (xelatex/lualatex only), `beamer`.
+- **CLI (poppler-utils)**: `pdftotext`, `pdftoppm`, `pdfimages`, `pdfinfo`, `pdftohtml`.
+- **Other**: `ghostscript` (for `gs` linearization/compression).
+- **Internet**: none (no `pip install`, no `tlmgr`, no remote BibTeX). Use `image_search` with `save_to_disk=true` to fetch images legally; they land in `/readonly/searched_images/` and can be referenced from your script.
 
 ---
 
-## Unified Generator — Command & Data Format
+## reportlab — Quick Cookbook
 
-```bash
-# Phase 3 (after_all) — pair with write_file in Phase 2
-python /readonly/skills/pdf/scripts/unified_pdf_generator.py \
-  --template /readonly/skills/pdf/assets/templates/scientific_template.tex \
-  --data-file /workspace/temp/data.json \
-  --output /workspace/output/document.pdf \
-  --verify
-# Optional flags: --figures-dir <subdir> (default: temp), --snippets <dir>...
-#                 --engine pdflatex|xelatex|lualatex (default: pdflatex)
-```
-
-**`data.json` skeleton (scientific example):**
-```json
-{
-  "title": "General Relativity: Black Holes",
-  "author": "GemiX AI",
-  "date": "2026",
-  "figures": [
-    {
-      "filename": "veff.pdf",
-      "code": "import numpy as np\nimport matplotlib.pyplot as plt\n# ... plot code ...",
-      "title": "Effective Potential"
-    }
-  ],
-  "sections": [
-    {"title": "Introduction", "content": "Raw LaTeX content...", "figure_path": "veff.pdf"}
-  ]
-}
-```
-> **Note**: The script handles `plt.savefig()` and `plt.close()` automatically.
-
-**Linking figures**: reference the `filename` from the `figures` array inside sections via `"figure_path": "filename.pdf"` or `"figure": {"path": "filename.pdf"}`. Filenames are resolved to absolute paths automatically.
-
----
-
-## Math & Physics Cheat Sheet (`latex_helper.py` vs custom Python)
-
-The AI often fails by passing LaTeX to SymPy or using undefined symbols. Use this table as a strict guide.
-
-| Goal | Tool | ❌ WRONG (LaTeX/Undefined) | ✅ RIGHT (Math Expression) |
-| :--- | :--- | :--- | :--- |
-| Simple fraction | `latex_helper` | `--expr "\frac{a}{b}"` | `--expr "a/b"` |
-| Power/Superscript | `latex_helper` | `--expr "e^{x}"` | `--expr "exp(x)"` or `"e**x"` |
-| Schrödinger Eq | `latex_helper` | `--expr "H\Psi = E\Psi"` | `--expr "H*Psi = E*Psi"` |
-| Derivative | `latex_helper` | `--expr "\frac{d}{dx}f(x)"` | `--expr "diff(f(x), x)"` |
-| Equality | `latex_helper` | `--expr "a == b"` | `--expr "a = b"` or `"Eq(a, b)"` |
-| Complex physics | `write_file` + `bash python` | `from sympy import hbar` | `from sympy.physics.quantum.constants import hbar` |
-
-### 💡 The "Emergency LaTeX" Strategy
-If `latex_helper.py` fails with a conversion error, **DO NOT RETRY**. Write the raw LaTeX to a file directly via `write_file`:
+### Minimal PDF (Canvas)
 
 ```python
-# Phase 2 — write_file `/workspace/temp/equation.tex` directly with the raw LaTeX content.
-# (No bash/python detour needed.)
-```
-Then proceed to compilation/rendering as usual.
-
----
-
-## Troubleshooting & Common Fails
-
-### 1. "Command failed" in `unified_pdf_generator.py`
-This is often a **race condition** (file not yet flushed to disk).
-- **Check Stderr**: If it says "Waiting for referenced file...", it's a synchronization delay.
-- **Solution**: The script now has an auto-retry, but if it still fails, run the generator alone in a dedicated round.
-
-### 2. "ImportError" in a workspace Python script
-- `hbar` is NOT in the main `sympy` namespace. Use: `from sympy.physics.quantum.constants import hbar`.
-- `grad`, `div`, `curl` are NOT standard functions. Use `diff()` or `sympy.vector`.
-
----
-
-## LaTeX Snippets & Tables (`latex_helper.py`)
-
-Run in **Phase 1** (`before_all`), then include output via `\input{/workspace/temp/snippet.tex}` in any **(Raw)** field.
-
-```bash
-# SymPy expression → LaTeX equation file
-python /readonly/skills/pdf/scripts/latex_helper.py sympy \
-  --expr "diff(x**2 * sin(x), x)" \
-  --output /workspace/temp/derivative.tex
-# Flags: --no-simplify (skip simplification), --inline ($...$ wrapper)
-
-# Booktabs table from JSON data
-python /readonly/skills/pdf/scripts/latex_helper.py table \
-  --data-file /workspace/temp/results.json \
-  --output /workspace/temp/table.tex \
-  --caption "Model comparison" \
-  --label "tab:comparison" \
-  --alignment "Xll" 
-# Flags: --alignment "lcr" or "Xll", --caption, --label
-```
-
----
-
-## Low-Level Workflow (Alternative)
-
-Emit all `bash` calls in **Phase 3**. Figure paths must be hardcoded in `data.json` **before** rendering.
-
-**1. Render template:**
-```bash
-python /readonly/skills/pdf/scripts/render_latex_template.py \
-  /readonly/skills/pdf/assets/templates/scientific_template.tex \
-  --data-file /workspace/temp/data.json \
-  --output /workspace/temp/main.tex
-```
-
-**2. Generate figure:**
-```bash
-python /readonly/skills/pdf/scripts/generate_matplotlib_figure.py \
-  --code "x = np.linspace(0, 10, 100); plt.plot(x, np.sin(x))" \
-  --output /workspace/temp/my_fig.pdf \
-  --title "Sine Wave"
-# Note: plt/np are pre-injected. Script handles savefig/close.
-# Flags: --caption, --no-usetex, --params-file
-```
-
-**3. Compile:**
-```bash
-python /readonly/skills/pdf/scripts/compile_tex.py /workspace/temp/main.tex
-# Flags: --engine pdflatex|xelatex|lualatex, --no-clean (keep aux files)
-```
-
----
-
-## Professional Aesthetics
-
-The templates include `microtype`, `siunitx`, `cleveref`, and `bm` by default.
-
-### Matplotlib Figure Quality
-- **Colors**: Use `import seaborn as sns; sns.set_palette("muted")`. 
-- **Style**: DO NOT use `plt.style.use()`; it overrides the publication-grade script defaults.
-- **Layout**: `bbox_inches='tight'` is automatic. DO NOT call `plt.tight_layout()`.
-
-### LaTeX Table Quality
-- **Lines**: Never use vertical lines (`|`). `booktabs` (via `latex_helper.py`) handles rules correctly.
-- **Alignment**: Use `--alignment "Xrr"` for text-left / numbers-right layout.
-
-### Visual Verification
-Render a 300 DPI preview in the same round as compilation, using separate standalone `bash` calls:
-```bash
-mkdir -p /workspace/temp/verify
-```
-```bash
-pdftoppm -png -r 300 -f 1 -l 1 /workspace/output/document.pdf /workspace/temp/verify/page
-```
-
----
-
-## PDF Manipulation (`pdf_manipulate.py`)
-
-Do NOT use `qpdf` directly or write custom scripts. Use the provided script:
-
-```bash
-# Merge
-python /readonly/skills/pdf/scripts/pdf_manipulate.py merge \
-  --inputs /workspace/output/doc1.pdf /workspace/output/doc2.pdf \
-  --output /workspace/output/merged.pdf
-
-# Split (page ranges)
-python /readonly/skills/pdf/scripts/pdf_manipulate.py split \
-  --input /workspace/output/full.pdf --pages 1-5,7-10 \
-  --output-prefix /workspace/temp/part
-
-# Rotate (angle: 90, 180, 270, -90, -180, -270)
-python /readonly/skills/pdf/scripts/pdf_manipulate.py rotate \
-  --input /workspace/output/doc.pdf --pages 1,3-5 --angle 90 \
-  --output /workspace/output/rotated.pdf
-
-# Encrypt / Decrypt
-python /readonly/skills/pdf/scripts/pdf_manipulate.py encrypt \
-  --input /workspace/output/doc.pdf --password "secret" --output /workspace/output/secure.pdf
-python /readonly/skills/pdf/scripts/pdf_manipulate.py decrypt \
-  --input /workspace/output/secure.pdf --password "secret" --output /workspace/output/doc.pdf
-
-# Watermark
-python /readonly/skills/pdf/scripts/pdf_manipulate.py watermark \
-  --input /workspace/output/doc.pdf --watermark /workspace/temp/wm.pdf \
-  --output /workspace/output/doc_wm.pdf
-
-# Info
-python /readonly/skills/pdf/scripts/pdf_manipulate.py info --input /workspace/output/doc.pdf
-```
-
----
-
-## Basic PDF Creation (ReportLab)
-
-For simple documents without complex math or layout:
-
-```python
-from reportlab.lib.pagesizes import letter
+# /workspace/code/simple.py
+from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-c = canvas.Canvas("/workspace/output/hello.pdf", pagesize=letter)
-w, h = letter
-c.drawString(100, h - 100, "Hello World!")
-c.line(100, h - 140, 400, h - 140)
+c = canvas.Canvas("/workspace/output/note.pdf", pagesize=A4)
+w, h = A4
+c.setFont("Helvetica-Bold", 18)
+c.drawString(72, h - 100, "Quick Note")
+c.setFont("Helvetica", 11)
+c.drawString(72, h - 130, "Body text on the next line.")
 c.save()
 ```
 
-**With image:**
-```python
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
+Run: `bash python /workspace/code/simple.py`.
 
-c = canvas.Canvas("/workspace/output/doc.pdf", pagesize=letter)
-w, h = letter
-img = ImageReader("/workspace/temp/chart.png")  # or /readonly/searched_images/<file>
-iw, ih = img.getSize()
-tw = 4.5 * inch
-th = tw * (ih / iw)
-c.drawImage(img, inch, h - inch - th, width=tw, height=th)
-c.save()
+### Multi-page document with styles (Platypus)
+
+```python
+# /workspace/code/report.py
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image,
+)
+
+doc = SimpleDocTemplate(
+    "/workspace/output/report.pdf",
+    pagesize=A4,
+    leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm,
+)
+styles = getSampleStyleSheet()
+title = ParagraphStyle("title", parent=styles["Title"], spaceAfter=18)
+h1 = ParagraphStyle("h1", parent=styles["Heading1"], spaceBefore=14, spaceAfter=6)
+body = ParagraphStyle("body", parent=styles["BodyText"], leading=14, spaceAfter=8)
+
+story = [
+    Paragraph("Quarterly Report — Q2 2026", title),
+    Paragraph("Executive Summary", h1),
+    Paragraph("Revenue grew <b>12%</b> compared to Q1, driven by …", body),
+    Spacer(1, 12),
+    Image("/readonly/searched_images/chart.png", width=12*cm, height=7*cm),
+    PageBreak(),
+    Paragraph("Detailed Breakdown", h1),
+    Paragraph("…", body),
+]
+doc.build(story)
 ```
+
+### Tables — wrap every cell in `Paragraph`
+
+Plain strings inside `Table` cells don't wrap. Always wrap them, including headers and short values, and size columns proportionally.
+
+```python
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
+
+styles = getSampleStyleSheet()
+cell = styles["BodyText"]
+
+data = [
+    [Paragraph("<b>ID</b>", cell), Paragraph("<b>Name</b>", cell),
+     Paragraph("<b>Description</b>", cell)],
+    [Paragraph("1", cell), Paragraph("Widget", cell),
+     Paragraph("A long description that wraps within the column.", cell)],
+    [Paragraph("2", cell), Paragraph("Gadget", cell),
+     Paragraph("Another long description for the second row.", cell)],
+]
+
+# Total must fit printable area (A4 landscape with 2 cm margins ≈ 25 cm).
+table = Table(data, colWidths=[1.5*cm, 4*cm, 11*cm], repeatRows=1)
+table.setStyle(TableStyle([
+    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+]))
+
+doc = SimpleDocTemplate("/workspace/output/table.pdf", pagesize=A4,
+                       leftMargin=2*cm, rightMargin=2*cm)
+doc.build([table])
+```
+
+### Subscripts/superscripts in reportlab
+
+The default fonts have no Unicode `H₂O` glyphs — they render as black boxes. Use the inline tags `<sub>` and `<super>` inside `Paragraph`:
+
+```python
+Paragraph("H<sub>2</sub>O · E = mc<super>2</super>", styles["BodyText"])
+```
+
+For Canvas-drawn text, switch font size and `drawString` at a manual offset.
+
+### Images
+
+- `Image(path, width=W, height=H)` is a flowable; pass it to `doc.build([...])`.
+- `c.drawImage(path, x, y, width=W, height=H, preserveAspectRatio=True, anchor="c")` is the Canvas equivalent. Origin is **bottom-left**, so `y = page_h - margin - target_h`.
+- Compute `target_h = target_w * (img_h / img_w)` to keep aspect ratio when you only want to fix one side.
+- Prefer `drawImage` for repeated images (the resource is shared in the PDF).
+
+---
+
+## LaTeX — Pipeline
+
+Write a `.tex` file with `write_file`, then compile with `bash`. Output goes to `/workspace/temp/`, then move (or compile directly) to `/workspace/output/`.
+
+### Engines
+
+- **`pdflatex`** — default, fastest. Use for English/Italian text and standard LaTeX packages.
+- **`xelatex`** — needed for `fontspec`, custom system fonts, native UTF-8 with non-Latin scripts.
+- **`lualatex`** — same as xelatex but with Lua scripting and better Unicode math.
+
+### Compile command
+
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
+```
+
+For documents with cross-references, ToC, or `cleveref`, run **twice**:
+
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
+```
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
+```
+
+For `biblatex` with a local `.bib`, run `biber` between the two passes:
+
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
+```
+```bash
+biber --output-directory /workspace/temp /workspace/temp/main
+```
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
+```
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
+```
+
+Then move the result:
+
+```bash
+cp /workspace/temp/main.pdf /workspace/output/document.pdf
+```
+
+### Modern article preamble (copy-paste, adapt the body)
+
+```latex
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}        % or [italian]
+\usepackage{lmodern}
+\usepackage{microtype}             % polished typography
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{siunitx}
+\usepackage{booktabs,tabularx,longtable}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black,
+            citecolor=blue!50!black]{hyperref}
+\usepackage{cleveref}
+\usepackage{tcolorbox}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=4pt}
+
+\title{My Title}
+\author{GemiX}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+Body with \textbf{microtype} ligatures and protrusion.
+A SI quantity: \SI{9.81}{m/s^2}.
+
+\begin{equation}
+  \int_{-\infty}^{\infty} e^{-x^2}\,\mathrm{d}x = \sqrt{\pi}
+  \label{eq:gauss}
+\end{equation}
+
+See \cref{eq:gauss}.
+
+\begin{tcolorbox}[colback=blue!5!white,colframe=blue!50!black,title=Note]
+  Use \texttt{tcolorbox} for callouts.
+\end{tcolorbox}
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{lrr}
+    \toprule
+    Item & Q1 & Q2 \\
+    \midrule
+    Widgets & 120 & 135 \\
+    Gadgets & 85  & 92  \\
+    \bottomrule
+  \end{tabular}
+  \caption{Sales by quarter.}
+  \label{tab:sales}
+\end{table}
+
+\end{document}
+```
+
+### Two-column scientific paper
+
+Add `\documentclass[twocolumn,10pt,a4paper]{article}` and the figures will need `figure*` for full-width content:
+
+```latex
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{/workspace/temp/figure.pdf}
+  \caption{Wide figure across both columns.}
+  \label{fig:wide}
+\end{figure*}
+```
+
+### Beamer slides
+
+```latex
+\documentclass{beamer}
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\usepackage{microtype}
+
+\title{Talk Title}
+\author{GemiX}
+\date{\today}
+
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{Outline}
+  \tableofcontents
+\end{frame}
+\section{Intro}
+\begin{frame}{Key Idea}
+  \begin{itemize}
+    \item First point
+    \item Second point
+  \end{itemize}
+\end{frame}
+\end{document}
+```
+
+Compile with `pdflatex` exactly like an article.
+
+### Figures (matplotlib → LaTeX)
+
+Save figures as PDF (vector) for LaTeX inclusion:
+
+```python
+# /workspace/code/figure.py
+import numpy as np
+import matplotlib.pyplot as plt
+
+x = np.linspace(0, 10, 400)
+fig, ax = plt.subplots(figsize=(5, 3))
+ax.plot(x, np.sin(x), label=r"$\sin(x)$")
+ax.plot(x, np.cos(x), label=r"$\cos(x)$")
+ax.set_xlabel(r"$x$")
+ax.set_ylabel("amplitude")
+ax.legend()
+ax.grid(True, alpha=0.3)
+fig.savefig("/workspace/temp/figure.pdf", bbox_inches="tight")
+plt.close(fig)
+```
+
+Then in the `.tex`: `\includegraphics[width=0.7\textwidth]{/workspace/temp/figure.pdf}`.
+
+**Matplotlib rules**:
+- Always call `plt.close(fig)` after `savefig` (otherwise the kernel keeps the figure in memory across calls).
+- Use raw strings for LaTeX in labels: `r"$\alpha$"`, `r"$\frac{1}{2}$"`.
+- Don't call `plt.style.use(...)` if you want LaTeX-rendered text — it overrides text settings.
+- Don't use Unicode subscripts/superscripts in labels (`H₂O`); use LaTeX (`$H_2O$`) or plain digits.
+
+### LaTeX pitfalls
+
+- **Compile errors are fatal**: `pdflatex` exits non-zero on the first error with `-halt-on-error`. The `.log` file is in `/workspace/temp/main.log` — `read_file` it to diagnose.
+- **Math mode required for special chars**: `_`, `^`, `&`, `%`, `#`, `$` outside math mode must be escaped (`\_`, `\^{}`, `\&`, `\%`, `\#`, `\$`).
+- **Non-ASCII in pdflatex**: prefer `xelatex` if the document has accented characters not covered by `T1` font encoding.
+- **`shell-escape` is required for `minted`**: add `-shell-escape` to the compile command if you use it.
+- **Multiple passes**: ToC, cross-refs, citations, `cleveref` need 2 passes; `biblatex` needs 3 (pdflatex → biber → pdflatex → pdflatex).
+
+---
+
+## pypdf — Manipulation Cookbook
+
+### Merge
+
+```python
+from pypdf import PdfReader, PdfWriter
+w = PdfWriter()
+for src in ["/readonly/history/a.pdf", "/readonly/history/b.pdf"]:
+    for page in PdfReader(src).pages:
+        w.add_page(page)
+with open("/workspace/output/merged.pdf", "wb") as f:
+    w.write(f)
+```
+
+### Split (one page per file)
+
+```python
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/readonly/history/full.pdf")
+for i, page in enumerate(r.pages, start=1):
+    w = PdfWriter()
+    w.add_page(page)
+    with open(f"/workspace/output/page_{i:03d}.pdf", "wb") as f:
+        w.write(f)
+```
+
+### Split by range
+
+```python
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/readonly/history/full.pdf")
+def slice_pdf(start, end, out):
+    w = PdfWriter()
+    for i in range(start - 1, end):
+        w.add_page(r.pages[i])
+    with open(out, "wb") as f:
+        w.write(f)
+slice_pdf(1, 5,  "/workspace/output/part1.pdf")
+slice_pdf(6, 10, "/workspace/output/part2.pdf")
+```
+
+### Rotate
+
+```python
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/readonly/history/landscape.pdf")
+w = PdfWriter()
+for page in r.pages:
+    page.rotate(90)        # 90, 180, 270, -90, ...
+    w.add_page(page)
+with open("/workspace/output/rotated.pdf", "wb") as f:
+    w.write(f)
+```
+
+### Encrypt / Decrypt
+
+```python
+# Encrypt
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/workspace/output/doc.pdf")
+w = PdfWriter()
+for p in r.pages: w.add_page(p)
+w.encrypt(user_password="user", owner_password="owner")
+with open("/workspace/output/secured.pdf", "wb") as f: w.write(f)
+```
+
+```python
+# Decrypt (e.g., to enable read_file extraction)
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/readonly/history/secured.pdf")
+if r.is_encrypted:
+    r.decrypt("user")
+w = PdfWriter()
+for p in r.pages: w.add_page(p)
+with open("/workspace/temp/clear.pdf", "wb") as f: w.write(f)
+```
+
+### Watermark (overlay an existing 1-page PDF on every page)
+
+```python
+from pypdf import PdfReader, PdfWriter
+base = PdfReader("/readonly/history/contract.pdf")
+mark = PdfReader("/workspace/temp/watermark.pdf").pages[0]
+w = PdfWriter()
+for page in base.pages:
+    page.merge_page(mark)
+    w.add_page(page)
+with open("/workspace/output/contract_wm.pdf", "wb") as f:
+    w.write(f)
+```
+
+The watermark PDF should have a transparent background and the same page size as the base.
+
+### Crop
+
+```python
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/readonly/history/scan.pdf")
+w = PdfWriter()
+for page in r.pages:
+    # mediabox uses points (1 pt = 1/72 in). Coordinates are bottom-left origin.
+    page.mediabox.left = 50
+    page.mediabox.bottom = 50
+    page.mediabox.right = 562   # 612 - 50
+    page.mediabox.top = 742     # 792 - 50
+    w.add_page(page)
+with open("/workspace/output/cropped.pdf", "wb") as f:
+    w.write(f)
+```
+
+### Metadata
+
+```python
+from pypdf import PdfReader, PdfWriter
+r = PdfReader("/workspace/output/doc.pdf")
+w = PdfWriter(clone_from=r)
+w.add_metadata({
+    "/Title": "Annual Report 2026",
+    "/Author": "GemiX",
+    "/Subject": "Q1–Q4 review",
+})
+with open("/workspace/output/doc_meta.pdf", "wb") as f:
+    w.write(f)
+```
+
+---
+
+## Poppler CLI — Quick Reference
+
+### Render a page → PNG (visual QA, OCR pre-processing)
+
+```bash
+pdftoppm -png -r 300 -f 1 -l 1 /workspace/output/document.pdf /workspace/temp/preview
+```
+
+Produces `/workspace/temp/preview-1.png`. Use `-r 200` for previews, `-r 300` for QA, `-r 600` for OCR.
+
+For all pages:
+
+```bash
+pdftoppm -png -r 200 /workspace/output/document.pdf /workspace/temp/page
+```
+
+### Extract embedded raster images (originals, not page renders)
+
+```bash
+pdfimages -all /readonly/history/document.pdf /workspace/temp/img
+```
+
+Output: `/workspace/temp/img-000.<ext>`, `/workspace/temp/img-001.<ext>`, …
+
+### Inspect metadata
+
+```bash
+pdfinfo /readonly/history/document.pdf
+```
+
+---
+
+## Visual Verification
+
+After producing or editing a PDF, render the relevant pages and inspect them with `read_file`. Catch font issues, layout overflow, mis-cropped images, and overlapping text:
+
+```bash
+pdftoppm -png -r 300 -f 1 -l 3 /workspace/output/document.pdf /workspace/temp/verify
+```
+
+```
+read_file /workspace/temp/verify-1.png
+read_file /workspace/temp/verify-2.png
+read_file /workspace/temp/verify-3.png
+```
+
+For multi-page documents, render selectively (`-f 1 -l 1`, then later pages on demand) to keep the round small. **Do not** `read_file` the produced `.pdf` itself for QA — it would only run the parser on your own output and waste a round; rendering pages to PNG is faster and shows the real layout.
+
+---
+
+## Common Pitfalls
+
+- **Spec characters in LaTeX**: `_ ^ & % # $ ~` outside math mode need escaping. Forgetting is the #1 compile failure.
+- **Reportlab cell overflow**: never put a bare string in a `Table` cell; always wrap in `Paragraph`. Always set `colWidths` proportionally to expected content. Total `colWidths` must fit the printable area.
+- **Reportlab Unicode subscripts**: use `<sub>` / `<super>` markup, never Unicode characters.
+- **Matplotlib leaks**: every `savefig` must be followed by `plt.close(fig)`.
+- **Vector vs raster figures for LaTeX**: save figures as `.pdf` (vector) when included via `\includegraphics`. Use `.png` only for raster artwork.
+- **`pdftoppm` resolution**: `-r 100` for thumbnails, `-r 300` for QA, `-r 600` for OCR. Higher values produce huge files for no benefit when a human is reading.
+- **Path absolute always**: every script and every LaTeX `\includegraphics` path must start with `/workspace/` or `/readonly/`.
+- **No `cat << EOF` for code generation**: write `.py`/`.tex`/`.json` via `write_file`, never via shell heredoc.
+- **No piping/chaining in bash**: emit one command per `bash` call; multiple bash calls in the same round run in emission order.
+- **`/readonly/` is read-only**: copy to `/workspace/temp/` first if you need to mutate.
+- **Image sourcing**: prefer `image_search` with `save_to_disk=true` to fetch external imagery; reference the returned `/readonly/searched_images/<file>` path verbatim.
+
+---
+
+## See Also
+
+- `reference.md` — advanced reportlab Platypus (TOC, footers, custom canvas), LaTeX with TikZ/pgfplots and biblatex, Ghostscript compression, encrypted-file recovery, and troubleshooting.

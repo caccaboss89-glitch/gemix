@@ -302,7 +302,7 @@ async function bashTool(args, userCtx, responseCtx) {
 
   let commandToRun = command;
   if (hasShellChaining(commandToRun)) {
-    return { success: false, error: 'bash commands must be standalone — no chaining, piping, redirection, or subshells. Use multiple bash tool calls with execution_phase instead.' };
+    return { success: false, error: 'bash commands must be standalone — no chaining, piping, redirection, or subshells. Emit multiple bash tool calls instead; they run in emission order within the same round.' };
   }
 
   if (commandToRun.includes('yt-dlp')) {
