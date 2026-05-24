@@ -23,6 +23,74 @@ function makeTool({ name, description, properties = {}, required = [] }) {
   return tool;
 }
 
+// ── Lightweight runtime arg validator ──────────────────────────────────────
+//
+// We do NOT pull in ajv: a few hundred bytes of inline checks cover the
+// schemas we actually use (plain object with string/number/boolean/array
+// properties + required[]). The goal is to catch obvious AI hallucinations
+// (wrong types, missing required fields) at the dispatcher boundary so the
+// tool implementations don't have to repeat the same defensive checks.
+
+function _matchesType(value, schemaType) {
+  if (!schemaType) return true; // unconstrained property
+  switch (schemaType) {
+    case 'string': return typeof value === 'string';
+    case 'number': return typeof value === 'number' && Number.isFinite(value);
+    case 'integer': return typeof value === 'number' && Number.isInteger(value);
+    case 'boolean': return typeof value === 'boolean';
+    case 'array': return Array.isArray(value);
+    case 'object': return value !== null && typeof value === 'object' && !Array.isArray(value);
+    default: return true;
+  }
+}
+
+/**
+ * Validate parsed args against the tool's JSON-schema-style parameters.
+ * Returns null on success or a human-readable error string on failure.
+ *
+ * Checks:
+ *   - args is an object
+ *   - all `required` properties are present and non-null
+ *   - top-level property types match the declared `type` (string/array/etc.)
+ *   - enum constraints on top-level string properties
+ *
+ * Intentionally NOT recursive: nested objects (e.g. recipient { name, phone })
+ * are validated by the individual tool handlers, which already have richer
+ * domain rules. The point here is the cheap top-level guard.
+ *
+ * @param {object} args - Parsed tool-call arguments.
+ * @param {object} toolDef - Tool definition (as returned by makeTool).
+ * @returns {string|null}
+ */
+function validateToolArgs(args, toolDef) {
+  if (!toolDef || !toolDef.function || !toolDef.function.parameters) return null;
+  const params = toolDef.function.parameters;
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+    return 'Tool arguments must be a JSON object.';
+  }
+  const required = Array.isArray(params.required) ? params.required : [];
+  for (const key of required) {
+    if (args[key] === undefined || args[key] === null || args[key] === '') {
+      return `Missing required argument "${key}".`;
+    }
+  }
+  const props = params.properties || {};
+  for (const [key, value] of Object.entries(args)) {
+    const propSchema = props[key];
+    if (!propSchema) continue; // unknown extra props are tolerated
+    if (value === undefined || value === null) continue;
+    if (!_matchesType(value, propSchema.type)) {
+      return `Argument "${key}" has wrong type (expected ${propSchema.type}).`;
+    }
+    if (Array.isArray(propSchema.enum) && propSchema.enum.length > 0 && typeof value === 'string') {
+      if (!propSchema.enum.includes(value)) {
+        return `Argument "${key}" must be one of: ${propSchema.enum.join(', ')}.`;
+      }
+    }
+  }
+  return null;
+}
+
 // ── xAI code_interpreter — exposed as a function tool ──
 //
 // Hermes /chat/completions only accepts type:'function' or type:'live_search'.
@@ -629,4 +697,5 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 module.exports = {
   getToolsForUser,
   isActiveMemberOnlyTool,
+  validateToolArgs,
 };

@@ -66,6 +66,21 @@ async function executeYtDlpOnHost(args, userCtx, command, responseCtx) {
     return { success: false, error: 'yt-dlp commands must run standalone — no chaining (&&, ||, ;, |, redirection, subshells).' };
   }
 
+  // ── Tighter input sanitisation (defence in depth) ─────────────────────────
+  // hasShellChaining() above already rejects classic operators. Add explicit
+  // rejection for control characters, newlines, NUL bytes, command-substitution
+  // markers, and tilde-expansion that hasShellChaining might miss. Also cap
+  // the length to keep the argv reasonable.
+  if (/[\x00-\x09\x0B-\x1F\x7F]/.test(command)) {
+    return { success: false, error: 'yt-dlp command contains control characters.' };
+  }
+  if (/\$\(|`|\$\{/.test(command)) {
+    return { success: false, error: 'yt-dlp command contains shell expansion characters ($(...), `...`, ${...}).' };
+  }
+  if (command.length > 4000) {
+    return { success: false, error: `yt-dlp command too long (${command.length} chars, max 4000).` };
+  }
+
   // Check proxy before starting
   const proxyOk = await checkProxyConnectivity(SANDBOX_PROXY_HOST, SANDBOX_PROXY_PORT);
   if (!proxyOk) {

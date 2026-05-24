@@ -11,19 +11,25 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
 
 // ── System cleanup on startup ─────────────────────────────────────────────────────
-// Prevents disk space exhaustion from:
+// Optional, opt-in only via STARTUP_SYSTEM_CLEANUP=true.
+// Cleans:
 // - Chromium/Puppeteer crash dumps (apport)
 // - Docker unused containers/images
 // - User cache directories
-try {
-  if (process.platform === 'linux') {
-    log.info('🧹 Running system cleanup on startup...');
+//
+// Disabled by default because it requires passwordless sudo for /var/lib/apport
+// and /var/crash, and mutates host system directories from the bot process,
+// which is a fragile coupling. Enable explicitly only on hosts where sudo
+// is configured for the bot user and the cleanup is actually wanted.
+if (process.env.STARTUP_SYSTEM_CLEANUP === 'true' && process.platform === 'linux') {
+  try {
+    log.info('🧹 Running system cleanup on startup (STARTUP_SYSTEM_CLEANUP=true)...');
 
     // 1. Crash dumps (Chromium/Puppeteer)
     const apportSize = execSync('du -sh /var/lib/apport 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
     const crashSize = execSync('du -sh /var/crash 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
     log.info(`   Crash dumps: apport=${apportSize.split('\t')[0]}, crash=${crashSize.split('\t')[0]}`);
-    
+
     execSync('sudo rm -rf /var/lib/apport/* 2>/dev/null || true', { encoding: 'utf-8' });
     execSync('sudo rm -rf /var/crash/* 2>/dev/null || true', { encoding: 'utf-8' });
 
@@ -41,7 +47,7 @@ try {
       const homeCacheSize = execSync('du -sh ~/.cache 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
       log.info(`   ~/.cache: ${homeCacheSize.split('\t')[0]}`);
       execSync('rm -rf ~/.cache/* 2>/dev/null || true', { encoding: 'utf-8' });
-      
+
       const pipCacheSize = execSync('pip cache info 2>/dev/null | grep "Total" || echo "0"', { encoding: 'utf-8' }).trim();
       log.info(`   pip cache: ${pipCacheSize}`);
       execSync('pip cache purge 2>/dev/null || true', { encoding: 'utf-8' });
@@ -50,11 +56,11 @@ try {
     }
 
     log.info('✅ System cleanup completed');
-  } else {
-    log.info('🧹 System cleanup skipped (non-Linux OS)');
+  } catch (err) {
+    log.warn(`⚠️ System cleanup failed: ${err.message}`);
   }
-} catch (err) {
-  log.warn(`⚠️ System cleanup failed: ${err.message}`);
+} else {
+  log.debug('🧹 System cleanup skipped (set STARTUP_SYSTEM_CLEANUP=true to enable)');
 }
 
 const { initDedicatedWhatsApp } = require('./platforms/whatsapp/dedicated');
@@ -120,4 +126,15 @@ process.on('unhandledRejection', (err) => {
     const { notifyAdmin } = require('./utils/adminNotifier');
     notifyAdmin('Unhandled Rejection', `Error: ${err?.message || err}\nStack: ${err?.stack || ''}`).catch(() => {});
   } catch {}
+});
+
+process.on('uncaughtException', (err) => {
+  log.error('❌ Uncaught exception:', err);
+  try {
+    const { notifyAdmin } = require('./utils/adminNotifier');
+    notifyAdmin('Uncaught Exception', `Error: ${err?.message || err}\nStack: ${err?.stack || ''}`).catch(() => {});
+  } catch {}
+  // Do not exit: PM2 will restart on hard crashes; here we surface the error
+  // and let the process keep running so in-flight tool sessions can complete
+  // (the same philosophy as unhandledRejection above).
 });

@@ -9,7 +9,104 @@ const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
 const LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour
+const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
+const LOG_ENTRY_MAX_BYTES = 1 * 1024 * 1024;       // 1 MB cap per single entry post-redaction
+const REDACT_BASE64_KEEP = 64;                      // keep first N chars of each base64 payload
+const REDACT_TEXT_KEEP = 4 * 1024;                  // keep first N chars of long text content parts
 const crypto = require('crypto');
+
+// ── Redaction helpers ──────────────────────────────────────────────────────
+//
+// We log every API request/response to disk for debugging. Without redaction
+// these files contain user PII (emails, phone numbers, names), full base64
+// of incoming images/audio/video, and command strings that can include paths
+// or file contents. The redactor walks the body in-place (on a deep clone)
+// and shrinks the heaviest fields without losing the structure needed for
+// debugging.
+
+const _EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const _WA_JID_RE = /\b\d{8,15}@(?:c|s)\.us\b/g;
+const _PHONE_RE = /\b\+?\d{8,15}\b/g;
+
+function _redactStringPii(s) {
+  if (typeof s !== 'string' || s.length === 0) return s;
+  return s
+    .replace(_EMAIL_RE, '[REDACTED_EMAIL]')
+    .replace(_WA_JID_RE, '[REDACTED_JID]')
+    .replace(_PHONE_RE, (m) => (m.length >= 8 ? '[REDACTED_PHONE]' : m));
+}
+
+function _truncateBase64DataUrl(url) {
+  const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(url);
+  if (!m) return url;
+  const head = m[2].slice(0, REDACT_BASE64_KEEP);
+  return `data:${m[1]};base64,${head}…[truncated ${m[2].length - head.length} chars]`;
+}
+
+function _redactValue(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    if (value.startsWith('data:') && value.includes(';base64,')) {
+      return _truncateBase64DataUrl(value);
+    }
+    let out = value;
+    if (out.length > REDACT_TEXT_KEEP) {
+      out = out.slice(0, REDACT_TEXT_KEEP) + `…[truncated ${out.length - REDACT_TEXT_KEEP} chars]`;
+    }
+    return _redactStringPii(out);
+  }
+  if (Array.isArray(value)) return value.map(_redactValue);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const k of Object.keys(value)) out[k] = _redactValue(value[k]);
+    return out;
+  }
+  return value;
+}
+
+function _redactEntry(entry) {
+  try {
+    return _redactValue(entry);
+  } catch {
+    return entry;
+  }
+}
+
+/**
+ * Enforce a total size quota on the log directory by deleting the oldest
+ * files until the total size drops below LOG_DIR_QUOTA_BYTES.
+ * Cheap to call before every write because it short-circuits when below cap.
+ */
+function _enforceLogDirQuota() {
+  try {
+    if (!fs.existsSync(apiLogDir)) return;
+    const files = fs.readdirSync(apiLogDir).filter(f => f.endsWith('.json'));
+    let total = 0;
+    const stats = [];
+    for (const f of files) {
+      try {
+        const fp = path.join(apiLogDir, f);
+        const st = fs.statSync(fp);
+        total += st.size;
+        stats.push({ fp, mtime: st.mtimeMs, size: st.size });
+      } catch { /* ignore */ }
+    }
+    if (total <= LOG_DIR_QUOTA_BYTES) return;
+    stats.sort((a, b) => a.mtime - b.mtime);
+    let deleted = 0;
+    for (const s of stats) {
+      if (total <= LOG_DIR_QUOTA_BYTES) break;
+      try {
+        fs.unlinkSync(s.fp);
+        total -= s.size;
+        deleted++;
+      } catch { /* ignore */ }
+    }
+    if (deleted > 0) log.info(`Log quota: deleted ${deleted} oldest file(s) to enforce ${Math.round(LOG_DIR_QUOTA_BYTES / 1024 / 1024)} MB cap.`);
+  } catch (err) {
+    log.warn(`Log quota enforcement failed: ${err.message}`);
+  }
+}
 
 function ensureLogDir() {
   if (!fs.existsSync(apiLogDir)) {
@@ -82,18 +179,26 @@ function extractAttachmentsFromMessages(messages) {
 function logApiRequest(modelName, apiUrl, body, extra = {}) {
   try {
     ensureLogDir();
+    _enforceLogDirQuota();
     const now = new Date().toISOString();
     const requestAttachments = extractAttachmentsFromMessages(body.messages);
-    const entry = {
+    const entry = _redactEntry({
       timestamp: now,
       model: modelName,
       apiUrl,
       requestBody: body,
       requestAttachments,
       ...extra,
-    };
+    });
+    let serialized = JSON.stringify(entry, null, 2);
+    if (serialized.length > LOG_ENTRY_MAX_BYTES) {
+      // Defensive truncation: redacted entries should already fit, but very
+      // long aggregations (many tool rounds) can still blow past the cap.
+      serialized = serialized.slice(0, LOG_ENTRY_MAX_BYTES) +
+        `\n... [entry truncated at ${LOG_ENTRY_MAX_BYTES} bytes]`;
+    }
     const filePath = _getLogFilePath('api-request', now);
-    fs.writeFileSync(filePath, JSON.stringify(entry, null, 2));
+    fs.writeFileSync(filePath, serialized);
     return filePath;
   } catch (err) {
     log.warn(`Failed to write API request log: ${err.message}`);
@@ -104,16 +209,22 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
 function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
   try {
     ensureLogDir();
+    _enforceLogDirQuota();
     const now = new Date().toISOString();
     const responseLogFile = _getLogFilePath('api-response', now);
-    const entry = {
+    const entry = _redactEntry({
       timestamp: now,
       model: modelName,
       apiUrl,
       responseBody,
       ...extra,
-    };
-    fs.writeFileSync(responseLogFile, JSON.stringify(entry, null, 2));
+    });
+    let serialized = JSON.stringify(entry, null, 2);
+    if (serialized.length > LOG_ENTRY_MAX_BYTES) {
+      serialized = serialized.slice(0, LOG_ENTRY_MAX_BYTES) +
+        `\n... [entry truncated at ${LOG_ENTRY_MAX_BYTES} bytes]`;
+    }
+    fs.writeFileSync(responseLogFile, serialized);
     return responseLogFile;
   } catch (err) {
     log.warn(`Failed to write API response log: ${err.message}`);

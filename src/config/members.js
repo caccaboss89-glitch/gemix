@@ -1,5 +1,20 @@
 // src/config/members.js
-const ACTIVE_MEMBERS = [
+//
+// Active member registry.
+//
+// PII separation: by default the registry is loaded from a non-tracked file
+// at data/members.json (added to .gitignore). If that file is missing, we
+// fall back to the legacy hardcoded list below so existing deployments do
+// not regress. Override path with GEMIX_MEMBERS_FILE if you keep the
+// registry elsewhere (encrypted store, secrets vault, etc.).
+const fs = require('fs');
+const path = require('path');
+const { DATA_DIR } = require('./constants');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('Members');
+
+const _LEGACY_HARDCODED_MEMBERS = [
   {
     name: 'Gagliardi Alberto',
     nicks: ['抜刀隊', 'SecondoAccount89'],
@@ -32,6 +47,29 @@ const ACTIVE_MEMBERS = [
     wa: '393278547055@c.us',
   },
 ];
+
+function _loadMembers() {
+  const customPath = process.env.GEMIX_MEMBERS_FILE && process.env.GEMIX_MEMBERS_FILE.trim();
+  const candidate = customPath
+    ? path.resolve(customPath)
+    : path.join(DATA_DIR, 'members.json');
+  try {
+    if (fs.existsSync(candidate)) {
+      const raw = fs.readFileSync(candidate, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        log.info(`Loaded ${parsed.length} active member(s) from ${candidate}`);
+        return parsed;
+      }
+      log.warn(`Members file at ${candidate} is empty or not an array, falling back to legacy list.`);
+    }
+  } catch (err) {
+    log.warn(`Failed to read members file at ${candidate}: ${err.message} — falling back to legacy list.`);
+  }
+  return _LEGACY_HARDCODED_MEMBERS;
+}
+
+const ACTIVE_MEMBERS = _loadMembers();
 
 /**
  * Find a member by WhatsApp JID.

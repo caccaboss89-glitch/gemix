@@ -32,7 +32,7 @@ exec jupyter server \
   --ServerApp.password='' \
   --ServerApp.disable_check_xsrf=True \
   --ServerApp.allow_remote_access=True \
-  --ServerApp.allow_origin='*' \
+  --ServerApp.allow_origin='http://127.0.0.1' \
   --ServerApp.root_dir="${SANDBOX_WORKDIR}" \
   --ServerApp.terminado_settings="shell_command=['/bin/bash']" \
   --ServerApp.log_level=INFO \

@@ -25,8 +25,13 @@ const EXPIRATION_MS = 60 * 60 * 1000; // 1 hour
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
 const TEMP_DIR = path.join(process.cwd(), '.tempfiles');
 
-// In-memory registry: Map<tokenId, { token, filePath, expiresAt, originalName }>
+// In-memory registry: Map<tokenId, { token, filePath, expiresAt, originalName, requestCount }>
 const fileRegistry = new Map();
+
+// Per-token request counter to mitigate token-reuse abuse / scraping.
+// A legitimate recipient downloads the file 1-2 times. We allow MAX_TOKEN_REQUESTS
+// before refusing further reads with 429.
+const MAX_TOKEN_REQUESTS = 20;
 
 let _server = null;
 let _cleanupInterval = null;
@@ -82,6 +87,7 @@ function registerTempFile(filePath, originalName) {
       filePath,
       expiresAt,
       originalName: path.basename(originalName || filePath),
+      requestCount: 0,
     });
 
     // Build URL: use env variable GEMIX_PUBLIC_URL if available, else fallback
@@ -199,6 +205,16 @@ function startTempFileServer() {
         return;
       }
 
+      // Per-token request cap. Legitimate recipients download once or twice;
+      // anything beyond MAX_TOKEN_REQUESTS is treated as abuse (e.g. scrapers
+      // following a leaked link, retries from broken clients) and refused.
+      entry.requestCount = (entry.requestCount || 0) + 1;
+      if (entry.requestCount > MAX_TOKEN_REQUESTS) {
+        log.warn(`Rate-limit hit for temp token ${token.slice(0, 8)}… (${entry.requestCount} requests)`);
+        res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '3600' }).end('Too many requests');
+        return;
+      }
+
       const filePath = entry.filePath;
 
       // Safety check: file must exist and be inside allowed temp dir
@@ -223,6 +239,10 @@ function startTempFileServer() {
           'Content-Disposition': `attachment; filename="${escapedName}"; filename*=UTF-8''${encodedName}`,
           'Content-Length': stat.size,
           'Cache-Control': 'no-cache, no-store, must-revalidate',
+          // Discourage search engines and link-preview crawlers from indexing
+          // accidentally-leaked links.
+          'X-Robots-Tag': 'noindex, nofollow, noarchive',
+          'Referrer-Policy': 'no-referrer',
         });
 
         const stream = fs.createReadStream(filePath);

@@ -411,7 +411,7 @@ async function handleMessage(ctx) {
           argsPreview = String(tc.function.arguments || '').slice(0, 1000);
         }
         log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
-        const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx);
+        const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, tools);
         if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
           let isSuccess = false;
           if (typeof result === 'string') {

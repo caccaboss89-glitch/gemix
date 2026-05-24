@@ -23,9 +23,9 @@ const log = createLogger('WebXSearch');
 
 const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
 
-// SuperGrok plan only allows the 4-agent (low effort) tier.
+// SuperGrok plan only allows the 4-agent in high effort.
 // Hardcoded here so the main model can't accidentally request the unsupported tier.
-const FIXED_EFFORT = 'low';
+const FIXED_EFFORT = 'high';
 
 // 4-agent runs typically resolve in 30-90s. Give some headroom for slow searches.
 const REQUEST_TIMEOUT_MS = 3 * 60 * 1000;

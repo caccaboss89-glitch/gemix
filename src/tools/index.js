@@ -1,5 +1,5 @@
 // src/tools/index.js
-const { isActiveMemberOnlyTool } = require('../ai/tools');
+const { isActiveMemberOnlyTool, validateToolArgs } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
 const { codeInterpreter } = require('./codeInterpreter');
 const { imageSearch } = require('./imageSearch');
@@ -132,9 +132,10 @@ const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', '
  * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, isGroup, groupId }
  * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
  * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set, roundCalledTools: Set }
+ * @param {Array} [toolDefs] - Optional list of currently-allowed tool definitions, used for early arg validation.
  * @returns {Promise<object>} { toolCallId: string, result: string }
  */
-async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
+async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs = null) {
   const name = toolCall.function.name;
   const chatKey = _getVoiceLimitChatKey(userCtx);
 
@@ -151,6 +152,23 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx) {
     }
   } catch {
     args = {};
+  }
+
+  // ── Schema validation ────────────────────────────────────────────────────
+  // Catch obvious AI hallucinations (wrong types, missing required fields)
+  // before we hand off to the individual tool implementation. We look up
+  // the tool definition in the per-call list passed by the handler.
+  if (Array.isArray(toolDefs)) {
+    const toolDef = toolDefs.find(t => t && t.function && t.function.name === name);
+    if (toolDef) {
+      const validationError = validateToolArgs(args, toolDef);
+      if (validationError) {
+        return {
+          toolCallId: toolCall.id,
+          result: JSON.stringify({ success: false, error: validationError }),
+        };
+      }
+    }
   }
 
   // ── Per-round deduplication ───────────────────────────────────────────────
