@@ -249,10 +249,6 @@ async function _callMultiAgent(prompt) {
         type: 'x_search',
         limit: X_LIMIT,
       },
-    ],
-    include: [
-      "reasoning.encrypted_content",
-      "verbose_streaming"
     ]
   };
 
