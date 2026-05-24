@@ -249,7 +249,6 @@ async function _callMultiAgent(prompt) {
       {
         type: 'web_search',
         num_results: 10,
-        search_context_size: 'medium',
       },
       {
         type: 'x_search',
