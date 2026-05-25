@@ -50,7 +50,7 @@ function getChatKey(ctx) {
  * invocation — the caller should stay silent.
  *
  * @param {object} ctx  - Handler context; must have `requestId` set.
- * @param {string} kind - Notification kind: 'pdf' | 'video' | 'audio' | 'research'
+ * @param {string} kind - Notification kind: 'research' | 'image_gen' | 'video_gen' | etc.
  * @returns {boolean}
  */
 function markNotifiedInCall(ctx, kind) {
@@ -79,26 +79,6 @@ function clearCallNotifications(ctx) {
 // ── Message builders ────────────────────────────────────────────────────────
 
 /**
- * "Transcribing N document(s)" — singular/plural.
- * @param {number} count
- * @returns {string}
- */
-function buildPdfNotificationMessage(count) {
-  if (count === 1) return '⏳ Sto trascrivendo il documento, attendi un attimo...';
-  return `⏳ Sto trascrivendo ${count} documenti, attendi un attimo...`;
-}
-
-/**
- * "Analysing N video(s)" — singular/plural.
- * @param {number} count
- * @returns {string}
- */
-function buildVideoNotificationMessage(count) {
-  if (count <= 1) return '⏳ Sto analizzando il video, attendi un attimo...';
-  return `⏳ Sto analizzando ${count} video, attendi un attimo...`;
-}
-
-/**
  * Fixed research notification. Sent BEFORE the multi-agent team is queried,
  * so the user knows GemiX is actively consulting the research team and is
  * about to wait for their report before answering. Searches are capped at
@@ -107,6 +87,17 @@ function buildVideoNotificationMessage(count) {
  */
 function buildResearchNotificationMessage() {
   return '🔎 Sto consultando il team di ricerca prima di risponderti, attendi un attimo...';
+}
+
+/**
+ * Fixed build notification. Sent BEFORE the engineering sub-agent is invoked,
+ * so the user knows the host is delegating the task and is about to wait for
+ * the deliverable. Dedup key 'build' ensures it fires once per AI call even
+ * if the model invokes `build` multiple times.
+ * @returns {string}
+ */
+function buildEngineeringNotificationMessage() {
+  return '🛠️ Sto delegando il lavoro al coder agent, attendi un attimo...';
 }
 
 // ── Safety valve ────────────────────────────────────────────────────────────
@@ -125,7 +116,6 @@ module.exports = {
   getChatKey,
   markNotifiedInCall,
   clearCallNotifications,
-  buildPdfNotificationMessage,
-  buildVideoNotificationMessage,
   buildResearchNotificationMessage,
+  buildEngineeringNotificationMessage,
 };

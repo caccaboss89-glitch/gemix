@@ -49,26 +49,11 @@ module.exports = {
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 64_000,
   MAX_TOOL_ROUNDS: 30,
-  MAX_TOOL_ROUNDS_AGENTIC: 90,
 
-  // Agentic projects
-  MAX_PROJECTS_PER_USER: 10,
-  // Total user disk quota (sum of physical projects/ + searched_images/ folders).
-  MAX_USER_TOTAL_MB: 1024,
-  MAX_PROJECT_NAME_LEN: 40,
-  PROJECT_STATE_LOCK_TTL_MS: 5 * 60 * 1000,
-  INTERRUPTED_RUN_TTL_MS: 2 * 60 * 60 * 1000,
-
-  // Code execution sandbox
-  CODE_EXEC_TIMEOUT_MS: 30_000,
-  CODE_EXEC_MAX_TIMEOUT_MS: 120_000,
-  CODE_EXEC_MAX_OUTPUT_BYTES: 512 * 1024,
-  CODE_EXEC_MAX_FILES_PER_CALL: 200,
-  CODE_EXEC_MAX_TOTAL_BYTES: 100 * 1024 * 1024,
+  // Build sub-agent sandbox container.
+  // Memory cap and idle TTL reused from the legacy sandbox config.
   SANDBOX_MEMORY_MB: 1536,
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
-  SANDBOX_PROXY_HOST: '127.0.0.1',
-  SANDBOX_PROXY_PORT: 5040,
 
   // Public file tunnel (tempFileServer + localtunnel) — token TTLs.
   // History items live on disk forever (until pruned); their public token
@@ -79,12 +64,28 @@ module.exports = {
   TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,
   TUNNEL_TOKEN_TTL_TEMP_MS: 60 * 60 * 1000,
 
+  // Build sub-agent (engineering sub-agent invoked via the `build` tool).
+  // Workspace lifecycle is decoupled from the sandbox container's idle TTL:
+  //   - WORKSPACE_TTL_MS: time after the user's last interaction (any
+  //     platform) before we wipe the on-disk workspace and shut down the
+  //     associated container.
+  //   - QUOTA_MB: hard cap on the sum of bytes in the workspace tree;
+  //     write tools refuse new writes past this threshold.
+  //   - MAX_ROUNDS / HARD_TIMEOUT_MS: outer-loop safety nets per build call.
+  //   - LOCK_WAIT_MS: how long a concurrent build call waits to acquire the
+  //     per-workspace lock before giving up with "build busy".
+  BUILD_WORKSPACE_TTL_MS: 4 * 60 * 60 * 1000,
+  BUILD_WORKSPACE_QUOTA_MB: 500,
+  BUILD_MAX_ROUNDS: 60,
+  BUILD_HARD_TIMEOUT_MS: 10 * 60 * 1000,
+  BUILD_LOCK_WAIT_MS: 30 * 1000,
+
   // Media
   MAX_IMAGES: 4,
   MAX_IMAGE_BYTES: 7_500_000,
   MAX_TTS_CHARS: 1000,
-  MAX_AUDIO_DURATION_S: 120,
-  MAX_VIDEO_DURATION_S: 15,
+  MAX_AUDIO_DURATION_S: 600,
+  MAX_VIDEO_DURATION_S: 120,
 
   // Platforms
   PLATFORM_DISCORD: 'discord',

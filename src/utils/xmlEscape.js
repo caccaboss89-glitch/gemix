@@ -1,5 +1,5 @@
 // src/utils/xmlEscape.js
-// Shared XML escape utility — used by systemPrompt.js and agenticBriefing.js.
+// Shared XML escape utility for system-prompt builders.
 
 /**
  * Escape XML special characters in a string.

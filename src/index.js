@@ -68,7 +68,7 @@ const { initPersonalWhatsApp } = require('./platforms/whatsapp/personal');
 const { initDiscord } = require('./platforms/discord/client');
 const { startScheduler, setSchedulerWaClient } = require('./scheduler/engine');
 const { setAdminNotifierClient } = require('./utils/adminNotifier');
-const sandboxManager = require('./sandbox/sandboxManager');
+const buildSandbox = require('./sandbox/buildSandbox');
 const { startInternalNotifyServer } = require('./utils/internalNotifyServer');
 const { startTempFileServer } = require('./utils/tempFileServer');
 const { HERMES_BASE_URL, GROK_MODEL } = require('./config/env');
@@ -107,13 +107,12 @@ initPersonalWhatsApp();
 initDiscord();
 
 startScheduler();
-sandboxManager.installShutdownHook();
 startInternalNotifyServer();
 startTempFileServer();
 
 const shutdownHandler = async (signal) => {
   log.info(`\n🛑 GemiX — Shutting down (${signal})...`);
-  try { await sandboxManager.shutdownAll(); } catch (err) { log.warn(`Sandbox shutdown failed during ${signal}: ${err.message}`); }
+  try { await buildSandbox.shutdownAll(); } catch (err) { log.warn(`Build sandbox shutdown failed during ${signal}: ${err.message}`); }
   process.exit(0);
 };
 

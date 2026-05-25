@@ -1,6 +1,6 @@
 # GemiX sandbox — reference topology.
 #
-# This file is NOT used in production (the Node sandboxManager spawns
+# This file is NOT used in production (the Node `buildSandbox` spawns
 # containers programmatically). It exists to:
 #   1. Let you verify the image + proxy work on your Linux server:
 #        docker compose -f sandbox/docker-compose.yml up --build
@@ -8,8 +8,8 @@
 #      will reproduce at runtime.
 #
 # Production notes:
-#   - The manager creates ONE sandbox container per active (user, project)
-#     pair and reuses it for the REPL session.
+#   - The manager creates ONE sandbox container per active workspaceId
+#     (group:<id> or user:<storageId>) and reuses it for the session.
 #   - The proxy is a singleton: one instance shared by all sandboxes.
 #   - Volumes are mounted per-container by the manager (not statically).
 
@@ -21,34 +21,38 @@ services:
     image: gemix-sandbox-proxy:latest
     container_name: gemix-sandbox-proxy
     restart: unless-stopped
-    # Default allowlist lives in proxy.py; override here if you need to widen it.
+    # Default allowlist lives in proxy.py; override here to widen it.
     environment:
       # ALLOWED_HOSTS: "youtube.com,twitter.com,x.com,instagram.com,tiktok.com,facebook.com"
       PROXY_PORT: "8080"
       # URL of the host's internal notify server — set to reach the Node process.
-      # On Linux Docker: http://172.17.0.1:9999/notify (host bridge IP)
+      # On Linux Docker: http://172.17.0.1:9999/notify
       # On Docker Desktop: http://host.docker.internal:9999/notify
       GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
     networks:
       egress: {}           # internet access (for forwarding to allowed hosts)
-      sandbox_net: {}      # reachable by sandboxes as hostname "proxy"
+      sandbox_net: {}      # reachable by sandboxes as hostname "gemix-sandbox-proxy"
     # Do NOT expose the port to the host — the proxy must only be reachable
-    # from sandbox_net. Leaving `ports:` unset keeps it internal.
+    # from sandbox_net.
 
   sandbox_example:
-    # Example of how the Node manager will run a sandbox. Replace SANDBOX_TOKEN
-    # with a per-container random value and mount the actual project folder.
+    # Example of how the Node manager will run a sandbox. The manager always
+    # overrides Entrypoint to skip the legacy Jupyter bootstrap and runs the
+    # container as a quiet `sleep infinity` process attached via `docker exec`.
     build:
       context: .
       dockerfile: Dockerfile
     image: gemix-sandbox:latest
     container_name: gemix-sandbox-example
     depends_on: [proxy]
+    entrypoint: ""
+    command: ["sleep", "infinity"]
+    user: "1000:1000"
     environment:
-      SANDBOX_TOKEN: "replace-me-with-random-32char-token"
-      HTTP_PROXY:  "http://proxy:8080"
-      HTTPS_PROXY: "http://proxy:8080"
+      HTTP_PROXY:  "http://gemix-sandbox-proxy:8080"
+      HTTPS_PROXY: "http://gemix-sandbox-proxy:8080"
       NO_PROXY:    "localhost,127.0.0.1"
+      GEMIX_BUILD: "1"
     networks:
       sandbox_net: {}      # no default internet; only the proxy is reachable
     read_only: false       # /workspace must be writable
@@ -61,12 +65,10 @@ services:
     memswap_limit: 1536m
     cpus: 1.0
     volumes:
-      # Mount a real project directory here in tests:
+      # Mount a real build workspace here in tests:
       - ./_test_workspace:/workspace
-      # Optionally mount the user's read-only zones:
-      # - /path/to/user/history:/readonly/history:ro
-
-      # - /path/to/user/searched_images:/readonly/searched_images:ro
+      # Skills mount (read-only):
+      - ../src/data/skills:/skills:ro
 
 networks:
   # Internal-only network where sandboxes live; no direct internet.

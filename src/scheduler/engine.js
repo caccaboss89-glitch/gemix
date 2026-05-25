@@ -1,7 +1,7 @@
 // src/scheduler/engine.js
 const fsPromises = require('fs').promises;
 const fs = require('fs');
-const { TASKS_DIR, SCHEDULER_INTERVAL_MS } = require('../config/constants');
+const { TASKS_DIR, SCHEDULER_INTERVAL_MS, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
 const { getRomeISO, convertRomeLocalToISO } = require('../utils/time');
 const { buildScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
@@ -9,6 +9,9 @@ const { checkNewRelease } = require('./releaseMonitor');
 const { modifyTaskFile } = require('../utils/taskStore');
 const { createLogger } = require('../utils/logger');
 const { stripVoiceTags, normalizeMarkdown } = require('../utils/text');
+const { listWorkspaceStates } = require('../utils/buildState');
+const buildSandbox = require('../sandbox/buildSandbox');
+const { wipeWorkspace } = require('../sandbox/buildWorkspace');
 
 const log = createLogger('Scheduler');
 
@@ -63,6 +66,35 @@ function computeNextOccurrence(scheduledAtISO, freq) {
 }
 
 /**
+ * Periodic sweeper for the build sub-agent's per-workspace tree.
+ * Wipes any workspace whose user has not interacted with GemiX for
+ * BUILD_WORKSPACE_TTL_MS, and shuts down the matching sandbox container.
+ * The metadata file (.build_state.json) is left in place so future activity
+ * can restart from a known empty workspace.
+ */
+async function _sweepBuildWorkspaces() {
+  const states = listWorkspaceStates();
+  const now = Date.now();
+  for (const s of states) {
+    if (!s.lastActivityAt) continue;
+    if (now - s.lastActivityAt < BUILD_WORKSPACE_TTL_MS) continue;
+    // The workspaceId was persisted by touchActivity() — use it directly.
+    // We deliberately don't try to invert the filesystem slug because the
+    // sanitization step is lossy (e.g. multiple chars collapse to '_').
+    const workspaceId = s.workspaceId;
+    if (!workspaceId) {
+      log.warn(`Skipping idle workspace ${s.workspaceSlug}: no workspaceId persisted`);
+      continue;
+    }
+    log.info(`🧹 Wiping idle build workspace ${s.workspaceSlug} (idle ${(now - s.lastActivityAt) / 60000 | 0} min)`);
+    try { wipeWorkspace(workspaceId); }
+    catch (err) { log.warn(`wipeWorkspace failed: ${err.message}`); }
+    try { await buildSandbox.shutdown(workspaceId); }
+    catch (err) { log.warn(`buildSandbox shutdown failed: ${err.message}`); }
+  }
+}
+
+/**
  * Set the WhatsApp dedicated client reference for the scheduler.
  * @param {object} client - The whatsapp-web.js Client instance
  */
@@ -73,7 +105,7 @@ function setSchedulerWaClient(client) {
 /**
  * Start the task scheduler.
  * Initializes the task directory and begins checking for due tasks at regular intervals.
- * Also triggers daily music wrap monitoring.
+ * Also triggers daily music wrap monitoring and hourly build-workspace sweep.
  */
 function startScheduler() {
   if (!fs.existsSync(TASKS_DIR)) {
@@ -90,6 +122,14 @@ function startScheduler() {
     }
   }, SCHEDULER_INTERVAL_MS);
   schedulerInterval.unref();
+
+  // Hourly: wipe idle build workspaces past the TTL.
+  const buildSweepInterval = setInterval(() => {
+    _sweepBuildWorkspaces().catch(err => log.error('Build workspace sweep error:', err));
+  }, 60 * 60 * 1000);
+  buildSweepInterval.unref();
+  // Run once at startup so any post-restart stale state is cleaned up.
+  _sweepBuildWorkspaces().catch(err => log.error('Build workspace initial sweep error:', err));
 }
 
 async function checkAndExecuteTasks() {

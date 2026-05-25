@@ -30,6 +30,11 @@ module.exports = {
   HERMES_BASE_URL: process.env.HERMES_BASE_URL,
   HERMES_API_KEY: process.env.HERMES_API_KEY,
   GROK_MODEL: process.env.GROK_MODEL,
+  // Engineering sub-agent invoked by the `build` tool. Defaults to the
+  // main brain's model so production keeps working without any extra env
+  // var; flip to `grok-build-0.1` (or any future dedicated model) when
+  // available without code changes.
+  BUILD_MODEL: process.env.BUILD_MODEL || process.env.GROK_MODEL,
 
   // OpenRouter — for Lyria music generation and video description (Gemini).
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,

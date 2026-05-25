@@ -1,0 +1,667 @@
+// src/ai/buildAgent.js
+//
+// Engineering sub-agent invoked by the `build` tool. The agent runs as a
+// fresh /v1/responses conversation, isolated from the main brain's chat
+// history and its tool list. All it sees is:
+//
+//   - Its own system prompt (built by buildSystemPrompt below).
+//   - The user prompt the host passes through (the main brain's task brief).
+//   - Workspace state (built dynamically each round).
+//   - Tool result observations as it iterates.
+//
+// Tools exposed to the agent (per Analisi_Pulizia_v2.md §2.2):
+//   write_file, edit_file, bash, read_file, image_search, web_x_search,
+//   {type:'code_interpreter'} (xAI server-side, costs zero of our rounds).
+//
+// NOT exposed (intentionally — main brain prepares those assets and passes
+// them as attachments instead):
+//   generate_image, generate_video, music_creator.
+//
+// At the end of the conversation the agent writes its final user-facing
+// answer and appends `<DELIVER>file1, file2</DELIVER>` to declare which
+// workspace files should be sent back to the human user. The host parses
+// the tag, resolves filenames, and pushes the matching files onto
+// `responseCtx.attachments` of the main turn.
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { HERMES_API_KEY, HERMES_BASE_URL, BUILD_MODEL } = require('../config/env');
+const { callResponsesModel } = require('./apiClient');
+const {
+  chatMessagesToResponsesInput,
+  chatToolsToResponsesTools,
+  responsesToAssistantMessage,
+} = require('./responsesAdapter');
+const { renewBuildLock } = require('../utils/buildState');
+const {
+  listWorkspaceFiles,
+  workspaceSizeBytes,
+  resolveInsideWorkspace,
+  QUOTA_BYTES,
+} = require('../sandbox/buildWorkspace');
+const buildSandbox = require('../sandbox/buildSandbox');
+const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
+const { imageSearch } = require('../tools/imageSearch');
+const { webXSearch } = require('../tools/webXSearch');
+const { getRomeTime } = require('../utils/time');
+const { sanitizeFilename } = require('../utils/text');
+const {
+  BUILD_MAX_ROUNDS,
+  BUILD_HARD_TIMEOUT_MS,
+  BUILD_WORKSPACE_QUOTA_MB,
+} = require('../config/constants');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('BuildAgent');
+
+const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
+
+const READ_TEXT_MAX_BYTES = 50 * 1024;
+const WRITE_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const BASH_DEFAULT_TIMEOUT_MS = 30_000;
+const BASH_MAX_TIMEOUT_MS = 120_000;
+const TEXT_EXT_FOR_INLINE = new Set([
+  '.txt', '.md', '.rst', '.log', '.csv', '.tsv',
+  '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+  '.sh', '.bash', '.ps1', '.dockerfile',
+  '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.rb', '.php',
+  '.java', '.kt', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cs',
+  '.html', '.htm', '.css', '.scss', '.svelte', '.vue',
+  '.sql', '.graphql',
+]);
+const URL_PASSTHROUGH_PREFIXES = ['application/', 'audio/', 'video/']; // not text/, those go inline
+
+// ── Tool definitions exposed to the sub-agent ──────────────────────────────
+//
+// Same chat-completions shape used by ai/tools.js so the responsesAdapter
+// can flatten them. We include the native `{type:'code_interpreter'}` so
+// the agent gets a Python sandbox at zero round cost (same trick as the
+// main brain).
+
+function _buildAgentTools() {
+  return [
+    {
+      type: 'function',
+      function: {
+        name: 'write_file',
+        description: 'Create or overwrite a file inside /workspace/. Path must be relative to /workspace/ (e.g. "report.pdf" or "out/chart.png"). UTF-8 text or base64 binary.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Relative path under /workspace/.' },
+            content: { type: 'string', description: 'File content (max 5 MB after decoding).' },
+            encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Content encoding (default utf-8).' },
+            mode: { type: 'string', enum: ['overwrite', 'append'], description: 'Write mode (default overwrite).' },
+          },
+          required: ['path', 'content'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'edit_file',
+        description: 'In-place edit of a UTF-8 text file inside /workspace/. Replaces old_string with new_string. Use replace_all=true for multiple occurrences.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Relative path under /workspace/.' },
+            old_string: { type: 'string' },
+            new_string: { type: 'string' },
+            replace_all: { type: 'boolean' },
+          },
+          required: ['path', 'old_string', 'new_string'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'bash',
+        description: 'Run a single shell command in the /workspace/ sandbox. Standalone only — no &&, ||, ;, |, redirection, subshells. Skills are mounted read-only at /skills/.',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: { type: 'string' },
+            timeout_ms: { type: 'integer', description: `Timeout in ms (default ${BASH_DEFAULT_TIMEOUT_MS}, max ${BASH_MAX_TIMEOUT_MS}).` },
+          },
+          required: ['command'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'read_file',
+        description: 'Read a file from /workspace/ or /skills/. Text/code is returned inline; PDF/audio/video/image is exposed as input_file via the tunnel and ingested in the next round.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path: /workspace/<rel> or /skills/<rel>.' },
+          },
+          required: ['path'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'image_search',
+        description: 'Search images and inspect previews. Saved into /workspace/ for use in the build (filename echoed in the response).',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            count: { type: 'integer' },
+            language: { type: 'string' },
+            image_type: { type: 'string', enum: ['any', 'photo', 'gif', 'clipart', 'lineart'] },
+          },
+          required: ['query'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'web_x_search',
+        description: 'Hand a research brief to the multi-agent research team (web + X). Returns a synthesized report with citations.',
+        parameters: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' },
+          },
+          required: ['prompt'],
+        },
+      },
+    },
+    // Native xAI server-side Python sandbox (zero round cost).
+    { type: 'code_interpreter' },
+  ];
+}
+
+// ── System prompt ──────────────────────────────────────────────────────────
+
+function _renderWorkspaceState(workspaceId) {
+  const { files, total, more } = listWorkspaceFiles(workspaceId, 200);
+  if (total === 0) return '<WorkspaceState empty="true"/>';
+  const sizeBytes = workspaceSizeBytes(workspaceId);
+  const lines = files.map(f => {
+    const ageMin = Math.max(0, Math.floor((Date.now() - f.mtimeMs) / 60000));
+    const sizeKb = (f.size / 1024).toFixed(1);
+    return `  ${f.relPath}  (${sizeKb} KB, ${ageMin} min ago)`;
+  });
+  if (more) lines.push(`  ... and more (showing first ${files.length})`);
+  const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
+  return `<WorkspaceState files="${total}" total_size_mb="${sizeMb}" quota_mb="${BUILD_WORKSPACE_QUOTA_MB}">\n${lines.join('\n')}\n</WorkspaceState>`;
+}
+
+function _renderAttachmentNotes(renamedAttachments) {
+  if (!Array.isArray(renamedAttachments) || renamedAttachments.length === 0) {
+    return '<AttachmentNotes/>';
+  }
+  const items = renamedAttachments.map(a =>
+    `  - "${a.requested}" was already present in the workspace and was renamed to "${a.actual}". Use "${a.actual}" in your operations.`
+  );
+  return `<AttachmentNotes>\n${items.join('\n')}\n</AttachmentNotes>`;
+}
+
+function _buildSystemPrompt(workspaceId, renamedAttachments, roundHint) {
+  const stateBlock = _renderWorkspaceState(workspaceId);
+  const notesBlock = _renderAttachmentNotes(renamedAttachments);
+
+  return [
+    '<SystemPrompt role="GemiX-Build">',
+    '  <Identity>',
+    '    GemiX-Build, the engineering sub-agent of GemiX. Reasoning and tool calls in English. Final user-facing text in Italian.',
+    `    Time (Europe/Rome): ${getRomeTime()}.`,
+    '  </Identity>',
+    '  <Mission>',
+    '    Execute the build/code/document task delegated by GemiX-Main. Produce',
+    '    deliverables in /workspace/ and announce them via &lt;DELIVER&gt;.',
+    '  </Mission>',
+    '  <Workspace>',
+    '    Working dir: /workspace/  (writable, no fixed structure)',
+    '    Skills: /skills/          (read-only — pdf, docx, xlsx, pptx, REWRITE_METHOD)',
+    `    Quota: ${BUILD_WORKSPACE_QUOTA_MB} MB. Files persist across build calls in the same session.`,
+    '  </Workspace>',
+    `  ${stateBlock}`,
+    `  ${notesBlock}`,
+    '  <Tools>',
+    '    write_file / edit_file / bash / read_file / image_search / web_x_search / code_interpreter',
+    '  </Tools>',
+    '  <Skills>',
+    '    Read full skill via read_file on /skills/&lt;name&gt;/SKILL.md when relevant. Available skill folders: pdf, docx, xlsx, pptx.',
+    '  </Skills>',
+    '  <Delivery>',
+    '    End your final response with &lt;DELIVER&gt;file1.ext, file2.ext&lt;/DELIVER&gt; listing files in /workspace/ to send to the user.',
+    '    Empty &lt;DELIVER&gt;&lt;/DELIVER&gt; means "text response only, no files". The tag is REQUIRED on the final response — files NOT listed will not reach the user.',
+    '  </Delivery>',
+    '  <Pitfalls>',
+    '    - bash: standalone calls only — no &&, ||, ;, |, redirection, subshells.',
+    '    - Always paths under /workspace/ or /skills/. read_file refuses binary archives (.zip etc.) — use bash (unzip, etc.) instead.',
+    '    - Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
+    '  </Pitfalls>',
+    roundHint ? `  ${roundHint}` : '',
+    '</SystemPrompt>',
+  ].filter(Boolean).join('\n');
+}
+
+// ── Tool execution dispatcher (sub-agent side) ──────────────────────────────
+
+function _toolErr(msg) {
+  return JSON.stringify({ success: false, error: msg });
+}
+
+function _isTextExt(ext) {
+  return TEXT_EXT_FOR_INLINE.has(ext.toLowerCase());
+}
+
+function _classifyAgentPath(workspaceId, rawPath) {
+  if (typeof rawPath !== 'string' || !rawPath) return { ok: false, reason: 'Empty path.' };
+  if (rawPath.includes('\0')) return { ok: false, reason: 'Invalid path (null byte).' };
+  const trimmed = rawPath.trim();
+  if (trimmed.startsWith('/skills/')) {
+    const rel = trimmed.slice('/skills/'.length);
+    if (rel.includes('..') || path.isAbsolute(rel)) return { ok: false, reason: 'Skills path escapes /skills/.' };
+    const { SKILLS_DIR } = require('../utils/userPaths');
+    const abs = path.resolve(SKILLS_DIR, rel);
+    if (!abs.startsWith(SKILLS_DIR)) return { ok: false, reason: 'Skills path escapes /skills/.' };
+    return { ok: true, abs, zone: 'skills' };
+  }
+  // Default: workspace
+  const wsRel = trimmed.startsWith('/workspace/')
+    ? trimmed.slice('/workspace/'.length)
+    : trimmed.replace(/^\/+/, '');
+  const abs = resolveInsideWorkspace(workspaceId, wsRel);
+  if (!abs) return { ok: false, reason: 'Path escapes /workspace/.' };
+  return { ok: true, abs, zone: 'workspace' };
+}
+
+const NON_READABLE_EXTS = new Set([
+  '.exe', '.dll', '.so', '.bin', '.iso', '.dmg',
+  '.zip', '.tar', '.gz', '.7z', '.rar', '.jar',
+]);
+
+async function _executeReadFile(workspaceId, args) {
+  const c = _classifyAgentPath(workspaceId, args && args.path);
+  if (!c.ok) return _toolErr(c.reason);
+  if (!fs.existsSync(c.abs)) return _toolErr(`File not found: ${args.path}`);
+
+  let stat;
+  try { stat = fs.statSync(c.abs); }
+  catch (err) { return _toolErr(`Cannot stat: ${err.message}`); }
+  if (stat.isDirectory()) return _toolErr('Path is a directory.');
+
+  const ext = path.extname(c.abs).toLowerCase();
+  if (NON_READABLE_EXTS.has(ext)) return _toolErr(`Binary archive ${ext} — use bash (unzip etc.) to inspect.`);
+
+  // Text/code inline.
+  if (_isTextExt(ext)) {
+    if (stat.size > READ_TEXT_MAX_BYTES * 4) return _toolErr(`Text file too large (max ${READ_TEXT_MAX_BYTES / 1024} KB).`);
+    let buf = fs.readFileSync(c.abs);
+    let text = buf.toString('utf-8');
+    let truncated = false;
+    if (Buffer.byteLength(text) > READ_TEXT_MAX_BYTES) {
+      text = buf.slice(0, READ_TEXT_MAX_BYTES).toString('utf-8') + '\n... (file truncated)';
+      truncated = true;
+    }
+    const lines = text.split(/\r?\n/);
+    const numbered = lines.map((l, i) => `${i + 1}: ${l}`).join('\n');
+    return `<FileContent path="${args.path}" size="${stat.size}"${truncated ? ' truncated="true"' : ''}>\n${numbered}\n</FileContent>`;
+  }
+
+  // Binary (PDF/audio/video/image): expose via tunnel as input_file URL.
+  // The agent will see the file on the *next* round when this tool result
+  // becomes part of its conversation.
+  const mimetypeByExt = {
+    '.pdf': 'application/pdf',
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp', '.gif': 'image/gif',
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
+    '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  };
+  const mimetype = mimetypeByExt[ext] || 'application/octet-stream';
+  let urlInfo;
+  try {
+    urlInfo = getPublicAttachmentUrl(c.abs, path.basename(c.abs), { kind: 'temp', mimetype });
+  } catch (err) {
+    return _toolErr(`Cannot expose file via tunnel: ${err.message}`);
+  }
+  return [
+    { type: 'text', text: `[Attachment: ${args.path}]` },
+    { type: 'input_file', file_url: urlInfo.url },
+  ];
+}
+
+function _executeWriteFile(workspaceId, args) {
+  const a = args || {};
+  const encoding = a.encoding === 'base64' ? 'base64' : 'utf-8';
+  const mode = a.mode === 'append' ? 'append' : 'overwrite';
+  const c = _classifyAgentPath(workspaceId, a.path);
+  if (!c.ok || c.zone !== 'workspace') return _toolErr(c.reason || 'Writes are only allowed under /workspace/.');
+  let buf;
+  try {
+    if (typeof a.content !== 'string') return _toolErr('Missing or invalid content.');
+    buf = encoding === 'base64' ? Buffer.from(a.content, 'base64') : Buffer.from(a.content, 'utf-8');
+  } catch (err) { return _toolErr(`Decode failed: ${err.message}`); }
+  if (buf.length > WRITE_FILE_MAX_BYTES) {
+    return _toolErr(`Content too large (${buf.length} bytes, max ${WRITE_FILE_MAX_BYTES}).`);
+  }
+  // Quota check.
+  const sizeBefore = workspaceSizeBytes(workspaceId);
+  const existingSize = fs.existsSync(c.abs) && mode === 'overwrite' ? (fs.statSync(c.abs).size || 0) : 0;
+  const projectedSize = sizeBefore - existingSize + buf.length;
+  if (projectedSize > QUOTA_BYTES) {
+    return _toolErr(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap). Delete files before continuing.`);
+  }
+  try { fs.mkdirSync(path.dirname(c.abs), { recursive: true }); }
+  catch (err) { return _toolErr(`Cannot create parent dir: ${err.message}`); }
+  try {
+    if (mode === 'append' && fs.existsSync(c.abs)) {
+      fs.appendFileSync(c.abs, buf);
+    } else {
+      fs.writeFileSync(c.abs, buf);
+    }
+  } catch (err) { return _toolErr(`Write failed: ${err.message}`); }
+  return JSON.stringify({ success: true, path: a.path, size: buf.length, mode });
+}
+
+function _executeEditFile(workspaceId, args) {
+  const a = args || {};
+  const c = _classifyAgentPath(workspaceId, a.path);
+  if (!c.ok || c.zone !== 'workspace') return _toolErr(c.reason || 'Edits are only allowed under /workspace/.');
+  if (!fs.existsSync(c.abs)) return _toolErr('File does not exist.');
+  if (typeof a.old_string !== 'string' || typeof a.new_string !== 'string') {
+    return _toolErr('old_string and new_string must be strings.');
+  }
+  let text;
+  try { text = fs.readFileSync(c.abs, 'utf-8'); }
+  catch (err) { return _toolErr(`Read failed: ${err.message}`); }
+  const occurrences = text.split(a.old_string).length - 1;
+  if (occurrences === 0) return _toolErr('old_string not found in file.');
+  if (occurrences > 1 && !a.replace_all) {
+    return _toolErr(`old_string occurs ${occurrences} times; pass replace_all=true to apply to all.`);
+  }
+  const updated = a.replace_all
+    ? text.split(a.old_string).join(a.new_string)
+    : text.replace(a.old_string, a.new_string);
+  // Quota check.
+  const newBytes = Buffer.byteLength(updated, 'utf-8');
+  const sizeBefore = workspaceSizeBytes(workspaceId);
+  const existingSize = fs.statSync(c.abs).size || 0;
+  if (sizeBefore - existingSize + newBytes > QUOTA_BYTES) {
+    return _toolErr(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
+  }
+  try { fs.writeFileSync(c.abs, updated, 'utf-8'); }
+  catch (err) { return _toolErr(`Write failed: ${err.message}`); }
+  return JSON.stringify({ success: true, path: a.path, occurrences, replaced: a.replace_all ? occurrences : 1 });
+}
+
+const SHELL_CHAINING_RE = /(?:&&|\|\|)|;|\||(?:>{1,2})|<|\$\(|`|\$\{/;
+
+async function _executeBash(workspaceId, args) {
+  const a = args || {};
+  const cmd = a.command;
+  if (typeof cmd !== 'string' || !cmd.trim()) return _toolErr('Missing command.');
+  if (cmd.length > 4000) return _toolErr('Command too long (max 4000 chars).');
+  if (SHELL_CHAINING_RE.test(cmd)) {
+    return _toolErr('bash commands must be standalone — no chaining (&&, ||, ;, |, redirection, subshells).');
+  }
+  let timeoutMs = Number(a.timeout_ms);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = BASH_DEFAULT_TIMEOUT_MS;
+  if (timeoutMs > BASH_MAX_TIMEOUT_MS) timeoutMs = BASH_MAX_TIMEOUT_MS;
+  let res;
+  try { res = await buildSandbox.execBash(workspaceId, cmd, { timeoutMs }); }
+  catch (err) { return _toolErr(`Sandbox failure: ${err.message}`); }
+  return JSON.stringify({
+    success: res.rc === 0,
+    rc: res.rc,
+    stdout: res.stdout || '',
+    stderr: res.stderr || '',
+    timed_out: res.timedOut,
+    duration_ms: res.durationMs,
+  });
+}
+
+async function _executeImageSearch(workspaceId, args) {
+  const a = args || {};
+  if (typeof a.query !== 'string' || !a.query.trim()) return _toolErr('Missing query.');
+  let result;
+  try {
+    result = await imageSearch(a.query, a.count, {
+      language: a.language,
+      image_type: a.image_type,
+    });
+  } catch (err) { return _toolErr(`Image search failed: ${err.message}`); }
+
+  // Persist images into the workspace root so the agent can use them.
+  const saved = [];
+  if (Array.isArray(result.attachments)) {
+    for (const att of result.attachments) {
+      if (!att || !att.buffer) continue;
+      const baseName = sanitizeFilename(att.name || `img_${crypto.randomBytes(4).toString('hex')}.jpg`);
+      const ext = path.extname(baseName);
+      const stem = baseName.slice(0, baseName.length - ext.length);
+      const c = resolveInsideWorkspace(workspaceId, baseName);
+      if (!c) continue;
+      let finalName = baseName;
+      let abs = c;
+      let i = 1;
+      while (fs.existsSync(abs)) {
+        finalName = `${stem}(${i})${ext}`;
+        abs = resolveInsideWorkspace(workspaceId, finalName);
+        i++;
+        if (i > 999) break;
+      }
+      const sizeBefore = workspaceSizeBytes(workspaceId);
+      if (sizeBefore + att.buffer.length > QUOTA_BYTES) {
+        saved.push({ name: finalName, error: 'workspace quota exceeded' });
+        continue;
+      }
+      try { fs.writeFileSync(abs, att.buffer); saved.push({ name: finalName, size: att.buffer.length }); }
+      catch (err) { saved.push({ name: finalName, error: err.message }); }
+    }
+  }
+
+  // Build a clean tool result: use the textual portion of result.toolResult
+  // (multimodal preview) and append a summary of saved files.
+  const textParts = Array.isArray(result.toolResult)
+    ? result.toolResult.filter(p => p.type === 'text')
+    : [{ type: 'text', text: 'image_search returned no preview text.' }];
+  const summary = saved.length > 0
+    ? `\nSaved to /workspace/: ${saved.map(s => s.name + (s.error ? ` (failed: ${s.error})` : '')).join(', ')}`
+    : '';
+  return [
+    ...(Array.isArray(result.toolResult) ? result.toolResult : []),
+    { type: 'text', text: summary },
+  ];
+}
+
+async function _executeWebXSearch(args, statsAccumulator) {
+  const a = args || {};
+  if (typeof a.prompt !== 'string' || !a.prompt.trim()) return _toolErr('Missing prompt.');
+  const result = await webXSearch(a.prompt);
+  if (result && result._stats && statsAccumulator) {
+    statsAccumulator.webSources += result._stats.webSources || 0;
+    statsAccumulator.xPosts += result._stats.xPosts || 0;
+  }
+  const { _stats: _ignored, ...clean } = result || {};
+  return JSON.stringify(clean);
+}
+
+async function _runToolCall(toolCall, ctx) {
+  const name = toolCall.function && toolCall.function.name;
+  let parsedArgs = {};
+  try { parsedArgs = JSON.parse(toolCall.function.arguments || '{}'); }
+  catch { /* leave empty */ }
+
+  log.info(`   build tool: ${name} args=${JSON.stringify(parsedArgs).slice(0, 500)}`);
+  switch (name) {
+    case 'write_file':    return _executeWriteFile(ctx.workspaceId, parsedArgs);
+    case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);
+    case 'bash':          return await _executeBash(ctx.workspaceId, parsedArgs);
+    case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs);
+    case 'image_search':  return await _executeImageSearch(ctx.workspaceId, parsedArgs);
+    case 'web_x_search':  return await _executeWebXSearch(parsedArgs, ctx.researchStats);
+    default:              return _toolErr(`Unknown tool "${name}".`);
+  }
+}
+
+// ── DELIVER tag parsing ────────────────────────────────────────────────────
+
+function _parseDeliverTag(text) {
+  if (typeof text !== 'string') return { remaining: text, files: [] };
+  const re = /<DELIVER>([\s\S]*?)<\/DELIVER>/i;
+  const match = re.exec(text);
+  if (!match) return { remaining: text, files: [] };
+  const inner = match[1].trim();
+  const files = inner
+    .split(/[\n,]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => s.replace(/^\/+|\/+$/g, ''));
+  const remaining = text.replace(re, '').trim();
+  return { remaining, files };
+}
+
+// ── Main entry: run the build agent ────────────────────────────────────────
+
+/**
+ * @param {object} args
+ * @param {string} args.workspaceId
+ * @param {string} args.prompt - user-facing task brief from the main brain.
+ * @param {Array<{requested:string, actual:string}>} [args.renamedAttachments]
+ *   - List of rename-on-collision events to communicate to the agent.
+ * @param {Array<{name:string, url:string}>} [args.attachmentParts]
+ *   - File parts the host wants the agent to ingest immediately on round 1.
+ *     Typically created when staging buffer-only attachments — for files
+ *     that already live in /workspace/ on disk, the agent finds them in
+ *     <WorkspaceState> and can read them itself.
+ * @param {string} args.lockOwnerId - owner id for renewing the lock per round.
+ * @returns {Promise<{
+ *   success: boolean,
+ *   message?: string,             // user-facing text, DELIVER tag stripped
+ *   delivered?: string[],         // workspace-relative filenames
+ *   roundsUsed: number,
+ *   research_stats?: { webSources:number, xPosts:number },
+ *   error?: string,
+ * }>}
+ */
+async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachmentParts, lockOwnerId }) {
+  const startedAt = Date.now();
+  const tools = _buildAgentTools();
+  const messages = [
+    { role: 'system', content: _buildSystemPrompt(workspaceId, renamedAttachments) },
+    {
+      role: 'user',
+      content: _buildUserContent(prompt, attachmentParts),
+    },
+  ];
+
+  const researchStats = { webSources: 0, xPosts: 0 };
+  const ctx = { workspaceId, researchStats };
+
+  let rounds = 0;
+  let finalText = null;
+
+  while (rounds < BUILD_MAX_ROUNDS) {
+    rounds++;
+    if (Date.now() - startedAt > BUILD_HARD_TIMEOUT_MS) {
+      log.warn(`build agent: hard timeout reached at round ${rounds}`);
+      break;
+    }
+
+    // Refresh the system prompt with the latest workspace state at every
+    // round (the agent just wrote new files, the state must reflect them).
+    const roundsLeft = BUILD_MAX_ROUNDS - rounds;
+    const roundHint = roundsLeft <= 2
+      ? `<RoundHint>Critical: ${roundsLeft} round(s) left. Wrap up, emit your final response with &lt;DELIVER&gt; now.</RoundHint>`
+      : null;
+    messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments, roundHint);
+
+    // Renew the lock so a long agent run keeps the workspace held.
+    renewBuildLock(workspaceId, lockOwnerId);
+
+    const { instructions, input } = chatMessagesToResponsesInput(messages);
+    const adaptedTools = chatToolsToResponsesTools(tools);
+    const body = {
+      model: BUILD_MODEL,
+      input,
+      max_output_tokens: 64_000,
+      tool_choice: 'auto',
+    };
+    if (instructions) body.instructions = instructions;
+    if (adaptedTools) body.tools = adaptedTools;
+
+    let data;
+    try {
+      data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY);
+    } catch (err) {
+      log.error(`build agent API call failed at round ${rounds}: ${err.message}`);
+      return { success: false, error: err.message, roundsUsed: rounds };
+    }
+
+    const assistant = responsesToAssistantMessage(data);
+
+    if (Array.isArray(assistant.tool_calls) && assistant.tool_calls.length > 0) {
+      // Push the assistant turn (with content if any) and then each tool result.
+      const assistantToPush = { ...assistant };
+      if (assistantToPush.content === null || assistantToPush.content === undefined) delete assistantToPush.content;
+      messages.push(assistantToPush);
+      for (const tc of assistant.tool_calls) {
+        const result = await _runToolCall(tc, ctx);
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: result,
+        });
+      }
+      continue;
+    }
+
+    // No tool calls → final assistant message.
+    finalText = assistant.content || '';
+    break;
+  }
+
+  if (finalText === null) {
+    log.warn(`build agent ran out of rounds (${rounds}/${BUILD_MAX_ROUNDS}) without final text.`);
+    return {
+      success: false,
+      error: `build agent reached the round budget (${BUILD_MAX_ROUNDS}) without producing a final response.`,
+      roundsUsed: rounds,
+      research_stats: researchStats,
+    };
+  }
+
+  const { remaining, files } = _parseDeliverTag(finalText);
+  log.info(`build agent finished: rounds=${rounds}, deliver=${files.length}`);
+  return {
+    success: true,
+    message: remaining,
+    delivered: files,
+    roundsUsed: rounds,
+    research_stats: researchStats,
+  };
+}
+
+function _buildUserContent(prompt, attachmentParts) {
+  const parts = [];
+  if (typeof prompt === 'string' && prompt.trim()) {
+    parts.push({ type: 'text', text: prompt });
+  }
+  if (Array.isArray(attachmentParts) && attachmentParts.length > 0) {
+    for (const att of attachmentParts) {
+      if (att && typeof att.url === 'string') {
+        if (att.name) parts.push({ type: 'text', text: `[Attachment: ${att.name}]` });
+        parts.push({ type: 'input_file', file_url: att.url });
+      }
+    }
+  }
+  return parts.length > 0 ? parts : (prompt || '');
+}
+
+module.exports = {
+  runBuildAgent,
+};

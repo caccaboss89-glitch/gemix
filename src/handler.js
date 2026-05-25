@@ -1,41 +1,57 @@
 // src/handler.js
-const fs = require('fs');
-const path = require('path');
+//
+// Main message handler.
+//
+// One round of conversation looks like this:
+//   1. Resolve identity / memory / RAG context.
+//   2. Touch the per-user/group build workspace activity timestamp.
+//   3. Build the messages array: system prompt + chat history + the current
+//      user content. PDF/audio/video parts are rewritten on the fly into
+//      Responses-shape `input_file` URLs (xAI fetches them server-side).
+//   4. Loop: call Grok (`/v1/responses`) → run any tool calls → repeat
+//      until the model returns plain text (final response) or we hit the
+//      round budget.
+//   5. Apply the research-team badge (web/X sources) and ship the reply
+//      back to the platform.
+
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser } = require('./ai/tools');
 const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
 const { isAdmin } = require('./config/members');
-const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_MODE, MAINTENANCE_ADMIN_ONLY, MAINTENANCE_USER_MESSAGE, MAINTENANCE_RELEASE_NOTIFY_COMMAND, INTERRUPTED_RUN_TTL_MS } = require('./config/constants');
+const {
+  MAX_TOOL_ROUNDS,
+  PLATFORM_DISCORD,
+  MAINTENANCE_MODE,
+  MAINTENANCE_ADMIN_ONLY,
+  MAINTENANCE_USER_MESSAGE,
+  MAINTENANCE_RELEASE_NOTIFY_COMMAND,
+} = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { prepareInputFilesInMessages } = require('./utils/inputFileBuilder');
+const { resolveWorkspaceId } = require('./utils/workspaceId');
+const { touchActivity } = require('./utils/buildState');
+const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
 const { readMemory } = require('./utils/memoryStore');
-const { stripVoiceTags, stripHistoryPrefixes, cleanAssistantResponse } = require('./utils/text');
+const { cleanAssistantResponse } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
-const { getCurrentProject, getLastProject, setCurrentProject, acquireLock, releaseLock, startAutoRenewLock, consumeLastCrash } = require('./utils/projectState');
-const { getProjectRoot, resolveStorageId } = require('./utils/userPaths');
+const { resolveStorageId } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
-const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
-const {
-  markNotifiedInCall,
-  clearCallNotifications,
-} = require('./utils/notificationDedup');
-
-// Tools that unlock the larger agentic round budget. As soon as any of these
-// is invoked in a message, the per-message round cap is bumped from
-// MAX_TOOL_ROUNDS to MAX_TOOL_ROUNDS_AGENTIC so multi-step pipelines
-// (gemix-project create via bash → write_file → bash → … → send_whatsapp_message) have room.
-const AGENTIC_TOOL_NAMES = new Set([
-  'write_file', 'edit_file', 'bash'
-]);
-
-const DEFERRED_TOOL_NAMES = new Set(['bash']);
+const { markNotifiedInCall, clearCallNotifications } = require('./utils/notificationDedup');
 
 const log = createLogger('Handler');
+
+// Total wall-clock budget for one main turn. Caps runaway tool loops even
+// when the model keeps emitting tool_calls within the round limit.
+const SESSION_MAX_DURATION_MS = 10 * 60 * 1000;
+
+// Delivery tools always run last in a round so they ship the reply only
+// after every other tool has finished (e.g. write_file before send_*).
+const DELIVERY_TOOL_NAMES = new Set(['send_voice_message', 'send_whatsapp_message', 'send_email']);
 
 /**
  * Send an intermediate notification message to the active chat (Discord channel
@@ -46,7 +62,7 @@ const log = createLogger('Handler');
  * same banner repeatedly.
  *
  * @param {object} ctx - Handler context (must include `requestId` and platform info)
- * @param {string} kind - 'pdf' | 'video' | 'audio' | 'research'
+ * @param {string} kind - 'video_gen' | 'image_gen' | 'research' | etc.
  * @param {string} message - Text to send
  */
 async function sendIntermediateNotification(ctx, kind, message) {
@@ -68,60 +84,26 @@ async function sendIntermediateNotification(ctx, kind, message) {
 }
 
 /**
- * Walk the project directory and return relative file paths (excludes hidden files and README.md).
- * Capped at maxFiles to avoid bloating the briefing.
- */
-function _scanProjectFiles(projectDir, maxFiles = 80) {
-  const files = [];
-  function walk(dir, rel) {
-    if (files.length >= maxFiles) return;
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-    catch { return; }
-    for (const e of entries) {
-      if (files.length >= maxFiles) return;
-      if (e.name.startsWith('.') || e.name === 'README.md') continue;
-      const relPath = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        walk(path.join(dir, e.name), relPath);
-      } else {
-        files.push(relPath);
-      }
-    }
-  }
-  walk(projectDir, '');
-  return files;
-}
-
-/**
  * Extract and remove <title>...</title> XML tag from text.
  * Used to extract Discord thread title from AI response.
- * @param {string} text - Text that may contain <title> tag
- * @returns {object} { text: string without title tag, title: extracted title or empty string }
  */
 function extractTitleTag(text) {
   if (typeof text !== 'string') return { text: text || '', title: '' };
   const titleMatch = text.match(/<title>([\s\S]*?)<\/title>/i);
   if (!titleMatch) return { text, title: '' };
-
   const title = titleMatch[1].trim();
   const cleanText = text.replace(/<title>[\s\S]*?<\/title>/i, '').trim();
   return { text: cleanText, title };
 }
 
+/**
+ * Stable phase ordering for tool calls within a round:
+ *   - phase 1: standard tools (read_file, image_search, web_x_search, build, …)
+ *   - phase 2: delivery tools (send_voice_message, send_*) — always last
+ *     so any preceding tool's output reaches the recipient via the buffer.
+ */
 function orderToolCalls(toolCalls) {
-  // Stable phase ordering:
-  //   1. Standard tools (write_file, edit_file, read_file, ...): run first
-  //   2. bash (and any other deferred tool): runs after, so it can execute
-  //      scripts written/edited earlier in the same round.
-  //   3. Final-response delivery tools (send_voice_message, send_whatsapp_message):
-  //      always last.
-  const getPhase = (tc) => {
-    const name = tc.function.name;
-    if (name === 'send_voice_message' || name === 'send_whatsapp_message') return 3;
-    if (DEFERRED_TOOL_NAMES.has(name)) return 2;
-    return 1;
-  };
+  const getPhase = (tc) => DELIVERY_TOOL_NAMES.has(tc.function.name) ? 2 : 1;
   return [...toolCalls].sort((a, b) => getPhase(a) - getPhase(b));
 }
 
@@ -149,9 +131,7 @@ function buildMaintenanceReleaseAlreadyEnabledMessage() {
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
- * Sends every request to Grok via the Hermes proxy (OpenAI-compatible).
- * ingests audio, video and images natively — no upstream captioning step.
- * @param {object} ctx - Normalized message context { platform, userId, userName, userIdentity, content, history, isGroup, groupId, ... }
+ * @param {object} ctx
  * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle? }
  */
 async function handleMessage(ctx) {
@@ -160,14 +140,10 @@ async function handleMessage(ctx) {
     voiceBuffer: null,
     isVoiceOnly: false,
     discordTitle: '',
-    // Accumulated research stats from web_x_search calls — used for the badge.
+    // Accumulated research stats from web_x_search calls and any agent
+    // sub-runs (e.g. build) — used for the badge appended to the reply.
     researchStats: null,
   };
-  let projectLockCtx = null;
-  let projectLockOwnerId = null;
-  let projectLockHeld = false;
-  let stopProjectLockRenew = null;
-  let shouldAutoExitProject = false;
 
   try {
     const ui = ctx.userIdentity;
@@ -216,7 +192,7 @@ async function handleMessage(ctx) {
       };
     }
 
-    // Leggi memoria personalizzata (privata o di gruppo)
+    // Memory: per-user (private/dedicated chats) or per-group (WA groups).
     const memoryFileId = 'memory_' + ui.taskFileId;
     const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
 
@@ -232,14 +208,10 @@ async function handleMessage(ctx) {
     ctx.userMemory = userMemory;
     ctx.groupMemory = groupMemory;
 
-
-
-    // RAG: inietta contesto regolamento per Discord
+    // RAG: server rules context for Discord (Statuto Albertino).
     if (ctx.platform === PLATFORM_DISCORD) {
       ctx.ragContext = loadRegolamento();
     }
-
-    let currentAgenticBriefing = null;
 
     const userCtx = {
       isActiveMember,
@@ -256,11 +228,6 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      // Per-message agentic gate: starts locked. Set to true after the AI
-      // calls `agentic_unlock`, which causes the tool list to be rebuilt
-      // (full agentic stack appears, gateway disappears) and a briefing
-      // system message to be injected.
-      agenticUnlocked: false,
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
       // Bound helper for tools that want to fire an intermediate notification
@@ -274,60 +241,50 @@ async function handleMessage(ctx) {
     // keys written by the tools dispatcher (which receives userCtx).
     ctx.requestId = userCtx.requestId;
 
-    projectLockOwnerId = userCtx.requestId;
-    projectLockCtx = userCtx;
+    const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
-    let crashRecovery = null;
-    try {
-      crashRecovery = await consumeLastCrash(userCtx, INTERRUPTED_RUN_TTL_MS);
-    } catch (e) { log.warn(`consumeLastCrash failed: ${e.message}`); }
-
-    let tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
-
-    if (crashRecovery) {
-      const _sanitize = (s) => {
-        if (typeof s !== 'string') return s;
-        return s
-          .replace(/[A-Z]:\\[^\s"']*/gi, '<path>')
-          .replace(/\/(?:home|var|opt|root|data|workspace|readonly)[^\s"']*/g, '<path>')
-          .replace(/\b\d{8,}@[\w.-]+\b/g, '<wa_jid>')
-          .replace(/\b\d{15,}\b/g, '<id>');
-      };
-      const ageSec = Math.floor((Date.now() - (crashRecovery.ts || 0)) / 1000);
-      const lines = [
-        `The previous tool call for this user did not complete (the bot process was restarted ~${ageSec}s ago).`,
-        `Type: ${crashRecovery.type || 'unknown'}`,
-      ];
-      if (crashRecovery.project) lines.push(`Project: ${_sanitize(crashRecovery.project)}`);
-      if (crashRecovery.code_preview) {
-        lines.push(`Code preview: ${_sanitize(String(crashRecovery.code_preview).slice(0, 1000)).replace(/\n/g, ' ⏎ ')}`);
-      }
-      if (crashRecovery.command_preview) {
-        lines.push(`Command preview: ${_sanitize(String(crashRecovery.command_preview).slice(0, 1000))}`);
-      }
-      lines.push('Before doing anything else, briefly check the project state (read_file / list new files in output/) and then resume the user request.');
-      ctx.crashRecovery = lines.join('\n');
-      log.info(`   ♻️ Prepared interrupted-run notice (type=${crashRecovery.type})`);
+    // ── Build workspace activity tracking ────────────────────────────────
+    // Touch the workspace's last-activity timestamp on every main turn so
+    // the TTL sweeper sees the user is alive across all platforms, not just
+    // when they invoke `build`. The same workspaceId is also used to
+    // surface a <UserWorkspace> listing in the system prompt whenever the
+    // engineering sub-agent has files leftover from previous runs.
+    const workspaceId = resolveWorkspaceId(ctx);
+    if (workspaceId) {
+      try { touchActivity(workspaceId); }
+      catch (e) { log.warn(`touchActivity failed: ${e.message}`); }
     }
+    const refreshUserWorkspace = () => {
+      if (!workspaceId) { ctx.userWorkspace = null; return; }
+      try {
+        const listing = listWorkspaceFiles(workspaceId, 30);
+        ctx.userWorkspace = listing.total > 0
+          ? {
+              total: listing.total,
+              files: listing.files,
+              more: !!listing.more,
+            }
+          : null;
+      } catch (e) {
+        log.warn(`refreshUserWorkspace failed: ${e.message}`);
+        ctx.userWorkspace = null;
+      }
+    };
+    refreshUserWorkspace();
 
-    let messages = [
+    const messages = [
       { role: 'system', content: buildSystemPrompt(ctx) },
     ];
-
     if (ctx.history && ctx.history.length > 0) {
       messages.push(...ctx.history);
     }
-
-    // Push the user message as-is. xAI's /v1/responses ingests PDF/audio/
-    // video natively when content parts are converted to input_file URLs,
-    // which we do via prepareInputFilesInMessages just before the API call.
     messages.push({ role: 'user', content: ctx.content });
 
     // ── Media pre-processing (input_file URL conversion) ────────────────
     // Walk all messages once and rewrite non-image media parts (PDF, audio,
     // video, plain text) into Responses-ready `input_file` parts backed by
     // the public attachment tunnel. xAI fetches them server-side and runs
-    // OCR / STT / frame extraction natively — no custom pre-pass needed.
+    // OCR / STT / frame extraction natively.
     try {
       await prepareInputFilesInMessages(messages);
     } catch (e) {
@@ -335,11 +292,11 @@ async function handleMessage(ctx) {
     }
 
     // ── Deterministic history prune ─────────────────────────────────────
-    // Every file in chat history that is no longer reachable from
-    // the chat buffer the AI is about to see gets removed (100%, no
-    // probabilistic GC). On Discord we additionally enforce a 30-day cap
-    // even on still-referenced files (replies can keep old attachments
-    // alive forever otherwise).
+    // Every file in chat history that is no longer reachable from the chat
+    // buffer the AI is about to see gets removed (100%, no probabilistic
+    // GC). On Discord we additionally enforce a 30-day cap even on still-
+    // referenced files (replies can keep old attachments alive forever
+    // otherwise).
     try {
       const isDiscord = ctx.platform === PLATFORM_DISCORD;
       const historyUserId = resolveStorageId(ctx);
@@ -360,27 +317,9 @@ async function handleMessage(ctx) {
 
     let rounds = 0;
     let lastModelUsed = null;
-    let maxRounds = MAX_TOOL_ROUNDS;
-    let agenticUnlocked = false;
     const sessionStartTime = Date.now();
-    const SESSION_MAX_DURATION_MS = 10 * 60 * 1000; // 10 minutes max
-    const runToolCall = async (tc) => {
-      if (projectLockCtx && AGENTIC_TOOL_NAMES.has(tc.function.name)) {
-        if (!(await acquireLock(projectLockCtx, projectLockOwnerId))) {
-          const lockError = 'Another agentic request is already using this project. Wait for it to finish before running project or sandbox tools again.';
-          log.warn(`   ⛔ Agentic lock denied for ${tc.function.name} (${projectLockOwnerId})`);
-          return {
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: JSON.stringify({ success: false, error: lockError }),
-          };
-        }
-        if (!projectLockHeld) {
-          projectLockHeld = true;
-          stopProjectLockRenew = startAutoRenewLock(projectLockCtx, projectLockOwnerId);
-        }
-      }
 
+    const runToolCall = async (tc) => {
       try {
         let argsPreview = '';
         try {
@@ -391,22 +330,6 @@ async function handleMessage(ctx) {
         }
         log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
         const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, tools);
-        if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
-          let isSuccess = false;
-          if (typeof result === 'string') {
-            try {
-              const resObj = JSON.parse(result);
-              if (resObj.success !== false) isSuccess = true;
-            } catch {
-              isSuccess = true;
-            }
-          } else if (Array.isArray(result) || result && typeof result === 'object') {
-            isSuccess = result.success !== false;
-          }
-          if (isSuccess) {
-            shouldAutoExitProject = true;
-          }
-        }
         let resultPreview;
         if (Array.isArray(result)) {
           resultPreview = `multimodal[${result.length}] parts=${result.map(p => p.type).join(',')}`;
@@ -431,7 +354,7 @@ async function handleMessage(ctx) {
       }
     };
 
-    while (rounds < maxRounds) {
+    while (rounds < MAX_TOOL_ROUNDS) {
       rounds++;
 
       if (Date.now() - sessionStartTime > SESSION_MAX_DURATION_MS) {
@@ -445,118 +368,65 @@ async function handleMessage(ctx) {
       }
 
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
-      log.info(`🤖 [${pLabel}] AI call (round ${rounds}/${maxRounds}${agenticUnlocked ? ' agentic' : ''})`);
-      const _roundsLeft = maxRounds - rounds;
-      const _roundHint = _roundsLeft <= 2
-        ? `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
-        : `<ToolRound><Current>${rounds}</Current><Max>${maxRounds}</Max><Remaining>${_roundsLeft}</Remaining><Status>normal</Status></ToolRound>`;
+      log.info(`🤖 [${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
+      const roundsLeft = MAX_TOOL_ROUNDS - rounds;
+      const roundHint = roundsLeft <= 2
+        ? `<ToolRound><Current>${rounds}</Current><Max>${MAX_TOOL_ROUNDS}</Max><Remaining>${roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
+        : `<ToolRound><Current>${rounds}</Current><Max>${MAX_TOOL_ROUNDS}</Max><Remaining>${roundsLeft}</Remaining><Status>normal</Status></ToolRound>`;
 
-      // Update system prompt in messages[0] with the current round hint and briefing
+      // Refresh the workspace listing before each AI call so any file the
+      // build sub-agent just produced shows up immediately in <UserWorkspace>.
+      refreshUserWorkspace();
       messages[0].content = buildSystemPrompt({
         ...ctx,
-        roundHint: _roundHint,
-        agenticBriefing: currentAgenticBriefing
+        roundHint,
       });
 
-      const { message: assistantMsg, provider, model } = await callAI(messages, tools, {
-        agenticUnlocked: agenticUnlocked || userCtx.agenticUnlocked,
-      });
+      const { message: assistantMsg, provider, model } = await callAI(messages, tools);
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
         log.info(`🔧 [${pLabel}] ${assistantMsg.tool_calls.length} tool call(s)`);
-        // Bump the per-message round budget on first agentic tool use.
-        let unlockTriggered = false;
-        for (const tc of assistantMsg.tool_calls) {
-          if (tc.function.name === 'agentic_unlock') {
-            unlockTriggered = true;
-          }
-          if (AGENTIC_TOOL_NAMES.has(tc.function.name)) {
-            if (!agenticUnlocked) {
-              agenticUnlocked = true;
-              maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
-              log.info(`   🧠 Agentic tool detected → round budget bumped to ${maxRounds}`);
-            }
-          }
-        }
-        // Preserve reasoning_details where present; delete null content
-        // (OpenAI-compatible reasoning models occasionally return content=null).
+        // OpenAI-compatible reasoning models occasionally return content=null
+        // — drop it so the message validates downstream.
         if (assistantMsg.content === null || assistantMsg.content === undefined) {
           delete assistantMsg.content;
         }
         messages.push(assistantMsg);
 
-        // Reset per-round deduplication tracking for idempotent tools
+        // Reset per-round deduplication tracking for idempotent tools.
         deliveryCtx.roundCalledTools = new Set();
 
-        // Reorder: file-creation tools first, execution tools last so the AI
-        // can write files and run them in the same round.
-        const _orderedCalls = orderToolCalls(assistantMsg.tool_calls);
-        // ── Tool whitelist enforcement ──────────────────────────────────────
+        const orderedCalls = orderToolCalls(assistantMsg.tool_calls);
         // Build a Set of tool names the AI is actually allowed to call this
-        // round. Any hallucinated tool name outside this set is silently
-        // rejected with a clear error instead of falling through to the
-        // executor (which would run it anyway if the name matched a case).
-        const _allowedToolNames = new Set(tools.map(t => t.function?.name).filter(Boolean));
-        for (let i = 0; i < _orderedCalls.length; i++) {
-          const tc = _orderedCalls[i];
+        // round. Any hallucinated tool name outside this set is rejected
+        // with a clear error instead of falling through to the executor.
+        const allowedToolNames = new Set(tools.map(t => t.function?.name).filter(Boolean));
+
+        for (const tc of orderedCalls) {
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
             log.warn(`   ⚠️ Tool loop interrupted: a tool already produced the final response`);
             break;
           }
-
-          if (!_allowedToolNames.has(tc.function.name)) {
+          if (!allowedToolNames.has(tc.function.name)) {
             log.warn(`   ⛔ Tool "${tc.function.name}" not in current allowed list — rejected`);
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
               content: JSON.stringify({
                 success: false,
-                error: `Tool "${tc.function.name}" is not available in the current context. Call agentic_unlock first to access the full agentic toolkit, then retry.`,
+                error: `Tool "${tc.function.name}" is not available in the current context.`,
               }),
             });
             continue;
           }
-
           messages.push(await runToolCall(tc));
         }
 
-        // If agentic_unlock was just executed, swap the tool list and
-        // inject the full briefing as a system message for the next round.
-        if (unlockTriggered && !userCtx.agenticUnlocked) {
-          userCtx.agenticUnlocked = true;
-          tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
-          if (!agenticUnlocked) {
-            agenticUnlocked = true;
-            maxRounds = MAX_TOOL_ROUNDS_AGENTIC;
-          }
-          const _briefingProject = (await getCurrentProject(userCtx)) || ctx.currentProject || null;
-          let _projectFiles = [];
-          let _readmeContent = null;
-          if (_briefingProject) {
-            const _pdir = getProjectRoot(userCtx, _briefingProject);
-            if (_pdir) {
-              _projectFiles = _scanProjectFiles(_pdir);
-              try {
-                const _rp = path.join(_pdir, 'README.md');
-                if (fs.existsSync(_rp)) _readmeContent = fs.readFileSync(_rp, 'utf-8').slice(0, 1500);
-              } catch { /* skip */ }
-            }
-          }
-          const briefing = buildAgenticBriefing({
-            currentProject: _briefingProject,
-            lastProjectUsed: (await getLastProject(userCtx)) || ctx.lastProjectUsed || null,
-            projects: ctx.projects || [],
-            projectFiles: _projectFiles,
-            readmeContent: _readmeContent,
-          });
-          currentAgenticBriefing = briefing;
-          log.info(`   🔓 agentic_unlock invoked → tools rebuilt (${tools.length}) + briefing prepared for next round`);
-        }
-
-        // Token optimization: strip image previews from tool results the AI has already seen.
-        // The AI evaluated them in this round; keeping base64 data wastes context in future rounds.
+        // Token optimization: strip image previews from tool results the AI
+        // has already seen. The AI evaluated them in this round; keeping the
+        // base64 payload would only waste context in future rounds.
         for (const msg of messages) {
           if (msg.role === 'tool' && Array.isArray(msg.content)) {
             if (msg._imagePreviewSeen) {
@@ -577,7 +447,7 @@ async function handleMessage(ctx) {
       let text = cleanAssistantResponse(assistantMsg.content || '');
       log.info(`✅ [${pLabel}] Response generated (${text.length} chars)`);
 
-      // Extract Discord thread title from <title> XML tag if present
+      // Extract Discord thread title from <title> XML tag if present.
       if (ctx.platform === PLATFORM_DISCORD) {
         const { text: cleanedText, title } = extractTitleTag(text);
         text = cleanedText;
@@ -644,8 +514,6 @@ async function handleMessage(ctx) {
       };
     }
 
-
-
     try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed: ${vcErr.message}`); }
     return {
       text: FALLBACK_ERROR_PREFIX,
@@ -673,18 +541,6 @@ async function handleMessage(ctx) {
       modelUsed: null,
     };
   } finally {
-    if (shouldAutoExitProject && projectLockCtx) {
-      try {
-        const _cp = await getCurrentProject(projectLockCtx);
-        if (_cp) await setCurrentProject(projectLockCtx, null);
-      } catch (e) { log.warn(`auto-exit project failed: ${e.message}`); }
-    }
-    if (typeof stopProjectLockRenew === 'function') {
-      try { stopProjectLockRenew(); } catch (e) { log.warn(`stopProjectLockRenew failed: ${e.message}`); }
-    }
-    if (projectLockHeld && projectLockCtx && projectLockOwnerId) {
-      try { await releaseLock(projectLockCtx, projectLockOwnerId); } catch (e) { log.warn(`releaseLock failed: ${e.message}`); }
-    }
     // Drop per-call notification dedup entries so the next AI call can fire
     // intermediate notifications again.
     try { clearCallNotifications(ctx); } catch { /* best effort */ }

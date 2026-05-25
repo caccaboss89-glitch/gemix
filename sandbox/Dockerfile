@@ -1,21 +1,14 @@
-# GemiX Python sandbox image.
+# GemiX sandbox image.
 # Build: docker build -t gemix-sandbox:latest -f sandbox/Dockerfile sandbox
-# Run (managed by the Node sandboxManager):
-#   docker run --rm --network=gemix_sandbox_net \
-#              --cap-drop=ALL --security-opt=no-new-privileges \
-#              --pids-limit=200 --memory=1536m --memory-swap=1536m --cpus=1 \
-#              -e SANDBOX_TOKEN=<random> \
-#              -e HTTP_PROXY=http://gemix-sandbox-proxy:8080 \
-#              -e HTTPS_PROXY=http://gemix-sandbox-proxy:8080 \
-#              -v <project_dir>:/workspace \
-#              -v <user_readonly>:/readonly:ro \
-#              gemix-sandbox:latest
+# Run: managed by src/sandbox/buildSandbox.js, which boots the container with
+#      Cmd: ['sleep', 'infinity'] and attaches per-call via `docker exec`.
+#      Bind mounts: /workspace (rw, per-workspaceId build dir) and /skills (ro).
 
 FROM python:3.12-slim-bookworm
 
 # ── System packages ──
-# Build tools (gcc/g++/make, python3-dev, libpq-dev) are needed by a few wheels
-# keep them installed — no pip at runtime so this does not widen the attack surface.
+# Build tools (gcc/g++/make, python3-dev, libpq-dev) are needed by a few wheels.
+# Kept installed — no pip at runtime so this does not widen the attack surface.
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -69,7 +62,7 @@ RUN python /opt/sandbox/preload_models.py
 
 # ── Non-root sandbox user ──
 RUN useradd --create-home --uid 1000 --shell /bin/bash sandbox \
-    && mkdir -p /workspace /readonly \
+    && mkdir -p /workspace /skills \
     && chown -R sandbox:sandbox /workspace /home/sandbox
 
 # rembg caches under $HOME/.u2net — move it to the sandbox user's home so it is
@@ -80,10 +73,7 @@ RUN if [ -d /root/.u2net ]; then \
         chown -R sandbox:sandbox /home/sandbox/.u2net; \
     fi
 
-COPY sandbox/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# Disable pip at build time so the AI cannot install arbitrary packages at runtime.
+# Disable pip at runtime so the AI cannot install arbitrary packages.
 # We replace every pip entry point with a refusal stub. The stub is owned by
 # root (755) and the sandbox user cannot overwrite it.
 RUN printf '#!/bin/sh\necho "pip is disabled inside the GemiX sandbox." >&2\nexit 1\n' \
@@ -95,11 +85,12 @@ RUN printf '#!/bin/sh\necho "pip is disabled inside the GemiX sandbox." >&2\nexi
 
 USER sandbox
 WORKDIR /workspace
-EXPOSE 8888
 
 ENV SANDBOX_WORKDIR=/workspace \
     SANDBOX_USER=sandbox \
     GEMIX_SANDBOX=1 \
     MPLBACKEND=Agg
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# No ENTRYPOINT and no CMD: the build manager always provides Cmd:['sleep','infinity']
+# at run time. Leaving the image without a default avoids confusion if someone
+# launches the container manually for debugging.

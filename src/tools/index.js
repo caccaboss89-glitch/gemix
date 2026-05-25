@@ -18,10 +18,7 @@ const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
 const { toggleReleaseNotify } = require('./releaseNotify');
-const { attachFileTool } = require('./attachFile');
-const { writeFileTool } = require('./writeFile');
-const { editFileTool } = require('./editFile');
-const { bashTool } = require('./bashTool');
+const { buildTool } = require('./build');
 const { musicCreator } = require('./musicCreator');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
@@ -31,11 +28,9 @@ const { createLogger } = require('../utils/logger');
 const { storeRecentVoiceText } = require('../utils/historySync');
 const { toWhatsAppMediaArgs, toEmailAttachment, attachmentSize } = require('../utils/attachments');
 const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
-const { ensureUserSkeleton, getSearchedImagesDir, resolveStorageId, userTotalBytes, userQuotaBytes } = require('../utils/userPaths');
+const { ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/projectState');
-const fs = require('fs');
-const path = require('path');
+const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/voiceCounter');
 const { MessageMedia } = require('whatsapp-web.js');
 
 const log = createLogger('Tools');
@@ -122,7 +117,7 @@ function _resolveTargetEmail(args, userCtx) {
 
 // Tools that should only be called once per round — calling them again produces
 // identical results and wastes a round trip.
-const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'agentic_unlock', 'web_x_search', 'generate_image', 'generate_video']);
+const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'web_x_search', 'generate_image', 'generate_video', 'build']);
 
 /**
  * Execute a tool call and return the result.
@@ -177,16 +172,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       result: JSON.stringify({
         success: false,
         error: `"${name}" can only be called once per round. Use the result from the previous call in this round.`,
-      }),
-    };
-  }
-  if (name === 'agentic_unlock' && userCtx.agenticUnlocked) {
-    return {
-      toolCallId: toolCall.id,
-      result: JSON.stringify({
-        success: true,
-        unlocked: true,
-        message: 'Agentic toolkit is already unlocked. Briefing was provided earlier — proceed with your task.',
       }),
     };
   }
@@ -263,72 +248,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           }
         );
 
-        const savedPaths = [];
-        const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
-        const wantSave = Boolean(args.save_to_disk) && isWhatsApp && resolveStorageId(userCtx);
-        let quotaFull = false;
-
         if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
-          let savedDir = null;
-          if (wantSave) {
-            try {
-              ensureUserSkeleton(userCtx);
-              if (userTotalBytes(userCtx) >= userQuotaBytes()) {
-                quotaFull = true;
-
-              } else {
-                savedDir = getSearchedImagesDir(userCtx);
-              }
-            } catch (err) {
-              log.warn(`save_to_disk: cannot prepare searched_images/: ${err.message}`);
-              savedDir = null;
-            }
-          }
-
+          // Push every result to the delivery buffer; everything in the
+          // buffer is sent automatically with the final reply.
           for (const att of imageResult.attachments) {
-            // Persist to searched_images/ when requested (in addition to buffering for delivery)
-            if (savedDir && att.buffer) {
-              try {
-                if (!fs.existsSync(savedDir)) fs.mkdirSync(savedDir, { recursive: true });
-                let dest = path.join(savedDir, att.name);
-                // Avoid clobbering existing files: append _<n> before extension
-                if (fs.existsSync(dest)) {
-                  const ext = path.extname(att.name);
-                  const stem = att.name.slice(0, att.name.length - ext.length);
-                  let n = 1;
-                  while (fs.existsSync(path.join(savedDir, `${stem}(${n})${ext}`))) n++;
-                  dest = path.join(savedDir, `${stem}(${n})${ext}`);
-                }
-                fs.writeFileSync(dest, att.buffer);
-                savedPaths.push(`searched_images/${path.basename(dest)}`);
-              } catch (err) {
-                log.warn(`save_to_disk: failed to write ${att.name}: ${err.message}`);
-              }
-            }
-            // Push every result to the delivery buffer; everything in the
-            // buffer is sent automatically with the final reply.
             responseCtx.attachments.push(att);
-          }
-        }
-
-        // Append saved-paths info to the textual result so the AI knows the persistent paths.
-        if (savedPaths.length > 0 && Array.isArray(imageResult.toolResult)) {
-          const note = `Saved to disk: ${savedPaths.join(', ')}`;
-          // The first part is always { type: 'text', text: ... } — append a line.
-          const first = imageResult.toolResult[0];
-          if (first && first.type === 'text') {
-            first.text = `${first.text}\n\n${note}`;
-          } else {
-            imageResult.toolResult.unshift({ type: 'text', text: note });
-          }
-        } else if (wantSave && savedPaths.length === 0) {
-          // Asked to save but nothing saved — surface a warning.
-          if (Array.isArray(imageResult.toolResult)) {
-            const first = imageResult.toolResult[0];
-            const warn = quotaFull
-              ? 'Warning: save_to_disk failed because your storage quota is full.'
-              : 'Warning: save_to_disk requested but no images were persisted (see logs).';
-            if (first && first.type === 'text') first.text = `${first.text}\n\n${warn}`;
           }
         }
 
@@ -341,23 +265,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         break;
       }
 
-      case 'attach_file': {
-        result = await attachFileTool(args, userCtx, responseCtx);
-        break;
-      }
-
-
-      case 'agentic_unlock': {
-        // The actual unlocking (rebuilding the tool list + injecting the
-        // full briefing as a system message) is performed by the handler
-        // by inspecting tool_calls names. Here we just return a short
-        // acknowledgement so the conversation keeps a single canonical
-        // copy of the briefing.
-        result = {
-          success: true,
-          unlocked: true,
-
-        };
+      case 'build': {
+        // Fire the "delegating to engineering team" banner once per AI call.
+        if (typeof userCtx.sendIntermediateNotification === 'function') {
+          const { buildEngineeringNotificationMessage } = require('../utils/notificationDedup');
+          await userCtx.sendIntermediateNotification('build', buildEngineeringNotificationMessage());
+        }
+        result = await buildTool(args, userCtx, responseCtx);
         break;
       }
 
@@ -700,19 +614,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         } else {
           result = updatePrivateMemory(args.content, userCtx.memoryFileId);
         }
-        break;
-      }
-
-      case 'write_file': {
-        result = await writeFileTool(args, userCtx, responseCtx);
-        break;
-      }
-      case 'edit_file': {
-        result = await editFileTool(args, userCtx, responseCtx);
-        break;
-      }
-      case 'bash': {
-        result = await bashTool(args, userCtx, responseCtx);
         break;
       }
 

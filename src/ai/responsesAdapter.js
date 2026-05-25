@@ -114,8 +114,8 @@ function _toolOutputToString(content) {
  *
  * Rules:
  *   - `system` messages are concatenated (in order) into `instructions`.
- *     Multi-system is a thing in our handler (round hint + briefing
- *     reinjection on agentic_unlock); they merge here with `\n\n`.
+ *     Multi-system is a thing in our handler (round hint reinjection); they
+ *     merge here with `\n\n`.
  *   - `user` messages produce a `message` item with content parts.
  *     User messages with no usable parts are dropped.
  *   - `assistant` messages produce up to one `message` item (when there is

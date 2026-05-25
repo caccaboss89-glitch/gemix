@@ -1,142 +1,83 @@
-# GemiX Python sandbox
+# GemiX sandbox
 
-This folder contains the Dockerized Python sandbox used by the `bash`,
-`write_file`, and `edit_file` tools. (Ad-hoc Python without filesystem access
-goes through the xAI server-side `code_interpreter` instead.)
+Container Docker usato dal sub-agent `build`. Una sola immagine
+(`gemix-sandbox:latest`) + un proxy egress (`gemix-sandbox-proxy:latest`).
 
-In production the containers are **not** started through `docker compose`.
-They are created lazily by `src/sandbox/sandboxManager.js`, one container per
-active `(storageId, project)` pair, and automatically destroyed when idle.
+In produzione i container **non** vengono avviati con `docker compose`. Sono
+creati on-demand da `src/sandbox/buildSandbox.js`, uno per `workspaceId`
+(utente o gruppo), e distrutti dopo `SANDBOX_IDLE_TTL_MS` di inattività o
+quando il workspace supera la sua TTL globale (4h dall'ultima interazione).
 
-This README focuses on the practical operations you need on the Linux server:
+## Cosa il runtime si aspetta
 
-- first-time setup
-- fixing Docker socket permission errors
-- rebuilding the sandbox after dependency changes
-- knowing when a bot restart is enough and when a Docker rebuild is required
-
-## What the runtime expects
-
-The current Node runtime expects all of the following:
-
-- Docker Engine reachable by the bot process
+- Docker Engine raggiungibile dal processo bot
   - default: `/var/run/docker.sock`
-  - optional override: `DOCKER_HOST`
-- image `gemix-sandbox:latest` already built
-- image `gemix-sandbox-proxy:latest` already built
-- Docker network `gemix_sandbox_net` already created as `internal`
-- Docker network `gemix_sandbox_egress` already created as a normal bridge
-- proxy container running with the name `gemix-sandbox-proxy`
-  - unless you override `GEMIX_SANDBOX_PROXY_HOST`
-- the user running GemiX must be allowed to talk to Docker
+  - override: `DOCKER_HOST`
+- immagine `gemix-sandbox:latest` già buildata
+- immagine `gemix-sandbox-proxy:latest` già buildata
+- network Docker `gemix_sandbox_net` esistente (internal)
+- network Docker `gemix_sandbox_egress` esistente (bridge normale)
+- container proxy `gemix-sandbox-proxy` in esecuzione (collegato a entrambe
+  le network) — unico ponte tra il sandbox network e Internet
+- l'utente che esegue GemiX deve poter parlare con Docker
 
-If one of these is missing, the first sandbox tool call will fail during
-`getOrCreate()`.
+Se manca uno di questi, la prima chiamata `build` fallisce in `getOrCreate()`.
 
-## Folder layout
+## Layout cartella
 
 ```text
 sandbox/
 ├── Dockerfile
 ├── requirements-sandbox.txt
-├── entrypoint.sh
 ├── preload_models.py
-├── docker-compose.yml
+├── docker-compose.yml    (riferimento manuale, non usato in prod)
 ├── proxy/
 │   ├── Dockerfile
 │   └── proxy.py
 └── README.md
 ```
 
-## First-time setup on a Linux server
+## Setup iniziale (Linux)
 
-### 1. Install Docker
-
-Example for Debian / Ubuntu servers:
+### 1. Installare Docker
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y docker.io docker-compose-plugin
 sudo systemctl enable --now docker
-docker --version
 ```
 
-If your distro uses different package names, adapt accordingly.
-
-### 2. Make sure the **same user that runs GemiX** can access Docker
-
-This is the fix for errors such as:
-
-```text
-connect EACCES /var/run/docker.sock
-```
-
-That error does **not** mean Docker is missing. It usually means the bot
-process user does not have permission to use the Docker socket.
-
-Typical fix:
+### 2. Permettere all'utente del bot di parlare con Docker
 
 ```bash
 sudo usermod -aG docker <bot_user>
-```
-
-Then fully refresh that user's session before restarting the bot:
-
-```bash
 newgrp docker
-docker ps
+docker ps    # verifica
 ```
 
-Important notes:
+Errori tipo `EACCES /var/run/docker.sock` significano che l'utente del
+servizio (PM2/systemd) non è nel gruppo `docker`. Aggiungi quello, non solo
+l'utente SSH.
 
-- If GemiX is started by `pm2`, `systemd`, or another service manager, add the
-  **service user**, not just your SSH login user.
-- If `docker ps` works in your shell but GemiX still gets `EACCES`, the bot is
-  probably running as a different user.
-- You can confirm the socket permissions with:
+### 3. Buildare le immagini
 
-```bash
-ls -l /var/run/docker.sock
-```
-
-### 3. Build the images
-
-Run these in the repository root:
+Dalla root del repo:
 
 ```bash
 docker build -t gemix-sandbox:latest -f sandbox/Dockerfile sandbox
 docker build -t gemix-sandbox-proxy:latest -f sandbox/proxy/Dockerfile sandbox/proxy
 ```
 
-Notes:
+L'immagine principale ci mette parecchio (Texlive, LibreOffice, fonts).
 
-- The main sandbox image is the large one.
-- The first build takes a while.
-- `preload_models.py` downloads the rembg model during build; that is expected.
-
-### 4. Create the required Docker networks
-
-Use idempotent commands so re-running them is safe:
+### 4. Creare le network
 
 ```bash
-docker network inspect gemix_sandbox_net >/dev/null 2>&1 || docker network create --internal gemix_sandbox_net
+docker network inspect gemix_sandbox_net    >/dev/null 2>&1 || docker network create --internal gemix_sandbox_net
 docker network inspect gemix_sandbox_egress >/dev/null 2>&1 || docker network create gemix_sandbox_egress
 ```
 
-Network roles:
-
-- `gemix_sandbox_net`
-  - internal-only network
-  - sandboxes attach here
-  - no direct internet access
-- `gemix_sandbox_egress`
-  - normal bridge network
-  - only the proxy needs outbound internet here
-
-### 5. Start the proxy container
-
-The runtime expects the proxy to be reachable as `gemix-sandbox-proxy` on the
-internal sandbox network.
+### 5. Avviare il proxy
 
 ```bash
 docker rm -f gemix-sandbox-proxy 2>/dev/null || true
@@ -150,160 +91,84 @@ docker run -d \
 docker network connect gemix_sandbox_net gemix-sandbox-proxy 2>/dev/null || true
 ```
 
-### 6. Restart GemiX
-
-After the first-time setup, restart the bot so future sandbox requests can
-reach Docker and create containers correctly.
-
-Examples:
+### 6. Avviare GemiX
 
 ```bash
 pm2 restart GemiX
 ```
 
-or:
+La prima chiamata `build` materializza il container del sandbox. Le successive
+lo riusano.
 
-```bash
-sudo systemctl restart gemix
-```
+## Quando rebuildare
 
-### 7. Run a smoke test
+| Cambia | Azione |
+| :--- | :--- |
+| File JS sotto `src/` | restart GemiX, niente Docker rebuild |
+| `sandbox/Dockerfile` / `requirements-sandbox.txt` / `preload_models.py` | rebuild `gemix-sandbox:latest` + restart GemiX |
+| `sandbox/proxy/*` | rebuild `gemix-sandbox-proxy:latest` + ricreare il container del proxy + restart GemiX |
+| Allowlist proxy (`ALLOWED_HOSTS`) | ricreare il container del proxy con la nuova env |
 
-Ask GemiX to execute a simple sandbox action, for example a trivial Python
-calculation or a simple shell command in a project. If the setup is correct,
-the first request will boot the sandbox and the next ones will reuse it.
-
-## Update / rebuild playbook
-
-### Case A: only host-side JavaScript logic changed
-
-Examples:
-
-- files under `src/`
-- prompt/tool descriptions
-- timeouts or quotas in `src/config/constants.js`
-- sandbox manager logic in `src/sandbox/*.js`
-
-Action:
-
-- restart GemiX
-- **no Docker rebuild needed**
-
-### Case B: sandbox image contents changed
-
-Rebuild the main sandbox image when you change any of these:
-
-- `sandbox/Dockerfile`
-- `sandbox/requirements-sandbox.txt`
-- `sandbox/entrypoint.sh`
-- `sandbox/preload_models.py`
-- any dependency baked into the image
-  - for example after adding a new package or CLI tool such as `yt-dlp`
-
-Commands:
+Esempio rebuild sandbox principale:
 
 ```bash
 docker build -t gemix-sandbox:latest -f sandbox/Dockerfile sandbox
 pm2 restart GemiX
+# Le sandbox ancora vive con la vecchia immagine vengono distrutte dallo
+# shutdown hook al restart; le successive useranno l'immagine aggiornata.
 ```
 
-If you do not use PM2, restart the service with your normal process manager.
+## Note operative
 
-Important:
+### Container PID 1
 
-- rebuilding the image only updates what is installed inside the container
-- if the new dependency also needs outbound network access to new domains,
-  you must update the proxy allowlist too
-- example: adding a downloader such as `yt-dlp` may require both
-  - rebuilding `gemix-sandbox:latest`
-  - updating the proxy rules / `ALLOWED_HOSTS` so the required hosts are allowed
+L'image non ha `ENTRYPOINT` né `CMD`: il `buildSandbox` lo passa esplicitamente
+(`Cmd:['sleep','infinity']`) al boot, così il container resta un processo idle a
+cui ci si attacca con `docker exec`. Se lanci il container a mano per debug,
+ricordati di passare `--entrypoint ""` e un comando esplicito (vedi sezione
+"Avviare manualmente una sandbox").
 
-Why the restart matters:
+### UID nel container
 
-- running sandbox containers keep using the old image until they are destroyed
-- restarting GemiX triggers sandbox cleanup through the shutdown logic
-- the next sandbox request will create fresh containers from the rebuilt image
+Il container gira come UID `1000` (`sandbox`).
 
-### Case C: proxy image or allowlist logic changed
+Per i bind mount writable (`/workspace`), la cartella host deve essere
+accessibile in scrittura da UID `1000`. Quando il bot gira come root il
+buildSandbox fa `chown 1000:1000` automaticamente; quando gira come utente
+non-root applica `chmod 0777` ricorsivo sull'albero del workspace. Il
+container è cap-dropped, network-isolated, memory-capped, quindi il chmod
+permissivo è limitato al solo subtree dell'utente/gruppo.
 
-Rebuild and recreate the proxy when you change:
+### Override runtime
 
-- `sandbox/proxy/Dockerfile`
-- `sandbox/proxy/proxy.py`
+Variabili d'ambiente che il `buildSandbox` riconosce:
 
-Commands:
+- `DOCKER_HOST`
+- `GEMIX_SANDBOX_IMAGE`
+- `GEMIX_SANDBOX_NETWORK`
+- `GEMIX_SANDBOX_PROXY_HOST`
+- `GEMIX_SANDBOX_PROXY_PORT`
 
-```bash
-docker build -t gemix-sandbox-proxy:latest -f sandbox/proxy/Dockerfile sandbox/proxy
-docker rm -f gemix-sandbox-proxy
+In assenza di motivi specifici, lascia i default.
 
-docker run -d \
-  --name gemix-sandbox-proxy \
-  --restart unless-stopped \
-  --network gemix_sandbox_egress \
-  gemix-sandbox-proxy:latest
+## Allowlist del proxy
 
-docker network connect gemix_sandbox_net gemix-sandbox-proxy 2>/dev/null || true
-pm2 restart GemiX
-```
+Il proxy nega il traffico in uscita per default e inoltra solo verso gli
+host nell'allowlist (`sandbox/proxy/proxy.py`, override via env
+`ALLOWED_HOSTS`). I default coprono YouTube, X/Twitter, Instagram, TikTok,
+Facebook (necessari per `yt-dlp`).
 
-### Case D: only proxy allowlist environment changed
+I log del proxy registrano `event=allow_*` o `event=deny_*` per ogni
+richiesta — controllarli è il modo più rapido per capire perché un download
+sta fallendo.
 
-If you only changed `ALLOWED_HOSTS`, you can recreate the proxy container with
-the new environment value. No main sandbox rebuild is needed.
+## Avviare manualmente una sandbox (debug)
 
-Example:
-
-```bash
-docker rm -f gemix-sandbox-proxy
-
-docker run -d \
-  --name gemix-sandbox-proxy \
-  --restart unless-stopped \
-  --network gemix_sandbox_egress \
-  -e ALLOWED_HOSTS='files.example.com' \
-  gemix-sandbox-proxy:latest
-
-docker network connect gemix_sandbox_net gemix-sandbox-proxy 2>/dev/null || true
-pm2 restart GemiX
-```
-
-## Manual checks after an update
-
-Useful commands:
+Il runtime gestisce tutto da solo. Questi comandi servono solo per verifiche
+manuali:
 
 ```bash
-docker images | grep gemix-sandbox
-docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-docker logs --tail 100 gemix-sandbox-proxy
-```
-
-If you want to inspect currently running sandbox containers:
-
-```bash
-docker ps --filter "name=gemix-sb-"
-```
-
-## Proxy allowlist
-
-The proxy denies outbound traffic by default and only forwards to the hosts
-allowed by `proxy/proxy.py` or by `ALLOWED_HOSTS`.
-
-Default intent:
-
-- any extra hosts you explicitly allow
-
-Each decision is logged as `event=allow_*` or `event=deny_*`, so checking the
-proxy logs is the quickest way to understand why an outbound request failed.
-
-## Running one sandbox by hand
-
-The Node runtime normally handles this automatically. The commands below are
-only for manual testing.
-
-```bash
-PROJECT=/abs/path/to/data/users/<storageId>/projects/<slug>
-TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+WORKSPACE=/abs/path/to/data/users/user_<sanitized>/build_workspace
 
 docker run --rm -it \
   --network gemix_sandbox_net \
@@ -313,76 +178,22 @@ docker run --rm -it \
   --memory 1536m \
   --memory-swap 1536m \
   --cpus 1 \
-  -e SANDBOX_TOKEN="$TOKEN" \
+  --user 1000:1000 \
+  --entrypoint '' \
   -e HTTP_PROXY=http://gemix-sandbox-proxy:8080 \
   -e HTTPS_PROXY=http://gemix-sandbox-proxy:8080 \
-  -e NO_PROXY=localhost,127.0.0.1 \
-  -v "$PROJECT":/workspace:rw \
-  gemix-sandbox:latest
+  -v "$WORKSPACE":/workspace:rw \
+  -v "$(pwd)/src/data/skills":/skills:ro \
+  gemix-sandbox:latest \
+  /bin/bash
 ```
 
-If you also publish `-p 8888:8888`, the Jupyter server becomes reachable at:
+## Costanti operative (host)
 
-```text
-http://localhost:8888/?token=<TOKEN>
-```
+In `src/config/constants.js`, modificabili con un solo restart del bot:
 
-## UID mapping on Linux
-
-The container runs as `uid=1000` (`sandbox`).
-
-For bind mounts to be writable, the project directory on the host should also
-be writable by UID `1000`.
-
-Recommended options:
-
-- run the bot with a Linux user whose UID is `1000`
-- or pre-chown the relevant user/project directories to `1000:1000`
-
-Example:
-
-```bash
-sudo chown -R 1000:1000 data/users
-```
-
-The Node sandbox manager only attempts host-side `chown` automatically when the
-bot itself is running as root on Linux. In normal non-root deployments, you are
-responsible for the ownership setup.
-
-## Optional runtime overrides
-
-These environment variables can override the defaults used by
-`src/sandbox/sandboxManager.js`:
-
-- `DOCKER_HOST`
-- `GEMIX_SANDBOX_IMAGE`
-- `GEMIX_SANDBOX_NETWORK`
-- `GEMIX_SANDBOX_PROXY_HOST`
-- `GEMIX_SANDBOX_PROXY_PORT`
-
-Unless you intentionally changed the topology, keeping the defaults is simpler.
-
-## Reference `docker-compose.yml`
-
-`sandbox/docker-compose.yml` is only a reference topology for local validation.
-Production does not rely on it for lifecycle management.
-
-It is still useful when you want to verify the image and proxy manually:
-
-```bash
-docker compose -f sandbox/docker-compose.yml up --build
-```
-
-## Operational knobs
-
-These are controlled on the host side in `src/config/constants.js` and only
-require a bot restart, not a Docker rebuild:
-
-- `CODE_EXEC_TIMEOUT_MS`
-- `CODE_EXEC_MAX_TIMEOUT_MS`
-- `CODE_EXEC_MAX_OUTPUT_BYTES`
-- `CODE_EXEC_MAX_FILES_PER_CALL`
-- `CODE_EXEC_MAX_TOTAL_BYTES`
-- `SANDBOX_MEMORY_MB`
-- `SANDBOX_IDLE_TTL_MS`
-- `MAX_USER_TOTAL_MB`
+- `SANDBOX_MEMORY_MB` (default 1536)
+- `SANDBOX_IDLE_TTL_MS` (default 15 min — quando un container è idle)
+- `BUILD_WORKSPACE_TTL_MS` (default 4h — quando il workspace si svuota)
+- `BUILD_WORKSPACE_QUOTA_MB` (default 500 MB)
+- `BUILD_MAX_ROUNDS` / `BUILD_HARD_TIMEOUT_MS` / `BUILD_LOCK_WAIT_MS`

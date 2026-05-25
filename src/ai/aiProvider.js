@@ -46,13 +46,11 @@ const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
  * @param {Array} messages - Chat-completion-format messages array (string or array
  *   content; tool_calls/tool_call_id supported). Adapter handles translation.
  * @param {Array|null} tools - Chat-completion tool definitions. Adapter flattens
- *   them into Responses-shape function tools.
- * @param {object} [_options] - Reserved for future flags. Currently unused but
- *   kept in the signature for parity with the previous /chat/completions call
- *   site (handler.js still passes `agenticUnlocked`).
+ *   them into Responses-shape function tools; native server-side tools
+ *   (e.g. {type:'code_interpreter'}) pass through unchanged.
  * @returns {Promise<{message: object, provider: string, model: string}>}
  */
-async function callAI(messages, tools = null, _options = {}) {
+async function callAI(messages, tools = null) {
   const { instructions, input } = chatMessagesToResponsesInput(messages);
 
   const body = {

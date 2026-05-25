@@ -97,8 +97,7 @@ function validateToolArgs(args, toolDef) {
 // xAI runs the Python sandbox itself and folds the result back into the
 // same response (no extra round trip in our outer loop). The bot does NOT
 // implement a function tool with this name: the model invokes the native
-// path, we never see it as a tool_call (verified in TEST.md test 5 where
-// web_search ran server-side in parallel with a function tool).
+// path, we never see it as a tool_call.
 const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
 
 // ── Static tool definitions (schema never varies) ──
@@ -115,8 +114,10 @@ const TOOL_WEB_X_SEARCH = makeTool({
   required: ['prompt'],
 });
 
-function buildImageSearchTool(agenticUnlocked = false) {
-  const properties = {
+const TOOL_IMAGE_SEARCH = makeTool({
+  name: 'image_search',
+  description: 'Search for images and inspect the returned previews. Results are pushed to the delivery buffer.',
+  properties: {
     query: { type: 'string', description: 'Specific image search query.' },
     count: { type: 'integer', description: 'Images to retrieve (1-4, default 1).' },
     language: { type: 'string', description: 'Language hint (default "it", use "en" for international results).' },
@@ -125,97 +126,17 @@ function buildImageSearchTool(agenticUnlocked = false) {
       enum: ['any', 'photo', 'gif', 'clipart', 'lineart'],
       description: 'Filter by type (default "any").',
     },
-  };
+  },
+  required: ['query'],
+});
 
-  if (agenticUnlocked) {
-    properties.save_to_disk = {
-      type: 'boolean',
-      description: 'If true, ALL images are saved to searched_images/. Default false.',
-    };
-  }
-
-  return makeTool({
-    name: 'image_search',
-    description: 'Search for images and inspect the returned previews. Results are pushed to the delivery buffer.',
-    properties,
-    required: ['query'],
-  });
-}
-
-const TOOL_ATTACH_FILE = makeTool({
-  name: 'attach_file',
-  description: 'Push an existing file (from /readonly/ or /workspace/) into the delivery buffer.',
+const TOOL_READ_FILE = makeTool({
+  name: 'read_file',
+  description: 'Read the content of a file from chat history (text/code, images, audio, video, PDF).',
   properties: {
-    path: { type: 'string', description: 'Unified path: "/readonly/searched_images/file.txt" or "/workspace/code/main.py".' },
+    path: { type: 'string', description: 'Filename from chat history (e.g. "report.pdf").' },
   },
   required: ['path'],
-});
-
-
-const TOOL_AGENTIC_UNLOCK = makeTool({
-  name: 'agentic_unlock',
-  description: 'Unlock the agentic toolkit (bash, write_file, edit_file, project management, downloads, charts) on the user-scoped /workspace + /readonly filesystem. Full toolkit becomes available in the next round. Do NOT call for chat replies, web search, voice, scheduling, memory, or pure calculations (use code_interpreter for those — it has no /workspace access).',
-  properties: {},
-});
-
-function buildReadFileTool(isDiscord, agenticUnlocked = false) {
-  const description = !agenticUnlocked
-    ? 'Read the contents of a file from chat history (text, code, images, video, audio, pdf).'
-    : 'Read the contents of a file from chat history, searched images or project artefacts (text, code, images, video, audio, pdf).';
-
-  let pathDesc = !agenticUnlocked
-    ? 'Filename from chat history (e.g. "report.pdf").'
-    : 'Absolute path: /readonly/{history|searched_images|skills}/<file> or /workspace/{temp|output|code}/<file>. Bare filenames (no slash) are resolved to chat history automatically.';
-
-  if (!isDiscord && agenticUnlocked) {
-    pathDesc += ' Use skills:<name>.md to read a skill guide.';
-  }
-
-  return makeTool({
-    name: 'read_file',
-    description,
-    properties: { path: { type: 'string', description: pathDesc } },
-    required: ['path'],
-  });
-}
-
-// ── Agentic toolkit (WhatsApp only, gated behind agentic_unlock) ──
-
-const TOOL_WRITE_FILE = makeTool({
-  name: 'write_file',
-  description: 'Create or overwrite a file in the current project ({temp|output|code}). Files in /workspace/output/ are pushed to the delivery buffer.',
-  properties: {
-    path: { type: 'string', description: 'Path under current project: "/workspace/{temp|output|code}/file".' },
-    content: { type: 'string', description: 'File content (max 5 MB).' },
-    encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Content encoding (default "utf-8").' },
-    mode: { type: 'string', enum: ['overwrite', 'append'], description: 'Write mode (default "overwrite").' },
-  },
-  required: ['path', 'content'],
-});
-
-const TOOL_EDIT_FILE = makeTool({
-  name: 'edit_file',
-  description: 'Edit an existing UTF-8 text file in the current project by replacing old_string with new_string. old_string must be unique unless replace_all=true. Same path limits as write_file.',
-  properties: {
-    path: { type: 'string', description: 'Path under current project: "/workspace/{temp|output|code}/file".' },
-    old_string: { type: 'string', description: 'Exact text to replace. Must appear at least once. Provide enough surrounding context to be unique unless replace_all=true.' },
-    new_string: { type: 'string', description: 'Replacement text (use empty string to delete the matched region).' },
-    replace_all: { type: 'boolean', description: 'Replace every occurrence (default false). Required when old_string is not unique.' },
-    start_line: { type: 'integer', description: 'Optional: line number where to start searching (1-indexed).' },
-    end_line: { type: 'integer', description: 'Optional: line number where to stop searching (1-indexed).' },
-  },
-  required: ['path', 'old_string', 'new_string'],
-});
-
-const TOOL_BASH = makeTool({
-  name: 'bash',
-  description: 'Run shell commands in the project sandbox. Project at /workspace, read-only /readonly. Combine with write_file/edit_file to write and execute scripts in the same round (bash always runs AFTER write_file/edit_file/read_file in the same round, so a script written in this round can be executed by bash in the same round). Use code_interpreter for Python without filesystem access.',
-  properties: {
-    command: { type: 'string', description: 'Single standalone shell command. Do NOT use shell concatenation or piping (&&, ||, ;, |, redirection, subshells) to combine steps. Emit multiple bash tool calls instead — they run in emission order within the same round, after any write_file/edit_file/read_file calls.' },
-    timeout_ms: { type: 'integer', description: 'Timeout in ms (default 30000, max 120000).' },
-    background: { type: 'boolean', description: 'Run in background: returns immediately with an output file path. Use read_file on that path later to get results. Default false.' },
-  },
-  required: ['command'],
 });
 
 const TOOL_READ_SERVER_RULES = makeTool({
@@ -288,43 +209,39 @@ const TOOL_MUSIC_CREATOR = makeTool({
 // textual prompt to describe the desired look. If/when reference image
 // support is restored, the schema can grow back a `reference_images` field.
 
-function buildGenerateImageTool(_agenticUnlocked = false) {
-  return makeTool({
-    name: 'generate_image',
-    description: 'Generate an image from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
-    properties: {
-      prompt: {
-        type: 'string',
-        description: 'Image description: subject, style, lighting, mood, composition.',
-      },
-      aspect_ratio: {
-        type: 'string',
-        enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
-        description: 'Aspect ratio. Omit for automatic.',
-      },
+const TOOL_GENERATE_IMAGE = makeTool({
+  name: 'generate_image',
+  description: 'Generate an image from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
+  properties: {
+    prompt: {
+      type: 'string',
+      description: 'Image description: subject, style, lighting, mood, composition.',
     },
-    required: ['prompt'],
-  });
-}
+    aspect_ratio: {
+      type: 'string',
+      enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+      description: 'Aspect ratio. Omit for automatic.',
+    },
+  },
+  required: ['prompt'],
+});
 
-function buildGenerateVideoTool(_agenticUnlocked = false) {
-  return makeTool({
-    name: 'generate_video',
-    description: 'Generate a 10-second 720p video from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
-    properties: {
-      prompt: {
-        type: 'string',
-        description: 'Video description: subject, action, camera movement, style, lighting.',
-      },
-      aspect_ratio: {
-        type: 'string',
-        enum: ['16:9', '9:16', '1:1'],
-        description: 'Aspect ratio. Default 16:9.',
-      },
+const TOOL_GENERATE_VIDEO = makeTool({
+  name: 'generate_video',
+  description: 'Generate a 10-second 720p video from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
+  properties: {
+    prompt: {
+      type: 'string',
+      description: 'Video description: subject, action, camera movement, style, lighting.',
     },
-    required: ['prompt'],
-  });
-}
+    aspect_ratio: {
+      type: 'string',
+      enum: ['16:9', '9:16', '1:1'],
+      description: 'Aspect ratio. Default 16:9.',
+    },
+  },
+  required: ['prompt'],
+});
 
 // ── Dynamic tool builders (schema varies by grade/platform) ──
 
@@ -568,10 +485,45 @@ const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
   description: 'Report a bug/failure. Use ONLY if the tool error DOES NOT state the Admin was already notified, or for general logical bugs. Inform the user in your final response.',
   properties: {
-    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "bash", "yt-dlp", "proxy", "attachments")' },
+    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "build", "yt-dlp", "proxy", "attachments")' },
     details: { type: 'string', description: 'Brief but clear description of the problem' },
   },
   required: ['source', 'details'],
+});
+
+// ── Build sub-agent (engineering tool) ─────────────────────────────────────
+//
+// Invokes the engineering sub-agent. The agent has its own isolated workspace
+// persistent across calls within the same session (4h inactivity TTL,
+// 500 MB quota), and returns task result text plus any deliverable files
+// announced via <DELIVER>.
+//
+// Tools available INSIDE build (not visible from the main brain):
+//   write_file, edit_file, bash, read_file, image_search, web_x_search,
+//   code_interpreter (xAI server-side, zero round cost).
+// NOT available inside build:
+//   generate_image, generate_video, music_creator, send_*  — main brain
+//   prepares those assets and passes them via attachments[].
+
+const TOOL_BUILD = makeTool({
+  name: 'build',
+  description:
+    'Hand a build/code/document task to the engineering sub-agent. '
+    + 'Persistent isolated workspace per user/group (4h inactivity TTL, 500 MB). '
+    + 'Tools available INSIDE build: write_file, edit_file, bash, read_file, image_search, web_x_search, code_interpreter. '
+    + 'If you need a generated asset (image/video/song) inside the build task, generate it FIRST in the main loop, then pass it via attachments[].',
+  properties: {
+    prompt: {
+      type: 'string',
+      description: 'Detailed task instructions. Include desired output format, constraints, and how each attached file should be used. The agent does NOT see chat history — only this prompt and the workspace state.',
+    },
+    attachments: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Filenames (with extension) referring to files in the current-turn buffer or chat history. Host fetches each one, places it in /workspace/, renames on collision. Empty/omit if no files are needed.',
+    },
+  },
+  required: ['prompt'],
 });
 
 // ── Active-member-only tool check (runtime permission guard) ──
@@ -599,43 +551,33 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // 1. Search & Information Retrieval
   tools.push(
     TOOL_WEB_X_SEARCH,
-    buildImageSearchTool(userCtx.agenticUnlocked),
-    buildReadFileTool(isDiscord, userCtx.agenticUnlocked)
+    TOOL_IMAGE_SEARCH,
+    TOOL_READ_FILE,
   );
   if (isWhatsApp) {
     tools.push(TOOL_MUSIC_CREATOR);
   }
 
-  // 1c. Grok Imagine — image and video generation. Available only on
-  // WhatsApp (same gating as music_creator) since both produce binary media
-  // that is delivered through the WA attachment pipeline. Both go in the
-  // ONCE_PER_ROUND_TOOLS set in tools/index.js.
+  // 1b. Grok Imagine — image and video generation. Available only on
+  // WhatsApp since both produce binary media that is delivered through
+  // the WA attachment pipeline. Both go in the ONCE_PER_ROUND_TOOLS set
+  // in tools/index.js.
   if (isWhatsApp) {
-    tools.push(
-      buildGenerateImageTool(userCtx.agenticUnlocked),
-      buildGenerateVideoTool(userCtx.agenticUnlocked),
-    );
+    tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO);
   }
 
-  // 1b. xAI server-side code interpreter — native Responses tool, executed
-  // by xAI inside its own isolated sandbox. No /workspace/ or /readonly/
-  // access. Available outside Discord. Round cost: zero (server-side).
+  // 1c. xAI server-side code interpreter — native Responses tool, executed
+  // by xAI inside its own isolated sandbox. Available outside Discord.
+  // Round cost: zero (server-side).
   if (!isDiscord) {
     tools.push(TOOL_CODE_INTERPRETER_NATIVE);
   }
 
-  // 2. Agentic Workspace (Gated)
+  // 2. Build sub-agent — single delegation point for any task that needs
+  // to write/edit files, run shell commands, or assemble deliverables.
+  // Available outside Discord.
   if (!isDiscord) {
-    if (userCtx.agenticUnlocked) {
-      tools.push(
-        TOOL_WRITE_FILE,
-        TOOL_EDIT_FILE,
-        TOOL_BASH,
-        TOOL_ATTACH_FILE,
-      );
-    } else {
-      tools.push(TOOL_AGENTIC_UNLOCK);
-    }
+    tools.push(TOOL_BUILD);
   }
 
   // 3. Communication & Delivery
