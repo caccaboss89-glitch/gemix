@@ -60,7 +60,7 @@ ${formatSkillsForPrompt(loadSkills())}
 
   <ProjectSandbox>
     <Runtime>Linux container. /workspace/ writable, /readonly/ read-only. No internet except yt-dlp domains. pip disabled.</Runtime>
-    <OSTools>tesseract-ocr, libcairo, poppler-utils, libreoffice, pdflatex/xelatex/lualatex, ffmpeg, yt-dlp</OSTools>
+    <OSTools>libcairo, poppler-utils, libreoffice, pdflatex/xelatex/lualatex, ghostscript, ffmpeg, yt-dlp</OSTools>
     <Pitfalls>
       - bash: standalone calls only — no \`&&\`, \`||\`, \`;\`, \`|\`, \`>\`, \`<\`, subshells. Emit one bash call per command; multiple bash calls in the same round run in emission order, after write_file/edit_file/read_file.
       - yt-dlp: max 1080p enforced by the sandbox (the AI cannot raise this). Allowed domains only: youtube.com, x.com, instagram.com, tiktok.com, facebook.com.

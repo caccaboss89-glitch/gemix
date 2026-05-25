@@ -64,7 +64,7 @@ function buildSystemPrompt(ctx) {
     const isAgenticActive = Boolean(ctx.agenticBriefing);
     const filesLine = isAgenticActive
       ? '- For files, skills, downloads, deliverables: use bash/write_file/edit_file.'
-      : '- For files editing/creation, skills, downloads, deliverables: call agentic_unlock FIRST (Do NOT use code interpreters for these things).';
+      : '- For files editing/creation, skills, yt-dlp downloads, deliverables: call agentic_unlock FIRST (Do NOT use code interpreters for these things).';
     prompt += `  <ToolBoundaries>
 - code_interpreter: isolated ad-hoc Python (math, analysis, quick calculations) — no user workspace access, cannot save files to the user.
 ${filesLine}

@@ -12,11 +12,11 @@ description: Create or manipulate PDFs (build from scratch, merge/split/rotate/c
 
 When a user attaches an unencrypted PDF, GemiX's PDF parser already transcribes it for you. The content arrives **inline in the chat** as `<FileContent type="pdf-transcription"><Transcription>…</Transcription></FileContent>`. **Just read that text and reply** — do NOT call this skill, do NOT call `read_file` on the PDF, do NOT create a project.
 
-Call this skill only when the user asks you to **produce or manipulate** a PDF (create, merge, split, rotate, watermark, encrypt, decrypt, OCR a non-parsed scan, extract images, …).
+Call this skill only when the user asks you to **produce or manipulate** a PDF (create, merge, split, rotate, watermark, encrypt, decrypt, extract images, …).
 
 ## When You Need The Original PDF File
 
-If you must operate on the original bytes (watermark, encrypt, merge, rotate, custom OCR…), call `read_file` on the user's PDF path **once**. The GemiX PDF parser materialises a structured folder next to the file:
+If you must operate on the original bytes (watermark, encrypt, merge, rotate, …), call `read_file` on the user's PDF path **once**. The GemiX PDF parser materialises a structured folder next to the file:
 
 ```
 /readonly/history/<name>/
@@ -76,9 +76,9 @@ Then `read_file /workspace/temp/clear.pdf` — the parser will transcribe the cl
 | Professional/scientific PDF: equations, footnotes, citations, multi-column, beamer slides, CV with custom typography | **LaTeX** (`pdflatex` / `xelatex` / `lualatex`) | TeX Live full + `science` + `cm-super` are installed, output quality is unmatched |
 | Invoice, report, deck with charts | **reportlab** + matplotlib OR **LaTeX** + matplotlib | Either works — reportlab is faster, LaTeX looks better |
 | Merge / split / rotate / encrypt / watermark / crop / extract metadata | **pypdf** | Single dependency, no LaTeX, no external CLI |
-| Render PDF page → PNG/JPG (for visual QA, OCR pre-processing, previews) | **`pdftoppm`** (poppler) via `bash` | Native, fast, lossless |
+| Render PDF page → PNG/JPG (for visual QA, previews) | **`pdftoppm`** (poppler) via `bash` | Native, fast, lossless |
 | Extract embedded raster images (originals, not page renders) | **`pdfimages`** (poppler) via `bash` | Pulls original bitmaps without re-rendering |
-| Reading text/tables from a user-supplied PDF | **the GemiX PDF parser** (auto, no tool call) | The PDF transcription is already in your context as `<FileContent type="pdf-transcription">` |
+| Reading text/tables from a user-supplied PDF (incl. scanned/OCR) | **the GemiX PDF parser** (auto, no tool call) | The PDF transcription is already in your context as `<FileContent type="pdf-transcription">` |
 
 **Rule of thumb**: if the document has math, footnotes, or needs to look like a real publication → LaTeX. Otherwise reportlab.
 
@@ -86,11 +86,12 @@ Then `read_file /workspace/temp/clear.pdf` — the parser will transcribe the cl
 
 ## Available Toolchain (sandbox)
 
-- **Python**: `pypdf`, `reportlab`, `Pillow`, `cairosvg`, `matplotlib`, `seaborn`, `numpy`, `scipy`, `sympy`, `pandas`, `jinja2`, `pytesseract`.
-- **LaTeX (TeX Live)**: `pdflatex`, `xelatex`, `lualatex` + `texlive-latex-recommended`, `texlive-latex-extra`, `texlive-fonts-extra`, `texlive-science`, `cm-super`, `dvipng`, `ghostscript`. Notable packages available: `microtype`, `booktabs`, `siunitx`, `cleveref`, `bm`, `amsmath`, `amssymb`, `mathtools`, `xcolor`, `tcolorbox`, `tikz`, `pgfplots`, `geometry`, `fancyhdr`, `hyperref`, `multicol`, `enumitem`, `tabularx`, `longtable`, `listings`, `minted` (with `-shell-escape`), `biblatex` (with local `.bib`), `fontspec` (xelatex/lualatex only), `beamer`.
-- **CLI (poppler-utils)**: `pdftotext`, `pdftoppm`, `pdfimages`, `pdfinfo`, `pdftohtml`.
-- **Other**: `ghostscript` (for `gs` linearization/compression).
-- **Internet**: none (no `pip install`, no `tlmgr`, no remote BibTeX). Use `image_search` with `save_to_disk=true` to fetch images legally; they land in `/readonly/searched_images/` and can be referenced from your script.
+Everything below is preinstalled. There is no internet (no `pip install`, no `tlmgr`, no `apt-get`), so do not use packages outside this list.
+
+- **Python**: `pypdf`, `reportlab`, `Pillow`, `cairosvg`, `matplotlib`, `seaborn`, `plotly`, `numpy`, `scipy`, `sympy`, `mpmath`, `pandas`, `jinja2`, `python-docx`, `openpyxl`, `python-pptx`, `pyyaml`, `requests`, `rembg` (with `onnxruntime`).
+- **TeX Live**: `pdflatex`, `xelatex`, `lualatex`. Installed packages: `texlive-latex-recommended`, `texlive-latex-extra`, `texlive-fonts-recommended`, `texlive-fonts-extra`, `texlive-science`, `texlive-lang-italian`, `cm-super`, `lmodern`, `dvipng`. Notable usable packages: `microtype`, `lmodern`, `booktabs`, `siunitx`, `cleveref`, `bm`, `amsmath`, `amssymb`, `mathtools`, `xcolor`, `tcolorbox`, `tikz`, `pgfplots`, `geometry`, `fancyhdr`, `hyperref`, `multicol`, `enumitem`, `tabularx`, `longtable`, `listings`, `biblatex` (compile with `biber`, local `.bib` only), `fontspec` (xelatex/lualatex only), `beamer`, `babel` with `english` and `italian` languages. **Not available**: `minted` (Pygments stylesheets need internet — use `listings` instead).
+- **CLI**: `pdftotext`, `pdftoppm`, `pdfimages`, `pdfinfo`, `pdftohtml` (poppler-utils); `gs` (ghostscript); `libreoffice` (headless); `ffmpeg`; `yt-dlp`.
+- **Image sourcing**: no internet from inside the sandbox. Use the host-side `image_search` tool with `save_to_disk=true` BEFORE writing scripts; the result lands in `/readonly/searched_images/<file>` and you reference it from your script with that exact path.
 
 ---
 
@@ -255,7 +256,7 @@ cp /workspace/temp/main.pdf /workspace/output/document.pdf
 \documentclass[11pt,a4paper]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage[english]{babel}        % or [italian]
+\usepackage[italian]{babel}        % or [english]
 \usepackage{lmodern}
 \usepackage{microtype}             % polished typography
 \usepackage[margin=2.3cm]{geometry}
@@ -520,13 +521,13 @@ with open("/workspace/output/doc_meta.pdf", "wb") as f:
 
 ## Poppler CLI — Quick Reference
 
-### Render a page → PNG (visual QA, OCR pre-processing)
+### Render a page → PNG (visual QA, previews)
 
 ```bash
 pdftoppm -png -r 300 -f 1 -l 1 /workspace/output/document.pdf /workspace/temp/preview
 ```
 
-Produces `/workspace/temp/preview-1.png`. Use `-r 200` for previews, `-r 300` for QA, `-r 600` for OCR.
+Produces `/workspace/temp/preview-1.png`. Use `-r 200` for previews, `-r 300` for QA, `-r 600` for highest fidelity.
 
 For all pages:
 
@@ -575,7 +576,7 @@ For multi-page documents, render selectively (`-f 1 -l 1`, then later pages on d
 - **Reportlab Unicode subscripts**: use `<sub>` / `<super>` markup, never Unicode characters.
 - **Matplotlib leaks**: every `savefig` must be followed by `plt.close(fig)`.
 - **Vector vs raster figures for LaTeX**: save figures as `.pdf` (vector) when included via `\includegraphics`. Use `.png` only for raster artwork.
-- **`pdftoppm` resolution**: `-r 100` for thumbnails, `-r 300` for QA, `-r 600` for OCR. Higher values produce huge files for no benefit when a human is reading.
+- **`pdftoppm` resolution**: `-r 100` for thumbnails, `-r 300` for QA, `-r 600` for highest fidelity. Higher values produce huge files for no benefit when a human is reading.
 - **Path absolute always**: every script and every LaTeX `\includegraphics` path must start with `/workspace/` or `/readonly/`.
 - **No `cat << EOF` for code generation**: write `.py`/`.tex`/`.json` via `write_file`, never via shell heredoc.
 - **No piping/chaining in bash**: emit one command per `bash` call; multiple bash calls in the same round run in emission order.

@@ -19,7 +19,6 @@ FROM python:3.12-slim-bookworm
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
-        tesseract-ocr \
         libcairo2 \
         libpango-1.0-0 \
         libpangocairo-1.0-0 \
@@ -33,11 +32,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         wget \
         ghostscript \
+        lmodern \
         texlive-latex-recommended \
         texlive-latex-extra \
         texlive-fonts-recommended \
         texlive-fonts-extra \
         texlive-science \
+        texlive-lang-italian \
         cm-super \
         dvipng \
         libreoffice-calc \

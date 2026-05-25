@@ -33,7 +33,6 @@ const {
   getScratchDir,
   getHistoryDir,
   getSearchedImagesDir,
-  ensureUserSkeleton,
   ensureProjectSkeleton,
 } = require('../utils/userPaths');
 const { createLogger } = require('../utils/logger');

@@ -1,6 +1,6 @@
 # PDF — Advanced Reference
 
-Use this when `SKILL.md` is not enough: TikZ/pgfplots figures, biblatex with a local `.bib`, custom Platypus headers/footers, Ghostscript compression, advanced cropping, OCR for scanned PDFs that GemiX's parser couldn't handle.
+Use this when `SKILL.md` is not enough: TikZ/pgfplots figures, biblatex with a local `.bib`, custom Platypus headers/footers, Ghostscript compression, advanced cropping, archival/repair workflows.
 
 ---
 
@@ -237,29 +237,39 @@ pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/te
 pdflatex -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
 ```
 
-### `minted` — syntax-highlighted code listings
+### `listings` — syntax-highlighted code listings
 
-`minted` requires `Pygments` (preinstalled with TeX Live in this sandbox) and `-shell-escape`:
+`listings` is preinstalled and works without `-shell-escape` or external dependencies. `minted` is **not** usable here (requires Pygments + shell-escape, and the Pygments stylesheet would need internet).
 
 ```latex
 \documentclass{article}
-\usepackage{minted}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\lstdefinestyle{pyhl}{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  numbers=left, numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue!70!black},
+  stringstyle=\color{green!50!black},
+  commentstyle=\color{gray}\itshape,
+  showstringspaces=false,
+  backgroundcolor=\color{gray!8},
+  frame=single, rulecolor=\color{gray!40},
+}
+
 \begin{document}
-\begin{minted}[linenos,bgcolor=gray!10,fontsize=\small]{python}
+\begin{lstlisting}[style=pyhl]
 def fib(n):
     a, b = 0, 1
     for _ in range(n):
         a, b = b, a + b
     return a
-\end{minted}
+\end{lstlisting}
 \end{document}
 ```
 
-```bash
-pdflatex -shell-escape -interaction=nonstopmode -halt-on-error -output-directory=/workspace/temp /workspace/temp/main.tex
-```
-
-If `Pygments` is unavailable, fall back to `listings` (no `shell-escape` needed).
+Compile with a single `pdflatex` pass — no `-shell-escape` needed.
 
 ### `tcolorbox` — callouts, theorem boxes, code frames
 
@@ -375,73 +385,6 @@ gs -o /workspace/output/a4.pdf -sDEVICE=pdfwrite -sPAPERSIZE=a4 -dFIXEDMEDIA -dP
 
 ---
 
-## OCR — When the GemiX Parser Isn't Enough
-
-The GemiX PDF parser handles OCR for most scanned documents and feeds the result directly into your context. Reach for manual OCR only when:
-
-- the parser returned empty/garbled text on a particular scan, or
-- the user wants a **searchable PDF** (sidecar OCR text embedded), or
-- the user wants raw OCR text in a specific format/layout.
-
-### Render to PNG → Tesseract → text
-
-```python
-# /workspace/code/ocr.py
-import os, subprocess, glob
-from pathlib import Path
-
-src = "/readonly/history/scan.pdf"
-work = "/workspace/temp/ocr"
-Path(work).mkdir(parents=True, exist_ok=True)
-
-# Render every page at 300 dpi
-subprocess.run(
-    ["pdftoppm", "-png", "-r", "300", src, f"{work}/page"],
-    check=True,
-)
-
-text_chunks = []
-for png in sorted(glob.glob(f"{work}/page-*.png")):
-    out = subprocess.run(
-        ["tesseract", png, "-", "-l", "eng+ita"],
-        capture_output=True, text=True, check=True,
-    )
-    text_chunks.append(out.stdout)
-
-with open("/workspace/output/scan.txt", "w", encoding="utf-8") as f:
-    f.write("\n\n".join(text_chunks))
-```
-
-`tesseract -l <lang>+<lang>` accepts combined languages. `eng`, `ita`, `fra`, `deu`, `spa`, `por`, `lat` are typically installed; check `tesseract --list-langs` if unsure.
-
-### Searchable PDF with OCR sidecar
-
-`tesseract` can emit a PDF with the original image plus an invisible OCR text layer. Combine page-by-page:
-
-```python
-import subprocess, glob
-from pathlib import Path
-from pypdf import PdfWriter, PdfReader
-
-src = "/readonly/history/scan.pdf"
-work = "/workspace/temp/ocrpdf"
-Path(work).mkdir(parents=True, exist_ok=True)
-
-subprocess.run(["pdftoppm", "-png", "-r", "300", src, f"{work}/page"], check=True)
-for png in sorted(glob.glob(f"{work}/page-*.png")):
-    base = png[:-4]
-    subprocess.run(["tesseract", png, base, "-l", "eng+ita", "pdf"], check=True)
-
-w = PdfWriter()
-for pdf_part in sorted(glob.glob(f"{work}/page-*.pdf")):
-    for page in PdfReader(pdf_part).pages:
-        w.add_page(page)
-with open("/workspace/output/scan_searchable.pdf", "wb") as f:
-    w.write(f)
-```
-
----
-
 ## Diagnostics & Recovery
 
 ### `pdfinfo` — quick metadata + page count + dimensions
@@ -499,8 +442,6 @@ The skill no longer ships fixed templates. Pick the engine that matches the requ
 - `reportlab` — BSD
 - `matplotlib`, `numpy`, `scipy`, `pandas` — BSD/PSF
 - `Pillow` — MIT-CMU
-- `Pygments` — BSD
-- `tesseract-ocr` — Apache 2.0
 - `Ghostscript` — AGPL (use only with input/output files; no GPL-incompatible bundling concerns for ad-hoc PDF processing)
 - `poppler-utils` — GPL
 - `TeX Live` — mixed (LPPL, GPL, others)

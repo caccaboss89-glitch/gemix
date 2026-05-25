@@ -52,7 +52,7 @@
 - Risolvere equazioni di fisica quantistica complesse e generare grafici scientifici pronti per una pubblicazione.
 - Produrre un report finanziario professionale con Excel completo di formule, grafici e formattazione automatica, poi convertirlo in PDF elegante con watermark.
 - Generare da zero una presentazione PowerPoint aziendale con grafici, immagini e layout professionali.
-- Processare decine di foto di prodotto: rimuovere sfondi, estrarre testi con OCR e creare un catalogo PDF impaginato e pronto all'uso.
+- Processare decine di foto di prodotto: rimuovere sfondi, creare un catalogo PDF impaginato e pronto all'uso.
 - Analizzare dati di vendita e trasformarli automaticamente in un report Word completo di indice, tabelle e grafici.
 - Leggere un CV in PDF, migliorarlo e trasformarlo in una presentazione accattivante per un colloquio.
 - Creare fatture ricorrenti personalizzate, calcolare totali e imposte, e consegnarle pronte da inviare.

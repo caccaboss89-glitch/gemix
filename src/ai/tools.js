@@ -167,7 +167,7 @@ const TOOL_ATTACH_FILE = makeTool({
 
 const TOOL_AGENTIC_UNLOCK = makeTool({
   name: 'agentic_unlock',
-  description: 'Unlock the agentic toolkit (bash, write_file, edit_file, project management, downloads, OCR, charts) on the user-scoped /workspace + /readonly filesystem. Full toolkit becomes available in the next round. Do NOT call for chat replies, web search, voice, scheduling, memory, or pure calculations (use code_interpreter for those — it has no /workspace access).',
+  description: 'Unlock the agentic toolkit (bash, write_file, edit_file, project management, downloads, charts) on the user-scoped /workspace + /readonly filesystem. Full toolkit becomes available in the next round. Do NOT call for chat replies, web search, voice, scheduling, memory, or pure calculations (use code_interpreter for those — it has no /workspace access).',
   properties: {},
 });
 
