@@ -328,6 +328,22 @@ function startTempFileServer() {
   }
 
   _server = http.createServer((req, res) => {
+    // ── Access log ──
+    // Lightweight per-request log so we can verify xAI (or any client)
+    // actually reaches us. If a fetch is registered in the bot but no
+    // matching access log appears here, the request never made it past
+    // the public tunnel (e.g. localtunnel anti-abuse warning page).
+    const _start = Date.now();
+    const _ua = (req.headers['user-agent'] || '-').toString().slice(0, 80);
+    const _xff = req.headers['x-forwarded-for'];
+    const _ip = (typeof _xff === 'string' && _xff
+      ? _xff.split(',')[0].trim()
+      : (req.socket && req.socket.remoteAddress) || '-');
+    res.on('finish', () => {
+      const _dur = Date.now() - _start;
+      log.info(`HTTP ${req.method} ${req.url} → ${res.statusCode} (${_dur}ms, ua="${_ua}", ip=${_ip})`);
+    });
+
     try {
       // Only handle GET requests to /temp/...
       if (req.method !== 'GET') {
