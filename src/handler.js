@@ -8,7 +8,7 @@ const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools'
 const { isAdmin } = require('./config/members');
 const { MAX_TOOL_ROUNDS, MAX_TOOL_ROUNDS_AGENTIC, PLATFORM_DISCORD, MAINTENANCE_MODE, MAINTENANCE_ADMIN_ONLY, MAINTENANCE_USER_MESSAGE, MAINTENANCE_RELEASE_NOTIFY_COMMAND, INTERRUPTED_RUN_TTL_MS } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { transcribeDocumentsInMessageContent } = require('./utils/media');
+const { prepareInputFilesInMessages } = require('./utils/inputFileBuilder');
 const { readMemory } = require('./utils/memoryStore');
 const { stripVoiceTags, stripHistoryPrefixes, cleanAssistantResponse } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
@@ -20,12 +20,9 @@ const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
 const { buildAgenticBriefing } = require('./ai/agenticBriefing');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
-const { processAudioInMessages } = require('./ai/audioProcessor');
-const { describeVideoInMessages } = require('./ai/videoDescriber');
 const {
   markNotifiedInCall,
   clearCallNotifications,
-  buildVideoNotificationMessage,
 } = require('./utils/notificationDedup');
 
 // Tools that unlock the larger agentic round budget. As soon as any of these
@@ -321,34 +318,20 @@ async function handleMessage(ctx) {
       messages.push(...ctx.history);
     }
 
-    // Transcribe documents in ctx.content before adding
-    const transcribedUserContent = await transcribeDocumentsInMessageContent(ctx.content, {
-      ctx,
-      onTranscriptionStart: async (message) => {
-        await sendIntermediateNotification(ctx, 'pdf', message);
-      },
-    });
-    messages.push({ role: 'user', content: transcribedUserContent });
+    // Push the user message as-is. xAI's /v1/responses ingests PDF/audio/
+    // video natively when content parts are converted to input_file URLs,
+    // which we do via prepareInputFilesInMessages just before the API call.
+    messages.push({ role: 'user', content: ctx.content });
 
-    // ── Media pre-processing ─────────────────────────────────────────────
-    // 1. Videos ≤ MAX_VIDEO_DURATION_S → described by Gemini via OpenRouter
-    // 2. Audio ≤ MAX_AUDIO_DURATION_S  → transcribed by xAI STT
-    // Both replace the raw media parts with text tags so Grok never sees
-    // unsupported binary content in the messages array.
+    // ── Media pre-processing (input_file URL conversion) ────────────────
+    // Walk all messages once and rewrite non-image media parts (PDF, audio,
+    // video, plain text) into Responses-ready `input_file` parts backed by
+    // the public attachment tunnel. xAI fetches them server-side and runs
+    // OCR / STT / frame extraction natively — no custom pre-pass needed.
     try {
-      await describeVideoInMessages(messages, {
-        onStart: async (pendingCount) => {
-          const msg = buildVideoNotificationMessage(pendingCount || 1);
-          await sendIntermediateNotification(ctx, 'video', msg);
-        },
-      });
+      await prepareInputFilesInMessages(messages);
     } catch (e) {
-      log.warn(`describeVideoInMessages failed: ${e.message}`);
-    }
-    try {
-      await processAudioInMessages(messages);
-    } catch (e) {
-      log.warn(`processAudioInMessages failed: ${e.message}`);
+      log.warn(`prepareInputFilesInMessages failed: ${e.message}`);
     }
 
     // ── Deterministic history prune ─────────────────────────────────────
@@ -361,7 +344,7 @@ async function handleMessage(ctx) {
       const isDiscord = ctx.platform === PLATFORM_DISCORD;
       const historyUserId = resolveStorageId(ctx);
       if (historyUserId) {
-        const referenced = collectReferencedHistoryFilenames(ctx.history, transcribedUserContent);
+        const referenced = collectReferencedHistoryFilenames(ctx.history, ctx.content);
         const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};
         pruneHistory(historyUserId, referenced, opts);
       }

@@ -4,7 +4,6 @@ const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { createLogger } = require('./logger');
 const { sanitizeFilename } = require('./text');
-const { buildParsedPdfStructure, ensureHeaderInTranscription } = require('./pdfStructure');
 
 const log = createLogger('HistorySync');
 
@@ -306,137 +305,6 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
   }
 }
 
-function _findPdfDirName(historyDir, normalizedHistoryFilename) {
-  const normalized = _normalizeHistoryFilename(normalizedHistoryFilename);
-  if (!normalized) return null;
-  if (normalized.endsWith('/')) {
-    const diskName = normalized.slice(0, -1);
-    return fs.existsSync(path.join(historyDir, diskName)) ? normalized : null;
-  }
-  const ext = path.extname(normalized).toLowerCase();
-  if (ext !== '.pdf') return null;
-  const baseName = normalized.slice(0, -ext.length);
-  return fs.existsSync(path.join(historyDir, baseName)) ? `${baseName}/` : null;
-}
-
-function _replaceHistoryMetaFilename(meta, oldFilename, newFilename) {
-  let changed = false;
-  for (const [id, entry] of Object.entries(meta)) {
-    const current = _getEntryFilename(entry);
-    if (current !== oldFilename) continue;
-    if (entry && typeof entry === 'object') {
-      meta[id] = { ...entry, filename: newFilename, type: 'pdf-dir' };
-    } else {
-      meta[id] = { filename: newFilename, type: 'pdf-dir' };
-    }
-    changed = true;
-  }
-  return changed;
-}
-
-async function persistParsedPdfToHistory(userId, historyFilename, buffer = null) {
-  if (!userId || !historyFilename) {
-    return { success: false, error: 'Missing userId or historyFilename.' };
-  }
-
-  const { historyDir, metaFile } = getUserHistoryPaths(userId);
-  ensureDir(historyDir);
-
-  const normalized = _normalizeHistoryFilename(historyFilename);
-  if (!normalized) {
-    return { success: false, error: 'Invalid history filename.' };
-  }
-
-  // ── Already-parsed: return existing dir, backfilling the header for legacy folders ──
-  const existingDir = _findPdfDirName(historyDir, normalized);
-  if (existingDir) {
-    const diskName = existingDir.slice(0, -1);
-    const parsedDirAbs = path.join(historyDir, diskName);
-    try {
-      if (existingDir !== normalized) {
-        const meta = _loadMeta(metaFile, userId);
-        const replaced = _replaceHistoryMetaFilename(meta, normalized, existingDir);
-        if (!replaced) {
-          const target = _upsertMetaEntry(meta, normalized);
-          if (!target.id) throw new Error('Failed to create history_meta.json entry for parsed PDF.');
-          meta[target.id] = { ...target.entry, filename: existingDir, type: 'pdf-dir' };
-        }
-        if (!_saveMeta(metaFile, meta, userId)) {
-          throw new Error('Failed to update history_meta.json for parsed PDF.');
-        }
-      }
-      const text = ensureHeaderInTranscription(parsedDirAbs, `history/${diskName}`);
-      log.info(`✅ PDF parser: cache hit for history/${normalized} → history/${existingDir}`);
-      return { success: true, historyPath: existingDir, text };
-    } catch (err) {
-      log.error(`❌ PDF parser: meta update failed for history/${normalized}: ${err.message}`);
-      return { success: false, error: err.message };
-    }
-  }
-
-  const ext = path.extname(normalized).toLowerCase();
-  if (ext !== '.pdf') {
-    return { success: false, error: `Unsupported history file type: ${ext || 'unknown'}` };
-  }
-
-  const filePath = path.join(historyDir, normalized);
-  if (!buffer) {
-    try {
-      buffer = fs.readFileSync(filePath);
-    } catch (err) {
-      log.error(`❌ PDF parser: cannot read history/${normalized}: ${err.message}`);
-      return { success: false, error: `Cannot read PDF from history: ${err.message}` };
-    }
-  }
-
-  // Make sure the source file actually exists on disk before delegating
-  // (buildParsedPdfStructure moves it inside the new folder).
-  if (!fs.existsSync(filePath)) {
-    try { fs.writeFileSync(filePath, buffer); }
-    catch (err) {
-      log.error(`❌ PDF parser: cannot stage history/${normalized}: ${err.message}`);
-      return { success: false, error: `Cannot stage PDF for parsing: ${err.message}` };
-    }
-  }
-
-  const built = await buildParsedPdfStructure({
-    absPdfPath: filePath,
-    buffer,
-    virtualPdfPath: `history/${normalized}`,
-  });
-  if (!built.success) {
-    log.error(`❌ PDF parser: failed to build parsed structure for history/${normalized}: ${built.error}`);
-    return { success: false, error: built.error };
-  }
-
-  const parsedHistoryPath = `${built.dirName}/`;
-  try {
-    const meta = _loadMeta(metaFile, userId);
-    const replaced = _replaceHistoryMetaFilename(meta, normalized, parsedHistoryPath);
-    if (!replaced) {
-      const target = _upsertMetaEntry(meta, normalized);
-      if (!target.id) throw new Error('Failed to create history_meta.json entry for parsed PDF.');
-      meta[target.id] = { ...target.entry, filename: parsedHistoryPath, type: 'pdf-dir' };
-    }
-    if (!_saveMeta(metaFile, meta, userId)) {
-      throw new Error('Failed to update history_meta.json for parsed PDF.');
-    }
-  } catch (err) {
-    // Roll back: dump the buffer back to the original location and remove the parsed dir.
-    try { fs.writeFileSync(filePath, buffer); } catch {}
-    try { fs.rmSync(built.parsedDirAbs, { recursive: true, force: true }); } catch {}
-    log.error(`❌ PDF parser: rollback after meta failure for history/${normalized}: ${err.message}`);
-    return { success: false, error: err.message };
-  }
-
-  log.info(`✅ PDF parser: history/${normalized} → history/${parsedHistoryPath} (assets=${built.assetCount}, pointer updated)`);
-  return {
-    success: true,
-    historyPath: parsedHistoryPath,
-    text: built.mdText,
-  };
-}
-
 /**
  * Deterministic prune. Called by the handler at the start of EVERY user
  * message, before the AI call. Removes from chat history every file
@@ -636,7 +504,6 @@ _loadRecentVoiceEntries();
 
 module.exports = {
   syncFileToHistory,
-  persistParsedPdfToHistory,
   copyFromHistory,
   getUserHistoryPaths,
   getStoredHistoryMediaDescription,

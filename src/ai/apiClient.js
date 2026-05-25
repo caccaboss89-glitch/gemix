@@ -332,4 +332,55 @@ async function callModel(modelName, apiUrl, body, apiKey) {
   return data.choices[0].message;
 }
 
-module.exports = { callModel, logApiRequest, logApiResponse };
+/**
+ * Call an AI model on the xAI Responses API (`/v1/responses`) and return
+ * the parsed raw payload (not yet adapted to chat-completion shape).
+ *
+ * Same retry/timeout/log policy as callModel; only the response decoding
+ * differs: Responses returns top-level `{ id, output: […], usage, … }` with
+ * no `choices` envelope, so the malformed-response check is different.
+ *
+ * Callers (e.g. aiProvider.callAI for the main brain, webXSearch for the
+ * research team) are in charge of translating `output[]` into whatever they
+ * need. For the main brain we use `responsesToAssistantMessage` from
+ * responsesAdapter.js to reach the chat-style message the handler expects.
+ *
+ * @param {string} modelName
+ * @param {string} apiUrl - Full URL to /v1/responses
+ * @param {object} body
+ * @param {string} apiKey
+ * @returns {Promise<object>} The full parsed JSON body
+ */
+async function callResponsesModel(modelName, apiUrl, body, apiKey) {
+  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey);
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (parseErr) {
+    log.error(`   ⚠️ JSON parse error from ${modelName}:`);
+    log.error(`      ${parseErr.message}`);
+    throw new Error(`${modelName} API: invalid response (JSON parsing failed)`);
+  }
+
+  try {
+    logApiResponse(modelName, apiUrl, data);
+  } catch (err) {
+    log.warn(`Failed to write API response log: ${err.message}`);
+  }
+
+  if (!data || (!Array.isArray(data.output) && typeof data.output_text !== 'string')) {
+    log.error(`   ⚠️ Malformed ${modelName} response (Responses API):`);
+    log.error(`      output: ${typeof data?.output} | output_text: ${typeof data?.output_text}`);
+    log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
+
+    if (data?.error) {
+      throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
+    }
+    throw new Error(`${modelName} API: no response received (empty or malformed)`);
+  }
+
+  return data;
+}
+
+module.exports = { callModel, callResponsesModel, logApiRequest, logApiResponse };

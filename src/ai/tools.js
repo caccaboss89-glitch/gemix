@@ -91,28 +91,15 @@ function validateToolArgs(args, toolDef) {
   return null;
 }
 
-// ── xAI code_interpreter — exposed as a function tool ──
+// ── xAI code_interpreter — native server-side tool ────────────────────────
 //
-// Hermes /chat/completions only accepts type:'function' or type:'live_search'.
-// We expose code_interpreter as a regular function tool; when the model calls
-// it, the dispatcher in tools/index.js forwards the request to xAI /v1/responses
-// (same path as web_x_search) where code_interpreter IS a valid server-side tool.
-function buildCodeInterpreterTool(agenticUnlocked = false) {
-  const description = agenticUnlocked
-    ? 'Run Python for calculations, data analysis, plots, or any ad-hoc script. Isolated sandbox — no access to user workspace. For project files use write_file + bash instead.'
-    : 'Run Python for calculations, data analysis, plots, or any ad-hoc script. Isolated sandbox — no access to user workspace.';
-  return makeTool({
-    name: 'code_interpreter',
-    description,
-    properties: {
-      code: {
-        type: 'string',
-        description: 'Python code to execute.',
-      },
-    },
-    required: ['code'],
-  });
-}
+// Passed straight through to /v1/responses as `{type:'code_interpreter'}`.
+// xAI runs the Python sandbox itself and folds the result back into the
+// same response (no extra round trip in our outer loop). The bot does NOT
+// implement a function tool with this name: the model invokes the native
+// path, we never see it as a tool_call (verified in TEST.md test 5 where
+// web_search ran server-side in parallel with a function tool).
+const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
 
 // ── Static tool definitions (schema never varies) ──
 
@@ -581,7 +568,7 @@ const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
   description: 'Report a bug/failure. Use ONLY if the tool error DOES NOT state the Admin was already notified, or for general logical bugs. Inform the user in your final response.',
   properties: {
-    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "bash", "yt-dlp", "proxy", "pdf-parser")' },
+    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "bash", "yt-dlp", "proxy", "attachments")' },
     details: { type: 'string', description: 'Brief but clear description of the problem' },
   },
   required: ['source', 'details'],
@@ -630,10 +617,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     );
   }
 
-  // 1b. xAI server-side code interpreter — always available outside Discord,
-  // runs in xAI's own isolated sandbox without access to /workspace/ or /readonly/.
+  // 1b. xAI server-side code interpreter — native Responses tool, executed
+  // by xAI inside its own isolated sandbox. No /workspace/ or /readonly/
+  // access. Available outside Discord. Round cost: zero (server-side).
   if (!isDiscord) {
-    tools.push(buildCodeInterpreterTool(userCtx.agenticUnlocked));
+    tools.push(TOOL_CODE_INTERPRETER_NATIVE);
   }
 
   // 2. Agentic Workspace (Gated)

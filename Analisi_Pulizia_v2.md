@@ -37,6 +37,8 @@ L'utente vuole inoltre:
 
 ## 1. Decisioni di design (sintesi)
 
+> **Update post-test (Fase 1b)**: i test su `/v1/responses` (vedi `TEST.md`) hanno confermato che i tool server-side xAI (`web_search`, `x_search`, `code_interpreter`, `file_search`, `mcp`) **possono coesistere con i function tool nello stesso `tools[]` array e vengono eseguiti dietro le quinte da xAI nello stesso turno della chiamata** (test 5: `web_search` in parallelo con `calculator` function tool, completato in un solo round). Conseguenza: niente più round-trip custom per `code_interpreter` (il file `src/tools/codeInterpreter.js` può sparire), e in generale qualunque tool xAI server-side va passato come `{type: '<nome>'}` direttamente nel body, non avvolto in un function tool nostro. Vedi §1.bis.
+
 | Domanda | Scelta | Perché |
 | :--- | :--- | :--- |
 | Endpoint LLM principale | **Migrazione globale a `/v1/responses`** | Unico endpoint che accetta PDF/audio/video. Già usato per multi-agent. Hermes lo proxy. |
@@ -53,7 +55,7 @@ L'utente vuole inoltre:
 | Passaggio file dall'host all'agente | **URL pubblici scaricati fisicamente nella root del workspace prima di lanciare l'agente** | Fix unificato per il rinaming-on-collision (vedi §2.3). |
 | Fonti dei file allegati a `build` | **Sia history sia buffer turno corrente** | Senza buffer, l'agente non potrebbe usare immagini/video/musica appena generati nel turno corrente. |
 | Output dell'agente verso l'host | **Tag `<DELIVER>filename1, filename2</DELIVER>`** alla fine della risposta finale | Niente cartella di sistema dedicata, niente tool dedicato (rischio dimenticanza). Il system prompt ricorda il tag ad ogni round. |
-| `code_interpreter` | **Mantenuto sul main + esposto anche al sub-agent** | Tool ortogonale per simulazioni veloci. |
+| `code_interpreter` | **Mantenuto sul main + esposto anche al sub-agent**, **come tool server-side `{type:'code_interpreter'}` direttamente nel body Responses** (vedi §1.bis) | Tool ortogonale per simulazioni veloci. xAI lo esegue dietro le quinte nello stesso turno, niente round-trip custom. |
 | `attach_file` | **Eliminato** | Con la delivery via DELIVER non serve più. |
 | `save_to_disk` su `image_search` | **Eliminato** | Asimmetria sanata: dentro `build` salva sempre in workspace; nel main non persiste. |
 | Skill (PDF/DOCX/XLSX/PPTX) | **Vivono nel sub-agent**, montate read-only su `/skills/` | L'host non le vede. |
@@ -61,6 +63,31 @@ L'utente vuole inoltre:
 | Listing workspace nel main | **`<UserWorkspace files="N">` nel system prompt main** quando il workspace non è vuoto | L'utente chiede "hai ancora il PDF di prima?" → GemiX risponde senza chiamare `build`. |
 | Lock workspace | **1 chiamata `build` per volta per workspace_id** | Evita race su file. Concorrenti aspettano o ricevono errore. |
 
+
+## 2. Architettura proposta
+
+### 1.bis. Tool server-side xAI nativi (post-test Fase 1b)
+
+I test su `/v1/responses` (vedi `TEST.md`) hanno mostrato che i tool server-side xAI possono essere passati **direttamente nel body** insieme ai nostri function tool, senza alcun round-trip custom. xAI li esegue dietro le quinte e ritorna nello stesso `output[]` sia gli `<X>_call` items (informativi: query effettuate, sources, codice eseguito) sia il messaggio finale.
+
+| Tool server-side | Trigger | Round consumati | Note |
+| :--- | :--- | :--- | :--- |
+| `{type:'web_search'}` | Ricerca web | 0 (server-side) | Già emerso anche in `webXSearch.js` per il team multi-agent |
+| `{type:'x_search', limit:N}` | Ricerca X/Twitter | 0 | Stesso uso del team multi-agent |
+| `{type:'code_interpreter'}` | Sandbox Python xAI | 0 | **Sostituisce `src/tools/codeInterpreter.js`** che oggi inoltra manualmente a un secondo `/v1/responses` |
+| `{type:'file_search'}` / `{type:'mcp'}` / `{type:'document_search'}` | Per uso futuro | 0 | Non usati ora, ma stessa meccanica |
+
+**Implicazione architetturale**: i tool server-side **non vanno più esposti come function tool** nel main loop. Vanno aggiunti come voci `{type:'<nome>'}` nel `tools[]` del body Responses, e basta. La policy `ONCE_PER_ROUND_TOOLS` non li riguarda (non costano round).
+
+**Cosa cambia:**
+- `src/tools/codeInterpreter.js` → **eliminato** (il proxy custom non serve più).
+- Definizione function tool `code_interpreter` in `src/ai/tools.js` → **rimossa**.
+- `aiProvider.callAI` impara a riconoscere i tipi server-side e li passa attraverso senza tentarne la traduzione function-style.
+- Tool server-side disponibili al main e al sub-agent build con stessa meccanica (sub-agent: `code_interpreter`).
+
+**Cosa resta esattamente uguale:**
+- `web_x_search` (multi-agent dedicato grok-4.20-multi-agent) resta come tool a sé. Diverso da `{type:'web_search'}`: il team multi-agent fa orchestrazione + sintesi + citation tracking, non solo ricerca grezza. È una scelta di design (tool delega vs. azione diretta).
+- Footer di ricerche `🌐: N sources. 𝕏: N posts.`: oggi viene da `web_x_search`. Quando aggiungeremo `web_search`/`x_search` server-side al main, andranno sommati anche quelli (`usage.server_side_tool_usage_details.web_search_calls` × stima media; logica già usata in `webXSearch.js`).
 
 ## 2. Architettura proposta
 
@@ -77,7 +104,7 @@ L'utente vuole inoltre:
 │   generate_image        (Imagine via CLI)                            │
 │   generate_video        (Imagine via CLI)                            │
 │   music_creator         (Lyria via OpenRouter)                       │
-│   code_interpreter      (xAI server-side)                            │
+│   code_interpreter      (xAI server-side, native tool nel body)      │
 │   read_file             (filename → URL pubblico → input_file)       │
 │   send_voice_message / send_whatsapp_message / send_email            │
 │   schedule_tasks / read_my_tasks / remove_my_tasks                   │

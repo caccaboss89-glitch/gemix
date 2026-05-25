@@ -51,7 +51,8 @@ function buildSystemPrompt(ctx) {
   if (!isActiveMember) {
     prompt += '- Some tools (email, messages...) unavailable for this user.\n';
   }
-  prompt += `- Audio ≤ ${MAX_AUDIO_DURATION_S}s → &lt;Transcription&gt; tags. PDF → &lt;FileContent type="pdf-transcription"&gt; with inner &lt;Transcription&gt;. Video ≤ ${MAX_VIDEO_DURATION_S}s → &lt;Description&gt; tags. Inlined text/code attachments → &lt;FileContent path=... size=...&gt;.\n`;
+  prompt += `- Audio messages > ${MAX_AUDIO_DURATION_S}s and videos > ${MAX_VIDEO_DURATION_S}s are skipped (too long); reply asking the user to shorten them.\n`;
+  prompt += '- If you previously sent a voice message, its text remains stored in chat history so you can recall what you said.\n';
 
   if (isWhatsApp) {
     prompt += '    <ResponsePreferences>\n';

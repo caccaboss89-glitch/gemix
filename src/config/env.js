@@ -35,7 +35,6 @@ module.exports = {
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   MUSIC_MODEL: process.env.MUSIC_MODEL,
-  VIDEO_DESCRIBER_MODEL: process.env.VIDEO_DESCRIBER_MODEL,
 
   // xAI features fronted by Hermes (TTS, STT, multi-agent research).
   // Endpoints: ${HERMES_BASE_URL}/tts, /stt, /responses
@@ -59,8 +58,6 @@ module.exports = {
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
   GITHUB_REPO: process.env.GITHUB_REPO,
   GEMIX_NOTIFY_URL: process.env.GEMIX_NOTIFY_URL,
-  OPENDATALOADER_HYBRID_URL: process.env.OPENDATALOADER_HYBRID_URL,
-  OPENDATALOADER_HYBRID_TIMEOUT: Number(process.env.OPENDATALOADER_HYBRID_TIMEOUT),
   GEMIX_PUBLIC_URL: process.env.GEMIX_PUBLIC_URL,
 
   // Feature Flags / Modes

@@ -70,11 +70,19 @@ module.exports = {
   SANDBOX_PROXY_HOST: '127.0.0.1',
   SANDBOX_PROXY_PORT: 5040,
 
+  // Public file tunnel (tempFileServer + localtunnel) — token TTLs.
+  // History items live on disk forever (until pruned); their public token
+  // gets a longer lease so the model can re-fetch a recently-attached file
+  // across consecutive turns without us re-registering.
+  // Temp items are short-lived buffers (one-shot generated images, audio
+  // freshly downloaded from WhatsApp) and use the legacy 1h TTL.
+  TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,
+  TUNNEL_TOKEN_TTL_TEMP_MS: 60 * 60 * 1000,
+
   // Media
   MAX_IMAGES: 4,
   MAX_IMAGE_BYTES: 7_500_000,
   MAX_TTS_CHARS: 1000,
-  MAX_DOC_PAGES: 20,
   MAX_AUDIO_DURATION_S: 120,
   MAX_VIDEO_DURATION_S: 15,
 

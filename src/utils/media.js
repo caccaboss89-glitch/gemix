@@ -1,15 +1,21 @@
 // src/utils/media.js
-const { SUPPORTED_MEDIA } = require('../config/constants');
-const fs = require('fs').promises;
-const os = require('os');
-const path = require('path');
-const { OPENDATALOADER_HYBRID_URL, OPENDATALOADER_HYBRID_TIMEOUT } = require('../config/env');
-const { createLogger } = require('./logger');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
-const { persistParsedPdfToHistory } = require('./historySync');
-const { incrementTranscription, decrementTranscription, buildNotificationMessage } = require('./pdfTranscriptionTracker');
+//
+// Helpers for building/inspecting multimodal content parts that flow into
+// the LLM call.
+//
+// Note (post-cleanup):
+//   - The legacy in-bot PDF parser microservice (port 5002) and its
+//     pre-pass `transcribeDocumentsInMessageContent` are gone. xAI's
+//     /v1/responses endpoint ingests PDFs natively via `input_file` URLs,
+//     so we hand the file off through the public attachment tunnel
+//     (see `inputFileBuilder.js`) and let the model do the OCR/extraction.
+//   - Same story for audio (was xAI STT) and video (was Gemini describer):
+//     no more pre-pass, xAI handles them server-side.
+//   - This file is now strictly about packaging buffers as inline content
+//     parts for the user message and producing the small bookkeeping tags
+//     used in chat history.
 
-const log = createLogger('Media');
+const { SUPPORTED_MEDIA } = require('../config/constants');
 
 /**
  * Check if a media type is supported by the AI.
@@ -20,19 +26,20 @@ function isSupportedMedia(type) {
   return SUPPORTED_MEDIA.includes(type);
 }
 
-function _replaceAttachmentPathInText(text, oldPath, newPath) {
-  if (typeof text !== 'string' || !text) return text;
-  const oldTagPath = String(oldPath || '').replace(/^history\//, '').trim();
-  const newTagPath = String(newPath || '').replace(/^history\//, '').trim();
-  if (!oldTagPath || !newTagPath || oldTagPath === newTagPath) return text;
-  return text
-    .split(`[Attachment: ${oldTagPath}]`).join(`[Attachment: ${newTagPath}]`)
-    .split(`[Attachment (expired): ${oldTagPath}]`).join(`[Attachment (expired): ${newTagPath}]`);
-}
-
 /**
- * Convert media to base64 content part for the AI API (OpenAI-compatible format).
- * All media types use image_url with data URI — the MIME type tells the model the actual content type.
+ * Convert media to a base64 content part for the user message.
+ *
+ * The shape is intentionally `image_url` + data URI for every MIME — that's
+ * the legacy carrier used across the codebase. The `inputFileBuilder` runs
+ * after history assembly and converts non-image MIMEs into proper xAI
+ * `input_file` URL parts. Images stay base64 inline (the Responses adapter
+ * translates them into native `input_image` parts).
+ *
+ * The optional `_historyPath` / `_historyUserId` metadata hints let
+ * `inputFileBuilder` find the same file already on disk in chat history
+ * and serve it via the longer 24h TTL token instead of materialising the
+ * base64 buffer to a temp file again.
+ *
  * @param {Buffer} buffer
  * @param {string} mimetype - e.g. 'image/jpeg', 'audio/ogg', 'application/pdf'
  * @param {object} [opts]
@@ -40,7 +47,7 @@ function _replaceAttachmentPathInText(text, oldPath, newPath) {
  */
 function mediaToContentPart(buffer, mimetype, opts = {}) {
   // Strip parameters (e.g. 'audio/ogg; codecs=opus' → 'audio/ogg')
-  const cleanMime = mimetype.split(';')[0].trim();
+  const cleanMime = (mimetype || '').split(';')[0].trim();
   const base64 = buffer.toString('base64');
   const part = {
     type: 'image_url',
@@ -56,316 +63,12 @@ function mediaToContentPart(buffer, mimetype, opts = {}) {
 }
 
 /**
- * Extract text and images from a PDF buffer using Heavy/Hybrid AI mode.
- *
- * Heavy mode features:
- *  - OCR for scanned / non-extractable text
- *  - Complex table extraction (borderless, merged cells)
- *  - AI-generated picture descriptions (SmolVLM)
- *
- * The hybrid backend must be running at HYBRID_URL (default localhost:5002).
- * Falls back gracefully to Java-only extraction when the backend is down.
- *
- * @param {Buffer} buffer - raw PDF bytes
- * @param {object} [opts]
- * @param {string} [opts.persistDir] - if set, images are saved here
- *                                     (used by syncFileToHistory for directory-based storage)
- * @returns {Promise<{success:boolean, text?:string, pages?:number, assetsDir?:string, error?:string}>}
- */
-async function extractTextFromPdfBuffer(buffer, opts = {}) {
-  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-    return { success: false, error: 'Invalid PDF buffer' };
-  }
-
-  const HYBRID_URL = OPENDATALOADER_HYBRID_URL;
-  const HYBRID_TIMEOUT = OPENDATALOADER_HYBRID_TIMEOUT;
-
-  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gemix-pdf-'));
-  const inputPdf = path.join(workDir, 'document.pdf');
-  const outputDir = path.join(workDir, 'out');
-  // If caller wants images persisted, use their dir; otherwise a temp subdir.
-  const imageDir = opts.persistDir
-    ? path.join(opts.persistDir, 'assets')
-    : path.join(workDir, 'assets');
-
-  try {
-    await fs.writeFile(inputPdf, buffer);
-    await fs.mkdir(outputDir, { recursive: true });
-    await fs.mkdir(imageDir, { recursive: true });
-
-    let convert;
-    try {
-      const mod = await import('@opendataloader/pdf');
-      convert = mod.convert;
-    } catch (err) {
-      log.error(`❌ PDF parser dependency missing (@opendataloader/pdf): ${err.message}`);
-      return { success: false, error: 'PDF transcription service is currently unavailable (missing dependency).' };
-    }
-
-    log.info(`📄 Transcribing PDF (${buffer.length} bytes)... Mode: ${HYBRID_URL ? 'Hybrid (Heavy)' : 'Local (Light)'}`);
-    const start = Date.now();
-
-    await convert([inputPdf], {
-      outputDir,
-      format: ['json', 'markdown-with-images'],
-      hybrid: 'docling-fast',
-      hybridMode: 'full',
-      hybridUrl: HYBRID_URL,
-      hybridTimeout: String(HYBRID_TIMEOUT),
-      hybridFallback: true,
-
-      // Image extraction
-      imageOutput: 'external',
-      imageDir,
-      imageFormat: 'png',
-
-      // Table & structure
-      tableMethod: 'cluster',
-      useStructTree: true,
-      includeHeaderFooter: true,
-      detectStrikethrough: true,
-      sanitize: false,
-      threads: '4',
-      quiet: true,
-      enrichTable: true,
-    });
-
-    log.info(`✅ PDF Transcription finished in ${((Date.now() - start) / 1000).toFixed(1)}s`);
-
-    const baseName = path.basename(inputPdf, '.pdf');
-    const markdownPath = path.join(outputDir, `${baseName}.md`);
-    const jsonPath = path.join(outputDir, `${baseName}.json`);
-
-    let text = '';
-    if (await _fileExists(markdownPath)) {
-      text = await fs.readFile(markdownPath, 'utf8');
-    }
-
-    let pages = 0;
-    if (await _fileExists(jsonPath)) {
-      const rawJson = await fs.readFile(jsonPath, 'utf8');
-      const jsonData = JSON.parse(rawJson);
-      pages = _pdfPageCountFromJson(jsonData);
-      if (!text) {
-        text = _textFromJson(jsonData);
-      }
-    }
-
-    if (!text) {
-      log.error('❌ PDF parser returned no text (markdown empty, JSON empty)');
-      return { success: false, error: 'OpenDataLoader returned no text' };
-    }
-
-    // If images were persisted, rewrite image paths in markdown to use
-    // relative `assets/` references (the markdown-with-images format may
-    // use the absolute imageDir path).
-    if (opts.persistDir) {
-      const absPrefix = imageDir.replace(/\\/g, '/');
-      text = text.split(absPrefix).join('assets');
-    }
-
-    // Determine if there are actual extracted images
-    let hasAssets = false;
-    try {
-      const assetEntries = await fs.readdir(imageDir);
-      hasAssets = assetEntries.length > 0;
-    } catch { /* empty dir or missing — fine */ }
-
-    return {
-      success: true,
-      text: text.trim(),
-      pages,
-      assetsDir: hasAssets ? imageDir : undefined,
-    };
-  } catch (err) {
-    const msg = err?.message || String(err);
-    log.error(`❌ PDF parsing failed: ${msg}`);
-    return { success: false, error: msg };
-  } finally {
-    // Only clean up the temp workDir; if persistDir was used, the assets
-    // directory lives outside workDir and must NOT be deleted.
-    await fs.rm(workDir, { recursive: true, force: true }).catch(() => { });
-  }
-}
-
-async function _fileExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function _pdfPageCountFromJson(jsonData) {
-  if (!Array.isArray(jsonData)) return 0;
-  return jsonData.reduce((max, item) => {
-    const page = Number(item['page number'] ?? item.page ?? 0);
-    return Number.isFinite(page) && page > max ? page : max;
-  }, 0);
-}
-
-function _textFromJson(jsonData) {
-  if (!Array.isArray(jsonData)) return '';
-  return jsonData
-    .map(item => {
-      const parts = [];
-      if (typeof item.title === 'string' && item.title) parts.push(item.title);
-      if (typeof item.heading === 'string' && item.heading) parts.push(item.heading);
-      if (typeof item.content === 'string' && item.content) parts.push(item.content);
-      else if (typeof item.text === 'string' && item.text) parts.push(item.text);
-      return parts.join('\n');
-    })
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-/**
  * Build a filename descriptor for unsupported or any media in history
  */
 function mediaTag(filename, mimetype) {
   if (filename) return `[${filename}]`;
   const ext = (mimetype || '').split('/')[1] || 'file';
   return `[file.${ext}]`;
-}
-
-/**
- * Pre-API-call hook: every PDF that is part of the round content (incoming
- * attachment, reply to a recent PDF, or any other source that sets a PDF
- * content part) is parsed in place into the canonical parsed-PDF folder
- * (history zone — meta pointers are updated so future history reads keep
- * working). The base64 PDF is then **replaced** with the resulting markdown
- * transcription so the AI never sees raw PDF bytes.
- *
- * If parsing fails, an explicit error message is injected for the AI (the
- * admin is notified automatically; the AI should stop and not retry).
- *
- * @param {Array|string} content - Message content (can be string or array of parts)
- * @param {object} [opts] - Options
- * @param {object} [opts.ctx] - Handler context for notifications
- * @param {function} [opts.onTranscriptionStart] - Called with the notification message when transcription starts
- * @returns {Promise<Array|string>} Transcribed content
- */
-async function transcribeDocumentsInMessageContent(content, opts = {}) {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return content;
-  }
-
-  const { ctx, onTranscriptionStart } = opts;
-
-  // Count how many PDF parts are actually present before touching the tracker.
-  // We only increment/notify when there is real work to do.
-  const pdfCount = content.filter(
-    (part) => part && _getMediaTypeFromContentPart(part) === 'document'
-  ).length;
-
-  const useTracker = pdfCount > 0 && ctx && typeof onTranscriptionStart === 'function';
-
-  if (useTracker) {
-    const { count, shouldNotify } = incrementTranscription(ctx);
-    if (shouldNotify) {
-      await onTranscriptionStart(buildNotificationMessage(count));
-    }
-  }
-
-  const transcribed = [];
-  const attachmentPathReplacements = new Map();
-
-  try {
-    for (const part of content) {
-      if (!part) {
-        transcribed.push(part);
-        continue;
-      }
-
-      if (_getMediaTypeFromContentPart(part) !== 'document') {
-        transcribed.push(part);
-        continue;
-      }
-
-      const dataUrl = part.image_url?.url || '';
-      const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-      if (!match || match[1].toLowerCase() !== 'application/pdf') {
-        await notifyAdmin('PDF Parser (Mime)', `Unsupported document type "${match ? match[1] : 'unknown'}"`);
-        transcribed.push({
-          type: 'text',
-          text: `[PDF parsing skipped: unsupported document type "${match ? match[1] : 'unknown'}"]. ${ADMIN_NOTIFIED_SUFFIX}`,
-        });
-        continue;
-      }
-
-      const historyPath = typeof part._historyPath === 'string' ? part._historyPath.trim() : null;
-      const historyUserId = typeof part._historyUserId === 'string' ? part._historyUserId.trim() : null;
-
-      if (!historyPath || !historyUserId) {
-        // Defensive: every PDF reaching this point should originate from a
-        // platform handler that always tags content parts with these fields.
-        log.error(`❌ PDF content part missing history metadata — refusing to parse.`);
-        await notifyAdmin('PDF Parser (Metadata)', 'Missing history metadata for PDF part');
-        transcribed.push({
-          type: 'text',
-          text: `[PDF parsing skipped: internal error — missing history metadata]. STOP. Do NOT retry in agentic mode. ${ADMIN_NOTIFIED_SUFFIX}`,
-        });
-        continue;
-      }
-
-      const buffer = Buffer.from(match[2], 'base64');
-      const persisted = await persistParsedPdfToHistory(historyUserId, historyPath, buffer);
-
-      if (persisted.success && typeof persisted.text === 'string' && persisted.text.trim()) {
-        // Wrap in the same <FileContent type="pdf-transcription"> envelope
-        // produced by the read_file tool, so the model treats inline PDFs
-        // and read_file results identically.
-        const pdfDisplayPath = persisted.historyPath || historyPath;
-        transcribed.push({
-          type: 'text',
-          text: `<FileContent path="${pdfDisplayPath}" type="pdf-transcription">\n<Transcription>\n${persisted.text}\n</Transcription>\n</FileContent>`,
-        });
-        if (persisted.historyPath && persisted.historyPath !== historyPath) {
-          attachmentPathReplacements.set(historyPath, persisted.historyPath);
-        }
-        continue;
-      }
-
-      const errorMsg = persisted.error || 'Unknown PDF parsing error';
-      log.error(`❌ PDF round-pre-call parsing failed for ${historyPath}: ${errorMsg}`);
-      await notifyAdmin('PDF Parser (Auto-Transcribe)', `Failed to parse ${historyPath}: ${errorMsg}`);
-      transcribed.push({
-        type: 'text',
-        text: `[PDF parsing failed: ${errorMsg}]. STOP. Do NOT enter agentic mode to retry parsing yourself. ${ADMIN_NOTIFIED_SUFFIX}`,
-      });
-    }
-
-    if (attachmentPathReplacements.size > 0) {
-      for (const part of transcribed) {
-        if (!part || part.type !== 'text' || typeof part.text !== 'string') continue;
-        for (const [oldPath, newPath] of attachmentPathReplacements.entries()) {
-          part.text = _replaceAttachmentPathInText(part.text, oldPath, newPath);
-        }
-      }
-    }
-
-    return transcribed;
-  } finally {
-    if (useTracker) {
-      decrementTranscription(ctx);
-    }
-  }
-}
-
-function _getMediaTypeFromContentPart(part) {
-  if (!part || !part.image_url || !part.image_url.url) return null;
-  const m = /^data:([^;]+);base64,/.exec(part.image_url.url);
-  if (!m) return null;
-  const mime = m[1].toLowerCase();
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('audio/')) return 'audio';
-  if (mime.startsWith('application/')) return 'document';
-  return null;
 }
 
 /**
@@ -471,9 +174,6 @@ function isInlineableTextFile(filename, mimetype) {
  * Keeping the format consistent means the model treats inlined attachments
  * and read_file outputs the same way (line refs, citations, edit prompts).
  *
- * Handles size cap and truncation marker. The returned string never exceeds
- * INLINE_TEXT_MAX_BYTES + a small wrapper.
- *
  * @param {string} filename
  * @param {Buffer} buffer
  * @returns {string}
@@ -497,8 +197,6 @@ module.exports = {
   isSupportedMedia,
   mediaToContentPart,
   mediaTag,
-  extractTextFromPdfBuffer,
-  transcribeDocumentsInMessageContent,
   buildAttachmentTag,
   extractAttachmentTagPaths,
   isInlineableTextFile,

@@ -1,26 +1,45 @@
 // src/tools/readFile.js
+//
+// read_file is the AI-facing tool that lets the assistant pull a specific
+// file from chat history (or, in agentic mode, from the project workspace
+// and a few read-only zones) into the conversation.
+//
+// Two return shapes:
+//   1. Text-based files → wrapped in <FileContent> with line numbers and
+//      truncated past MAX_TEXT_BYTES.
+//   2. Media (PDF, audio, video, image) → exposed via the public attachment
+//      tunnel as `{type:'input_file', file_url:'https://…'}` so xAI's
+//      Responses endpoint fetches and pre-processes them natively (OCR,
+//      STT, frame extraction). For images we keep the legacy base64
+//      `image_url` part since it is already accepted natively as
+//      `input_image` by /v1/responses (no need to round-trip through the
+//      tunnel for those).
+//
+// Output paths are unchanged from the AI's perspective — only the
+// transport for non-image binaries switched from in-line base64 + custom
+// pre-pass to public URL + xAI native ingestion.
+
 const fs = require('fs');
 const path = require('path');
 const { mediaToContentPart } = require('../utils/media');
-const { persistParsedPdfToHistory, getUserHistoryPaths } = require('../utils/historySync');
-const {
-  buildParsedPdfStructure,
-  findExistingParsedDirFor,
-  ensureHeaderInTranscription,
-  HEADER_BEGIN,
-  HEADER_END,
-} = require('../utils/pdfStructure');
 const { isPathAllowed, ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
 const { getBgTask, removeBgTask } = require('../utils/bgTasks');
 const { isSandboxAlive } = require('../sandbox/sandboxManager');
 const { getCurrentProject } = require('../utils/projectState');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
+const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
+const { createLogger } = require('../utils/logger');
 
-const NON_READABLE_EXTS = new Set(['.xls', '.xlsx', '.doc', '.docx', '.ppt', '.pptx', '.exe', '.dll', '.bin', '.so', '.zip', '.tar', '.gz', '.7z', '.rar', '.jar', '.class', '.pyc', '.db', '.sqlite', '.iso', '.dmg']);
+const log = createLogger('ReadFileTool');
 
-const MAX_TEXT_BYTES = 50 * 1024; // 50KB limit for text reading
-const MAX_BG_AUTO_ATTACH = 20;        // max files to auto-attach from a completed background task
-const MAX_BG_AUTO_ATTACH_BYTES = 100 * 1024 * 1024; // 100 MB total cap
+const NON_READABLE_EXTS = new Set([
+  '.xls', '.xlsx', '.doc', '.docx', '.ppt', '.pptx',
+  '.exe', '.dll', '.bin', '.so', '.zip', '.tar', '.gz', '.7z', '.rar',
+  '.jar', '.class', '.pyc', '.db', '.sqlite', '.iso', '.dmg',
+]);
+
+const MAX_TEXT_BYTES = 50 * 1024; // 50KB cap for inline text reads
+const MAX_BG_AUTO_ATTACH = 20;
+const MAX_BG_AUTO_ATTACH_BYTES = 100 * 1024 * 1024;
 
 const _BG_MIME = {
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.flac': 'audio/flac',
@@ -32,12 +51,18 @@ const _BG_MIME = {
 function _mimeForBg(absPath) {
   return _BG_MIME[path.extname(absPath).toLowerCase()] || 'application/octet-stream';
 }
-const MAX_IMAGE_READS = 10;
-const MAX_AUDIO_BYTES = 15 * 1024 * 1024; // 15MB limit for audio
-const MAX_VIDEO_BYTES = 60 * 1024 * 1024; // 60MB limit for video (caller still enforces 15s duration cap)
 
-const AUDIO_EXTS = ['.ogg', '.mp3', '.wav', '.m4a'];
-const VIDEO_EXTS = ['.mp4', '.webm', '.mov'];
+const MAX_IMAGE_READS = 10;
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
+
+const AUDIO_EXTS = ['.ogg', '.mp3', '.wav', '.m4a', '.flac', '.aac'];
+const VIDEO_EXTS = ['.mp4', '.webm', '.mov', '.mkv'];
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+
+const AUDIO_MIME = { '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.flac': 'audio/flac', '.aac': 'audio/aac' };
+const VIDEO_MIME = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mkv': 'video/x-matroska' };
+const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 
 function _collectRecentProjectWriteViolations(projectDir, startedAt) {
   const violations = [];
@@ -65,10 +90,35 @@ function _collectRecentProjectWriteViolations(projectDir, startedAt) {
 }
 
 /**
+ * Build an `input_file` content part backed by the public attachment tunnel.
+ * `kind` selects the TTL (`history` = 24h, `temp` = 1h).
+ *
+ * Returns `[textTag, inputFilePart]`. Errors propagate as { success:false }
+ * tool results so the AI can react.
+ */
+function _buildInputFilePart(absPath, displayPath, originalName, mimetype, kind) {
+  let urlInfo;
+  try {
+    urlInfo = getPublicAttachmentUrl(absPath, originalName, { kind, mimetype });
+  } catch (err) {
+    log.warn(`Failed to expose ${displayPath} via tunnel: ${err.message}`);
+    return { success: false, error: `Cannot expose "${displayPath}" via attachment tunnel: ${err.message}` };
+  }
+  return [
+    { type: 'text', text: `[Attachment: ${displayPath}]` },
+    { type: 'input_file', file_url: urlInfo.url },
+  ];
+}
+
+/**
  * Read file tool execution logic.
- * On Discord, paths are implicitly relative to chat history. On WhatsApp paths
- * can target /readonly/{history|searched_images}/, /workspace/**, or skills:.
- * Bare filenames (no slash) are automatically resolved to chat history.
+ *
+ * Path resolution (unchanged):
+ *  - Discord and non-agentic: any non-absolute path is treated as relative
+ *    to chat history.
+ *  - Agentic: absolute /workspace and /readonly paths are honoured. A bare
+ *    filename (no slash) still routes to history for convenience.
+ *  - `skills:<name>.md` reads from src/data/skills/.
  */
 async function readFileTool(filePath, userCtx, responseCtx) {
   if (responseCtx.imagesReadCount === undefined) responseCtx.imagesReadCount = 0;
@@ -83,14 +133,6 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   const agenticUnlocked = userCtx.agenticUnlocked;
   let rawPath = (filePath || '').trim();
 
-  // Automatically normalize bare filenames / relative paths to chat history.
-  //
-  // - Non-agentic: any non-absolute path is treated as relative to history/
-  //   (e.g. "file.pdf" → "history/file.pdf", "CV/transcription.md" → "history/CV/transcription.md").
-  // - Agentic: absolute paths are required for /workspace and /readonly,
-  //   but a BARE filename with no slash (e.g. "file.pdf") is still routed to
-  //   chat history — this matches the tool description and keeps reads of
-  //   in-history files convenient regardless of mode.
   if (!rawPath.startsWith('/') && !rawPath.startsWith('skills:')) {
     if (rawPath.startsWith('./')) {
       rawPath = rawPath.slice(2);
@@ -109,95 +151,8 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return { success: false, error: `Access denied: ${check.reason}` };
   }
 
-  let absolutePath = check.absPath;
-  let displayPath = rawPath;
-
-  // ── Canonical PDF resolution ──
-  // Any read on a `.pdf` path resolves to a self-contained parsed-PDF folder
-  // (folder/, original .pdf inside, transcription.md with header, assets/).
-  // History paths get extra meta bookkeeping; everything else uses the
-  // generic structure builder. If the .pdf already became a folder on a
-  // previous read, we redirect to that folder so the AI keeps using the
-  // original .pdf path consistently.
-  if (/\.pdf$/i.test(rawPath)) {
-    // Guard: if the .pdf is the original sitting inside an already-parsed
-    // folder (i.e. its parent has a transcription.md), redirect to that
-    // folder instead of triggering a recursive re-parse.
-    if (fs.existsSync(absolutePath)) {
-      try {
-        const st0 = fs.statSync(absolutePath);
-        if (st0.isFile()) {
-          const parentDir = path.dirname(absolutePath);
-          if (fs.existsSync(path.join(parentDir, 'transcription.md'))) {
-            absolutePath = parentDir;
-            const parentName = path.basename(parentDir);
-            displayPath = displayPath.replace(/[^/]*\.pdf$/i, parentName + '/');
-          }
-        }
-      } catch { /* ignore */ }
-    }
-  }
-  let isPdfFileTarget = false;
-  if (/\.pdf$/i.test(rawPath)) {
-    if (!fs.existsSync(absolutePath)) {
-      isPdfFileTarget = true;
-    } else {
-      try {
-        if (fs.statSync(absolutePath).isFile()) {
-          isPdfFileTarget = true;
-        }
-      } catch { /* ignore */ }
-    }
-  }
-  if (isPdfFileTarget) {
-    if (rawPath.startsWith('history/')) {
-      const storageId = resolveStorageId(userCtx);
-      let persisted;
-      try {
-        persisted = await persistParsedPdfToHistory(storageId, rawPath);
-      } catch (err) {
-        await notifyAdmin('PDF Parser (History)', `Failed to parse PDF ${displayPath}: ${err.message}`);
-        return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message} ${ADMIN_NOTIFIED_SUFFIX}` };
-      }
-      if (persisted.success && persisted.historyPath) {
-        displayPath = `history/${persisted.historyPath}`;
-        const { historyDir } = getUserHistoryPaths(storageId);
-        absolutePath = path.join(historyDir, persisted.historyPath.replace(/\/$/, ''));
-      } else {
-        const errMsg = persisted.error || 'unknown error';
-        await notifyAdmin('PDF Parser (History)', `Failed to parse PDF ${displayPath}: ${errMsg}`);
-        return { success: false, error: `PDF parsing failed for "${displayPath}": ${errMsg} ${ADMIN_NOTIFIED_SUFFIX}` };
-      }
-    } else if (fs.existsSync(absolutePath)) {
-      const st0 = fs.statSync(absolutePath);
-      if (st0.isFile()) {
-        let built;
-        try {
-          built = await buildParsedPdfStructure({
-            absPdfPath: absolutePath,
-            virtualPdfPath: rawPath.startsWith('/') ? rawPath : `/${rawPath}`,
-          });
-        } catch (err) {
-          await notifyAdmin('PDF Parser (Project)', `Failed to parse PDF ${displayPath}: ${err.message}`);
-          return { success: false, error: `PDF parsing failed for "${displayPath}": ${err.message} ${ADMIN_NOTIFIED_SUFFIX}` };
-        }
-        if (built.success) {
-          absolutePath = built.parsedDirAbs;
-          displayPath = displayPath.replace(/[^/]*\.pdf$/i, built.dirName + '/');
-        } else {
-          const errMsg = built.error || 'unknown error';
-          await notifyAdmin('PDF Parser (Project)', `Failed to parse PDF ${displayPath}: ${errMsg}`);
-          return { success: false, error: `PDF parsing failed for "${displayPath}": ${errMsg} ${ADMIN_NOTIFIED_SUFFIX}` };
-        }
-      }
-    } else {
-      const existing = findExistingParsedDirFor(absolutePath);
-      if (existing) {
-        absolutePath = existing;
-        displayPath = displayPath.replace(/[^/]*\.pdf$/i, path.basename(existing) + '/');
-      }
-    }
-  }
+  const absolutePath = check.absPath;
+  const displayPath = rawPath;
 
   if (!fs.existsSync(absolutePath)) {
     const bgTask = getBgTask(absolutePath);
@@ -214,7 +169,6 @@ async function readFileTool(filePath, userCtx, responseCtx) {
 
       while (waited < remaining) {
         if (fs.existsSync(bgTask.doneMarkerPath)) break;
-        // Watchdog: if the sandbox for this project is gone, the bg task definitely crashed.
         if (!isSandboxAlive(userCtx, projectName)) {
           deadCount++;
           if (deadCount > 10) {
@@ -229,7 +183,6 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       }
       const bgStartedAt = bgTask.startedAt;
       removeBgTask(absolutePath);
-      // Process finished but no output file → create empty
       if (fs.existsSync(bgTask.doneMarkerPath) && !fs.existsSync(absolutePath)) {
         try { fs.writeFileSync(absolutePath, '', 'utf-8'); } catch { }
       }
@@ -243,9 +196,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
           bgWriteViolationWarning = `\n\n[Background write violation: ${violations.length} file(s) changed outside authorized dirs temp/, output/, code/: ${violations.join(', ')}]`;
         }
       } catch { }
-      // Auto-attach any output/ files the background command wrote after it started.
-      // These are invisible to the normal diff-based auto-attach because the diff
-      // snapshot was taken before the background thread had a chance to write them.
+      // Auto-attach background output files (unchanged from previous behaviour).
       if (responseCtx && Array.isArray(responseCtx.attachments)) {
         const outputDir = path.join(projectDir, 'output');
 
@@ -279,7 +230,6 @@ async function readFileTool(filePath, userCtx, responseCtx) {
 
               const already = responseCtx.attachments.some(a => a.filePath && path.resolve(a.filePath) === path.resolve(absFile));
               if (!already) {
-                // Symlink-escape guard
                 let isEscaped = false;
                 try {
                   const real = fs.realpathSync(absFile);
@@ -314,169 +264,83 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return { success: false, error: `Cannot read file "${displayPath}": ${err.message}` };
   }
 
-  // ── Parsed-PDF directory ──
-  // Both the new flow (created by buildParsedPdfStructure) and legacy folders
-  // converge here. ensureHeaderInTranscription backfills the canonical paths/
-  // rules header for legacy md files that were written before this feature.
   if (stat.isDirectory()) {
-    const transcriptionPath = path.join(absolutePath, 'transcription.md');
-    if (fs.existsSync(transcriptionPath)) {
-      const virtualDir = displayPath.endsWith('/') ? displayPath.slice(0, -1) : displayPath;
-      let text = ensureHeaderInTranscription(absolutePath, virtualDir);
-      if (!text) text = fs.readFileSync(transcriptionPath, 'utf-8');
-      const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
-      if (isTruncated) {
-        text = Buffer.from(text).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';
-      }
-
-      // List assets if present
-      let assetsInfo = '';
-      const assetsDir = path.join(absolutePath, 'assets');
-      if (fs.existsSync(assetsDir)) {
-        try {
-          const assetFiles = fs.readdirSync(assetsDir);
-          if (assetFiles.length > 0) {
-            assetsInfo = `\n<Assets count="${assetFiles.length}">\n${assetFiles.map(f => `  ${displayPath}assets/${f}`).join('\n')}\n</Assets>`;
-          }
-        } catch { /* ignore */ }
-      }
-
-      const output = `<FileContent path="${displayPath}" type="pdf-transcription"${isTruncated ? ' truncated="true"' : ''}>
-<Transcription>
-${text}
-</Transcription>${assetsInfo}
-</FileContent>${bgWriteViolationWarning}`;
-
-      return { success: true, message: output };
-    }
     return { success: false, error: `Path is a directory, not a file.` };
   }
 
+  // Touch atime/mtime so the history pruner sees this file as recently used.
   const now = new Date();
-  try {
-    fs.utimesSync(absolutePath, now, now);
-  } catch (err) { }
+  try { fs.utimesSync(absolutePath, now, now); } catch { /* ignore */ }
 
   const ext = path.extname(absolutePath).toLowerCase();
   const sanitizedPath = displayPath;
   const fileSize = stat.size;
+  const originalName = path.basename(absolutePath);
+  // History reads keep their longer TTL; everything else (project files,
+  // skills) is exposed for 1h since the conversation rarely needs more.
+  const tunnelKind = rawPath.startsWith('history/') ? 'history' : 'temp';
 
   if (NON_READABLE_EXTS.has(ext)) {
     return { success: false, error: `read_file: files with extension "${ext}" are binary and not supported for direct reading. Use specialized tools or scripts to analyze them.` };
   }
 
-  // ── Size check before reading into memory ──
-  if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
-    // Image size usually not a problem for memory but we check count later
-  } else if (AUDIO_EXTS.includes(ext)) {
+  // ── Images ─────────────────────────────────────────────────────────────
+  // Stay base64 inline. /v1/responses accepts image data URLs natively as
+  // input_image; round-tripping through the tunnel would only add latency.
+  if (IMAGE_EXTS.includes(ext)) {
+    if (responseCtx.imagesReadCount >= MAX_IMAGE_READS) {
+      return { success: false, error: `Image limit reached. You can only read up to ${MAX_IMAGE_READS} images per call.` };
+    }
+    if (fileSize === 0) {
+      return { success: false, error: `Image file "${displayPath}" is empty.` };
+    }
+    responseCtx.imagesReadCount++;
+    const buffer = fs.readFileSync(absolutePath);
+    return [
+      { type: 'text', text: `[Attachment: ${sanitizedPath}]` },
+      mediaToContentPart(buffer, IMAGE_MIME[ext]),
+    ];
+  }
+
+  // ── PDF / audio / video ───────────────────────────────────────────────
+  // Hand off to the public tunnel and emit an input_file part. xAI fetches
+  // the URL itself, runs OCR / STT / frame extraction, and folds the result
+  // into the prompt at /v1/responses without any further work on our side.
+  if (ext === '.pdf') {
+    if (fileSize > 48 * 1024 * 1024) {
+      return { success: false, error: `PDF "${displayPath}" exceeds the 48 MB xAI limit.` };
+    }
+    return _buildInputFilePart(absolutePath, displayPath, originalName, 'application/pdf', tunnelKind);
+  }
+
+  if (AUDIO_EXTS.includes(ext)) {
     if (fileSize > MAX_AUDIO_BYTES) {
       const maxMins = Math.round(MAX_AUDIO_BYTES / (16 * 1024 * 60));
       return { success: false, error: `Audio file exceeds size limit (max ~${maxMins} minutes).` };
     }
-  } else if (VIDEO_EXTS.includes(ext)) {
+    return _buildInputFilePart(absolutePath, displayPath, originalName, AUDIO_MIME[ext], tunnelKind);
+  }
+
+  if (VIDEO_EXTS.includes(ext)) {
     if (fileSize > MAX_VIDEO_BYTES) {
       return { success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max). GemiX does not support video editing.` };
     }
-  } else if (fileSize > MAX_TEXT_BYTES * 4 && ext !== '.pdf') {
-    // Heuristic: don't read more than 4x max text into memory if it's just text
+    return _buildInputFilePart(absolutePath, displayPath, originalName, VIDEO_MIME[ext], tunnelKind);
+  }
+
+  // ── Text / Code / unknown small file ──────────────────────────────────
+  // Read inline up to MAX_TEXT_BYTES. Larger files are truncated.
+  if (fileSize > MAX_TEXT_BYTES * 4) {
     return { success: false, error: `File is too large to read as text (max ${MAX_TEXT_BYTES / 1024}KB).` };
   }
 
   const buffer = fs.readFileSync(absolutePath);
-
-  // ── Images ──
-  if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) {
-    if (responseCtx.imagesReadCount >= MAX_IMAGE_READS) {
-      return { success: false, error: `Image limit reached. You can only read up to ${MAX_IMAGE_READS} images per call.` };
-    }
-    responseCtx.imagesReadCount++;
-    const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
-    return [
-      { type: 'text', text: `[Attachment: ${sanitizedPath}]` },
-      mediaToContentPart(buffer, mimeMap[ext])
-    ];
-  }
-
-  // ── Audio ──
-  if (AUDIO_EXTS.includes(ext)) {
-    const mimeMap = { '.ogg': 'audio/ogg', '.mp3': 'audio/mp3', '.wav': 'audio/wav', '.m4a': 'audio/m4a' };
-    return [
-      { type: 'text', text: `[Attachment: ${sanitizedPath}]` },
-      mediaToContentPart(buffer, mimeMap[ext], {
-        historyPath: rawPath.startsWith('history/') ? rawPath : null,
-        historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,
-      })
-    ];
-  }
-
-  // ── Video ──
-  if (VIDEO_EXTS.includes(ext)) {
-    const mimeMap = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
-    return [
-      { type: 'text', text: `[Attachment: ${sanitizedPath}]` },
-      mediaToContentPart(buffer, mimeMap[ext], {
-        historyPath: rawPath.startsWith('history/') ? rawPath : null,
-        historyUserId: rawPath.startsWith('history/') ? resolveStorageId(userCtx) : null,
-      })
-    ];
-  }
-
-  // ── PDF (raw .pdf file) ──
-  // Should be unreachable: any .pdf path is rerouted above to its parsed
-  // folder (handled in the directory branch). If a stray raw .pdf reaches
-  // this point, the canonical parser failed silently and we surface a
-  // clear error instead of triggering a second parse attempt.
-  if (ext === '.pdf') {
-    await notifyAdmin('PDF Parser (Unexpected)', `PDF ${sanitizedPath} reached raw read branch (silently failed parsing).`);
-    return { success: false, error: `PDF "${sanitizedPath}" could not be parsed into the canonical folder structure. ${ADMIN_NOTIFIED_SUFFIX}` };
-  }
-
-  // ── Text/Code ──
   let text = buffer.toString('utf-8');
-
-  // ── Normalize PDF transcription header paths for non-agentic mode ──
-  // In non-agentic mode, the AI can only use relative history paths.
-  // When reading a transcription.md file, temporarily convert absolute paths
-  // in the header to relative paths for the AI to use (e.g. /readonly/history/CV/ → CV/).
-  // Also remove the second rule about copying to /workspace/temp/ since non-agentic
-  // AI cannot access that path. The file on disk remains unchanged.
-  if (!agenticUnlocked && path.basename(absolutePath) === 'transcription.md') {
-    const headerBeginIdx = text.indexOf(HEADER_BEGIN);
-    const headerEndIdx = text.indexOf(HEADER_END);
-
-    if (headerBeginIdx !== -1 && headerEndIdx !== -1) {
-      const header = text.slice(headerBeginIdx, headerEndIdx + HEADER_END.length);
-      const rest = text.slice(headerEndIdx + HEADER_END.length);
-
-      // Convert absolute paths to relative paths in the header
-      // /readonly/history/CV/ → CV/
-      // /readonly/history/CV/transcription.md → CV/transcription.md
-      let normalizedHeader = header.replace(
-        /\/readonly\/history\/([^/\s]+)/g,
-        '$1'
-      ).replace(
-        /\/readonly\/history\//g,
-        ''
-      );
-
-      // Remove the second rule about copying to /workspace/temp/ (non-agentic AI cannot access it)
-      // The rule starts with "   - If you need to use any of these files..."
-      normalizedHeader = normalizedHeader.replace(
-        /   - If you need to use any of these files[\s\S]*?operate on the copy\.\n/,
-        ''
-      );
-
-      text = normalizedHeader + rest;
-    }
-  }
-
   const isTruncated = Buffer.byteLength(text) > MAX_TEXT_BYTES;
   if (isTruncated) {
-    const truncatedBuffer = buffer.slice(0, MAX_TEXT_BYTES);
-    text = truncatedBuffer.toString('utf-8') + '\n\n... (file truncated)';
+    text = Buffer.from(buffer).slice(0, MAX_TEXT_BYTES).toString('utf-8') + '\n\n... (file truncated)';
   }
 
-  // Add line numbers for better AI context (similar to view_file)
   const lines = text.split(/\r?\n/);
   const numberedText = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
 

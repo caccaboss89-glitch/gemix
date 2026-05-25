@@ -1,7 +1,6 @@
 // src/tools/index.js
 const { isActiveMemberOnlyTool, validateToolArgs } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
-const { codeInterpreter } = require('./codeInterpreter');
 const { imageSearch } = require('./imageSearch');
 const { generateImage, generateVideo } = require('./imagineGenerator');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
@@ -229,11 +228,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         // Strip internal _stats before returning to the AI (not part of the tool schema).
         const { _stats: _ignored, ...searchResultClean } = searchResult;
         result = searchResultClean;
-        break;
-      }
-
-      case 'code_interpreter': {
-        result = await codeInterpreter(args.code);
         break;
       }
 
