@@ -58,6 +58,10 @@ async function callAI(messages, tools = null) {
     input,
     // max_output_tokens is the Responses API counterpart of max_tokens.
     max_output_tokens: MAX_TOKENS,
+    // High reasoning effort: GemiX is the user-facing brain, latency is
+    // already dominated by tool I/O, and we'd rather pay extra reasoning
+    // budget than ship sloppy answers. webXSearch / buildAgent use the same.
+    reasoning: { effort: 'high' },
   };
 
   // Only attach instructions when we actually have a system prompt; xAI tolerates

@@ -1,5 +1,5 @@
 // src/ai/tools.js
-const { PLATFORM_DISCORD, XAI_TTS_ENABLED } = require('../config/constants');
+const { PLATFORM_DISCORD } = require('../config/constants');
 
 // Tool definitions for AI function calling (OpenAI-compatible format).
 
@@ -249,40 +249,38 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   const properties = {
     text: {
       type: 'string',
-      description: XAI_TTS_ENABLED
-        ? 'TTS text (max 1000 chars), supports vocal effects. Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.'
-        : 'TTS text (max 1000 chars). Note: vocal effects/tags are NOT supported at the moment.',
+      description: 'Plain text to speak (max 1000 chars). Do NOT add vocal effect tags — the TTS engine inserts them on its own. Just write the message in the language you want.',
     },
   };
 
   if (includeRecipientName || includeRecipientPhone) {
     properties.includeAttachments = {
       type: 'boolean',
-      description: 'Forward buffered files to this recipient (default true).',
+      description: 'Forward buffered files together with the voice (default true). Ignored when the recipient is omitted or is the current user.',
     };
     const recipientProps = {};
     if (includeRecipientName) {
       recipientProps.name = {
         type: 'string',
-        description: 'Member name (omit=current chat)',
+        description: 'Member name. Omit to reply in the current chat.',
       };
     }
     if (includeRecipientPhone) {
       recipientProps.phone = {
         type: 'string',
-        description: 'Phone number with country code (e.g. +393XXXXXXXXX)',
+        description: 'Phone number with country code (e.g. +393XXXXXXXXX). Omit to reply in the current chat.',
       };
     }
     properties.recipient = {
       type: 'object',
-      description: 'Specific recipient',
+      description: 'Specific recipient. Omit to reply in the current chat.',
       properties: recipientProps,
     };
   }
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Delivery tool — send a voice message. Without "recipient" replies in the current chat; with it, sends to that recipient.',
+    description: 'Delivery tool — send a voice message. Without "recipient" (or with recipient=current user) replies in the current chat; with a different recipient, sends to that recipient.',
     properties,
     required: ['text'],
   });

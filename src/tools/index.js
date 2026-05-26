@@ -286,23 +286,37 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           .replace(/\s{2,}/g, ' ')
           .trim();
 
-        // Delivery to a specific recipient
-        const hasRecipient = args.recipient?.name || args.recipient?.phone || args.recipientName || args.recipientPhone;
+        // Delivery to a specific recipient (or, if the recipient resolves
+        // to the current user, gracefully fall through to "current chat").
+        let hasRecipient = args.recipient?.name || args.recipient?.phone || args.recipientName || args.recipientPhone;
         let targetChatKey = chatKey;
         let targetJid = null;
 
         if (hasRecipient) {
           const recipientName = args.recipient?.name || args.recipientName;
+          const recipientPhone = args.recipient?.phone || args.recipientPhone;
+          // Self-recipient handling: when the AI specifies the user it is
+          // currently talking to, treat the call as if recipient was
+          // omitted (deliver in the current chat). The previous behaviour
+          // — returning an error — caused failures whenever the AI
+          // included recipient defensively, e.g. on the personal WA bot
+          // where every reply IS to the same user.
+          let resolvesToSelf = false;
           if (recipientName) {
             const member = findMemberByName(recipientName);
-            if (member && member.wa === userCtx.waJid) {
-              result = { success: false, error: `You cannot send to yourself. To reply in the current chat, omit the recipient.` };
-              break;
-            }
+            if (member && member.wa === userCtx.waJid) resolvesToSelf = true;
           }
-          targetJid = _resolveTargetWaJid(args, userCtx);
-          if (targetJid.error) { result = targetJid.error; break; }
-          targetChatKey = targetJid.jid;
+          if (!resolvesToSelf && recipientPhone && userCtx.waJid) {
+            const normalized = normalizePhoneToJid(recipientPhone);
+            if (normalized === userCtx.waJid) resolvesToSelf = true;
+          }
+          if (resolvesToSelf) {
+            hasRecipient = false;
+          } else {
+            targetJid = _resolveTargetWaJid(args, userCtx);
+            if (targetJid.error) { result = targetJid.error; break; }
+            targetChatKey = targetJid.jid;
+          }
         }
 
         const currentCount = await getVoiceCount(userCtx, targetChatKey);

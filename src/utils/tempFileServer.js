@@ -43,7 +43,11 @@ const DEFAULT_EXPIRATION_MS = TUNNEL_TOKEN_TTL_TEMP_MS;
 // Cleanup runs every 5 minutes regardless of TTL kind: a 24h token still
 // needs deletion soon after its window closes.
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-const TEMP_DIR = path.join(process.cwd(), '.tempfiles');
+// Absolute path to temp directory. On the VPS this resolves to
+// /home/ubuntu/DiscordBots/GemiX/.tempfiles (or wherever GemiX is deployed).
+// Using an absolute path ensures consistency regardless of how the process
+// is started (PM2, Docker, manual, etc.).
+const TEMP_DIR = path.join(__dirname, '..', '..', '.tempfiles');
 
 // In-memory registry: Map<token, {
 //   token, filePath, expiresAt, originalName, mimetype, disposition, requestCount

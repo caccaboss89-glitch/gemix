@@ -2,6 +2,46 @@
 
 > Documento autonomo. Chi legge dopo non ha il contesto della conversazione: tutto quello che serve è qui dentro. Non eseguire ancora niente — è un'analisi, non un piano operativo. Tutte le decisioni qui dentro sono state validate dall'utente proprietario del progetto.
 
+## Hotfix tra Fase 5 e Fase 6 (TTS, recipient self, anti-allucinazioni)
+
+Tre fix applicati prima di iniziare la Fase 6 (riscrittura skill). Vivono fuori dal piano principale di pulizia perché correggono difetti emersi durante i test in produzione.
+
+### Hotfix A — TTS via CLI bridge (allineato a Imagine)
+
+Il proxy Hermes non inoltra `/v1/tts` (`path_not_allowed`, whitelist: `/chat/completions`, `/completions`, `/embeddings`, `/models`, `/responses`). La soluzione precedente (POST diretto a `${HERMES_BASE_URL}/tts`) tornava 404 in produzione.
+
+Adottato lo stesso pattern di Imagine:
+- Nuovo wrapper `bridge/tts.sh` che invoca `hermes --yolo --ignore-rules -t tts -z "<istruzione+testo>"`. Il toolset è ristretto al solo `tts` (`-t tts`) → il modello vede solo `text_to_speech` e si concentra esclusivamente sulla qualità dell'audio.
+- L'istruzione passata al CLI dice: usa solo `text_to_speech`, parla esattamente il testo fornito (niente parafrasi/traduzioni, qualunque lingua), inserisci tu i tag vocali dove più opportuno (elenco completo nei prompt), salva in un percorso assoluto preciso che ti passo io. Il bridge verifica filesystem-side che il file esista prima di tornare; se manca, exit code 4.
+- `src/tools/voiceMessage.js` riscritto: `xaiTTSViaBridge(text)` spawna il bridge in `.tempfiles/` (percorso assoluto), legge l'MP3 dal disco, lo cancella, e lo passa al transcoder ffmpeg → Opus/OGG come prima.
+- Il caller (GemiX-Main / sub-agent) **non scrive più tag vocali**: la tool description di `send_voice_message` chiede solo testo in chiaro, qualunque lingua. Il vantaggio è duplice: (1) la qualità migliora perché Hermes-TTS si occupa di una sola cosa, (2) GemiX-Main non deve più memorizzare la lista dei tag.
+- Il testo generato viene salvato via `storeRecentVoiceText()` **senza tag vocali** (stripVocalTags), così la history mostra quello che l'utente ha sentito, non il markup interno.
+- Fallback Google Translate TTS invariato. Quando il bridge fallisce (proxy down, file non prodotto, transcode error), si applica `stripVocalTags()` difensivo prima di Google.
+
+Cambi correlati:
+- `XAI_TTS_VOICE` rimosso da `.env` ed `env.js` (non più usato — la voce la sceglie Hermes nel CLI).
+- `SERVER_SETUP.md` aggiornato: `/v1/tts` non è proxato; nuova sottosezione "TTS (Text-to-Speech)" che documenta il bridge.
+- `bridge/README.md` aggiornato: documenta `tts.sh` accanto a `imagine.sh`.
+- `src/ai/tools.js` `buildVoiceTool`: descrizione del campo `text` riscritta — "Plain text to speak (max 1000 chars, any language)". Niente più limitazione a italiano, niente più elenco tag.
+- Percorsi temp: `TEMP_DIR` in `tempFileServer.js` e `voiceMessage.js` cambiato da `process.cwd()` a percorso assoluto (`path.resolve(__dirname, '..', '.tempfiles')`), garantendo coerenza indipendentemente da come il processo è lanciato (PM2, Docker, manuale).
+
+### Hotfix B — Recipient che risolve all'utente corrente
+
+Sintomo: l'AI chiama `send_voice_message` con `recipient: { name: "Gagliardi Alberto" }` mentre sta già parlando con Alberto sulla WA personale. Il dispatcher rispondeva con `"You cannot send to yourself. To reply in the current chat, omit the recipient."` e la voce non partiva.
+
+Fix in `src/tools/index.js` (case `send_voice_message`): quando `recipient.name` mappa al membro la cui `wa === userCtx.waJid`, oppure `recipient.phone` normalizzato coincide con `userCtx.waJid`, il flag `hasRecipient` viene riportato a `false` e la chiamata cade naturalmente nel ramo "current chat" (genera la voce e la invia come reply, niente errore). Il vocale viene inviato immediatamente come risposta finale (il handler interrompe il loop tool e ritorna con `isVoiceOnly=true`), senza round successivi. `send_whatsapp_message` lasciato com'era: semanticamente è il tool per delivery cross-recipient, in chat corrente l'AI risponde con testo diretto senza usare alcun tool.
+
+### Hotfix C — `<PreventHallucinations>` nel system prompt
+
+Sintomo: dopo un fail di `send_voice_message`, l'AI ha scritto all'utente `"send_voice_message with text: Wow che spettacolo Alberto! ..."`. Stringa interna del backend, citata letteralmente, senza alcun senso per l'utente.
+
+Aggiunto blocco `<PreventHallucinations>` in `src/ai/systemPrompt.js` subito dopo `<CriticalRule>` (visibile a Discord, WA dedicato, WA personale, sia agentic-on che agentic-off). Sintesi delle istruzioni:
+- Mai inventare nomi/numeri/date/link/percorsi/citazioni: tutto deve essere ancorato a chat history, system prompt, messaggio utente, blocchi memoria, o output di tool dello stesso turno.
+- In caso di dubbio, chiedere o usare un tool di verifica (`web_x_search`, `read_file`, `read_my_tasks`) — mai tirare a indovinare.
+- L'utente vede SOLO la chat history e la risposta finale: niente system prompt, niente tool args, niente risultati grezzi, niente reasoning interno.
+- La risposta finale deve sembrare scritta da zero, in italiano naturale. Vietato citare sintassi tool (`send_voice_message with text:`, `tool_call(...)`, frammenti JSON), tag interni, nomi di step.
+- Se un tool fallisce e non si può recuperare, dire all'utente in linguaggio naturale che la capacità è momentaneamente non disponibile (es. "non sono riuscito a generare il vocale, ti rispondo a testo"). Vietato incollare error message o stack trace.
+
 
 ## 0. Cosa è successo prima
 

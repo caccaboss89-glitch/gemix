@@ -590,6 +590,10 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       input,
       max_output_tokens: 64_000,
       tool_choice: 'auto',
+      // Engineering work benefits from deeper reasoning even more than the
+      // main brain (algorithm choice, file layout, edge cases). Same
+      // setting used by aiProvider and webXSearch.
+      reasoning: { effort: 'high' },
     };
     if (instructions) body.instructions = instructions;
     if (adaptedTools) body.tools = adaptedTools;

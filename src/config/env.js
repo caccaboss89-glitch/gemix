@@ -41,10 +41,16 @@ module.exports = {
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   MUSIC_MODEL: process.env.MUSIC_MODEL,
 
-  // xAI features fronted by Hermes (TTS, STT, multi-agent research).
-  // Endpoints: ${HERMES_BASE_URL}/tts, /stt, /responses
-  // Imagine (image/video gen) uses the CLI bridge (bridge/imagine.sh), NOT the proxy.
-  XAI_TTS_VOICE: process.env.XAI_TTS_VOICE,
+  // xAI features fronted by Hermes.
+  // - TTS: via the CLI bridge (`bridge/tts.sh`) since the proxy does NOT
+  //   expose /v1/tts. Voice and language are picked by Hermes itself.
+  // - STT: still HTTP via proxy (${HERMES_BASE_URL}/stt) — kept for
+  //   reference, audio transcription happens server-side via input_file
+  //   on /v1/responses in the new architecture.
+  // - Multi-agent research: ${HERMES_BASE_URL}/responses with the
+  //   MULTI_AGENT_MODEL below.
+  // - Imagine (image/video gen): NOT proxied. Via CLI `hermes -z`
+  //   wrapped by bridge/imagine.sh.
   // Multi-agent research model used by the web_x_search tool (web + X/Twitter via xAI native search).
   MULTI_AGENT_MODEL: process.env.MULTI_AGENT_MODEL,
   // Grok Imagine — image and video generation via Hermes proxy.

@@ -369,18 +369,11 @@ async function handleMessage(ctx) {
 
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
       log.info(`🤖 [${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
-      const roundsLeft = MAX_TOOL_ROUNDS - rounds;
-      const roundHint = roundsLeft <= 2
-        ? `<ToolRound><Current>${rounds}</Current><Max>${MAX_TOOL_ROUNDS}</Max><Remaining>${roundsLeft}</Remaining><Status>critical</Status><Instruction>You are near the tool round limit. Wrap up now, send a final response to the user, and stop using tools.</Instruction></ToolRound>`
-        : `<ToolRound><Current>${rounds}</Current><Max>${MAX_TOOL_ROUNDS}</Max><Remaining>${roundsLeft}</Remaining><Status>normal</Status></ToolRound>`;
 
       // Refresh the workspace listing before each AI call so any file the
       // build sub-agent just produced shows up immediately in <UserWorkspace>.
       refreshUserWorkspace();
-      messages[0].content = buildSystemPrompt({
-        ...ctx,
-        roundHint,
-      });
+      messages[0].content = buildSystemPrompt(ctx);
 
       const { message: assistantMsg, provider, model } = await callAI(messages, tools);
       lastModelUsed = model;
