@@ -4,7 +4,7 @@ const { getGroupTaskFileId } = require('../utils/userIdentifier');
 
 /**
  * Update the group memory for the current WhatsApp group.
- * @param {string} content - New memory content (max 500 chars, empty to clear)
+ * @param {string} content - New memory content (max 1000 chars, empty to clear)
  * @param {string} groupId - WhatsApp group ID
  * @returns {string} Result message
  */

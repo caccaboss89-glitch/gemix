@@ -3,7 +3,7 @@ const { writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
 
 /**
  * Update the private memory for the current user.
- * @param {string} content - New memory content (max 500 chars, empty to clear)
+ * @param {string} content - New memory content (max 1000 chars, empty to clear)
  * @param {string} memoryFileId - User's memory file ID
  * @returns {string} Result message
  */

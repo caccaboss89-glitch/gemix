@@ -9,7 +9,7 @@
 //   4. <ToolUsage>      how to operate tools (silent, batched, deliverables).
 //   5. <Capabilities>   what GemiX can offer/suggest proactively.
 //   6. <Limits>         what is dropped or unavailable.
-//   7. <Memory>         long-term user/group notes.
+//   7. <Memory>         long-term notes (scoped to current chat).
 //   8. <BuildWorkspace> on-disk files leftover from previous build runs (if any).
 //
 // Sections that have no content for the current turn are simply skipped so
@@ -63,8 +63,8 @@ function buildSystemPrompt(ctx) {
     </Output>
     <Style>
     - These rules apply to your final reply AND to any text you pass to delivery tools (send_voice_message, send_whatsapp_message, send_email).
-    - Default language: Italian. Switch language only if the user explicitly asks for it.
     - Write natural prose. Never quote raw tool syntax, JSON fragments, backend tags, error messages, or stack traces.
+    - Follow any &lt;Memory&gt; style.
     </Style>
     <Grounding>
     - Use only verifiable info: chat history, this prompt, the user message, memory blocks, and tool results.
@@ -80,7 +80,8 @@ function buildSystemPrompt(ctx) {
   const usage = [
     '- Execute tools silently. Reply once, after all of them complete.',
     '- Buffered files (from generate_image, image_search, music_creator, ...) ship automatically with your reply (under your response). Delivery tools accept includeAttachments (default true) — set false to skip them when forwarding to a different recipient. For send_voice_message in the current chat this flag is ignored: buffered files always ship.',
-    '- bug_report: call only if a tool error did NOT state the Admin was already notified, then inform the user.',
+    '- Use bug_report if a tool error did NOT state the Admin was already notified, then inform the user.',
+    '- Use update_memory only for long-term preferences. Never store transient context (current task, session state, temporary data).'
   ];
   if (!isDiscord) {
     usage.push('- code_interpreter: ad-hoc Python (math, analysis, quick scripts) — isolated (no filesystem).');
@@ -122,10 +123,21 @@ function buildSystemPrompt(ctx) {
   sections.push(_block('Limits', limits));
 
   // ── 7. Memory ────────────────────────────────────────────────────────────
-  sections.push(`  <Memory>
-    <User>${ctx.userMemory || 'Empty'}</User>
-    <Group>${ctx.groupMemory || 'Empty'}</Group>
+  // Default guidelines live here so the user can override them via
+  // update_memory (e.g. switch language, disable emojis). When the user
+  // has set their own memory the defaults are replaced, not appended.
+  // Only the relevant scope is rendered: <User> in private chats,
+  // <Group> in group chats. update_memory writes to the same scope.
+  const DEFAULT_MEMORY = 'Default guidelines: reply in Italian; use emojis sparingly.';
+  if (ctx.isGroup) {
+    sections.push(`  <Memory>
+    <Group>${ctx.groupMemory || DEFAULT_MEMORY}</Group>
   </Memory>`);
+  } else {
+    sections.push(`  <Memory>
+    <User>${ctx.userMemory || DEFAULT_MEMORY}</User>
+  </Memory>`);
+  }
 
   // ── 8. Build workspace listing ───────────────────────────────────────────
   // Visible only when the engineering sub-agent has leftover files. Lets

@@ -260,7 +260,7 @@ These are the recurring transformations to apply when porting an xAI skill into 
 - **Short, technical, no marketing language.** No "powerful", "professional-grade", "amazing".
 - **Imperative voice** ("Wrap every cell in `Paragraph`", "Always call `plt.close(fig)`").
 - **English** (consistent with the rest of the agent prompts and tool descriptions).
-- **No emojis** in skill files.
+- **No emojis** in skill files. Each rewritten skill MUST also instruct the agent to never include emojis in the deliverables it produces (PDF, DOCX, XLSX, PPTX, …). Add this as an explicit rule in the skill's `SKILL.md` (e.g. under "Common pitfalls" or a dedicated "Output rules" subsection) so the constraint reaches the model when the skill is loaded. This applies to every skill rewrite without exception.
 - **Code blocks**: language-tagged (` ```python `, ` ```bash `, ` ```latex `). Paths absolute. Comments only when non-obvious.
 - **Tables** for decision matrices and cheatsheets; bullets for short lists; prose only when explaining a runtime behaviour.
 - **No hyperbole** about output quality. State what the engine does and let the agent judge fitness.
@@ -273,6 +273,7 @@ Before opening the rewrite for review, confirm:
 
 - [ ] `SKILL.md` frontmatter `name` matches the folder name.
 - [ ] `SKILL.md` description is 1-2 sentences and disambiguates from sibling skills.
+- [ ] `SKILL.md` contains an explicit "no emojis in deliverables" rule directed at the agent.
 - [ ] No references to `execution_phase`, `Phase 1-3`, `before_all`, `after_all`.
 - [ ] No references to scripts/templates that have been deleted.
 - [ ] No references to `/readonly/`, `/workspace/{temp|output|code}/`, projects, `gemix-project`, `agentic_unlock`, `attach_file`, the GemiX PDF parser.

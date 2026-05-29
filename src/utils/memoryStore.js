@@ -4,7 +4,7 @@ const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 
 const MEMORIES_DIR = path.join(DATA_DIR, 'memories');
-const MAX_MEMORY_CHARS = 500;
+const MAX_MEMORY_CHARS = 1000;
 
 if (!fs.existsSync(MEMORIES_DIR)) {
   fs.mkdirSync(MEMORIES_DIR, { recursive: true });
