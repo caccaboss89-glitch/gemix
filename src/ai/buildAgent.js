@@ -10,7 +10,7 @@
 //   - Tool result observations as it iterates.
 //
 // Tools exposed to the agent (per Analisi_Pulizia_v2.md §2.2):
-//   write_file, edit_file, bash, read_file, image_search, web_x_search,
+//   write_file, edit_file, bash, read_file, web_x_search,
 //   {type:'code_interpreter'} (xAI server-side, costs zero of our rounds).
 //
 // NOT exposed (intentionally — main brain prepares those assets and passes
@@ -42,7 +42,6 @@ const {
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
 const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
-const { imageSearch } = require('../tools/imageSearch');
 const { webXSearch } = require('../tools/webXSearch');
 const { getRomeTime } = require('../utils/time');
 const { sanitizeFilename } = require('../utils/text');
@@ -147,29 +146,14 @@ function _buildAgentTools() {
     {
       type: 'function',
       function: {
-        name: 'image_search',
-        description: 'Search images and inspect previews. Saved into /workspace/ for use in the build (filename echoed in the response).',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: { type: 'string' },
-            count: { type: 'integer' },
-            language: { type: 'string' },
-            image_type: { type: 'string', enum: ['any', 'photo', 'gif', 'clipart', 'lineart'] },
-          },
-          required: ['query'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
         name: 'web_x_search',
-        description: 'Hand a research brief to the multi-agent research team (web + X). Returns a synthesized report with citations.',
+        description: 'Research the web and X. Set search_images=true to also fetch relevant images into /workspace/ (filenames returned in the response) for use in the build. Set full_team=true only for deep multi-faceted research; omit for quick lookups.',
         parameters: {
           type: 'object',
           properties: {
             prompt: { type: 'string' },
+            full_team: { type: 'boolean', description: 'true → deep 4x multi-agent team; omit for fast single-model search.' },
+            search_images: { type: 'boolean', description: 'true → also fetch relevant images into /workspace/.' },
           },
           required: ['prompt'],
         },
@@ -228,7 +212,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments, roundHint) {
     `  ${stateBlock}`,
     `  ${notesBlock}`,
     '  <Tools>',
-    '    write_file / edit_file / bash / read_file / image_search / web_x_search / code_interpreter',
+    '    write_file / edit_file / bash / read_file / web_x_search / code_interpreter',
     '  </Tools>',
     '  <Skills>',
     '    Read full skill via read_file on /skills/&lt;name&gt;/SKILL.md when relevant. Available skill folders: pdf, docx, xlsx, pptx.',
@@ -424,29 +408,34 @@ async function _executeBash(workspaceId, args) {
   });
 }
 
-async function _executeImageSearch(workspaceId, args) {
+async function _executeWebXSearch(workspaceId, args, statsAccumulator) {
   const a = args || {};
-  if (typeof a.query !== 'string' || !a.query.trim()) return _toolErr('Missing query.');
+  if (typeof a.prompt !== 'string' || !a.prompt.trim()) return _toolErr('Missing prompt.');
+  const fullTeam = a.full_team === true;
+  const searchImages = a.search_images === true;
+
   let result;
   try {
-    result = await imageSearch(a.query, a.count, {
-      language: a.language,
-      image_type: a.image_type,
-    });
-  } catch (err) { return _toolErr(`Image search failed: ${err.message}`); }
+    result = await webXSearch(a.prompt, { fullTeam, searchImages });
+  } catch (err) { return _toolErr(`Research failed: ${err.message}`); }
 
-  // Persist images into the workspace root so the agent can use them.
+  if (result && result._stats && statsAccumulator) {
+    statsAccumulator.webSources += result._stats.webSources || 0;
+    statsAccumulator.xPosts += result._stats.xPosts || 0;
+  }
+
+  // Persist any returned images into the workspace root so the agent can use
+  // them in the build (e.g. embed in a PDF). Filenames are echoed back.
   const saved = [];
-  if (Array.isArray(result.attachments)) {
-    for (const att of result.attachments) {
-      if (!att || !att.buffer) continue;
-      const baseName = sanitizeFilename(att.name || `img_${crypto.randomBytes(4).toString('hex')}.jpg`);
+  if (Array.isArray(result?._images) && result._images.length > 0) {
+    for (const img of result._images) {
+      if (!img || !Buffer.isBuffer(img.buffer)) continue;
+      const baseName = sanitizeFilename(img.name || `img_${crypto.randomBytes(4).toString('hex')}.jpg`);
       const ext = path.extname(baseName);
       const stem = baseName.slice(0, baseName.length - ext.length);
-      const c = resolveInsideWorkspace(workspaceId, baseName);
-      if (!c) continue;
       let finalName = baseName;
-      let abs = c;
+      let abs = resolveInsideWorkspace(workspaceId, finalName);
+      if (!abs) continue;
       let i = 1;
       while (fs.existsSync(abs)) {
         finalName = `${stem}(${i})${ext}`;
@@ -455,38 +444,20 @@ async function _executeImageSearch(workspaceId, args) {
         if (i > 999) break;
       }
       const sizeBefore = workspaceSizeBytes(workspaceId);
-      if (sizeBefore + att.buffer.length > QUOTA_BYTES) {
+      if (sizeBefore + img.buffer.length > QUOTA_BYTES) {
         saved.push({ name: finalName, error: 'workspace quota exceeded' });
         continue;
       }
-      try { fs.writeFileSync(abs, att.buffer); saved.push({ name: finalName, size: att.buffer.length }); }
+      try { fs.writeFileSync(abs, img.buffer); saved.push({ name: finalName, size: img.buffer.length }); }
       catch (err) { saved.push({ name: finalName, error: err.message }); }
     }
   }
 
-  // Build a clean tool result: use the textual portion of result.toolResult
-  // (multimodal preview) and append a summary of saved files.
-  const textParts = Array.isArray(result.toolResult)
-    ? result.toolResult.filter(p => p.type === 'text')
-    : [{ type: 'text', text: 'image_search returned no preview text.' }];
-  const summary = saved.length > 0
-    ? `\nSaved to /workspace/: ${saved.map(s => s.name + (s.error ? ` (failed: ${s.error})` : '')).join(', ')}`
-    : '';
-  return [
-    ...(Array.isArray(result.toolResult) ? result.toolResult : []),
-    { type: 'text', text: summary },
-  ];
-}
-
-async function _executeWebXSearch(args, statsAccumulator) {
-  const a = args || {};
-  if (typeof a.prompt !== 'string' || !a.prompt.trim()) return _toolErr('Missing prompt.');
-  const result = await webXSearch(a.prompt);
-  if (result && result._stats && statsAccumulator) {
-    statsAccumulator.webSources += result._stats.webSources || 0;
-    statsAccumulator.xPosts += result._stats.xPosts || 0;
+  const { _stats: _ignored, _images: _ignored2, images_added: _ig3, images_note: _ig4, ...clean } = result || {};
+  if (saved.length > 0) {
+    clean.saved_images = saved.map(s => s.error ? `${s.name} (failed: ${s.error})` : s.name);
+    clean.images_note = 'The saved images are in /workspace/ under the listed filenames. Use those exact paths in your scripts.';
   }
-  const { _stats: _ignored, ...clean } = result || {};
   return JSON.stringify(clean);
 }
 
@@ -502,8 +473,7 @@ async function _runToolCall(toolCall, ctx) {
     case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);
     case 'bash':          return await _executeBash(ctx.workspaceId, parsedArgs);
     case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs);
-    case 'image_search':  return await _executeImageSearch(ctx.workspaceId, parsedArgs);
-    case 'web_x_search':  return await _executeWebXSearch(parsedArgs, ctx.researchStats);
+    case 'web_x_search':  return await _executeWebXSearch(ctx.workspaceId, parsedArgs, ctx.researchStats);
     default:              return _toolErr(`Unknown tool "${name}".`);
   }
 }
@@ -590,6 +560,9 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       input,
       max_output_tokens: 64_000,
       tool_choice: 'auto',
+      // Bound xAI server-side tool turns (web_search/x_search/code_interpreter)
+      // per request; our own BUILD_MAX_ROUNDS bounds the client-side loop.
+      max_turns: BUILD_MAX_ROUNDS,
       // Engineering work benefits from deeper reasoning even more than the
       // main brain (algorithm choice, file layout, edge cases). Same
       // setting used by aiProvider and webXSearch.

@@ -79,7 +79,7 @@ function buildSystemPrompt(ctx) {
   // ── 4. Tool usage ────────────────────────────────────────────────────────
   const usage = [
     '- Execute tools silently. Reply once, after all of them complete.',
-    '- Buffered files (from generate_image, image_search, music_creator, ...) ship automatically with your reply (under your response). Delivery tools accept includeAttachments (default true) — set false to skip them when forwarding to a different recipient. For send_voice_message in the current chat this flag is ignored: buffered files always ship.',
+    '- Buffered files (from generate_image, web_x_search images, music_creator, ...) ship automatically with your reply (under your response). Delivery tools accept includeAttachments (default true) — set false to skip them when forwarding to a different recipient. For send_voice_message in the current chat this flag is ignored: buffered files always ship.',
     '- Use bug_report if a tool error did NOT state the Admin was already notified, then inform the user.',
     '- Use update_memory only for long-term preferences. Never store transient context (current task, session state, temporary data).'
   ];
@@ -100,10 +100,10 @@ function buildSystemPrompt(ctx) {
       '- Media downloads: YouTube, X, Instagram, TikTok, Facebook video/audio (via build + yt-dlp, max 1080p).',
       '- Image / video generation: text-to-image and short text-to-video (no reference images — describe the look in words; cannot edit an existing image or pin specific real subjects).',
       '- Music: 30-second clip from a textual prompt.',
-      '- Image search: pull real photos/illustrations from the web on a given topic.',
+      '- Image search: pull real photos/illustrations from the web on a given topic (via web_x_search with search_images).',
       '- Charts / data analysis: code_interpreter for quick numbers; build for chart images.',
       '- Voice messages, scheduled reminders, group/private memory, web/X research.',
-      'Use these wisely when the user\'s request hints at one (e.g. "spiegami questa funzione" → build image chart; "parlami di questo film" → search images + web/X).',
+      'Use these wisely when the user\'s request hints at one (e.g. "spiegami questa funzione" → build image chart; "parlami di questo film" → web_x_search with search_images).',
     ]));
   }
 
@@ -163,9 +163,6 @@ const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated ser
 function buildDiscordPlatform(ctx) {
   const lines = ['<Platform name="discord">'];
   lines.push('  <Role>Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.</Role>');
-  if (ctx.threadName) {
-    lines.push(`  <Thread current="${escapeXml(ctx.threadName)}">If the conversation shifts topic, include \`<title>New Title</title>\` in your reply to rename the thread.</Thread>`);
-  }
   lines.push('  <Limitations>No voice, scheduling, music stats, or agentic files here — point users to GemiX on WhatsApp for those.</Limitations>');
   lines.push(`  <SystemMessages>${SYSTEM_LINE_RULE}</SystemMessages>`);
   lines.push('  <Format>Markdown supported (no tables). Cite web sources with links.</Format>');

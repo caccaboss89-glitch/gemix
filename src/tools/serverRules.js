@@ -12,7 +12,7 @@ async function readServerRules() {
     }
     const text = fs.readFileSync(RULES_FILE, 'utf-8');
     const output = `<ServerRules>\n${text || 'The rules file is empty.'}\n</ServerRules>`;
-    return { success: true, content: output };
+    return { success: true, message: output };
   } catch (err) {
     return { success: false, error: `Error reading the rules: ${err.message}` };
   }

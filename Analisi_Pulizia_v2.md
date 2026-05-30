@@ -43,6 +43,59 @@ Aggiunto blocco `<PreventHallucinations>` in `src/ai/systemPrompt.js` subito dop
 - Se un tool fallisce e non si può recuperare, dire all'utente in linguaggio naturale che la capacità è momentaneamente non disponibile (es. "non sono riuscito a generare il vocale, ti rispondo a testo"). Vietato incollare error message o stack trace.
 
 
+## Pre-Fase 6 — Migrazione ricerca a xAI native (web/𝕏/immagini), tool title forzato, max_turns
+
+Insieme di semplificazioni applicate prima della Fase 6 (riscrittura skill), sfruttando feature ufficiali xAI ora disponibili su Hermes.
+
+### A — `image_search` SearXNG eliminato → ricerca immagini dentro `web_x_search`
+
+- `src/tools/imageSearch.js` **eliminato** (tool custom SearXNG). Rimossi `SEARXNG_URL` da `.env`/`env.js` e `MAX_IMAGES` da `constants.js` (`MAX_IMAGE_BYTES` resta, riusato da `webXSearch`).
+- La ricerca immagini è ora nativa xAI: `web_search` con `enable_image_search=true`. Si abilita **solo** quando il caller passa `search_images=true` sul tool `web_x_search` (anti-allucinazione: per ricerche interne/documentazione non arrivano immagini indesiderate).
+- `enable_image_understanding=true` su web_search **e** x_search (xAI espone un unico `view_image` server-side condiviso, nessun duplicato). `enable_video_understanding=true` solo su x_search (web non lo supporta). Quando `search_images` è OFF non si dice nulla sulle immagini nel prompt (così il modello resta libero di usare `view_image` durante il browsing senza essere fuorviato a evitarle).
+- **Estrazione immagini**: il modello di ricerca cita max `MAX_RESEARCH_IMAGES` (=6) immagini come Markdown embed `![alt](url)`. `webXSearch` le scarica (guard MIME/dimensione), le aggiunge al buffer di delivery (main) o al `/workspace/` (build), e **sostituisce ogni embed con un placeholder posizionale** `[📎 Immagine N: alt]`. Se l'AI ne cita **più di 6**, le prime 6 vengono scaricate+allegate e tutte le eccedenti vengono **rimosse dal testo** (mappate a stringa vuota nel rewrite), quindi non resta mai un "ecco l'immagine:" senza immagine né un URL grezzo. Un campo `images_note` informa il brain che le immagini citate sono già nel buffer in ordine.
+
+### B — `web_x_search`: due marce (veloce vs team 4x)
+
+- Default = modello singolo veloce `FAST_RESEARCH_MODEL` (`grok-4.20-reasoning-latest`, confermato esistente, effort `low`): ricerca completa (web+𝕏+immagini) ma leggera e rapida, **nessun banner intermedio**.
+- `full_team=true` = team multi-agent `grok-4.20-multi-agent` (effort `medium` = 4 agenti). Solo qui parte il banner "🔎 Sto consultando il team di ricerca…".
+- Effort team portato da `high` a **`medium`**: l'abbonamento è cap a 4 agenti, quindi `high`/`xhigh` (16 agenti) verrebbero comunque retrocessi → niente token sprecati.
+- Stessi tool/parametri per entrambe le marce. Una sola code path in `webXSearch.js`.
+- `FAST_RESEARCH_MODEL` aggiunto a `.env` ed `env.js` (lista REQUIRED, con `process.env`).
+- **Prompt della ricerca in XML** (`<Context>`, `<OutputRules>`, `<ResearchBrief>`) coerente col resto del codebase, con istruzione esplicita di rispondere in **prosa naturale, non XML**.
+- **Footer fonti/post (conteggio)**: per il **fast model** il conteggio è **esatto** (nessun sub-agente cifrato): si sommano i `action.sources` reali di ogni `web_search_call` + il `limit` di ogni X search call (sia `x_search_call` nativo sia `custom_tool_call` `x_*`). Per il **team** resta la stima (sub-agenti cifrati da Hermes) scalando la media visibile sulle call cifrate da `usage.server_side_tool_usage_details`. Stessa funzione `_computeResultCounts`, che collassa al conteggio esatto quando non ci sono call cifrate. `response.citations` **non è disponibile via Hermes** (confermato): le fonti si estraggono dalle annotation `url_citation`.
+
+### Formato di ritorno dei tool (coerenza)
+
+Tutti i nostri function tool ritornano un oggetto JSON `{ success, message, ...extra }` (il dispatcher fa `JSON.stringify`). `web_x_search` è stato allineato a questa convenzione: **niente più wrapper XML** `<ResearchReport>` nel risultato — `message` è il testo, `sources`/`images_note` sono campi a parte. Così, quando i nostri tool convivono con i tool server-side xAI (caso build agent), la convenzione di ritorno resta unica e coerente.
+
+### C — Discord: tool `set_conversation_title` forzato (addio parsing `<title>` XML)
+
+- Rimosso il parsing del tag `<title>…</title>` (`extractTitleTag` in `handler.js`) e l'istruzione `<Thread>` nel system prompt: fragile, il modello poteva dimenticarlo.
+- Nuovo tool `set_conversation_title` esposto **solo alla prima risposta del thread** (nessun `assistant` in history) e **forzato** via `tool_choice: {type:'function', name:'set_conversation_title'}`. Titolo settato al 100% una volta sola; nei turni successivi il tool è rimosso dalla lista → il modello non può più rinominare.
+
+### D — `max_turns` xAI + budget outer-loop client-side
+
+- `MAX_TOOL_ROUNDS` portato a **10** (non-agentic) e `BUILD_MAX_ROUNDS` a **30** (agentic/team).
+- `max_turns` passato sul body Responses di main brain, build agent e research: **bounda solo i turni dei tool SERVER-SIDE** (web_search/x_search/code_interpreter) entro una singola request e xAI garantisce comunque una risposta finale sintetizzata quando lo raggiunge.
+- **Importante** (da doc xAI): `max_turns` **si resetta a ogni chiamata di un tool client-side** (i nostri function tool: read_file, web_x_search, build, send_*). Quindi NON può bloccare il nostro outer-loop, che conta quante volte il modello chiama i NOSTRI tool. Per questo `MAX_TOOL_ROUNDS` resta come bound dell'outer-loop.
+- Esaurito `MAX_TOOL_ROUNDS` (o l'hard timeout di sessione), invece del fallback secco si fa **una chiamata finale con `tool_choice:'none'`** (modo documentato xAI per forzare una risposta solo-testo): il modello chiude con una risposta reale da tutto il contesto raccolto, senza interrompersi a metà.
+- **Crash recovery**: verificato che NON esiste più codice di iniezione-stato post-crash (era stato ritirato col sistema progetti). `apiClient.callApiWithRetry` già fa fino a 3 retry rimandando l'intero `messages[]` pulito, e l'handler aggiunge i risultati di un round solo a round completato → un crash server-side riparte naturalmente dall'ultimo round completato con contesto pulito. Logica già conforme, nessuna modifica necessaria.
+
+### E — Build sub-agent allineato
+
+- Rimosso `image_search` (SearXNG) dai tool del build agent; `web_x_search` ora supporta `search_images`/`full_team` e salva le immagini in `/workspace/`. Tool list build: `write_file / edit_file / bash / read_file / web_x_search / code_interpreter`.
+- Skill (PDF/DOCX/PPTX): aggiornati i riferimenti `image_search` → `web_x_search search_images=true` con output in `/workspace/` (il resto della riscrittura skill resta in Fase 7).
+
+### Note confermate dall'utente
+
+- `grok-4.20-reasoning-latest` esiste e funziona (confermato da test) → usato come `FAST_RESEARCH_MODEL`.
+- `response.citations` **non** è presente/reperibile via Hermes senza modificare il codice di Hermes → per il team si usa la stima sui sub-agenti cifrati, per il fast model il conteggio è esatto dai `web_search_call`/`x_search_call` visibili (vedi §B).
+
+### Da investigare (non bloccante)
+
+- Eventuale futura esposizione di `response.citations` da parte di Hermes (darebbe la lista fonti completa anche dal team senza stima).
+
+
 ## 0. Cosa è successo prima
 
 L'utente sta finalizzando GemiX v2.0 (vedi `Aggiornamento.txt`) e fa una pulizia profonda. Da quando paga indirettamente le chiamate LLM via abbonamento SuperGrok attraverso Hermes Agent (vedi `SERVER_SETUP.md`), non deve più ottimizzare round/costi. Ha già riscritto la skill PDF seguendo `src/data/skills/REWRITE_METHOD.md` ma il sistema è ancora troppo complesso e sporco.
@@ -139,8 +192,7 @@ I test su `/v1/responses` (vedi `TEST.md`) hanno mostrato che i tool server-side
 │ Endpoint: /v1/responses                                              │
 │                                                                      │
 │ Tool list (ridotta, niente tool agentici):                           │
-│   web_x_search                                                       │
-│   image_search          (no save_to_disk; niente persistenza)        │
+│   web_x_search          (web + 𝕏 + immagini; fast / full_team)       │
 │   generate_image        (Imagine via CLI)                            │
 │   generate_video        (Imagine via CLI)                            │
 │   music_creator         (Lyria via OpenRouter)                       │
@@ -170,7 +222,7 @@ I test su `/v1/responses` (vedi `TEST.md`) hanno mostrato che i tool server-side
 │                                                                      │
 │ Tool list:                                                           │
 │   write_file / edit_file / bash / read_file                          │
-│   image_search / web_x_search / code_interpreter                     │
+│   web_x_search / code_interpreter                                    │
 │                                                                      │
 │ Output finale: testo + <DELIVER>filename1, filename2</DELIVER>       │
 └──────────────────────────────────────────────────────────────────────┘
@@ -550,7 +602,7 @@ Step rilasciabili indipendentemente, ognuno con valore:
 - Allegati a `build`: lista filename, l'host scarica nel workspace, rinomina su collisione, comunica all'agente i nomi reali.
 - Delivery dell'agente via tag `<DELIVER>file1.ext, file2.ext</DELIVER>` alla fine del messaggio finale.
 - `code_interpreter` resta sul main + esposto anche al sub-agent.
-- `image_search` e `web_x_search` esposti sia al main sia al sub-agent.
+- `web_x_search` (web + 𝕏 + immagini) esposto sia al main sia al sub-agent; ricerca immagini nativa xAI (niente più `image_search` SearXNG).
 - `generate_image`/`generate_video`/`music_creator` solo sul main.
 - Skill vivono nel sub-agent (mount `/skills/` read-only).
 - Endpoint unico `/v1/responses`. Audio musicale → tag vuoto, istruzione system prompt main.

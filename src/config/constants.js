@@ -48,7 +48,15 @@ module.exports = {
   API_TIMEOUT_MS: 60_000,
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 64_000,
-  MAX_TOOL_ROUNDS: 30,
+  // Main brain outer loop (client-side tool rounds). When exhausted the
+  // handler makes one final tool-less call to force a clean text answer
+  // instead of bailing out — so GemiX always returns a real response.
+  // Also passed as `max_turns` on the Responses body to bound server-side
+  // sub-tool turns (web_search/x_search/code_interpreter) per request.
+  MAX_TOOL_ROUNDS: 10,
+  // max_turns for the research tool (web_x_search). Pure server-side tools,
+  // so xAI guarantees a synthesized final answer when the limit is hit.
+  RESEARCH_MAX_TURNS: 10,
 
   // Build sub-agent sandbox container.
   // Memory cap and idle TTL reused from the legacy sandbox config.
@@ -76,13 +84,16 @@ module.exports = {
   //     per-workspace lock before giving up with "build busy".
   BUILD_WORKSPACE_TTL_MS: 4 * 60 * 60 * 1000,
   BUILD_WORKSPACE_QUOTA_MB: 500,
-  BUILD_MAX_ROUNDS: 60,
+  BUILD_MAX_ROUNDS: 30,
   BUILD_HARD_TIMEOUT_MS: 10 * 60 * 1000,
   BUILD_LOCK_WAIT_MS: 30 * 1000,
 
   // Media
-  MAX_IMAGES: 4,
   MAX_IMAGE_BYTES: 7_500_000,
+  // Max images extracted from a web_x_search run (when search_images=true).
+  // The research model is instructed to cite at most 6; we cap defensively
+  // so the brain never references an image that wasn't actually attached.
+  MAX_RESEARCH_IMAGES: 6,
   MAX_TTS_CHARS: 1000,
   MAX_AUDIO_DURATION_S: 600,
   MAX_VIDEO_DURATION_S: 120,

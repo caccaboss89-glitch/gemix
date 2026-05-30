@@ -1,7 +1,6 @@
 // src/tools/index.js
 const { isActiveMemberOnlyTool, validateToolArgs } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
-const { imageSearch } = require('./imageSearch');
 const { generateImage, generateVideo } = require('./imagineGenerator');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { scheduleTasks } = require('./scheduler');
@@ -195,12 +194,16 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
     switch (name) {
       case 'web_x_search': {
-        // Fire the "consulting research team" banner once per AI call.
-        if (typeof userCtx.sendIntermediateNotification === 'function') {
+        const fullTeam = args.full_team === true;
+        const searchImages = args.search_images === true;
+        // The "consulting the research team" banner is only meaningful for
+        // the slow multi-agent team. The fast single-model gear is quick and
+        // stays silent (no intermediate message at all).
+        if (fullTeam && typeof userCtx.sendIntermediateNotification === 'function') {
           const { buildResearchNotificationMessage } = require('../utils/notificationDedup');
           await userCtx.sendIntermediateNotification('research', buildResearchNotificationMessage());
         }
-        const searchResult = await webXSearch(args.prompt);
+        const searchResult = await webXSearch(args.prompt, { fullTeam, searchImages });
         // Accumulate usage stats for the final message badge.
         // Multiple web_x_search calls in the same round are additive.
         if (searchResult._stats) {
@@ -210,9 +213,29 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           responseCtx.researchStats.webSources += searchResult._stats.webSources;
           responseCtx.researchStats.xPosts += searchResult._stats.xPosts;
         }
-        // Strip internal _stats before returning to the AI (not part of the tool schema).
-        const { _stats: _ignored, ...searchResultClean } = searchResult;
+        // Push any images the research returned to the delivery buffer, in the
+        // same order they are referenced in the report text.
+        if (Array.isArray(searchResult._images) && searchResult._images.length > 0) {
+          for (const img of searchResult._images) {
+            responseCtx.attachments.push({
+              name: img.name,
+              buffer: img.buffer,
+              mimetype: img.mimetype,
+            });
+          }
+        }
+        // Strip internal fields before returning to the AI (not part of the schema).
+        const { _stats: _ignored, _images: _ignored2, ...searchResultClean } = searchResult;
         result = searchResultClean;
+        break;
+      }
+
+      case 'set_conversation_title': {
+        // Discord first-turn forced tool. Record the title on responseCtx; the
+        // handler picks it up to rename the thread. No user-visible output.
+        const title = String(args.title || '').replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
+        if (title) responseCtx.discordTitle = title;
+        result = { success: true, message: 'Conversation title set.' };
         break;
       }
 
@@ -235,28 +258,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           );
         }
         result = await generateVideo(args, userCtx, responseCtx);
-        break;
-      }
-
-      case 'image_search': {
-        const imageResult = await imageSearch(
-          args.query,
-          args.count,
-          {
-            language: args.language,
-            image_type: args.image_type,
-          }
-        );
-
-        if (Array.isArray(imageResult.attachments) && imageResult.attachments.length > 0) {
-          // Push every result to the delivery buffer; everything in the
-          // buffer is sent automatically with the final reply.
-          for (const att of imageResult.attachments) {
-            responseCtx.attachments.push(att);
-          }
-        }
-
-        result = imageResult.toolResult;
         break;
       }
 

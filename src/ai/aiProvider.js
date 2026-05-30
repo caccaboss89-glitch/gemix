@@ -48,9 +48,13 @@ const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
  * @param {Array|null} tools - Chat-completion tool definitions. Adapter flattens
  *   them into Responses-shape function tools; native server-side tools
  *   (e.g. {type:'code_interpreter'}) pass through unchanged.
+ * @param {object} [opts]
+ * @param {string|object} [opts.toolChoice] - Override tool_choice (e.g. 'required'
+ *   or {type:'function', name:'set_conversation_title'} to force a specific tool).
+ * @param {number} [opts.maxTurns] - max_turns for server-side tool loops.
  * @returns {Promise<{message: object, provider: string, model: string}>}
  */
-async function callAI(messages, tools = null) {
+async function callAI(messages, tools = null, opts = {}) {
   const { instructions, input } = chatMessagesToResponsesInput(messages);
 
   const body = {
@@ -64,6 +68,14 @@ async function callAI(messages, tools = null) {
     reasoning: { effort: 'high' },
   };
 
+  // max_turns bounds xAI server-side tool turns (web_search/x_search/
+  // code_interpreter) within a single request, so a runaway server-side
+  // loop can't stall the call. Client-side function tools reset this counter
+  // (per xAI docs), so our own outer loop in handler.js is the real bound.
+  if (Number.isFinite(opts.maxTurns)) {
+    body.max_turns = opts.maxTurns;
+  }
+
   // Only attach instructions when we actually have a system prompt; xAI tolerates
   // an empty string but the omission is a touch cleaner in the request log.
   if (instructions && instructions.length > 0) {
@@ -74,8 +86,9 @@ async function callAI(messages, tools = null) {
   if (adaptedTools) {
     body.tools = adaptedTools;
     // Default tool_choice ("auto") matches the previous behaviour of
-    // /chat/completions when no explicit choice was sent.
-    body.tool_choice = 'auto';
+    // /chat/completions when no explicit choice was sent. Callers can force a
+    // specific tool (e.g. the Discord title-setter on the first turn).
+    body.tool_choice = opts.toolChoice || 'auto';
   }
 
   const data = await callResponsesModel('Grok', RESPONSES_URL, body, HERMES_API_KEY);

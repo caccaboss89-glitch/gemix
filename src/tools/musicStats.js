@@ -117,7 +117,7 @@ function formatStats(data) {
 
   const xmlOutput = `<MusicStats last_updated="${data.lastUpdated || ''}">\n${output}\n</MusicStats>`;
 
-  return { success: true, content: xmlOutput };
+  return { success: true, message: xmlOutput };
 }
 
 module.exports = { readMusicStats };

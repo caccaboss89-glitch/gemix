@@ -16,7 +16,7 @@
 
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
-const { getToolsForUser } = require('./ai/tools');
+const { getToolsForUser, SET_CONVERSATION_TITLE_TOOL } = require('./ai/tools');
 const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
 const { isAdmin } = require('./config/members');
 const {
@@ -84,21 +84,8 @@ async function sendIntermediateNotification(ctx, kind, message) {
 }
 
 /**
- * Extract and remove <title>...</title> XML tag from text.
- * Used to extract Discord thread title from AI response.
- */
-function extractTitleTag(text) {
-  if (typeof text !== 'string') return { text: text || '', title: '' };
-  const titleMatch = text.match(/<title>([\s\S]*?)<\/title>/i);
-  if (!titleMatch) return { text, title: '' };
-  const title = titleMatch[1].trim();
-  const cleanText = text.replace(/<title>[\s\S]*?<\/title>/i, '').trim();
-  return { text: cleanText, title };
-}
-
-/**
  * Stable phase ordering for tool calls within a round:
- *   - phase 1: standard tools (read_file, image_search, web_x_search, build, …)
+ *   - phase 1: standard tools (read_file, web_x_search, build, …)
  *   - phase 2: delivery tools (send_voice_message, send_*) — always last
  *     so any preceding tool's output reaches the recipient via the buffer.
  */
@@ -228,6 +215,13 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
+      // First turn of a Discord thread: used to expose and force the
+      // set_conversation_title tool exactly once. "First" = GemiX has not
+      // replied in this thread yet (no assistant message in history). The
+      // current user message is already in the fetched history, so we can't
+      // rely on history being empty.
+      isFirstTurn: ctx.platform === PLATFORM_DISCORD
+        && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
       // Bound helper for tools that want to fire an intermediate notification
@@ -375,7 +369,20 @@ async function handleMessage(ctx) {
       refreshUserWorkspace();
       messages[0].content = buildSystemPrompt(ctx);
 
-      const { message: assistantMsg, provider, model } = await callAI(messages, tools);
+      // First Discord turn: force the title-setter exactly once so the thread
+      // gets named deterministically (replaces the old <title> XML parsing).
+      // After it has run (or past round 1) we drop it from the tool list so
+      // the model can never rename the conversation later.
+      const callOpts = { maxTurns: MAX_TOOL_ROUNDS };
+      let roundTools = tools;
+      const forceTitle = rounds === 1 && userCtx.isFirstTurn && !responseCtx.discordTitle;
+      if (forceTitle) {
+        callOpts.toolChoice = { type: 'function', name: SET_CONVERSATION_TITLE_TOOL };
+      } else {
+        roundTools = tools.filter(t => t.function?.name !== SET_CONVERSATION_TITLE_TOOL);
+      }
+
+      const { message: assistantMsg, provider, model } = await callAI(messages, roundTools, callOpts);
       lastModelUsed = model;
       log.info(`   Provider: ${provider} (${model})`);
 
@@ -440,16 +447,6 @@ async function handleMessage(ctx) {
       let text = cleanAssistantResponse(assistantMsg.content || '');
       log.info(`✅ [${pLabel}] Response generated (${text.length} chars)`);
 
-      // Extract Discord thread title from <title> XML tag if present.
-      if (ctx.platform === PLATFORM_DISCORD) {
-        const { text: cleanedText, title } = extractTitleTag(text);
-        text = cleanedText;
-        if (title) {
-          responseCtx.discordTitle = title.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
-          log.info(`   📝 Thread title extracted: "${responseCtx.discordTitle}"`);
-        }
-      }
-
       if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
         log.warn('   ⚠️ Empty AI response, sending fallback');
         text = FALLBACK_ERROR_PREFIX;
@@ -507,12 +504,43 @@ async function handleMessage(ctx) {
       };
     }
 
+    // ── Outer (client-side) loop budget exhausted ──────────────────────
+    // Note: xAI's `max_turns` only bounds SERVER-SIDE tool turns within a
+    // single request and resets whenever a client-side function tool is
+    // called (per xAI docs). It therefore cannot bound this outer loop, which
+    // counts how many times the model calls OUR function tools. So we cap it
+    // ourselves and, when the cap is hit, make ONE more call with
+    // tool_choice:'none' — the documented way to force a text-only answer —
+    // so the model wraps up using everything gathered so far instead of
+    // discarding the work behind a canned error.
+    log.warn(`   ⚠️ Tool-round budget (${MAX_TOOL_ROUNDS}) exhausted — forcing a final answer (tool_choice:none)`);
+    let wrapUpText = '';
+    try {
+      messages[0].content = buildSystemPrompt(ctx);
+      const noTitleTools = tools.filter(t => t.function?.name !== SET_CONVERSATION_TITLE_TOOL);
+      const { message: finalMsg, model: finalModel } = await callAI(messages, noTitleTools, { toolChoice: 'none' });
+      if (finalModel) lastModelUsed = finalModel;
+      wrapUpText = cleanAssistantResponse(finalMsg.content || '');
+    } catch (wrapErr) {
+      log.error(`   ❌ Forced wrap-up call failed: ${wrapErr.message}`);
+    }
+
+    if (wrapUpText.trim() && responseCtx.researchStats) {
+      const { webSources, xPosts } = responseCtx.researchStats;
+      if (webSources > 0 || xPosts > 0) {
+        const parts = [];
+        if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
+        if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
+        wrapUpText = `${wrapUpText}\n\n${parts.join('. ')}.`;
+      }
+    }
+
     try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed: ${vcErr.message}`); }
     return {
-      text: FALLBACK_ERROR_PREFIX,
+      text: wrapUpText.trim() ? wrapUpText : FALLBACK_ERROR_PREFIX,
       voiceBuffer: null,
       isVoiceOnly: false,
-      attachments: [],
+      attachments: responseCtx.attachments || [],
       discordTitle: responseCtx.discordTitle || '',
       modelUsed: lastModelUsed,
     };

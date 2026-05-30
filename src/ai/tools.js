@@ -104,30 +104,25 @@ const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
 
 const TOOL_WEB_X_SEARCH = makeTool({
   name: 'web_x_search',
-  description: 'Hand a research brief to the multi-agent research team (4x). The team conducts web searches, navigates pages, performs X/Twitter searches, monitors citations, and summarizes the results. Do not use this tool again for the same query.',
+  description:
+    'Research the web and X/Twitter (and optionally images) for external or up-to-date information, fact-checking, or when images from the web are wanted. '
+    + 'By default a single fast model handles it. Set full_team=true only for deep, multi-faceted research that needs the multi-agent team. '
+    + 'Do not call this tool again for the same query.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Detailed research brief for the team. Include the exact question, any URLs to consult, the desired output format, and constraints (date range, language, sources to prefer or avoid).',
+      description: 'Detailed research brief: the exact question, any URLs to consult, desired output format, and constraints (date range, language, sources to prefer or avoid).',
+    },
+    full_team: {
+      type: 'boolean',
+      description: 'true → deep multi-agent team (slower, thorough). Omit for the fast single-model search (default).',
+    },
+    search_images: {
+      type: 'boolean',
+      description: 'Set true when you want images from the web (asked for, or useful for the answer): relevant images are added to the delivery buffer. Omit for text-only research.',
     },
   },
   required: ['prompt'],
-});
-
-const TOOL_IMAGE_SEARCH = makeTool({
-  name: 'image_search',
-  description: 'Search for images and inspect the returned previews. Results are pushed to the delivery buffer.',
-  properties: {
-    query: { type: 'string', description: 'Specific image search query.' },
-    count: { type: 'integer', description: 'Images to retrieve (1-4, default 1).' },
-    language: { type: 'string', description: 'Language hint (default "it", use "en" for international results).' },
-    image_type: {
-      type: 'string',
-      enum: ['any', 'photo', 'gif', 'clipart', 'lineart'],
-      description: 'Filter by type (default "any").',
-    },
-  },
-  required: ['query'],
 });
 
 const TOOL_READ_FILE = makeTool({
@@ -143,6 +138,24 @@ const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
   description: 'Read the Discord server rules (aka Statuto Albertino).',
   properties: {},
+});
+
+// ── Discord conversation title (forced on the first turn) ──────────────────
+//
+// Replaces the fragile <title>…</title> XML parsing. On the FIRST message of
+// a Discord thread we expose this tool and force its use (tool_choice), so
+// the thread title is set deterministically exactly once. It is NOT offered
+// on later turns, so the model never second-guesses or rewrites the title.
+const TOOL_SET_CONVERSATION_TITLE = makeTool({
+  name: 'set_conversation_title',
+  description: 'Set the title of this Discord conversation/thread. Called once at the start to name the conversation after its topic.',
+  properties: {
+    title: {
+      type: 'string',
+      description: 'Concise topic title (max ~80 chars), no emojis, in the user\'s language.',
+    },
+  },
+  required: ['title'],
 });
 
 const TOOL_READ_MUSIC_STATS = makeTool({
@@ -500,7 +513,7 @@ const TOOL_BUG_REPORT = makeTool({
 // announced via <DELIVER>.
 //
 // Tools available INSIDE build (not visible from the main brain):
-//   write_file, edit_file, bash, read_file, image_search, web_x_search,
+//   write_file, edit_file, bash, read_file, web_x_search,
 //   code_interpreter (xAI server-side, zero round cost).
 // NOT available inside build:
 //   generate_image, generate_video, music_creator, send_*  — main brain
@@ -513,7 +526,7 @@ function buildBuildTool(isGroup) {
     description:
       'Hand a build/code/document task to the engineering sub-agent. '
       + `Persistent isolated workspace for ${scope} (4h inactivity TTL, 500 MB). `
-      + 'Tools available INSIDE build: write_file, edit_file, bash, read_file, image_search, web_x_search, code_interpreter. '
+      + 'Tools available INSIDE build: write_file, edit_file, bash, read_file, web_x_search, code_interpreter. '
       + 'If you need a specific asset (image/video/song) inside the build task, generate it FIRST in the main loop, then pass it via attachments[].',
     properties: {
       prompt: {
@@ -555,7 +568,6 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // 1. Search & Information Retrieval
   tools.push(
     TOOL_WEB_X_SEARCH,
-    TOOL_IMAGE_SEARCH,
     TOOL_READ_FILE,
   );
   if (isWhatsApp) {
@@ -593,6 +605,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   }
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
+    // First message of a thread: offer (and force, via tool_choice in the
+    // handler) the title-setter so the conversation gets named exactly once.
+    if (userCtx.isFirstTurn) {
+      tools.push(TOOL_SET_CONVERSATION_TITLE);
+    }
   }
   if (isActiveMember) {
     tools.push(buildEmailTool(isAdmin));
@@ -627,4 +644,5 @@ module.exports = {
   getToolsForUser,
   isActiveMemberOnlyTool,
   validateToolArgs,
+  SET_CONVERSATION_TITLE_TOOL: 'set_conversation_title',
 };

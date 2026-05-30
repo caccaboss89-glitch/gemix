@@ -16,8 +16,8 @@
 - Video descritti da modello dedicato (Gemini 2.5 Flash Lite), audio trascritti dal sistema STT xAI nativo.
 
 *� Ricerca Web e 𝕏 di Nuova Generazione*
-- *NEW* `web_x_search`: le ricerche su web sono ora gestite da un *team di ricerca specializzato* (Grok 4.20 Multi-Agent 4x) che cerca su web e 𝕏 in parallelo, con citazioni e fonti verificate (con statistiche di ricerca nel footer finale).
-- *NEW* `image_search` con anteprime low quality.
+- *NEW* `web_x_search`: ricerca su web e 𝕏 in parallelo con citazioni e fonti verificate (statistiche nel footer finale). Due marce: *veloce* (singolo modello, default, per lookup rapidi) e *team 4x* (Grok 4.20 Multi-Agent) per ricerche approfondite.
+- *NEW* Ricerca immagini integrata: quando richiesto, le immagini più rilevanti vengono scaricate e allegate automaticamente alla risposta.
 
 *🏗️ Sistema Agentico Completo*
 - *NEW* `agentic_unlock` intelligente che sblocca la suite agentica completa quando necessario.

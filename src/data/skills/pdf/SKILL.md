@@ -91,7 +91,7 @@ Everything below is preinstalled. There is no internet (no `pip install`, no `tl
 - **Python**: `pypdf`, `reportlab`, `Pillow`, `cairosvg`, `matplotlib`, `seaborn`, `plotly`, `numpy`, `scipy`, `sympy`, `mpmath`, `pandas`, `jinja2`, `python-docx`, `openpyxl`, `python-pptx`, `pyyaml`, `requests`, `rembg` (with `onnxruntime`).
 - **TeX Live**: `pdflatex`, `xelatex`, `lualatex`. Installed packages: `texlive-latex-recommended`, `texlive-latex-extra`, `texlive-fonts-recommended`, `texlive-fonts-extra`, `texlive-science`, `texlive-lang-italian`, `cm-super`, `lmodern`, `dvipng`. Notable usable packages: `microtype`, `lmodern`, `booktabs`, `siunitx`, `cleveref`, `bm`, `amsmath`, `amssymb`, `mathtools`, `xcolor`, `tcolorbox`, `tikz`, `pgfplots`, `geometry`, `fancyhdr`, `hyperref`, `multicol`, `enumitem`, `tabularx`, `longtable`, `listings`, `biblatex` (compile with `biber`, local `.bib` only), `fontspec` (xelatex/lualatex only), `beamer`, `babel` with `english` and `italian` languages. **Not available**: `minted` (Pygments stylesheets need internet — use `listings` instead).
 - **CLI**: `pdftotext`, `pdftoppm`, `pdfimages`, `pdfinfo`, `pdftohtml` (poppler-utils); `gs` (ghostscript); `libreoffice` (headless); `ffmpeg`; `yt-dlp`.
-- **Image sourcing**: no internet from inside the sandbox. Use the host-side `image_search` tool with `save_to_disk=true` BEFORE writing scripts; the result lands in `/readonly/searched_images/<file>` and you reference it from your script with that exact path.
+- **Image sourcing**: no internet from inside the sandbox for arbitrary downloads. Use the `web_x_search` tool with `search_images=true` BEFORE writing scripts; the fetched images are saved into `/workspace/` (filenames echoed in the tool response) and you reference them from your script with that exact path.
 
 ---
 
@@ -580,8 +580,7 @@ For multi-page documents, render selectively (`-f 1 -l 1`, then later pages on d
 - **Path absolute always**: every script and every LaTeX `\includegraphics` path must start with `/workspace/` or `/readonly/`.
 - **No `cat << EOF` for code generation**: write `.py`/`.tex`/`.json` via `write_file`, never via shell heredoc.
 - **No piping/chaining in bash**: emit one command per `bash` call; multiple bash calls in the same round run in emission order.
-- **`/readonly/` is read-only**: copy to `/workspace/temp/` first if you need to mutate.
-- **Image sourcing**: prefer `image_search` with `save_to_disk=true` to fetch external imagery; reference the returned `/readonly/searched_images/<file>` path verbatim.
+- **Image sourcing**: use `web_x_search` with `search_images=true` to fetch external imagery; reference the returned `/workspace/<file>` path verbatim.
 
 ---
 

@@ -51,7 +51,7 @@ The sandbox has **no Node.js / no `docx-js` / no `pandoc`**. All creation, editi
 - **Pre-existing templates**: When EDITING a user-provided `.docx`/`.dotx` template, study its style with `docx_inspect.py` and EXACTLY match existing fonts, colors, page size, margins, and heading styles. Existing template conventions ALWAYS override the defaults in this guide.
 - **Heading levels are 1-based** (1 to 9). Don't skip levels (H1 → H3); QA flags `heading_skip`.
 - **Page sizes** in the spec accept names (`"letter"`, `"a4"`, `"a5"`, `"legal"`) OR explicit inches (`{"width_in": 8.5, "height_in": 11}`). Default: A4.
-- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `image_search` with `save_to_disk=true` to make them available under `/readonly/searched_images/`. Use the EXACT path returned by the tool.
+- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `web_x_search` with `search_images=true` to fetch them into `/workspace/`. Use the EXACT path returned by the tool.
 
 ---
 

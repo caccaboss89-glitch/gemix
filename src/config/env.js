@@ -12,6 +12,7 @@ const REQUIRED = [
   'HERMES_API_KEY',
   'GROK_MODEL',
   'MULTI_AGENT_MODEL',
+  'FAST_RESEARCH_MODEL',
   'IMAGE_GEN_MODEL',
   'VIDEO_GEN_MODEL',
   'OPENROUTER_BASE_URL',
@@ -51,14 +52,17 @@ module.exports = {
   //   MULTI_AGENT_MODEL below.
   // - Imagine (image/video gen): NOT proxied. Via CLI `hermes -z`
   //   wrapped by bridge/imagine.sh.
-  // Multi-agent research model used by the web_x_search tool (web + X/Twitter via xAI native search).
+  // Multi-agent research model used by the web_x_search tool when full_team=true
+  // (web + X/Twitter + images via xAI native search, orchestrated by a 4x team).
   MULTI_AGENT_MODEL: process.env.MULTI_AGENT_MODEL,
+  // Fast research model: a single reasoning model used by web_x_search by
+  // default (full_team omitted/false). Same tools/params as the team
+  // (web_search + x_search + image search) but lighter and quicker — no
+  // multi-agent orchestration, no intermediate "consulting the team" banner.
+  FAST_RESEARCH_MODEL: process.env.FAST_RESEARCH_MODEL,
   // Grok Imagine — image and video generation via Hermes proxy.
   IMAGE_GEN_MODEL: process.env.IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL,
-
-  // Image search (SearXNG self-hosted). Web/X search migrated to xAI native tools in Step 2.
-  SEARXNG_URL: process.env.SEARXNG_URL,
 
   // Platform / infra
   BOT_TOKEN: process.env.BOT_TOKEN,

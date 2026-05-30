@@ -49,7 +49,7 @@ The sandbox has **no Node.js / no `pptxgenjs` / no `markitdown`**. All creation,
 - **Output buffer**: The final `.pptx` (or its `.pdf` export) MUST end up in `/workspace/output/`. Files in `/workspace/temp/` are NOT pushed to the delivery buffer.
 - **Pre-existing templates**: When EDITING a user-provided deck, study its style with `pptx_inspect.py` and EXACTLY match existing fonts, colors, slide size, and layout names. Existing template conventions ALWAYS override the defaults in this guide.
 - **Slide indices are 1-based** in every script.
-- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `image_search` with `save_to_disk=true` to make them available under `/readonly/searched_images/`. Use the EXACT path returned by the tool.
+- **Image Search**: Include relevant images from internet when appropriate to enhance visual appeal and clarity. Use `web_x_search` with `search_images=true` to fetch them into `/workspace/`. Use the EXACT path returned by the tool.
 
 ---
 
