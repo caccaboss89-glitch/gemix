@@ -343,13 +343,19 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
 
   const body = {
     model,
-    reasoning: { effort },
     // max_turns bounds the server-side tool-call turns and guarantees a final
     // synthesized answer even if the budget is hit mid-research.
     max_turns: RESEARCH_MAX_TURNS,
     input: [{ role: 'user', content }],
     tools: _buildResearchTools(searchImages),
   };
+
+  // reasoning.effort is only supported by multi-agent and grok-4.3 models.
+  // The fast reasoning model (grok-4.20-reasoning-latest) rejects the param
+  // entirely with HTTP 400 — omit it for that gear.
+  if (fullTeam) {
+    body.reasoning = { effort };
+  }
 
   logApiRequest(model, RESPONSES_URL, body);
   log.info(`   📡 → ${model} (${fullTeam ? 'team' : 'fast'}, images=${searchImages}, input: ${content.length} chars)`);
