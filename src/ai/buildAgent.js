@@ -563,10 +563,8 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       // Bound xAI server-side tool turns (web_search/x_search/code_interpreter)
       // per request; our own BUILD_MAX_ROUNDS bounds the client-side loop.
       max_turns: BUILD_MAX_ROUNDS,
-      // Engineering work benefits from deeper reasoning even more than the
-      // main brain (algorithm choice, file layout, edge cases). Same
-      // setting used by aiProvider and webXSearch.
-      reasoning: { effort: 'high' },
+      // NOTE: grok-build-0.1 has reasoning built-in and rejects any
+      // reasoning/reasoningEffort parameter with HTTP 400. Do NOT add it.
     };
     if (instructions) body.instructions = instructions;
     if (adaptedTools) body.tools = adaptedTools;
