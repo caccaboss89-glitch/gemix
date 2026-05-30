@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libreoffice-common \
         libreoffice-java-common \
         default-jre-headless \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ──

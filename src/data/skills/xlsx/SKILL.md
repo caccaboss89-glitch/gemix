@@ -42,7 +42,6 @@ description: Spreadsheets (.xlsx, .xlsm, .csv, .tsv). Create, edit, clean, forma
 - **Read temp JSON via bash if needed**: If `read_file` cannot read a newly-created `/workspace/temp/*.json`, do NOT loop. Use a standalone `bash` call: `cat /workspace/temp/file.json`.
 - **No `cat << EOF`**: Never build the JSON spec via bash heredoc; always `write_file`.
 - **Scripts vs Tools**: All utilities are SCRIPTS, called via `bash`. DO NOT try to use them as tool names.
-- **No Concatenation**: NEVER combine multiple xlsx scripts in a single `bash` command using `&&`/`;`. Emit them as separate tool calls.
 - **Generated Filenames**: Scripts may sanitize sheet names. NEVER guess generated filenames after `split`; use the exact stdout paths from `xlsx_manipulate.py`, or run `ls /workspace/output/` before follow-up operations.
 - **Pre-existing templates**: When EDITING a user-provided file, study its style with `xlsx_inspect.py` and EXACTLY match existing formatting. Existing template conventions ALWAYS override the defaults in this guide.
 

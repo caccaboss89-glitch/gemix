@@ -18,7 +18,7 @@ Hard facts about the environment:
 - **No PDF/audio/video parser microservice anymore.** xAI ingests PDF/audio/video natively from `input_file` URLs (the `read_file` agent tool exposes binary files via the public attachment tunnel automatically). For PDFs the agent receives `<DOCUMENT>` content (text + images + structure, OCR included) directly.
 - **`/skills/` files are read-only `.md`.** No more `scripts/` shipped with the skill — the agent writes equivalent code inline via `write_file` + `bash`.
 - **`code_interpreter`** is a server-side xAI native tool exposed to the agent for ad-hoc Python without filesystem access. For anything that touches `/workspace/` files use `write_file` / `edit_file` / `bash`.
-- **Sandbox toolchain** is Python 3.12 + LibreOffice + Ghostscript + TeX Live + every dep in `sandbox/requirements-sandbox.txt`. No internet by default; outbound traffic only via the egress proxy (yt-dlp allowlist).
+- **Sandbox toolchain** is Python 3.12 + LibreOffice + Ghostscript + TeX Live + ffmpeg + every dep in `sandbox/requirements-sandbox.txt`. No internet by default; outbound traffic only via the egress proxy (yt-dlp allowlist).
 - **`<DELIVER>`** is REQUIRED on the final reply. Files NOT listed there are silently dropped from the user-facing response.
 
 ---

@@ -381,7 +381,6 @@ Bozza concettuale (in inglese, coerente con `REWRITE_METHOD.md`):
   </Delivery>
 
   <Pitfalls>
-    - bash: standalone calls only — no &&, ||, ;, |, redirection, subshells.
     - Always absolute paths under /workspace/ or /skills/.
     - read_file refuses binary archives (.zip etc.) — use bash (unzip, etc.) instead.
     - yt-dlp: max 1080p, allowed domains youtube/x/instagram/tiktok/facebook.

@@ -44,8 +44,7 @@ The sandbox has **no Node.js / no `pptxgenjs` / no `markitdown`**. All creation,
 - **Consistent output filename**: When building a presentation, use a single consistent output filename (e.g., `/workspace/output/deck.pptx`). If you need to rebuild after QA, overwrite the same file — do NOT create new filenames. Only one `.pptx` should be delivered to the user.
 - **Read temp JSON via bash if needed**: If `read_file` cannot read a newly-created `/workspace/temp/*.json`, do NOT loop. Use a standalone `bash` call: `cat /workspace/temp/file.json`.
 - **Scripts vs Tools**: All utilities are SCRIPTS, called via `bash`. DO NOT try to use them as tool names.
-- **No Concatenation**: NEVER combine multiple pptx scripts in a single `bash` command using `&&`/`;`/`|`. Emit them as separate tool calls in the same round.
-- **Readonly writes**: NEVER write back to `/readonly/...`. To edit a user-provided deck, first `cp /readonly/history/<file>.pptx /workspace/temp/<file>.pptx` in a standalone `bash call, then operate on the writable copy.
+- **Readonly writes**: NEVER write back to `/readonly/...`. To edit a user-provided deck, first `cp /readonly/history/<file>.pptx /workspace/temp/<file>.pptx`, then operate on the writable copy.
 - **Output buffer**: The final `.pptx` (or its `.pdf` export) MUST end up in `/workspace/output/`. Files in `/workspace/temp/` are NOT pushed to the delivery buffer.
 - **Pre-existing templates**: When EDITING a user-provided deck, study its style with `pptx_inspect.py` and EXACTLY match existing fonts, colors, slide size, and layout names. Existing template conventions ALWAYS override the defaults in this guide.
 - **Slide indices are 1-based** in every script.

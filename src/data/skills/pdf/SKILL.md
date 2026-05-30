@@ -578,8 +578,7 @@ For multi-page documents, render selectively (`-f 1 -l 1`, then later pages on d
 - **Vector vs raster figures for LaTeX**: save figures as `.pdf` (vector) when included via `\includegraphics`. Use `.png` only for raster artwork.
 - **`pdftoppm` resolution**: `-r 100` for thumbnails, `-r 300` for QA, `-r 600` for highest fidelity. Higher values produce huge files for no benefit when a human is reading.
 - **Path absolute always**: every script and every LaTeX `\includegraphics` path must start with `/workspace/` or `/readonly/`.
-- **No `cat << EOF` for code generation**: write `.py`/`.tex`/`.json` via `write_file`, never via shell heredoc.
-- **No piping/chaining in bash**: emit one command per `bash` call; multiple bash calls in the same round run in emission order.
+- **No `cat << EOF` for code generation**: write `.py`/`.tex`/`.json` via `write_file`, never via shell heredoc — it is more reliable than escaping content in the shell.
 - **Image sourcing**: use `web_x_search` with `search_images=true` to fetch external imagery; reference the returned `/workspace/<file>` path verbatim.
 
 ---

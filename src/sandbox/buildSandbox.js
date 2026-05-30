@@ -202,9 +202,9 @@ async function getOrCreate(workspaceId) {
 }
 
 /**
- * Run a single shell command inside the container (one shot via `docker exec`).
- * Standalone only — chaining (&&, ||, ;, |, redirection, subshells) is
- * still rejected at the tool boundary, this layer just runs whatever it gets.
+ * Run a shell command inside the container (one shot via `docker exec`).
+ * The command is executed via `/bin/bash -lc`, so full shell syntax
+ * (pipes, &&, ||, ;, redirection, subshells) is supported.
  *
  * @param {string} workspaceId
  * @param {string} command

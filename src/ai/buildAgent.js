@@ -118,7 +118,7 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'bash',
-        description: 'Run a single shell command in the /workspace/ sandbox. Standalone only — no &&, ||, ;, |, redirection, subshells. Skills are mounted read-only at /skills/.',
+        description: 'Run a shell command in the /workspace/ sandbox. Full shell syntax is supported (pipes, &&, ||, ;, redirection, subshells). Skills are mounted read-only at /skills/.',
         parameters: {
           type: 'object',
           properties: {
@@ -214,6 +214,11 @@ function _buildSystemPrompt(workspaceId, renamedAttachments, roundHint) {
     '  <Tools>',
     '    write_file / edit_file / bash / read_file / web_x_search / code_interpreter',
     '  </Tools>',
+    '  <Sandbox>',
+    '    Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
+    '    Python 3.12. Pre-installed CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. Pre-installed Python libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, reportlab, pypdf, python-docx, openpyxl, python-pptx, jinja2, PyYAML, requests, unoserver. No pip/apt at runtime.',
+    '    yt-dlp: outbound traffic goes through the egress proxy (YouTube, X/Twitter, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly — no need to check if it is installed.',
+    '  </Sandbox>',
     '  <Skills>',
     '    Read full skill via read_file on /skills/&lt;name&gt;/SKILL.md when relevant. Available skill folders: pdf, docx, xlsx, pptx.',
     '  </Skills>',
@@ -222,7 +227,6 @@ function _buildSystemPrompt(workspaceId, renamedAttachments, roundHint) {
     '    Empty &lt;DELIVER&gt;&lt;/DELIVER&gt; means "text response only, no files". The tag is REQUIRED on the final response — files NOT listed will not reach the user.',
     '  </Delivery>',
     '  <Pitfalls>',
-    '    - bash: standalone calls only — no &&, ||, ;, |, redirection, subshells.',
     '    - Always paths under /workspace/ or /skills/. read_file refuses binary archives (.zip etc.) — use bash (unzip, etc.) instead.',
     '    - Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
     '  </Pitfalls>',
@@ -382,16 +386,13 @@ function _executeEditFile(workspaceId, args) {
   return JSON.stringify({ success: true, path: a.path, occurrences, replaced: a.replace_all ? occurrences : 1 });
 }
 
-const SHELL_CHAINING_RE = /(?:&&|\|\|)|;|\||(?:>{1,2})|<|\$\(|`|\$\{/;
+const SHELL_COMMAND_MAX_LEN = 4000;
 
 async function _executeBash(workspaceId, args) {
   const a = args || {};
   const cmd = a.command;
   if (typeof cmd !== 'string' || !cmd.trim()) return _toolErr('Missing command.');
-  if (cmd.length > 4000) return _toolErr('Command too long (max 4000 chars).');
-  if (SHELL_CHAINING_RE.test(cmd)) {
-    return _toolErr('bash commands must be standalone — no chaining (&&, ||, ;, |, redirection, subshells).');
-  }
+  if (cmd.length > SHELL_COMMAND_MAX_LEN) return _toolErr(`Command too long (max ${SHELL_COMMAND_MAX_LEN} chars).`);
   let timeoutMs = Number(a.timeout_ms);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = BASH_DEFAULT_TIMEOUT_MS;
   if (timeoutMs > BASH_MAX_TIMEOUT_MS) timeoutMs = BASH_MAX_TIMEOUT_MS;
