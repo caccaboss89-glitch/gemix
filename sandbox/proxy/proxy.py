@@ -45,20 +45,37 @@ from urllib.parse import urlparse
 DEFAULT_ALLOWED = [
     # YouTube / Video Delivery (for yt-dlp)
     ".youtube.com",
+    "youtube.com",
     ".googlevideo.com",
     ".ytimg.com",
-    # Social Media
+    # X / Twitter (yt-dlp hits api.x.com, video.twimg.com, t.co, abs.twimg.com, etc.)
     ".twitter.com",
+    "twitter.com",
     ".x.com",
+    "x.com",
+    "api.x.com",
     ".twimg.com",
+    "twimg.com",
+    ".t.co",
+    "t.co",
+    # Instagram
     ".instagram.com",
+    "instagram.com",
     ".cdninstagram.com",
+    "cdninstagram.com",
+    # TikTok
     ".tiktok.com",
+    "tiktok.com",
     ".tiktokv.com",
     ".byteoversea.com",
     ".ibyteimg.com",
+    ".tiktokcdn.com",
+    ".tiktokcdn-us.com",
+    # Facebook
     ".facebook.com",
+    "facebook.com",
     ".fbcdn.net",
+    "fbcdn.net",
 ]
 
 

@@ -56,7 +56,7 @@ Insieme di semplificazioni applicate prima della Fase 6 (riscrittura skill), sfr
 
 ### B — `web_x_search`: due marce (veloce vs team 4x)
 
-- Default = modello singolo veloce `FAST_RESEARCH_MODEL` (`grok-4.20-reasoning-latest`, confermato esistente, effort `low`): ricerca completa (web+𝕏+immagini) ma leggera e rapida, **nessun banner intermedio**.
+- Default = modello singolo veloce `FAST_RESEARCH_MODEL` (`grok-4.20-non-reasoning-latest`, confermato esistente, effort `low`): ricerca completa (web+𝕏+immagini) ma leggera e rapida, **nessun banner intermedio**.
 - `full_team=true` = team multi-agent `grok-4.20-multi-agent` (effort `medium` = 4 agenti). Solo qui parte il banner "🔎 Sto consultando il team di ricerca…".
 - Effort team portato da `high` a **`medium`**: l'abbonamento è cap a 4 agenti, quindi `high`/`xhigh` (16 agenti) verrebbero comunque retrocessi → niente token sprecati.
 - Stessi tool/parametri per entrambe le marce. Una sola code path in `webXSearch.js`.
@@ -88,7 +88,7 @@ Tutti i nostri function tool ritornano un oggetto JSON `{ success, message, ...e
 
 ### Note confermate dall'utente
 
-- `grok-4.20-reasoning-latest` esiste e funziona (confermato da test) → usato come `FAST_RESEARCH_MODEL`.
+- `grok-4.20-non-reasoning-latest` esiste e funziona (confermato da test) → usato come `FAST_RESEARCH_MODEL`.
 - `response.citations` **non** è presente/reperibile via Hermes senza modificare il codice di Hermes → per il team si usa la stima sui sub-agenti cifrati, per il fast model il conteggio è esatto dai `web_search_call`/`x_search_call` visibili (vedi §B).
 
 ### Da investigare (non bloccante)
