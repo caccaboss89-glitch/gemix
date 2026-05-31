@@ -10,6 +10,15 @@
 #   bridge/imagine.sh image "<prompt>" [aspect_ratio]
 #   bridge/imagine.sh video "<prompt>" [aspect_ratio] [duration_s] [resolution]
 #
+# Reference images (optional):
+#   Pass a SPACE-SEPARATED list of public HTTPS URLs via the IMAGINE_REF_URLS
+#   environment variable. xAI fetches each URL server-side and uses it as a
+#   reference for image-to-image / image-to-video / reference-to-video. The
+#   wrapper folds the URLs into the prompt (the CLI cannot ingest binaries,
+#   but it does consume reference images mentioned as URLs — verified in
+#   production). URLs travel via env (not argv) so they never get split or
+#   misparsed.
+#
 # Output:
 #   stdout : exactly one line — the URL of the generated media
 #   stderr : any diagnostic output from hermes (warnings, etc.)
@@ -27,6 +36,8 @@ PROMPT="${2:-}"
 ASPECT="${3:-}"
 DURATION="${4:-10}"
 RESOLUTION="${5:-720p}"
+REF_CLAUSE="${IMAGINE_REF_CLAUSE:-}"
+REF_URLS="${IMAGINE_REF_URLS:-}"
 
 if [[ -z "$KIND" || -z "$PROMPT" ]]; then
   echo "imagine.sh: missing kind or prompt (usage: imagine.sh image|video <prompt> [aspect] [duration] [resolution])" >&2
@@ -54,9 +65,19 @@ case "$KIND" in
     ;;
 esac
 
+# Reference images: the caller (imagineGenerator.js) builds the natural-language
+# clause that mentions each reference as "<filename> (<public_url>)" and encodes
+# the image-vs-video / 1-vs-many intent. We just append it verbatim. xAI fetches
+# each URL server-side and uses it as a visual reference. The clause is forced
+# onto a single line (hermes -z stops at the first newline).
+REF_CLAUSE_FLAT=""
+if [[ -n "$REF_CLAUSE" ]]; then
+  REF_CLAUSE_FLAT="$(printf '%s' "$REF_CLAUSE" | tr '\t\r\n' '   ' | tr -s ' ')"
+fi
+
 # Single line: no newlines in the prompt — hermes -z treats newlines as
 # prompt terminators and only processes the first line.
-FULL_PROMPT="${PROMPT} | ${INSTRUCTION}"
+FULL_PROMPT="${PROMPT}${REF_CLAUSE_FLAT} | ${INSTRUCTION}"
 
 # Run hermes in one-shot mode, restricted to the relevant toolset and with
 # rule injection disabled so AGENTS.md / memory / preloaded skills don't
@@ -78,11 +99,26 @@ if ! hermes --yolo --ignore-rules -t "$TOOLSET" -z "$FULL_PROMPT" >"$TMP_OUT" 2>
   exit 3
 fi
 
-# Strip all whitespace (newlines, tabs, CR) before extracting the URL.
-# Sometimes hermes wraps the URL across multiple lines, which breaks
-# line-based grep matching.
+# Extract the generated-media URL.
+#
+# Two complications to handle at once:
+#   1. hermes sometimes wraps a single URL across multiple lines, so naive
+#      line-based matching would truncate it. → flatten all whitespace first.
+#   2. With reference images we passed URLs IN, and the model may echo them,
+#      so the flattened text can contain ref-URL + result-URL fused together.
+#      → strip the KNOWN reference URLs from the flattened text BEFORE
+#        grepping, leaving only the result URL.
 URL_FLAT="$(tr -d '\r\n\t ' < "$TMP_OUT")"
-URL="$(echo "$URL_FLAT" | grep -oE 'https://[^"<>]+' | head -n 1 || true)"
+if [[ -n "$REF_URLS" ]]; then
+  for ref in $REF_URLS; do
+    # Remove every occurrence of this exact reference URL from the blob.
+    URL_FLAT="${URL_FLAT//$ref/ }"
+  done
+fi
+URL="$(printf '%s' "$URL_FLAT" | grep -oE 'https://[^"<> ]+' | head -n 1 || true)"
+# Strip trailing punctuation the model may have appended, anchored to the END
+# only so dots inside the URL are preserved.
+URL="$(printf '%s' "$URL" | sed -E 's/[].,)"}>]+$//')"
 
 if [[ -z "$URL" ]]; then
   echo "imagine.sh: hermes returned no parseable URL" >&2

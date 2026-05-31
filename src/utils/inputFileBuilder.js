@@ -33,7 +33,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { createLogger } = require('./logger');
-const { getPublicAttachmentUrl, TEMP_DIR } = require('./tempFileServer');
+const { getPublicAttachmentUrl, tempDirForOwner } = require('./tempFileServer');
 const { DATA_DIR } = require('../config/constants');
 const { notifyAdmin } = require('./adminNotifier');
 
@@ -112,13 +112,13 @@ function _resolveOnDiskPath(part) {
   return fs.existsSync(abs) ? abs : null;
 }
 
-function _materializeToTemp(base64, originalName) {
-  if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+function _materializeToTemp(base64, originalName, ownerKey) {
+  const dir = tempDirForOwner(ownerKey);
   const buf = Buffer.from(base64, 'base64');
   if (!buf.length) throw new Error('Empty base64 buffer');
   const stem = `inline_${crypto.randomBytes(8).toString('hex')}`;
   const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const filePath = path.join(TEMP_DIR, `${stem}_${safeName}`);
+  const filePath = path.join(dir, `${stem}_${safeName}`);
   fs.writeFileSync(filePath, buf);
   return filePath;
 }
@@ -134,9 +134,10 @@ function _materializeToTemp(base64, originalName) {
  * surfaces clearly via the handler's error path.
  *
  * @param {object} part
+ * @param {string} [ownerKey] - per-user temp subdir key
  * @returns {{type:'input_file', file_url:string} | null}
  */
-function _convertPart(part) {
+function _convertPart(part, ownerKey) {
   if (!part || typeof part !== 'object') return null;
   if (part.type !== 'image_url' || !part.image_url || typeof part.image_url.url !== 'string') return null;
 
@@ -156,7 +157,7 @@ function _convertPart(part) {
     kind = 'history';
   } else {
     try {
-      filePath = _materializeToTemp(parsed.base64, originalName);
+      filePath = _materializeToTemp(parsed.base64, originalName, ownerKey);
       kind = 'temp';
     } catch (err) {
       log.warn(`Failed to materialize ${originalName} (${parsed.mimetype}): ${err.message}`);
@@ -187,19 +188,23 @@ function _convertPart(part) {
  * pass through untouched.
  *
  * @param {Array} messages - chat-style messages array
+ * @param {object} [opts]
+ * @param {string} [opts.ownerKey] - per-user key so materialized temp files
+ *   land in TEMP_DIR/<owner>/ instead of the shared root (privacy isolation).
  * @returns {Promise<{ converted: number, skipped: number }>}
  */
-async function prepareInputFilesInMessages(messages) {
+async function prepareInputFilesInMessages(messages, opts = {}) {
   let converted = 0;
   let skipped = 0;
   if (!Array.isArray(messages)) return { converted, skipped };
+  const ownerKey = opts && typeof opts.ownerKey === 'string' ? opts.ownerKey : null;
 
   for (const msg of messages) {
     if (!msg || !Array.isArray(msg.content)) continue;
     for (let i = 0; i < msg.content.length; i++) {
       const part = msg.content[i];
       if (!part || part.type !== 'image_url') continue;
-      const replacement = _convertPart(part);
+      const replacement = _convertPart(part, ownerKey);
       if (replacement) {
         msg.content[i] = replacement;
         converted++;

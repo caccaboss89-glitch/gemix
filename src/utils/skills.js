@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { SKILLS_DIR } = require('./userPaths');
+const { escapeXml } = require('./xmlEscape');
 const { createLogger } = require('./logger');
 
 const log = createLogger('Skills');
@@ -63,21 +64,26 @@ function loadSkills() {
 }
 
 /**
- * Formats skill metadata into an XML block for the system prompt.
- * Instructs the AI to read the full file if needed.
+ * Format the loaded skills into the <Skills> block injected into the build
+ * sub-agent's system prompt. Dynamic: whatever skill folders exist on disk
+ * (each with a SKILL.md whose frontmatter carries name + description) show up
+ * here, so there is no static list to maintain. The description tells the
+ * agent WHEN a skill applies; it reads the full SKILL.md with read_file only
+ * when it actually needs the recipe.
+ *
+ * Indentation matches the surrounding two-space prompt blocks.
  */
 function formatSkillsForPrompt(skills) {
-  if (!skills || skills.length === 0) {
-    return '';
+  if (!Array.isArray(skills) || skills.length === 0) {
+    return '<Skills empty="true"/>';
   }
-
-  let xml = '  <Skills>\n';
-  xml += '    <Instruction>CRITICAL: If a skill matches the request, you MUST call `read_file` on its &lt;Source&gt; path IMMEDIATELY. DO NOT write manual scripts, bash or guess code before reading the documentation.</Instruction>\n';
-  for (const skill of skills) {
-    xml += `    <Skill name="${skill.name}">\n      <Description>${skill.description}</Description>\n      <Source>skills:${skill.filename}</Source>\n    </Skill>\n`;
+  const lines = ['<Skills>'];
+  lines.push('    Each skill below is a guided workflow with helper scripts. When a task matches a skill\'s purpose, read its SKILL.md with read_file BEFORE writing your own code, then follow it.');
+  for (const s of skills) {
+    lines.push(`    <Skill name="${escapeXml(s.name)}" doc="/skills/${escapeXml(s.filename)}">${escapeXml(s.description)}</Skill>`);
   }
-  xml += '  </Skills>\n';
-  return xml;
+  lines.push('  </Skills>');
+  return lines.join('\n');
 }
 
 module.exports = {

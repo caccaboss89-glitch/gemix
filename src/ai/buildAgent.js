@@ -45,6 +45,7 @@ const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
 const { webXSearch } = require('../tools/webXSearch');
 const { getRomeTime } = require('../utils/time');
 const { sanitizeFilename } = require('../utils/text');
+const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 const {
   BUILD_MAX_ROUNDS,
   BUILD_HARD_TIMEOUT_MS,
@@ -69,7 +70,6 @@ const TEXT_EXT_FOR_INLINE = new Set([
   '.html', '.htm', '.css', '.scss', '.svelte', '.vue',
   '.sql', '.graphql',
 ]);
-const URL_PASSTHROUGH_PREFIXES = ['application/', 'audio/', 'video/']; // not text/, those go inline
 
 // ── Tool definitions exposed to the sub-agent ──────────────────────────────
 //
@@ -118,7 +118,7 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'bash',
-        description: 'Run a shell command in the /workspace/ sandbox. Full shell syntax is supported (pipes, &&, ||, ;, redirection, subshells). Skills are mounted read-only at /skills/.',
+        description: 'Run a shell command in the /workspace/ sandbox. Full shell syntax is supported (pipes, &&, ||, ;, redirection, subshells). Skills in /skills/ are read-only.',
         parameters: {
           type: 'object',
           properties: {
@@ -133,7 +133,7 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'read_file',
-        description: 'Read a file from /workspace/ or /skills/. Text/code is returned inline; PDF/audio/video/image is exposed as input_file via the tunnel and ingested in the next round.',
+        description: 'Read a file from /workspace/ or /skills/. Only for text/code, images, audio, video, PDF.',
         parameters: {
           type: 'object',
           properties: {
@@ -147,13 +147,26 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'web_x_search',
-        description: 'Research the web and X. Set search_images=true to also fetch relevant images into /workspace/ (filenames returned in the response) for use in the build. Set full_team=true only for deep multi-faceted research; omit for quick lookups.',
+        description:
+          'Performs web and X searches from a research prompt to a specialized agent (or multi-agent team). '
+          + 'Use it for external/up-to-date information, fact-checking, or when web images are needed. '
+          + 'By default a single fast model handles the request. Set full_team=true only for deep, multi-faceted research. '
+          + 'Do not call multiple times in the same round.',
         parameters: {
           type: 'object',
           properties: {
-            prompt: { type: 'string' },
-            full_team: { type: 'boolean', description: 'true → deep 4x multi-agent team; omit for fast single-model search.' },
-            search_images: { type: 'boolean', description: 'true → also fetch relevant images into /workspace/.' },
+            prompt: {
+              type: 'string',
+              description: 'Detailed research brief: the exact question, any URLs to consult, desired output format, and constraints (date range, language, sources to prefer or avoid).',
+            },
+            full_team: {
+              type: 'boolean',
+              description: 'Set true for 4x multi-agent team (more deep); omit for fast single-model search (default).',
+            },
+            search_images: {
+              type: 'boolean',
+              description: 'Set true for fetch relevant images into /workspace/ from the web (if requested or useful, e.g. include in documents). Omit for text-only research.',
+            },
           },
           required: ['prompt'],
         },
@@ -190,49 +203,57 @@ function _renderAttachmentNotes(renamedAttachments) {
   return `<AttachmentNotes>\n${items.join('\n')}\n</AttachmentNotes>`;
 }
 
-function _buildSystemPrompt(workspaceId, renamedAttachments, roundHint) {
+// Build the <Skills> block dynamically from the skill folders mounted at
+// /skills/ (each with a SKILL.md whose frontmatter carries name + description).
+// This keeps the prompt in sync with whatever skills exist on disk — no static
+// "pdf, docx, xlsx, pptx" list to maintain.
+function _renderSkills() {
+  return formatSkillsForPrompt(loadSkills());
+}
+
+function _buildSystemPrompt(workspaceId, renamedAttachments) {
   const stateBlock = _renderWorkspaceState(workspaceId);
   const notesBlock = _renderAttachmentNotes(renamedAttachments);
+  const skillsBlock = _renderSkills();
 
+  // No outer <SystemPrompt> envelope: this string is delivered in the
+  // Responses API `instructions` field (the dedicated system channel), so a
+  // root tag adds nothing. The structured sub-tags sit flush at the top level
+  // (mirrors ai/systemPrompt.js).
   return [
-    '<SystemPrompt role="GemiX-Build">',
-    '  <Identity>',
-    '    GemiX-Build, the engineering sub-agent of GemiX. Reasoning and tool calls in English. Final user-facing text in Italian.',
-    `    Time (Europe/Rome): ${getRomeTime()}.`,
-    '  </Identity>',
-    '  <Mission>',
-    '    Execute the build/code/document task delegated by GemiX-Main. Produce',
-    '    deliverables in /workspace/ and announce them via &lt;DELIVER&gt;.',
-    '  </Mission>',
-    '  <Workspace>',
-    '    Working dir: /workspace/  (writable, no fixed structure)',
-    '    Skills: /skills/          (read-only — pdf, docx, xlsx, pptx, REWRITE_METHOD)',
-    `    Quota: ${BUILD_WORKSPACE_QUOTA_MB} MB. Files persist across build calls in the same session.`,
-    '  </Workspace>',
-    `  ${stateBlock}`,
-    `  ${notesBlock}`,
-    '  <Tools>',
-    '    write_file / edit_file / bash / read_file / web_x_search / code_interpreter',
-    '  </Tools>',
-    '  <Sandbox>',
-    '    Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
-    '    Python 3.12. Pre-installed CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. Pre-installed Python libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, reportlab, pypdf, python-docx, openpyxl, python-pptx, jinja2, PyYAML, requests, unoserver. No pip/apt at runtime.',
-    '    yt-dlp: outbound traffic goes through the egress proxy (YouTube, X/Twitter, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly — no need to check if it is installed.',
-    '  </Sandbox>',
-    '  <Skills>',
-    '    Read full skill via read_file on /skills/&lt;name&gt;/SKILL.md when relevant. Available skill folders: pdf, docx, xlsx, pptx.',
-    '  </Skills>',
-    '  <Delivery>',
-    '    End your final response with &lt;DELIVER&gt;file1.ext, file2.ext&lt;/DELIVER&gt; listing files in /workspace/ to send to the user.',
-    '    Empty &lt;DELIVER&gt;&lt;/DELIVER&gt; means "text response only, no files". The tag is REQUIRED on the final response — files NOT listed will not reach the user.',
-    '  </Delivery>',
-    '  <Pitfalls>',
-    '    - Always paths under /workspace/ or /skills/. read_file refuses binary archives (.zip etc.) — use bash (unzip, etc.) instead.',
-    '    - Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
-    '  </Pitfalls>',
-    roundHint ? `  ${roundHint}` : '',
-    '</SystemPrompt>',
-  ].filter(Boolean).join('\n');
+    '<Identity>',
+    '  GemiX-Build, the engineering sub-agent of GemiX. Reasoning and tool calls in English. Final user-facing text in the user\'s language (Italian by default), without emojis unless the user asked for them.',
+    `  Time (Europe/Rome): ${getRomeTime()}.`,
+    '</Identity>',
+    '<Mission>',
+    '  Execute the build/code/document task delegated by GemiX-Main. Produce',
+    '  deliverables in /workspace/ and announce them via &lt;DELIVER&gt;.',
+    '</Mission>',
+    '<Workspace>',
+    '  Working dir: /workspace/  (writable, no fixed structure)',
+    '  Skills: /skills/          (read-only)',
+    `  Quota: ${BUILD_WORKSPACE_QUOTA_MB} MB. Files persist across build calls in the same session.`,
+    '</Workspace>',
+    stateBlock,
+    notesBlock,
+    '<Tools>',
+    '  write_file / edit_file / bash / read_file / web_x_search / code_interpreter',
+    '</Tools>',
+    '<Sandbox>',
+    '  Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
+    '  Python 3.12 and Node.js 22. General-purpose pre-installed libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, jinja2, PyYAML, requests, unoserver. General CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. No pip/npm/apt at runtime. Document-format libraries (reportlab, pypdf, python-docx, openpyxl, python-pptx, pptxgenjs, ...) are documented inside the relevant skill — read its SKILL.md.',
+    '  yt-dlp: outbound traffic goes through the egress proxy (YouTube, X/Twitter, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly — no need to check if it is installed.',
+    '</Sandbox>',
+    skillsBlock,
+    '<Delivery>',
+    '  End your final response with &lt;DELIVER&gt;file1.ext, file2.ext&lt;/DELIVER&gt; listing files in /workspace/ to send to the user.',
+    '  Empty &lt;DELIVER&gt;&lt;/DELIVER&gt; means "text response only, no files". The tag is REQUIRED on the final response — files NOT listed will not reach the user.',
+    '</Delivery>',
+    '<Pitfalls>',
+    '  - Always paths under /workspace/ or /skills/. read_file refuses binary archives (.zip etc.) — use bash (unzip, etc.) instead.',
+    '  - Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
+    '</Pitfalls>',
+  ].join('\n');
 }
 
 // ── Tool execution dispatcher (sub-agent side) ──────────────────────────────
@@ -387,7 +408,6 @@ function _executeEditFile(workspaceId, args) {
 }
 
 const SHELL_COMMAND_MAX_LEN = 4000;
-
 async function _executeBash(workspaceId, args) {
   const a = args || {};
   const cmd = a.command;
@@ -454,7 +474,7 @@ async function _executeWebXSearch(workspaceId, args, statsAccumulator) {
     }
   }
 
-  const { _stats: _ignored, _images: _ignored2, images_added: _ig3, images_note: _ig4, ...clean } = result || {};
+  const { _stats: _ignored, _images: _ignored2, images_added: _ig3, images_note: _ig4, image_filenames: _ig5, ...clean } = result || {};
   if (saved.length > 0) {
     clean.saved_images = saved.map(s => s.error ? `${s.name} (failed: ${s.error})` : s.name);
     clean.images_note = 'The saved images are in /workspace/ under the listed filenames. Use those exact paths in your scripts.';
@@ -535,21 +555,22 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
 
   let rounds = 0;
   let finalText = null;
+  let budgetExhausted = false;
 
   while (rounds < BUILD_MAX_ROUNDS) {
     rounds++;
     if (Date.now() - startedAt > BUILD_HARD_TIMEOUT_MS) {
       log.warn(`build agent: hard timeout reached at round ${rounds}`);
+      budgetExhausted = true;
       break;
     }
 
     // Refresh the system prompt with the latest workspace state at every
     // round (the agent just wrote new files, the state must reflect them).
-    const roundsLeft = BUILD_MAX_ROUNDS - rounds;
-    const roundHint = roundsLeft <= 2
-      ? `<RoundHint>Critical: ${roundsLeft} round(s) left. Wrap up, emit your final response with &lt;DELIVER&gt; now.</RoundHint>`
-      : null;
-    messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments, roundHint);
+    // The agent is never told which round it is on or how many remain — the
+    // budget is enforced host-side, and when it runs out we force ONE clean
+    // tool-less answer below (same pattern as the main brain).
+    messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
 
     // Renew the lock so a long agent run keeps the workspace held.
     renewBuildLock(workspaceId, lockOwnerId);
@@ -593,6 +614,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
           content: result,
         });
       }
+      if (rounds >= BUILD_MAX_ROUNDS) budgetExhausted = true;
       continue;
     }
 
@@ -601,8 +623,50 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
     break;
   }
 
+  // ── Round budget / hard-timeout exhausted ───────────────────────────────
+  // The agent still wanted to call tools when we ran out of rounds (or the
+  // hard timeout fired). Instead of discarding all the work behind a canned
+  // error, make ONE final call with tool_choice:'none' (the documented xAI
+  // way to force a text-only answer) so the agent wraps up from everything it
+  // gathered. This mirrors the main brain's outer-loop handling exactly — when
+  // the build can no longer act it must explain what it managed to do and that
+  // it had to stop. The host bubbles this up to GemiX-Main, which relays it to
+  // the user.
+  if (finalText === null && budgetExhausted) {
+    log.warn(`   ⚠️ build round budget (${BUILD_MAX_ROUNDS}) exhausted — forcing a final answer (tool_choice:none)`);
+    renewBuildLock(workspaceId, lockOwnerId);
+    messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
+    messages.push({
+      role: 'user',
+      content:
+        'SYSTEM: You have reached your work budget and can no longer run tools. ' +
+        'Write your final response now: explain to the user (in their language) ' +
+        'what you accomplished and that you had to stop before fully finishing, summarizing the ' +
+        'current state of the work. Then list any usable files you already produced in /workspace/ ' +
+        'with a <DELIVER>...</DELIVER> tag (empty if none).',
+    });
+    try {
+      const { instructions, input } = chatMessagesToResponsesInput(messages);
+      const adaptedTools = chatToolsToResponsesTools(tools);
+      const body = {
+        model: BUILD_MODEL,
+        input,
+        max_output_tokens: 64_000,
+        // tool_choice:'none' forces a text-only answer while keeping the tool
+        // definitions in context (same as the main brain's forced wrap-up).
+        tool_choice: 'none',
+      };
+      if (instructions) body.instructions = instructions;
+      if (adaptedTools) body.tools = adaptedTools;
+      const data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY);
+      finalText = responsesToAssistantMessage(data).content || '';
+    } catch (err) {
+      log.error(`   ❌ build forced wrap-up call failed: ${err.message}`);
+    }
+  }
+
   if (finalText === null) {
-    log.warn(`build agent ran out of rounds (${rounds}/${BUILD_MAX_ROUNDS}) without final text.`);
+    log.warn(`build agent ended without a final response (rounds=${rounds}/${BUILD_MAX_ROUNDS}).`);
     return {
       success: false,
       error: `build agent reached the round budget (${BUILD_MAX_ROUNDS}) without producing a final response.`,

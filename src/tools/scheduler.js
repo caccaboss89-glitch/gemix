@@ -2,7 +2,7 @@
 const crypto = require('crypto');
 const { MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
 const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
-const { findMemberByName } = require('../config/members');
+const { findMemberByName, findMemberByWa } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { normalizeMarkdown } = require('../utils/text');
@@ -159,14 +159,47 @@ async function scheduleTasks(tasks, ctx) {
       return data;
     });
 
-    const destStr = Object.keys(destinations).join(', ');
-    const recLabel = recurrence ? ` 🔁${recurrence.freq} until ${recurrence.endAt}` : '';
     const scheduledAtRome = formatTimestamp(scheduledAt);
-    let msg = `Task "${task.content.substring(0, 50)}..." scheduled for ${scheduledAtRome} [${destStr}]${recLabel}. Make sure the time matches what the user requested; if not, cancel it and set it again.`;
-    if (dstWarning) {
-      msg = dstWarning + '\n' + msg;
+
+    // Build a human-readable recipient label:
+    // - active member → first name only
+    // - external phone (whatsapp JID) → phone number
+    // - current user (self) → nothing (omit)
+    let recipientLabel = '';
+    if (destinations.whatsapp) {
+      const destJid = destinations.whatsapp;
+      const isSelf = destJid === ctx.waJid;
+      if (!isSelf) {
+        const member = findMemberByWa(destJid);
+        if (member) {
+          recipientLabel = member.name.split(' ')[0]; // first name only
+        } else {
+          recipientLabel = destJid.split('@')[0]; // phone number
+        }
+      }
     }
-    results.push({ success: true, message: msg });
+    if (destinations.whatsappGroup) {
+      recipientLabel = recipientLabel ? `${recipientLabel} + gruppo` : 'gruppo';
+    }
+
+    const recLabel = recurrence ? `\n  🔁 Ricorrenza: ${recurrence.freq} fino al ${formatTimestamp(recurrence.endAt)}` : '';
+    const recipientLine = recipientLabel ? `\n  👤 Destinatario: ${recipientLabel}` : '';
+
+    let taskSummary =
+      `📋 Task schedulato:\n` +
+      `  🆔 ID: ${newTask.id}\n` +
+      `  📝 Messaggio: ${cleanContent.substring(0, 80)}${cleanContent.length > 80 ? '…' : ''}` +
+      `\n  🕐 Data/ora: ${scheduledAtRome}` +
+      recipientLine +
+      recLabel;
+
+    if (dstWarning) {
+      taskSummary = dstWarning + '\n' + taskSummary;
+    }
+
+    taskSummary += '\n\n⚠️ Verifica che ogni parametro corrisponda esattamente a quanto richiesto dall\'utente. Se qualcosa non è corretto, elimina il task con il suo ID e ricrealo.';
+
+    results.push({ success: true, message: taskSummary });
   }
 
   return { success: true, message: results };

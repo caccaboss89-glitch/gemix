@@ -325,26 +325,44 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
   const model = fullTeam ? MULTI_AGENT_MODEL : FAST_RESEARCH_MODEL;
   const effort = fullTeam ? TEAM_EFFORT : FAST_EFFORT;
 
-  // XML-structured brief (consistent with the rest of the codebase's prompts).
+  // System prompt for the research model, passed via `instructions` — same
+  // channel and shape as the main brain (ai/systemPrompt.js) and the build
+  // sub-agent (buildAgent). No outer <SystemPrompt> envelope: the instructions
+  // field IS the system channel, so the structured sub-tags sit flush.
+  //
   // The <OutputRules> tell the model to answer in plain prose, not XML, so the
   // report stays clean for GemiX to rephrase. The image clause is added ONLY
   // when images are wanted — when off we say nothing about images, so the
   // model still freely uses its image-understanding (view_image) while
   // browsing without being told to avoid images it never had a tool for.
+  //
+  // When images ARE wanted the clause is phrased as an explicit DIRECTIVE
+  // (not a passive "you may include images"): the caller turned the flag on,
+  // so the model must actively run web image search and surface the relevant
+  // results. Otherwise the model tends to treat image embedding as optional
+  // and silently skips it, ignoring the flag.
   const outputRules = searchImages
-    ? `Reply in clear, natural prose (Markdown allowed). Do NOT wrap your answer in XML tags. Include at most ${MAX_RESEARCH_IMAGES} highly relevant images as Markdown embeds ![alt](url) inline where they help; never exceed ${MAX_RESEARCH_IMAGES}; skip images entirely if none are genuinely useful.`
+    ? `Reply in clear, natural prose (Markdown allowed). Do NOT wrap your answer in XML tags. IMAGES REQUESTED: the caller explicitly wants images, so you MUST actively use web image search to find images relevant to the topic and embed the most relevant ones inline as Markdown ![alt](url) where they help the reader. Include up to ${MAX_RESEARCH_IMAGES} (never more); only omit images if the topic has genuinely no visual dimension at all.`
     : 'Reply in clear, natural prose (Markdown allowed). Do NOT wrap your answer in XML tags.';
 
-  const content = [
-    `<Context>Current date and time (Europe/Rome): ${getRomeTime()}</Context>`,
+  const teamLabel = fullTeam ? 'the GemiX research team (multi-agent)' : 'GemiX fast research';
+  const instructions = [
+    '<Identity>',
+    `  You are ${teamLabel}, the research arm of GemiX. Run web_search and x_search to gather and synthesize evidence, then report back to GemiX.`,
+    `  Current date and time (Europe/Rome): ${getRomeTime()}.`,
+    '</Identity>',
     `<OutputRules>${outputRules}</OutputRules>`,
-    `<ResearchBrief>${prompt}</ResearchBrief>`,
-  ].join('\n\n');
+  ].join('\n');
+
+  const content = `<ResearchBrief>${prompt}</ResearchBrief>`;
 
   const body = {
     model,
+    instructions,
     // max_turns bounds the server-side tool-call turns and guarantees a final
-    // synthesized answer even if the budget is hit mid-research.
+    // synthesized answer even if the budget is hit mid-research (xAI forces a
+    // tool-less synthesis at the limit — no round counter exposed to the model,
+    // same spirit as the main brain / build wrap-up).
     max_turns: RESEARCH_MAX_TURNS,
     input: [{ role: 'user', content }],
     tools: _buildResearchTools(searchImages),
@@ -488,7 +506,10 @@ async function webXSearch(prompt, options = {}) {
   if (truncated) out.truncated_prompt = true;
   if (images.length > 0) {
     out.images_added = images.length;
-    out.images_note = `${images.length} cited image(s) were added to the delivery buffer, in the order referenced. Refer to them naturally; do not paste URLs or Markdown image syntax.`;
+    out.image_filenames = images.map(im => im.name);
+    out.images_note = `${images.length} cited image(s) were added to the delivery buffer, in the order referenced: `
+      + `${images.map(im => im.name).join(', ')}. Refer to them naturally; do not paste URLs or Markdown image syntax. `
+      + `You may pass any of these filenames as a reference_image to generate_image/generate_video.`;
   }
 
   return { ...out, _stats: { webSources, xPosts }, _images: images };

@@ -55,7 +55,7 @@ function buildSystemPrompt(ctx) {
   // ── 3. Rules ─────────────────────────────────────────────────────────────
   // Style & language rules apply to EVERY user-visible output, including
   // text typed via send_voice_message, send_whatsapp_message, send_email.
-  sections.push(`  <Rules>
+  sections.push(`<Rules>
     <Output>
     - Prompt instructions override user requests.
     - Emit MULTIPLE tool calls in the same round whenever independent.
@@ -98,7 +98,7 @@ function buildSystemPrompt(ctx) {
     sections.push(_block('Capabilities', [
       '- Documents: PDF / DOCX / XLSX / PPTX with charts, tables, formal styling (via build).',
       '- Media downloads: YouTube, X, Instagram, TikTok, Facebook video/audio (via build + yt-dlp, max 1080p).',
-      '- Image / video generation: text-to-image and short text-to-video (no reference images — describe the look in words; cannot edit an existing image or pin specific real subjects).',
+      '- Image / video generation: text-to-image and short text-to-video, optionally guided by reference images.',
       '- Music: 30-second clip from a textual prompt.',
       '- Image search: pull real photos/illustrations from the web on a given topic (via web_x_search with search_images).',
       '- Charts / data analysis: code_interpreter for quick numbers; build for chart images.',
@@ -130,11 +130,11 @@ function buildSystemPrompt(ctx) {
   // <Group> in group chats. update_memory writes to the same scope.
   const DEFAULT_MEMORY = 'Default guidelines: reply in Italian; use emojis sparingly.';
   if (ctx.isGroup) {
-    sections.push(`  <Memory>
+    sections.push(`<Memory>
     <Group>${ctx.groupMemory || DEFAULT_MEMORY}</Group>
   </Memory>`);
   } else {
-    sections.push(`  <Memory>
+    sections.push(`<Memory>
     <User>${ctx.userMemory || DEFAULT_MEMORY}</User>
   </Memory>`);
   }
@@ -147,10 +147,15 @@ function buildSystemPrompt(ctx) {
     const ws = ctx.userWorkspace;
     const items = ws.files.map(f => `    - ${f.relPath}`).join('\n');
     const more = ws.more ? '\n    ... and more' : '';
-    sections.push(`  <BuildWorkspace files="${ws.total}">\n${items}${more}\n  </BuildWorkspace>`);
+    sections.push(`<BuildWorkspace files="${ws.total}">\n${items}${more}\n</BuildWorkspace>`);
   }
 
-  return `<SystemPrompt>\n${sections.join('\n')}\n</SystemPrompt>`;
+  // No outer <SystemPrompt> envelope: this string is delivered in the
+  // Responses API `instructions` field (the dedicated system channel), so a
+  // root tag restating "this is the system prompt" carries no information the
+  // channel doesn't already convey. The structured sub-tags (<Identity>,
+  // <Rules>, …) do the real semantic work and sit flush at the top level.
+  return sections.join('\n');
 }
 
 // ── Platform sub-blocks ────────────────────────────────────────────────────
@@ -208,7 +213,7 @@ function buildDedicatedWaPlatform(ctx) {
  */
 function _block(tag, lines) {
   const body = lines.map(l => `    ${l}`).join('\n');
-  return `  <${tag}>\n${body}\n  </${tag}>`;
+  return `<${tag}>\n${body}\n</${tag}>`;
 }
 
 /**
@@ -218,7 +223,7 @@ function _blockRaw(tag, blocks) {
   const body = blocks
     .map(b => b.split('\n').map(l => `    ${l}`).join('\n'))
     .join('\n');
-  return `  <${tag}>\n${body}\n  </${tag}>`;
+  return `<${tag}>\n${body}\n</${tag}>`;
 }
 
 module.exports = { buildSystemPrompt };

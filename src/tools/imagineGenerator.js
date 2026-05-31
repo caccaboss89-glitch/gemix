@@ -23,19 +23,30 @@
 // CLI and parses the URL. This file spawns the wrapper (no shell, no
 // injection) and turns the URL into a buffered attachment.
 //
-// Limitations of the bridge (vs the original Step 7 design):
-//   - reference_images: not supported by hermes -z (the CLI can't ingest
-//     binary inputs into the image_gen / video_gen toolsets). If the model
-//     passes them, we return a clear structured error so it can retry
-//     without them.
+// Reference images (image-to-image / image-to-video / reference-to-video):
+//   The CLI cannot ingest binary inputs, but it CAN consume a reference
+//   image when its PUBLIC URL is mentioned in the prompt — xAI fetches the
+//   URL server-side, exactly like `input_file` ingestion (verified in
+//   production: `hermes -t video_gen -z 'Animate <https url>'` produces an
+//   animated video of that image). So we resolve each requested reference
+//   filename to a real file (current-turn buffer or chat history), expose it
+//   through the public attachment tunnel (utils/tempFileServer), and hand
+//   the resulting HTTPS URLs to the bridge via the IMAGINE_REF_URLS env var.
+//   The bridge folds them into the prompt. No base64, no binary CLI inputs.
 
+const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const {
   HERMES_API_KEY,
   IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL,
 } = require('../config/env');
+const { getPublicAttachmentUrl, tempDirForOwner } = require('../utils/tempFileServer');
+const { getHistoryDir, resolveStorageId } = require('../utils/userPaths');
+const { resolveWorkspaceId, workspaceIdToSlug } = require('../utils/workspaceId');
+const { pushBufferAttachment } = require('../utils/attachments');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { sanitizeFilename } = require('../utils/text');
 const { createLogger } = require('../utils/logger');
@@ -59,17 +70,41 @@ const MAX_PROMPT_LEN = 2000;
 const ALLOWED_IMAGE_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4']);
 const ALLOWED_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16']);
 
+// xAI Imagine accepts up to 3 reference images for image-to-image / editing
+// and up to 7 for reference-to-video (1 → image-to-video). Hard caps so the
+// model cannot ask for more.
+const MAX_REF_IMAGES_FOR_IMAGE = 3;
+const MAX_REF_IMAGES_FOR_VIDEO = 7;
+
+// Single reference image size cap. The tunnel serves the raw bytes, so the
+// limit guards the upstream fetch, not a base64 payload.
+const MAX_REF_IMAGE_BYTES = 8 * 1024 * 1024;
+
+const REF_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+const REF_IMAGE_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+};
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Sanitize the prompt: strip control chars, collapse whitespace, trim, cap length.
+ * Sanitize the prompt: strip control chars, collapse ALL whitespace (incl.
+ * newlines) to single spaces, trim, cap length. Single-line is mandatory:
+ * `hermes -z` treats a newline as a prompt terminator and only processes the
+ * first line, which would drop the reference clause and the instruction we
+ * append after the prompt.
  */
 function _cleanPrompt(prompt) {
   if (typeof prompt !== 'string') return { prompt: '', truncated: false };
   let p = prompt
     // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .replace(/[ \t]+/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
   let truncated = false;
   if (p.length > MAX_PROMPT_LEN) {
@@ -80,17 +115,172 @@ function _cleanPrompt(prompt) {
 }
 
 /**
+ * Build the natural-language reference clause folded into the CLI prompt.
+ * This is where the semantics from the old HTTP design (SCOPERTA.md) now
+ * live — there is no JSON body on the CLI, so 1-vs-many and image-vs-video
+ * intent must be expressed in words:
+ *
+ *   - image gen (any count): references guide subject / style / composition.
+ *   - video gen, 1 reference: image-to-video — animate that exact image
+ *     (it is the starting frame).
+ *   - video gen, 2-7 references: reference-to-video — keep the depicted
+ *     subjects / characters / style consistent across the generated clip.
+ *
+ * Each reference is emitted as `"<filename>" (<public_url>)` so xAI can map a
+ * filename the user prompt mentions (e.g. "add the subject of image1.jpg")
+ * to the right URL. The filename is preserved at the tail of the tunnel URL
+ * too, but the explicit pairing makes the correlation unambiguous.
+ *
+ * Returns '' when there are no references.
+ */
+function _buildRefClause(kind, names, urls) {
+  if (!urls || urls.length === 0) return '';
+  const pairs = names.map((n, i) => `"${n}" (${urls[i]})`).join(', ');
+  if (kind === 'video') {
+    if (urls.length === 1) {
+      return ` Use this image as the starting frame and animate it (image-to-video): ${pairs}.`;
+    }
+    return ` Use these images as visual references for the video — keep the depicted subjects, characters and style consistent: ${pairs}.`;
+  }
+  // image
+  return ` Use the following image(s) as visual reference to guide subject, style and composition: ${pairs}.`;
+}
+
+/**
+ * Locate a reference-image file by filename, mirroring the resolution policy
+ * of read_file / the build tool:
+ *   1. current-turn delivery buffer (responseCtx.attachments[]) by name
+ *   2. chat history for this user
+ *
+ * Returns { filePath } | { buffer, name } on hit, null on miss. Only the
+ * basename is honoured — the model passes plain filenames, never paths.
+ */
+function _findReferenceFile(filename, userCtx, responseCtx) {
+  if (typeof filename !== 'string' || !filename.trim()) return null;
+  const target = path.basename(filename.trim());
+
+  if (Array.isArray(responseCtx && responseCtx.attachments)) {
+    const buf = responseCtx.attachments.find(
+      a => a && a.name && path.basename(a.name) === target,
+    );
+    if (buf) {
+      if (buf.filePath && fs.existsSync(buf.filePath)) {
+        return { filePath: buf.filePath, name: path.basename(buf.name) };
+      }
+      if (Buffer.isBuffer(buf.buffer)) {
+        return { buffer: buf.buffer, name: path.basename(buf.name) };
+      }
+    }
+  }
+
+  const historyDir = getHistoryDir(userCtx);
+  if (historyDir) {
+    const candidate = path.join(historyDir, target);
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return { filePath: candidate, name: target };
+      }
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
+/**
+ * Persist a buffer-sourced reference image to the caller's private temp subdir
+ * (TEMP_DIR/<owner>/) so the tunnel can expose it. Per-user isolation: files
+ * for one user never share a directory with another's. Returns the absolute
+ * path. The physical name is randomized (collision-proof) and is never used
+ * for resolution — the model only ever sees the logical buffer/history name.
+ */
+function _materializeRefToTemp(buffer, name, ownerKey) {
+  const dir = tempDirForOwner(ownerKey);
+  const safe = (name || 'ref').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const filePath = path.join(dir, `imgref_${crypto.randomBytes(8).toString('hex')}_${safe}`);
+  fs.writeFileSync(filePath, buffer);
+  return filePath;
+}
+
+/**
+ * Resolve a list of reference-image filenames into public HTTPS URLs the
+ * model (server-side xAI) can fetch. Validates count, extension, and size.
+ *
+ * Returns { ok:true, urls:[], names:[] } or { ok:false, reason }.
+ */
+function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
+  if (refList.length > max) {
+    return { ok: false, reason: `Too many reference images (${refList.length}). Max allowed: ${max}.` };
+  }
+  // Per-user temp subdir so buffer-materialized references stay isolated.
+  const ownerKey = workspaceIdToSlug(resolveWorkspaceId(userCtx)) || resolveStorageId(userCtx) || null;
+  const urls = [];
+  const names = [];
+  for (const raw of refList) {
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return { ok: false, reason: 'Each reference image must be a non-empty filename.' };
+    }
+    const found = _findReferenceFile(raw, userCtx, responseCtx);
+    if (!found) {
+      return { ok: false, reason: `Reference image "${raw}" not found in the current attachments or chat history.` };
+    }
+
+    const ext = path.extname(found.name || raw).toLowerCase();
+    if (!REF_IMAGE_EXTS.has(ext)) {
+      return {
+        ok: false,
+        reason: `Reference "${raw}" is not a supported image type (allowed: ${[...REF_IMAGE_EXTS].join(', ')}).`,
+      };
+    }
+
+    let diskPath = found.filePath || null;
+    if (!diskPath) {
+      if (found.buffer.length === 0) return { ok: false, reason: `Reference "${raw}" is empty.` };
+      if (found.buffer.length > MAX_REF_IMAGE_BYTES) {
+        return { ok: false, reason: `Reference "${raw}" exceeds the 8 MB limit.` };
+      }
+      try {
+        diskPath = _materializeRefToTemp(found.buffer, found.name, ownerKey);
+      } catch (err) {
+        return { ok: false, reason: `Cannot stage reference "${raw}": ${err.message}` };
+      }
+    } else {
+      try {
+        const sz = fs.statSync(diskPath).size;
+        if (sz === 0) return { ok: false, reason: `Reference "${raw}" is empty.` };
+        if (sz > MAX_REF_IMAGE_BYTES) return { ok: false, reason: `Reference "${raw}" exceeds the 8 MB limit.` };
+      } catch (err) {
+        return { ok: false, reason: `Cannot read reference "${raw}": ${err.message}` };
+      }
+    }
+
+    let urlInfo;
+    try {
+      urlInfo = getPublicAttachmentUrl(diskPath, found.name || `ref${ext}`, {
+        kind: 'temp',
+        mimetype: REF_IMAGE_MIME[ext],
+      });
+    } catch (err) {
+      return { ok: false, reason: `Cannot expose reference "${raw}" via the attachment tunnel: ${err.message}` };
+    }
+    urls.push(urlInfo.url);
+    names.push(found.name || raw);
+  }
+  return { ok: true, urls, names };
+}
+
+/**
  * Spawn `bash bridge/imagine.sh <args>` and collect stdout/stderr.
  * Returns { code, stdout, stderr } on completion, throws on timeout / spawn error.
  *
  * No shell is used (only `bash` as the script interpreter, with the script
  * path and arguments passed positionally) — prompts and ratios cannot be
- * misinterpreted as shell metacharacters.
+ * misinterpreted as shell metacharacters. Reference-image URLs travel via the
+ * IMAGINE_REF_URLS env var (extraEnv) so they never touch argv parsing.
  */
-function _runBridge(args, timeoutMs) {
+function _runBridge(args, timeoutMs, extraEnv) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [BRIDGE_SCRIPT, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     });
 
     let stdout = '';
@@ -157,7 +347,7 @@ async function _downloadToBuffer(url) {
 /**
  * @param {object} args
  * @param {string} args.prompt
- * @param {string[]} [args.reference_images]   Currently unsupported by the bridge.
+ * @param {string[]} [args.reference_images]   Filenames (history / current-turn buffer).
  * @param {string} [args.aspect_ratio]
  * @param {object} userCtx
  * @param {object} responseCtx
@@ -181,23 +371,29 @@ async function generateImage(args, userCtx, responseCtx) {
     };
   }
 
+  if (!resolveStorageId(userCtx)) {
+    return { success: false, error: 'Could not resolve storage ID for this context.' };
+  }
+
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
-  if (refList.length > 0) {
-    return {
-      success: false,
-      error: 'reference_images are not supported by the current Hermes bridge. '
-        + 'Retry without reference_images, describing the desired look in the prompt instead.',
-    };
+  const refs = _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_IMAGE, userCtx, responseCtx);
+  if (!refs.ok) {
+    return { success: false, error: refs.reason };
   }
 
   const cliArgs = ['image', prompt];
   if (aspect !== null) cliArgs.push(aspect);
 
-  log.info(`🎨 generate_image: aspect=${aspect || 'omitted'}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
+  const refClause = _buildRefClause('image', refs.names, refs.urls);
+  const extraEnv = refs.urls.length > 0
+    ? { IMAGINE_REF_CLAUSE: refClause, IMAGINE_REF_URLS: refs.urls.join(' ') }
+    : undefined;
+
+  log.info(`🎨 generate_image: aspect=${aspect || 'omitted'}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
 
   let result;
   try {
-    result = await _runBridge(cliArgs, IMAGE_TIMEOUT_MS);
+    result = await _runBridge(cliArgs, IMAGE_TIMEOUT_MS, extraEnv);
   } catch (err) {
     await notifyAdmin('GenerateImage', err.message);
     return { success: false, error: `Image generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -230,20 +426,26 @@ async function generateImage(args, userCtx, responseCtx) {
   const baseName = sanitizeFilename(prompt.slice(0, 30), 30) || 'image';
   // hermes -z most often emits .jpeg URLs; preserve extension when present.
   const urlExt = (url.match(/\.(png|jpe?g|webp|gif)(?:\?|$)/i) || [])[1] || 'png';
-  const filename = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
+  const desiredName = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
   const mimetype = urlExt.toLowerCase() === 'png' ? 'image/png'
     : urlExt.toLowerCase().startsWith('jp') ? 'image/jpeg'
       : urlExt.toLowerCase() === 'webp' ? 'image/webp'
         : urlExt.toLowerCase() === 'gif' ? 'image/gif'
           : 'application/octet-stream';
 
-  if (!Array.isArray(responseCtx.attachments)) responseCtx.attachments = [];
-  responseCtx.attachments.push({ name: filename, buffer, mimetype });
+  // Dedup against the buffer and learn the FINAL name so we report the exact
+  // name the model must use to reference this image later.
+  const filename = pushBufferAttachment(responseCtx, { name: desiredName, buffer, mimetype });
 
   const truncNote = truncated ? ' (prompt was truncated)' : '';
+  const refNote = refs.names.length > 0
+    ? ` Used ${refs.names.length} reference image(s): ${refs.names.join(', ')}.`
+    : '';
   return {
     success: true,
-    message: `Image generated successfully and pushed to the delivery buffer.${truncNote}`,
+    filename,
+    message: `Image generated successfully and pushed to the delivery buffer as "${filename}". `
+      + `You can reuse this filename as a reference_image in a later generate_image/generate_video call.${refNote}${truncNote}`,
   };
 }
 
@@ -252,7 +454,7 @@ async function generateImage(args, userCtx, responseCtx) {
 /**
  * @param {object} args
  * @param {string} args.prompt
- * @param {string[]} [args.reference_images]   Currently unsupported by the bridge.
+ * @param {string[]} [args.reference_images]   Filenames (history / current-turn buffer).
  * @param {string} [args.aspect_ratio]
  * @param {object} userCtx
  * @param {object} responseCtx
@@ -274,23 +476,29 @@ async function generateVideo(args, userCtx, responseCtx) {
     };
   }
 
+  if (!resolveStorageId(userCtx)) {
+    return { success: false, error: 'Could not resolve storage ID for this context.' };
+  }
+
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
-  if (refList.length > 0) {
-    return {
-      success: false,
-      error: 'reference_images are not supported by the current Hermes bridge. '
-        + 'Retry without reference_images, describing the desired look / characters / framing in the prompt instead.',
-    };
+  const refs = _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_VIDEO, userCtx, responseCtx);
+  if (!refs.ok) {
+    return { success: false, error: refs.reason };
   }
 
   // Fixed knobs (matches the original Step 7 contract): 10 seconds, 720p.
   const cliArgs = ['video', prompt, aspect, '10', '720p'];
 
-  log.info(`🎬 generate_video: aspect=${aspect}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
+  const refClause = _buildRefClause('video', refs.names, refs.urls);
+  const extraEnv = refs.urls.length > 0
+    ? { IMAGINE_REF_CLAUSE: refClause, IMAGINE_REF_URLS: refs.urls.join(' ') }
+    : undefined;
+
+  log.info(`🎬 generate_video: aspect=${aspect}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
 
   let result;
   try {
-    result = await _runBridge(cliArgs, VIDEO_TIMEOUT_MS);
+    result = await _runBridge(cliArgs, VIDEO_TIMEOUT_MS, extraEnv);
   } catch (err) {
     await notifyAdmin('GenerateVideo', err.message);
     return { success: false, error: `Video generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -322,18 +530,21 @@ async function generateVideo(args, userCtx, responseCtx) {
 
   const baseName = sanitizeFilename(prompt.slice(0, 30), 30) || 'video';
   const urlExt = (url.match(/\.(mp4|webm|mov)(?:\?|$)/i) || [])[1] || 'mp4';
-  const filename = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
+  const desiredName = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
   const mimetype = urlExt.toLowerCase() === 'webm' ? 'video/webm'
     : urlExt.toLowerCase() === 'mov' ? 'video/quicktime'
       : 'video/mp4';
 
-  if (!Array.isArray(responseCtx.attachments)) responseCtx.attachments = [];
-  responseCtx.attachments.push({ name: filename, buffer, mimetype });
+  const filename = pushBufferAttachment(responseCtx, { name: desiredName, buffer, mimetype });
 
   const truncNote = truncated ? ' (prompt was truncated)' : '';
+  const refNote = refs.names.length > 0
+    ? ` Used ${refs.names.length} reference image(s): ${refs.names.join(', ')}.`
+    : '';
   return {
     success: true,
-    message: `Video generated successfully (10s, 720p) and pushed to the delivery buffer.${truncNote}`,
+    filename,
+    message: `Video generated successfully (10s, 720p) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`,
   };
 }
 

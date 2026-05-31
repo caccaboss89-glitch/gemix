@@ -8,7 +8,7 @@ const COOLDOWN_MS = 5 * 60 * 1000;
 
 // Standardized message suffix for AI tool errors when admin is already notified.
 // This prevents the AI from redundantly calling bug_report.
-const ADMIN_NOTIFIED_SUFFIX = ' [Admin has been notified. DO NOT use bug_report for this error. Explain the problem to the user in your final text response.]';
+const ADMIN_NOTIFIED_SUFFIX = ' [Admin has been notified. DO NOT use bug_report for this error. In your final text response, explain the problem to the user and tell them the admin has already been notified.]';
 
 /**
  * Set the WhatsApp dedicated client reference for admin notifications.

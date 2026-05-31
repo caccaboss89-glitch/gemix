@@ -188,7 +188,7 @@ function listWorkspaceStates() {
       const raw = JSON.parse(fs2.readFileSync(stateFile, 'utf-8'));
       out.push({
         workspaceSlug: e.name,
-        workspaceId: typeof raw && raw.workspaceId === 'string' ? raw.workspaceId : null,
+        workspaceId: raw && typeof raw.workspaceId === 'string' ? raw.workspaceId : null,
         metaDir,
         workspaceDir: path.join(metaDir, 'build_workspace'),
         lastActivityAt: Number(raw && raw.lastActivityAt) || 0,

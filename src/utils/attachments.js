@@ -9,10 +9,74 @@
 // "read-on-demand" logic so platform senders don't have to care.
 
 const fs = require('fs');
+const path = require('path');
 
 /**
  * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string }} Attachment
  */
+
+/**
+ * Compute a buffer-unique filename. If `rawName`'s basename is already taken
+ * by another attachment in `existing`, append "(1)", "(2)"… before the
+ * extension until free. Returns the basename only (paths are never stored as
+ * the logical name).
+ *
+ * @param {Attachment[]} existing
+ * @param {string} rawName
+ * @returns {string}
+ */
+function uniqueAttachmentName(existing, rawName) {
+  const base = path.basename(String(rawName || 'file').trim()) || 'file';
+  const taken = new Set(
+    (Array.isArray(existing) ? existing : [])
+      .map(a => (a && a.name ? path.basename(a.name) : null))
+      .filter(Boolean),
+  );
+  if (!taken.has(base)) return base;
+  const ext = path.extname(base);
+  const stem = base.slice(0, base.length - ext.length);
+  let i = 1;
+  let candidate;
+  do {
+    candidate = `${stem}(${i})${ext}`;
+    i++;
+  } while (taken.has(candidate) && i < 100000);
+  return candidate;
+}
+
+/**
+ * Push an attachment into `responseCtx.attachments`, guaranteeing its logical
+ * `name` is unique within the buffer (renaming to "name(1).ext" on clash).
+ * Returns the FINAL name actually stored so the caller can report it to the
+ * model in the same tool result — the model addresses files by name, so it
+ * must learn the post-dedup name immediately (never "renamed afterwards",
+ * which would otherwise pollute the conversation).
+ *
+ * Every name-addressed feature relies on buffer names being collision-free:
+ *   - reference_images resolution in generate_image / generate_video,
+ *   - attachments[] filename matching handed to the build sub-agent,
+ *   - the model citing searched / generated images by name in later turns.
+ *
+ * Note: this dedups only against the in-memory buffer. The temp-disk and the
+ * public tunnel are already collision-proof on their own (random file
+ * prefixes + unique per-file tokens), so they need no coordination here.
+ *
+ * @param {object} responseCtx
+ * @param {Attachment} att - { name, mimetype, buffer?|filePath? }
+ * @returns {string} the final, buffer-unique name stored
+ */
+function pushBufferAttachment(responseCtx, att) {
+  if (!responseCtx || typeof responseCtx !== 'object') {
+    throw new Error('pushBufferAttachment: responseCtx is required');
+  }
+  if (!att || !att.name) {
+    throw new Error('pushBufferAttachment: attachment with a name is required');
+  }
+  if (!Array.isArray(responseCtx.attachments)) responseCtx.attachments = [];
+  const finalName = uniqueAttachmentName(responseCtx.attachments, att.name);
+  responseCtx.attachments.push({ ...att, name: finalName });
+  return finalName;
+}
 
 function isValidAttachment(att) {
   if (!att || typeof att !== 'object') return false;
@@ -85,6 +149,8 @@ function toDiscordAttachmentArgs(att) {
 
 module.exports = {
   isValidAttachment,
+  uniqueAttachmentName,
+  pushBufferAttachment,
   readAttachmentBuffer,
   attachmentSize,
   toEmailAttachment,

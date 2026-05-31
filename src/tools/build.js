@@ -38,8 +38,9 @@ const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
 const { runBuildAgent } = require('../ai/buildAgent');
 const { getUserHistoryPaths } = require('../utils/historySync');
 const { resolveStorageId } = require('../utils/userPaths');
-const { getPublicAttachmentUrl, TEMP_DIR } = require('../utils/tempFileServer');
+const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
 const { sanitizeFilename } = require('../utils/text');
+const { pushBufferAttachment } = require('../utils/attachments');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('BuildTool');
@@ -142,30 +143,32 @@ function _attachDelivered(workspaceId, delivered, responseCtx) {
   if (!Array.isArray(delivered) || delivered.length === 0) return { attached, missing };
   if (!responseCtx || !Array.isArray(responseCtx.attachments)) return { attached, missing };
 
-  const existingByName = new Set(
-    responseCtx.attachments
-      .map(a => a && a.name ? path.basename(a.name) : null)
-      .filter(Boolean)
-  );
+  // Guard against the agent listing the same workspace file twice in one
+  // <DELIVER> — we deliver each distinct workspace file at most once.
+  const seenSources = new Set();
 
   for (const raw of delivered) {
     const cleaned = sanitizeFilename(path.basename(String(raw || '').trim()));
     if (!cleaned) continue;
+    if (seenSources.has(cleaned)) continue;
+    seenSources.add(cleaned);
     const abs = resolveInsideWorkspace(workspaceId, cleaned);
     if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
       missing.push(cleaned);
       continue;
     }
-    if (existingByName.has(cleaned)) continue;
     const ext = path.extname(cleaned).toLowerCase();
     const mimetype = _mimeFromExt(ext);
-    responseCtx.attachments.push({
+    // Dedup against the buffer (rename to name(1).ext on clash) so a generated
+    // asset already in the buffer never shadows a build deliverable. The model
+    // learns the final name via the returned `attached` list (build reports it
+    // as `delivered`).
+    const finalName = pushBufferAttachment(responseCtx, {
       name: cleaned,
       filePath: abs,
       mimetype,
     });
-    existingByName.add(cleaned);
-    attached.push(cleaned);
+    attached.push(finalName);
   }
   return { attached, missing };
 }

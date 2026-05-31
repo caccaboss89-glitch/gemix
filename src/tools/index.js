@@ -18,6 +18,7 @@ const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
 const { toggleReleaseNotify } = require('./releaseNotify');
 const { buildTool } = require('./build');
+const { pushBufferAttachment } = require('../utils/attachments');
 const { musicCreator } = require('./musicCreator');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
@@ -214,15 +215,24 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           responseCtx.researchStats.xPosts += searchResult._stats.xPosts;
         }
         // Push any images the research returned to the delivery buffer, in the
-        // same order they are referenced in the report text.
+        // same order they are referenced in the report text. Dedup against the
+        // buffer so the names stay collision-free; if any image was renamed,
+        // rewrite images_note so the model is told the exact final names (it
+        // addresses them by name for reference_images / build attachments).
         if (Array.isArray(searchResult._images) && searchResult._images.length > 0) {
+          const finalNames = [];
           for (const img of searchResult._images) {
-            responseCtx.attachments.push({
+            const finalName = pushBufferAttachment(responseCtx, {
               name: img.name,
               buffer: img.buffer,
               mimetype: img.mimetype,
             });
+            finalNames.push(finalName);
           }
+          searchResult.image_filenames = finalNames;
+          searchResult.images_note = `${finalNames.length} cited image(s) were added to the delivery buffer, in the order referenced: `
+            + `${finalNames.join(', ')}. Refer to them naturally; do not paste URLs or Markdown image syntax. `
+            + `You may pass any of these filenames as a reference_image to generate_image/generate_video.`;
         }
         // Strip internal fields before returning to the AI (not part of the schema).
         const { _stats: _ignored, _images: _ignored2, ...searchResultClean } = searchResult;
@@ -463,12 +473,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             legalSignature: args.legalSignature,
           });
           const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
-          responseCtx.attachments.push({
+          const formalFinalName = pushBufferAttachment(responseCtx, {
             name: formalFileName,
             buffer: formalPdfBuffer,
             mimetype: 'application/pdf',
           });
-          result = { success: true, message: `Formal request PDF "${args.title}" generated successfully.` };
+          result = { success: true, message: `Formal request PDF "${formalFinalName}" generated successfully.` };
         } catch (err) {
           await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
           result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -639,7 +649,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         }
         const musicResult = await musicCreator(args.prompt, userCtx);
         if (musicResult.attachments && musicResult.attachments.length > 0) {
-          responseCtx.attachments.push(...musicResult.attachments);
+          for (const att of musicResult.attachments) {
+            pushBufferAttachment(responseCtx, att);
+          }
         }
         result = musicResult.toolResult;
         break;

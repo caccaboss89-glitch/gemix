@@ -29,7 +29,7 @@ const {
 } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
 const { prepareInputFilesInMessages } = require('./utils/inputFileBuilder');
-const { resolveWorkspaceId } = require('./utils/workspaceId');
+const { resolveWorkspaceId, workspaceIdToSlug } = require('./utils/workspaceId');
 const { touchActivity } = require('./utils/buildState');
 const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
 const { readMemory } = require('./utils/memoryStore');
@@ -280,7 +280,9 @@ async function handleMessage(ctx) {
     // the public attachment tunnel. xAI fetches them server-side and runs
     // OCR / STT / frame extraction natively.
     try {
-      await prepareInputFilesInMessages(messages);
+      await prepareInputFilesInMessages(messages, {
+        ownerKey: workspaceIdToSlug(workspaceId) || resolveStorageId(ctx) || null,
+      });
     } catch (e) {
       log.warn(`prepareInputFilesInMessages failed: ${e.message}`);
     }
@@ -512,12 +514,21 @@ async function handleMessage(ctx) {
     // ourselves and, when the cap is hit, make ONE more call with
     // tool_choice:'none' — the documented way to force a text-only answer —
     // so the model wraps up using everything gathered so far instead of
-    // discarding the work behind a canned error.
+    // discarding the work behind a canned error. Same pattern as the build
+    // sub-agent and the research tool: the round counter is never shown to the
+    // model; we just nudge it once here to close out cleanly.
     log.warn(`   ⚠️ Tool-round budget (${MAX_TOOL_ROUNDS}) exhausted — forcing a final answer (tool_choice:none)`);
     let wrapUpText = '';
     try {
       messages[0].content = buildSystemPrompt(ctx);
       const noTitleTools = tools.filter(t => t.function?.name !== SET_CONVERSATION_TITLE_TOOL);
+      messages.push({
+        role: 'user',
+        content:
+          'SYSTEM: You can no longer run tools for this turn. Reply now in natural language: ' +
+          'answer the user with everything you gathered, and if the task is not fully complete ' +
+          'tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.',
+      });
       const { message: finalMsg, model: finalModel } = await callAI(messages, noTitleTools, { toolChoice: 'none' });
       if (finalModel) lastModelUsed = finalModel;
       wrapUpText = cleanAssistantResponse(finalMsg.content || '');

@@ -70,6 +70,30 @@ function generateToken() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+/**
+ * Sanitize an owner key (workspace slug, user id, …) into a single safe path
+ * segment so per-user temp files can live in their own subdir under TEMP_DIR.
+ * Returns null for empty/invalid input (caller falls back to TEMP_DIR root).
+ */
+function _ownerSegment(ownerKey) {
+  if (typeof ownerKey !== 'string') return null;
+  const seg = ownerKey.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 80);
+  return seg || null;
+}
+
+/**
+ * Resolve the directory a temp file should be written to. With an ownerKey
+ * the file lands in TEMP_DIR/<owner>/ (per-user physical isolation); without
+ * one it stays in TEMP_DIR root (back-compat for callers with no user ctx).
+ * The directory is created on demand.
+ */
+function tempDirForOwner(ownerKey) {
+  const seg = _ownerSegment(ownerKey);
+  const dir = seg ? path.join(TEMP_DIR, seg) : TEMP_DIR;
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function _isAllowedPath(target) {
   try {
     const absTarget = path.resolve(target).toLowerCase().replace(/\\/g, '/');
@@ -298,14 +322,33 @@ function cleanupExpiredFiles() {
   if (fs.existsSync(TEMP_DIR)) {
     try {
       const orphanThresholdMs = TUNNEL_TOKEN_TTL_HISTORY_MS;
-      const files = fs.readdirSync(TEMP_DIR);
-      for (const file of files) {
-        const filePath = path.join(TEMP_DIR, file);
+      // Recurse one level deep: temp files now live either in TEMP_DIR root
+      // (legacy callers) or in TEMP_DIR/<owner>/ (per-user isolation). Sweep
+      // both, and drop owner subdirs once they go empty.
+      const entries = fs.readdirSync(TEMP_DIR, { withFileTypes: true });
+      for (const ent of entries) {
+        const entPath = path.join(TEMP_DIR, ent.name);
         try {
-          const stat = fs.statSync(filePath);
-          if (stat.isFile() && now - stat.mtimeMs > orphanThresholdMs) {
-            fs.unlinkSync(filePath);
-            cleanedCount++;
+          if (ent.isDirectory()) {
+            const inner = fs.readdirSync(entPath);
+            for (const f of inner) {
+              const fp = path.join(entPath, f);
+              try {
+                const st = fs.statSync(fp);
+                if (st.isFile() && now - st.mtimeMs > orphanThresholdMs) {
+                  fs.unlinkSync(fp);
+                  cleanedCount++;
+                }
+              } catch { }
+            }
+            // Remove the owner dir if it is now empty.
+            try { if (fs.readdirSync(entPath).length === 0) fs.rmdirSync(entPath); } catch { }
+          } else if (ent.isFile()) {
+            const st = fs.statSync(entPath);
+            if (now - st.mtimeMs > orphanThresholdMs) {
+              fs.unlinkSync(entPath);
+              cleanedCount++;
+            }
           }
         } catch { }
       }
@@ -531,6 +574,7 @@ module.exports = {
   stopTempFileServer,
   registerTempFile,
   getPublicAttachmentUrl,
+  tempDirForOwner,
   getTempFileStats,
   cleanupExpiredFiles,
   TEMP_DIR,

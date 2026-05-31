@@ -105,9 +105,10 @@ const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
 const TOOL_WEB_X_SEARCH = makeTool({
   name: 'web_x_search',
   description:
-    'Research the web and X/Twitter (and optionally images) for external or up-to-date information, fact-checking, or when images from the web are wanted. '
-    + 'By default a single fast model handles it. Set full_team=true only for deep, multi-faceted research that needs the multi-agent team. '
-    + 'Do not call this tool again for the same query.',
+    'Provides a research prompt to a specialized agent (or multi-agent team) that performs web and X searches. '
+    + 'Use it for external/up-to-date information, fact-checking, or when web images are needed. '
+    + 'By default a single fast model handles the request. Set full_team=true only for deep, multi-faceted research. '
+    + 'Do not call multiple times in the same round.',
   properties: {
     prompt: {
       type: 'string',
@@ -115,11 +116,11 @@ const TOOL_WEB_X_SEARCH = makeTool({
     },
     full_team: {
       type: 'boolean',
-      description: 'true → deep multi-agent team (slower, thorough). Omit for the fast single-model search (default).',
+      description: 'Set true for 4x multi-agent team (more deep); omit for fast single-model search (default).',
     },
     search_images: {
       type: 'boolean',
-      description: 'Set true when you want images from the web (asked for, or useful for the answer): relevant images are added to the delivery buffer. Omit for text-only research.',
+      description: 'Set true for include relevant images from the web (if requested or useful). Images are added to the delivery buffer. Omit for text-only research.',
     },
   },
   required: ['prompt'],
@@ -127,7 +128,7 @@ const TOOL_WEB_X_SEARCH = makeTool({
 
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
-  description: 'Read the content of a file from chat history (text/code, images, audio, video, PDF).',
+  description: 'Read the content of a file from chat history (only for text/code, images, audio, video, PDF).',
   properties: {
     path: { type: 'string', description: 'Filename from chat history (e.g. "report.pdf").' },
   },
@@ -220,18 +221,28 @@ const TOOL_MUSIC_CREATOR = makeTool({
 //
 // Available to all users (active or not) on every platform except Discord.
 //
-// IMPORTANT: the current Hermes bridge (CLI-based, see bridge/imagine.sh)
-// does NOT support reference images. The model must rely entirely on the
-// textual prompt to describe the desired look. If/when reference image
-// support is restored, the schema can grow back a `reference_images` field.
+// Reference images are supported: pass filenames already visible to the model
+// — a file the user just sent ([Attachment: name] tag), a file from chat
+// history, an image returned by web_x_search (search_images=true; its
+// image_filenames are reported), or an image produced by an earlier
+// generate_image call (its filename is reported in the result). The backend
+// resolves each filename (current-turn delivery buffer first, then chat
+// history), exposes it through the public attachment tunnel, and hands the
+// URL to xAI, which fetches it server-side and uses it as a visual reference
+// (image-to-image / image-to-video / reference-to-video).
 
 const TOOL_GENERATE_IMAGE = makeTool({
   name: 'generate_image',
-  description: 'Generate an image from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
+  description: 'Generate an image from a textual prompt, optionally guided by reference images. Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Image description: subject, style, lighting, mood, composition.',
+      description: 'Image description: subject, style, lighting, mood, composition. If you pass reference images, mention them here by filename (e.g. "place the subject of photo.jpg into a beach scene").',
+    },
+    reference_images: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Up to 3 image filenames WITH extension (e.g. "photo.jpg"). Sources: a file the user just sent, a chat-history file, a web_x_search result image, or a previously generated image. The exact filename must already appear in the conversation. Omit for pure text-to-image.',
     },
     aspect_ratio: {
       type: 'string',
@@ -244,11 +255,16 @@ const TOOL_GENERATE_IMAGE = makeTool({
 
 const TOOL_GENERATE_VIDEO = makeTool({
   name: 'generate_video',
-  description: 'Generate a 10-second 720p video from a textual prompt. Result is pushed to the delivery buffer. Reference images are not supported.',
+  description: 'Generate a 10-second 720p video from a textual prompt, optionally guided by reference images. Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Video description: subject, action, camera movement, style, lighting.',
+      description: 'Video description: subject, action, camera movement, style, lighting. If you pass reference images, mention them here by filename.',
+    },
+    reference_images: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Up to 7 image filenames WITH extension (e.g. "photo.jpg"). 1 image = animate that exact image (image-to-video); 2–7 = keep those subjects/style consistent (reference-to-video). Sources: a file the user just sent, a chat-history file, a web_x_search result image, or a previously generated image. The exact filename must already appear in the conversation. Omit for pure text-to-video.',
     },
     aspect_ratio: {
       type: 'string',
@@ -272,7 +288,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   if (includeRecipientName || includeRecipientPhone) {
     properties.includeAttachments = {
       type: 'boolean',
-      description: 'Forward buffered files together with the voice (default true). Ignored when the recipient is omitted or is the current user.',
+      description: 'Forward buffered files together with the voice (default true). Ignored when the recipient is omitted or is the current chat.',
     };
     const recipientProps = {};
     if (includeRecipientName) {
@@ -296,7 +312,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Delivery tool — send a voice message. Without "recipient" (or with recipient=current user) replies in the current chat; with a different recipient, sends to that recipient.',
+    description: 'Delivery tool — send a voice message. Without "recipient" replies in the current chat; with a different recipient, sends to that recipient.',
     properties,
     required: ['text'],
   });
@@ -333,7 +349,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — send a WhatsApp message to a specific recipient (never the current user; never use for intermediate updates).',
+    description: 'Delivery tool — send a WhatsApp message to a specific recipient (never the current chat; never use for intermediate updates).',
     properties,
     required: isAdmin ? ['message'] : ['recipient', 'message'],
   });
@@ -379,35 +395,39 @@ function buildEmailTool(isAdmin) {
 
 function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   const waProps = {};
+
   if (isWhatsAppGroup) {
     waProps.toGroup = {
       type: 'boolean',
-      description: 'Send to current group',
+      description: 'Send this reminder to the current group.',
     };
   }
+
   waProps.toPrivate = {
     type: 'boolean',
-    description: 'Send privately to the user',
+    description: 'Send this reminder as a private message.',
   };
 
   const recipientWaProps = {};
   if (isActiveMember) {
     recipientWaProps.name = {
       type: 'string',
-      description: 'Recipient member name',
+      description: 'Active member name.',
     };
   }
   if (isAdmin) {
     recipientWaProps.phone = {
       type: 'string',
-      description: 'Phone number for non-member recipient',
+      description: 'Phone number with country code (e.g. +393XXXXXXXXX).',
     };
   }
 
   if (Object.keys(recipientWaProps).length > 0) {
     waProps.recipient = {
       type: 'object',
-      description: 'Recipient',
+      description: isAdmin
+        ? 'Recipient (name for active members or phone for external).'
+        : 'Active member name to remind.',
       properties: recipientWaProps,
     };
   }
@@ -415,23 +435,25 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   const taskItemProps = {
     content: {
       type: 'string',
-      description: 'Text to send directly to the user at the scheduled date/time.',
+      description: 'The reminder message to deliver.',
     },
     scheduledAt: {
       type: 'string',
-      description: 'Date and time in ISO 8601 without timezone offset (e.g. 2026-04-17T16:30:00).',
+      description: 'Execution time in ISO 8601 (e.g. 2026-06-05T14:30:00). System uses the correct timezone.',
     },
     whatsapp: {
       type: 'object',
-      description: 'WhatsApp destination',
+      description: isWhatsAppGroup
+        ? 'Where to send. Omit = current group. Use toPrivate + recipient to send privately.'
+        : 'Where to send. Omit = current user. Use toPrivate + recipient to send to someone else.',
       properties: waProps,
     },
     recurrence: {
       type: 'object',
-      description: 'Optional recurrence (scheduledAt=first execution).',
+      description: 'Optional recurrence settings.',
       properties: {
-        freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'], description: 'Frequency' },
-        endAt: { type: 'string', description: 'Date and time in ISO 8601 of the last allowed execution (inclusive) without timezone offset.' },
+        freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'] },
+        endAt: { type: 'string', description: 'End date (ISO 8601).' },
       },
       required: ['freq', 'endAt'],
     },
@@ -440,10 +462,10 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Schedule reminders/tasks (one-time or recurring) for user, other active members (by name), or contacts (by phone number). Not use timezone offset, system will process it with the user\'s correct timezone.'
-      : (isActiveMember
-        ? 'Schedule reminders/tasks (one-time or recurring) for user or other active members (by name). Not use timezone offset, system will process it with the user\'s correct timezone.'
-        : 'Schedule personal reminders and future tasks (one-time or recurring) for user. Not use timezone offset, system will process it with the user\'s correct timezone.'),
+      ? 'Schedule reminders for current chat, other active members or external contacts. To remind multiple people: one task per person with its own whatsapp.recipient.'
+      : isActiveMember
+        ? 'Schedule reminders for current chat or other active members. To remind multiple people: one task per person with its own whatsapp.recipient.'
+        : 'Schedule personal reminders for current chat.',
     properties: {
       tasks: {
         type: 'array',

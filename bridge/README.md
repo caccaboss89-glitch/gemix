@@ -43,6 +43,23 @@ bridge/imagine.sh image "<prompt>" [aspect_ratio]
 bridge/imagine.sh video "<prompt>" [aspect_ratio] [duration_s] [resolution]
 ```
 
+**Reference images** (image-to-image / image-to-video / reference-to-video):
+the caller (`imagineGenerator.js`) resolves the requested filenames, exposes
+them through the public attachment tunnel, and passes two env vars:
+
+- `IMAGINE_REF_CLAUSE` — a ready-made natural-language sentence the wrapper
+  appends verbatim to the prompt. It pairs each reference as
+  `"<filename>" (<public_url>)` and encodes the intent: image gen → guide
+  subject/style/composition; video gen with 1 ref → animate that exact image
+  (image-to-video); video gen with 2-7 refs → keep subjects/style consistent
+  (reference-to-video). All the semantics live in the JS caller, not here.
+- `IMAGINE_REF_URLS` — the same URLs, space-separated, used ONLY to strip any
+  echoed reference URLs out of hermes' stdout before extracting the result URL.
+
+The CLI cannot ingest binary inputs, but it does consume reference images
+mentioned as URLs (verified in production: `hermes -t video_gen -z 'Animate
+<https url>'` animates that image). xAI fetches each URL server-side.
+
 ### `tts.sh`
 
 Wraps `hermes -t tts -z` for xAI text-to-speech. Saves the audio to the
@@ -85,9 +102,10 @@ the single URL line.
 ## Notes / limitations
 
 - Runs only on the production Linux VPS (the only environment GemiX supports).
-- Reference images: not supported in this bridge (Hermes' `image_gen` /
-  `video_gen` toolsets don't accept binary inputs from the CLI). The JS
-  layer rejects `reference_images` with a clear error so the model knows
-  to retry without them or describe the reference in words.
+- Reference images: supported via env vars (`IMAGINE_REF_CLAUSE` + `IMAGINE_REF_URLS`
+  — see `imagine.sh` above). The CLI still can't take binary inputs directly, so
+  the bytes are exposed through the attachment tunnel and xAI fetches them
+  server-side from the URLs mentioned in the prompt.
 - The CLI is invoked with `spawn` (no shell), so prompts are safe regardless
-  of quoting / metacharacters.
+  of quoting / metacharacters. Reference URLs travel via the environment, never
+  argv, so they can't be split or misparsed.
