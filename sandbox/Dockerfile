@@ -48,14 +48,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=120
 
 WORKDIR /opt/sandbox
 COPY sandbox/requirements-sandbox.txt /opt/sandbox/requirements-sandbox.txt
-RUN pip install --no-cache-dir -r /opt/sandbox/requirements-sandbox.txt
+RUN pip install --no-cache-dir --retries 5 --timeout 120 -r /opt/sandbox/requirements-sandbox.txt
 
 # -- unoserver for LibreOffice field updates (TOC, indexes) ------------------
-RUN pip install --no-cache-dir unoserver
+RUN pip install --no-cache-dir --retries 5 --timeout 120 unoserver
 
 # -- Node.js + PptxGenJS (pptx skill: deck generation from templates) --------
 # Node is the engine the pptx templates run on. pptxgenjs is the only hard
