@@ -310,12 +310,15 @@ async function onDiscordMessage(msg) {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }
     } else if (isInlineableTextFile(att.name, att.contentType)) {
-      // Plain-text / source-code file - inline its content directly so the
-      // model sees it without a read_file roundtrip.
+      // Plain-text / source-code file on the current message: inline the content
+      // directly (as <FileContent>) so the model sees it without needing read_file.
+      // Attachments from the current message of this type are inlined as content;
+      // attachments appearing in history context use the [Attachment] tag.
       try {
         const buffer = await fetchBuffer();
         const inlinePart = buildInlineTextFilePart(att.name, buffer);
-        textBody = `${attachmentTag} ${inlinePart} ${textBody}`.trim();
+        const caption = textBody ? ` ${textBody}` : '';
+        textBody = `${inlinePart}${caption}`.trim();
       } catch {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }

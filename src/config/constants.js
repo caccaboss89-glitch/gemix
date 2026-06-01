@@ -22,7 +22,7 @@ const MAINTENANCE_RELEASE_NOTIFY_COMMAND = '/updates';
 module.exports = {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
 
-  // Maintenance mode (not remove "GemiX è temporaneamente in manutenzione")
+  // Maintenance mode
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY: true,
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
@@ -59,7 +59,7 @@ module.exports = {
   RESEARCH_MAX_TURNS: 10,
 
   // Build sub-agent sandbox container.
-  // Memory cap and idle TTL reused from the legacy sandbox config.
+  // Memory cap and idle TTL for the sandbox.
   SANDBOX_MEMORY_MB: 1536,
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
 
@@ -68,7 +68,7 @@ module.exports = {
   // gets a longer lease so the model can re-fetch a recently-attached file
   // across consecutive turns without us re-registering.
   // Temp items are short-lived buffers (one-shot generated images, audio
-  // freshly downloaded from WhatsApp) and use the legacy 1h TTL.
+  // freshly downloaded from WhatsApp) and use a 1h TTL.
   TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,
   TUNNEL_TOKEN_TTL_TEMP_MS: 60 * 60 * 1000,
 

@@ -3,7 +3,7 @@
 // Core periodic scheduler: executes due tasks from per-user/group JSON files,
 // advances recurring tasks, delivers via WhatsApp (using dedicated client),
 // and runs background sweeps (idle build workspaces, daily music wrap, release checks).
-// Uses per-file locking via taskStore to avoid races with user tool calls.
+// Uses per-file locking via taskStore.
 
 const fsPromises = require('fs').promises;
 const fs = require('fs');
@@ -75,8 +75,7 @@ function computeNextOccurrence(scheduledAtISO, freq) {
  * Periodic sweeper for the build sub-agent's per-workspace tree.
  * Wipes any workspace whose user has not interacted with GemiX for
  * BUILD_WORKSPACE_TTL_MS, and shuts down the matching sandbox container.
- * The metadata file (.build_state.json) is left in place so future activity
- * can restart from a known empty workspace.
+ * The metadata file (.build_state.json) is left in place.
  */
 async function _sweepBuildWorkspaces() {
   const states = listWorkspaceStates();
@@ -84,9 +83,7 @@ async function _sweepBuildWorkspaces() {
   for (const s of states) {
     if (!s.lastActivityAt) continue;
     if (now - s.lastActivityAt < BUILD_WORKSPACE_TTL_MS) continue;
-    // The workspaceId was persisted by touchActivity() - use it directly.
-    // We deliberately don't try to invert the filesystem slug because the
-    // sanitization step is lossy (e.g. multiple chars collapse to '_').
+
     const workspaceId = s.workspaceId;
     if (!workspaceId) {
       log.warn(`Skipping idle workspace ${s.workspaceSlug}: no workspaceId persisted`);
@@ -134,7 +131,7 @@ function startScheduler() {
     _sweepBuildWorkspaces().catch(err => log.error('Build workspace sweep error:', err));
   }, 60 * 60 * 1000);
   buildSweepInterval.unref();
-  // Run once at startup so any post-restart stale state is cleaned up.
+  // Initial sweep at startup.
   _sweepBuildWorkspaces().catch(err => log.error('Build workspace initial sweep error:', err));
 }
 
@@ -173,8 +170,7 @@ async function checkAndExecuteTasks() {
     const fileId = file.replace('.json', '');
     let tasksToExecute = [];
     try {
-      // modifyTaskFile holds the per-file lock for the entire read->execute->write cycle,
-      // preventing races between the scheduler and concurrent user tool calls.
+      // modifyTaskFile holds the per-file lock for the entire read->execute->write cycle.
       await modifyTaskFile(fileId, async (data) => {
         if (!data || !data.tasks || data.tasks.length === 0) return data;
 
@@ -217,11 +213,7 @@ async function checkAndExecuteTasks() {
       log.error(`Task file processing error ${fileId}:`, err.message);
     }
 
-    // NOTE (Concurrency & State Race): The per-file lock is released before executeTask runs.
-    // If executeTask takes longer than the scheduler interval (60s) to complete, a subsequent
-    // scheduler tick could theoretically re-evaluate the task file. However, since recurring tasks
-    // are rescheduled to their next occurrence inside the lock prior to execution, double execution
-    // is prevented unless the recurrence frequency itself is smaller than the execution duration.
+
     for (const task of tasksToExecute) {
       try {
         await executeTask(task);

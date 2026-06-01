@@ -6,11 +6,12 @@
 //   1. Resolve identity / memory / RAG context.
 //   2. Touch the per-user/group build workspace activity timestamp.
 //   3. Build the messages array: system prompt + chat history + the current
-//      user content. PDF/audio/video parts are rewritten on the fly into
-//      Responses-shape `input_file` URLs (xAI fetches them server-side).
+//      user content. Media parts (PDF, audio, video, plain text) are prepared
+//      as `input_file` parts (xAI fetches them server-side for native
+//      processing).
 //   4. Loop: call Grok (`/v1/responses`) - run any tool calls - repeat
-//      until the model returns plain text (final response) or we hit the
-//      round budget.
+//      until the model returns plain text (final response) or the round
+//      budget is reached.
 //   5. Apply the research-team badge (web/X sources) and ship the reply
 //      back to the platform.
 
@@ -216,10 +217,9 @@ async function handleMessage(ctx) {
       chatId: ctx.chatId || null,
       platform: ctx.platform,
       // First turn of a Discord thread: used to expose and force the
-      // set_conversation_title tool exactly once. "First" = GemiX has not
-      // replied in this thread yet (no assistant message in history). The
-      // current user message is already in the fetched history, so we can't
-      // rely on history being empty.
+      // set_conversation_title tool exactly once. "First" means no assistant
+      // message exists for the thread in the fetched history. The current
+      // user message is already included, so the flag is computed explicitly.
       isFirstTurn: ctx.platform === PLATFORM_DISCORD
         && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
@@ -241,8 +241,8 @@ async function handleMessage(ctx) {
     // Touch the workspace's last-activity timestamp on every main turn so
     // the TTL sweeper sees the user is alive across all platforms, not just
     // when they invoke `build`. The same workspaceId is also used to
-    // surface a <UserWorkspace> listing in the system prompt whenever the
-    // engineering sub-agent has files leftover from previous runs.
+    // surface a <UserWorkspace> listing in the system prompt when the
+    // engineering sub-agent has files in the workspace.
     const workspaceId = resolveWorkspaceId(ctx);
     if (workspaceId) {
       try { touchActivity(workspaceId); }
@@ -275,10 +275,10 @@ async function handleMessage(ctx) {
     messages.push({ role: 'user', content: ctx.content });
 
     // -- Media pre-processing (input_file URL conversion) --
-    // Walk all messages once and rewrite non-image media parts (PDF, audio,
-    // video, plain text) into Responses-ready `input_file` parts backed by
-    // the public attachment tunnel. xAI fetches them server-side and runs
-    // OCR / STT / frame extraction natively.
+    // Walk all messages once and convert non-image media parts (PDF, audio,
+    // video, plain text) into `input_file` parts backed by the public
+    // attachment tunnel. xAI fetches them server-side and runs OCR / STT /
+    // frame extraction natively.
     try {
       await prepareInputFilesInMessages(messages, {
         ownerKey: workspaceIdToSlug(workspaceId) || resolveStorageId(ctx) || null,
@@ -288,11 +288,10 @@ async function handleMessage(ctx) {
     }
 
     // ── Deterministic history prune ─────────────────────────────────────
-    // Every file in chat history that is no longer reachable from the chat
-    // buffer the AI is about to see gets removed (100%, no probabilistic
-    // GC). On Discord we additionally enforce a 30-day cap even on still-
-    // referenced files (replies can keep old attachments alive forever
-    // otherwise).
+    // Every file in chat history that is no longer referenced from the
+    // current chat buffer is removed (100%, no probabilistic GC). On
+    // Discord a 30-day cap is enforced on attachments even when still
+    // referenced in replies.
     try {
       const isDiscord = ctx.platform === PLATFORM_DISCORD;
       const historyUserId = resolveStorageId(ctx);
@@ -371,10 +370,9 @@ async function handleMessage(ctx) {
       refreshUserWorkspace();
       messages[0].content = buildSystemPrompt(ctx);
 
-      // First Discord turn: force the title-setter exactly once so the thread
-      // gets named deterministically (replaces the old <title> XML parsing).
-      // After it has run (or past round 1) we drop it from the tool list so
-      // the model can never rename the conversation later.
+      // On the first Discord turn the title-setter tool is forced exactly once
+      // via toolChoice so the thread gets named deterministically. It is
+      // excluded from the tool list in every other round.
       const callOpts = { maxTurns: MAX_TOOL_ROUNDS };
       let roundTools = tools;
       const forceTitle = rounds === 1 && userCtx.isFirstTurn && !responseCtx.discordTitle;
@@ -402,8 +400,8 @@ async function handleMessage(ctx) {
 
         const orderedCalls = orderToolCalls(assistantMsg.tool_calls);
         // Build a Set of tool names the AI is actually allowed to call this
-        // round. Any hallucinated tool name outside this set is rejected
-        // with a clear error instead of falling through to the executor.
+        // round. Any tool name outside this set is rejected with a clear
+        // error.
         const allowedToolNames = new Set(tools.map(t => t.function?.name).filter(Boolean));
 
         for (const tc of orderedCalls) {
@@ -426,9 +424,8 @@ async function handleMessage(ctx) {
           messages.push(await runToolCall(tc));
         }
 
-        // Token optimization: strip image previews from tool results the AI
-        // has already seen. The AI evaluated them in this round; keeping the
-        // base64 payload would only waste context in future rounds.
+        // Token optimization: image previews are stripped from tool results
+        // after the AI evaluates them in the current round.
         for (const msg of messages) {
           if (msg.role === 'tool' && Array.isArray(msg.content)) {
             if (msg._imagePreviewSeen) {
@@ -455,7 +452,7 @@ async function handleMessage(ctx) {
       }
 
       // ── Research badge ──────────────────────────────────────────────────
-      // Append "🌐: N sources. 𝕏: N posts." when web_x_search was used.
+      // Append "🌐: N sources. 𝕏: N posts." when web_x_search is used.
       // Only shown on text replies (not voice-only). Omit a section when its
       // count is zero so the badge stays minimal.
       if (text.trim() && !responseCtx.isVoiceOnly && responseCtx.researchStats) {
@@ -507,16 +504,8 @@ async function handleMessage(ctx) {
     }
 
     // ── Outer (client-side) loop budget exhausted ──────────────────────
-    // Note: xAI's `max_turns` only bounds SERVER-SIDE tool turns within a
-    // single request and resets whenever a client-side function tool is
-    // called (per xAI docs). It therefore cannot bound this outer loop, which
-    // counts how many times the model calls OUR function tools. So we cap it
-    // ourselves and, when the cap is hit, make ONE more call with
-    // tool_choice:'none' - the documented way to force a text-only answer -
-    // so the model wraps up using everything gathered so far instead of
-    // discarding the work behind a canned error. Same pattern as the build
-    // sub-agent and the research tool: the round counter is never shown to the
-    // model; we just nudge it once here to close out cleanly.
+    // When the tool round budget is reached, one final call is made with
+    // toolChoice set to 'none' to obtain a text-only response.
     log.warn(`   Tool-round budget (${MAX_TOOL_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
     let wrapUpText = '';
     try {
@@ -573,8 +562,8 @@ async function handleMessage(ctx) {
       modelUsed: null,
     };
   } finally {
-    // Drop per-call notification dedup entries so the next AI call can fire
-    // intermediate notifications again.
+    // Drop per-call notification dedup entries so subsequent AI calls can
+    // fire intermediate notifications.
     try { clearCallNotifications(ctx); } catch { /* best effort */ }
   }
 }

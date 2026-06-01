@@ -28,8 +28,15 @@
 
 ### 1.3 System Messages & History
 - Verify that scheduled reminders / wraps / releases appear with `[System]` tag **only in dedicated WA private 1:1 chats** (not personal admin WA, not groups, not Discord)
-- Test that the bot correctly ignores `[System]` messages in history (per system prompt rule)
+- Test that the bot correctly ignores `[System]` messages in history
 - Test release notifications (if a new release is available)
+
+### 1.4 Attachments & History
+- Send files (with and without caption/text) on WA dedicated + personal. Verify:
+  - No duplicate "current user message" turns in the prompt sent to the model.
+  - Pure attachment (no text) does not inject the filename as fake user text.
+  - Text files (.txt, .js, etc.) inline as `<FileContent path="...">` (no preceding `[Attachment]` tag for the *current* turn).
+  - `<FileContent>` does not include a `size="..."` attribute.
 
 ---
 

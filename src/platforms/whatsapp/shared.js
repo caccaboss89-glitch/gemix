@@ -49,6 +49,8 @@ function _waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
 }
 
+module.exports._waMessageKey = _waMessageKey; // for internal use by WA platform handlers (dedup)
+
 /**
  * Replace WhatsApp @<digits> mention tags inside a body with @<DisplayName>
  * so the AI can understand who is being mentioned.
@@ -130,13 +132,27 @@ async function _getRecentWhatsAppMessageIds(msg) {
 /**
  * Fetch last N messages from a WhatsApp chat and build history array.
  * Includes message context, media handling, and footer cleanup for GemiX messages.
+ *
  * @param {object} chat - whatsapp-web.js Chat object
  * @param {string} platform - Platform identifier ('whatsapp_dedicated' | 'whatsapp_personal')
+ * @param {string} userId - storage id for media sync
+ * @param {Set<string>|string|null} [excludeKeys] - WhatsApp message keys (from _waMessageKey) to exclude from history.
+ *   Current-batch messages are excluded from history (the user turn containing attachment tags/inline content is provided as the final turn instead).
  * @returns {Promise<Array>} Array of history messages with role ('user'|'assistant') and content
  */
-async function buildWhatsAppHistory(chat, platform, userId) {
+async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) {
   const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
-  const messages = rawMessages.slice(-MAX_HISTORY);
+  let messages = rawMessages.slice(-MAX_HISTORY);
+
+  // Exclude current message(s) being processed (they form the final user turn and are omitted from the history array)
+  if (excludeKeys) {
+    const toExclude = excludeKeys instanceof Set ? excludeKeys : new Set([excludeKeys]);
+    messages = messages.filter(m => {
+      const k = _waMessageKey(m);
+      return !k || !toExclude.has(k);
+    });
+  }
+
   const isGroup = Boolean(chat?.isGroup);
 
   const historyMessages = [];
@@ -164,10 +180,8 @@ async function buildWhatsAppHistory(chat, platform, userId) {
         }
       }
     } else {
-      // Dedicated WA: system/scheduled messages (wraps, releases, programmed, temp links etc)
-      // are ONLY ever sent via the dedicated account to private 1:1 member chats.
-      // Tag them [System] ONLY here (never on personal admin WA, never on groups, never on Discord).
-      // This lets the model distinguish bot's normal replies from proactive system events in history.
+      // [System] tagging (for scheduled/system messages) is limited to the dedicated
+      // platform in private (non-group) chats; personal platform uses GemiX/Account Owner.
       if (msg.fromMe) {
         const isPrivateDedicated = !isGroup;
         if (isPrivateDedicated && hasScheduledFooter(msg.body)) {
@@ -261,9 +275,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
     // For normal GemiX assistant replies: bare textContent (role assistant)
     // For real users: labeled prefix (role user)
-    // For system events (only possible on dedicated private): labeled with [System] tag
-    //   so the model sees them in history and the system prompt rule applies.
-    //   Keep role=assistant (they are bot-originated) but content includes the marker.
+    // For system events: labeled prefix including [System] tag (role assistant)
     const useLabeledContent = !isFromBot || isSystemEvent;
     historyMessages.push({
       role: isFromBot ? 'assistant' : 'user',
@@ -276,9 +288,13 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
 /**
  * Extract quoted message content if this message is a reply.
- * Handles audio (cache transcription + duration check) and PDF (page check).
+ * Handles media (images, video, audio with transcription/duration, PDF if in recent history)
+ * and plain quoted text. Uses recentMessageIds to decide PDF media inclusion.
  * @param {object} msg - The whatsapp-web.js message object
- * @param {string} chatId - Chat ID for voice cache lookup
+ * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
+ * @param {string} userId - storage id for media sync
+ * @param {Set<string>} recentMessageIds - keys of recent messages (to gate PDF content)
+ * @param {boolean} [isGroup=false] - whether the chat is a group (affects mention resolution)
  * @returns {Promise<object>} { prefix: string, mediaParts: array }
  */
 async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup = false) {
@@ -485,8 +501,11 @@ async function sendWhatsAppResponse(chat, responseData) {
 }
 
 /**
- * Process current message media with duration/page checks.
+ * Process current message media: applies duration limits for audio/video,
+ * inlines text/code documents as <FileContent>, and returns tags or buffers
+ * for supported media.
  * @param {object} msg - The whatsapp-web.js message object
+ * @param {string} userId - storage id for media sync
  * @returns {Promise<object|null>} { skipped, buffer?, mimetype?, filename?, tag, reason? } or null
  */
 async function processCurrentMedia(msg, userId) {
@@ -582,15 +601,35 @@ async function processCurrentMedia(msg, userId) {
 /**
  * Build the contentParts array for an incoming WhatsApp message.
  * Handles vcard/poll text formatting, quoted message content, and current message media.
- * Extracted to avoid duplication between dedicated and personal handlers.
+ *
+ * For text/code documents on the *current* message we inline the content as <FileContent>
+ * (replacing the [Attachment] tag) so the model sees it immediately without needing read_file.
+ * Pure-attachment sends (no caption) have redundant filename bodies cleaned.
+ *
  * @param {object} msg - The whatsapp-web.js message object
  * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
+ * @param {string} userId - storage id for media sync
+ * @param {boolean} [isGroup=false] - whether chat is group (affects mentions)
  * @returns {Promise<Array>} contentParts array (may be empty if message has no usable content)
  */
 async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
   const contentParts = [];
   const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
   let textBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
+
+  // Early cleanup for pure-attachment sends: WhatsApp/the library often puts the
+  // document filename into .body when there is no user caption/text at all.
+  // We only strip when the *entire* trimmed body is exactly the filename (nothing else).
+  // This ensures that if the user writes other text (even if it happens to contain
+  // the filename), it is preserved.
+  const bodyFilenameHint = msg._data?.filename;
+  if (bodyFilenameHint && typeof textBody === 'string') {
+    const t = textBody.trim();
+    const fn = String(bodyFilenameHint);
+    if (t === fn || t === `[${fn}]`) {
+      textBody = '';
+    }
+  }
 
   if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
     textBody = `[Shared contact] ${textBody}`;
@@ -609,10 +648,17 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
 
   const mediaResult = await processCurrentMedia(msg, userId);
   if (mediaResult) {
-    if (mediaResult.skipped) {
+    // Special handling for current-message inline text files: provide the actual content
+    // (via <FileContent>) rather than a bare [Attachment] tag.
+    // Text/code documents on the current message are inlined; attachments from prior
+    // messages use [Attachment] tags in the history context.
+    if (mediaResult.skipped && mediaResult.inlineText) {
+      // Replace the tag with the inlined content for text files. Append any real user caption.
+      const caption = textBody ? ` ${textBody}` : '';
+      textBody = `${mediaResult.inlineText}${caption}`.trim();
+    } else if (mediaResult.skipped) {
       const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
-      const inlineSuffix = mediaResult.inlineText ? ` ${mediaResult.inlineText}` : '';
-      textBody = `${mediaResult.tag}${suffix}${inlineSuffix} ${textBody}`.trim();
+      textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
     } else {
       contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype, {
         historyPath: mediaResult.syncedPath,
@@ -625,6 +671,18 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
     textBody = `${tag} (file unavailable) ${textBody}`.trim();
   }
 
+  // Post-processing robustness: after tags/inline have been applied, if what remains
+  // in textBody is exactly the (resolved) attachment filename, drop it.
+  // This catches cases where the early hint from msg._data was not present/accurate.
+  // Only exact full-body match (pure attachment, no user text).
+  if (mediaResult && mediaResult.filename && textBody) {
+    const t = textBody.trim();
+    const fn = mediaResult.filename;
+    if (t === fn || t === `[${fn}]`) {
+      textBody = '';
+    }
+  }
+
   if (textBody) {
     contentParts.unshift({ type: 'text', text: textBody });
   }
@@ -632,4 +690,4 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
   return contentParts;
 }
 
-module.exports = { buildWhatsAppHistory, buildIncomingContentParts, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent };
+module.exports = { buildWhatsAppHistory, buildIncomingContentParts, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent, _waMessageKey };

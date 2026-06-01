@@ -1,12 +1,14 @@
 // src/utils/inputFileBuilder.js
 //
 // Pre-call hook that rewrites non-image media parts (PDF, audio, video, text)
-// into `input_file` URL parts for the Responses API so xAI can fetch and
-// process them server-side (OCR/STT/frames).
+// into `input_file` URL parts. Non-image media (typically arriving wrapped
+// as image_url with data: base64) are materialized to temp files and
+// rewritten to public input_file URLs so xAI can fetch and process them
+// server-side (OCR/STT/frames).
 //
-// Images stay as data: URLs (handled as input_image by the adapter).
-// Does not touch persisted history and does not enforce size limits
-// (those are left to xAI + the handler error path).
+// Images stay as data: URLs for image handling. Does not touch persisted
+// history and does not enforce size limits (those are left to xAI + the
+// handler error path).
 
 const fs = require('fs');
 const path = require('path');
@@ -18,8 +20,9 @@ const { notifyAdmin } = require('./adminNotifier');
 
 const log = createLogger('InputFileBuilder');
 
-// MIME prefixes we hand off as input_file URLs. Images go through the
-// adapter's `input_image` path (base64 data URLs work fine on /v1/responses).
+// MIME prefixes for non-image media that we rewrite from image_url data:
+// base64 wrappers into input_file URL parts. Image MIME types stay as
+// data: URLs for image handling.
 const URL_PASSTHROUGH_PREFIXES = ['application/', 'audio/', 'video/', 'text/'];
 
 // Extension -> fallback name when the original filename is unknown.
@@ -103,9 +106,10 @@ function _materializeToTemp(base64, originalName, ownerKey) {
 }
 
 /**
- * Convert a single base64-image_url content part into a Responses-ready
- * input_file part. Returns null when no transformation is needed (image
- * MIME types stay as-is).
+ * Rewrite non-image media content parts (PDF, audio, video, text arriving
+ * as image_url data: base64) into input_file {file_url: ...} parts.
+ * Returns null when no transformation is needed (image MIME types stay
+ * as data: URLs for image handling).
  *
  * The function is best-effort: if URL registration fails (tunnel down,
  * disk full, ...) it returns null and the caller falls back to leaving the
@@ -123,7 +127,7 @@ function _convertPart(part, ownerKey) {
   const parsed = _extractMimeFromDataUrl(part.image_url.url);
   if (!parsed) return null;
 
-  // Pure images stay where they are - adapter handles them as input_image.
+  // Non-image media get rewritten to input_file; image MIME types stay as data: URLs for image handling.
   if (!_shouldPassAsUrl(parsed.mimetype)) return null;
 
   const originalName = _basenameForPart(part, parsed.mimetype);

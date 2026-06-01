@@ -1,7 +1,7 @@
 // src/tools/releaseNotify.js
 //
 // Manages per-chat subscription state for GemiX release notifications.
-// Persists via systemState ('releases' key), with migration from old JSON file.
+// Persists via systemState ('releases' key).
 // Exposes isReleaseNotifyEnabled, toggleReleaseNotify, and getSubscribedChats
 // for use by handler and admin flows. In-memory Map with disk backup.
 
@@ -21,7 +21,7 @@ function _load() {
     return;
   }
 
-  // Migration: Try loading from old file if exists
+  // Fallback: try loading from JSON file if systemState entry missing
   const OLD_FILE = path.join(DATA_DIR, 'releaseNotifyChats.json');
   if (fs.existsSync(OLD_FILE)) {
     try {

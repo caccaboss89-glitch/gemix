@@ -2,7 +2,7 @@
 //
 // Monitors GitHub releases and notifies subscribed chats (via releaseNotify)
 // with release notes + attached images when a new release is published.
-// Persists last seen release ID via systemState, with migration from old JSON.
+// Persists last seen release ID via systemState.
 
 const fs = require('fs');
 const path = require('path');
@@ -27,7 +27,7 @@ function _loadState() {
     return;
   }
 
-  // Migration: Try loading from old file if exists
+
   const OLD_FILE = path.join(DATA_DIR, 'releaseMonitor.json');
   if (fs.existsSync(OLD_FILE)) {
     try {

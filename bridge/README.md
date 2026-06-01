@@ -80,7 +80,7 @@ The wrapper instructs Hermes to:
 
 Internals:
 - `--yolo` to auto-approve the tool call without a TTY prompt
-- `--ignore-rules` to skip AGENTS.md / SOUL.md / memory / preloaded skills
+- `--ignore-rules` to skip memory / preloaded skills
   injection (we don't want any of that mixing into the prompt)
 - `-t image_gen` (resp. `video_gen`) to limit the toolset for the run
 - An instruction appended to the user prompt that tells the model to reply

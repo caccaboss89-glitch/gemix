@@ -63,7 +63,7 @@ function _escapeHtml(str) {
  * Admin: can target anyone. Active member: can target other members. Otherwise: self.
  */
 function _resolveTargetWaJid(args, userCtx) {
-  // Extract recipient info (can be nested in recipient object or flat for backward compatibility)
+  // Extract recipient info (supports nested recipient object or top-level fields)
   const recipientPhone = args.recipient?.phone || args.recipientPhone;
   const recipientName = args.recipient?.name || args.recipientName;
 
@@ -97,7 +97,7 @@ function _resolveTargetEmail(args, userCtx) {
   if (!userCtx.isActiveMember) {
     return { error: { success: false, error: 'Only active members can send emails.' } };
   }
-  // Extract recipient info (can be nested in recipient object or flat for backward compatibility)
+  // Extract recipient info (supports nested recipient object or top-level fields)
   const recipientEmail = args.recipient?.email || args.recipientEmail;
   const recipientName = args.recipient?.name || args.recipientName;
 
@@ -140,7 +140,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
   const name = toolCall.function.name;
   const chatKey = _getVoiceLimitChatKey(userCtx);
 
-  // Voice limits are now reset centrally in handler.js when a text message is sent,
+  // Voice limits are reset centrally in handler.js when a text message is sent,
   // preventing the AI from bypassing limits by calling intermediate tools.
 
   let args;
@@ -223,7 +223,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         }
         // Push any images the research returned to the delivery buffer, in the
         // same order they are referenced in the report text. Dedup against the
-        // buffer so the names stay collision-free; if any image was renamed,
+        // buffer so the names stay collision-free; if any image is renamed,
         // rewrite images_note so the model is told the exact final names (it
         // addresses them by name for reference_images / build attachments).
         if (Array.isArray(searchResult._images) && searchResult._images.length > 0) {
@@ -313,12 +313,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         if (hasRecipient) {
           const recipientName = args.recipient?.name || args.recipientName;
           const recipientPhone = args.recipient?.phone || args.recipientPhone;
-          // Self-recipient handling: when the AI specifies the user it is
-          // currently talking to, treat the call as if recipient was
-          // omitted (deliver in the current chat). The previous behaviour
-          // - returning an error - caused failures whenever the AI
-          // included recipient defensively, e.g. on the personal WA bot
-          // where every reply IS to the same user.
+          // Self-recipient handling: when the specified recipient resolves to the
+          // current user, the message is delivered in the current chat.
           let resolvesToSelf = false;
           if (recipientName) {
             const member = findMemberByName(recipientName);
@@ -380,7 +376,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
                 { platform: 'whatsapp' }
               );
 
-              // If there were failed attachments, send fallback message
+              // If there are failed attachments, send fallback message
               if (sendResult.fallbackMessage) {
                 try {
                   await sendWhatsAppDirect(targetJid.jid, sendResult.fallbackMessage);
@@ -609,7 +605,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
             log.info(`WhatsApp delivery: ${sendResult.sent.length} sent, ${sendResult.failed.length} failed`);
 
-            // If there were failed attachments, send fallback message
+            // If there are failed attachments, send fallback message
             if (sendResult.fallbackMessage) {
               try {
                 await sendWhatsAppDirect(targetJid.jid, sendResult.fallbackMessage);

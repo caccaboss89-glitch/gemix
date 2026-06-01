@@ -52,7 +52,6 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DEFAULT_TIMEOUT=120
 
 WORKDIR /opt/sandbox
-COPY sandbox/requirements-sandbox.txt /opt/sandbox/requirements-sandbox.txt
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r /opt/sandbox/requirements-sandbox.txt
 
 # -- unoserver for LibreOffice field updates (TOC, indexes) ------------------
@@ -91,7 +90,6 @@ RUN npm install -g --no-fund --no-audit \
     && npm cache clean --force
 
 # -- Preload heavy models at build time (offline runtime) ------------------
-COPY sandbox/preload_models.py /opt/sandbox/preload_models.py
 RUN python /opt/sandbox/preload_models.py
 
 # -- Non-root sandbox user -----------------------------------------------

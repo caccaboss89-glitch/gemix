@@ -2,7 +2,7 @@
 //
 // Monitors GitHub music stats for updates and sends monthly wrap notifications
 // to active members on the 1st of each month (or when new stats appear).
-// Persists state via systemState, with migration from old JSON file.
+// Persists state via systemState.
 
 const fs = require('fs');
 const path = require('path');
@@ -30,12 +30,12 @@ function loadMonitorState() {
   const state = getSystemState('musicWrap');
   if (state) return state;
 
-  // Migration: Try loading from old file if exists
+
   const OLD_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
   if (fs.existsSync(OLD_FILE)) {
     try {
       const oldState = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
-      // We don't save it here yet, it will be saved on first update
+
       return oldState;
     } catch { }
   }
@@ -103,8 +103,7 @@ function isFirstOfMonth() {
 }
 
 /**
- * Fetch and check if stats.json was updated on GitHub
- * Uses raw GitHub URL (same as musicStats tool) instead of API commits endpoint
+ * Fetch and check if stats.json was updated on GitHub via raw URL.
  * @returns {Promise<string|null>} Content hash or null if error/no change
  */
 async function checkStatsFileUpdate() {
@@ -161,7 +160,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   const today = getItalyDateString();
   const state = loadMonitorState();
 
-  // If the check was already done today, skip (even after a bot restart)
+  // If the check was already done today (per systemState lastCheckDate), skip.
   if (state.lastCheckDate === today) {
     log.info(`Already checked today (${today}), skipping`);
     return;
@@ -177,7 +176,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
 
   if (state.lastStatsTimestamp === statsTimestamp) {
     log.info('No new update detected (timestamp: ' + statsTimestamp + ')');
-    // Record the check even without updates so it is not re-checked today after a reboot
+    // Record the check even without updates.
     state.lastCheckDate = today;
     await saveMonitorState(state);
     return;

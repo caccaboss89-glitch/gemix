@@ -66,7 +66,6 @@ services:
     cpus: 1.0
     volumes:
       # Mount a real build workspace here in tests:
-      - ./_test_workspace:/workspace
       # Skills mount (read-only):
       - ../src/data/skills:/skills:ro
 

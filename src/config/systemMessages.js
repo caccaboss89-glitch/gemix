@@ -71,8 +71,8 @@ const FALLBACK_ERROR_REGEX  = /^\u26A0\uFE0F GemiX: Generazione della risposta f
 const TEMP_ATTACHMENT_PREFIX = '📥 Allegat';
 const TEMP_ATTACHMENT_REGEX  = /^\uD83D\uDCE5 Allegat/;
 
-// -- Legacy error / alert patterns (kept for backward compatibility) -------
-// These match older message formats that may still exist in history.
+// -- Error / alert patterns ----------------------------------------------
+// These regexes detect error, avviso, and reminder messages.
 const LEGACY_ERROR_REGEX  = /^\u274C \*ERRORE/;   // ❌ *ERRORE
 const LEGACY_AVVISO_REGEX = /^⚠️ \*AVVISO/;        // ⚠️ *AVVISO
 const LEGACY_REMINDER_REGEX = /^🔔 \*Promemoria/;  // 🔔 *Promemoria

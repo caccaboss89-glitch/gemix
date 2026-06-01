@@ -1,7 +1,7 @@
 // src/ai/buildAgent.js
 //
 // Engineering sub-agent for the `build` tool.
-// Runs an isolated Responses conversation with dedicated tools
+// Runs an isolated conversation with dedicated tools
 // (write_file/edit_file/bash/read_file/web_x_search/code_interpreter).
 // Host (tools/build.js) manages lock, workspace staging and <DELIVER> parsing.
 // See: sandbox/buildWorkspace.js, utils/buildState.js, utils/skills.js
@@ -57,10 +57,9 @@ const TEXT_EXT_FOR_INLINE = new Set([
 
 // -- Tool definitions exposed to the sub-agent -----------------------------
 //
-// Same chat-completions shape used by ai/tools.js so the responsesAdapter
-// can flatten them. We include the native `{type:'code_interpreter'}` so
-// the agent gets a Python sandbox at zero round cost (same trick as the
-// main brain).
+// Defines the tools available to the sub-agent, including function tools
+// and the native `{type:'code_interpreter'}` for server-side Python sandbox
+// (zero round cost).
 
 function _buildAgentTools() {
   return [
@@ -189,8 +188,7 @@ function _renderAttachmentNotes(renamedAttachments) {
 
 // Build the <Skills> block dynamically from the skill folders mounted at
 // /skills/ (each with a SKILL.md whose frontmatter carries name + description).
-// This keeps the prompt in sync with whatever skills exist on disk - no static
-// "pdf, docx, xlsx, pptx" list to maintain.
+// This keeps the prompt in sync with whatever skills exist on disk.
 function _renderSkills() {
   return formatSkillsForPrompt(loadSkills());
 }
@@ -201,9 +199,8 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
   const skillsBlock = _renderSkills();
 
   // No outer <SystemPrompt> envelope: this string is delivered in the
-  // Responses API `instructions` field (the dedicated system channel), so a
-  // root tag adds nothing. The structured sub-tags sit flush at the top level
-  // (mirrors ai/systemPrompt.js).
+  // dedicated system `instructions` field (the dedicated system channel), so a
+  // root tag adds nothing. The structured sub-tags sit flush at the top level.
   return [
     '<Identity>',
     '  GemiX-Build, the engineering sub-agent of GemiX. Reasoning and tool calls in English. Final user-facing text in the user\'s language (Italian by default), without emojis unless the user asked for them.',
@@ -300,7 +297,7 @@ async function _executeReadFile(workspaceId, args) {
     }
     const lines = text.split(/\r?\n/);
     const numbered = lines.map((l, i) => `${i + 1}: ${l}`).join('\n');
-    return `<FileContent path="${args.path}" size="${stat.size}"${truncated ? ' truncated="true"' : ''}>\n${numbered}\n</FileContent>`;
+    return `<FileContent path="${args.path}"${truncated ? ' truncated="true"' : ''}>\n${numbered}\n</FileContent>`;
   }
 
   // Binary (PDF/audio/video/image): expose via tunnel as input_file URL.
@@ -551,8 +548,8 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
     // Refresh the system prompt with the latest workspace state at every
     // round (the agent just wrote new files, the state must reflect them).
     // The agent is never told which round it is on or how many remain - the
-    // budget is enforced host-side, and when it runs out we force ONE clean
-    // tool-less answer below (same pattern as the main brain).
+    // budget is enforced host-side. When the budget is exhausted, one clean
+    // tool-less answer is forced below.
     messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
 
     // Renew the lock so a long agent run keeps the workspace held.
@@ -565,11 +562,10 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       input,
       max_output_tokens: 64_000,
       tool_choice: 'auto',
-      // Bound xAI server-side tool turns (web_search/x_search/code_interpreter)
-      // per request; our own BUILD_MAX_ROUNDS bounds the client-side loop.
+      // max_turns bounds server-side tool turns (web_search/x_search/code_interpreter)
+      // per request; BUILD_MAX_ROUNDS bounds the client-side loop.
       max_turns: BUILD_MAX_ROUNDS,
-      // NOTE: grok-build-0.1 has reasoning built-in and rejects any
-      // reasoning/reasoningEffort parameter with HTTP 400. Do NOT add it.
+      // The model rejects any reasoning/reasoningEffort parameter (HTTP 400).
     };
     if (instructions) body.instructions = instructions;
     if (adaptedTools) body.tools = adaptedTools;
@@ -607,14 +603,10 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
   }
 
   // -- Round budget / hard-timeout exhausted -------------------------------
-  // The agent still wanted to call tools when we ran out of rounds (or the
-  // hard timeout fired). Instead of discarding all the work behind a canned
-  // error, make ONE final call with tool_choice:'none' (the documented xAI
-  // way to force a text-only answer) so the agent wraps up from everything it
-  // gathered. This mirrors the main brain's outer-loop handling exactly - when
-  // the build can no longer act it must explain what it managed to do and that
-  // it had to stop. The host bubbles this up to GemiX-Main, which relays it to
-  // the user.
+  // When no final text has been produced by the time the round budget or hard
+  // timeout is reached, a final request is issued with tool_choice:'none' to
+  // obtain a text-only response. This lets the agent summarize completed work
+  // and include any <DELIVER> tag.
   if (finalText === null && budgetExhausted) {
     log.warn(`   build round budget (${BUILD_MAX_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
     renewBuildLock(workspaceId, lockOwnerId);
@@ -636,7 +628,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
         input,
         max_output_tokens: 64_000,
         // tool_choice:'none' forces a text-only answer while keeping the tool
-        // definitions in context (same as the main brain's forced wrap-up).
+        // definitions in context.
         tool_choice: 'none',
       };
       if (instructions) body.instructions = instructions;

@@ -10,7 +10,7 @@
 //        - then chat history (history/<filename>).
 //   4. Stage each resolved attachment into /workspace/, renaming on
 //      collision and recording the rename so the agent learns the new name.
-//   5. For attachments that don't already live on disk (current-turn
+//   5. For attachments that do not live on disk yet (current-turn
 //      buffers without filePath), expose them via the public tunnel so the
 //      sub-agent ingests them as input_file URLs on round 1. This keeps a
 //      consistent mental model: files are in /workspace/ AND visible
@@ -90,10 +90,10 @@ function _resolveAttachment(filename, userCtx, responseCtx) {
  * Stage a single attachment into the workspace and (when needed) prepare
  * an `input_file` URL part to inject in round 1 of the agent.
  *
- * For files copied from disk we rely on the agent's <WorkspaceState> + its
- * own read_file to access them - no need to send the URL on round 1.
- * For buffers materialized fresh, we ALSO attach the input_file URL on
- * round 1 to give the model immediate visibility (saves an extra round).
+ * For files copied from disk, the agent's <WorkspaceState> + its own read_file
+ * is used to access them; no URL is sent on round 1.
+ * For buffers materialized fresh, the input_file URL is also attached on
+ * round 1 to give the model immediate visibility.
  */
 function _stageOne(attachment, workspaceId) {
   if (attachment.filePath) {
@@ -107,7 +107,7 @@ function _stageOne(attachment, workspaceId) {
 
 /**
  * Build an input_file URL part for a freshly-staged in-workspace file.
- * Used on round 1 only when the source was a buffer (i.e. content the model
+ * Used on round 1 only when the source is a buffer (i.e. content the model
  * has never seen before; for history files the agent reads them on demand).
  */
 function _makeRound1FilePart(workspaceId, finalName, mimetypeHint) {
@@ -132,10 +132,10 @@ function _makeRound1FilePart(workspaceId, finalName, mimetypeHint) {
  * Skips silently:
  *   - filenames that escape /workspace/,
  *   - files that don't exist (the agent referenced something it never wrote),
- *   - duplicates already in the buffer.
+ *   - duplicates present in the buffer.
  *
- * Returns the list of names that were attached AND the list that were
- * skipped, so the tool result can be transparent about what reached the user.
+ * Returns the list of attached names and the list of skipped names,
+ * so the tool result is transparent about what reached the user.
  */
 function _attachDelivered(workspaceId, delivered, responseCtx) {
   const attached = [];
@@ -144,7 +144,7 @@ function _attachDelivered(workspaceId, delivered, responseCtx) {
   if (!responseCtx || !Array.isArray(responseCtx.attachments)) return { attached, missing };
 
   // Guard against the agent listing the same workspace file twice in one
-  // <DELIVER> - we deliver each distinct workspace file at most once.
+  // <DELIVER> - each distinct workspace file is delivered at most once.
   const seenSources = new Set();
 
   for (const raw of delivered) {
@@ -160,7 +160,7 @@ function _attachDelivered(workspaceId, delivered, responseCtx) {
     const ext = path.extname(cleaned).toLowerCase();
     const mimetype = _mimeFromExt(ext);
     // Dedup against the buffer (rename to name(1).ext on clash) so a generated
-    // asset already in the buffer never shadows a build deliverable. The model
+    // asset present in the buffer never shadows a build deliverable. The model
     // learns the final name via the returned `attached` list (build reports it
     // as `delivered`).
     const finalName = pushBufferAttachment(responseCtx, {
@@ -263,7 +263,7 @@ async function buildTool(args, userCtx, responseCtx) {
         // Buffer sources: model has never seen this content; surface it
         // immediately on round 1 so the agent doesn't have to call read_file.
         if (r.source === 'buffer' && !r.filePath) {
-          // Find ext from the staged filename (sanitization may have changed it).
+          // Find ext from the staged filename (sanitization may change it).
           const ext = path.extname(staged.finalName).toLowerCase();
           const mimeHint = _MIME_BY_EXT[ext] || 'application/octet-stream';
           const part = _makeRound1FilePart(workspaceId, staged.finalName, mimeHint);

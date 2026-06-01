@@ -1,10 +1,6 @@
 // src/utils/media.js
 //
 // Helpers for building multimodal content parts and attachment tags.
-// After the Responses API migration, non-image media is handed off as
-// `input_file` URLs (see inputFileBuilder). This module now focuses on
-// packaging buffers for the current message and generating [Attachment: ...]
-// bookkeeping tags used in history and by the model via read_file.
 
 const { SUPPORTED_MEDIA } = require('../config/constants');
 
@@ -20,16 +16,9 @@ function isSupportedMedia(type) {
 /**
  * Convert media to a base64 content part for the user message.
  *
- * The shape is intentionally `image_url` + data URI for every MIME - that's
- * the legacy carrier used across the codebase. The `inputFileBuilder` runs
- * after history assembly and converts non-image MIMEs into proper xAI
- * `input_file` URL parts. Images stay base64 inline (the Responses adapter
- * translates them into native `input_image` parts).
- *
- * The optional `_historyPath` / `_historyUserId` metadata hints let
- * `inputFileBuilder` find the same file already on disk in chat history
- * and serve it via the longer 24h TTL token instead of materialising the
- * base64 buffer to a temp file again.
+ * Produces `{ type: 'image_url', image_url: { url: `data:${cleanedMime};base64,${base64}` } }`.
+ * When `opts.historyPath` or `opts.historyUserId` are non-empty strings, they are
+ * copied to `_historyPath` / `_historyUserId` on the returned object.
  *
  * @param {Buffer} buffer
  * @param {string} mimetype - e.g. 'image/jpeg', 'audio/ogg', 'application/pdf'
@@ -90,16 +79,11 @@ function extractAttachmentTagPaths(text) {
 
 // -- Inline text-file ingestion --------------------------------------------
 //
-// Source-code and plain-text files are not multimodal: feeding them as
-// base64 inside an image_url part is wasteful and unreliable. Instead we
-// inline the file content directly inside the user message text, wrapped
-// in a small XML envelope so the model can clearly distinguish
-// per-attachment content from the user's own typing.
+// For current messages, source-code and plain-text files have their content
+// inlined directly inside the user message text using <FileContent> tags.
 //
-// This applies ONLY to the message that triggers the current AI call
-// (current Discord/WhatsApp message). In chat history the same files are
-// referenced via [Attachment: filename] tags - the model can request the
-// content via read_file when needed.
+// Attachments in chat history use [Attachment: filename] tags.
+// The model requests their content via read_file when needed.
 const INLINE_TEXT_EXTS = new Set([
   // Plain text / docs
   '.txt', '.md', '.rst', '.log', '.csv', '.tsv',
@@ -154,16 +138,13 @@ function isInlineableTextFile(filename, mimetype) {
 
 /**
  * Build an XML-tagged text part to inline a text-file body inside the user
- * message content. Mirrors the exact format produced by the read_file tool:
+ * message content. Produces output in this format:
  *
- *   <FileContent path="..." size="N" [truncated="true"]>
+ *   <FileContent path="..." [truncated="true"]>
  *   1: line1
  *   2: line2
  *   ...
  *   </FileContent>
- *
- * Keeping the format consistent means the model treats inlined attachments
- * and read_file outputs the same way (line refs, citations, edit prompts).
  *
  * @param {string} filename
  * @param {Buffer} buffer
@@ -181,7 +162,7 @@ function buildInlineTextFilePart(filename, buffer) {
   const numberedText = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
   const safePath = String(filename || 'file').replace(/[<>"'&]/g, '_');
   const truncAttr = truncated ? ' truncated="true"' : '';
-  return `<FileContent path="${safePath}" size="${totalSize}"${truncAttr}>\n${numberedText}\n</FileContent>`;
+  return `<FileContent path="${safePath}"${truncAttr}>\n${numberedText}\n</FileContent>`;
 }
 
 module.exports = {

@@ -2,12 +2,10 @@
 //
 // Active member registry.
 //
-// The real member list is now stored in src/data/members.json (gitignored).
-// This file contains the active members and is loaded at startup.
+// The member list is stored in src/data/members.json (gitignored).
+// This module loads the active members at startup.
 //
-// If the file is missing or invalid, the code falls back to an empty list
-// (the previous legacy hardcoded list has been removed from source to avoid
-// committing real personal data).
+// If the members file is missing or invalid, the loader returns an empty list.
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('./constants');
@@ -16,9 +14,9 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('Members');
 
-// Legacy fallback list.
-// Currently empty because the real members are in src/data/members.json.
-// This array is kept only for backward compatibility in the loading logic.
+// Fallback members list.
+// Empty because active members are loaded from src/data/members.json.
+// Supports fallback in the loading logic.
 const _LEGACY_HARDCODED_MEMBERS = [];
 
 function _loadMembers() {

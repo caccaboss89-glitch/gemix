@@ -72,9 +72,8 @@ const { HERMES_BASE_URL, GROK_MODEL } = require('./config/env');
 log.info('GemiX - Avvio in corso...\n');
 log.info(`   Hermes proxy: ${HERMES_BASE_URL} (model: ${GROK_MODEL})`);
 
-// Soft preflight: ping the Hermes proxy. We don't block startup on failure
-// because the proxy may come up after GemiX (e.g. via tmux on the VPS), but
-// a clear log line surfaces the most common misconfiguration immediately.
+// Soft preflight: the Hermes proxy is pinged at startup without blocking
+// initialization. A warning is logged if the preflight fails.
 (async () => {
   try {
     const ctrl = new AbortController();
@@ -129,7 +128,7 @@ process.on('uncaughtException', (err) => {
     const { notifyAdmin } = require('./utils/adminNotifier'); // dynamic require for lazy error path
     notifyAdmin('Uncaught Exception', `Error: ${err?.message || err}\nStack: ${err?.stack || ''}`).catch(() => {});
   } catch {}
-  // Do not exit: PM2 will restart on hard crashes; here we surface the error
-  // and let the process keep running so in-flight tool sessions can complete
-  // (the same philosophy as unhandledRejection above).
+  // Do not exit: PM2 will restart on hard crashes. The error is surfaced
+  // and the process continues running so in-flight tool sessions can
+  // complete.
 });

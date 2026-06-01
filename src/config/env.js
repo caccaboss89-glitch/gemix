@@ -51,9 +51,8 @@ module.exports = {
   // xAI features fronted by Hermes.
   // - TTS: via the CLI bridge (`bridge/tts.sh`) since the proxy does NOT
   //   expose /v1/tts. Voice and language are picked by Hermes itself.
-  // - STT: still HTTP via proxy (${HERMES_BASE_URL}/stt) - kept for
-  //   reference, audio transcription happens server-side via input_file
-  //   on /v1/responses in the new architecture.
+  // - STT: HTTP via proxy (${HERMES_BASE_URL}/stt); audio transcription uses
+  //   server-side input_file on /v1/responses.
   // - Multi-agent research: ${HERMES_BASE_URL}/responses with the
   //   MULTI_AGENT_MODEL below.
   // - Imagine (image/video gen): NOT proxied. Via CLI `hermes -z`

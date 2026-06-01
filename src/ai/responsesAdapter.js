@@ -1,11 +1,11 @@
 // src/ai/responsesAdapter.js
 //
-// Bidirectional adapter: chat-completions style (used by handler, tools, history)
-// <-> xAI Responses API wire format (`/v1/responses` with `input[]`, `instructions`,
-// flat tools, typed items like function_call / function_call_output).
+// Bidirectional adapter between chat-completions style messages and tools
+// (used by handler, tools, history) and xAI Responses API wire format
+// (`/v1/responses` with `input[]`, `instructions`, flat tools, typed items
+// like function_call / function_call_output).
 //
-// Keeps the rest of GemiX oblivious to the wire format change. All three
-// exported functions are pure and heavily used by aiProvider + buildAgent.
+// All three exported functions are pure and heavily used by aiProvider + buildAgent.
 
 /**
  * Convert a single chat-style content payload (string OR array of parts) to
@@ -14,7 +14,7 @@
  * Mappings:
  *   - chat `text`        -> responses `input_text`
  *   - chat `image_url`   -> responses `input_image` (image_url is the data/https URL)
- *   - already-responses parts (`input_text`, `input_image`, `input_file`) pass through
+ *   - Responses-format parts (`input_text`, `input_image`, `input_file`) pass through
  *
  * Empty/falsy parts are dropped. The function never throws on unknown shapes:
  * unknown parts are silently skipped so a malformed entry does not blow up the
@@ -48,8 +48,7 @@ function _userContentToInputParts(content) {
       continue;
     }
 
-    // Pass through native responses parts (used by future tunnel-based
-    // attachment passing, e.g. {type:'input_file', file_url:'https://...'}).
+    // Pass through native responses parts (e.g. {type:'input_file', file_url:'https://...'} for attachments).
     if (part.type === 'input_text' || part.type === 'input_image' || part.type === 'input_file') {
       out.push(part);
       continue;
@@ -62,7 +61,7 @@ function _userContentToInputParts(content) {
 /**
  * Reduce an assistant content payload (string or array of text parts) to a
  * plain string. Responses API accepts both `string` and `[{type:'output_text'}]`
- * for assistant input items; we normalize to string for simplicity.
+ * for assistant input items; the function normalizes to string for simplicity.
  */
 function _assistantContentToText(content) {
   if (typeof content === 'string') return content;
@@ -78,9 +77,8 @@ function _assistantContentToText(content) {
 
 /**
  * Stringify a `tool` message content for Responses' function_call_output.output.
- * Tool results in our codebase are usually JSON strings already; arrays are
- * returned by the multimodal image_search/read_file paths and need a stable
- * serialization here.
+ * Tool results are typically JSON strings; arrays are returned by the
+ * multimodal image_search/read_file paths and require stable serialization here.
  *
  * `output` on `function_call_output` is required to be a string.
  */
@@ -99,8 +97,8 @@ function _toolOutputToString(content) {
  *
  * Rules:
  *   - `system` messages are concatenated (in order) into `instructions`.
- *     Multi-system is a thing in our handler (round hint reinjection); they
- *     merge here with `\n\n`.
+ *     Multi-system messages are supported by the handler (round hint reinjection);
+ *     they merge here with `\n\n`.
  *   - `user` messages produce a `message` item with content parts.
  *     User messages with no usable parts are dropped.
  *   - `assistant` messages produce up to one `message` item (when there is
@@ -110,10 +108,8 @@ function _toolOutputToString(content) {
  *   - `tool` messages become `function_call_output` items. The chat-style
  *     `tool_call_id` becomes the responses `call_id`.
  *
- * No reasoning items are emitted: GemiX does not currently store reasoning
- * blobs across rounds. If/when we want to preserve them, attach them as
- * `_reasoning` on the assistant message and emit a `{type:'reasoning'}` item
- * here.
+ * No reasoning items are emitted. GemiX does not store reasoning blobs
+ * across rounds in the provided messages.
  *
  * @param {Array} messages
  * @returns {{ instructions: string, input: Array }}
@@ -185,7 +181,7 @@ function chatMessagesToResponsesInput(messages) {
       }
 
       default:
-        // Unknown roles (developer, function legacy, ...) are dropped silently.
+        // Unknown roles (e.g. developer) are dropped silently.
         break;
     }
   }
@@ -200,13 +196,13 @@ function chatMessagesToResponsesInput(messages) {
  *   1. Chat-style function tool:
  *        { type:'function', function:{ name, description, parameters } }
  *      -> flattened to: { type:'function', name, description, parameters }
- *   2. Native xAI server-side tool (already in Responses-shape):
+ *   2. Native xAI server-side tool (in Responses shape):
  *        { type:'code_interpreter' } | { type:'web_search' } | { type:'x_search', limit:N } | ...
  *      -> passed through unchanged.
  *
  * The pass-through allows getToolsForUser() to mix function tools and
  * server-side tools in the same `tools[]` array; xAI executes server-side
- * tools transparently without consuming a round of our outer loop.
+ * tools transparently without consuming a round of the outer loop.
  *
  * Returns null when the input is empty/missing so the caller can omit the
  * key entirely (xAI rejects an empty array on some endpoints).
@@ -229,7 +225,7 @@ function chatToolsToResponsesTools(tools) {
       });
       continue;
     }
-    // Native server-side tool - already Responses-shape, ship as is.
+    // Native server-side tool (in Responses shape): passed through unchanged.
     if (typeof t.type === 'string' && t.type !== 'function') {
       out.push(t);
       continue;
@@ -253,15 +249,15 @@ function chatToolsToResponsesTools(tools) {
  *   }
  *
  * Notes:
- *   - We use the responses `call_id` as the chat-style `id`. This is the
- *     value we have to round-trip back into the next call's
- *     `function_call_output.call_id`, so keeping `id === call_id` in the
- *     internal shape avoids a parallel mapping.
- *   - Reasoning items are ignored at this layer (the handler does not need
- *     them; they would only inflate context if echoed back).
+ *   - The responses `call_id` is used as the chat-style `id`. This value is
+ *     round-tripped back into the next call's `function_call_output.call_id`,
+ *     so keeping `id === call_id` in the internal shape avoids a parallel
+ *     mapping.
+ *   - Reasoning items are ignored at this layer (the handler does not use
+ *     them and they are not echoed back to the model).
  *   - When the model produces no text and no tool_calls (rare, but happens
  *     on safety refusals), the returned `content` is the empty string and
- *     `tool_calls` is omitted; downstream callers already handle that case.
+ *     `tool_calls` is omitted; downstream callers handle that case.
  *
  * @param {object} data - Parsed JSON body from /v1/responses
  * @returns {object}

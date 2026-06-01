@@ -1,9 +1,8 @@
 // src/tools/musicCreator.js
 //
 // Music generation via Lyria on OpenRouter (SSE streaming).
-// This is the ONLY remaining OpenRouter dependency after the Hermes migration:
-// Lyria is not available via xAI/Grok, so this tool keeps its own dedicated
-// OPENROUTER_API_KEY + MUSIC_MODEL env vars.
+// Uses dedicated OPENROUTER_API_KEY and MUSIC_MODEL environment variables
+// (Lyria is not available via xAI/Grok).
 const { createLogger } = require('../utils/logger');
 const { MUSIC_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL } = require('../config/env');
 const systemState = require('../utils/systemState');

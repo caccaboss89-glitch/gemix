@@ -3,7 +3,7 @@
 // Tool used by the main brain to pull a specific file from chat history
 // into the conversation. Two return shapes:
 //
-//   1. Text/code -> wrapped in <FileContent path="..." size="N"> with line
+//   1. Text/code -> wrapped in <FileContent path="..." [truncated="true"]> with line
 //      numbers, truncated past MAX_TEXT_BYTES.
 //   2. Media (PDF, audio, video, image) -> exposed via the public attachment
 //      tunnel as `{type:'input_file', file_url:'https://...'}` (or `image_url`
@@ -172,7 +172,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
 
   return {
     success: true,
-    message: `<FileContent path="${displayPath}" size="${fileSize}"${isTruncated ? ' truncated="true"' : ''}>\n${numberedText}\n</FileContent>`,
+    message: `<FileContent path="${displayPath}"${isTruncated ? ' truncated="true"' : ''}>\n${numberedText}\n</FileContent>`,
   };
 }
 

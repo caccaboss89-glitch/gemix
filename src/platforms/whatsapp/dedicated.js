@@ -7,7 +7,7 @@
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse } = require('./shared');
+const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse, _waMessageKey } = require('./shared');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
@@ -144,13 +144,14 @@ async function onDedicatedMessage(msg) {
 
   if (contentParts.length === 0) return;
 
+  const messageKey = _waMessageKey(msg);
   const batchKey = `wa_dedicated:${chat.id._serialized}`;
 
   // If a batch is already accumulating for this chat, add to it and return
   // (even if a response lock is held - the batch will fire after debounce)
   if (hasPendingBatch(batchKey)) {
     log.info(`   Batching additional message for ${batchKey}`);
-    pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup }, _handleDedicatedBatch);
+    pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup, messageKey }, _handleDedicatedBatch);
     return;
   }
 
@@ -163,7 +164,7 @@ async function onDedicatedMessage(msg) {
   const stopLockRenew = responseLock.startAutoRenew(lockKey);
 
   // Start a new batch (the handler will fire after the debounce window)
-  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup, stopLockRenew }, _handleDedicatedBatch);
+  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup, messageKey, stopLockRenew }, _handleDedicatedBatch);
 }
 
 /**
@@ -193,11 +194,18 @@ async function _handleDedicatedBatch(entries) {
       allParts.push(...entry.contentParts);
     }
 
+    // Collect keys of the messages that are part of *this* current batch/turn to exclude them from history.
+    // The current user turn (including its attachment tags and any inline content) is supplied separately
+    // after the history.
+    const excludeKeys = new Set(
+      entries.map(e => e.messageKey).filter(Boolean)
+    );
+
     // Re-fetch history at fire time (fresher state)
     let history = [];
     try {
       history = await Promise.race([
-        buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid),
+        buildWhatsAppHistory(chat, PLATFORM_WA_DEDICATED, isGroup ? chat.id._serialized : phoneJid, excludeKeys.size > 0 ? excludeKeys : null),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('History fetch timeout')), 15000)
         )

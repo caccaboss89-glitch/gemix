@@ -1,36 +1,9 @@
 // src/tools/voiceMessage.js
 //
-// Voice generation pipeline.
-//
-// Why we shell out to `hermes -t tts -z` instead of hitting an HTTP endpoint:
-//
-// Hermes Agent v0.14's OpenAI-compatible proxy does NOT forward `/v1/tts`.
-// Hitting it returns:
-//   404 {"error":{"message":"Path /v1/tts is not forwarded by this proxy.
-//        Allowed: /chat/completions, /completions, /embeddings, /models,
-//        /responses","type":"path_not_allowed","code":"path_not_allowed"}}
-//
-// Same pattern as Imagine (image/video gen): the only way to reach the
-// xAI text_to_speech tool is through the Hermes CLI. We restrict the
-// toolset to `tts` (-t tts) so the model has exactly one tool available
-// and cannot wander off - the upstream caller hands plain text and the
-// CLI itself decides where to insert vocal tags. This concentration on a
-// single task tends to produce better-sounding audio.
-//
-// Architecture:
-//   1. Caller passes raw text (no vocal tags from GemiX-Main).
-//   2. We pick a deterministic temp output path under .tempfiles/.
-//   3. We invoke `bridge/tts.sh "<text>" "<path>"`. The bridge prompts
-//      Hermes to use only `text_to_speech`, speak the exact text (any
-//      language, no rewrites), and save to the path we provided.
-//   4. On success we read the MP3 from disk and transcode to Opus/OGG.
-//   5. The text (stripped of any vocal tags that Hermes may have added)
-//      is stored via storeRecentVoiceText() for history injection without
-//      tags (so the history shows what the user heard, not the internal
-//      markup).
-//   6. On any failure (proxy unreachable, file not produced, transcode
-//      error) we fall back to Google Translate TTS, which strips any
-//      vocal tags first since it can't render them.
+// Voice generation pipeline. Produces OGG/Opus audio buffers for WhatsApp
+// voice messages. Uses xAI TTS via Hermes bridge when enabled (primary),
+// with Google Translate TTS fallback. Always applies MP3-to-Opus transcode.
+// Strips vocal tags for Google TTS input.
 
 const path = require('path');
 const fs = require('fs');
@@ -46,21 +19,16 @@ const { FFMPEG_PATH } = require('../config/env');
 
 const log = createLogger('TTS');
 
-// Absolute path to the wrapper. Spawned via `bash` so the executable bit
-// is irrelevant (matches bridge/imagine.sh contract).
+// Absolute path to the wrapper script. Spawned via `bash` (executable bit not required).
 const BRIDGE_SCRIPT = path.resolve(__dirname, '..', '..', 'bridge', 'tts.sh');
 
-// Absolute path to temp directory for audio output. Matches tempFileServer.js
-// so all temp files live in the same place.
+// Absolute path to temp directory for audio output (shared location with tempFileServer.js).
 const TEMP_DIR = path.resolve(__dirname, '..', '..', '.tempfiles');
 
-// hermes -t tts -z usually completes in 5-30 s. Keep the ceiling generous
-// to absorb cold starts on the VPS without leaving zombies hanging forever.
+// TTS bridge call timeout. Hermes -t tts usually completes in 5-30 s; ceiling set high to handle cold starts.
 const TTS_BRIDGE_TIMEOUT_MS = 90 * 1000;
 
-// Outer-loop timeout covers both bridge call and ffmpeg transcode. If we
-// blow past this we give up and let the dispatcher report a hard failure
-// to the AI - better than indefinitely hanging the round.
+// Overall voice generation timeout covering bridge and transcode. On expiry, the call fails rather than hanging.
 const VOICE_GENERATION_TIMEOUT_MS = 120 * 1000;
 
 /**
@@ -171,17 +139,15 @@ async function _generateVoice(text) {
     }
   }
 
-  // Google Translate TTS fallback. It can't render vocal tags, so strip
-  // them defensively (text from upstream is plain, but the bridge may
-  // also have failed AFTER Hermes started writing tagged text - strip
-  // anyway).
+  // Google Translate TTS fallback. Strip vocal tags defensively before use,
+  // as the text may contain vocal tags.
   const cleanText = stripVocalTags(text);
 
   try {
     return await googleTranslateTTS(cleanText);
   } catch (err) {
     if (!XAI_TTS_ENABLED) {
-      // Notify admin automatically so the AI's "already reported" claim is true.
+      // Notify admin on Google TTS failure when xAI TTS is disabled.
       await notifyAdmin('Google TTS (Primary)', err.message);
       throw new Error(`TTS failed: Google Translate service error. xAI TTS is currently DISABLED by Admin.${ADMIN_NOTIFIED_SUFFIX}`);
     }
@@ -215,8 +181,7 @@ async function xaiTTSViaBridge(text) {
 
   if (code !== 0) {
     const tail = (stderr || stdout || '').slice(-500).trim();
-    // Best-effort cleanup: the bridge may have created the parent dir but
-    // not the file. Don't leave dangling parent dirs around if empty.
+    // Best-effort cleanup of output file (bridge may create the parent dir).
     _safeUnlink(outputPath);
     throw new Error(`Bridge exit ${code}: ${tail || 'no diagnostic output'}`);
   }

@@ -4,15 +4,14 @@
 //
 // What's stored:
 //   - lastActivityAt: ms timestamp updated by handler.js on every main
-//     turn, so the workspace TTL counts inactivity from the user's last
-//     interaction with GemiX (across any platform), not just from `build`
-//     calls.
+//     turn. The workspace TTL counts inactivity from the user's last
+//     interaction with GemiX (across any platform).
 //   - lock: { ownerId, acquiredAt, expiresAt } - a per-workspace mutex used
 //     by the build tool to serialize concurrent invocations. The lock has
-//     a hard expiry so a crashed handler can't strand a workspace forever.
+//     a hard expiry.
 //
 // Both pieces of state live in `<workspaceMetaDir>/.build_state.json` and
-// are written atomically (tmp + rename) to survive crashes.
+// are written atomically (tmp + rename).
 
 const fs = require('fs');
 const path = require('path');
@@ -24,9 +23,7 @@ const { createLogger } = require('./logger');
 const log = createLogger('BuildState');
 
 const STATE_FILENAME = '.build_state.json';
-// Hard ceiling for a held lock. We pick the build hard timeout + a generous
-// margin so a crashed call cannot block the workspace longer than the worst-
-// case legitimate run.
+// Hard ceiling for a held lock: BUILD_HARD_TIMEOUT_MS + 60s margin.
 const LOCK_MAX_TTL_MS = BUILD_HARD_TIMEOUT_MS + 60_000;
 
 function _stateFile(workspaceId) {
@@ -60,18 +57,16 @@ function _writeState(workspaceId, state) {
     return true;
   } catch (err) {
     log.warn(`Failed to persist state for ${workspaceId}: ${err.message}`);
-    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    try { fs.unlinkSync(tmp); } catch { /* ignore unlink error */ }
     return false;
   }
 }
 
 /**
  * Update the user-activity timestamp for this workspace. Called by handler.js
- * on every main turn to push back the inactivity TTL.
+ * on every main turn.
  *
- * Also persists the workspaceId itself so the sweeper can later wipe the
- * workspace and shut down its sandbox without having to invert the slug
- * (slug <-> workspaceId is a lossy mapping because of filesystem sanitization).
+ * Also stores the workspaceId in the state.
  */
 function touchActivity(workspaceId) {
   if (!workspaceId) return;
@@ -112,8 +107,7 @@ async function acquireBuildLock(workspaceId, opts = {}) {
         expiresAt: now + LOCK_MAX_TTL_MS,
       };
       if (_writeState(workspaceId, state)) {
-        // Re-read to make sure we actually won the race against another
-        // process that might have written between our read and write.
+        // Re-read to confirm the lock is held by this ownerId after the write.
         const verify = _readState(workspaceId);
         if (verify.lock && verify.lock.ownerId === ownerId) {
           return ownerId;
@@ -131,8 +125,7 @@ async function acquireBuildLock(workspaceId, opts = {}) {
 }
 
 /**
- * Release a previously-acquired lock. No-op if the current lock owner is
- * different (which means the lock was reaped and another caller took over).
+ * Release the lock for the given ownerId. No-op if a different owner holds it.
  */
 function releaseBuildLock(workspaceId, ownerId) {
   if (!workspaceId || !ownerId) return;
@@ -144,9 +137,8 @@ function releaseBuildLock(workspaceId, ownerId) {
 }
 
 /**
- * Push the lock's expiry forward. Useful when the build call is still
- * actively progressing (renewed each round) and we want the safety net
- * to apply only on true stalls.
+ * Push the lock's expiry forward if the given ownerId holds the lock.
+ * Called during active build progress.
  */
 function renewBuildLock(workspaceId, ownerId) {
   if (!workspaceId || !ownerId) return false;
@@ -161,12 +153,8 @@ function renewBuildLock(workspaceId, ownerId) {
 
 /**
  * Iterate over every workspace_meta dir under DATA_DIR/users/ that has a
- * build_state file, returning [{ workspaceId, lastActivityAt, hasWorkspace }].
+ * build_state file. Returns [{ workspaceSlug, workspaceId, metaDir, workspaceDir, lastActivityAt, lock }].
  * Used by the cron sweeper to find stale workspaces to wipe.
- *
- * NOTE: workspaceId is reconstructed by inverting workspaceIdToSlug - for
- * sweeping we only need a stable slug + the metaDir path, so we return the
- * slug as `workspaceSlug` and let the caller resolve directories from it.
  */
 function listWorkspaceStates() {
   const usersDir = path.join(DATA_DIR, 'users');
@@ -192,7 +180,7 @@ function listWorkspaceStates() {
         lastActivityAt: Number(raw && raw.lastActivityAt) || 0,
         lock: raw && raw.lock ? raw.lock : null,
       });
-    } catch { /* skip */ }
+    } catch { /* skip corrupted state file */ }
   }
   return out;
 }

@@ -2,12 +2,11 @@
 //
 // Personal WhatsApp account client (secondary number).
 // Handles QR auth, reconnection, and routes personal 1:1 messages that
-// contain @gemix. Delegates to the shared WhatsApp handler + batcher.
-// Never handles groups (filtered early).
+// contain @gemix (groups filtered prior to processing). Delegates to the shared WhatsApp handler + batcher.
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse } = require('./shared');
+const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse, _waMessageKey } = require('./shared');
 const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
 const { handleMessage } = require('../../handler');
 const { identifyUser } = require('../../utils/userIdentifier');
@@ -176,18 +175,19 @@ async function onPersonalMessage(msg) {
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
-  // Personal account never serves groups (filtered earlier in onPersonalMessage),
-  // so isGroup=false here is structural, not a runtime check.
+  // Personal account processes 1:1 chats only (groups filtered in onPersonalMessage before reaching here);
+  // isGroup is hardcoded false as a structural invariant for this platform.
   const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, phoneJid, false);
 
   if (contentParts.length === 0) return;
 
+  const messageKey = _waMessageKey(msg);
   const batchKey = `wa_personal:${chat.id._serialized}`;
 
   // If a batch is already accumulating for this chat, add to it and return
   if (hasPendingBatch(batchKey)) {
     log.info(`   Batching additional message for ${batchKey}`);
-    pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity }, _handlePersonalBatch);
+    pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, messageKey }, _handlePersonalBatch);
     return;
   }
 
@@ -200,7 +200,7 @@ async function onPersonalMessage(msg) {
   const stopLockRenew = responseLock.startAutoRenew(lockKey);
 
   // Start a new batch
-  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, stopLockRenew }, _handlePersonalBatch);
+  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, messageKey, stopLockRenew }, _handlePersonalBatch);
 }
 
 /**
@@ -229,11 +229,16 @@ async function _handlePersonalBatch(entries) {
       allParts.push(...entry.contentParts);
     }
 
+    // Collect keys of messages in this batch/turn to exclude from history (current user turn with tags/inline supplied separately after history)
+    const excludeKeys = new Set(
+      entries.map(e => e.messageKey).filter(Boolean)
+    );
+
     // Fetch history at fire time (fresher state)
     let history = [];
     try {
       history = await Promise.race([
-        buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, phoneJid),
+        buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, phoneJid, excludeKeys.size > 0 ? excludeKeys : null),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('History fetch timeout')), 15000)
         )

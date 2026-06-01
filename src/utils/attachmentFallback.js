@@ -1,7 +1,6 @@
 // src/utils/attachmentFallback.js
-// Handles fallback for attachments that fail to send directly.
-// When sending attachments fails, they are uploaded to temporary file server
-// and a system message with download link is sent instead.
+// Provides fallback delivery for attachments that cannot be sent directly:
+// uploads them to the temporary file server and includes download links in a system message.
 
 const fs = require('fs');
 const path = require('path');
@@ -18,7 +17,7 @@ const log = createLogger('AttachmentFallback');
  * @param {Array<object>} failedAttachments - Array of attachment objects that failed to send
  * @param {object} options
  * @param {string} options.platform - 'whatsapp' or 'discord' or 'email'
- * @returns {object} { message: string, fallbackLinks: Array<{name, url, size}> }
+ * @returns {object} { message: string, fallbackLinks: Array<{name: string, token: string, url: string, size: number, expiresInMinutes: number}>, totalSize: number }
  * @throws {Error} if temp file registration fails
  */
 function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
@@ -66,7 +65,7 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
       totalSize += stat.size;
     } catch (err) {
       log.error(`Failed to register attachment "${att.name || 'unknown'}" as temp file: ${err.message}`);
-      // Log the failure and continue, avoiding cascading error for other files
+      // Log registration failure for this attachment
     }
   }
 
@@ -107,7 +106,7 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
 
 /**
  * Attempt to send an attachment via a given send function.
- * Returns {success, error?, attachment?}
+ * Returns { success: boolean, error?: string, attachment?: object }
  * 
  * @param {object} attachment - Attachment to send
  * @param {Function} sendFunction - Async function that sends the attachment
@@ -130,7 +129,7 @@ async function trySendAttachment(attachment, sendFunction) {
  * @param {Function} sendFunction - Async (attachment) => void function
  * @param {object} options
  * @param {string} options.platform - 'whatsapp', 'discord', 'email'
- * @returns {Promise<object>} { sent, failed, fallbackMessage?, fallbackLinks? }
+ * @returns {Promise<object>} { sent: Array, failed: Array, fallbackMessage: string|null, fallbackLinks: Array }
  */
 async function sendAttachmentsWithFallback(attachments, sendFunction, options = {}) {
   if (!Array.isArray(attachments) || attachments.length === 0) {
@@ -165,7 +164,7 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
       log.info(`Generated fallback message for ${results.failed.length} attachment(s)`);
     } catch (err) {
       log.error(`Failed to generate fallback message: ${err.message}`);
-      // Don't re-throw; we tried our best
+      // Set default fallback message instead
       results.fallbackMessage = `⚠️ I seguenti allegati non hanno potuto essere inviati e non è possibile creare un link di download temporaneo. Riprova più tardi.`;
     }
   }

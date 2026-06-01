@@ -71,7 +71,7 @@ cleanup() { rm -f "$TMP_OUT" "$TMP_ERR"; }
 trap cleanup EXIT
 
 # --yolo : auto-approve the tool call (no TTY prompt)
-# --ignore-rules : strip AGENTS.md / SOUL.md / preloaded skills from the prompt
+# --ignore-rules : strip preloaded skills from the prompt
 # -t tts : restrict the toolset to text_to_speech
 # -z : one-shot non-interactive mode (same as imagine.sh)
 if ! hermes --yolo --ignore-rules -t tts -z "$FULL_PROMPT" >"$TMP_OUT" 2>"$TMP_ERR"; then

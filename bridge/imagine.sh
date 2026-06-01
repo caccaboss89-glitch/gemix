@@ -80,7 +80,7 @@ fi
 FULL_PROMPT="${PROMPT}${REF_CLAUSE_FLAT} | ${INSTRUCTION}"
 
 # Run hermes in one-shot mode, restricted to the relevant toolset and with
-# rule injection disabled so AGENTS.md / memory / preloaded skills don't
+# rule injection disabled so memory / preloaded skills don't
 # pollute the prompt. --yolo bypasses any approval prompt for the tool call.
 # NOTE: -z must come LAST before the prompt argument, or hermes misparses it.
 # NOTE: FULL_PROMPT must be a single line - hermes treats newlines as prompt

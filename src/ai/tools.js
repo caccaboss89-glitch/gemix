@@ -3,7 +3,7 @@
 // Central registry of tool definitions for the main brain (function calling schema).
 // Uses makeTool + validateToolArgs (lightweight hallucination guard, no ajv).
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
-// The build tool description is intentionally generic to avoid leaking sub-agent internals.
+// The build tool description is generic and does not expose sub-agent internals.
 
 const { PLATFORM_DISCORD } = require('../config/constants');
 
@@ -147,8 +147,7 @@ const TOOL_READ_SERVER_RULES = makeTool({
 
 // -- Discord conversation title (forced on the first turn) -----------------
 //
-// Replaces the fragile <title>...</title> XML parsing. On the FIRST message of
-// a Discord thread we expose this tool and force its use (tool_choice), so
+// On the FIRST message of a Discord thread we expose this tool and force its use (tool_choice), so
 // the thread title is set deterministically exactly once. It is NOT offered
 // on later turns, so the model never second-guesses or rewrites the title.
 const TOOL_SET_CONVERSATION_TITLE = makeTool({

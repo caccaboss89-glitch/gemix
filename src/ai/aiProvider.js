@@ -6,8 +6,7 @@
 // through responsesAdapter + apiClient, then converts the result back
 // to the chat-completion shape expected by handler.js.
 //
-// Keeps backward compatibility for existing callers while enabling
-// native multimodal input via input_file.
+// Supports native multimodal input via input_file.
 
 const { HERMES_API_KEY, HERMES_BASE_URL, GROK_MODEL } = require('../config/env');
 const { MAX_TOKENS } = require('../config/constants');
@@ -42,8 +41,8 @@ async function callAI(messages, tools = null, opts = {}) {
     // max_output_tokens is the Responses API counterpart of max_tokens.
     max_output_tokens: MAX_TOKENS,
     // High reasoning effort: GemiX is the user-facing brain, latency is
-    // already dominated by tool I/O, and we'd rather pay extra reasoning
-    // budget than ship sloppy answers. webXSearch / buildAgent use the same.
+    // dominated by tool I/O, and extra reasoning budget is used to avoid
+    // shipping sloppy answers. webXSearch / buildAgent use the same.
     reasoning: { effort: 'high' },
   };
 
@@ -64,8 +63,7 @@ async function callAI(messages, tools = null, opts = {}) {
   const adaptedTools = chatToolsToResponsesTools(tools);
   if (adaptedTools) {
     body.tools = adaptedTools;
-    // Default tool_choice ("auto") matches the previous behaviour of
-    // /chat/completions when no explicit choice was sent. Callers can force a
+    // tool_choice defaults to "auto". Callers can force a
     // specific tool (e.g. the Discord title-setter on the first turn).
     body.tool_choice = opts.toolChoice || 'auto';
   }

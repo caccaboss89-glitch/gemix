@@ -19,7 +19,7 @@
 // Markdown image embeds in the answer; we download those images, hand the
 // buffers back to the caller (main brain -> delivery buffer, build agent ->
 // workspace), and replace each embed with a positional placeholder so the
-// brain never pastes a raw URL or references an image that didn't ship.
+// brain never pastes a raw URL or references an image that does not ship.
 
 const { HERMES_API_KEY, HERMES_BASE_URL, MULTI_AGENT_MODEL, FAST_RESEARCH_MODEL } = require('../config/env');
 const { MAX_IMAGE_BYTES, MAX_RESEARCH_IMAGES, RESEARCH_MAX_TURNS } = require('../config/constants');
@@ -121,9 +121,9 @@ function _extractCitations(data) {
 }
 
 /**
- * Compute the number of web results and X posts a research run gathered.
+ * Compute the number of web results and X posts that a research run gathers.
  *
- * Fast gear (single model): every tool call the model made is visible in
+ * Fast gear (single model): every tool call the model makes is visible in
  * `output[]` (no encrypted sub-agents), so this is EXACT - we sum the real
  * `action.sources` of each web_search_call plus the requested `limit` of each
  * X search call.
@@ -230,7 +230,7 @@ const _MD_IMAGE_RE = /!\[([^\]]*)\]\(\s*(https?:\/\/[^\s)]+)\s*\)/g;
  * Extract Markdown image embeds from the report text, download up to
  * `maxImages`, and rewrite the text so the brain never sees raw image URLs:
  *   - successfully downloaded -> replaced with "[📎 Immagine N: alt]"
- *   - failed download or over the cap -> embed removed entirely (no broken ref)
+ *   - failed download or over the cap -> embed is removed entirely (no broken ref)
  *
  * Returns { text, images: [{ name, buffer, mimetype, alt, sourceUrl }] }.
  * The placeholder order matches the attachment order exactly, so the brain
@@ -292,7 +292,7 @@ async function _extractAndStripImages(text, maxImages) {
     const repl = urlToPlaceholder.get(cleanUrl);
     return repl === undefined ? '' : repl;
   });
-  // Collapse blank lines left behind by removed embeds.
+  // Collapse blank lines left behind by dropped image embeds.
   outText = outText.replace(/\n{3,}/g, '\n\n').trim();
 
   return { text: outText, images };
@@ -334,11 +334,11 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
   // report stays clean for GemiX to rephrase. The image clause is added ONLY
   // when images are wanted - when off we say nothing about images, so the
   // model still freely uses its image-understanding (view_image) while
-  // browsing without being told to avoid images it never had a tool for.
+  // browsing without being told to avoid images for which it has no search tool.
   //
   // When images ARE wanted the clause is phrased as an explicit DIRECTIVE
-  // (not a passive "you may include images"): the caller turned the flag on,
-  // so the model must actively run web image search and surface the relevant
+  // (not a passive "you may include images"): when the caller turns the flag on,
+  // the model must actively run web image search and surface the relevant
   // results. Otherwise the model tends to treat image embedding as optional
   // and silently skips it, ignoring the flag.
   const outputRules = searchImages
