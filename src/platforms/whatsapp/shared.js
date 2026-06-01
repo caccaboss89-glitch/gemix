@@ -149,13 +149,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
     if (platform === PLATFORM_WA_PERSONAL) {
       if (msg.fromMe) {
-        if (hasScheduledFooter(msg.body)) {
-          senderName = '[System]';
-          isScheduled = true;
-        } else if (isSystemMessage(msg.body)) {
-          senderName = '[System]';
-          isSystem = true;
-        } else if (hasFooter(msg.body)) {
+        if (hasFooter(msg.body)) {
           senderName = 'GemiX';
           isGemiX = true;
         } else {
@@ -170,11 +164,16 @@ async function buildWhatsAppHistory(chat, platform, userId) {
         }
       }
     } else {
+      // Dedicated WA: system/scheduled messages (wraps, releases, programmed, temp links etc)
+      // are ONLY ever sent via the dedicated account to private 1:1 member chats.
+      // Tag them [System] ONLY here (never on personal admin WA, never on groups, never on Discord).
+      // This lets the model distinguish bot's normal replies from proactive system events in history.
       if (msg.fromMe) {
-        if (hasScheduledFooter(msg.body)) {
+        const isPrivateDedicated = !isGroup;
+        if (isPrivateDedicated && hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
-        } else if (isSystemMessage(msg.body)) {
+        } else if (isPrivateDedicated && isSystemMessage(msg.body)) {
           senderName = '[System]';
           isSystem = true;
         } else {
@@ -192,6 +191,7 @@ async function buildWhatsAppHistory(chat, platform, userId) {
     }
 
     const isFromBot = isGemiX || isScheduled || isSystem;
+    const isSystemEvent = isScheduled || isSystem;
 
     const ts = formatTimestamp(msg.timestamp * 1000);
     const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
@@ -259,9 +259,15 @@ async function buildWhatsAppHistory(chat, platform, userId) {
 
     const prefix = `[${ts}] ${senderName}: `;
 
+    // For normal GemiX assistant replies: bare textContent (role assistant)
+    // For real users: labeled prefix (role user)
+    // For system events (only possible on dedicated private): labeled with [System] tag
+    //   so the model sees them in history and the system prompt rule applies.
+    //   Keep role=assistant (they are bot-originated) but content includes the marker.
+    const useLabeledContent = !isFromBot || isSystemEvent;
     historyMessages.push({
       role: isFromBot ? 'assistant' : 'user',
-      content: isFromBot ? textContent : `${prefix}${textContent}`,
+      content: useLabeledContent ? `${prefix}${textContent}` : textContent,
     });
   }
 

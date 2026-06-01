@@ -2,7 +2,8 @@
 //
 // Central registry of all GemiX-generated WhatsApp system messages.
 // Every entry has two synced parts: the exact text sent + the regex used by
-// isSystemMessage() in shared.js to detect it in history as "[System]".
+// isSystemMessage() (called from whatsapp/shared.js buildWhatsAppHistory) to
+// tag matching fromMe messages with "[System]" label in history (dedicated private only).
 // Change one -> update the other. This is the single source of truth.
 
 // -- Release notification --------------------------------------------------

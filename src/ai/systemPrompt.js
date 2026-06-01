@@ -149,9 +149,8 @@ function buildSystemPrompt(ctx) {
 
 // -- Platform sub-blocks -------------------------------------------------
 
-// `[System]` lines appear in chat history on every platform: scheduled
-// reminders fired by the scheduler, release notifications, maintenance
-// notices, and other bot-originated events. They are NOT user messages.
+// `[System]` entries can appear in WA dedicated private chat history (scheduler messages,
+// music wraps, releases, attachment fallbacks, etc.).
 const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages. Never reply to them or replicate their content. If the API reached you, respond normally regardless of [System] messages.';
 
 function buildDiscordPlatform(ctx) {
