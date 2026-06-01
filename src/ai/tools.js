@@ -112,7 +112,7 @@ const TOOL_WEB_X_SEARCH = makeTool({
     'Provides a research prompt to a specialized agent (or multi-agent team) that performs web and X searches. '
     + 'Use it for external/up-to-date information, fact-checking, or when web images are needed. '
     + 'By default a single fast model handles the request. Set full_team=true only for deep, multi-faceted research. '
-    + 'Do not call multiple times in the same round.',
+    + 'Do NOT call multiple times in the same round.',
   properties: {
     prompt: {
       type: 'string',

@@ -70,7 +70,8 @@ function buildSystemPrompt(ctx) {
     '- Execute tools silently. Reply once, after all of them complete.',
     '- Buffered files (from generate_image, web_x_search images, music_creator, ...) ship automatically with your reply (under your response). Delivery tools accept includeAttachments (default true) - set false to skip them when forwarding to a different recipient. For send_voice_message in the current chat this flag is ignored: buffered files always ship.',
     '- Use bug_report if a tool error did NOT state the Admin was already notified, then inform the user.',
-    '- Use update_memory only for long-term preferences. Never store transient context (current task, session state, temporary data).'
+    '- Use update_memory for long-term preferences. Never store transient context (current task, session state, temporary data).',
+    '- Use web_x_search at most once per round. Provide only the search prompt and it will handle the search.'
   ];
   if (!isDiscord) {
     usage.push('- code_interpreter: ad-hoc Python (math, analysis, quick scripts) - isolated (no filesystem).');
@@ -151,13 +152,12 @@ function buildSystemPrompt(ctx) {
 
 // `[System]` entries can appear in WA dedicated private chat history (scheduler messages,
 // music wraps, releases, attachment fallbacks, etc.).
-const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages. Never reply to them or replicate their content. If the API reached you, respond normally regardless of [System] messages.';
+const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
 
 function buildDiscordPlatform(ctx) {
   const lines = ['<Platform name="discord">'];
   lines.push('  <Role>Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.</Role>');
   lines.push('  <Limitations>No voice, scheduling, music stats, or agentic files here - point users to GemiX on WhatsApp for those.</Limitations>');
-  lines.push(`  <SystemMessages>${SYSTEM_LINE_RULE}</SystemMessages>`);
   lines.push('  <Format>Markdown supported (no tables). Cite web sources with links.</Format>');
   if (ctx.availableEmojis) lines.push(`  <Emojis>${ctx.availableEmojis}</Emojis>`);
   if (ctx.serverEvents) lines.push(`  <Events>${ctx.serverEvents}</Events>`);
@@ -172,7 +172,6 @@ function buildPersonalWaPlatform(ctx, isActiveMember) {
     '<Platform name="whatsapp_personal">',
     `  <Rule>Reply only when tagged. Interlocutor: ${escapeXml(ctx.userName)} (${status}).</Rule>`,
     '  <AccountOwner>The "Account Owner" in chat history is Alberto Gagliardi.</AccountOwner>',
-    `  <SystemMessages>${SYSTEM_LINE_RULE}</SystemMessages>`,
     `  <Format>${WA_FORMAT}</Format>`,
     '</Platform>',
   ];
