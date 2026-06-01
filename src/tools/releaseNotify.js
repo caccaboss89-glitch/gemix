@@ -1,11 +1,17 @@
 // src/tools/releaseNotify.js
+//
+// Manages per-chat subscription state for GemiX release notifications.
+// Persists via systemState ('releases' key), with migration from old JSON file.
+// Exposes isReleaseNotifyEnabled, toggleReleaseNotify, and getSubscribedChats
+// for use by handler and admin flows. In-memory Map with disk backup.
+
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 
 const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
 
-/** @type {Map<string, string>} chatId → waJid (delivery target) */
+/** @type {Map<string, string>} chatId -> waJid (delivery target) */
 let subscribedChats = new Map();
 
 function _load() {
@@ -104,7 +110,7 @@ async function toggleReleaseNotify(enabled, chatId, waJid) {
 
 /**
  * Get all subscribed WA JIDs (deduplicated).
- * @returns {Map<string, string>} chatId → waJid
+ * @returns {Map<string, string>} chatId -> waJid
  */
 function getSubscribedChats() {
   return new Map(subscribedChats);

@@ -1,33 +1,12 @@
 // src/utils/inputFileBuilder.js
 //
-// Pre-call hook that prepares non-image media (PDF, audio, video, plain text)
-// for the xAI Responses API.
+// Pre-call hook that rewrites non-image media parts (PDF, audio, video, text)
+// into `input_file` URL parts for the Responses API so xAI can fetch and
+// process them server-side (OCR/STT/frames).
 //
-// Why this exists:
-//   - xAI's /v1/responses endpoint accepts native attachments as
-//     `{type:'input_file', file_url:'https://…'}`. Server-side, xAI fetches
-//     the file once, runs OCR/STT/frame extraction, and folds the parsed
-//     content into the prompt automatically.
-//   - This replaces the three pre-pass modules we used to run before each
-//     LLM call (audio STT, video describer, PDF parser microservice) and
-//     the bespoke tag injection that came with them. None of that is
-//     needed anymore.
-//   - Images stay base64 inline (`image_url` data URL). The Responses adapter
-//     translates them to `input_image` and they work natively. No need to push
-//     every image through the tunnel — xAI accepts both.
-//
-// What this module does NOT do:
-//   - It does not pre-validate file size / duration limits anymore. xAI's
-//     own limits (48 MB/file, ~2-3 min practical video) take care of that.
-//     If a file exceeds the model's limit the API returns an explicit error
-//     and the handler reports it to the user.
-//   - It does not modify chat history entries. Pre-pass runs on the
-//     in-memory `messages[]` array right before the call; history rows in
-//     storage are untouched.
-//
-// Threading: each pass walks `messages` once and mutates content arrays in
-// place. Concurrent calls are isolated (each handleMessage gets its own
-// messages array).
+// Images stay as data: URLs (handled as input_image by the adapter).
+// Does not touch persisted history and does not enforce size limits
+// (those are left to xAI + the handler error path).
 
 const fs = require('fs');
 const path = require('path');
@@ -43,7 +22,7 @@ const log = createLogger('InputFileBuilder');
 // adapter's `input_image` path (base64 data URLs work fine on /v1/responses).
 const URL_PASSTHROUGH_PREFIXES = ['application/', 'audio/', 'video/', 'text/'];
 
-// Extension → fallback name when the original filename is unknown.
+// Extension -> fallback name when the original filename is unknown.
 const EXT_BY_MIME = {
   'application/pdf': '.pdf',
   'audio/mpeg': '.mp3',
@@ -79,7 +58,7 @@ function _extractMimeFromDataUrl(url) {
 }
 
 function _basenameForPart(part, mimetype) {
-  // Preferred order: explicit filename hint → history path basename →
+  // Preferred order: explicit filename hint -> history path basename ->
   // synthesized random name with a sensible extension.
   if (typeof part?._fileName === 'string' && part._fileName.trim()) {
     return path.basename(part._fileName.trim());
@@ -129,7 +108,7 @@ function _materializeToTemp(base64, originalName, ownerKey) {
  * MIME types stay as-is).
  *
  * The function is best-effort: if URL registration fails (tunnel down,
- * disk full, …) it returns null and the caller falls back to leaving the
+ * disk full, ...) it returns null and the caller falls back to leaving the
  * original part in place. The resulting downstream API error, if any,
  * surfaces clearly via the handler's error path.
  *
@@ -144,7 +123,7 @@ function _convertPart(part, ownerKey) {
   const parsed = _extractMimeFromDataUrl(part.image_url.url);
   if (!parsed) return null;
 
-  // Pure images stay where they are — adapter handles them as input_image.
+  // Pure images stay where they are - adapter handles them as input_image.
   if (!_shouldPassAsUrl(parsed.mimetype)) return null;
 
   const originalName = _basenameForPart(part, parsed.mimetype);
@@ -177,7 +156,7 @@ function _convertPart(part, ownerKey) {
     return null;
   }
 
-  log.debug(`📎 ${originalName} → ${kind} URL (mime=${parsed.mimetype})`);
+  log.debug(`${originalName} -> ${kind} URL (mime=${parsed.mimetype})`);
   return { type: 'input_file', file_url: urlInfo.url };
 }
 
@@ -216,7 +195,7 @@ async function prepareInputFilesInMessages(messages, opts = {}) {
   }
 
   if (converted > 0 || skipped > 0) {
-    log.info(`📎 prepareInputFilesInMessages: converted=${converted}, skipped=${skipped}`);
+    log.info(`prepareInputFilesInMessages: converted=${converted}, skipped=${skipped}`);
   }
   return { converted, skipped };
 }

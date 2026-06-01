@@ -3,10 +3,10 @@
 // Tool used by the main brain to pull a specific file from chat history
 // into the conversation. Two return shapes:
 //
-//   1. Text/code → wrapped in <FileContent path="…" size="N"> with line
+//   1. Text/code -> wrapped in <FileContent path="..." size="N"> with line
 //      numbers, truncated past MAX_TEXT_BYTES.
-//   2. Media (PDF, audio, video, image) → exposed via the public attachment
-//      tunnel as `{type:'input_file', file_url:'https://…'}` (or `image_url`
+//   2. Media (PDF, audio, video, image) -> exposed via the public attachment
+//      tunnel as `{type:'input_file', file_url:'https://...'}` (or `image_url`
 //      base64 for images) so xAI's Responses endpoint fetches and parses
 //      them natively (OCR, STT, frame extraction).
 //
@@ -45,7 +45,7 @@ const VIDEO_MIME = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/
 const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 
 /**
- * Resolve a filename or "history/<…>" path to an absolute path under the
+ * Resolve a filename or "history/<...>" path to an absolute path under the
  * user's history dir. Refuses anything that escapes the history tree.
  */
 function _resolveHistoryPath(rawPath, userCtx) {
@@ -122,7 +122,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return { success: false, error: `Files with extension "${ext}" cannot be read directly. Delegate the task to the build sub-agent (which can run scripts on the file).` };
   }
 
-  // ── Images ─────────────────────────────────────────────────────────────
+  // -- Images --------------------------------------------------------------
   // Stay base64 inline. /v1/responses accepts image data URLs natively as
   // input_image; round-tripping through the tunnel would only add latency.
   if (IMAGE_EXTS.includes(ext)) {
@@ -138,7 +138,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     ];
   }
 
-  // ── PDF / audio / video ───────────────────────────────────────────────
+  // -- PDF / audio / video -------------------------------------------------
   if (ext === '.pdf') {
     if (fileSize > MAX_PDF_BYTES) return { success: false, error: `PDF "${displayPath}" exceeds the 48 MB xAI limit.` };
     return _buildInputFilePart(abs, displayPath, 'application/pdf');
@@ -157,7 +157,7 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     return _buildInputFilePart(abs, displayPath, VIDEO_MIME[ext]);
   }
 
-  // ── Text / Code / unknown small file ──────────────────────────────────
+  // -- Text / Code / unknown small file ------------------------------------
   if (fileSize > MAX_TEXT_BYTES * 4) {
     return { success: false, error: `File is too large to read as text (max ${MAX_TEXT_BYTES / 1024} KB).` };
   }

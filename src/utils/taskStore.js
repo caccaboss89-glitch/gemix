@@ -1,4 +1,9 @@
 // src/utils/taskStore.js
+//
+// Persistent storage layer for scheduled tasks (reminders).
+// Handles read/write/modify operations on per-user/group task files
+// with per-file async locking to prevent race conditions.
+
 const fs = require('fs');
 const fsPromises = require('fs').promises;
 const path = require('path');

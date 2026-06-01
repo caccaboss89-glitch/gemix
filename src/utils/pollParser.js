@@ -1,4 +1,18 @@
 // src/utils/pollParser.js
+//
+// WhatsApp poll parsing helpers for whatsapp-web.js.
+// whatsapp-web.js exposes poll data in inconsistent internal shapes
+// (pollOptions, pollCreation, _data, etc.). These utilities normalize
+// extraction of options and produce a clean text representation for
+// the AI context.
+
+/**
+ * Extract poll option texts from a whatsapp-web.js poll message.
+ * Handles multiple internal representations used by the library.
+ *
+ * @param {object} msg - The whatsapp-web.js message object
+ * @returns {string[]} Array of option texts
+ */
 function extractWhatsAppPollOptions(msg) {
   const options = [];
 
@@ -35,6 +49,15 @@ function extractWhatsAppPollOptions(msg) {
   return options;
 }
 
+/**
+ * Format a WhatsApp poll creation message for the AI.
+ * If the message is a poll, appends the question + numbered options.
+ * Otherwise returns the original text body unchanged.
+ *
+ * @param {object} msg - The whatsapp-web.js message object
+ * @param {string} textBody - The raw text body of the message
+ * @returns {string} Formatted poll text or original body
+ */
 function formatWhatsAppPollText(msg, textBody) {
   if (msg.type !== 'poll_creation') return textBody;
 

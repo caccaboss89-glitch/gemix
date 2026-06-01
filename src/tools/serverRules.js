@@ -1,4 +1,9 @@
 // src/tools/serverRules.js
+//
+// Simple loader for the server rules (regolamento.txt) from the data directory.
+// Returns the full text wrapped in <ServerRules> XML tag for the main brain.
+// Used by the read_server_rules tool. No processing or formatting.
+
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');

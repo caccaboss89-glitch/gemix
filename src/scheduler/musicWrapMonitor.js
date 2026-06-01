@@ -1,4 +1,9 @@
 // src/scheduler/musicWrapMonitor.js
+//
+// Monitors GitHub music stats for updates and sends monthly wrap notifications
+// to active members on the 1st of each month (or when new stats appear).
+// Persists state via systemState, with migration from old JSON file.
+
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
@@ -11,6 +16,8 @@ const log = createLogger('MusicWrap');
 const { MUSIC_WRAP_PASSWORD } = require('../config/env');
 
 const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
+const { fetchExternal } = require('../utils/fetch');
+const { MUSIC_WRAP_PREFIX } = require('../config/systemMessages');
 
 const MUSIC_WRAP_URL = 'https://sito-music-bot.vercel.app/';
 
@@ -91,7 +98,7 @@ function isFirstOfMonth() {
     day: 'numeric',
   });
   const day = parseInt(formatter.format(now), 10);
-  log.info(`🔍 isFirstOfMonth check: day=${day} (${now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' })})`);
+  log.info(`isFirstOfMonth check: day=${day} (${now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' })})`);
   return day === 1;
 }
 
@@ -102,7 +109,6 @@ function isFirstOfMonth() {
  */
 async function checkStatsFileUpdate() {
   try {
-    const { fetchExternal } = require('../utils/fetch');
     const STATS_URL = 'https://raw.githubusercontent.com/caccaboss89-glitch/MusicBot/main/data/stats.json';
 
     const response = await fetchExternal(STATS_URL, {
@@ -110,7 +116,7 @@ async function checkStatsFileUpdate() {
     }, 'Music Stats Check');
 
     if (!response.ok) {
-      log.error(`❌ Failed to read stats.json: ${response.status}`);
+      log.error(`Failed to read stats.json: ${response.status}`);
       return null;
     }
 
@@ -119,7 +125,7 @@ async function checkStatsFileUpdate() {
     const timestamp = data.lastUpdated || new Date().toISOString();
     return timestamp;
   } catch (err) {
-    log.error('❌ Failed to fetch stats.json:', err.message);
+    log.error('Failed to fetch stats.json:', err.message);
     return null;
   }
 }
@@ -143,7 +149,7 @@ function wasMessageSentToday(memberWa, state) {
  */
 async function checkAndSendMusicWrap(dedicatedClient) {
   if (!dedicatedClient) {
-    log.warn('⚠️  Dedicated WhatsApp client unavailable (not ready yet)');
+    log.warn('Dedicated WhatsApp client unavailable (not ready yet)');
     return;
   }
 
@@ -157,48 +163,47 @@ async function checkAndSendMusicWrap(dedicatedClient) {
 
   // If the check was already done today, skip (even after a bot restart)
   if (state.lastCheckDate === today) {
-    log.info(`ℹ️  Already checked today (${today}), skipping`);
+    log.info(`Already checked today (${today}), skipping`);
     return;
   }
 
-  log.info('✅ First of month! Running checks...');
+  log.info('First of month! Running checks...');
 
   const statsTimestamp = await checkStatsFileUpdate();
   if (!statsTimestamp) {
-    log.warn('⚠️  Unable to verify updates from GitHub');
+    log.warn('Unable to verify updates from GitHub');
     return;
   }
 
   if (state.lastStatsTimestamp === statsTimestamp) {
-    log.info('ℹ️  No new update detected (timestamp: ' + statsTimestamp + ')');
+    log.info('No new update detected (timestamp: ' + statsTimestamp + ')');
     // Record the check even without updates so it is not re-checked today after a reboot
     state.lastCheckDate = today;
     await saveMonitorState(state);
     return;
   }
 
-  log.info(`✅ New update detected (timestamp: ${statsTimestamp})`);
+  log.info(`New update detected (timestamp: ${statsTimestamp})`);
 
   let sentCount = 0;
 
   for (const member of ACTIVE_MEMBERS) {
     if (wasMessageSentToday(member.wa, state)) {
-      log.info(`ℹ️  Message already sent to ${member.name} today`);
+      log.info(`Message already sent to ${member.name} today`);
       continue;
     }
 
     try {
       const monthName = getPreviousMonthName();
       const capitalizedMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
-      const { MUSIC_WRAP_PREFIX } = require('../config/systemMessages');
       const password = MUSIC_WRAP_PASSWORD || 'N/D';
       const message = normalizeMarkdown(`${MUSIC_WRAP_PREFIX} ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`);
       await dedicatedClient.sendMessage(member.wa, message);
-      log.info(`✅ Message sent to ${member.name}`);
+      log.info(`Message sent to ${member.name}`);
       state.lastSentDate[member.wa] = today;
       sentCount++;
     } catch (err) {
-      log.error(`❌ Error sending to ${member.name}:`, err.message);
+      log.error(`Error sending to ${member.name}:`, err.message);
     }
   }
 
@@ -207,7 +212,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   await saveMonitorState(state);
 
   if (sentCount > 0) {
-    log.info(`✅ Done: ${sentCount}/${ACTIVE_MEMBERS.length} messages sent`);
+    log.info(`Done: ${sentCount}/${ACTIVE_MEMBERS.length} messages sent`);
   }
 }
 

@@ -15,12 +15,12 @@
 #   environment variable. xAI fetches each URL server-side and uses it as a
 #   reference for image-to-image / image-to-video / reference-to-video. The
 #   wrapper folds the URLs into the prompt (the CLI cannot ingest binaries,
-#   but it does consume reference images mentioned as URLs — verified in
+#   but it does consume reference images mentioned as URLs - verified in
 #   production). URLs travel via env (not argv) so they never get split or
 #   misparsed.
 #
 # Output:
-#   stdout : exactly one line — the URL of the generated media
+#   stdout : exactly one line - the URL of the generated media
 #   stderr : any diagnostic output from hermes (warnings, etc.)
 #
 # Exit codes:
@@ -45,7 +45,7 @@ if [[ -z "$KIND" || -z "$PROMPT" ]]; then
 fi
 
 # Build the natural-language instruction appended to the user prompt. We tell
-# hermes to use exactly one tool and to reply with ONLY the URL — that's how
+# hermes to use exactly one tool and to reply with ONLY the URL - that's how
 # hermes -z reliably emits a single-line stdout we can parse.
 case "$KIND" in
   image)
@@ -75,7 +75,7 @@ if [[ -n "$REF_CLAUSE" ]]; then
   REF_CLAUSE_FLAT="$(printf '%s' "$REF_CLAUSE" | tr '\t\r\n' '   ' | tr -s ' ')"
 fi
 
-# Single line: no newlines in the prompt — hermes -z treats newlines as
+# Single line: no newlines in the prompt - hermes -z treats newlines as
 # prompt terminators and only processes the first line.
 FULL_PROMPT="${PROMPT}${REF_CLAUSE_FLAT} | ${INSTRUCTION}"
 
@@ -83,7 +83,7 @@ FULL_PROMPT="${PROMPT}${REF_CLAUSE_FLAT} | ${INSTRUCTION}"
 # rule injection disabled so AGENTS.md / memory / preloaded skills don't
 # pollute the prompt. --yolo bypasses any approval prompt for the tool call.
 # NOTE: -z must come LAST before the prompt argument, or hermes misparses it.
-# NOTE: FULL_PROMPT must be a single line — hermes treats newlines as prompt
+# NOTE: FULL_PROMPT must be a single line - hermes treats newlines as prompt
 # terminators and only processes the first line.
 TMP_OUT="$(mktemp)"
 TMP_ERR="$(mktemp)"
@@ -103,10 +103,10 @@ fi
 #
 # Two complications to handle at once:
 #   1. hermes sometimes wraps a single URL across multiple lines, so naive
-#      line-based matching would truncate it. → flatten all whitespace first.
+#      line-based matching would truncate it. -> flatten all whitespace first.
 #   2. With reference images we passed URLs IN, and the model may echo them,
 #      so the flattened text can contain ref-URL + result-URL fused together.
-#      → strip the KNOWN reference URLs from the flattened text BEFORE
+#      -> strip the KNOWN reference URLs from the flattened text BEFORE
 #        grepping, leaving only the result URL.
 URL_FLAT="$(tr -d '\r\n\t ' < "$TMP_OUT")"
 if [[ -n "$REF_URLS" ]]; then

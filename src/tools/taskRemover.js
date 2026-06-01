@@ -1,4 +1,8 @@
 // src/tools/taskRemover.js
+//
+// Removes tasks by ID(s) from a personal or group task file using taskStore.
+// Simple read-filter-write. Returns success with count or clear error.
+
 const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
 
 /**

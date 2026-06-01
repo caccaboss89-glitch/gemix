@@ -6,7 +6,7 @@
 //      reject the attachment (legacy behaviour, 1h TTL).
 //   2. xAI ingestion: public URLs handed to /v1/responses as `input_file`
 //      so Grok can fetch PDF/audio/video/text natively. xAI fetches the
-//      file once shortly after the request — short-lived tokens are fine
+//      file once shortly after the request - short-lived tokens are fine
 //      for buffer-backed assets, longer ones (24h) for files already living
 //      in chat history that may be re-referenced across turns.
 //
@@ -71,7 +71,7 @@ function generateToken() {
 }
 
 /**
- * Sanitize an owner key (workspace slug, user id, …) into a single safe path
+ * Sanitize an owner key (workspace slug, user id, ...) into a single safe path
  * segment so per-user temp files can live in their own subdir under TEMP_DIR.
  * Returns null for empty/invalid input (caller falls back to TEMP_DIR root).
  */
@@ -227,12 +227,12 @@ function registerTempFile(filePath, originalName, opts = {}) {
     // Build URL: use env variable GEMIX_PUBLIC_URL if available, else fallback
     let publicUrl = env.GEMIX_PUBLIC_URL || 'http://localhost:9998';
     if (publicUrl === 'http://localhost:9998') {
-      log.warn(`⚠️  GEMIX_PUBLIC_URL not set - temp links will be: ${publicUrl} (may not be accessible externally)`);
+      log.warn(`GEMIX_PUBLIC_URL not set - temp links will be: ${publicUrl} (may not be accessible externally)`);
     }
     if (publicUrl.endsWith('/')) publicUrl = publicUrl.slice(0, -1);
     const url = `${publicUrl}/temp/${token}/${encodeURIComponent(finalName)}`;
 
-    log.info(`📁 Registered temp file: ${finalName} (mime=${mimetype}, token=${token.slice(0, 8)}..., expires in ${expiresInMinutes}min)`);
+    log.info(`Registered temp file: ${finalName} (mime=${mimetype}, token=${token.slice(0, 8)}..., expires in ${expiresInMinutes}min)`);
 
     return {
       token,
@@ -242,7 +242,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
       mimetype,
     };
   } catch (err) {
-    log.error(`❌ Failed to register temp file: ${err.message}`);
+    log.error(`Failed to register temp file: ${err.message}`);
     throw err;
   }
 }
@@ -259,8 +259,8 @@ function registerTempFile(filePath, originalName, opts = {}) {
  * @param {string} originalName - Display name (used in URL and headers).
  * @param {object} [opts]
  * @param {'history'|'temp'} [opts.kind='temp'] - Picks the default TTL:
- *   'history' → 24h (file lives on disk indefinitely, may be re-fetched),
- *   'temp'    → 1h  (one-shot generated asset or freshly-downloaded media).
+ *   'history' - 24h (file lives on disk indefinitely, may be re-fetched),
+ *   'temp'    - 1h  (one-shot generated asset or freshly-downloaded media).
  * @param {number} [opts.ttlMs] - Explicit override (takes precedence over kind).
  * @param {string} [opts.mimetype] - Force-override the detected MIME.
  * @returns {{url: string, token: string, expiresAt: number, mimetype: string}}
@@ -284,10 +284,10 @@ function getPublicAttachmentUrl(filePath, originalName, opts = {}) {
  *   1. Drop expired entries from the in-memory registry. If the registered
  *      file lives under TEMP_DIR (one-shot artefact, not user-history) we
  *      also unlink it from disk; files anywhere else (DATA_DIR/users/.../history,
- *      …) are left intact because their lifecycle is owned by the history
+ *      ...) are left intact because their lifecycle is owned by the history
  *      pruner / project sweeper, not us.
  *   2. Sweep TEMP_DIR for orphan files older than the longest possible TTL
- *      (history TTL — strictly an upper bound). This catches buffers that
+ *      (history TTL - strictly an upper bound). This catches buffers that
  *      were written to disk but never registered or whose registry entry
  *      crashed before insertion.
  */
@@ -312,7 +312,7 @@ function cleanupExpiredFiles() {
           log.debug(`🗑️  Deleted expired temp file: ${entry.originalName}`);
         }
       } catch (err) {
-        log.warn(`⚠️  Failed to delete expired file: ${err.message}`);
+        log.warn(`Failed to delete expired file: ${err.message}`);
       }
       fileRegistry.delete(token);
       cleanedCount++;
@@ -356,7 +356,7 @@ function cleanupExpiredFiles() {
   }
 
   if (cleanedCount > 0) {
-    log.info(`🧹 Cleanup: removed ${cleanedCount} expired/orphan file(s), ${fileRegistry.size} remaining in registry`);
+    log.info(`Cleanup: removed ${cleanedCount} expired/orphan file(s), ${fileRegistry.size} remaining in registry`);
   }
 }
 
@@ -375,7 +375,7 @@ function startTempFileServer() {
   }
 
   _server = http.createServer((req, res) => {
-    // ── Access log ──
+    // -- Access log --
     // Lightweight per-request log so we can verify xAI (or any client)
     // actually reaches us. If a fetch is registered in the bot but no
     // matching access log appears here, the request never made it past
@@ -388,7 +388,7 @@ function startTempFileServer() {
       : (req.socket && req.socket.remoteAddress) || '-');
     res.on('finish', () => {
       const _dur = Date.now() - _start;
-      log.info(`HTTP ${req.method} ${req.url} → ${res.statusCode} (${_dur}ms, ua="${_ua}", ip=${_ip})`);
+      log.info(`HTTP ${req.method} ${req.url} - ${res.statusCode} (${_dur}ms, ua="${_ua}", ip=${_ip})`);
     });
 
     try {
@@ -423,7 +423,7 @@ function startTempFileServer() {
       // following a leaked link, retries from broken clients) and refused.
       entry.requestCount = (entry.requestCount || 0) + 1;
       if (entry.requestCount > MAX_TOKEN_REQUESTS) {
-        log.warn(`Rate-limit hit for temp token ${token.slice(0, 8)}… (${entry.requestCount} requests)`);
+        log.warn(`Rate-limit hit for temp token ${token.slice(0, 8)}... (${entry.requestCount} requests)`);
         res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '3600' }).end('Too many requests');
         return;
       }
@@ -487,7 +487,7 @@ function startTempFileServer() {
   _server.listen(PORT, '0.0.0.0', () => {
     const tempH = Math.round(TUNNEL_TOKEN_TTL_TEMP_MS / 60000);
     const histH = Math.round(TUNNEL_TOKEN_TTL_HISTORY_MS / 3600000);
-    log.info(`✅ Temp file server listening on 0.0.0.0:${PORT} (TTL: ${tempH}min temp / ${histH}h history)`);
+    log.info(`Temp file server listening on 0.0.0.0:${PORT} (TTL: ${tempH}min temp / ${histH}h history)`);
   });
 
   _server.on('error', (err) => {
@@ -499,7 +499,7 @@ function startTempFileServer() {
   cleanupExpiredFiles();
   _cleanupInterval = setInterval(cleanupExpiredFiles, CLEANUP_INTERVAL_MS);
   if (_cleanupInterval.unref) _cleanupInterval.unref();
-  log.info(`🔄 Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
+  log.info(`Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
 }
 
 /**

@@ -1,4 +1,9 @@
 // src/scheduler/releaseMonitor.js
+//
+// Monitors GitHub releases and notifies subscribed chats (via releaseNotify)
+// with release notes + attached images when a new release is published.
+// Persists last seen release ID via systemState, with migration from old JSON.
+
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
@@ -11,6 +16,7 @@ const { MessageMedia } = require('whatsapp-web.js');
 const log = createLogger('ReleaseMonitor');
 
 const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
+const { RELEASE_NOTIFICATION_PREFIX } = require('../config/systemMessages');
 
 let lastCheckedReleaseId = null;
 
@@ -111,7 +117,7 @@ async function checkNewRelease(waClient) {
     if (lastCheckedReleaseId === null) {
       lastCheckedReleaseId = releaseId;
       await _saveState();
-      log.info(`📌 Initial release recorded: ${release.tag_name}`);
+      log.info(`Initial release recorded: ${release.tag_name}`);
       return;
     }
 
@@ -127,7 +133,6 @@ async function checkNewRelease(waClient) {
     // Strip markdown image syntax (images are sent separately as media)
     const cleanBody = body.replace(/!\[.*?\]\(https?:\/\/[^)\s]+\)/g, '').replace(/\n{3,}/g, '\n\n').trim();
 
-    const { RELEASE_NOTIFICATION_PREFIX } = require('../config/systemMessages');
     const message = `${RELEASE_NOTIFICATION_PREFIX} ${title}*\n\n${cleanBody}`.trim();
 
     // Collect images: inline markdown images + image assets
@@ -149,16 +154,16 @@ async function checkNewRelease(waClient) {
     }
 
     if (mediaItems.length > 0) {
-      log.info(`🖼️ ${mediaItems.length} image(s) found for release ${title}`);
+      log.info(`${mediaItems.length} image(s) found for release ${title}`);
     }
 
     const subscribedChats = getSubscribedChats();
     if (subscribedChats.size === 0) {
-      log.info(`📦 New release ${title} detected, but no subscribed chats.`);
+      log.info(`New release ${title} detected, but no subscribed chats.`);
       return;
     }
 
-    log.info(`📦 New release ${title} — sending to ${subscribedChats.size} chat(s)...`);
+    log.info(`New release ${title} - sending to ${subscribedChats.size} chat(s)...`);
 
     for (const [chatId, waJid] of subscribedChats) {
       try {

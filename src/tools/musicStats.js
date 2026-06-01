@@ -1,4 +1,9 @@
 // src/tools/musicStats.js
+//
+// Fetches public music listening stats from an external MusicBot GitHub repo
+// (https://.../stats.json) and returns a compact, XML-wrapped summary.
+// Used exclusively by the read_music_stats tool. Pure formatting + fetch.
+
 const { fetchExternal } = require('../utils/fetch');
 
 const STATS_URL = 'https://raw.githubusercontent.com/caccaboss89-glitch/MusicBot/main/data/stats.json';

@@ -1,34 +1,19 @@
 // src/ai/responsesAdapter.js
 //
-// Bidirectional adapter between the OpenAI Chat-Completions message format
-// used internally by GemiX (handler.js, tools/index.js, history store) and
-// the xAI Responses API (`/v1/responses`) used on the wire.
+// Bidirectional adapter: chat-completions style (used by handler, tools, history)
+// <-> xAI Responses API wire format (`/v1/responses` with `input[]`, `instructions`,
+// flat tools, typed items like function_call / function_call_output).
 //
-// Why this exists:
-//   - All call sites in GemiX speak chat-completions: `messages[]` with roles
-//     {system, user, assistant, tool}, content as string or `[{type, text|image_url}]`,
-//     `tool_calls` on assistant messages, `tool_call_id` on tool-result messages.
-//   - The wire format on `/v1/responses` is different: a single `input[]` list
-//     of typed items (`message`, `function_call`, `function_call_output`,
-//     `reasoning`), separate `instructions` for the system prompt, and tools
-//     are flat `{type:'function', name, description, parameters}` (NOT nested
-//     under `function:`).
-//
-// Doing the migration via an adapter keeps the rest of the codebase oblivious
-// to the wire change. Function calling, history replay, image attachments,
-// system prompt, and tool definitions all continue to be authored in
-// chat-completions style and translated here.
-//
-// Documented by xAI: https://docs.x.ai/docs/guides/responses
-// (paths verified via the Hermes proxy in RESEARCH.md tests).
+// Keeps the rest of GemiX oblivious to the wire format change. All three
+// exported functions are pure and heavily used by aiProvider + buildAgent.
 
 /**
  * Convert a single chat-style content payload (string OR array of parts) to
  * an array of Responses-API input parts for a `user` role message.
  *
  * Mappings:
- *   - chat `text`        → responses `input_text`
- *   - chat `image_url`   → responses `input_image` (image_url is the data/https URL)
+ *   - chat `text`        -> responses `input_text`
+ *   - chat `image_url`   -> responses `input_image` (image_url is the data/https URL)
  *   - already-responses parts (`input_text`, `input_image`, `input_file`) pass through
  *
  * Empty/falsy parts are dropped. The function never throws on unknown shapes:
@@ -64,7 +49,7 @@ function _userContentToInputParts(content) {
     }
 
     // Pass through native responses parts (used by future tunnel-based
-    // attachment passing, e.g. {type:'input_file', file_url:'https://…'}).
+    // attachment passing, e.g. {type:'input_file', file_url:'https://...'}).
     if (part.type === 'input_text' || part.type === 'input_image' || part.type === 'input_file') {
       out.push(part);
       continue;
@@ -200,7 +185,7 @@ function chatMessagesToResponsesInput(messages) {
       }
 
       default:
-        // Unknown roles (developer, function legacy, …) are dropped silently.
+        // Unknown roles (developer, function legacy, ...) are dropped silently.
         break;
     }
   }
@@ -214,15 +199,14 @@ function chatMessagesToResponsesInput(messages) {
  * Two shapes are supported:
  *   1. Chat-style function tool:
  *        { type:'function', function:{ name, description, parameters } }
- *      → flattened to: { type:'function', name, description, parameters }
+ *      -> flattened to: { type:'function', name, description, parameters }
  *   2. Native xAI server-side tool (already in Responses-shape):
- *        { type:'code_interpreter' } | { type:'web_search' } | { type:'x_search', limit:N } | …
- *      → passed through unchanged.
+ *        { type:'code_interpreter' } | { type:'web_search' } | { type:'x_search', limit:N } | ...
+ *      -> passed through unchanged.
  *
  * The pass-through allows getToolsForUser() to mix function tools and
  * server-side tools in the same `tools[]` array; xAI executes server-side
- * tools transparently without consuming a round of our outer loop (verified
- * empirically in TEST.md: web_search + custom function tool in one call).
+ * tools transparently without consuming a round of our outer loop.
  *
  * Returns null when the input is empty/missing so the caller can omit the
  * key entirely (xAI rejects an empty array on some endpoints).
@@ -245,7 +229,7 @@ function chatToolsToResponsesTools(tools) {
       });
       continue;
     }
-    // Native server-side tool — already Responses-shape, ship as is.
+    // Native server-side tool - already Responses-shape, ship as is.
     if (typeof t.type === 'string' && t.type !== 'function') {
       out.push(t);
       continue;
@@ -264,7 +248,7 @@ function chatToolsToResponsesTools(tools) {
  *     content: <plain text concatenation of all output_text parts>,
  *     tool_calls?: [
  *       { id: <call_id>, type: 'function', function: { name, arguments } },
- *       …
+ *       ...
  *     ],
  *   }
  *
@@ -297,7 +281,7 @@ function responsesToAssistantMessage(data) {
           if (part.type === 'output_text' && typeof part.text === 'string') {
             textPieces.push(part.text);
           } else if (typeof part.text === 'string' && !part.type) {
-            // Defensive: some shapes return bare {text:'…'} parts.
+            // Defensive: some shapes return bare {text:'...'} parts.
             textPieces.push(part.text);
           }
         }
@@ -321,7 +305,7 @@ function responsesToAssistantMessage(data) {
       }
 
       // Reasoning, web_search_call, custom_tool_call, etc.: not part of the
-      // chat-completion message contract — silently skipped.
+      // chat-completion message contract - silently skipped.
     }
   }
 

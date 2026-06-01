@@ -1,4 +1,11 @@
 // src/ai/apiClient.js
+//
+// Centralized API client for all LLM calls (Grok via Hermes).
+// Provides retry + timeout logic, structured request/response logging
+// with PII + base64 redaction, and log directory quota enforcement.
+// Exposes both the legacy chat-completion path (callModel) and the
+// Responses API path (callResponsesModel).
+
 const fs = require('fs');
 const path = require('path');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
@@ -15,7 +22,7 @@ const REDACT_BASE64_KEEP = 64;                      // keep first N chars of eac
 const REDACT_TEXT_KEEP = 4 * 1024;                  // keep first N chars of long text content parts
 const crypto = require('crypto');
 
-// ── Redaction helpers ──────────────────────────────────────────────────────
+// -- Redaction helpers -----------------------------------------------------
 //
 // We log every API request/response to disk for debugging. Without redaction
 // these files contain user PII (emails, phone numbers, names), full base64
@@ -278,12 +285,12 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
         const delay = attempt * 3000;
-        log.warn(`   ⚠️ API attempt ${attempt}/${MAX_API_RETRIES} failed: ${errMsg} — retrying in ${delay / 1000}s...`);
+        log.warn(`   API attempt ${attempt}/${MAX_API_RETRIES} failed: ${errMsg} - retrying in ${delay / 1000}s...`);
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
 
-      log.error(`   ❌ API error: ${errMsg}`);
+      log.error(`   API error: ${errMsg}`);
       await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
       throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
     }
@@ -306,7 +313,7 @@ async function callModel(modelName, apiUrl, body, apiKey) {
   try {
     data = await res.json();
   } catch (parseErr) {
-    log.error(`   ⚠️ JSON parse error from ${modelName}:`);
+    log.error(`   JSON parse error from ${modelName}:`);
     log.error(`      ${parseErr.message}`);
     throw new Error(`${modelName} API: invalid response (JSON parsing failed)`);
   }
@@ -318,7 +325,7 @@ async function callModel(modelName, apiUrl, body, apiKey) {
   }
 
   if (!data.choices || !data.choices[0]) {
-    log.error(`   ⚠️ Malformed ${modelName} response:`);
+    log.error(`   Malformed ${modelName} response:`);
     log.error(`      choices: ${JSON.stringify(data.choices)}`);
     log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
     
@@ -358,7 +365,7 @@ async function callResponsesModel(modelName, apiUrl, body, apiKey) {
   try {
     data = await res.json();
   } catch (parseErr) {
-    log.error(`   ⚠️ JSON parse error from ${modelName}:`);
+    log.error(`   JSON parse error from ${modelName}:`);
     log.error(`      ${parseErr.message}`);
     throw new Error(`${modelName} API: invalid response (JSON parsing failed)`);
   }
@@ -370,7 +377,7 @@ async function callResponsesModel(modelName, apiUrl, body, apiKey) {
   }
 
   if (!data || (!Array.isArray(data.output) && typeof data.output_text !== 'string')) {
-    log.error(`   ⚠️ Malformed ${modelName} response (Responses API):`);
+    log.error(`   Malformed ${modelName} response (Responses API):`);
     log.error(`      output: ${typeof data?.output} | output_text: ${typeof data?.output_text}`);
     log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
 

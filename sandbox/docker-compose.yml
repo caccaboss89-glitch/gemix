@@ -1,4 +1,4 @@
-# GemiX sandbox — reference topology.
+# GemiX sandbox - reference topology.
 #
 # This file is NOT used in production (the Node `buildSandbox` spawns
 # containers programmatically). It exists to:
@@ -25,14 +25,14 @@ services:
     environment:
       # ALLOWED_HOSTS: "youtube.com,twitter.com,x.com,instagram.com,tiktok.com,facebook.com"
       PROXY_PORT: "8080"
-      # URL of the host's internal notify server — set to reach the Node process.
+      # URL of the host's internal notify server - set to reach the Node process.
       # On Linux Docker: http://172.17.0.1:9999/notify
       # On Docker Desktop: http://host.docker.internal:9999/notify
       GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
     networks:
       egress: {}           # internet access (for forwarding to allowed hosts)
       sandbox_net: {}      # reachable by sandboxes as hostname "gemix-sandbox-proxy"
-    # Do NOT expose the port to the host — the proxy must only be reachable
+    # Do NOT expose the port to the host - the proxy must only be reachable
     # from sandbox_net.
 
   sandbox_example:

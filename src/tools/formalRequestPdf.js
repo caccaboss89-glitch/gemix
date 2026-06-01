@@ -1,4 +1,11 @@
 // src/tools/formalRequestPdf.js
+//
+// Generates formal PDF requests compliant with Art. 6 of the Statuto Albertino.
+// Uses pdfkit + Helvetica, a minimal inline-markdown parser (bold/italic + lists),
+// and a rigid set of predefined sections (headings are stripped from motivation).
+// Timestamp comes from the centralized Rome timezone utility (time.js).
+// Returns a Buffer ready for email / attachment delivery.
+
 const PDFDocument = require('pdfkit');
 const { getRomeTime } = require('../utils/time');
 
@@ -51,7 +58,7 @@ function renderInlineMarkdown(doc, text) {
 
 /**
  * Render motivation text: bold, italic, lists, numbered lists.
- * Heading markers (# ## etc.) are stripped — section headers are predefined.
+ * Heading markers (# ## etc.) are stripped - section headers are predefined.
  */
 function renderMotivation(doc, content) {
   const lines = content.split('\n');
@@ -112,7 +119,7 @@ function generateFormalRequestPdf({ fullName, title, motivation, requesterSignat
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    // ── Intestazione ──
+    // -- Intestazione --
     doc.fontSize(22).font('Helvetica-Bold').text('RICHIESTA FORMALE', { align: 'center' });
     doc.moveDown(0.3);
     doc.fontSize(10).font('Helvetica').fillColor('#333333')
@@ -128,31 +135,31 @@ function generateFormalRequestPdf({ fullName, title, motivation, requesterSignat
     doc.strokeColor('#000000').lineWidth(1);
     doc.moveDown(0.5);
 
-    // ── Sezione: Nome e Cognome ──
+    // -- Sezione: Nome e Cognome --
     renderSectionHeader(doc, 'NOME E COGNOME');
     doc.fontSize(11).font('Helvetica').text(fullName);
 
-    // ── Sezione: Titolo della Richiesta ──
+    // -- Sezione: Titolo della Richiesta --
     renderSectionHeader(doc, 'TITOLO DELLA RICHIESTA');
     doc.fontSize(11).font('Helvetica').text(title);
 
-    // ── Sezione: Motivazione ──
+    // -- Sezione: Motivazione --
     renderSectionHeader(doc, 'MOTIVAZIONE');
     renderMotivation(doc, motivation);
 
-    // ── Sezione: Data e Orario di Creazione ──
+    // -- Sezione: Data e Orario di Creazione --
     renderSectionHeader(doc, 'DATA E ORARIO DI CREAZIONE');
     doc.fontSize(11).font('Helvetica').text(getRomeTime());
 
-    // ── Sezione: Firma del Richiedente ──
+    // -- Sezione: Firma del Richiedente --
     renderSectionHeader(doc, 'FIRMA DEL RICHIEDENTE');
     doc.fontSize(11).font('Helvetica').text(requesterSignature || '________________________');
 
-    // ── Sezione: Firma/Visto del Legale ──
+    // -- Sezione: Firma/Visto del Legale --
     renderSectionHeader(doc, 'FIRMA/VISTO DEL LEGALE');
     doc.fontSize(11).font('Helvetica').text(legalSignature || '________________________');
 
-    // ── Footer ──
+    // -- Footer --
     doc.moveDown(2);
     doc.moveTo(lx, doc.y)
       .lineTo(doc.page.width - doc.page.margins.right, doc.y)

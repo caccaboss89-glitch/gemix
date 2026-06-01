@@ -3,11 +3,11 @@ GemiX sandbox egress proxy.
 
 Enforces a strict domain allowlist for outbound HTTP(S) traffic originating
 from a sandbox container. This is the ONLY bridge between the sandbox network
-and the outside world — the sandbox itself runs with no default route.
+and the outside world - the sandbox itself runs with no default route.
 
 Protocol support:
-- HTTP CONNECT  (HTTPS tunneling) — by far the common case (requests, httpx).
-- Plain HTTP GET/POST              — forwarded verbatim when host matches.
+- HTTP CONNECT  (HTTPS tunneling) - by far the common case (requests, httpx).
+- Plain HTTP GET/POST              - forwarded verbatim when host matches.
 
 Allowlist rules:
 - Matched against the request host (for CONNECT) or the Host header / URL
@@ -22,7 +22,7 @@ Operational:
 - Listens on 0.0.0.0:${PROXY_PORT:-8080} (only reachable from the internal
   sandbox docker network).
 - Structured log line for every request: allowed / denied, host, method, size.
-- No per-client authentication — the internal docker network is the trust
+- No per-client authentication - the internal docker network is the trust
   boundary. Do NOT expose this port to the host / internet.
 """
 
@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler
 from typing import Iterable
 from urllib.parse import urlparse
 
-# ── Configuration ───────────────────────────────────────────────────────────
+# -- Configuration ---------------------------------------------------------
 
 DEFAULT_ALLOWED = [
     # YouTube / Video Delivery (for yt-dlp)
@@ -142,7 +142,7 @@ def host_allowed(host: str, allowlist: Iterable[str] = ALLOWED_HOSTS) -> bool:
     return False
 
 
-# ── Logger (thread-safe single-line records) ────────────────────────────────
+# -- Logger (thread-safe single-line records) ------------------------------
 
 _log_lock = threading.Lock()
 
@@ -154,7 +154,7 @@ def _log(level: str, **fields) -> None:
         print(" ".join(parts), flush=True)
 
 
-# ── HTTP handler ────────────────────────────────────────────────────────────
+# -- HTTP handler ----------------------------------------------------------
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -165,7 +165,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: N802 (BaseHTTPRequestHandler API)
         return
 
-    # ── CONNECT (HTTPS tunneling) ──────────────────────────────────────────
+    # -- CONNECT (HTTPS tunneling) -----------------------------------------
     def do_CONNECT(self) -> None:  # noqa: N802
         target = self.path  # "host:port"
         host, _, port_str = target.partition(":")
@@ -178,7 +178,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not host_allowed(host):
             _log("warn", event="deny_connect", host=host, port=port)
             _notify_admin(
-                "Proxy — deny_connect",
+                "Proxy - deny_connect",
                 f"Connessione bloccata verso host non autorizzato: {host}:{port}",
             )
             self._reject(403, f"host {host} not allowed")
@@ -192,8 +192,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
-                "Proxy — upstream_fail (CONNECT)",
-                f"Connessione upstream fallita verso {host}:{port} — {e}",
+                "Proxy - upstream_fail (CONNECT)",
+                f"Connessione upstream fallita verso {host}:{port} - {e}",
             )
             self._reject(502, "upstream connect failed")
             return
@@ -208,7 +208,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    # ── Plain HTTP forwarding ──────────────────────────────────────────────
+    # -- Plain HTTP forwarding ---------------------------------------------
     def _forward_http(self) -> None:
         parsed = urlparse(self.path)
         host = parsed.hostname or self.headers.get("Host", "")
@@ -216,7 +216,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not host_allowed(host):
             _log("warn", event="deny_http", method=self.command, host=host)
             _notify_admin(
-                "Proxy — deny_http",
+                "Proxy - deny_http",
                 f"Richiesta HTTP bloccata verso host non autorizzato: {self.command} {host}",
             )
             self._reject(403, f"host {host} not allowed")
@@ -234,8 +234,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
-                "Proxy — upstream_fail (HTTP)",
-                f"Connessione upstream fallita verso {host}:{port} — {e}",
+                "Proxy - upstream_fail (HTTP)",
+                f"Connessione upstream fallita verso {host}:{port} - {e}",
             )
             self._reject(502, "upstream connect failed")
             return
@@ -295,7 +295,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._forward_http()  # noqa: N802
 
-    # ── Helpers ────────────────────────────────────────────────────────────
+    # -- Helpers -----------------------------------------------------------
     def _reject(self, code: int, reason: str) -> None:
         body = f"{reason}\n".encode()
         try:

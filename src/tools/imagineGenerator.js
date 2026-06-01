@@ -1,12 +1,12 @@
 // src/tools/imagineGenerator.js
 //
-// Grok Imagine — generate images and short videos.
+// Grok Imagine - generate images and short videos.
 //
 // Why we shell out to `hermes -z` instead of hitting an HTTP endpoint:
 //
 // Hermes Agent v0.14's OpenAI-compatible proxy only forwards five paths to
 // xAI: /chat/completions, /completions, /embeddings, /models, /responses.
-// None of them accepts Imagine — the dedicated /images/generations and
+// None of them accepts Imagine - the dedicated /images/generations and
 // /videos/generations endpoints return 404 ("Path not forwarded"), and
 // /responses only accepts these tool variants (verbatim from the proxy):
 //   function, web_search, x_search, collections_search, file_search,
@@ -14,7 +14,7 @@
 //
 // Hermes itself, however, ships internal toolsets `image_gen` and
 // `video_gen` (configured for `grok-imagine-image-quality` /
-// `grok-imagine-video`) that DO produce media — but only through the
+// `grok-imagine-video`) that DO produce media - but only through the
 // CLI / TUI, not the proxy. The one-shot mode (`hermes -z "<prompt>"`)
 // invokes those tools and prints exactly the URL of the generated media
 // on stdout, which is the contract we need.
@@ -25,7 +25,7 @@
 //
 // Reference images (image-to-image / image-to-video / reference-to-video):
 //   The CLI cannot ingest binary inputs, but it CAN consume a reference
-//   image when its PUBLIC URL is mentioned in the prompt — xAI fetches the
+//   image when its PUBLIC URL is mentioned in the prompt - xAI fetches the
 //   URL server-side, exactly like `input_file` ingestion (verified in
 //   production: `hermes -t video_gen -z 'Animate <https url>'` produces an
 //   animated video of that image). So we resolve each requested reference
@@ -57,7 +57,7 @@ const log = createLogger('ImagineGenerator');
 // bit on the script is irrelevant (some deployments end up without +x).
 const BRIDGE_SCRIPT = path.resolve(__dirname, '..', '..', 'bridge', 'imagine.sh');
 
-// ── Limits ──────────────────────────────────────────────────────────────────
+// -- Limits -----------------------------------------------------------------
 
 // hermes -z for an image typically takes 15-40 s. For video, 30-180 s.
 // Keep a generous ceiling on top of that.
@@ -71,7 +71,7 @@ const ALLOWED_IMAGE_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4'
 const ALLOWED_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16']);
 
 // xAI Imagine accepts up to 3 reference images for image-to-image / editing
-// and up to 7 for reference-to-video (1 → image-to-video). Hard caps so the
+// and up to 7 for reference-to-video (1 -> image-to-video). Hard caps so the
 // model cannot ask for more.
 const MAX_REF_IMAGES_FOR_IMAGE = 3;
 const MAX_REF_IMAGES_FOR_VIDEO = 7;
@@ -90,7 +90,7 @@ const REF_IMAGE_MIME = {
   '.bmp': 'image/bmp',
 };
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 /**
  * Sanitize the prompt: strip control chars, collapse ALL whitespace (incl.
@@ -116,14 +116,14 @@ function _cleanPrompt(prompt) {
 
 /**
  * Build the natural-language reference clause folded into the CLI prompt.
- * This is where the semantics from the old HTTP design (SCOPERTA.md) now
- * live — there is no JSON body on the CLI, so 1-vs-many and image-vs-video
- * intent must be expressed in words:
+ * Because the hermes -z CLI has no structured JSON body, 1-vs-many and
+ * image-vs-video intent must be expressed in natural language words inside
+ * the prompt itself:
  *
  *   - image gen (any count): references guide subject / style / composition.
- *   - video gen, 1 reference: image-to-video — animate that exact image
+ *   - video gen, 1 reference: image-to-video - animate that exact image
  *     (it is the starting frame).
- *   - video gen, 2-7 references: reference-to-video — keep the depicted
+ *   - video gen, 2-7 references: reference-to-video - keep the depicted
  *     subjects / characters / style consistent across the generated clip.
  *
  * Each reference is emitted as `"<filename>" (<public_url>)` so xAI can map a
@@ -140,7 +140,7 @@ function _buildRefClause(kind, names, urls) {
     if (urls.length === 1) {
       return ` Use this image as the starting frame and animate it (image-to-video): ${pairs}.`;
     }
-    return ` Use these images as visual references for the video — keep the depicted subjects, characters and style consistent: ${pairs}.`;
+    return ` Use these images as visual references for the video - keep the depicted subjects, characters and style consistent: ${pairs}.`;
   }
   // image
   return ` Use the following image(s) as visual reference to guide subject, style and composition: ${pairs}.`;
@@ -153,7 +153,7 @@ function _buildRefClause(kind, names, urls) {
  *   2. chat history for this user
  *
  * Returns { filePath } | { buffer, name } on hit, null on miss. Only the
- * basename is honoured — the model passes plain filenames, never paths.
+ * basename is honoured - the model passes plain filenames, never paths.
  */
 function _findReferenceFile(filename, userCtx, responseCtx) {
   if (typeof filename !== 'string' || !filename.trim()) return null;
@@ -190,7 +190,7 @@ function _findReferenceFile(filename, userCtx, responseCtx) {
  * (TEMP_DIR/<owner>/) so the tunnel can expose it. Per-user isolation: files
  * for one user never share a directory with another's. Returns the absolute
  * path. The physical name is randomized (collision-proof) and is never used
- * for resolution — the model only ever sees the logical buffer/history name.
+ * for resolution - the model only ever sees the logical buffer/history name.
  */
 function _materializeRefToTemp(buffer, name, ownerKey) {
   const dir = tempDirForOwner(ownerKey);
@@ -272,7 +272,7 @@ function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
  * Returns { code, stdout, stderr } on completion, throws on timeout / spawn error.
  *
  * No shell is used (only `bash` as the script interpreter, with the script
- * path and arguments passed positionally) — prompts and ratios cannot be
+ * path and arguments passed positionally) - prompts and ratios cannot be
  * misinterpreted as shell metacharacters. Reference-image URLs travel via the
  * IMAGINE_REF_URLS env var (extraEnv) so they never touch argv parsing.
  */
@@ -280,6 +280,9 @@ function _runBridge(args, timeoutMs, extraEnv) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [BRIDGE_SCRIPT, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Bridge needs the full environment (HERMES_API_KEY, model vars, PATH, etc.)
+      // plus selective overrides for reference image handling. This is the
+      // documented exception for bridge tools; extraEnv is never user-controlled.
       env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     });
 
@@ -328,7 +331,7 @@ function _extractUrl(stdout) {
 
 /**
  * Download a URL into a Buffer. Used for the URL emitted by hermes -z
- * (xAI temporary URLs expire fast — we materialize the bytes immediately).
+ * (xAI temporary URLs expire fast - we materialize the bytes immediately).
  */
 async function _downloadToBuffer(url) {
   const res = await fetch(url);
@@ -342,7 +345,7 @@ async function _downloadToBuffer(url) {
   return Buffer.from(arrBuf);
 }
 
-// ── generate_image ──────────────────────────────────────────────────────────
+// -- generate_image ----------------------------------------------------------
 
 /**
  * @param {object} args
@@ -389,7 +392,7 @@ async function generateImage(args, userCtx, responseCtx) {
     ? { IMAGINE_REF_CLAUSE: refClause, IMAGINE_REF_URLS: refs.urls.join(' ') }
     : undefined;
 
-  log.info(`🎨 generate_image: aspect=${aspect || 'omitted'}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
+  log.info(`generate_image: aspect=${aspect || 'omitted'}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
   let result;
   try {
@@ -401,7 +404,7 @@ async function generateImage(args, userCtx, responseCtx) {
 
   if (result.code !== 0) {
     const tail = (result.stderr || result.stdout || '').slice(-500).trim();
-    log.error(`   ❌ imagine/image bridge exit ${result.code}: ${tail}`);
+    log.error(`   imagine/image bridge exit ${result.code}: ${tail}`);
     await notifyAdmin('GenerateImage', `Bridge exit ${result.code}: ${tail}`);
     return {
       success: false,
@@ -449,7 +452,7 @@ async function generateImage(args, userCtx, responseCtx) {
   };
 }
 
-// ── generate_video ──────────────────────────────────────────────────────────
+// -- generate_video ----------------------------------------------------------
 
 /**
  * @param {object} args
@@ -494,7 +497,7 @@ async function generateVideo(args, userCtx, responseCtx) {
     ? { IMAGINE_REF_CLAUSE: refClause, IMAGINE_REF_URLS: refs.urls.join(' ') }
     : undefined;
 
-  log.info(`🎬 generate_video: aspect=${aspect}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}"`);
+  log.info(`generate_video: aspect=${aspect}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
   let result;
   try {
@@ -506,7 +509,7 @@ async function generateVideo(args, userCtx, responseCtx) {
 
   if (result.code !== 0) {
     const tail = (result.stderr || result.stdout || '').slice(-500).trim();
-    log.error(`   ❌ imagine/video bridge exit ${result.code}: ${tail}`);
+    log.error(`   imagine/video bridge exit ${result.code}: ${tail}`);
     await notifyAdmin('GenerateVideo', `Bridge exit ${result.code}: ${tail}`);
     return {
       success: false,

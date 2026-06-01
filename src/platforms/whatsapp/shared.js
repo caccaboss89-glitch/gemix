@@ -1,4 +1,10 @@
 // src/platforms/whatsapp/shared.js
+//
+// Shared WhatsApp logic used by both dedicated.js and personal.js.
+// Builds history, handles incoming media/quoted messages, processes
+// current message attachments, and sends responses (text + voice + files).
+// Central place for WhatsApp-specific formatting and media handling.
+
 const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../../config/constants');
@@ -52,23 +58,23 @@ function _waMessageKey(msg) {
  * fetched via `msg.getMentions()`. We resolve each numeric tag to the best
  * available display name with the following priority:
  *
- *   1. contact.pushname  → public profile name the contact set on their own
+ *   1. contact.pushname  -> public profile name the contact set on their own
  *                          WhatsApp profile. Preferred because it's how the
  *                          person presents themselves and is consistent for
  *                          everyone reading the chat.
- *   2. contact.name      → name as saved in the OWNER's phone address book
+ *   2. contact.name      -> name as saved in the OWNER's phone address book
  *                          (only set when the contact is in rubrica AND has
  *                          been synced via Multi-Device).
- *   3. contact.shortName → the abbreviated form of `name` (rare, but useful
+ *   3. contact.shortName -> the abbreviated form of `name` (rare, but useful
  *                          when neither pushname nor full name are available).
- *   4. contact.number    → formatted phone number.
- *   5. contact.id.user   → raw digits, last-resort fallback.
+ *   4. contact.number    -> formatted phone number.
+ *   5. contact.id.user   -> raw digits, last-resort fallback.
  *
  * There is no single getFormattedName()-style helper in whatsapp-web.js;
  * the priority must be coded manually. See https://docs.wwebjs.dev/Contact.html.
  *
  * Falls through silently when mentions can't be resolved (e.g. group
- * membership data unavailable) — the original numeric tag is kept.
+ * membership data unavailable) - the original numeric tag is kept.
  *
  * @param {string} body - raw msg.body
  * @param {Array} contacts - resolved Contact objects from msg.getMentions()
@@ -541,7 +547,7 @@ async function processCurrentMedia(msg, userId) {
   if (mediaType === 'document' && mimetype !== 'application/pdf') {
     // Plain-text / source-code documents are inlined directly into the
     // user message so the model sees the file content without a read_file
-    // roundtrip. Other binary docs (docx, xlsx, zip, …) keep tag-only.
+    // roundtrip. Other binary docs (docx, xlsx, zip, ...) keep tag-only.
     if (isInlineableTextFile(filename, mimetype)) {
       return {
         skipped: true,

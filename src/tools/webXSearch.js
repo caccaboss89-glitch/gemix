@@ -17,7 +17,7 @@
 // Image search: only enabled when the caller passes search_images=true
 // (the model must explicitly want images). When on, web_search returns
 // Markdown image embeds in the answer; we download those images, hand the
-// buffers back to the caller (main brain → delivery buffer, build agent →
+// buffers back to the caller (main brain -> delivery buffer, build agent ->
 // workspace), and replace each embed with a positional placeholder so the
 // brain never pastes a raw URL or references an image that didn't ship.
 
@@ -34,7 +34,7 @@ const log = createLogger('WebXSearch');
 const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
 // Multi-agent: "medium" maps to the 4-agent setup. The account is capped at
 // 4 agents, so "high"/"xhigh" (16 agents) get silently downgraded to medium
-// anyway — no point paying the extra prompt tokens by requesting them.
+// anyway - no point paying the extra prompt tokens by requesting them.
 const TEAM_EFFORT = 'medium';
 // Fast gear: a single reasoning model. Low effort keeps it quick while still
 // triggering the server-side search tools when the prompt asks for them.
@@ -72,7 +72,7 @@ function _extractOutputText(data) {
 }
 
 // Heuristics to tell an "image" citation apart from a regular web source.
-// xAI tags embedded images with title "img-N" (see TEST2.md) and the URLs
+// xAI tags embedded images with title "img-N" and the URLs
 // usually carry an image extension.
 const _IMG_TITLE_RE = /^img-?\d+$/i;
 const _IMG_URL_RE = /\.(?:png|jpe?g|webp|gif|bmp|svg)(?:[?#].*)?$/i;
@@ -86,7 +86,7 @@ function _looksLikeImageCitation(ann) {
 
 /**
  * Collect deduplicated citation URLs for the "Sources" block of the report.
- * Image citations (img-N / image-extension URLs) are excluded — they are
+ * Image citations (img-N / image-extension URLs) are excluded - they are
  * delivered as attachments, not listed as textual sources.
  */
 function _extractCitations(data) {
@@ -124,7 +124,7 @@ function _extractCitations(data) {
  * Compute the number of web results and X posts a research run gathered.
  *
  * Fast gear (single model): every tool call the model made is visible in
- * `output[]` (no encrypted sub-agents), so this is EXACT — we sum the real
+ * `output[]` (no encrypted sub-agents), so this is EXACT - we sum the real
  * `action.sources` of each web_search_call plus the requested `limit` of each
  * X search call.
  *
@@ -229,8 +229,8 @@ const _MD_IMAGE_RE = /!\[([^\]]*)\]\(\s*(https?:\/\/[^\s)]+)\s*\)/g;
 /**
  * Extract Markdown image embeds from the report text, download up to
  * `maxImages`, and rewrite the text so the brain never sees raw image URLs:
- *   - successfully downloaded → replaced with "[📎 Immagine N: alt]"
- *   - failed download or over the cap → embed removed entirely (no broken ref)
+ *   - successfully downloaded -> replaced with "[📎 Immagine N: alt]"
+ *   - failed download or over the cap -> embed removed entirely (no broken ref)
  *
  * Returns { text, images: [{ name, buffer, mimetype, alt, sourceUrl }] }.
  * The placeholder order matches the attachment order exactly, so the brain
@@ -259,7 +259,7 @@ async function _extractAndStripImages(text, maxImages) {
   }
 
   const images = [];
-  const urlToPlaceholder = new Map(); // url → replacement string (or '' to drop)
+  const urlToPlaceholder = new Map(); // url -> replacement string (or '' to drop)
 
   for (const item of unique) {
     if (images.length >= maxImages) {
@@ -325,14 +325,14 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
   const model = fullTeam ? MULTI_AGENT_MODEL : FAST_RESEARCH_MODEL;
   const effort = fullTeam ? TEAM_EFFORT : FAST_EFFORT;
 
-  // System prompt for the research model, passed via `instructions` — same
+  // System prompt for the research model, passed via `instructions` - same
   // channel and shape as the main brain (ai/systemPrompt.js) and the build
   // sub-agent (buildAgent). No outer <SystemPrompt> envelope: the instructions
   // field IS the system channel, so the structured sub-tags sit flush.
   //
   // The <OutputRules> tell the model to answer in plain prose, not XML, so the
   // report stays clean for GemiX to rephrase. The image clause is added ONLY
-  // when images are wanted — when off we say nothing about images, so the
+  // when images are wanted - when off we say nothing about images, so the
   // model still freely uses its image-understanding (view_image) while
   // browsing without being told to avoid images it never had a tool for.
   //
@@ -361,7 +361,7 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
     instructions,
     // max_turns bounds the server-side tool-call turns and guarantees a final
     // synthesized answer even if the budget is hit mid-research (xAI forces a
-    // tool-less synthesis at the limit — no round counter exposed to the model,
+    // tool-less synthesis at the limit - no round counter exposed to the model,
     // same spirit as the main brain / build wrap-up).
     max_turns: RESEARCH_MAX_TURNS,
     input: [{ role: 'user', content }],
@@ -370,13 +370,13 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
 
   // reasoning.effort is only supported by multi-agent and grok-4.3 models.
   // The fast reasoning model (grok-4.20-non-reasoning-latest) rejects the param
-  // entirely with HTTP 400 — omit it for that gear.
+  // entirely with HTTP 400 - omit it for that gear.
   if (fullTeam) {
     body.reasoning = { effort };
   }
 
   logApiRequest(model, RESPONSES_URL, body);
-  log.info(`   📡 → ${model} (${fullTeam ? 'team' : 'fast'}, images=${searchImages}, input: ${content.length} chars)`);
+  log.info(`   research call -> ${model} (${fullTeam ? 'team' : 'fast'}, images=${searchImages}, input: ${content.length} chars)`);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -401,13 +401,13 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
 
     const data = await res.json();
     try { logApiResponse(model, RESPONSES_URL, data); } catch { /* best effort */ }
-    log.info(`   ✅ research reply in ${Date.now() - startTime}ms`);
+    log.info(`   research reply in ${Date.now() - startTime}ms`);
     return data;
 
   } catch (err) {
     const isTimeout = err.name === 'AbortError';
     const msg = isTimeout ? `Timeout (${REQUEST_TIMEOUT_MS / 1000}s)` : err.message;
-    log.error(`   ❌ research error: ${msg}`);
+    log.error(`   research error: ${msg}`);
     await notifyAdmin(`WebXSearch (${fullTeam ? 'team' : 'fast'})`, `Error: ${msg}`);
     throw new Error(`Research unavailable: ${msg}${ADMIN_NOTIFIED_SUFFIX}`);
   } finally {
@@ -420,8 +420,8 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
  *
  * @param {string} prompt
  * @param {object} [options]
- * @param {boolean} [options.fullTeam=false] - true → multi-agent team, false → fast model.
- * @param {boolean} [options.searchImages=false] - true → enable web image search + extraction.
+ * @param {boolean} [options.fullTeam=false] - true -> multi-agent team, false -> fast model.
+ * @param {boolean} [options.searchImages=false] - true -> enable web image search + extraction.
  * @param {number}  [options.maxImages] - cap on images extracted (default MAX_RESEARCH_IMAGES).
  * @returns {Promise<{
  *   success: boolean,
@@ -460,14 +460,14 @@ async function webXSearch(prompt, options = {}) {
   }
 
   if (!HERMES_API_KEY) {
-    return { success: false, error: 'HERMES_API_KEY is not configured — research is unavailable.' };
+    return { success: false, error: 'HERMES_API_KEY is not configured - research is unavailable.' };
   }
   const requiredModel = fullTeam ? MULTI_AGENT_MODEL : FAST_RESEARCH_MODEL;
   if (!requiredModel) {
-    return { success: false, error: `${fullTeam ? 'MULTI_AGENT_MODEL' : 'FAST_RESEARCH_MODEL'} is not configured — research is unavailable.` };
+    return { success: false, error: `${fullTeam ? 'MULTI_AGENT_MODEL' : 'FAST_RESEARCH_MODEL'} is not configured - research is unavailable.` };
   }
 
-  log.info(`🔎 Research (${fullTeam ? 'team' : 'fast'}, ${cleanPrompt.length} chars${truncated ? ', truncated' : ''}${searchImages ? ', images' : ''})`);
+  log.info(`Research (${fullTeam ? 'team' : 'fast'}, ${cleanPrompt.length} chars${truncated ? ', truncated' : ''}${searchImages ? ', images' : ''})`);
 
   let data;
   try {
@@ -487,13 +487,13 @@ async function webXSearch(prompt, options = {}) {
     const extracted = await _extractAndStripImages(text, maxImages);
     text = extracted.text;
     images = extracted.images;
-    if (images.length > 0) log.info(`   🖼️ Attached ${images.length} image(s) from research`);
+    if (images.length > 0) log.info(`   Attached ${images.length} image(s) from research`);
   }
 
   const citations = _extractCitations(data);
   const { webSources, xPosts } = _computeResultCounts(data);
 
-  // Return a plain JSON object — the same shape every other GemiX tool uses
+  // Return a plain JSON object - the same shape every other GemiX tool uses
   // ({ success, message, ...extra }). No XML wrapper: keeps the tool-result
   // format consistent across all our function tools (the dispatcher
   // JSON-stringifies this), so when our tools sit alongside xAI server-side

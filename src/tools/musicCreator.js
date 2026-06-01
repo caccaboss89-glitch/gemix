@@ -26,7 +26,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   let buffer = '';
 
   try {
-    log.info(`🎵 Lyria streaming call → ${model}`);
+    log.info(`Lyria streaming call to ${model}`);
 
     const res = await fetchExternal(apiUrl, {
       method: 'POST',
@@ -75,7 +75,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
             // Base64 audio is long, no spaces, and typically matches base64 charset
             if (c.length > 200 && !c.includes(' ') && /^[A-Za-z0-9+/=]+$/.test(c)) {
               audioChunks.push(c);
-              log.info(`🎵 Found base64 audio chunk (${c.length} chars)`);
+              log.info(`Found base64 audio chunk (${c.length} chars)`);
             } else {
               textChunks.push(c);
             }
@@ -89,7 +89,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
     const fullAudioBase64 = audioChunks.join('');
     const fullLyrics = textChunks.join('').trim();
 
-    log.info(`📊 Stream finished → Audio chunks: ${audioChunks.length} | Lyrics length: ${fullLyrics.length}`);
+    log.info(`Stream finished - Audio chunks: ${audioChunks.length} | Lyrics length: ${fullLyrics.length}`);
 
     return {
       audio: { data: fullAudioBase64 },
@@ -139,7 +139,7 @@ async function musicCreator(prompt, userCtx) {
     if (!model) throw new Error('MUSIC_MODEL is missing in environment (required for Lyria music generation).');
     if (!OPENROUTER_BASE_URL) throw new Error('OPENROUTER_BASE_URL is missing in environment.');
 
-    log.info(`🎵 Generating for ${userId}`);
+    log.info(`Generating music for ${userId}`);
 
     const body = {
       model,
@@ -187,7 +187,7 @@ async function musicCreator(prompt, userCtx) {
     }
 
     // === FALLBACK: lyrics only ===
-    log.warn('⚠️ Audio not received → returning only lyrics');
+    log.warn('Audio not received - returning only lyrics');
 
     return {
       toolResult: {

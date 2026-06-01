@@ -1,9 +1,16 @@
 // src/utils/historySync.js
+//
+// Handles persistent storage of user/group chat history files, deterministic
+// pruning of unreferenced attachments, and metadata storage for media
+// descriptions and voice transcriptions. Also manages the recent voice text
+// cache used for WhatsApp voice message handling.
+
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { createLogger } = require('./logger');
 const { sanitizeFilename } = require('./text');
+const { extractAttachmentTagPaths } = require('./media');
 
 const log = createLogger('HistorySync');
 
@@ -421,7 +428,6 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
  */
 function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
   const out = new Set();
-  const { extractAttachmentTagPaths } = require('./media');
   const _scan = (text) => {
     if (typeof text !== 'string' || text.length === 0) return;
     for (const taggedPath of extractAttachmentTagPaths(text)) {

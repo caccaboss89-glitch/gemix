@@ -18,7 +18,7 @@ quando il workspace supera la sua TTL globale (4h dall'ultima interazione).
 - network Docker `gemix_sandbox_net` esistente (internal)
 - network Docker `gemix_sandbox_egress` esistente (bridge normale)
 - container proxy `gemix-sandbox-proxy` in esecuzione (collegato a entrambe
-  le network) — unico ponte tra il sandbox network e Internet
+  le network) - unico ponte tra il sandbox network e Internet
 - l'utente che esegue GemiX deve poter parlare con Docker
 
 Se manca uno di questi, la prima chiamata `build` fallisce in `getOrCreate()`.
@@ -159,7 +159,7 @@ host nell'allowlist (`sandbox/proxy/proxy.py`, override via env
 per `yt-dlp`).
 
 I log del proxy registrano `event=allow_*` o `event=deny_*` per ogni
-richiesta — controllarli è il modo più rapido per capire perché un download
+richiesta - controllarli è il modo più rapido per capire perché un download
 sta fallendo.
 
 ## Avviare manualmente una sandbox (debug)
@@ -193,7 +193,7 @@ docker run --rm -it \
 In `src/config/constants.js`, modificabili con un solo restart del bot:
 
 - `SANDBOX_MEMORY_MB` (default 1536)
-- `SANDBOX_IDLE_TTL_MS` (default 15 min — quando un container è idle)
-- `BUILD_WORKSPACE_TTL_MS` (default 4h — quando il workspace si svuota)
+- `SANDBOX_IDLE_TTL_MS` (default 15 min - quando un container è idle)
+- `BUILD_WORKSPACE_TTL_MS` (default 4h - quando il workspace si svuota)
 - `BUILD_WORKSPACE_QUOTA_MB` (default 500 MB)
 - `BUILD_MAX_ROUNDS` / `BUILD_HARD_TIMEOUT_MS` / `BUILD_LOCK_WAIT_MS`

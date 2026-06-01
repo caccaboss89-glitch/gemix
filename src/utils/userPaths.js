@@ -14,10 +14,11 @@
 //       group_<sanitized>/              .build_state.json + build_workspace/
 //
 // The legacy `projects/`, `searched_images/`, `scratch/` folders that lived
-// under <storageId>/ are gone — the agentic project system was retired in
-// favour of the build sub-agent (Analisi_Pulizia_v2.md §4).
+// under <storageId>/ are gone - the old agentic project system was retired
+// in favour of the build sub-agent (replaced by the dedicated build tool
+// and per-user/group workspaces under user_<...>/ and group_<...>/).
 //
-// Anything under `user_<…>/` / `group_<…>/` is owned by the build subsystem
+// Anything under `user_<...>/` / `group_<...>/` is owned by the build subsystem
 // (see utils/workspaceId.js, sandbox/buildWorkspace.js, utils/buildState.js)
 // and not touched by this module.
 
@@ -27,7 +28,7 @@ const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
 
 const SKILLS_DIR = path.join(DATA_DIR, 'skills');
 
-// ── Storage ID resolution ──────────────────────────────────────────────────
+// -- Storage ID resolution -------------------------------------------------
 
 /**
  * Resolve the unique storageId used as the user's folder name under
@@ -49,7 +50,7 @@ function resolveStorageId(userCtx) {
   return null;
 }
 
-// ── Path helpers ───────────────────────────────────────────────────────────
+// -- Path helpers ----------------------------------------------------------
 
 function getUserRoot(userCtx) {
   const id = resolveStorageId(userCtx);
@@ -62,7 +63,7 @@ function getHistoryDir(userCtx) {
   return r && path.join(r, 'history');
 }
 
-// ── Skeleton creation ──────────────────────────────────────────────────────
+// -- Skeleton creation -----------------------------------------------------
 
 function ensureDir(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
@@ -71,7 +72,7 @@ function ensureDir(p) {
 /**
  * Create the per-user folders if missing. Idempotent.
  *
- * Just history now — every other zone the bot writes (voice counts,
+ * Just history now - every other zone the bot writes (voice counts,
  * build workspace) materializes its own dirs on demand.
  */
 function ensureUserSkeleton(userCtx) {
@@ -82,7 +83,7 @@ function ensureUserSkeleton(userCtx) {
   return true;
 }
 
-// ── Recursive size accounting (used by historySync diagnostics) ───────────
+// -- Recursive size accounting (used by historySync diagnostics) -----------
 
 function dirSizeBytes(dir) {
   if (!fs.existsSync(dir)) return 0;

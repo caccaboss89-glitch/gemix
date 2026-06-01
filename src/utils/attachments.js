@@ -17,7 +17,7 @@ const path = require('path');
 
 /**
  * Compute a buffer-unique filename. If `rawName`'s basename is already taken
- * by another attachment in `existing`, append "(1)", "(2)"… before the
+ * by another attachment in `existing`, append "(1)", "(2)..." before the
  * extension until free. Returns the basename only (paths are never stored as
  * the logical name).
  *
@@ -48,18 +48,15 @@ function uniqueAttachmentName(existing, rawName) {
  * Push an attachment into `responseCtx.attachments`, guaranteeing its logical
  * `name` is unique within the buffer (renaming to "name(1).ext" on clash).
  * Returns the FINAL name actually stored so the caller can report it to the
- * model in the same tool result — the model addresses files by name, so it
+ * model in the same tool result - the model addresses files by name, so it
  * must learn the post-dedup name immediately (never "renamed afterwards",
  * which would otherwise pollute the conversation).
  *
- * Every name-addressed feature relies on buffer names being collision-free:
- *   - reference_images resolution in generate_image / generate_video,
- *   - attachments[] filename matching handed to the build sub-agent,
- *   - the model citing searched / generated images by name in later turns.
- *
- * Note: this dedups only against the in-memory buffer. The temp-disk and the
- * public tunnel are already collision-proof on their own (random file
- * prefixes + unique per-file tokens), so they need no coordination here.
+ * This deduplication ensures name-addressed features (reference_images for
+ * generate_image/video, build attachments[], model citing images by name)
+ * continue to work reliably. Dedup is only against the current in-memory
+ * response buffer; disk/temp-file and public tunnel layers have their own
+ * collision protection.
  *
  * @param {object} responseCtx
  * @param {Attachment} att - { name, mimetype, buffer?|filePath? }
@@ -128,7 +125,7 @@ function toEmailAttachment(att) {
 function toWhatsAppMediaArgs(att) {
   const size = attachmentSize(att);
   if (size > 100 * 1024 * 1024) {
-    // Too large for direct WhatsApp sending — return null to trigger fallback
+    // Too large for direct WhatsApp sending - return null to trigger fallback
     return null;
   }
   const buf = readAttachmentBuffer(att);

@@ -1,4 +1,9 @@
 // src/utils/systemState.js
+//
+// Persistent key-value store for system-wide state (e.g. tool usage tracking).
+// Provides atomic read-modify-write operations via an in-memory lock and
+// includes a specialized helper for daily per-tool usage limits.
+
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');

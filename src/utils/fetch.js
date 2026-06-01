@@ -1,4 +1,9 @@
 // src/utils/fetch.js
+//
+// Wrapper around native fetch that adds reliable timeout handling and
+// optional automatic admin notification on failures. Used for external
+// service calls throughout the bot.
+
 const { FETCH_TIMEOUT_MS } = require('../config/constants');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
 

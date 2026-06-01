@@ -1,27 +1,10 @@
 // src/ai/buildAgent.js
 //
-// Engineering sub-agent invoked by the `build` tool. The agent runs as a
-// fresh /v1/responses conversation, isolated from the main brain's chat
-// history and its tool list. All it sees is:
-//
-//   - Its own system prompt (built by buildSystemPrompt below).
-//   - The user prompt the host passes through (the main brain's task brief).
-//   - Workspace state (built dynamically each round).
-//   - Tool result observations as it iterates.
-//
-// Tools exposed to the agent (per Analisi_Pulizia_v2.md §2.2):
-//   write_file, edit_file, bash, read_file, web_x_search,
-//   {type:'code_interpreter'} (xAI server-side, costs zero of our rounds).
-//
-// NOT exposed (intentionally — main brain prepares those assets and passes
-// them as attachments instead):
-//   generate_image, generate_video, music_creator.
-//
-// At the end of the conversation the agent writes its final user-facing
-// answer and appends `<DELIVER>file1, file2</DELIVER>` to declare which
-// workspace files should be sent back to the human user. The host parses
-// the tag, resolves filenames, and pushes the matching files onto
-// `responseCtx.attachments` of the main turn.
+// Engineering sub-agent for the `build` tool.
+// Runs an isolated Responses conversation with dedicated tools
+// (write_file/edit_file/bash/read_file/web_x_search/code_interpreter).
+// Host (tools/build.js) manages lock, workspace staging and <DELIVER> parsing.
+// See: sandbox/buildWorkspace.js, utils/buildState.js, utils/skills.js
 
 const fs = require('fs');
 const path = require('path');
@@ -46,6 +29,7 @@ const { webXSearch } = require('../tools/webXSearch');
 const { getRomeTime } = require('../utils/time');
 const { sanitizeFilename } = require('../utils/text');
 const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
+const { SKILLS_DIR } = require('../utils/userPaths');
 const {
   BUILD_MAX_ROUNDS,
   BUILD_HARD_TIMEOUT_MS,
@@ -71,7 +55,7 @@ const TEXT_EXT_FOR_INLINE = new Set([
   '.sql', '.graphql',
 ]);
 
-// ── Tool definitions exposed to the sub-agent ──────────────────────────────
+// -- Tool definitions exposed to the sub-agent -----------------------------
 //
 // Same chat-completions shape used by ai/tools.js so the responsesAdapter
 // can flatten them. We include the native `{type:'code_interpreter'}` so
@@ -177,7 +161,7 @@ function _buildAgentTools() {
   ];
 }
 
-// ── System prompt ──────────────────────────────────────────────────────────
+// -- System prompt ---------------------------------------------------------
 
 function _renderWorkspaceState(workspaceId) {
   const { files, total, more } = listWorkspaceFiles(workspaceId, 200);
@@ -205,7 +189,7 @@ function _renderAttachmentNotes(renamedAttachments) {
 
 // Build the <Skills> block dynamically from the skill folders mounted at
 // /skills/ (each with a SKILL.md whose frontmatter carries name + description).
-// This keeps the prompt in sync with whatever skills exist on disk — no static
+// This keeps the prompt in sync with whatever skills exist on disk - no static
 // "pdf, docx, xlsx, pptx" list to maintain.
 function _renderSkills() {
   return formatSkillsForPrompt(loadSkills());
@@ -241,22 +225,22 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '</Tools>',
     '<Sandbox>',
     '  Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
-    '  Python 3.12 and Node.js 22. General-purpose pre-installed libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, jinja2, PyYAML, requests, unoserver. General CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. No pip/npm/apt at runtime. Document-format libraries (reportlab, pypdf, python-docx, openpyxl, python-pptx, pptxgenjs, ...) are documented inside the relevant skill — read its SKILL.md.',
-    '  yt-dlp: outbound traffic goes through the egress proxy (YouTube, X/Twitter, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly — no need to check if it is installed.',
+    '  Python 3.12 and Node.js 22. General-purpose pre-installed libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, jinja2, PyYAML, requests, unoserver. General CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. No pip/npm/apt at runtime. Document-format libraries (reportlab, pypdf, python-docx, openpyxl, python-pptx, pptxgenjs, ...) are documented inside the relevant skill - read its SKILL.md.',
+    '  yt-dlp: outbound traffic goes through the egress proxy (YouTube, X/Twitter, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly - no need to check if it is installed.',
     '</Sandbox>',
     skillsBlock,
     '<Delivery>',
     '  End your final response with &lt;DELIVER&gt;file1.ext, file2.ext&lt;/DELIVER&gt; listing files in /workspace/ to send to the user.',
-    '  Empty &lt;DELIVER&gt;&lt;/DELIVER&gt; means "text response only, no files". The tag is REQUIRED on the final response — files NOT listed will not reach the user.',
+    '  Empty &lt;DELIVER&gt;&lt;/DELIVER&gt; means "text response only, no files". The tag is REQUIRED on the final response - files NOT listed will not reach the user.',
     '</Delivery>',
     '<Pitfalls>',
-    '  - Always paths under /workspace/ or /skills/. read_file refuses binary archives (.zip etc.) — use bash (unzip, etc.) instead.',
+    '  - Always paths under /workspace/ or /skills/. read_file refuses binary archives (.zip etc.) - use bash (unzip, etc.) instead.',
     '  - Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
     '</Pitfalls>',
   ].join('\n');
 }
 
-// ── Tool execution dispatcher (sub-agent side) ──────────────────────────────
+// -- Tool execution dispatcher (sub-agent side) ----------------------------
 
 function _toolErr(msg) {
   return JSON.stringify({ success: false, error: msg });
@@ -273,7 +257,6 @@ function _classifyAgentPath(workspaceId, rawPath) {
   if (trimmed.startsWith('/skills/')) {
     const rel = trimmed.slice('/skills/'.length);
     if (rel.includes('..') || path.isAbsolute(rel)) return { ok: false, reason: 'Skills path escapes /skills/.' };
-    const { SKILLS_DIR } = require('../utils/userPaths');
     const abs = path.resolve(SKILLS_DIR, rel);
     if (!abs.startsWith(SKILLS_DIR)) return { ok: false, reason: 'Skills path escapes /skills/.' };
     return { ok: true, abs, zone: 'skills' };
@@ -303,7 +286,7 @@ async function _executeReadFile(workspaceId, args) {
   if (stat.isDirectory()) return _toolErr('Path is a directory.');
 
   const ext = path.extname(c.abs).toLowerCase();
-  if (NON_READABLE_EXTS.has(ext)) return _toolErr(`Binary archive ${ext} — use bash (unzip etc.) to inspect.`);
+  if (NON_READABLE_EXTS.has(ext)) return _toolErr(`Binary archive ${ext} - use bash (unzip etc.) to inspect.`);
 
   // Text/code inline.
   if (_isTextExt(ext)) {
@@ -499,7 +482,7 @@ async function _runToolCall(toolCall, ctx) {
   }
 }
 
-// ── DELIVER tag parsing ────────────────────────────────────────────────────
+// -- DELIVER tag parsing ---------------------------------------------------
 
 function _parseDeliverTag(text) {
   if (typeof text !== 'string') return { remaining: text, files: [] };
@@ -516,7 +499,7 @@ function _parseDeliverTag(text) {
   return { remaining, files };
 }
 
-// ── Main entry: run the build agent ────────────────────────────────────────
+// -- Main entry: run the build agent ---------------------------------------
 
 /**
  * @param {object} args
@@ -526,7 +509,7 @@ function _parseDeliverTag(text) {
  *   - List of rename-on-collision events to communicate to the agent.
  * @param {Array<{name:string, url:string}>} [args.attachmentParts]
  *   - File parts the host wants the agent to ingest immediately on round 1.
- *     Typically created when staging buffer-only attachments — for files
+ *     Typically created when staging buffer-only attachments - for files
  *     that already live in /workspace/ on disk, the agent finds them in
  *     <WorkspaceState> and can read them itself.
  * @param {string} args.lockOwnerId - owner id for renewing the lock per round.
@@ -567,7 +550,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
 
     // Refresh the system prompt with the latest workspace state at every
     // round (the agent just wrote new files, the state must reflect them).
-    // The agent is never told which round it is on or how many remain — the
+    // The agent is never told which round it is on or how many remain - the
     // budget is enforced host-side, and when it runs out we force ONE clean
     // tool-less answer below (same pattern as the main brain).
     messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
@@ -618,22 +601,22 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       continue;
     }
 
-    // No tool calls → final assistant message.
+    // No tool calls - final assistant message.
     finalText = assistant.content || '';
     break;
   }
 
-  // ── Round budget / hard-timeout exhausted ───────────────────────────────
+  // -- Round budget / hard-timeout exhausted -------------------------------
   // The agent still wanted to call tools when we ran out of rounds (or the
   // hard timeout fired). Instead of discarding all the work behind a canned
   // error, make ONE final call with tool_choice:'none' (the documented xAI
   // way to force a text-only answer) so the agent wraps up from everything it
-  // gathered. This mirrors the main brain's outer-loop handling exactly — when
+  // gathered. This mirrors the main brain's outer-loop handling exactly - when
   // the build can no longer act it must explain what it managed to do and that
   // it had to stop. The host bubbles this up to GemiX-Main, which relays it to
   // the user.
   if (finalText === null && budgetExhausted) {
-    log.warn(`   ⚠️ build round budget (${BUILD_MAX_ROUNDS}) exhausted — forcing a final answer (tool_choice:none)`);
+    log.warn(`   build round budget (${BUILD_MAX_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
     renewBuildLock(workspaceId, lockOwnerId);
     messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
     messages.push({
@@ -661,7 +644,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       const data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY);
       finalText = responsesToAssistantMessage(data).content || '';
     } catch (err) {
-      log.error(`   ❌ build forced wrap-up call failed: ${err.message}`);
+      log.error(`   build forced wrap-up call failed: ${err.message}`);
     }
   }
 

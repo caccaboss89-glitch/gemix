@@ -1,4 +1,10 @@
 // src/platforms/discord/client.js
+//
+// Discord platform adapter: initializes the discord.js client, handles
+// messageCreate events in forum threads, builds multimodal history,
+// and sends responses (text + attachments) back to Discord.
+// Only activates inside the configured DISCORD_THREAD_NAME category.
+
 const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
 const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../../config/constants');
@@ -13,6 +19,7 @@ const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoi
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
 const { cleanIncomingText } = require('../../utils/text');
+const { isSystemMessage } = require('../../config/systemMessages');
 
 const log = createLogger('DISCORD');
 
@@ -37,21 +44,21 @@ function initDiscord() {
   });
 
   discordClient.on('clientReady', () => {
-    log.info(`✅ Bot ready: ${discordClient.user.tag}`);
+    log.info(`Bot ready: ${discordClient.user.tag}`);
   });
 
   discordClient.on('messageCreate', async (msg) => {
     try {
       await onDiscordMessage(msg);
     } catch (err) {
-      log.error(`\n❌ Critical error:`);
+      log.error(`\nCritical error:`);
       log.error(`   ${err.message}`);
       log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
   });
 
   discordClient.login(BOT_TOKEN).catch(err => {
-    log.error('❌ Discord login failed:', err.message);
+    log.error('Discord login failed:', err.message);
   });
   return discordClient;
 }
@@ -108,8 +115,6 @@ function createAttachmentBufferFetcher(att) {
     return bufferPromise;
   };
 }
-
-const { isSystemMessage } = require('../../config/systemMessages');
 
 function isDiscordSystemMessage(body) {
   return isSystemMessage(body);
@@ -305,7 +310,7 @@ async function onDiscordMessage(msg) {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }
     } else if (isInlineableTextFile(att.name, att.contentType)) {
-      // Plain-text / source-code file — inline its content directly so the
+      // Plain-text / source-code file - inline its content directly so the
       // model sees it without a read_file roundtrip.
       try {
         const buffer = await fetchBuffer();
@@ -315,7 +320,7 @@ async function onDiscordMessage(msg) {
         textBody = `${attachmentTag} ${textBody}`.trim();
       }
     } else if (isDoc) {
-      // Non-image, non-PDF, non-text documents (docx, xlsx, zip…): tag only.
+      // Non-image, non-PDF, non-text documents (docx, xlsx, zip...): tag only.
       textBody = `${attachmentTag} ${textBody}`.trim();
     } else if (isImage) {
       try {
@@ -382,7 +387,7 @@ async function onDiscordMessage(msg) {
   };
   const lockKey = `discord:${channel.id}`;
   if (!responseLock.tryLock(lockKey)) {
-    log.warn(`   ⛔ Ignoring message in thread ${channel.id}: GemiX is already responding`);
+    log.warn(`   Ignoring message in thread ${channel.id}: GemiX is already responding`);
     return;
   }
   const stopLockRenew = responseLock.startAutoRenew(lockKey);
@@ -406,16 +411,16 @@ async function onDiscordMessage(msg) {
 
     if (finalText) {
       const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
-      if (chunks.length > 1) log.info(`   💬 Message split into ${chunks.length} parts`);
+      if (chunks.length > 1) log.info(`   Message split into ${chunks.length} parts`);
       
       for (let i = 0; i < chunks.length; i++) {
         const isLastChunk = i === chunks.length - 1;
         if (isLastChunk && files.length > 0) {
           try {
             await channel.send({ content: chunks[i], files });
-            log.info(`   ✅ Discord message and files sent`);
+            log.info(`   Discord message and files sent`);
           } catch (err) {
-            log.error(`   ❌ Failed to send files directly: ${err.message}. Using fallback...`);
+            log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
             await channel.send({ content: chunks[i] });
             const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
               const a = toDiscordAttachmentArgs(att);
@@ -434,9 +439,9 @@ async function onDiscordMessage(msg) {
     } else if (files.length > 0) {
       try {
         await channel.send({ files });
-        log.info(`   ✅ Discord files sent`);
+        log.info(`   Discord files sent`);
       } catch (err) {
-        log.error(`   ❌ Failed to send files directly: ${err.message}. Using fallback...`);
+        log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
         const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
           const a = toDiscordAttachmentArgs(att);
           if (!a) throw new Error('Invalid attachment');
@@ -448,7 +453,7 @@ async function onDiscordMessage(msg) {
         }
       }
     } else {
-      log.warn(`   ⚠️ No content or files to send`);
+      log.warn(`   No content or files to send`);
     }
 
     // Rename thread non-blocking (Discord limits to 2 renames per 10 min)
@@ -456,14 +461,16 @@ async function onDiscordMessage(msg) {
       const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
       if (safeTitle) {
         channel.setName(safeTitle)
-          .then(() => log.info(`   📝 Thread renamed: "${safeTitle}"`))
+          .then(() => log.info(`   Thread renamed: "${safeTitle}"`))
           .catch(err => log.error('Thread rename error:', err.message));
       }
     }
   } catch (err) {
-    log.error(`\n❌ Error sending response:`);
+    log.error(`\nError sending response:`);
     log.error(`   ${err.message}`);
     try {
+      // Dynamic require for lazy loading on error path only (avoids pulling
+      // admin notifier into the hot path for every message).
       const { notifyAdmin } = require('../../utils/adminNotifier');
       await notifyAdmin('Discord Chat Delivery', `Failed to send response in channel ${channel.id}: ${err.message}`);
     } catch (adminErr) {

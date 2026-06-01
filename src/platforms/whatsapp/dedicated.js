@@ -1,4 +1,10 @@
 // src/platforms/whatsapp/dedicated.js
+//
+// Dedicated WhatsApp account client (primary number).
+// Handles QR auth, reconnection, message routing (personal + group mentions/replies),
+// and delegates to the shared WhatsApp handler + batcher.
+// Only one instance (the "dedicated" client).
+
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse } = require('./shared');
@@ -7,11 +13,11 @@ const { identifyUser } = require('../../utils/userIdentifier');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
-
-const log = createLogger('WA-DEDICATED');
 const responseLock = require('../../utils/responseLock');
 const { pushMessage, hasPendingBatch } = require('../../utils/messageBatcher');
 const { WhatsAppPresence } = require('../../utils/presence');
+
+const log = createLogger('WA-DEDICATED');
 
 let client;
 let _reconnectAttempts = 0;
@@ -36,7 +42,7 @@ function initDedicatedWhatsApp() {
 
   const watchdog = setTimeout(() => {
     if (!client?.info?.wid?._serialized) {
-      log.error('❌ Dedicated WhatsApp client init timeout (5 min). Forcing process exit to restart.');
+      log.error('Dedicated WhatsApp client init timeout (5 min). Forcing process exit to restart.');
       process.exit(1);
     }
   }, 5 * 60 * 1000);
@@ -49,17 +55,17 @@ function initDedicatedWhatsApp() {
 
   client.on('ready', () => {
     clearTimeout(watchdog);
-    log.info('✅ Client ready:', client.info.wid._serialized);
+    log.info('Client ready:', client.info.wid._serialized);
     _reconnectAttempts = 0;
     setDedicatedClient(client);
   });
 
   client.on('auth_failure', (msg) => {
-    log.error('❌ Auth failure:', msg);
+    log.error('Auth failure:', msg);
   });
 
   client.on('disconnected', (reason) => {
-    log.warn('⚠️ Disconnected:', reason);
+    log.warn('Disconnected:', reason);
     _reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, _reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
     log.info(`Reconnect attempt ${_reconnectAttempts} in ${delay / 1000}s...`);
@@ -70,7 +76,7 @@ function initDedicatedWhatsApp() {
     try {
       await onDedicatedMessage(msg);
     } catch (err) {
-      log.error(`\n❌ Critical error:`);
+      log.error(`\nCritical error:`);
       log.error(`   ${err.message}`);
       log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
@@ -127,9 +133,9 @@ async function onDedicatedMessage(msg) {
     userId: phoneJid,
   });
 
-  log.debug(`   JID: ${senderJid} → phoneJid: ${phoneJid}`);
+  log.debug(`   JID: ${senderJid} -> phoneJid: ${phoneJid}`);
 
-  log.info(`\n📨 Incoming message`);
+  log.info(`\nIncoming message`);
   log.info(`   User: ${userName}${isGroup ? ` (Group: ${chat.name})` : ''}`);
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
@@ -141,9 +147,9 @@ async function onDedicatedMessage(msg) {
   const batchKey = `wa_dedicated:${chat.id._serialized}`;
 
   // If a batch is already accumulating for this chat, add to it and return
-  // (even if a response lock is held — the batch will fire after debounce)
+  // (even if a response lock is held - the batch will fire after debounce)
   if (hasPendingBatch(batchKey)) {
-    log.info(`   📦 Batching additional message for ${batchKey}`);
+    log.info(`   Batching additional message for ${batchKey}`);
     pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, isGroup }, _handleDedicatedBatch);
     return;
   }
@@ -151,7 +157,7 @@ async function onDedicatedMessage(msg) {
   // If GemiX is already responding, check if we should start a new batch or discard
   const lockKey = batchKey;
   if (responseLock.tryLock(lockKey) === false) {
-    log.warn(`   ⛔ Ignoring message in chat ${chat.id._serialized}: GemiX is already responding`);
+    log.warn(`   Ignoring message in chat ${chat.id._serialized}: GemiX is already responding`);
     return;
   }
   const stopLockRenew = responseLock.startAutoRenew(lockKey);
@@ -173,7 +179,7 @@ async function _handleDedicatedBatch(entries) {
   let activeStopRenew = stopLockRenew;
   if (!responseLock.refresh(lockKey)) {
     if (!responseLock.tryLock(lockKey)) {
-      log.warn(`   ⛔ Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
+      log.warn(`   Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
       return;
     }
     activeStopRenew = responseLock.startAutoRenew(lockKey);
@@ -197,7 +203,7 @@ async function _handleDedicatedBatch(entries) {
         )
       ]);
     } catch (historyErr) {
-      log.warn(`   ⚠️ History fetch failed (${historyErr.message}), proceeding without history`);
+      log.warn(`   History fetch failed (${historyErr.message}), proceeding without history`);
     }
 
     presence = new WhatsAppPresence(chat);
@@ -225,13 +231,15 @@ async function _handleDedicatedBatch(entries) {
     const response = await handleMessage(ctx);
 
     try {
-      log.info(`\n📤 Sending response...`);
+      log.info(`\nSending response...`);
       await sendWhatsAppResponse(chat, response);
-      log.info(`   ✅ Message sent`);
+      log.info(`   Message sent`);
     } catch (err) {
-      log.error(`\n❌ Error sending response:`);
+      log.error(`\nError sending response:`);
       log.error(`   ${err.message}`);
       try {
+        // Dynamic require for lazy loading on error path only (avoids pulling
+        // admin notifier into the hot path for every message).
         const { notifyAdmin } = require('../../utils/adminNotifier');
         await notifyAdmin('WA Dedicated Chat Delivery', `Failed to send response to chat ${chat.id._serialized}: ${err.message}`);
       } catch (adminErr) {

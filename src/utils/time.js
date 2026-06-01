@@ -1,5 +1,10 @@
 // src/utils/time.js
-/**
+//
+// Time utilities with strong focus on Europe/Rome timezone and DST handling.
+// Provides reliable ISO conversion, DST transition detection, and formatting
+// helpers used by the scheduler and other time-sensitive components.
+
+ /**
  * Get current time in Rome (Europe/Rome timezone) as localized string.
  * @returns {string} Formatted time string (it-IT locale)
  */
@@ -79,8 +84,8 @@ function getLastSundayOfMonth(year, month) {
  * Returns a warning message if applicable.
  * 
  * EU DST transitions happen on the last Sunday of March and October:
- * - Spring: Last Sunday of March at 02:00 → 03:00 (02:00-02:59:59 doesn't exist)
- * - Fall: Last Sunday of October at 03:00 → 02:00 (02:00-02:59:59 exists twice)
+ * - Spring: Last Sunday of March at 02:00 - 03:00 (02:00-02:59:59 doesn't exist)
+ * - Fall: Last Sunday of October at 03:00 - 02:00 (02:00-02:59:59 exists twice)
  * 
  * @param {string} localDatetime - ISO datetime without offset (Roma local): "2026-03-29T02:30:00"
  * @returns {string|null} Warning message if hour is ambiguous, null otherwise
@@ -94,7 +99,7 @@ function checkDSTAmbiguousHour(localDatetime) {
   const day = parseInt(match[3], 10);
   const hour = parseInt(match[4], 10);
 
-  // Spring forward: last Sunday of March at 02:00 → 03:00 (02:00-02:59:59 doesn't exist)
+  // Spring forward: last Sunday of March at 02:00 - 03:00 (02:00-02:59:59 doesn't exist)
   const lastSundayMarch = getLastSundayOfMonth(year, 3);
   if (month === 3 && day === lastSundayMarch && hour === 2) {
     return `Invalid time: on March ${day}, ${year} at 02:00 the clock jumps directly to 03:00 (start of daylight saving time). Choose 01:30 or 03:30 instead.`;
@@ -129,8 +134,8 @@ function formatTimestamp(date) {
  * @returns {string|null} ISO 8601 with offset (e.g., "2026-04-17T16:30:00+02:00") or null if invalid
  * 
  * @example
- * convertRomeLocalToISO("2026-04-17T16:30:00") // → "2026-04-17T16:30:00+02:00" (DST)
- * convertRomeLocalToISO("2026-01-15T16:30:00") // → "2026-01-15T16:30:00+01:00" (Standard time)
+ * convertRomeLocalToISO("2026-04-17T16:30:00") // -> "2026-04-17T16:30:00+02:00" (DST)
+ * convertRomeLocalToISO("2026-01-15T16:30:00") // -> "2026-01-15T16:30:00+01:00" (Standard time)
  */
 function convertRomeLocalToISO(localDatetime) {
   // Validate format (must be YYYY-MM-DDTHH:MM:SS or YYYY-MM-DDTHH:MM:SS.mmm)

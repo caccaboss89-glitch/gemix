@@ -1,10 +1,10 @@
 // src/utils/internalNotifyServer.js
-// Tiny internal HTTP server — receives error notifications from the sandbox
+// Tiny internal HTTP server - receives error notifications from the sandbox
 // proxy container (which cannot call WhatsApp directly) and forwards them
 // to the admin via notifyAdmin().
 //
 // Endpoint: POST /notify  { source: string, details: string }
-// Only binds to 127.0.0.1 — reachable from Docker via host.docker.internal.
+// Only binds to 127.0.0.1 - reachable from Docker via host.docker.internal.
 
 const http = require('http');
 const { createLogger } = require('./logger');
@@ -39,7 +39,7 @@ function startInternalNotifyServer() {
       try {
         const { source, details } = JSON.parse(body);
         if (source && details) {
-          log.warn(`📡 Proxy notification: [${source}] ${details}`);
+          log.warn(`Proxy notification: [${source}] ${details}`);
           await notifyAdmin(String(source).slice(0, 100), String(details).slice(0, 500));
         }
         res.writeHead(200).end('ok');
@@ -51,7 +51,7 @@ function startInternalNotifyServer() {
   });
 
   _server.listen(PORT, '127.0.0.1', () => {
-    log.info(`✅ Internal notify server listening on 127.0.0.1:${PORT}`);
+    log.info(`Internal notify server listening on 127.0.0.1:${PORT}`);
   });
 
   _server.on('error', (err) => {

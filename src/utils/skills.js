@@ -1,4 +1,10 @@
 // src/utils/skills.js
+//
+// Loads metadata from the SKILL.md files in src/data/skills/ and formats
+// them into the <Skills> block that gets injected into the build sub-agent's
+// system prompt. The actual skill recipes are read on-demand by the agent
+// via read_file.
+
 const fs = require('fs');
 const path = require('path');
 const { SKILLS_DIR } = require('./userPaths');

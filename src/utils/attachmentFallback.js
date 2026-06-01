@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { registerTempFile, TEMP_DIR } = require('./tempFileServer');
 const { createLogger } = require('./logger');
 const { TEMP_ATTACHMENT_PREFIX } = require('../config/systemMessages');
@@ -40,7 +41,6 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
         if (!fs.existsSync(TEMP_DIR)) {
           fs.mkdirSync(TEMP_DIR, { recursive: true });
         }
-        const crypto = require('crypto');
         const uniqueName = `buf_${crypto.randomBytes(12).toString('hex')}_${att.name || 'file'}`;
         filePath = path.join(TEMP_DIR, uniqueName);
         fs.writeFileSync(filePath, att.buffer);
@@ -48,7 +48,7 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
       }
 
       if (!filePath || !fs.existsSync(filePath)) {
-        log.warn(`⚠️  Attachment file not found: ${filePath}`);
+        log.warn(`Attachment file not found: ${filePath}`);
         continue;
       }
 
@@ -65,7 +65,7 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
 
       totalSize += stat.size;
     } catch (err) {
-      log.error(`❌ Failed to register attachment "${att.name || 'unknown'}" as temp file: ${err.message}`);
+      log.error(`Failed to register attachment "${att.name || 'unknown'}" as temp file: ${err.message}`);
       // Log the failure and continue, avoiding cascading error for other files
     }
   }
@@ -149,10 +149,10 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
     const result = await trySendAttachment(att, sendFunction);
     if (result.success) {
       results.sent.push(result.attachment);
-      log.info(`✅ Attachment sent: ${result.attachment.name || 'unknown'}`);
+      log.info(`Attachment sent: ${result.attachment.name || 'unknown'}`);
     } else {
       results.failed.push(result.attachment);
-      log.info(`ℹ️ Direct attachment sending unsupported/too large (${result.attachment.name || 'unknown'}), falling back to temp link.`);
+      log.info(`Direct attachment sending unsupported/too large (${result.attachment.name || 'unknown'}), falling back to temp link.`);
     }
   }
 
@@ -162,7 +162,7 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
       const fallbackData = buildFallbackAttachmentMessage(results.failed, options);
       results.fallbackMessage = fallbackData.message;
       results.fallbackLinks = fallbackData.fallbackLinks;
-      log.info(`📥 Generated fallback message for ${results.failed.length} attachment(s)`);
+      log.info(`Generated fallback message for ${results.failed.length} attachment(s)`);
     } catch (err) {
       log.error(`Failed to generate fallback message: ${err.message}`);
       // Don't re-throw; we tried our best

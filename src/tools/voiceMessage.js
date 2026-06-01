@@ -13,7 +13,7 @@
 // Same pattern as Imagine (image/video gen): the only way to reach the
 // xAI text_to_speech tool is through the Hermes CLI. We restrict the
 // toolset to `tts` (-t tts) so the model has exactly one tool available
-// and cannot wander off — the upstream caller hands plain text and the
+// and cannot wander off - the upstream caller hands plain text and the
 // CLI itself decides where to insert vocal tags. This concentration on a
 // single task tends to produce better-sounding audio.
 //
@@ -42,6 +42,7 @@ const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier')
 const { createLogger } = require('../utils/logger');
 const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
 const { XAI_TTS_ENABLED } = require('../config/constants');
+const { FFMPEG_PATH } = require('../config/env');
 
 const log = createLogger('TTS');
 
@@ -59,7 +60,7 @@ const TTS_BRIDGE_TIMEOUT_MS = 90 * 1000;
 
 // Outer-loop timeout covers both bridge call and ffmpeg transcode. If we
 // blow past this we give up and let the dispatcher report a hard failure
-// to the AI — better than indefinitely hanging the round.
+// to the AI - better than indefinitely hanging the round.
 const VOICE_GENERATION_TIMEOUT_MS = 120 * 1000;
 
 /**
@@ -112,7 +113,7 @@ function convertMp3ToWhatsAppOpus(mp3Buffer) {
       'pipe:1',
     ];
 
-    const ffmpegCmd = process.env.FFMPEG_PATH || 'ffmpeg';
+    const ffmpegCmd = FFMPEG_PATH;
     const ffmpeg = spawn(ffmpegCmd, ffmpegArgs);
     const chunks = [];
     let stderr = '';
@@ -140,7 +141,7 @@ function convertMp3ToWhatsAppOpus(mp3Buffer) {
  * with Google Translate TTS fallback.
  * Enforces a global timeout to prevent indefinite hangs on TTS or ffmpeg failures.
  * @param {string} text - Plain text to convert to speech (max 1000 characters,
- *   no vocal tags from the caller — the bridge tells Hermes to insert them).
+ *   no vocal tags from the caller - the bridge tells Hermes to insert them).
  * @returns {Promise<Buffer>} OGG/Opus audio buffer (48kHz mono, iOS-optimized WhatsApp format)
  */
 async function generateVoice(text) {
@@ -172,7 +173,7 @@ async function _generateVoice(text) {
 
   // Google Translate TTS fallback. It can't render vocal tags, so strip
   // them defensively (text from upstream is plain, but the bridge may
-  // also have failed AFTER Hermes started writing tagged text — strip
+  // also have failed AFTER Hermes started writing tagged text - strip
   // anyway).
   const cleanText = stripVocalTags(text);
 
@@ -188,7 +189,7 @@ async function _generateVoice(text) {
   }
 }
 
-// ── xAI TTS via Hermes CLI bridge ──────────────────────────────────────────
+// -- xAI TTS via Hermes CLI bridge ----------------------------------------
 
 /**
  * Spawn `bash bridge/tts.sh <text> <output_path>` and collect its result.
@@ -274,7 +275,7 @@ function _safeUnlink(filePath) {
   try { fs.unlinkSync(filePath); } catch { /* ignore */ }
 }
 
-// ── Google Translate TTS (fallback) ────────────────────────────────────────
+// -- Google Translate TTS (fallback) --------------------------------------
 
 /**
  * Google Translate TTS fallback (fixed language: Italian, fixed speed: normal).

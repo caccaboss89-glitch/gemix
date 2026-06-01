@@ -11,8 +11,8 @@
 //
 // Usage pattern (handler.js):
 //   ctx.requestId = <unique id generated once per handleMessage invocation>
-//   markNotifiedInCall(ctx, 'video')  → true on first call, false on repeats
-//   clearCallNotifications(ctx)       → called in the finally block of handleMessage
+//   markNotifiedInCall(ctx, 'video')  - true on first call, false on repeats
+//   clearCallNotifications(ctx)       - called in the finally block of handleMessage
 
 const { createLogger } = require('./logger');
 
@@ -22,11 +22,11 @@ const log = createLogger('NotificationDedup');
 // Entries are removed by clearCallNotifications at the end of each AI call.
 const _notified = new Set();
 
-// ── Context key helpers ─────────────────────────────────────────────────────
+// -- Context key helpers ---------------------------------------------------
 
 /**
  * Derive a stable chat-level key from a handler context.
- * Works for both the outer ctx (platform, chatId, …) and userCtx (platform, chatId, …).
+ * Works for both the outer ctx (platform, chatId, ...) and userCtx (platform, chatId, ...).
  *
  * @param {object} ctx
  * @returns {string}
@@ -40,14 +40,14 @@ function getChatKey(ctx) {
   return `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}`;
 }
 
-// ── Dedup API ───────────────────────────────────────────────────────────────
+// -- Dedup API -------------------------------------------------------------
 
 /**
  * Mark a notification kind as "already sent" for the current AI call.
  *
- * Returns true the first time a (call, kind) pair is seen — the caller should
+ * Returns true the first time a (call, kind) pair is seen - the caller should
  * send the message. Returns false on every subsequent call within the same AI
- * invocation — the caller should stay silent.
+ * invocation - the caller should stay silent.
  *
  * @param {object} ctx  - Handler context; must have `requestId` set.
  * @param {string} kind - Notification kind: 'research' | 'image_gen' | 'video_gen' | etc.
@@ -76,7 +76,7 @@ function clearCallNotifications(ctx) {
   }
 }
 
-// ── Message builders ────────────────────────────────────────────────────────
+// -- Message builders ------------------------------------------------------
 
 /**
  * Fixed research notification. Sent BEFORE the multi-agent team is queried,
@@ -100,7 +100,7 @@ function buildEngineeringNotificationMessage() {
   return '🛠️ Sto delegando il lavoro al coder agent, attendi un attimo...';
 }
 
-// ── Safety valve ────────────────────────────────────────────────────────────
+// -- Safety valve ----------------------------------------------------------
 // The Set should stay tiny (one entry per active call × kind), but guard
 // against leaks from calls that crash before clearCallNotifications runs.
 

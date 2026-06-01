@@ -1,10 +1,16 @@
 // src/utils/logger.js
+//
+// Lightweight leveled logger used throughout GemiX.
+// Supports error/warn/info/debug levels controlled by the LOG_LEVEL
+// environment variable (or the centralized value in env.js).
+// All loggers can be prefixed with a module name for easier filtering.
+
+const { LOG_LEVEL } = require('../config/env');
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3, silent: 4 };
 
 function getLevel() {
-  const raw = process.env.LOG_LEVEL;
-  if (!raw) return 'info';
-  const normalized = raw.toString().trim().toLowerCase();
+  const raw = LOG_LEVEL;
+  const normalized = String(raw || 'info').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(LEVELS, normalized) ? normalized : 'info';
 }
 

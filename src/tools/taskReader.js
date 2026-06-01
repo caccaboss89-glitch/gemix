@@ -1,4 +1,9 @@
 // src/tools/taskReader.js
+//
+// Reads scheduled tasks (personal and optionally group) from taskStore.
+// Formats them with timestamps and IDs into an XML-wrapped <ScheduledTasks> message
+// for the main brain. Companion to taskRemover and scheduler.
+
 const { readTaskFile } = require('../utils/taskStore');
 const { formatTimestamp } = require('../utils/time');
 
@@ -21,7 +26,7 @@ function _formatTask(t, i) {
   let line = `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)}`;
   if (t.recurrence) {
     const freqLabel = FREQ_LABELS[t.recurrence.freq] || `Every ${t.recurrence.freq}`;
-    line += ` | 🔁 ${freqLabel} → ${formatTimestamp(t.recurrence.endAt)}`;
+    line += ` | 🔁 ${freqLabel} -> ${formatTimestamp(t.recurrence.endAt)}`;
   }
   line += ` | ID: \`${t.id}\``;
   return line;

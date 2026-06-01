@@ -1,29 +1,25 @@
 // src/index.js
-require('dotenv').config();
+//
+// Main entry point for GemiX. Handles startup (directory creation, optional
+// system cleanup), initializes all platforms (WhatsApp dedicated/personal +
+// Discord), starts schedulers, internal servers, and the attachment tunnel.
+
 const fs = require('fs');
 const { execSync } = require('child_process');
 const { TASKS_DIR, DATA_DIR } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
+const { STARTUP_SYSTEM_CLEANUP } = require('./config/env');
 
 const log = createLogger('GemiX');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
 
-// ── System cleanup on startup ─────────────────────────────────────────────────────
-// Optional, opt-in only via STARTUP_SYSTEM_CLEANUP=true.
-// Cleans:
-// - Chromium/Puppeteer crash dumps (apport)
-// - Docker unused containers/images
-// - User cache directories
-//
-// Disabled by default because it requires passwordless sudo for /var/lib/apport
-// and /var/crash, and mutates host system directories from the bot process,
-// which is a fragile coupling. Enable explicitly only on hosts where sudo
-// is configured for the bot user and the cleanup is actually wanted.
-if (process.env.STARTUP_SYSTEM_CLEANUP === 'true' && process.platform === 'linux') {
+// System cleanup on startup (opt-in via STARTUP_SYSTEM_CLEANUP).
+// See env.js for flag definition and SERVER_SETUP.md for operational notes.
+if (STARTUP_SYSTEM_CLEANUP && process.platform === 'linux') {
   try {
-    log.info('🧹 Running system cleanup on startup (STARTUP_SYSTEM_CLEANUP=true)...');
+    log.info('Running system cleanup on startup (STARTUP_SYSTEM_CLEANUP=true)...');
 
     // 1. Crash dumps (Chromium/Puppeteer)
     const apportSize = execSync('du -sh /var/lib/apport 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
@@ -55,12 +51,12 @@ if (process.env.STARTUP_SYSTEM_CLEANUP === 'true' && process.platform === 'linux
       log.debug(`   Cache cleanup skipped: ${err.message}`);
     }
 
-    log.info('✅ System cleanup completed');
+    log.info('System cleanup completed');
   } catch (err) {
-    log.warn(`⚠️ System cleanup failed: ${err.message}`);
+    log.warn(`System cleanup failed: ${err.message}`);
   }
 } else {
-  log.debug('🧹 System cleanup skipped (set STARTUP_SYSTEM_CLEANUP=true to enable)');
+  log.debug('System cleanup skipped (set STARTUP_SYSTEM_CLEANUP=true to enable)');
 }
 
 const { initDedicatedWhatsApp } = require('./platforms/whatsapp/dedicated');
@@ -73,8 +69,8 @@ const { startInternalNotifyServer } = require('./utils/internalNotifyServer');
 const { startTempFileServer } = require('./utils/tempFileServer');
 const { HERMES_BASE_URL, GROK_MODEL } = require('./config/env');
 
-log.info('🤖 GemiX — Avvio in corso...\n');
-log.info(`   🔗 Hermes proxy: ${HERMES_BASE_URL} (model: ${GROK_MODEL})`);
+log.info('GemiX - Avvio in corso...\n');
+log.info(`   Hermes proxy: ${HERMES_BASE_URL} (model: ${GROK_MODEL})`);
 
 // Soft preflight: ping the Hermes proxy. We don't block startup on failure
 // because the proxy may come up after GemiX (e.g. via tmux on the VPS), but
@@ -86,12 +82,12 @@ log.info(`   🔗 Hermes proxy: ${HERMES_BASE_URL} (model: ${GROK_MODEL})`);
     const res = await fetch(`${HERMES_BASE_URL.replace(/\/+$/, '')}/models`, { signal: ctrl.signal }).catch(() => null);
     clearTimeout(timer);
     if (res && (res.ok || res.status === 401 || res.status === 404)) {
-      log.info('   ✅ Hermes proxy reachable');
+      log.info('   Hermes proxy reachable');
     } else {
-      log.warn(`   ⚠️ Hermes proxy preflight returned status ${res ? res.status : 'no-response'} — first AI call may fail`);
+      log.warn(`   Hermes proxy preflight returned status ${res ? res.status : 'no-response'} - first AI call may fail`);
     }
   } catch (err) {
-    log.warn(`   ⚠️ Hermes proxy preflight failed (${err.message}) — make sure 'hermes proxy start --provider xai --port 8000' is running`);
+    log.warn(`   Hermes proxy preflight failed (${err.message}) - make sure 'hermes proxy start --provider xai --port 8000' is running`);
   }
 })();
 
@@ -111,7 +107,7 @@ startInternalNotifyServer();
 startTempFileServer();
 
 const shutdownHandler = async (signal) => {
-  log.info(`\n🛑 GemiX — Shutting down (${signal})...`);
+  log.info(`\nGemiX - Shutting down (${signal})...`);
   try { await buildSandbox.shutdownAll(); } catch (err) { log.warn(`Build sandbox shutdown failed during ${signal}: ${err.message}`); }
   process.exit(0);
 };
@@ -122,7 +118,7 @@ process.on('SIGTERM', () => shutdownHandler('SIGTERM'));
 process.on('unhandledRejection', (err) => {
   log.error('❌ Unhandled rejection:', err);
   try {
-    const { notifyAdmin } = require('./utils/adminNotifier');
+    const { notifyAdmin } = require('./utils/adminNotifier'); // dynamic require for lazy error path
     notifyAdmin('Unhandled Rejection', `Error: ${err?.message || err}\nStack: ${err?.stack || ''}`).catch(() => {});
   } catch {}
 });
@@ -130,7 +126,7 @@ process.on('unhandledRejection', (err) => {
 process.on('uncaughtException', (err) => {
   log.error('❌ Uncaught exception:', err);
   try {
-    const { notifyAdmin } = require('./utils/adminNotifier');
+    const { notifyAdmin } = require('./utils/adminNotifier'); // dynamic require for lazy error path
     notifyAdmin('Uncaught Exception', `Error: ${err?.message || err}\nStack: ${err?.stack || ''}`).catch(() => {});
   } catch {}
   // Do not exit: PM2 will restart on hard crashes; here we surface the error

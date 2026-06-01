@@ -9,13 +9,13 @@ const { createLogger } = require('./logger');
 
 const log = createLogger('Batcher');
 
-// ── Configuration ──
+// -- Configuration --
 
 const DEBOUNCE_MS = 2500;          // wait this long after the last message before firing
 const MAX_WAIT_MS = 8000;          // absolute max wait from first message (prevents infinite delay)
 const MAX_BATCH_SIZE = 15;         // hard cap on messages per batch (safety valve)
 
-// ── State ──
+// -- State --
 
 // Map<chatKey, { messages: Array, timer: NodeJS.Timeout|null, maxTimer: NodeJS.Timeout|null, handler: Function }>
 const _batches = new Map();
@@ -26,8 +26,8 @@ const _batches = new Map();
  * or MAX_WAIT_MS elapses, whichever comes first.
  *
  * @param {string} key         Unique chat key (e.g. "wa_dedicated:<chatId>")
- * @param {object} entry       { ctx, contentParts } — raw pieces that the caller will merge
- * @param {Function} handler   async (mergedEntries: Array) => void — called with all entries
+ * @param {object} entry       { ctx, contentParts } - raw pieces that the caller will merge
+ * @param {Function} handler   async (mergedEntries: Array) => void - called with all entries
  */
 function pushMessage(key, entry, handler) {
   let batch = _batches.get(key);
@@ -69,7 +69,7 @@ function _fire(key) {
 
   const count = batch.messages.length;
   if (count > 1) {
-    log.info(`   📦 Batch fired for ${key}: ${count} message(s) merged`);
+    log.info(`   Batch fired for ${key}: ${count} message(s) merged`);
   }
 
   // Invoke handler (fire-and-forget; errors are the caller's responsibility)

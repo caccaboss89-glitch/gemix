@@ -1,4 +1,12 @@
 // src/utils/text.js
+//
+// Collection of text utilities used throughout GemiX:
+// - Filename sanitization for safe storage
+// - Stripping TTS voice effect tags ([pause], <soft>, etc.)
+// - Normalizing Markdown for WhatsApp compatibility
+// - Cleaning history prefixes, system messages, research badges, footers, etc.
+// - High-level clean functions for incoming and outgoing messages
+
 /**
  * Sanitize a string for use as a filename.
  * Removes special chars, collapses whitespace to underscores, trims length.
@@ -32,11 +40,11 @@ function stripVoiceTags(text) {
 
 /**
  * Normalize Markdown for WhatsApp (which has limited MD support).
- * - ### → removed (headings not supported)
- * - * bullet points → - bullet points (better compatibility)
- * - **text** → *text* (bold)
- * - __text__ → _text_ (italic)
- * - ~~text~~ → ~text~ (strikethrough)
+ * - ### - removed (headings not supported)
+ * - * bullet points - - bullet points (better compatibility)
+ * - **text** - *text* (bold)
+ * - __text__ - _text_ (italic)
+ * - ~~text~~ - ~text~ (strikethrough)
  * @param {string} text
  * @returns {string}
  */
@@ -44,13 +52,13 @@ function normalizeMarkdown(text) {
   if (!text || typeof text !== 'string') return text;
   // Remove heading markers (###) completely - WhatsApp doesn't support them
   text = text.replace(/^#{1,6}\s+/gm, '');
-  // * bullet points → - bullet points (better WhatsApp compatibility)
+  // * bullet points - - bullet points (better WhatsApp compatibility)
   text = text.replace(/^\*\s+/gm, '- ');
-  // **text** → *text* (bold)
+  // **text** - *text* (bold)
   text = text.replace(/\*\*([^\*]+)\*\*/g, '*$1*');
-  // __text__ → _text_ (italic)
+  // __text__ - _text_ (italic)
   text = text.replace(/__([^_]+)__/g, '_$1_');
-  // ~~text~~ → ~text~ (strikethrough)
+  // ~~text~~ - ~text~ (strikethrough)
   text = text.replace(/~~([^~]+)~~/g, '~$1~');
   return text;
 }
@@ -59,7 +67,7 @@ function normalizeMarkdown(text) {
 //   "[19/05/2026, 22:41] GemiX: "
 //   "[19/05/2026 22:41] Account Owner: "
 //   "[19/05/2026, 22:41:30] [System]: "
-// The model sometimes echoes this format from history into its own reply — strip it everywhere.
+// The model sometimes echoes this format from history into its own reply - strip it everywhere.
 const HISTORY_TIMESTAMP_PREFIX_RE = /^\[\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\]\s*[^\n:]{1,60}:\s*/gm;
 
 // Conservative: only strip a single leading speaker label at the very start of the reply.
@@ -133,7 +141,7 @@ function stripHistoryPrefixes(text) {
  * 4. Strips any accidental footers (e.g. "--GemiX • ...")
  * 5. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
  * 6. Strips any GemiX system-message lines accidentally echoed by the AI
- *    (release banners, maintenance, temp-attachment notice, fallback error…)
+ *    (release banners, maintenance, temp-attachment notice, fallback error...)
  * @param {string} text
  * @returns {string} Cleaned response text
  */

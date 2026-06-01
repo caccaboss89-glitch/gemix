@@ -6,8 +6,8 @@
 // long as the user keeps interacting (sandboxes that stay idle past
 // SANDBOX_IDLE_TTL_MS are reaped). The bind mounts are flat:
 //
-//   /workspace/  → host build_workspace dir for this workspaceId  (rw)
-//   /skills/     → src/data/skills/                                (ro)
+//   /workspace/  -> host build_workspace dir for this workspaceId  (rw)
+//   /skills/     -> src/data/skills/                                (ro)
 //
 // No /readonly/history, no /readonly/searched_images. The agent only sees
 // files explicitly staged in the workspace by the `build` tool (attachments)
@@ -30,6 +30,12 @@ const {
   SANDBOX_MEMORY_MB,
   SANDBOX_IDLE_TTL_MS,
 } = require('../config/constants');
+const {
+  GEMIX_SANDBOX_IMAGE,
+  GEMIX_SANDBOX_NETWORK,
+  GEMIX_SANDBOX_PROXY_HOST,
+  GEMIX_SANDBOX_PROXY_PORT,
+} = require('../config/env');
 const { SKILLS_DIR } = require('../utils/userPaths');
 const {
   workspaceIdToSlug,
@@ -40,10 +46,10 @@ const { createLogger } = require('../utils/logger');
 
 const log = createLogger('BuildSandbox');
 
-const SANDBOX_IMAGE = process.env.GEMIX_SANDBOX_IMAGE || 'gemix-sandbox:latest';
-const SANDBOX_NETWORK = process.env.GEMIX_SANDBOX_NETWORK || 'gemix_sandbox_net';
-const PROXY_HOSTNAME = process.env.GEMIX_SANDBOX_PROXY_HOST || 'gemix-sandbox-proxy';
-const PROXY_PORT = process.env.GEMIX_SANDBOX_PROXY_PORT || '8080';
+const SANDBOX_IMAGE = GEMIX_SANDBOX_IMAGE;
+const SANDBOX_NETWORK = GEMIX_SANDBOX_NETWORK;
+const PROXY_HOSTNAME = GEMIX_SANDBOX_PROXY_HOST;
+const PROXY_PORT = GEMIX_SANDBOX_PROXY_PORT;
 
 /** Map<workspaceId, BuildSandboxEntry> */
 const _pool = new Map();
@@ -86,7 +92,7 @@ function _ensureWorkspaceWritable(workspaceDir) {
 /**
  * Spawn a fresh container for `workspaceId`. The container runs an idle
  * sleep loop as PID 1 so we can attach via `docker exec` for individual
- * bash calls. No Jupyter/Python kernel here — the build agent does its
+ * bash calls. No Jupyter/Python kernel here - the build agent does its
  * Python work server-side via xAI's code_interpreter tool.
  */
 async function _spawnContainer(workspaceId) {
@@ -339,7 +345,7 @@ async function cleanupOrphanBuildSandboxes() {
   }
 }
 
-// ── Idle reaper ─────────────────────────────────────────────────────────
+// -- Idle reaper -----------------------------------------------------------
 const _reaper = setInterval(() => {
   const now = Date.now();
   for (const [workspaceId, entry] of _pool.entries()) {

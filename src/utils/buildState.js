@@ -7,7 +7,7 @@
 //     turn, so the workspace TTL counts inactivity from the user's last
 //     interaction with GemiX (across any platform), not just from `build`
 //     calls.
-//   - lock: { ownerId, acquiredAt, expiresAt } — a per-workspace mutex used
+//   - lock: { ownerId, acquiredAt, expiresAt } - a per-workspace mutex used
 //     by the build tool to serialize concurrent invocations. The lock has
 //     a hard expiry so a crashed handler can't strand a workspace forever.
 //
@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { getBuildWorkspaceMetaDir } = require('./workspaceId');
-const { BUILD_LOCK_WAIT_MS, BUILD_HARD_TIMEOUT_MS } = require('../config/constants');
+const { BUILD_LOCK_WAIT_MS, BUILD_HARD_TIMEOUT_MS, DATA_DIR } = require('../config/constants');
 const { createLogger } = require('./logger');
 
 const log = createLogger('BuildState');
@@ -71,7 +71,7 @@ function _writeState(workspaceId, state) {
  *
  * Also persists the workspaceId itself so the sweeper can later wipe the
  * workspace and shut down its sandbox without having to invert the slug
- * (slug ↔ workspaceId is a lossy mapping because of filesystem sanitization).
+ * (slug <-> workspaceId is a lossy mapping because of filesystem sanitization).
  */
 function touchActivity(workspaceId) {
   if (!workspaceId) return;
@@ -164,28 +164,26 @@ function renewBuildLock(workspaceId, ownerId) {
  * build_state file, returning [{ workspaceId, lastActivityAt, hasWorkspace }].
  * Used by the cron sweeper to find stale workspaces to wipe.
  *
- * NOTE: workspaceId is reconstructed by inverting workspaceIdToSlug — for
+ * NOTE: workspaceId is reconstructed by inverting workspaceIdToSlug - for
  * sweeping we only need a stable slug + the metaDir path, so we return the
  * slug as `workspaceSlug` and let the caller resolve directories from it.
  */
 function listWorkspaceStates() {
-  const fs2 = require('fs');
-  const { DATA_DIR } = require('../config/constants');
   const usersDir = path.join(DATA_DIR, 'users');
-  if (!fs2.existsSync(usersDir)) return [];
+  if (!fs.existsSync(usersDir)) return [];
 
   const out = [];
   let entries;
-  try { entries = fs2.readdirSync(usersDir, { withFileTypes: true }); }
+  try { entries = fs.readdirSync(usersDir, { withFileTypes: true }); }
   catch { return []; }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
     if (!e.name.startsWith('user_') && !e.name.startsWith('group_')) continue;
     const metaDir = path.join(usersDir, e.name);
     const stateFile = path.join(metaDir, STATE_FILENAME);
-    if (!fs2.existsSync(stateFile)) continue;
+    if (!fs.existsSync(stateFile)) continue;
     try {
-      const raw = JSON.parse(fs2.readFileSync(stateFile, 'utf-8'));
+      const raw = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
       out.push({
         workspaceSlug: e.name,
         workspaceId: raw && typeof raw.workspaceId === 'string' ? raw.workspaceId : null,

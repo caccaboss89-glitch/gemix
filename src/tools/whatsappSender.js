@@ -1,4 +1,9 @@
 // src/tools/whatsappSender.js
+//
+// Thin wrapper around the dedicated WhatsApp client for direct sending.
+// Used by scheduler and recipient tools (email/wa). Provides normalizePhoneToJid
+// helper and applies text sanitization via discord/text utils before delivery.
+
 const { removeDiscordEmoji } = require('../utils/discord');
 const { normalizeMarkdown } = require('../utils/text');
 

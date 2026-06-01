@@ -1,5 +1,10 @@
 // src/utils/discord.js
-/**
+//
+// Utility for cleaning Discord-specific formatting from text before it
+// reaches the AI or is used in other contexts. Removes custom emojis,
+// user/role/channel mentions, etc.
+
+ /**
  * Remove Discord custom emojis, mentions, and other Discord-specific markdown from text.
  * Removes patterns like <:name:id>, <@!id>, <#id>, <@&id>, etc.
  * @param {string} text - Text to clean

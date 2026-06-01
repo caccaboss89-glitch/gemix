@@ -6,9 +6,9 @@
 
 FROM python:3.12-slim-bookworm
 
-# ── System packages ──
+# -- System packages -------------------------------------------------------
 # Build tools (gcc/g++/make, python3-dev, libpq-dev) are needed by a few wheels.
-# Kept installed — no pip at runtime so this does not widen the attack surface.
+# Kept installed - no pip at runtime so this does not widen the attack surface.
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Python dependencies ──
+# -- Python dependencies ---------------------------------------------------
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -54,10 +54,10 @@ WORKDIR /opt/sandbox
 COPY sandbox/requirements-sandbox.txt /opt/sandbox/requirements-sandbox.txt
 RUN pip install --no-cache-dir -r /opt/sandbox/requirements-sandbox.txt
 
-# ── unoserver for LibreOffice field updates (TOC, indexes) ──
+# -- unoserver for LibreOffice field updates (TOC, indexes) ------------------
 RUN pip install --no-cache-dir unoserver
 
-# ── Node.js + PptxGenJS (pptx skill: deck generation from templates) ──
+# -- Node.js + PptxGenJS (pptx skill: deck generation from templates) --------
 # Node is the engine the pptx templates run on. pptxgenjs is the only hard
 # dependency; the icon libraries (react-icons/react/react-dom/sharp) are used
 # by a handful of templates that rasterize SVG icons to PNG. Installed globally
@@ -76,7 +76,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Let `node /workspace/deck.js` resolve the globally-installed modules.
 ENV NODE_PATH=/usr/lib/node_modules
 
-# ── docx skill Node deps: docx-js (create) + docxtemplater (template filling) ──
+# -- docx skill Node deps: docx-js (create) + docxtemplater (template filling) -
 # docx-js (https://docx.js.org) gives high-fidelity creation from scratch with
 # native TOC / footnotes / columns / hyperlinks. docxtemplater renders Word
 # templates with loops/conditionals/dynamic tables; pizzip is its zip backend
@@ -89,16 +89,16 @@ RUN npm install -g --no-fund --no-audit \
         angular-expressions@1.5.5 \
     && npm cache clean --force
 
-# ── Preload heavy models at build time (offline runtime) ──
+# -- Preload heavy models at build time (offline runtime) ------------------
 COPY sandbox/preload_models.py /opt/sandbox/preload_models.py
 RUN python /opt/sandbox/preload_models.py
 
-# ── Non-root sandbox user ──
+# -- Non-root sandbox user -----------------------------------------------
 RUN useradd --create-home --uid 1000 --shell /bin/bash sandbox \
     && mkdir -p /workspace /skills \
     && chown -R sandbox:sandbox /workspace /home/sandbox
 
-# rembg caches under $HOME/.u2net — move it to the sandbox user's home so it is
+# rembg caches under $HOME/.u2net - move it to the sandbox user's home so it is
 # available without re-downloading when we switch user below.
 RUN if [ -d /root/.u2net ]; then \
         mkdir -p /home/sandbox/.u2net && \

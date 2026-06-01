@@ -1,4 +1,9 @@
 // src/utils/memoryStore.js
+//
+// Simple persistent key-value memory store for users and groups.
+// Each memory is stored as a small JSON file under data/memories/.
+// Used by the `update_memory` tool and injected into the system prompt.
+
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');

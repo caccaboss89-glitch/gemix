@@ -7,12 +7,13 @@ const fs = require('fs').promises;
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { FFPROBE_PATH } = require('../config/env');
 
 const FFPROBE_TIMEOUT_MS = 10_000;
 
 function _runFfprobe(filePath) {
   return new Promise((resolve) => {
-    const cmd = process.env.FFPROBE_PATH || 'ffprobe';
+    const cmd = FFPROBE_PATH;
     const args = ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath];
     let child;
     try {
@@ -37,7 +38,7 @@ function _runFfprobe(filePath) {
 
 /**
  * Probe a media buffer (audio or video) to get its duration in seconds.
- * Returns null when ffprobe is unavailable or the file is unreadable —
+ * Returns null when ffprobe is unavailable or the file is unreadable -
  * callers should treat null as "unknown" and proceed with best-effort.
  *
  * @param {Buffer} buffer

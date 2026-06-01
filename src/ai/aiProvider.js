@@ -1,34 +1,13 @@
 // src/ai/aiProvider.js
 //
-// Single entry-point for every main-brain LLM call in GemiX. Talks to the
-// Hermes Agent proxy (http://127.0.0.1:8000/v1) using the xAI **Responses**
-// endpoint (`/v1/responses`) — the same endpoint already used by the
-// multi-agent research team (see tools/webXSearch.js).
+// Thin adapter for main-brain LLM calls.
+// Talks to Hermes via the xAI Responses endpoint (`/v1/responses`).
+// Accepts the usual chat-style messages + tools and translates them
+// through responsesAdapter + apiClient, then converts the result back
+// to the chat-completion shape expected by handler.js.
 //
-// Why /v1/responses (and not /v1/chat/completions anymore):
-//   - It is the only endpoint that reliably accepts native multimodal
-//     attachments via `input_file` with public URLs (PDF, audio, video).
-//     /v1/chat/completions returns "Empty content block" on most of those.
-//   - It is the same surface used internally by xAI's own tools, so we get
-//     consistent behaviour and feature parity (function calling, server-side
-//     tools like web_search/x_search, code_interpreter on the same path).
-//
-// What this module does:
-//   1. Accepts the same chat-style `messages[]` and `tools[]` it always
-//      accepted, so handler.js / tools/index.js don't need to know about
-//      the wire change.
-//   2. Translates them via responsesAdapter to the Responses API shape:
-//      `{ instructions, input, tools, … }`.
-//   3. Sends the request through callResponsesModel (apiClient).
-//   4. Translates the response back into a chat-completion-shaped assistant
-//      message so the caller keeps consuming `{role:'assistant', content,
-//      tool_calls}` exactly as before.
-//
-// Anything that previously worked (text-only chat, function calling, image
-// content parts) keeps working unchanged. PDF/audio/video parts are now
-// rewritten into Responses-shape `input_file` URL parts by the
-// `inputFileBuilder` pre-pass (see src/utils/inputFileBuilder.js); xAI
-// fetches them server-side and runs OCR/STT/frame extraction natively.
+// Keeps backward compatibility for existing callers while enabling
+// native multimodal input via input_file.
 
 const { HERMES_API_KEY, HERMES_BASE_URL, GROK_MODEL } = require('../config/env');
 const { MAX_TOKENS } = require('../config/constants');

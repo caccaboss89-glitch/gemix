@@ -1,5 +1,8 @@
 // src/utils/xmlEscape.js
-// Shared XML escape utility for system-prompt builders.
+//
+// Shared XML escape utility used when building structured prompts
+// (especially for the build sub-agent and other XML-tagged contexts).
+// Provides basic escaping for &, <, >, and " characters.
 
 /**
  * Escape XML special characters in a string.

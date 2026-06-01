@@ -2,19 +2,14 @@
 //
 // Filesystem-side helpers for the build sub-agent's workspace.
 //
-// Layout (per §2.3 of Analisi_Pulizia_v2.md):
-//   data/users/<workspaceSlug>/
-//     build_workspace/        <- writable root, no fixed structure
-//     .build_state.json       <- activity + lock (utils/buildState.js)
+// Per-workspace layout under data/users/<workspaceSlug>/ :
+//   build_workspace/        <- writable root (flat, no fixed structure)
+//   .build_state.json       <- activity + lock (see utils/buildState.js)
 //
-// The agent treats `/workspace` (its container's bind-mount of the
-// workspace path) as a single flat zone with no required layout. Files
-// dropped here as attachments via the `build` tool, plus anything the
-// agent writes itself, all live in the same tree.
+// The agent sees `/workspace` as a single flat zone. Attachments staged
+// by the `build` tool and anything the agent writes live in the same tree.
 //
-// Quota: BUILD_WORKSPACE_QUOTA_MB. The agent's write tools (write_file,
-// edit_file, bash) check this before each write; the host enforces it
-// when copying attachments in.
+// Quota: BUILD_WORKSPACE_QUOTA_MB. Enforced on writes and on attachment staging.
 
 const fs = require('fs');
 const path = require('path');

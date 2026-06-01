@@ -1,4 +1,10 @@
 // src/tools/scheduler.js
+//
+// Schedules tasks (one-time or recurring) for WhatsApp delivery (private or group).
+// Validates dates against DST, 1-year limit, permissions (admin/active member for recipients).
+// Uses taskStore for persistence, time utils for Rome timezone handling, and builds
+// human-readable confirmation messages with recipient/recurrence details.
+
 const crypto = require('crypto');
 const { MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
 const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
@@ -162,9 +168,9 @@ async function scheduleTasks(tasks, ctx) {
     const scheduledAtRome = formatTimestamp(scheduledAt);
 
     // Build a human-readable recipient label:
-    // - active member → first name only
-    // - external phone (whatsapp JID) → phone number
-    // - current user (self) → nothing (omit)
+    // - active member -> first name only
+    // - external phone (whatsapp JID) -> phone number
+    // - current user (self) -> nothing (omit)
     let recipientLabel = '';
     if (destinations.whatsapp) {
       const destJid = destinations.whatsapp;
@@ -188,7 +194,7 @@ async function scheduleTasks(tasks, ctx) {
     let taskSummary =
       `📋 Task schedulato:\n` +
       `  🆔 ID: ${newTask.id}\n` +
-      `  📝 Messaggio: ${cleanContent.substring(0, 80)}${cleanContent.length > 80 ? '…' : ''}` +
+      `  📝 Messaggio: ${cleanContent.substring(0, 80)}${cleanContent.length > 80 ? '...' : ''}` +
       `\n  🕐 Data/ora: ${scheduledAtRome}` +
       recipientLine +
       recLabel;

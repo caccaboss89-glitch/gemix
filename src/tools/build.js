@@ -27,7 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { resolveWorkspaceId, getBuildWorkspacePath } = require('../utils/workspaceId');
+const { resolveWorkspaceId } = require('../utils/workspaceId');
 const {
   ensureWorkspace,
   stageAttachmentBuffer,
@@ -91,7 +91,7 @@ function _resolveAttachment(filename, userCtx, responseCtx) {
  * an `input_file` URL part to inject in round 1 of the agent.
  *
  * For files copied from disk we rely on the agent's <WorkspaceState> + its
- * own read_file to access them — no need to send the URL on round 1.
+ * own read_file to access them - no need to send the URL on round 1.
  * For buffers materialized fresh, we ALSO attach the input_file URL on
  * round 1 to give the model immediate visibility (saves an extra round).
  */
@@ -144,7 +144,7 @@ function _attachDelivered(workspaceId, delivered, responseCtx) {
   if (!responseCtx || !Array.isArray(responseCtx.attachments)) return { attached, missing };
 
   // Guard against the agent listing the same workspace file twice in one
-  // <DELIVER> — we deliver each distinct workspace file at most once.
+  // <DELIVER> - we deliver each distinct workspace file at most once.
   const seenSources = new Set();
 
   for (const raw of delivered) {
@@ -219,7 +219,7 @@ async function buildTool(args, userCtx, responseCtx) {
     return { success: false, error: 'Cannot ensure workspace directory.' };
   }
 
-  // ── Resolve attachments BEFORE acquiring the lock so a missing-file
+  // -- Resolve attachments BEFORE acquiring the lock so a missing-file
   // error fails fast without blocking the workspace.
   const resolved = [];
   const notFound = [];
@@ -250,7 +250,7 @@ async function buildTool(args, userCtx, responseCtx) {
   }
 
   try {
-    // ── Stage attachments into /workspace/ ────────────────────────────────
+    // -- Stage attachments into /workspace/ ---------------------------------
     const renamedAttachments = [];
     const attachmentParts = []; // round-1 input_file URLs for buffer-only sources
     const stagingErrors = [];
@@ -281,7 +281,7 @@ async function buildTool(args, userCtx, responseCtx) {
       };
     }
 
-    // ── Run the sub-agent ─────────────────────────────────────────────────
+    // -- Run the sub-agent -------------------------------------------------
     const agentResult = await runBuildAgent({
       workspaceId,
       prompt,
@@ -299,7 +299,7 @@ async function buildTool(args, userCtx, responseCtx) {
       };
     }
 
-    // ── Deliver files to the main brain's response buffer ─────────────────
+    // -- Deliver files to the main brain's response buffer -----------------
     const { attached, missing } = _attachDelivered(workspaceId, agentResult.delivered || [], responseCtx);
 
     // Bubble the agent's research stats up to the main brain so the badge
@@ -316,7 +316,7 @@ async function buildTool(args, userCtx, responseCtx) {
       delivered: attached,
       delivered_missing: missing,
       attachments_not_found: notFound,
-      attachments_renamed: renamedAttachments.map(r => `${r.requested} → ${r.actual}`),
+      attachments_renamed: renamedAttachments.map(r => `${r.requested} -> ${r.actual}`),
       rounds_used: agentResult.roundsUsed,
     };
   } finally {

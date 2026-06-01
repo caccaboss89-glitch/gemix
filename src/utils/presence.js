@@ -1,4 +1,10 @@
 // src/utils/presence.js
+//
+// Manages WhatsApp presence indicators (typing / recording) with automatic
+// refresh. WhatsApp automatically clears these states after ~25 seconds, so
+// this utility keeps them alive for as long as the bot is actively "working"
+// on a response for that chat.
+
 const { createLogger } = require('./logger');
 
 const log = createLogger('Presence');

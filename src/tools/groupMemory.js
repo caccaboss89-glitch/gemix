@@ -1,4 +1,11 @@
 // src/tools/groupMemory.js
+//
+// Thin wrapper for group-level persistent memory (WhatsApp groups only).
+// Derives a stable file key via getGroupTaskFileId (userIdentifier) and delegates
+// to the centralized memoryStore (writeMemory + MAX_MEMORY_CHARS enforcement).
+// Returns simple success/error or confirmation messages for the main brain.
+// Companion to userMemory.js.
+
 const { writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 

@@ -1,15 +1,11 @@
 // src/config/systemMessages.js
-// Centralised registry of all GemiX-generated WhatsApp system messages.
 //
-// IMPORTANT: every entry here has TWO parts that must stay in sync:
-//   text(...)  — the actual message text sent to WhatsApp
-//   regex      — a RegExp used by _isSystemMessage() in shared.js to detect
-//                that message in history and label it as "[System]".
-//
-// If you change the text of a message, update its regex accordingly,
-// and vice versa. Both live here so you never forget to do both.
+// Central registry of all GemiX-generated WhatsApp system messages.
+// Every entry has two synced parts: the exact text sent + the regex used by
+// isSystemMessage() in shared.js to detect it in history as "[System]".
+// Change one -> update the other. This is the single source of truth.
 
-// ── Release notification ──────────────────────────────────────────────────────
+// -- Release notification --------------------------------------------------
 
 /**
  * Prefix used in every new-release notification.
@@ -20,7 +16,7 @@
 const RELEASE_NOTIFICATION_PREFIX = '🚀 *Nuova release GemiX:';
 const RELEASE_NOTIFICATION_REGEX  = /^\uD83D\uDE80 \*Nuova release GemiX:/;
 
-// ── Music wrap ────────────────────────────────────────────────────────────────
+// -- Music wrap ------------------------------------------------------------
 
 /**
  * Music wrap monthly notification sent to all active members.
@@ -29,25 +25,25 @@ const RELEASE_NOTIFICATION_REGEX  = /^\uD83D\uDE80 \*Nuova release GemiX:/;
 const MUSIC_WRAP_PREFIX = '🎵 *Wrap di';
 const MUSIC_WRAP_REGEX  = /^\uD83C\uDFB5 \*Wrap di /;
 
-// ── Admin error notifications ─────────────────────────────────────────────────
+// -- Admin error notifications ---------------------------------------------
 
 /**
- * Admin API error alert. Full text: `⚠️ *ERRORE API — ${source}*\n\n…`
+ * Admin API error alert. Full text: `⚠️ *ERRORE API - ${source}*\n\n...` (em-dash in actual message)
  * The regex matches messages sent by adminNotifier.js.
  */
 const ADMIN_ERROR_PREFIX = '⚠️ *ERRORE API —';
 const ADMIN_ERROR_REGEX  = /^\u26A0\uFE0F \*ERRORE API \u2014/;
 
-// ── Maintenance ───────────────────────────────────────────────────────────────
+// -- Maintenance -----------------------------------------------------------
 
 /**
  * Maintenance-mode message shown to non-admin users.
- * Defined in constants.js (MAINTENANCE_USER_MESSAGE) — matched here by prefix.
+ * Defined in constants.js (MAINTENANCE_USER_MESSAGE) - matched here by prefix.
  */
 const MAINTENANCE_PREFIX = '🌙 GemiX è temporaneamente in manutenzione';
 const MAINTENANCE_REGEX  = /^\uD83C\uDF19 GemiX è temporaneamente in manutenzione/;
 
-// ── Release-notify subscription confirmations ─────────────────────────────────
+// -- Release-notify subscription confirmations -----------------------------
 
 /**
  * Sent by handler.js when a user subscribes to release notifications during maintenance.
@@ -58,12 +54,12 @@ const RELEASE_NOTIFY_ENABLED_REGEX   = /^\uD83D\uDD14 Le notifiche degli aggiorn
 const RELEASE_NOTIFY_ALREADY_PREFIX  = 'ℹ️ Le notifiche degli aggiornamenti di GemiX sono già attive.';
 const RELEASE_NOTIFY_ALREADY_REGEX   = /^\u2139\uFE0F Le notifiche degli aggiornamenti di GemiX/;
 
-// ── Fallback Errors ───────────────────────────────────────────────────────────
+// -- Fallback Errors -------------------------------------------------------
 
 const FALLBACK_ERROR_PREFIX = '⚠️ GemiX: Generazione della risposta fallita. Riprova tra poco.';
 const FALLBACK_ERROR_REGEX  = /^\u26A0\uFE0F GemiX: Generazione della risposta fallita\./;
 
-// ── Temporary attachment links ────────────────────────────────────────────────
+// -- Temporary attachment links --------------------------------------------
 
 /**
  * System message indicating that some attachments couldn't be sent directly
@@ -74,13 +70,13 @@ const FALLBACK_ERROR_REGEX  = /^\u26A0\uFE0F GemiX: Generazione della risposta f
 const TEMP_ATTACHMENT_PREFIX = '📥 Allegat';
 const TEMP_ATTACHMENT_REGEX  = /^\uD83D\uDCE5 Allegat/;
 
-// ── Legacy error / alert patterns (kept for backward compatibility) ──────────
+// -- Legacy error / alert patterns (kept for backward compatibility) -------
 // These match older message formats that may still exist in history.
 const LEGACY_ERROR_REGEX  = /^\u274C \*ERRORE/;   // ❌ *ERRORE
 const LEGACY_AVVISO_REGEX = /^⚠️ \*AVVISO/;        // ⚠️ *AVVISO
 const LEGACY_REMINDER_REGEX = /^🔔 \*Promemoria/;  // 🔔 *Promemoria
 
-// ── Utility: ordered list of all system-message regexes ──────────────────────
+// -- Utility: ordered list of all system-message regexes -------------------
 // Used by isSystemMessage() in shared.js for a single authoritative check.
 const ALL_SYSTEM_MESSAGE_REGEXES = [
   RELEASE_NOTIFICATION_REGEX,

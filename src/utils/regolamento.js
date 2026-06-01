@@ -26,15 +26,15 @@ function loadRegolamento() {
   if (_cached !== null) return _cached;
   try {
     if (!fs.existsSync(REGOLAMENTO_PATH)) {
-      log.warn(`⚠️ regolamento.txt not found at ${REGOLAMENTO_PATH}`);
+      log.warn(`regolamento.txt not found at ${REGOLAMENTO_PATH}`);
       _cached = '';
       return _cached;
     }
     _cached = fs.readFileSync(REGOLAMENTO_PATH, 'utf-8').trim();
-    log.info(`📄 Regolamento loaded (${_cached.length} chars) — full-context inject enabled`);
+    log.info(`Regolamento loaded (${_cached.length} chars) - full-context inject enabled`);
     return _cached;
   } catch (err) {
-    log.error(`❌ Failed to read regolamento.txt: ${err.message}`);
+    log.error(`Failed to read regolamento.txt: ${err.message}`);
     _cached = '';
     return _cached;
   }

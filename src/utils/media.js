@@ -1,19 +1,10 @@
 // src/utils/media.js
 //
-// Helpers for building/inspecting multimodal content parts that flow into
-// the LLM call.
-//
-// Note (post-cleanup):
-//   - The legacy in-bot PDF parser microservice (port 5002) and its
-//     pre-pass `transcribeDocumentsInMessageContent` are gone. xAI's
-//     /v1/responses endpoint ingests PDFs natively via `input_file` URLs,
-//     so we hand the file off through the public attachment tunnel
-//     (see `inputFileBuilder.js`) and let the model do the OCR/extraction.
-//   - Same story for audio (was xAI STT) and video (was Gemini describer):
-//     no more pre-pass, xAI handles them server-side.
-//   - This file is now strictly about packaging buffers as inline content
-//     parts for the user message and producing the small bookkeeping tags
-//     used in chat history.
+// Helpers for building multimodal content parts and attachment tags.
+// After the Responses API migration, non-image media is handed off as
+// `input_file` URLs (see inputFileBuilder). This module now focuses on
+// packaging buffers for the current message and generating [Attachment: ...]
+// bookkeeping tags used in history and by the model via read_file.
 
 const { SUPPORTED_MEDIA } = require('../config/constants');
 
@@ -29,7 +20,7 @@ function isSupportedMedia(type) {
 /**
  * Convert media to a base64 content part for the user message.
  *
- * The shape is intentionally `image_url` + data URI for every MIME — that's
+ * The shape is intentionally `image_url` + data URI for every MIME - that's
  * the legacy carrier used across the codebase. The `inputFileBuilder` runs
  * after history assembly and converts non-image MIMEs into proper xAI
  * `input_file` URL parts. Images stay base64 inline (the Responses adapter
@@ -46,7 +37,7 @@ function isSupportedMedia(type) {
  * @returns {object} Content part for the messages array
  */
 function mediaToContentPart(buffer, mimetype, opts = {}) {
-  // Strip parameters (e.g. 'audio/ogg; codecs=opus' → 'audio/ogg')
+  // Strip parameters (e.g. 'audio/ogg; codecs=opus' -> 'audio/ogg')
   const cleanMime = (mimetype || '').split(';')[0].trim();
   const base64 = buffer.toString('base64');
   const part = {
@@ -97,7 +88,7 @@ function extractAttachmentTagPaths(text) {
   return paths;
 }
 
-// ── Inline text-file ingestion ──────────────────────────────────────────────
+// -- Inline text-file ingestion --------------------------------------------
 //
 // Source-code and plain-text files are not multimodal: feeding them as
 // base64 inside an image_url part is wasteful and unreliable. Instead we
@@ -107,7 +98,7 @@ function extractAttachmentTagPaths(text) {
 //
 // This applies ONLY to the message that triggers the current AI call
 // (current Discord/WhatsApp message). In chat history the same files are
-// referenced via [Attachment: filename] tags — the model can request the
+// referenced via [Attachment: filename] tags - the model can request the
 // content via read_file when needed.
 const INLINE_TEXT_EXTS = new Set([
   // Plain text / docs
@@ -143,7 +134,7 @@ const INLINE_TEXT_MAX_BYTES = 200 * 1024; // 200 KB cap per file
 
 /**
  * Decide whether a (filename, mimetype) pair is an inline-able text file.
- * Returns false for binary docs (pdf, docx, xlsx, zip, …) and unknown types.
+ * Returns false for binary docs (pdf, docx, xlsx, zip, ...) and unknown types.
  */
 function isInlineableTextFile(filename, mimetype) {
   const mime = (mimetype || '').split(';')[0].trim().toLowerCase();

@@ -1,12 +1,12 @@
 // src/config/constants.js
 //
 // Config split rule:
-//   - .env  → all deployment-specific values: external URLs, API keys,
+//   - .env  - all deployment-specific values: external URLs, API keys,
 //             model names, voice ids, GitHub repo, public URL, feature flags.
 //             Loaded by env.js and re-exported as plain JS values; no fallback
 //             defaults in code. Missing variables surface as undefined and
 //             must crash early at first use (or be guarded explicitly).
-//   - this  → fixed code-level constants: limits, timeouts, paths derived
+//   - this  - fixed code-level constants: limits, timeouts, paths derived
 //             from __dirname, format strings, file/MIME tables. Values that
 //             never change between dev/staging/prod and are part of the
 //             program logic, not its environment.
@@ -22,12 +22,12 @@ const MAINTENANCE_RELEASE_NOTIFY_COMMAND = '/updates';
 module.exports = {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
 
-  // ── Maintenance mode (not remove "GemiX è temporaneamente in manutenzione") ──
+  // Maintenance mode (not remove "GemiX è temporaneamente in manutenzione")
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY: true,
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
 
-  // ── TTS engine selection ──
+  // TTS engine selection
   XAI_TTS_ENABLED,
   MAINTENANCE_USER_MESSAGE:
     MAINTENANCE_PREFIX + ' per un aggiornamento importante.\n\n' +
@@ -50,7 +50,7 @@ module.exports = {
   MAX_TOKENS: 64_000,
   // Main brain outer loop (client-side tool rounds). When exhausted the
   // handler makes one final tool-less call to force a clean text answer
-  // instead of bailing out — so GemiX always returns a real response.
+  // instead of bailing out - so GemiX always returns a real response.
   // Also passed as `max_turns` on the Responses body to bound server-side
   // sub-tool turns (web_search/x_search/code_interpreter) per request.
   MAX_TOOL_ROUNDS: 10,
@@ -63,7 +63,7 @@ module.exports = {
   SANDBOX_MEMORY_MB: 1536,
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
 
-  // Public file tunnel (tempFileServer + localtunnel) — token TTLs.
+  // Public file tunnel (tempFileServer + localtunnel) - token TTLs.
   // History items live on disk forever (until pruned); their public token
   // gets a longer lease so the model can re-fetch a recently-attached file
   // across consecutive turns without us re-registering.

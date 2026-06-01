@@ -1,9 +1,15 @@
 // src/config/env.js
+//
+// Single source of truth for all environment-derived configuration.
+// Loads .env once, validates REQUIRED vars (fail-fast), exports plain values
+// + optional feature flags with sensible defaults. Never access process.env
+// directly anywhere else in the codebase.
+
 require('dotenv').config();
 
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
 
-// ── Required variables ──
+// -- Required variables --
 // Missing values here would surface as cryptic crashes deep inside HTTP clients
 // (e.g. `undefined.replace is not a function`). Fail fast at import time with a
 // clear message instead.
@@ -26,7 +32,7 @@ if (missing.length > 0) {
 }
 
 module.exports = {
-  // Hermes proxy (OpenAI-compatible) → xAI Grok via SuperGrok OAuth.
+  // Hermes proxy (OpenAI-compatible) -> xAI Grok via SuperGrok OAuth.
   // Single LLM endpoint for the whole bot. No paid API keys held by the app.
   HERMES_BASE_URL: process.env.HERMES_BASE_URL,
   HERMES_API_KEY: process.env.HERMES_API_KEY,
@@ -37,7 +43,7 @@ module.exports = {
   // available without code changes.
   BUILD_MODEL: process.env.BUILD_MODEL || process.env.GROK_MODEL,
 
-  // OpenRouter — for Lyria music generation and video description (Gemini).
+  // OpenRouter - for Lyria music generation and video description (Gemini).
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   MUSIC_MODEL: process.env.MUSIC_MODEL,
@@ -45,7 +51,7 @@ module.exports = {
   // xAI features fronted by Hermes.
   // - TTS: via the CLI bridge (`bridge/tts.sh`) since the proxy does NOT
   //   expose /v1/tts. Voice and language are picked by Hermes itself.
-  // - STT: still HTTP via proxy (${HERMES_BASE_URL}/stt) — kept for
+  // - STT: still HTTP via proxy (${HERMES_BASE_URL}/stt) - kept for
   //   reference, audio transcription happens server-side via input_file
   //   on /v1/responses in the new architecture.
   // - Multi-agent research: ${HERMES_BASE_URL}/responses with the
@@ -57,10 +63,10 @@ module.exports = {
   MULTI_AGENT_MODEL: process.env.MULTI_AGENT_MODEL,
   // Fast research model: a single reasoning model used by web_x_search by
   // default (full_team omitted/false). Same tools/params as the team
-  // (web_search + x_search + image search) but lighter and quicker — no
+  // (web_search + x_search + image search) but lighter and quicker - no
   // multi-agent orchestration, no intermediate "consulting the team" banner.
   FAST_RESEARCH_MODEL: process.env.FAST_RESEARCH_MODEL,
-  // Grok Imagine — image and video generation via Hermes proxy.
+  // Grok Imagine - image and video generation via Hermes proxy.
   IMAGE_GEN_MODEL: process.env.IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL,
 
@@ -78,4 +84,15 @@ module.exports = {
   // Feature Flags / Modes
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),
   XAI_TTS_ENABLED: toBool(process.env.XAI_TTS_ENABLED, false),
+  STARTUP_SYSTEM_CLEANUP: toBool(process.env.STARTUP_SYSTEM_CLEANUP, false),
+  LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+  FFPROBE_PATH: process.env.FFPROBE_PATH || 'ffprobe',
+  FFMPEG_PATH: process.env.FFMPEG_PATH || 'ffmpeg',
+  // Sandbox overrides (optional, for advanced/dev use)
+  GEMIX_SANDBOX_IMAGE: process.env.GEMIX_SANDBOX_IMAGE || 'gemix-sandbox:latest',
+  GEMIX_SANDBOX_NETWORK: process.env.GEMIX_SANDBOX_NETWORK || 'gemix_sandbox_net',
+  GEMIX_SANDBOX_PROXY_HOST: process.env.GEMIX_SANDBOX_PROXY_HOST || 'gemix-sandbox-proxy',
+  GEMIX_SANDBOX_PROXY_PORT: process.env.GEMIX_SANDBOX_PROXY_PORT || '8080',
+  // Optional: custom path for the active members registry (defaults to data/members.json)
+  GEMIX_MEMBERS_FILE: process.env.GEMIX_MEMBERS_FILE || null,
 };

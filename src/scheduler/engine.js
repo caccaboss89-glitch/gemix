@@ -1,4 +1,10 @@
 // src/scheduler/engine.js
+//
+// Core periodic scheduler: executes due tasks from per-user/group JSON files,
+// advances recurring tasks, delivers via WhatsApp (using dedicated client),
+// and runs background sweeps (idle build workspaces, daily music wrap, release checks).
+// Uses per-file locking via taskStore to avoid races with user tool calls.
+
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
@@ -78,7 +84,7 @@ async function _sweepBuildWorkspaces() {
   for (const s of states) {
     if (!s.lastActivityAt) continue;
     if (now - s.lastActivityAt < BUILD_WORKSPACE_TTL_MS) continue;
-    // The workspaceId was persisted by touchActivity() — use it directly.
+    // The workspaceId was persisted by touchActivity() - use it directly.
     // We deliberately don't try to invert the filesystem slug because the
     // sanitization step is lossy (e.g. multiple chars collapse to '_').
     const workspaceId = s.workspaceId;
@@ -86,7 +92,7 @@ async function _sweepBuildWorkspaces() {
       log.warn(`Skipping idle workspace ${s.workspaceSlug}: no workspaceId persisted`);
       continue;
     }
-    log.info(`🧹 Wiping idle build workspace ${s.workspaceSlug} (idle ${(now - s.lastActivityAt) / 60000 | 0} min)`);
+    log.info(`Wiping idle build workspace ${s.workspaceSlug} (idle ${(now - s.lastActivityAt) / 60000 | 0} min)`);
     try { wipeWorkspace(workspaceId); }
     catch (err) { log.warn(`wipeWorkspace failed: ${err.message}`); }
     try { await buildSandbox.shutdown(workspaceId); }
@@ -112,7 +118,7 @@ function startScheduler() {
     fs.mkdirSync(TASKS_DIR, { recursive: true });
   }
 
-  log.info('✅ Started. Checking every', SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
+  log.info('Started. Checking every', SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
 
   const schedulerInterval = setInterval(async () => {
     try {
@@ -139,7 +145,7 @@ async function checkAndExecuteTasks() {
 
   if (lastMusicWrapCheckDate !== todayDateString) {
     lastMusicWrapCheckDate = todayDateString;
-    log.info(`📅 New date detected (${todayDateString}), checking MusicWrap...`);
+    log.info(`New date detected (${todayDateString}), checking MusicWrap...`);
     try {
       await checkAndSendMusicWrap(dedicatedClient);
     } catch (err) {
@@ -167,7 +173,7 @@ async function checkAndExecuteTasks() {
     const fileId = file.replace('.json', '');
     let tasksToExecute = [];
     try {
-      // modifyTaskFile holds the per-file lock for the entire read→execute→write cycle,
+      // modifyTaskFile holds the per-file lock for the entire read->execute->write cycle,
       // preventing races between the scheduler and concurrent user tool calls.
       await modifyTaskFile(fileId, async (data) => {
         if (!data || !data.tasks || data.tasks.length === 0) return data;
@@ -197,9 +203,9 @@ async function checkAndExecuteTasks() {
             if (next && (!t.recurrence.endAt || new Date(next).getTime() <= new Date(t.recurrence.endAt).getTime())) {
               t.scheduledAt = next;
               updatedTasks.push(t);
-              log.info(`🔁 Recurring task ${t.id} rescheduled: ${t.scheduledAt}`);
+              log.info(`Recurring task ${t.id} rescheduled: ${t.scheduledAt}`);
             } else {
-              log.info(`🏁 Recurring task ${t.id} ended (recurrence end reached).`);
+              log.info(`Recurring task ${t.id} ended (recurrence end reached).`);
             }
           }
           // Non-recurring tasks are simply dropped
@@ -208,7 +214,7 @@ async function checkAndExecuteTasks() {
         return data;
       });
     } catch (err) {
-      log.error(`❌ Task file processing error ${fileId}:`, err.message);
+      log.error(`Task file processing error ${fileId}:`, err.message);
     }
 
     // NOTE (Concurrency & State Race): The per-file lock is released before executeTask runs.
@@ -219,9 +225,9 @@ async function checkAndExecuteTasks() {
     for (const task of tasksToExecute) {
       try {
         await executeTask(task);
-        log.info(`✅ Task executed: ${task.id}`);
+        log.info(`Task executed: ${task.id}`);
       } catch (err) {
-        log.error(`❌ Task processing error ${task.id}:`, err.message);
+        log.error(`Task processing error ${task.id}:`, err.message);
       }
     }
   }

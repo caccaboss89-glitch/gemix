@@ -2,71 +2,60 @@
 //
 // Active member registry.
 //
-// PII separation: by default the registry is loaded from a non-tracked file
-// at data/members.json (added to .gitignore). If that file is missing, we
-// fall back to the legacy hardcoded list below so existing deployments do
-// not regress. Override path with GEMIX_MEMBERS_FILE if you keep the
-// registry elsewhere (encrypted store, secrets vault, etc.).
+// The real member list is now stored in src/data/members.json (gitignored).
+// This file contains the active members and is loaded at startup.
+//
+// If the file is missing or invalid, the code falls back to an empty list
+// (the previous legacy hardcoded list has been removed from source to avoid
+// committing real personal data).
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('./constants');
+const { GEMIX_MEMBERS_FILE } = require('./env');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('Members');
 
-const _LEGACY_HARDCODED_MEMBERS = [
-  {
-    name: 'Gagliardi Alberto',
-    nicks: ['抜刀隊', 'SecondoAccount89'],
-    email: 'albertogagliardi08@gmail.com',
-    wa: '393922348132@c.us',
-    admin: true,
-  },
-  {
-    name: 'Passante Lorenzo',
-    nicks: ['lorenzo419', 'Blanc_et_Noir08'],
-    email: 'passante.lorenzo.00@gmail.com',
-    wa: '393518682781@c.us',
-  },
-  {
-    name: 'Ceraj Gabriel',
-    nicks: ['TEDESCODURO'],
-    email: 'g.ceraj08@gmail.com',
-    wa: '4917672773104@c.us',
-  },
-  {
-    name: 'Fabiano Christian Nicola',
-    nicks: ['niky09'],
-    email: 'nicola.fabiano2009@gmail.com',
-    wa: '393669729298@c.us',
-  },
-  {
-    name: 'Biclea Alexandru Antonio',
-    nicks: ['Lil Alex', 'Lil_NGA'],
-    email: 'alexbicleajr@gmail.com',
-    wa: '393278547055@c.us',
-  },
-];
+// Legacy fallback list.
+// Currently empty because the real members are in src/data/members.json.
+// This array is kept only for backward compatibility in the loading logic.
+const _LEGACY_HARDCODED_MEMBERS = [];
 
 function _loadMembers() {
-  const customPath = process.env.GEMIX_MEMBERS_FILE && process.env.GEMIX_MEMBERS_FILE.trim();
+  const customPath = GEMIX_MEMBERS_FILE && GEMIX_MEMBERS_FILE.trim();
   const candidate = customPath
     ? path.resolve(customPath)
     : path.join(DATA_DIR, 'members.json');
+
   try {
     if (fs.existsSync(candidate)) {
       const raw = fs.readFileSync(candidate, 'utf-8');
       const parsed = JSON.parse(raw);
+
       if (Array.isArray(parsed) && parsed.length > 0) {
         log.info(`Loaded ${parsed.length} active member(s) from ${candidate}`);
         return parsed;
       }
-      log.warn(`Members file at ${candidate} is empty or not an array, falling back to legacy list.`);
+
+      log.warn(`Members file at ${candidate} exists but is empty or invalid. No members loaded.`);
+      return [];
     }
   } catch (err) {
-    log.warn(`Failed to read members file at ${candidate}: ${err.message} — falling back to legacy list.`);
+    log.error(`Failed to read members file at ${candidate}: ${err.message}`);
   }
-  return _LEGACY_HARDCODED_MEMBERS;
+
+  // No valid members file found
+  if (_LEGACY_HARDCODED_MEMBERS.length > 0) {
+    log.warn('Falling back to legacy hardcoded members list (not recommended for production).');
+    return _LEGACY_HARDCODED_MEMBERS;
+  }
+
+  log.error(
+    `No members file found at ${candidate}.\n` +
+    `The active members list must be provided in a JSON file (see src/data/members.json).`
+  );
+
+  return [];
 }
 
 const ACTIVE_MEMBERS = _loadMembers();

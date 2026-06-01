@@ -1,4 +1,9 @@
 // src/tools/userMemory.js
+//
+// Thin wrapper for private per-user persistent memory.
+// Delegates to memoryStore (writeMemory + MAX_MEMORY_CHARS limit).
+// Returns simple success/clear/update messages. Companion to groupMemory.js.
+
 const { writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
 
 /**

@@ -3,7 +3,7 @@
 #
 # Wrapper around `hermes -t tts` for xAI TTS generation. Used by
 # src/tools/voiceMessage.js because Hermes Agent v0.14's OpenAI-compatible
-# proxy does NOT forward `/v1/tts` (404 "path_not_allowed" — the proxy
+# proxy does NOT forward `/v1/tts` (404 "path_not_allowed" - the proxy
 # whitelists only /chat/completions, /completions, /embeddings, /models,
 # /responses).
 #
@@ -19,7 +19,7 @@
 # Arguments:
 #   text: Plain text to speak (any language; Hermes will auto-detect or use
 #         the language implied by the text). Do NOT include vocal effect tags
-#         — Hermes inserts them on its own.
+#         - Hermes inserts them on its own.
 #   output_path: Absolute path where the audio file should be saved
 #         (e.g. /home/ubuntu/DiscordBots/GemiX/.tempfiles/tts_1234567890_abc123.mp3).
 #         The caller (voiceMessage.js) provides this path; the script verifies
@@ -27,7 +27,7 @@
 #
 # Output:
 #   stdout : the absolute output_path (after the script verifies the file
-#            actually exists on disk — the host trusts only this verified
+#            actually exists on disk - the host trusts only this verified
 #            path, never anything the model may have hallucinated).
 #   stderr : any diagnostic output from hermes (warnings, etc.)
 #
@@ -47,18 +47,18 @@ if [[ -z "$TEXT" || -z "$OUTPUT_PATH" ]]; then
   exit 2
 fi
 
-# Make sure the parent dir exists — hermes/text_to_speech may refuse to
+# Make sure the parent dir exists - hermes/text_to_speech may refuse to
 # create intermediate directories.
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
 # Instruction handed to hermes. The bridge's contract:
 #   1. Use ONLY the text_to_speech tool.
 #   2. Speak EXACTLY the user-provided text (no rewrites, no translations,
-#      no paraphrasing — preserve the original language and meaning).
-#   3. Add expressive vocal tags where natural — Hermes is the one picking
+#      no paraphrasing - preserve the original language and meaning).
+#   3. Add expressive vocal tags where natural - Hermes is the one picking
 #      tags now; the upstream caller (GemiX) only sends plain text.
 #   4. Save to OUR explicit path so we don't have to scrape ~/voice-memos/.
-#   5. Reply with one short confirmation line (we don't read it — we check
+#   5. Reply with one short confirmation line (we don't read it - we check
 #      the file directly).
 INSTRUCTION="Use ONLY the text_to_speech tool to generate a voice message saying EXACTLY the text below, without paraphrasing, translating, or modifying it in any way. Preserve the original language and meaning. Add expressive vocal tags wherever natural to make the delivery lively and human; do not narrate them, weave them into the text. Available inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. Available wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>. Save the audio to this exact absolute path: ${OUTPUT_PATH}. Reply with one short line, no markdown."
 
@@ -89,7 +89,7 @@ if [[ -s "$TMP_ERR" ]]; then
 fi
 
 # Verify the file actually landed where we asked. If not, the host treats
-# this as a soft failure and falls back to Google Translate TTS — never
+# this as a soft failure and falls back to Google Translate TTS - never
 # trust whatever path the model echoed back without a filesystem check.
 if [[ ! -f "$OUTPUT_PATH" ]]; then
   echo "tts.sh: hermes did not produce an audio file at ${OUTPUT_PATH}" >&2

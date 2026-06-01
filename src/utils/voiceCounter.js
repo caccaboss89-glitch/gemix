@@ -8,7 +8,7 @@
 //   - Per-user file at  data/users/<storageId>/voice_counts.json.
 //   - Shape: { "<chatKey>": <integer> }
 //   - chatKey is whatever caller passes (see _getVoiceLimitChatKey in
-//     tools/index.js — typically chatId / groupId / waJid).
+//     tools/index.js - typically chatId / groupId / waJid).
 //
 // Concurrency: in-memory mutex per storageId so the read-modify-write
 // cycle is atomic across overlapping tool calls.
@@ -75,6 +75,12 @@ function _write(userCtx, data) {
   }
 }
 
+/**
+ * Get current consecutive voice count for a chatKey.
+ * @param {object} userCtx
+ * @param {string} chatKey
+ * @returns {Promise<number>}
+ */
 function getVoiceCount(userCtx, chatKey) {
   return _withLock(userCtx, () => {
     const data = _read(userCtx);
@@ -82,6 +88,12 @@ function getVoiceCount(userCtx, chatKey) {
   });
 }
 
+/**
+ * Increment the consecutive voice counter for a chatKey.
+ * @param {object} userCtx
+ * @param {string} chatKey
+ * @returns {Promise<number>} new count
+ */
 function incrementVoiceCount(userCtx, chatKey) {
   return _withLock(userCtx, () => {
     const data = _read(userCtx);
@@ -91,6 +103,12 @@ function incrementVoiceCount(userCtx, chatKey) {
   });
 }
 
+/**
+ * Reset the consecutive voice counter for a chatKey (called after a text reply).
+ * @param {object} userCtx
+ * @param {string} chatKey
+ * @returns {Promise<number>} 0
+ */
 function resetVoiceCount(userCtx, chatKey) {
   return _withLock(userCtx, () => {
     const data = _read(userCtx);

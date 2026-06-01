@@ -1,4 +1,11 @@
 // src/tools/index.js
+//
+// Central dispatcher for all tool calls from the main brain.
+// Responsibilities: permission checks, schema validation via validateToolArgs,
+// ONCE_PER_ROUND deduplication (for build/imagine/etc.), recipient resolution
+// (for email/wa), the main execution switch, and unified error handling with
+// admin notification on uncaught failures. All individual tools are required here.
+
 const { isActiveMemberOnlyTool, validateToolArgs } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
 const { generateImage, generateVideo } = require('./imagineGenerator');
@@ -115,7 +122,7 @@ function _resolveTargetEmail(args, userCtx) {
   return { email: userCtx.email, display: 'yourself' };
 }
 
-// Tools that should only be called once per round — calling them again produces
+// Tools that should only be called once per round - calling them again produces
 // identical results and wastes a round trip.
 const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'web_x_search', 'generate_image', 'generate_video', 'build']);
 
@@ -148,7 +155,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     args = {};
   }
 
-  // ── Schema validation ────────────────────────────────────────────────────
+  // -- Schema validation -----------------------------------------------------
   // Catch obvious AI hallucinations (wrong types, missing required fields)
   // before we hand off to the individual tool implementation. We look up
   // the tool definition in the per-call list passed by the handler.
@@ -165,7 +172,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
   }
 
-  // ── Per-round deduplication ───────────────────────────────────────────────
+  // -- Per-round deduplication ----------------------------------------------
   if (ONCE_PER_ROUND_TOOLS.has(name) && deliveryCtx.roundCalledTools?.has(name)) {
     return {
       toolCallId: toolCall.id,
@@ -309,7 +316,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           // Self-recipient handling: when the AI specifies the user it is
           // currently talking to, treat the call as if recipient was
           // omitted (deliver in the current chat). The previous behaviour
-          // — returning an error — caused failures whenever the AI
+          // - returning an error - caused failures whenever the AI
           // included recipient defensively, e.g. on the personal WA bot
           // where every reply IS to the same user.
           let resolvesToSelf = false;
@@ -666,7 +673,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       case 'bug_report': {
         const bugSource = String(args.source || 'unknown').slice(0, 100);
         const bugDetails = String(args.details || '').slice(0, 500);
-        await notifyAdmin(`Bug Report — ${bugSource}`, bugDetails);
+        await notifyAdmin(`Bug Report - ${bugSource}`, bugDetails);
         result = {
           success: true,
           message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX.replace(' DO NOT use bug_report for this error.', '')}`,
@@ -678,7 +685,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         result = { success: false, error: `Tool "${name}" not recognized.` };
     }
   } catch (err) {
-    log.error(`   ❌ Unhandled tool error (${name}): ${err.message}`, err.stack);
+    log.error(`   Unhandled tool error (${name}): ${err.message}`, err.stack);
     await notifyAdmin(`Tool Execution (${name})`, `Unhandled error: ${err.message}`);
     result = { success: false, error: `Error executing ${name}: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
   }

@@ -8,7 +8,7 @@
 //   3. Build the messages array: system prompt + chat history + the current
 //      user content. PDF/audio/video parts are rewritten on the fly into
 //      Responses-shape `input_file` URLs (xAI fetches them server-side).
-//   4. Loop: call Grok (`/v1/responses`) → run any tool calls → repeat
+//   4. Loop: call Grok (`/v1/responses`) - run any tool calls - repeat
 //      until the model returns plain text (final response) or we hit the
 //      round budget.
 //   5. Apply the research-team badge (web/X sources) and ship the reply
@@ -70,12 +70,12 @@ async function sendIntermediateNotification(ctx, kind, message) {
   try {
     if (ctx.platform === PLATFORM_DISCORD && ctx.discordChannel) {
       await ctx.discordChannel.send({ content: message });
-      log.info(`   📤 ${kind} notification → Discord: ${message}`);
+      log.info(`   ${kind} notification - Discord: ${message}`);
     } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
       const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
       if (targetJid) {
         await sendWhatsAppDirect(targetJid, message);
-        log.info(`   📤 ${kind} notification → WhatsApp: ${message}`);
+        log.info(`   ${kind} notification - WhatsApp: ${message}`);
       }
     }
   } catch (err) {
@@ -86,7 +86,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
 /**
  * Stable phase ordering for tool calls within a round:
  *   - phase 1: standard tools (read_file, web_x_search, build, …)
- *   - phase 2: delivery tools (send_voice_message, send_*) — always last
+ *   - phase 2: delivery tools (send_voice_message, send_*) - always last
  *     so any preceding tool's output reaches the recipient via the buffer.
  */
 function orderToolCalls(toolCalls) {
@@ -128,7 +128,7 @@ async function handleMessage(ctx) {
     isVoiceOnly: false,
     discordTitle: '',
     // Accumulated research stats from web_x_search calls and any agent
-    // sub-runs (e.g. build) — used for the badge appended to the reply.
+    // sub-runs (e.g. build) - used for the badge appended to the reply.
     researchStats: null,
   };
 
@@ -139,7 +139,7 @@ async function handleMessage(ctx) {
     const maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
     const releaseNotifyTarget = getReleaseNotifyTarget(ctx, ui);
 
-    // ── Maintenance gate ──
+    // -- Maintenance gate --
     // Blocks every non-admin request with a fixed message. Admins always pass.
     if (MAINTENANCE_MODE && MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
       if (maintenanceCommand === MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
@@ -166,7 +166,7 @@ async function handleMessage(ctx) {
           systemMessage: true,
         };
       }
-      log.info(`   🔒 Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
+      log.info(`   Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
       await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
       return {
         text: MAINTENANCE_USER_MESSAGE,
@@ -225,7 +225,7 @@ async function handleMessage(ctx) {
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
       // Bound helper for tools that want to fire an intermediate notification
-      // (e.g. web_x_search → "🔎 Sto consultando il team di ricerca...").
+      // (e.g. web_x_search - "Sto consultando il team di ricerca...").
       // Dedup is enforced per (call, kind) inside sendIntermediateNotification.
       sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message),
     };
@@ -237,7 +237,7 @@ async function handleMessage(ctx) {
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
-    // ── Build workspace activity tracking ────────────────────────────────
+    // -- Build workspace activity tracking --
     // Touch the workspace's last-activity timestamp on every main turn so
     // the TTL sweeper sees the user is alive across all platforms, not just
     // when they invoke `build`. The same workspaceId is also used to
@@ -274,7 +274,7 @@ async function handleMessage(ctx) {
     }
     messages.push({ role: 'user', content: ctx.content });
 
-    // ── Media pre-processing (input_file URL conversion) ────────────────
+    // -- Media pre-processing (input_file URL conversion) --
     // Walk all messages once and rewrite non-image media parts (PDF, audio,
     // video, plain text) into Responses-ready `input_file` parts backed by
     // the public attachment tunnel. xAI fetches them server-side and runs
@@ -354,17 +354,17 @@ async function handleMessage(ctx) {
       rounds++;
 
       if (Date.now() - sessionStartTime > SESSION_MAX_DURATION_MS) {
-        log.warn(`   ⚠️ Overall session duration limit reached (10 minutes), forcing wrap up`);
+        log.warn(`   Overall session duration limit reached (10 minutes), forcing wrap up`);
         break;
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.warn(`   ⚠️ Voice already generated, skipping round`);
+        log.warn(`   Voice already generated, skipping round`);
         break;
       }
 
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
-      log.info(`🤖 [${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
+      log.info(`[${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
 
       // Refresh the workspace listing before each AI call so any file the
       // build sub-agent just produced shows up immediately in <UserWorkspace>.
@@ -389,9 +389,9 @@ async function handleMessage(ctx) {
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-        log.info(`🔧 [${pLabel}] ${assistantMsg.tool_calls.length} tool call(s)`);
+        log.info(`[${pLabel}] ${assistantMsg.tool_calls.length} tool call(s)`);
         // OpenAI-compatible reasoning models occasionally return content=null
-        // — drop it so the message validates downstream.
+        // - drop it so the message validates downstream.
         if (assistantMsg.content === null || assistantMsg.content === undefined) {
           delete assistantMsg.content;
         }
@@ -408,11 +408,11 @@ async function handleMessage(ctx) {
 
         for (const tc of orderedCalls) {
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-            log.warn(`   ⚠️ Tool loop interrupted: a tool already produced the final response`);
+            log.warn(`   Tool loop interrupted: a tool already produced the final response`);
             break;
           }
           if (!allowedToolNames.has(tc.function.name)) {
-            log.warn(`   ⛔ Tool "${tc.function.name}" not in current allowed list — rejected`);
+            log.warn(`   Tool "${tc.function.name}" not in current allowed list - rejected`);
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -447,10 +447,10 @@ async function handleMessage(ctx) {
       }
 
       let text = cleanAssistantResponse(assistantMsg.content || '');
-      log.info(`✅ [${pLabel}] Response generated (${text.length} chars)`);
+      log.info(`   [${pLabel}] Response generated (${text.length} chars)`);
 
       if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
-        log.warn('   ⚠️ Empty AI response, sending fallback');
+        log.warn('   Empty AI response, sending fallback');
         text = FALLBACK_ERROR_PREFIX;
       }
 
@@ -465,12 +465,12 @@ async function handleMessage(ctx) {
           if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
           if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
           text = `${text}\n\n${parts.join('. ')}.`;
-          log.info(`   🔎 Research badge: ${parts.join(', ')}`);
+          log.info(`   Research badge: ${parts.join(', ')}`);
         }
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
+        log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
         await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
         return {
           text: null,
@@ -494,7 +494,7 @@ async function handleMessage(ctx) {
     }
 
     if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-      log.info(`   🎤 Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
+      log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
       await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
       return {
         text: null,
@@ -512,12 +512,12 @@ async function handleMessage(ctx) {
     // called (per xAI docs). It therefore cannot bound this outer loop, which
     // counts how many times the model calls OUR function tools. So we cap it
     // ourselves and, when the cap is hit, make ONE more call with
-    // tool_choice:'none' — the documented way to force a text-only answer —
+    // tool_choice:'none' - the documented way to force a text-only answer -
     // so the model wraps up using everything gathered so far instead of
     // discarding the work behind a canned error. Same pattern as the build
     // sub-agent and the research tool: the round counter is never shown to the
     // model; we just nudge it once here to close out cleanly.
-    log.warn(`   ⚠️ Tool-round budget (${MAX_TOOL_ROUNDS}) exhausted — forcing a final answer (tool_choice:none)`);
+    log.warn(`   Tool-round budget (${MAX_TOOL_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
     let wrapUpText = '';
     try {
       messages[0].content = buildSystemPrompt(ctx);
@@ -533,7 +533,7 @@ async function handleMessage(ctx) {
       if (finalModel) lastModelUsed = finalModel;
       wrapUpText = cleanAssistantResponse(finalMsg.content || '');
     } catch (wrapErr) {
-      log.error(`   ❌ Forced wrap-up call failed: ${wrapErr.message}`);
+      log.error(`   Forced wrap-up call failed: ${wrapErr.message}`);
     }
 
     if (wrapUpText.trim() && responseCtx.researchStats) {
