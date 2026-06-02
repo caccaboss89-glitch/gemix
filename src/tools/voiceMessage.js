@@ -13,7 +13,6 @@ const { spawn } = require('child_process');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
-const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
 const { XAI_TTS_ENABLED } = require('../config/constants');
 const { FFMPEG_PATH } = require('../config/env');
 

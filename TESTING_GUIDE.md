@@ -65,13 +65,17 @@
 **Attachments**: Send various media types in previous messages.
 
 ### 2.3 send_voice_message
+**Platforms**: **WA dedicated only** (private + group). **Do not test on WA personal** — tool is absent from schema; model should reply with text + attachments only.
+
 **Test Cases**:
-1. Normal voice message (current chat)
+1. Normal voice message (current chat) — dedicated private
 2. Voice message to another member (as admin/active member)
 3. Voice message with `includeAttachments=true`
 4. Very long text (should be truncated or handled gracefully)
 
 **Attachments**: Test with and without buffered files.
+
+**Personal regression**: On personal admin chat, ask GemiX (with `@gemix`) to send a voice → tool must not appear / call must be rejected; reply should be text (+ files if any). Confirm `music_creator` still works on personal.
 
 ### 2.4 send_whatsapp_message / send_email
 **Test Cases** (Admin only for external):
@@ -210,23 +214,46 @@ This is one of the most complex — test thoroughly:
 - Send large file → verify fallback message with temporary link works
 
 ### 5.4 Voice Message Pipeline
-- Send voice message → verify transcription appears in history
-- Generate voice reply → verify it is delivered correctly
+- **Dedicated WA — user voice**: history shows voice attachment tag only (no `<Transcription>`); model uses `read_file` on the tag when needed
+- **Dedicated WA — GemiX voice**: `send_voice_message` delivers; history/quoted GemiX audio may include `<Transcription>…</Transcription>` when TTS text is stored (`history_meta` / voice cache)
+- **Personal**: no `send_voice_message`; GemiX replies text + files only; user/Account Owner voice = tag + `read_file` only; system prompt **Limits** must **not** mention `<Transcription>`
 
 ---
 
 ## 6. Platform-Specific Tests
 
-### WhatsApp Dedicated vs Personal
-- Group vs Private chat behavior
-- Tagging requirements
-- Voice message delivery
+### 6.1 WA Personal (admin account)
 
-### Discord
-- `read_server_rules` tool
-- `set_conversation_title` (forced on first message)
-- Thread naming
-- `generate_formal_request_pdf` (specific to Discord legal use case)
+| Test | Expected |
+|------|----------|
+| Message **without** `@gemix` | No GemiX reply |
+| Message with `@gemix` | Turn runs |
+| **Quote-only** reply to GemiX (no `@gemix`) | **No** turn (ingress requires `@gemix` in body) |
+| Quote-only **with** `@gemix` in body | Turn runs; quote context rebuilt at batch fire |
+| Rapid multi-message burst | Single merged turn; lock not lost at fire |
+| GemiX text + footer then 2+ file-only messages | History labels all as **GemiX** (not Account Owner) |
+| Admin file with **caption** after GemiX burst | Block ends; caption message = Account Owner |
+| Other user writes between GemiX files | GemiX block ends |
+| `music_creator` / `build` / imagine | Tools available (not confused with missing voice) |
+| Inspect **Limits** in system prompt | No line about `<Transcription>`; generic `read_file` on attachment tags only |
+| User or admin sends voice note | History tag only; no `<Transcription>` in rebuilt history |
+| Non-active caller | No `send_email` / `send_whatsapp_message` / statute / music stats in schema; `<CallerAccess>` in prompt |
+| Active member caller | Delivery + statute tools available |
+
+### 6.2 WA Dedicated
+- Group: mention or reply-to-bot required
+- Private: every message
+- Voice (`send_voice_message`) works
+- GemiX voice in history may show `<Transcription>`; user voice does not
+- **Limits** in prompt mentions GemiX voice + `<Transcription>` (not generic “any voice attachment”)
+- `[System]` only in dedicated **private** 1:1 history labels
+
+### 6.3 Discord
+- Statute via `<RulesContext>` in prompt (no `read_server_rules` tool)
+- `set_conversation_title` forced on first thread message only
+- Thread storage isolated per `channel.id`
+- User asks for voice/build/schedule → model should explain dedicated WA (not offer those tools)
+- History prune age-only (4h) if history fetch times out
 
 ---
 
@@ -264,13 +291,48 @@ This is one of the most complex — test thoroughly:
 
 ## 10. Regression Checklist (Quick)
 
-- [ ] All tools appear in `/tools` list when they should
-- [ ] Admin-only tools are hidden for normal users
-- [ ] Memory updates persist across restarts
+- [ ] All tools appear in schema when they should (per platform + active member)
+- [ ] Personal: no `send_voice_message`; dedicated: has voice
+- [ ] Non-active member: missing tools match `<CallerAccess>` / tool errors
+- [ ] Memory updates persist across restarts (personal = shared `memory_personal_<chatId>`)
 - [ ] Attachments from history are still usable
 - [ ] Proxy allowlist is respected (try downloading from blocked domain)
 - [ ] Tunnel attachments work
-- [ ] Voice messages are transcribed correctly
+- [ ] Dedicated: GemiX TTS voice may have `<Transcription>` in history; user voice = tag only
+- [ ] Personal: no `<Transcription>` in Limits or history; GemiX block labeling correct
+
+## 11. Post-refactor verification pack (2026-06)
+
+Run after changes to batch, personal history, tools, or prompts.
+
+### A. Prompt / tools coherence
+1. Personal + active member: inspect system prompt — no `send_voice_message` in ToolUsage; `music_creator` present if expected.
+2. Personal + non-active: `<CallerAccess>` lists only missing member tools (not voice).
+3. Personal **Limits**: no `<Transcription>` line; dedicated **Limits**: “GemiX voice messages…” + `<Transcription>` only.
+4. Discord: Limits mention telling **the user** about dedicated WA; no `<Transcription>` line; no first-person “use the dedicated account” as if the model should switch accounts.
+
+### B. Batch & lock
+1. Send 3 quick messages on personal with `@gemix` → one reply.
+2. While GemiX is typing, send another message → **ignored** (not queued).
+3. Quote a message sent 5s earlier in same burst → quote content present in merged turn.
+
+### C. Personal history blocks
+1. Trigger GemiX with text+footer + 2 PDFs (file-only WA messages).
+2. Reload / next `@gemix` turn: history shows **GemiX** for text and both files.
+3. Admin sends image **with caption** right after → labeled Account Owner.
+
+### D. Tool guards
+1. Personal: hallucinated `send_voice_message` → clear error; text reply still possible.
+2. Discord: `build` / `music_creator` blocked with “tell the user…” dedicated WA wording.
+3. Non-active: `send_email` blocked on WA and Discord.
+
+### E. Media ingress
+1. Audio > max duration → `(too long…)` note, not sent as native part.
+2. Unsupported WA sticker type → `[Attachment: …]` tag shape (not bare `[file.ext]`).
+3. Office doc on **current** message → tag-only, not base64 to model.
+
+**Document Version**: 2026-06-02  
+**Last Major Update**: Personal voice removal, GemiX history blocks, Limits `<Transcription>` scoped to dedicated WA only
 
 ---
 
@@ -286,9 +348,6 @@ This is one of the most complex — test thoroughly:
 8. **Cross-platform + edge cases**
 
 ---
-
-**Document Version**: 2026-06-01  
-**Last Major Update**: After extensive v2.0 beta cleanup
 
 When performing tests, always note:
 - Platform used

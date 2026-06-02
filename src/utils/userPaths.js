@@ -2,48 +2,61 @@
 //
 // Filesystem helpers for per-user storage.
 //
-// Layout (post-cleanup):
+// Layout:
 //
 //   data/
 //     skills/                         ← read-only skill scripts (PDF/DOCX/XLSX/PPTX)
 //     users/
-//       <storageId>/                  ← legacy per-user tree (chat history)
+//       <storageId>/                  ← chat history (WA jid/group, Discord thread id)
 //         history/
 //         voice_counts.json
-//       user_<sanitized>/             ← build sub-agent workspaces (workspaceId)
-//       group_<sanitized>/              .build_state.json + build_workspace/
+//       user_<sanitized>/             ← build workspaces (workspaceId user:…)
+//       group_<sanitized>/             ← build workspaces (workspaceId group:…)
 //
-// The legacy `projects/`, `searched_images/`, `scratch/` folders that lived
-// under <storageId>/ are gone - the old agentic project system was retired
-// in favour of the build sub-agent (replaced by the dedicated build tool
-// and per-user/group workspaces under user_<...>/ and group_<...>/).
-//
-// Anything under `user_<...>/` / `group_<...>/` is owned by the build subsystem
-// (see utils/workspaceId.js, sandbox/buildWorkspace.js, utils/buildState.js)
-// and not touched by this module.
+// Build trees live under user_* / group_* (see workspaceId.js, buildWorkspace.js).
+// This module only manages <storageId>/ history and voice_counts.json.
 
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, PLATFORM_DISCORD } = require('../config/constants');
+const { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
 
 const SKILLS_DIR = path.join(DATA_DIR, 'skills');
+/** Prefix for on-disk history of admin↔user personal-account chats (shared pair). */
+const PERSONAL_CHAT_STORAGE_PREFIX = 'personal_';
 
 // -- Storage ID resolution -------------------------------------------------
 
 /**
- * Resolve the unique storageId used as the user's folder name under
+ * Resolve the unique storageId used as the folder name under
  * data/users/<storageId>/ for chat history persistence.
  *
- *   - Discord:        userId (Discord account ID)
+ *   - Discord thread: chatId (forum thread = shared conversation, like a WA group)
  *   - WhatsApp group: groupId
- *   - WhatsApp DM:    waJid
+ *   - WA personal (admin↔user): personal_<chatId> (shared history for the pair)
+ *   - WhatsApp DM (dedicated): waJid
+ *
+ * Discord author identity stays in userCtx.userId; only history files use chatId.
  *
  * Returns null when not resolvable.
  */
+function resolvePersonalChatStorageId(chatId) {
+  if (!chatId) return null;
+  return PERSONAL_CHAT_STORAGE_PREFIX + String(chatId);
+}
+
+/** Long-term memory file id for a WA personal pair chat (shared by both users). */
+function resolvePersonalMemoryFileId(chatId) {
+  const storageId = resolvePersonalChatStorageId(chatId);
+  return storageId ? `memory_${storageId}` : null;
+}
+
 function resolveStorageId(userCtx) {
   if (!userCtx) return null;
   if (userCtx.platform === PLATFORM_DISCORD) {
-    return userCtx.userId ? String(userCtx.userId) : null;
+    return userCtx.chatId ? String(userCtx.chatId) : null;
+  }
+  if (userCtx.platform === PLATFORM_WA_PERSONAL && userCtx.chatId) {
+    return resolvePersonalChatStorageId(userCtx.chatId);
   }
   if (userCtx.isGroup && userCtx.groupId) return String(userCtx.groupId);
   if (userCtx.waJid) return String(userCtx.waJid);
@@ -83,34 +96,13 @@ function ensureUserSkeleton(userCtx) {
   return true;
 }
 
-// -- Recursive size accounting (used by historySync diagnostics) -----------
-
-function dirSizeBytes(dir) {
-  if (!fs.existsSync(dir)) return 0;
-  let total = 0;
-  const stack = [dir];
-  while (stack.length) {
-    const cur = stack.pop();
-    let entries;
-    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
-    catch { continue; }
-    for (const e of entries) {
-      const full = path.join(cur, e.name);
-      try {
-        if (e.isSymbolicLink()) continue;
-        if (e.isDirectory()) stack.push(full);
-        else if (e.isFile()) total += fs.statSync(full).size;
-      } catch { /* skip */ }
-    }
-  }
-  return total;
-}
-
 module.exports = {
+  resolvePersonalChatStorageId,
+  resolvePersonalMemoryFileId,
   resolveStorageId,
   getUserRoot,
   getHistoryDir,
   ensureUserSkeleton,
-  dirSizeBytes,
   SKILLS_DIR,
+  PERSONAL_CHAT_STORAGE_PREFIX,
 };

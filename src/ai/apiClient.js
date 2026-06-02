@@ -3,7 +3,6 @@
 // Centralized API client for all LLM calls (Grok via Hermes).
 // Provides retry + timeout logic, structured request/response logging
 // with PII + base64 redaction, and log directory quota enforcement.
-// Exposes both the legacy chat-completion path (callModel) and the
 // Responses API path (callResponsesModel).
 
 const fs = require('fs');
@@ -298,54 +297,8 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
 }
 
 /**
- * Call an AI model and return the parsed assistant message.
- * Wraps callApiWithRetry + response parsing in one call.
- * @param {string} modelName - Display name for logging
- * @param {string} apiUrl - Full API endpoint URL
- * @param {object} body - Request body
- * @param {string} apiKey - API key for authentication
- * @returns {Promise<object>} The assistant message object from the API response
- */
-async function callModel(modelName, apiUrl, body, apiKey) {
-  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey);
-  
-  let data;
-  try {
-    data = await res.json();
-  } catch (parseErr) {
-    log.error(`   JSON parse error from ${modelName}:`);
-    log.error(`      ${parseErr.message}`);
-    throw new Error(`${modelName} API: invalid response (JSON parsing failed)`);
-  }
-
-  try {
-    logApiResponse(modelName, apiUrl, data);
-  } catch (err) {
-    log.warn(`Failed to write API response log: ${err.message}`);
-  }
-
-  if (!data.choices || !data.choices[0]) {
-    log.error(`   Malformed ${modelName} response:`);
-    log.error(`      choices: ${JSON.stringify(data.choices)}`);
-    log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
-    
-    // If it's an error response, include details
-    if (data.error) {
-      throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
-    }
-    
-    throw new Error(`${modelName} API: no response received (empty or malformed)`);
-  }
-  return data.choices[0].message;
-}
-
-/**
  * Call an AI model on the xAI Responses API (`/v1/responses`) and return
  * the parsed raw payload (not yet adapted to chat-completion shape).
- *
- * Same retry/timeout/log policy as callModel; only the response decoding
- * differs: Responses returns top-level `{ id, output: […], usage, … }` with
- * no `choices` envelope, so the malformed-response check is different.
  *
  * Callers (e.g. aiProvider.callAI for the main brain, webXSearch for the
  * research team) are in charge of translating `output[]` into whatever they
@@ -390,4 +343,4 @@ async function callResponsesModel(modelName, apiUrl, body, apiKey) {
   return data;
 }
 
-module.exports = { callModel, callResponsesModel, logApiRequest, logApiResponse };
+module.exports = { callResponsesModel, logApiRequest, logApiResponse };

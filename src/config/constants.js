@@ -64,9 +64,8 @@ module.exports = {
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
 
   // Public file tunnel (tempFileServer + localtunnel) - token TTLs.
-  // History items live on disk forever (until pruned); their public token
-  // gets a longer lease so the model can re-fetch a recently-attached file
-  // across consecutive turns without us re-registering.
+  // History tunnel tokens use a 24h lease while the file remains on disk
+  // (until prune or Discord 4h age cap). Re-register on read_file if needed.
   // Temp items are short-lived buffers (one-shot generated images, audio
   // freshly downloaded from WhatsApp) and use a 1h TTL.
   TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,

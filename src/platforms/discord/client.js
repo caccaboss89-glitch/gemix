@@ -7,19 +7,33 @@
 
 const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
-const { DISCORD_THREAD_NAME, MAX_HISTORY, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../../config/constants');
-const { handleMessage } = require('../../handler');
+const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
+
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { mediaToContentPart, buildAttachmentTag, isInlineableTextFile, buildInlineTextFilePart } = require('../../utils/media');
-const { getMediaDurationSec } = require('../../utils/mediaDuration');
-const responseLock = require('../../utils/responseLock');
+const { buildAttachmentTag } = require('../../utils/media');
+const { ingressSyncedAttachment } = require('../../utils/incomingMediaIngress');
+
+const { enqueueBatchedTurn } = require('../../utils/batchIngress');
+const { analyzeBatchSpeakers } = require('../../utils/batchContext');
+const {
+  attachmentFilenameHints,
+  stripRedundantAttachmentCaption,
+  stripRedundantFilenameBesideAttachmentTag,
+} = require('../../utils/attachmentCaption');
 const { createLogger } = require('../../utils/logger');
-const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
+const {
+  createDiscordAttachmentBufferFetcher,
+  isDiscordAttachmentOversize,
+  formatDiscordOversizeNote,
+} = require('../../utils/discordAttachmentFetch');
+const { syncFileToHistory, resolveGemixVoiceTranscription } = require('../../utils/historySync');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
-const { cleanIncomingText } = require('../../utils/text');
-const { isSystemMessage } = require('../../config/systemMessages');
+const { cleanIncomingText, formatLabeledUserContent } = require('../../utils/text');
+const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
+const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPipeline');
+const { processDiscordQuotedReply } = require('../../utils/quoteIngress');
 
 const log = createLogger('DISCORD');
 
@@ -101,23 +115,95 @@ function splitDiscordMessage(text, maxLen = 2000) {
   return chunks;
 }
 
-function createAttachmentBufferFetcher(att) {
-  let bufferPromise = null;
-  return async () => {
-    if (!bufferPromise) {
-      bufferPromise = (async () => {
-        if (att.size > 25 * 1024 * 1024) {
-          throw new Error(`Attachment too large (${Math.round(att.size / 1048576)}MB, max 25MB)`);
-        }
-        return Buffer.from(await (await fetch(att.url)).arrayBuffer());
-      })();
-    }
-    return bufferPromise;
-  };
+function discordMessageHasUsableContent(msg) {
+  if (!msg) return false;
+  if (msg.content && String(msg.content).trim()) return true;
+  if (msg.attachments && msg.attachments.size > 0) return true;
+  if (msg.reference?.messageId) return true;
+  return false;
 }
 
-function isDiscordSystemMessage(body) {
-  return isSystemMessage(body);
+async function rebuildDiscordBatchParts(entries, channel, starterMessageId, historyStorageId) {
+  const recentMessageIds = await _fetchRecentMessageIds(channel, starterMessageId);
+  for (const ent of entries) {
+    if (!ent.msg) continue;
+    ent.contentParts = await buildDiscordIncomingContentParts(
+      ent.msg, channel, historyStorageId, recentMessageIds, ent.userName,
+    );
+  }
+}
+
+async function _fetchRecentMessageIds(channel, starterMessageId) {
+  const raw = await channel.messages.fetch({ limit: MAX_HISTORY + 5 });
+  const ids = [...raw.values()]
+    .filter(m => !starterMessageId || m.id !== starterMessageId)
+    .reverse()
+    .slice(-MAX_HISTORY)
+    .map(m => m.id);
+  return new Set(ids);
+}
+
+/**
+ * Build content parts for the current Discord message (quoted media, inline
+ * text files, attachment tags). History is supplied separately at batch fire.
+ */
+async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, recentMessageIds, senderName) {
+  let textBody = msg.content || '';
+  const botUserId = discordClient?.user?.id;
+  const { prefix, mediaParts: quotedMediaParts } = await processDiscordQuotedReply(
+    msg, channel, historyStorageId, recentMessageIds, botUserId,
+  );
+  textBody = prefix + textBody;
+
+  const contentParts = [...quotedMediaParts];
+  const attachmentTags = [];
+
+  for (const att of msg.attachments.values()) {
+    if (isDiscordAttachmentOversize(att)) {
+      const tag = buildAttachmentTag(null, att.name);
+      attachmentTags.push({ tag, name: att.name, syncedPath: null });
+      textBody = `${tag}${formatDiscordOversizeNote(att)} ${textBody}`.trim();
+      continue;
+    }
+    const fetchBuffer = createDiscordAttachmentBufferFetcher(att);
+    let syncedPath = null;
+    try {
+      syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, att.name);
+    } catch (err) {
+      log.warn(`Failed to sync file ${att.name}: ${err.message}`);
+    }
+    const ingress = await ingressSyncedAttachment({
+      syncedPath,
+      name: att.name,
+      contentType: att.contentType || '',
+      fetchBuffer,
+      historyStorageId,
+      metadataDurationSec: Number(att.duration || 0),
+    });
+    contentParts.push(...ingress.contentParts);
+    attachmentTags.push({ tag: ingress.tag, name: att.name, syncedPath });
+    const fragment = ingress.textFragment.trim();
+    if (fragment.includes('<FileContent')) {
+      textBody = `${fragment}${textBody ? ` ${textBody}` : ''}`.trim();
+    } else {
+      textBody = `${fragment} ${textBody}`.trim();
+    }
+  }
+
+  if (attachmentTags.length > 0 && textBody && !textBody.includes('<FileContent')) {
+    for (const { tag, name, syncedPath } of attachmentTags) {
+      const hints = attachmentFilenameHints(name, name, syncedPath);
+      textBody = stripRedundantAttachmentCaption(textBody, hints);
+      textBody = stripRedundantFilenameBesideAttachmentTag(textBody, tag, hints);
+    }
+  }
+
+  if (textBody) {
+    const tsMs = msg.createdAt?.getTime?.() || Date.now();
+    contentParts.unshift({ type: 'text', text: formatLabeledUserContent(tsMs, senderName, textBody) });
+  }
+
+  return contentParts;
 }
 
 async function onDiscordMessage(msg) {
@@ -149,349 +235,206 @@ async function onDiscordMessage(msg) {
     discordNickname: guildMember?.nickname,
   });
 
-  const { history, recentMessageIds } = await buildDiscordHistory(channel, starterMessage?.id, msg.author.id);
+  if (!discordMessageHasUsableContent(msg)) return;
 
-  let textBody = msg.content || '';
-  let quotedMediaParts = [];
-  if (msg.reference) {
-    try {
-      const quotedMsg = await channel.messages.fetch(msg.reference.messageId);
-      if (quotedMsg) {
-        const isQuotedInRecentHistory = recentMessageIds instanceof Set && recentMessageIds.has(quotedMsg.id);
-        if (quotedMsg.attachments.size > 0) {
-          const filetags = [...quotedMsg.attachments.values()]
-            .map(att => `[${att.name}]`)
-            .join(' ');
+  const senderName = guildMember?.nickname || msg.author.displayName || msg.author.username;
+  const historyStorageId = channel.id;
 
-          let replyPrefix = `[In reply to: ${filetags}]\n`;
+  const batchKey = `discord:${channel.id}`;
+  const batchEntry = {
+    msg,
+    messageId: msg.id,
+    authorUserId: msg.author.id,
+    historyStorageId,
+    channel,
+    starterMessageId: starterMessage?.id || null,
+    guild,
+    guildMember,
+    userIdentity,
+    userName: senderName,
+    stopLockRenew: null,
+  };
 
-          // Process quoted attachments
-          for (const att of quotedMsg.attachments.values()) {
-            const ext = (att.name || '').split('.').pop().toLowerCase();
-            const isImage = att.contentType?.startsWith('image/');
-            const isAudio = att.contentType?.startsWith('audio/');
-            const isPdf = att.contentType === 'application/pdf' || ext === 'pdf';
-            const isVideo = att.contentType?.startsWith('video/');
-            const fetchBuffer = createAttachmentBufferFetcher(att);
-            let syncedPath = null;
-            try {
-              syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
-            } catch (err) {
-              log.warn(`Failed to sync quoted file ${att.name}: ${err.message}`);
-            }
-            const attachmentTag = buildAttachmentTag(syncedPath, att.name);
-
-            if (isImage) {
-              try {
-                const buffer = await fetchBuffer();
-
-                quotedMediaParts.push(mediaToContentPart(buffer, att.contentType, {
-                  historyPath: syncedPath,
-                  historyUserId: msg.author.id,
-                }));
-              } catch { }
-            } else if (isAudio) {
-              const storedVoiceText = getStoredHistoryVoiceTranscription(msg.author.id, syncedPath);
-              const cachedText = storedVoiceText || retrieveRecentVoiceText(channel.id, quotedMsg.createdAt?.getTime?.());
-              if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(msg.author.id, syncedPath, cachedText);
-              const cachedDescription = getStoredHistoryMediaDescription(msg.author.id, syncedPath, 'audio');
-              const audioDuration = Number(att.duration || 0);
-              if (cachedText) {
-                replyPrefix = `[In reply to: ${attachmentTag} <Transcription>${cachedText}</Transcription>]\n`;
-              } else if (cachedDescription) {
-                replyPrefix = `[In reply to: ${attachmentTag} <Description kind="audio">${cachedDescription}</Description>]\n`;
-              } else if (audioDuration > MAX_AUDIO_DURATION_S) {
-                replyPrefix = `[In reply to: ${attachmentTag} (audio too long: ${audioDuration}s, max ${MAX_AUDIO_DURATION_S}s)]\n`;
-              } else {
-                try {
-                  const buffer = await fetchBuffer();
-                  quotedMediaParts.push(mediaToContentPart(buffer, att.contentType, {
-                    historyPath: syncedPath,
-                    historyUserId: msg.author.id,
-                  }));
-                } catch { }
-              }
-            } else if (isVideo) {
-              const cachedDescription = getStoredHistoryMediaDescription(msg.author.id, syncedPath, 'video');
-              if (cachedDescription) {
-                replyPrefix = `[In reply to: ${attachmentTag} <Description kind="video">${cachedDescription}</Description>]\n`;
-              } else {
-                try {
-                  const buffer = await fetchBuffer();
-                  const dur = await getMediaDurationSec(buffer, ext);
-                  if (dur != null && dur > MAX_VIDEO_DURATION_S) {
-                    replyPrefix = `[In reply to: ${attachmentTag} (video too long: ${Math.round(dur)}s, max ${MAX_VIDEO_DURATION_S}s)]\n`;
-                  } else {
-                    quotedMediaParts.push(mediaToContentPart(buffer, att.contentType, {
-                      historyPath: syncedPath,
-                      historyUserId: msg.author.id,
-                    }));
-                  }
-                } catch { }
-              }
-            } else if (isPdf) {
-              if (isQuotedInRecentHistory) {
-                try {
-                  const buffer = await fetchBuffer();
-                  quotedMediaParts.push(mediaToContentPart(buffer, att.contentType || 'application/pdf', {
-                    historyPath: syncedPath,
-                    historyUserId: msg.author.id,
-                  }));
-                } catch { }
-              }
-            }
-          }
-          textBody = replyPrefix + textBody;
-        } else if (quotedMsg.content) {
-          textBody = `[In reply to: ${cleanIncomingText(quotedMsg.content)}]\n` + textBody;
-        }
-      }
-    } catch { }
+  const status = enqueueBatchedTurn({
+    batchKey,
+    entry: batchEntry,
+    handler: _handleDiscordBatch,
+    log,
+    discardLogLabel: `thread ${channel.id}`,
+  });
+  if (status === 'batched') {
+    log.info(`   Batching additional message for ${batchKey}`);
   }
+}
 
-  const contentParts = [];
-  for (const att of msg.attachments.values()) {
-    const ext = (att.name || '').split('.').pop().toLowerCase();
-    const isImage = att.contentType?.startsWith('image/');
-    const isAudio = att.contentType?.startsWith('audio/');
-    const isDoc = att.contentType?.startsWith('application/') || ['pdf', 'txt', 'doc', 'docx', 'csv', 'json'].includes(ext);
-    const isVideo = att.contentType?.startsWith('video/');
-
-    const fetchBuffer = createAttachmentBufferFetcher(att);
-    let syncedPath = null;
-    try {
-      syncedPath = await syncFileToHistory(msg.author.id, att.id, fetchBuffer, att.name);
-    } catch (err) {
-      log.warn(`Failed to sync file ${att.name}: ${err.message}`);
-    }
-    const attachmentTag = buildAttachmentTag(syncedPath, att.name);
-
-    if (isVideo) {
-      try {
-        const buffer = await fetchBuffer();
-        const dur = await getMediaDurationSec(buffer, ext);
-        if (dur != null && dur > MAX_VIDEO_DURATION_S) {
-          textBody = `${attachmentTag} (video too long: ${Math.round(dur)}s, max ${MAX_VIDEO_DURATION_S}s) ${textBody}`.trim();
-        } else {
-          contentParts.push(mediaToContentPart(buffer, att.contentType, {
-            historyPath: syncedPath,
-            historyUserId: msg.author.id,
-          }));
-          textBody = `${attachmentTag} ${textBody}`.trim();
-        }
-      } catch {
-        textBody = `${attachmentTag} ${textBody}`.trim();
-      }
-    } else if (isAudio) {
-      const audioDuration = Number(att.duration || 0);
-      if (audioDuration > MAX_AUDIO_DURATION_S) {
-        textBody = `${attachmentTag} (audio too long: ${audioDuration}s, max ${MAX_AUDIO_DURATION_S}s) ${textBody}`.trim();
-      } else {
-        try {
-          const buffer = await fetchBuffer();
-          contentParts.push(mediaToContentPart(buffer, att.contentType, {
-            historyPath: syncedPath,
-            historyUserId: msg.author.id,
-          }));
-          textBody = `${attachmentTag} ${textBody}`.trim();
-        } catch {
-          textBody = `${attachmentTag} ${textBody}`.trim();
-        }
-      }
-    } else if (isDoc && (att.contentType === 'application/pdf' || ext === 'pdf')) {
-      try {
-        const buffer = await fetchBuffer();
-        contentParts.push(mediaToContentPart(buffer, att.contentType || 'application/pdf', {
-          historyPath: syncedPath,
-          historyUserId: msg.author.id,
-        }));
-        textBody = `${attachmentTag} ${textBody}`.trim();
-      } catch {
-        textBody = `${attachmentTag} ${textBody}`.trim();
-      }
-    } else if (isInlineableTextFile(att.name, att.contentType)) {
-      // Plain-text / source-code file on the current message: inline the content
-      // directly (as <FileContent>) so the model sees it without needing read_file.
-      // Attachments from the current message of this type are inlined as content;
-      // attachments appearing in history context use the [Attachment] tag.
-      try {
-        const buffer = await fetchBuffer();
-        const inlinePart = buildInlineTextFilePart(att.name, buffer);
-        const caption = textBody ? ` ${textBody}` : '';
-        textBody = `${inlinePart}${caption}`.trim();
-      } catch {
-        textBody = `${attachmentTag} ${textBody}`.trim();
-      }
-    } else if (isDoc) {
-      // Non-image, non-PDF, non-text documents (docx, xlsx, zip...): tag only.
-      textBody = `${attachmentTag} ${textBody}`.trim();
-    } else if (isImage) {
-      try {
-        const buffer = await fetchBuffer();
-        contentParts.push(mediaToContentPart(buffer, att.contentType));
-        textBody = `${attachmentTag} ${textBody}`.trim();
-      } catch {
-        textBody = `${attachmentTag} ${textBody}`.trim();
-      }
-    } else {
-      textBody = `${attachmentTag} ${textBody}`.trim();
-    }
-  }
-
-  if (textBody) {
-    contentParts.unshift({ type: 'text', text: textBody });
-  }
-
-  if (quotedMediaParts.length > 0) {
-    contentParts.push(...quotedMediaParts);
-  }
-
-  if (contentParts.length === 0) return;
-
+async function _discordGuildExtras(guild) {
   let availableEmojis = '';
   try {
     const emojis = guild.emojis.cache;
     if (emojis.size > 0) {
       availableEmojis = emojis.map(e => `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`).join(' ');
     }
-  } catch { }
+  } catch { /* ignore */ }
 
   let serverEvents = 'No upcoming events.';
   try {
     const events = await guild.scheduledEvents.fetch();
     if (events.size > 0) {
-      const now = new Date();
-      const nowTime = now.getTime();
+      const nowTime = Date.now();
       const upcoming = events.filter(e => new Date(e.scheduledStartAt).getTime() > nowTime);
       if (upcoming.size > 0) {
         serverEvents = upcoming.map(e => `${e.name} - ${formatTimestamp(e.scheduledStartAt)}`).join('; ');
       }
     }
-  } catch { }
+  } catch { /* ignore */ }
+  return { availableEmojis, serverEvents };
+}
 
-  const ctx = {
-    platform: 'discord',
-    isGroup: false,
-    groupId: null,
-    groupName: null,
-    chatId: channel.id,
-    userId: msg.author.id,
-    userName: guildMember?.nickname || msg.author.displayName || msg.author.username,
-    userIdentity,
-    content: contentParts.length === 1 && contentParts[0].type === 'text'
-      ? contentParts[0].text
-      : contentParts,
-    history,
-    threadName: channel.name,
-    availableEmojis,
-    serverEvents,
-    waJid: userIdentity.member ? userIdentity.member.wa : null,
-    discordChannel: channel,
-  };
-  const lockKey = `discord:${channel.id}`;
-  if (!responseLock.tryLock(lockKey)) {
-    log.warn(`   Ignoring message in thread ${channel.id}: GemiX is already responding`);
-    return;
+async function deliverDiscordResponse(channel, response) {
+  let finalText = response.text || '';
+  const newTitle = response.discordTitle || '';
+
+  const files = [];
+  if (response.attachments) {
+    for (const att of response.attachments) {
+      const a = toDiscordAttachmentArgs(att);
+      if (!a) continue;
+      files.push(new AttachmentBuilder(a.data, { name: a.name }));
+    }
   }
-  const stopLockRenew = responseLock.startAutoRenew(lockKey);
 
-  try {
-    await channel.sendTyping();
+  if (finalText) {
+    const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
+    if (chunks.length > 1) log.info(`   Message split into ${chunks.length} parts`);
 
-    const response = await handleMessage(ctx);
-
-    let finalText = response.text || '';
-    let newTitle = response.discordTitle || '';
-
-    const files = [];
-    if (response.attachments) {
-      for (const att of response.attachments) {
-        const a = toDiscordAttachmentArgs(att);
-        if (!a) continue;
-        files.push(new AttachmentBuilder(a.data, { name: a.name }));
-      }
-    }
-
-    if (finalText) {
-      const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
-      if (chunks.length > 1) log.info(`   Message split into ${chunks.length} parts`);
-      
-      for (let i = 0; i < chunks.length; i++) {
-        const isLastChunk = i === chunks.length - 1;
-        if (isLastChunk && files.length > 0) {
-          try {
-            await channel.send({ content: chunks[i], files });
-            log.info(`   Discord message and files sent`);
-          } catch (err) {
-            log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
-            await channel.send({ content: chunks[i] });
-            const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
-              const a = toDiscordAttachmentArgs(att);
-              if (!a) throw new Error('Invalid attachment');
-              await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
-            }, { platform: 'discord' });
-            
-            if (result.fallbackMessage) {
-              await channel.send({ content: result.fallbackMessage });
-            }
-          }
-        } else {
+    for (let i = 0; i < chunks.length; i++) {
+      const isLastChunk = i === chunks.length - 1;
+      if (isLastChunk && files.length > 0) {
+        try {
+          await channel.send({ content: chunks[i], files });
+          log.info('   Discord message and files sent');
+        } catch (err) {
+          log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
           await channel.send({ content: chunks[i] });
+          const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
+            const a = toDiscordAttachmentArgs(att);
+            if (!a) throw new Error('Invalid attachment');
+            await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
+          }, { platform: 'discord' });
+          if (result.fallbackMessage) {
+            await channel.send({ content: result.fallbackMessage });
+          }
         }
+      } else {
+        await channel.send({ content: chunks[i] });
       }
-    } else if (files.length > 0) {
-      try {
-        await channel.send({ files });
-        log.info(`   Discord files sent`);
-      } catch (err) {
-        log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
-        const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
-          const a = toDiscordAttachmentArgs(att);
-          if (!a) throw new Error('Invalid attachment');
-          await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
-        }, { platform: 'discord' });
-        
-        if (result.fallbackMessage) {
-          await channel.send({ content: result.fallbackMessage });
-        }
-      }
-    } else {
-      log.warn(`   No content or files to send`);
     }
+  } else if (files.length > 0) {
+    try {
+      await channel.send({ files });
+      log.info('   Discord files sent');
+    } catch (err) {
+      log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
+      const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
+        const a = toDiscordAttachmentArgs(att);
+        if (!a) throw new Error('Invalid attachment');
+        await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
+      }, { platform: 'discord' });
+      if (result.fallbackMessage) {
+        await channel.send({ content: result.fallbackMessage });
+      }
+    }
+  } else {
+    log.warn('   No content or files to send');
+  }
 
-    // Rename thread non-blocking (Discord limits to 2 renames per 10 min)
-    if (newTitle && newTitle.length > 0) {
-      const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
-      if (safeTitle) {
-        channel.setName(safeTitle)
-          .then(() => log.info(`   Thread renamed: "${safeTitle}"`))
-          .catch(err => log.error('Thread rename error:', err.message));
-      }
+  if (newTitle && newTitle.length > 0) {
+    const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
+    if (safeTitle) {
+      channel.setName(safeTitle)
+        .then(() => log.info(`   Thread renamed: "${safeTitle}"`))
+        .catch(err => log.error('Thread rename error:', err.message));
     }
-  } catch (err) {
-    log.error(`\nError sending response:`);
-    log.error(`   ${err.message}`);
-    try {
-      // Dynamic require for lazy loading on error path only (avoids pulling
-      // admin notifier into the hot path for every message).
-      const { notifyAdmin } = require('../../utils/adminNotifier');
-      await notifyAdmin('Discord Chat Delivery', `Failed to send response in channel ${channel.id}: ${err.message}`);
-    } catch (adminErr) {
-      log.error(`Failed to notify admin: ${adminErr.message}`);
-    }
-    try {
-      await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
-    } catch { }
-  } finally {
-    try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
-    try { responseLock.unlock(lockKey); } catch { }
   }
 }
 
-async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
+async function _handleDiscordBatch(entries) {
+  const first = entries[0];
+  const { channel, starterMessageId, historyStorageId, guild, stopLockRenew } = first;
+
+  await runTurnPipeline({
+    log,
+    lockKey: `discord:${channel.id}`,
+    stopLockRenew,
+    entries,
+    discardLogLabel: `thread ${channel.id}`,
+    loadHistory: async ({ entries: ents }) => {
+      const excludeMessageIds = new Set(ents.map(e => e.messageId).filter(Boolean));
+      return fetchHistoryWithTimeout(
+        async () => {
+          const built = await buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds);
+          return built.history;
+        },
+        log,
+        'DISCORD',
+      );
+    },
+    prepareSession: async () => {
+      try { await channel.sendTyping(); } catch { /* ignore */ }
+      return {};
+    },
+    buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
+      await rebuildDiscordBatchParts(ents, channel, starterMessageId, historyStorageId);
+      const lat = latest || ents[0];
+      const { multiSpeaker } = analyzeBatchSpeakers(ents, 'discord');
+      const extras = await _discordGuildExtras(guild);
+      return {
+        platform: 'discord',
+        isGroup: false,
+        groupId: null,
+        groupName: null,
+        chatId: channel.id,
+        userId: lat.authorUserId,
+        userName: lat.userName,
+        userIdentity: lat.userIdentity,
+        content: mergeBatchContentParts(ents),
+        history,
+        historyLoadIncomplete,
+        batchMultiSpeaker: multiSpeaker,
+        threadName: channel.name,
+        availableEmojis: extras.availableEmojis,
+        serverEvents: extras.serverEvents,
+        waJid: lat.userIdentity.member ? lat.userIdentity.member.wa : null,
+        discordChannel: channel,
+      };
+    },
+    deliver: async (_ctx, response) => {
+      await deliverDiscordResponse(channel, response);
+    },
+    onDeliverError: async (_ctx, err) => {
+      try {
+        const { notifyAdmin } = require('../../utils/adminNotifier');
+        await notifyAdmin('Discord Chat Delivery', `Failed to send response in channel ${channel.id}: ${err.message}`);
+      } catch { /* ignore */ }
+      try {
+        await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
+      } catch { /* ignore */ }
+    },
+  });
+}
+
+/**
+ * @param {Set<string>|string|null} [excludeMessageIds] - Discord message IDs to omit
+ *   (current batch); the merged user turn is passed separately as ctx.content.
+ */
+async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds = null) {
   const raw = await channel.messages.fetch({ limit: MAX_HISTORY + 5 });
+  const exclude = excludeMessageIds instanceof Set
+    ? excludeMessageIds
+    : (excludeMessageIds ? new Set([excludeMessageIds]) : null);
+
   const messages = [...raw.values()]
-    .filter(m => !starterMessageId || m.id !== starterMessageId)
+    .filter(m => (!starterMessageId || m.id !== starterMessageId) && (!exclude || !exclude.has(m.id)))
     .reverse()
     .slice(-MAX_HISTORY);
   const recentMessageIds = new Set(messages.map(m => m.id));
@@ -501,51 +444,50 @@ async function buildDiscordHistory(channel, starterMessageId, storageUserId) {
   for (const m of messages) {
     const ts = formatTimestamp(m.createdAt);
     const isBot = m.author.id === discordClient.user.id;
-    const isSystem = isBot && isDiscordSystemMessage(m.content || '');
     let textContent = cleanIncomingText(m.content || '');
 
     for (const att of m.attachments.values()) {
-      const isImage = att.contentType?.startsWith('image/');
-      const isAudio = att.contentType?.startsWith('audio/');
-      const isDoc = att.contentType?.startsWith('application/');
-      const isVideo = att.contentType?.startsWith('video/');
-
-      const fetchBuffer = async () => Buffer.from(await (await fetch(att.url)).arrayBuffer());
-      const syncedPath = await syncFileToHistory(storageUserId, att.id, fetchBuffer, att.name);
-
-      const attachmentTag = buildAttachmentTag(syncedPath, att.name);
-
-      if (isVideo) {
-        const cachedDescription = getStoredHistoryMediaDescription(storageUserId, syncedPath, 'video');
-        if (cachedDescription) {
-          textContent = `${textContent} ${attachmentTag} <Description kind="video">${cachedDescription}</Description>`.trim();
-        } else {
-          textContent = `${textContent} ${attachmentTag}`.trim();
-        }
-      } else if (isAudio) {
-        const storedVoiceText = getStoredHistoryVoiceTranscription(storageUserId, syncedPath);
-        const cachedText = storedVoiceText || retrieveRecentVoiceText(channel.id, m.createdAt.getTime());
-        if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(storageUserId, syncedPath, cachedText);
-        const cachedDescription = getStoredHistoryMediaDescription(storageUserId, syncedPath, 'audio');
-        if (cachedText) {
-          textContent = `${textContent} ${attachmentTag} <Transcription>${cachedText}</Transcription>`.trim();
-        } else if (cachedDescription) {
-          textContent = `${textContent} ${attachmentTag} <Description kind="audio">${cachedDescription}</Description>`.trim();
-        } else if (isBot) {
-          textContent = `${textContent} ${attachmentTag} (transcription unavailable)`.trim();
-        } else {
-          textContent = `${textContent} ${attachmentTag}`.trim();
-        }
-      } else if (isImage || isDoc) {
-        textContent = `${textContent} ${attachmentTag}`.trim();
-      } else {
-        textContent = `${textContent} ${attachmentTag}`.trim();
+      if (isDiscordAttachmentOversize(att)) {
+        const attachmentTag = buildAttachmentTag(null, att.name);
+        textContent = `${textContent} ${attachmentTag}${formatDiscordOversizeNote(att)}`.trim();
+        continue;
       }
+      const fetchBuffer = createDiscordAttachmentBufferFetcher(att);
+      let syncedPath = null;
+      try {
+        syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, att.name);
+      } catch (err) {
+        log.warn(`Failed to sync history file ${att.name}: ${err.message}`);
+      }
+      const captionHints = attachmentFilenameHints(att.name, att.name, syncedPath);
+      textContent = stripRedundantAttachmentCaption(textContent, captionHints);
+      const ingress = await ingressSyncedAttachment({
+        syncedPath,
+        name: att.name,
+        contentType: att.contentType || '',
+        fetchBuffer,
+        historyStorageId,
+        metadataDurationSec: Number(att.duration || 0),
+        getVoiceTranscription: isBot
+          ? async () => resolveGemixVoiceTranscription(
+            historyStorageId,
+            syncedPath,
+            channel.id,
+            m.createdAt?.getTime?.(),
+          )
+          : null,
+      });
+      textContent = stripRedundantFilenameBesideAttachmentTag(
+        textContent,
+        ingress.tag,
+        captionHints,
+      );
+      textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
     }
 
     if (!textContent) continue;
 
-    const senderName = isSystem ? '[System]' : (isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username));
+    const senderName = isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username);
     const prefix = `[${ts}] ${senderName}: `;
 
     history.push({

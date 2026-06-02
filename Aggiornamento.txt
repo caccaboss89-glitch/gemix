@@ -69,24 +69,23 @@
 Questa release rende GemiX un vero *agente autonomo* e professionale: più intelligente, più veloce, più sicuro e infinitamente più utile. Il salto è enorme, ma il risultato è un sistema stabile, pulito e pronto per compiti reali.
 
 Un ringraziamento speciale a tutto il team che ha lavorato questi mesi per realizzare un sistema così complesso:
-- Grok 4.20 fast/fast thinking: researcher e troubleshooting engineer
-- Grok 4.20 expert 1x: deep code analyst e performance optimizer
-- Grok 4.20 expert 4x: expert researcher and plans engineer
-- Grok 4.20 multi-agent: research team specialist (web + X search)
-- Grok 4.3: cervello principale di GemiX v2.0 + image/video generation //RINGRAZIAMENTO SPECIALE
-- Claude 4.5 Haiku: lightweight prompt architect e rapid idea generator
-- Claude 4.5 Sonnet: structured reasoning specialist e logic validator
-- Claude 4.6 Opus: advanced system designer e architecture master
-- Claude 4.7 Opus: max coder plan engineer e migration architect
-- Gemini 3 flash: multimodal vision & audio specialist
-- Gemini 3.1 pro medium: creative content & presentation engineer
-- Gemini 3.1 pro xhigh: high-precision document & data architect
-- Kimi 2.6: ultra-fast parallel thinker e research accelerator
-- SWE-1.6: software engineering veteran e codebase cleaner
-- GPT 5.3 codex: legacy-to-modern code migrator e refactoring expert
-- GPT 5.4 mini High: token-efficient prompt engineer
-- GPT 5.4 High: complex workflow orchestrator
-- GPT 5.5 high Thinking: strategic planner e long-horizon agent coordinator
+- Grok 4.20 fast: documentation fact-checking assistant
+- Grok 4.20 expert 4x: expert documentations researcher and server configurator
+- Grok 4.3: High quality official XAI skill provider
+- Grok Build 0.1: fast code cleaner
+- Composer 2.5: refactoring planer and coder engineer
+- Claude 4.5 Haiku: quick Q/A code analyzer
+- Claude 4.6 Sonnet: guided code implementer
+- Claude 4.6 Opus: architecture master
+- Claude 4.7/4.8 Opus: max coder plan and migration architect
+- Gemini 3 flash: simple tasks coder
+- Gemini 3.5 flash: code problem detector
+- Gemini 3.1 pro xhigh: high-precision data architect
+- Kimi 2.6: fast research accelerator
+- SWE-1.6: software codebase cleaner
+- GPT 5.3 codex: code migrator
+- GPT 5.4 High: workflow orchestrator
+- GPT 5.5 high Thinking: strategic planner
 
 [Immagine grafo codebase]
 

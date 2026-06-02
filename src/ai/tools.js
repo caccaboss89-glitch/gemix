@@ -5,7 +5,7 @@
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
 // The build tool description is generic and does not expose sub-agent internals.
 
-const { PLATFORM_DISCORD } = require('../config/constants');
+const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
 
 // -- Helpers -------------------------------------------------------------
 
@@ -141,7 +141,7 @@ const TOOL_READ_FILE = makeTool({
 
 const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
-  description: 'Read the Discord server rules (aka Statuto Albertino).',
+  description: 'Read the server rules (Statuto Albertino / Constitution). Use when you need the full statute text on WhatsApp.',
   properties: {},
 });
 
@@ -168,8 +168,10 @@ const TOOL_READ_MUSIC_STATS = makeTool({
   properties: {},
 });
 
-function buildUpdateMemoryTool(isGroup) {
-  const scope = isGroup ? 'the current group' : 'the current user';
+function buildUpdateMemoryTool(isGroup, isPersonalChat = false) {
+  const scope = isGroup
+    ? 'the current group'
+    : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
   return makeTool({
     name: 'update_memory',
     description: `Update personalized memory for ${scope}, for long-term preferences only. Do NOT store transient context. If memory already contains information, rewrite existing entries and append new ones.`,
@@ -564,9 +566,9 @@ function buildBuildTool(isGroup) {
 
 const ACTIVE_MEMBER_ONLY_TOOLS = new Set([
   'read_server_rules',
+  'read_music_stats',
   'send_email',
   'send_whatsapp_message',
-  'read_music_stats',
 ]);
 
 function isActiveMemberOnlyTool(toolName) {
@@ -613,8 +615,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildBuildTool(isWhatsAppGroup));
   }
 
-  // 3. Communication & Delivery
-  if (!isDiscord) {
+  // 3. Communication & Delivery (no voice on personal WA: replies are text + attachments only)
+  if (!isDiscord && userCtx.platform !== PLATFORM_WA_PERSONAL) {
     tools.push(buildVoiceTool({
       includeRecipientName: isAdmin || (isActiveMember && isWhatsApp),
       includeRecipientPhone: isAdmin,
@@ -640,15 +642,20 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
   }
 
-  // 5. Memory, Meta & Stats
-  // Note: On Discord, all users are active members, so no need to check isActiveMember.
-  tools.push(buildUpdateMemoryTool(isWhatsAppGroup));
+  // 5. Memory, Meta & Stats (no long-term memory on Discord)
+  if (!isDiscord) {
+    const isPersonalChat = userCtx.platform === PLATFORM_WA_PERSONAL;
+    tools.push(buildUpdateMemoryTool(isWhatsAppGroup, isPersonalChat));
+  }
   if (!isDiscord) {
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
-  // Rules and Stats are for all Discord users (members) or active WA members.
-  if (isDiscord || isActiveMember) {
-    tools.push(TOOL_READ_SERVER_RULES, TOOL_READ_MUSIC_STATS);
+  // Statute tool: active WA members only (Discord has RulesContext in the system prompt).
+  if (isActiveMember && isWhatsApp) {
+    tools.push(TOOL_READ_SERVER_RULES);
+  }
+  if (isActiveMember && isWhatsApp) {
+    tools.push(TOOL_READ_MUSIC_STATS);
   }
 
   // 6. Bug Report (all platforms, all modes)
@@ -657,8 +664,17 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   return tools;
 }
 
+/** Whether the tool is in the live list for this user (same rules as the model schema). */
+function isToolAllowedForUser(toolName, userCtx) {
+  const isActiveMember = Boolean(userCtx?.isActiveMember);
+  const isAdmin = Boolean(userCtx?.isAdmin);
+  const tools = getToolsForUser(isActiveMember, isAdmin, userCtx);
+  return tools.some(t => t?.function?.name === toolName);
+}
+
 module.exports = {
   getToolsForUser,
+  isToolAllowedForUser,
   isActiveMemberOnlyTool,
   validateToolArgs,
   SET_CONVERSATION_TITLE_TOOL: 'set_conversation_title',

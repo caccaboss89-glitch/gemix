@@ -4,14 +4,14 @@
 // based on the current user/group context:
 //
 //   - WhatsApp group  - "group:<groupId>"  (shared workspace for the whole group)
-//   - Everything else - "user:<storageId>" (cross-platform workspace that
-//                       follows active members across WhatsApp dedicated,
-//                       WhatsApp personal, and Discord).
+//   - WA personal     - "group:personal:<chatId>" (admin↔user pair, shared build tree)
+//   - WA dedicated DM - "user:<waJid>" (true 1:1 with GemiX)
 //
 // The `group:` / `user:` prefix provides filesystem-safe disambiguation.
 
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL } = require('../config/constants');
 const { resolveStorageId } = require('./userPaths');
 
 /**
@@ -24,6 +24,9 @@ function resolveWorkspaceId(ctx) {
   const isWhatsApp = typeof ctx.platform === 'string' && ctx.platform.startsWith('whatsapp');
   if (isWhatsApp && ctx.isGroup && ctx.groupId) {
     return `group:${ctx.groupId}`;
+  }
+  if (ctx.platform === PLATFORM_WA_PERSONAL) {
+    return ctx.chatId ? `group:personal:${ctx.chatId}` : null;
   }
   const storageId = resolveStorageId(ctx);
   if (storageId) return `user:${storageId}`;

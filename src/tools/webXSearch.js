@@ -507,9 +507,7 @@ async function webXSearch(prompt, options = {}) {
   if (images.length > 0) {
     out.images_added = images.length;
     out.image_filenames = images.map(im => im.name);
-    out.images_note = `${images.length} cited image(s) were added to the delivery buffer, in the order referenced: `
-      + `${images.map(im => im.name).join(', ')}. Refer to them naturally; do not paste URLs or Markdown image syntax. `
-      + `You may pass any of these filenames as a reference_image to generate_image/generate_video.`;
+    // images_note is set by tools/index.js via buildWebSearchImagesNote (platform-aware).
   }
 
   return { ...out, _stats: { webSources, xPosts }, _images: images };

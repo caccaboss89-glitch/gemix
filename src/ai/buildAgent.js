@@ -36,6 +36,7 @@ const {
   BUILD_WORKSPACE_QUOTA_MB,
 } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
+const { isNonReadableExt, buildReadFileBlockedMessage } = require('../config/nonReadableExts');
 
 const log = createLogger('BuildAgent');
 
@@ -267,11 +268,6 @@ function _classifyAgentPath(workspaceId, rawPath) {
   return { ok: true, abs, zone: 'workspace' };
 }
 
-const NON_READABLE_EXTS = new Set([
-  '.exe', '.dll', '.so', '.bin', '.iso', '.dmg',
-  '.zip', '.tar', '.gz', '.7z', '.rar', '.jar',
-]);
-
 async function _executeReadFile(workspaceId, args) {
   const c = _classifyAgentPath(workspaceId, args && args.path);
   if (!c.ok) return _toolErr(c.reason);
@@ -283,7 +279,7 @@ async function _executeReadFile(workspaceId, args) {
   if (stat.isDirectory()) return _toolErr('Path is a directory.');
 
   const ext = path.extname(c.abs).toLowerCase();
-  if (NON_READABLE_EXTS.has(ext)) return _toolErr(`Binary archive ${ext} - use bash (unzip etc.) to inspect.`);
+  if (isNonReadableExt(ext)) return _toolErr(buildReadFileBlockedMessage(ext));
 
   // Text/code inline.
   if (_isTextExt(ext)) {

@@ -5,51 +5,38 @@
 // current message attachments, and sends responses (text + voice + files).
 // Central place for WhatsApp-specific formatting and media handling.
 
-const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
-const { MAX_HISTORY, PLATFORM_WA_PERSONAL, MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../../config/constants');
+const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
 const { formatTimestamp } = require('../../utils/time');
-const { hasFooter, removeFooter, hasScheduledFooter, removeScheduledFooter } = require('../../utils/footer');
-
+const { hasScheduledFooter } = require('../../utils/footer');
+const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
 const { isSystemMessage } = require('../../config/systemMessages');
 
-const { isSupportedMedia, mediaToContentPart, mediaTag, buildAttachmentTag, isInlineableTextFile, buildInlineTextFilePart } = require('../../utils/media');
-const { normalizeMarkdown, cleanIncomingText } = require('../../utils/text');
-const { syncFileToHistory, getStoredHistoryMediaDescription, getStoredHistoryVoiceTranscription, retrieveRecentVoiceText, storeHistoryVoiceTranscription } = require('../../utils/historySync');
+const { mediaToContentPart, buildAttachmentTag } = require('../../utils/media');
+const { ingressWaMessageMedia } = require('../../utils/incomingMediaIngress');
+const {
+  normalizeMarkdown,
+  cleanIncomingText,
+  formatLabeledUserContent,
+} = require('../../utils/text');
+const {
+  attachmentFilenameHints: _attachmentFilenameHints,
+  stripRedundantAttachmentCaption: _stripRedundantAttachmentCaption,
+  stripRedundantFilenameBesideAttachmentTag: _stripRedundantFilenameBesideAttachmentTag,
+} = require('../../utils/attachmentCaption');
+
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
 const { createLogger } = require('../../utils/logger');
 
 const log = createLogger('WhatsAppResponse');
 
-const _MIME_TO_EXT = {
-  'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png',
-  'image/webp': '.webp', 'image/gif': '.gif', 'image/bmp': '.bmp', 'image/tiff': '.tiff',
-  'audio/mpeg': '.mp3', 'audio/ogg': '.ogg', 'audio/mp4': '.m4a', 'audio/webm': '.webm', 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/aac': '.aac',
-  'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov', 'video/x-matroska': '.mkv',
-  'application/pdf': '.pdf', 'application/zip': '.zip', 'application/x-zip-compressed': '.zip',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
-  'text/plain': '.txt', 'text/markdown': '.md', 'text/html': '.html', 'text/csv': '.csv', 'application/json': '.json',
-};
-
-function _resolveWaFilename(givenName, mediaType, mimetype, msgId = null) {
-  if (givenName && path.extname(givenName)) return givenName;
-  const baseMime = (mimetype || '').split(';')[0].trim().toLowerCase();
-  const ext = _MIME_TO_EXT[baseMime] || '';
-  // Use unique short ID-based name instead of caption to avoid message text as filename
-  const shortId = msgId ? msgId.slice(-8) : Date.now().toString(36);
-  const base = givenName || `file_${shortId}`;
-  return ext ? `${base}${ext}` : base;
-}
+const { resolveIngressFilename: _resolveWaFilename } = require('../../utils/attachmentFilenames');
 
 function _waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
 }
-
-module.exports._waMessageKey = _waMessageKey; // for internal use by WA platform handlers (dedup)
 
 /**
  * Replace WhatsApp @<digits> mention tags inside a body with @<DisplayName>
@@ -82,44 +69,10 @@ module.exports._waMessageKey = _waMessageKey; // for internal use by WA platform
  * @param {Array} contacts - resolved Contact objects from msg.getMentions()
  * @returns {string}
  */
-function _replaceMentionsInBody(body, contacts) {
-  if (typeof body !== 'string' || !body || !Array.isArray(contacts) || contacts.length === 0) {
-    return body || '';
-  }
-  let out = body;
-  for (const c of contacts) {
-    if (!c || !c.id) continue;
-    const userPart = (c.id.user || '').toString().replace(/\D/g, '');
-    if (!userPart) continue;
-    const display = (
-      c.pushname ||                      // (a) public profile name
-      c.name ||                          // (b) name as saved in owner's phone book
-      c.shortName ||                     // (c) abbreviated form of name
-      c.number ||                        // (d) formatted number
-      userPart                           // (e) raw digits
-    ).toString().trim();
-    if (!display) continue;
-    // Replace `@<digits>` only when it's not part of a longer digit run.
-    const re = new RegExp(`@${userPart}(?!\\d)`, 'g');
-    out = out.replace(re, `@${display}`);
-  }
-  return out;
-}
+const { replaceMentionsInBody: _replaceMentionsInBody, resolveMentionsForMessage: _resolveMentionsForMessage } = require('../../utils/waMentions');
+const { processWhatsAppQuotedReply } = require('../../utils/quoteIngress');
 
-async function _resolveMentionsForMessage(msg, isGroup) {
-  // WhatsApp @<digits> mentions are a group-chat feature: in 1-1 chats the
-  // library either doesn't populate mentions or returns the chat partner
-  // every time, so resolution has no upside and risks false positives.
-  if (!isGroup) return [];
-  try {
-    const mentions = await msg.getMentions();
-    return Array.isArray(mentions) ? mentions : [];
-  } catch {
-    return [];
-  }
-}
-
-async function _getRecentWhatsAppMessageIds(msg) {
+async function getRecentWhatsAppMessageIds(msg) {
   try {
     const chat = await msg.getChat();
     const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
@@ -156,8 +109,12 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
   const isGroup = Boolean(chat?.isGroup);
 
   const historyMessages = [];
+  const personalGemixFlags = platform === PLATFORM_WA_PERSONAL
+    ? buildPersonalGemixFlags(messages)
+    : null;
 
-  for (const msg of messages) {
+  for (let mi = 0; mi < messages.length; mi++) {
+    const msg = messages[mi];
     let senderName;
     let isGemiX = false;
     let isScheduled = false;
@@ -165,7 +122,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 
     if (platform === PLATFORM_WA_PERSONAL) {
       if (msg.fromMe) {
-        if (hasFooter(msg.body)) {
+        if (personalGemixFlags[mi]) {
           senderName = 'GemiX';
           isGemiX = true;
         } else {
@@ -223,50 +180,19 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     }
 
     if (msg.hasMedia) {
-      const mediaType = msg.type;
-      const filename = _resolveWaFilename(msg._data?.filename, msg.type, msg._data?.mimetype, msg.id.id);
-      const duration = Number(msg.duration || msg._data?.duration || 0);
-      const isAudioType = mediaType === 'audio' || mediaType === 'ptt';
+      const waFilename = msg._data?.filename;
+      const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
+      const allFilenameHints = _attachmentFilenameHints(waFilename, resolvedName, null);
+      textContent = _stripRedundantAttachmentCaption(textContent, allFilenameHints);
 
-      const fetchBuffer = async () => {
-        const media = await msg.downloadMedia();
-        return media ? Buffer.from(media.data, 'base64') : null;
-      };
-      const syncedPath = await syncFileToHistory(userId, msg.id.id, fetchBuffer, filename);
-      const tag = buildAttachmentTag(syncedPath, filename);
-
-      if (isSupportedMedia(mediaType)) {
-        if (isAudioType) {
-          const storedVoiceText = getStoredHistoryVoiceTranscription(userId, syncedPath);
-          const cachedText = storedVoiceText || retrieveRecentVoiceText(chat.id._serialized, msg.timestamp * 1000);
-          if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(userId, syncedPath, cachedText);
-          const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'audio');
-          if (cachedText) {
-            textContent = `${textContent} ${tag} <Transcription>${cachedText}</Transcription>`.trim();
-          } else if (cachedDescription) {
-            textContent = `${textContent} ${tag} <Description kind="audio">${cachedDescription}</Description>`.trim();
-          } else if (isGemiX) {
-            textContent = `${textContent} ${tag} (transcription unavailable)`.trim();
-          } else if (duration > 0 && duration > MAX_AUDIO_DURATION_S) {
-            textContent = `${textContent} ${tag} (audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s)`.trim();
-          } else {
-            textContent = `${textContent} ${tag}`.trim();
-          }
-        } else if (mediaType === 'video') {
-          const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'video');
-          if (cachedDescription) {
-            textContent = `${textContent} ${tag} <Description kind="video">${cachedDescription}</Description>`.trim();
-          } else if (duration > 0 && duration > MAX_VIDEO_DURATION_S) {
-            textContent = `${textContent} ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)`.trim();
-          } else {
-            textContent = `${textContent} ${tag}`.trim();
-          }
-        } else {
-          textContent = `${textContent} ${tag}`.trim();
-        }
-      } else {
-        textContent = `${textContent} ${tag}`.trim();
-      }
+      const mediaIngress = await ingressWaMessageMedia(msg, userId, {
+        chatId: chat.id._serialized,
+        isGemixVoice: platform !== PLATFORM_WA_PERSONAL && isGemiX,
+      });
+      textContent = _stripRedundantFilenameBesideAttachmentTag(
+        textContent, mediaIngress.tag, allFilenameHints,
+      );
+      textContent = `${textContent} ${mediaIngress.textFragment.trim()}`.trim();
     }
 
     if (!textContent) continue;
@@ -297,128 +223,8 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
  * @param {boolean} [isGroup=false] - whether the chat is a group (affects mention resolution)
  * @returns {Promise<object>} { prefix: string, mediaParts: array }
  */
-async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup = false) {
-  if (!msg.hasQuotedMsg) return { prefix: '', mediaParts: [] };
-
-  try {
-    const quoted = await msg.getQuotedMessage();
-    if (!quoted) return { prefix: '', mediaParts: [] };
-
-    let prefix = '';
-    const mediaParts = [];
-
-    if (quoted.hasMedia) {
-      const filename = _resolveWaFilename(quoted._data?.filename, quoted.type, quoted._data?.mimetype, quoted.id.id);
-      const mediaType = quoted.type;
-      const isAudio = mediaType === 'audio' || mediaType === 'ptt';
-      const duration = Number(quoted.duration || quoted._data?.duration || 0);
-
-      const fetchBuffer = async () => {
-        const media = await quoted.downloadMedia();
-        return media ? Buffer.from(media.data, 'base64') : null;
-      };
-      let syncedPath = null;
-      try {
-        syncedPath = await syncFileToHistory(userId, quoted.id.id, fetchBuffer, filename);
-      } catch (err) {
-        log.warn(`Failed to sync quoted media to history: ${err.message}`);
-      }
-      const tag = buildAttachmentTag(syncedPath, filename);
-      const quotedMessageKey = _waMessageKey(quoted);
-      const isQuotedInRecentHistory = Boolean(quotedMessageKey) && recentMessageIds instanceof Set && recentMessageIds.has(quotedMessageKey);
-
-      const isVideo = mediaType === 'video';
-      if (isAudio) {
-        const storedVoiceText = getStoredHistoryVoiceTranscription(userId, syncedPath);
-        const cachedText = storedVoiceText || (chatId ? retrieveRecentVoiceText(chatId, quoted.timestamp * 1000) : null);
-        if (!storedVoiceText && cachedText) storeHistoryVoiceTranscription(userId, syncedPath, cachedText);
-        const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'audio');
-        if (cachedText) {
-          prefix = `[In reply to: ${tag} <Transcription>${cachedText}</Transcription>]\n`;
-        } else if (cachedDescription) {
-          prefix = `[In reply to: ${tag} <Description kind="audio">${cachedDescription}</Description>]\n`;
-        } else if (duration > MAX_AUDIO_DURATION_S) {
-          prefix = `[In reply to: ${tag} (audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s)]\n`;
-        } else {
-          prefix = `[In reply to: ${tag}]\n`;
-          try {
-            const buffer = await fetchBuffer();
-            if (buffer) {
-              mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
-                historyPath: syncedPath,
-                historyUserId: userId,
-              }));
-            }
-          } catch { }
-        }
-        return { prefix, mediaParts };
-      }
-
-      if (isVideo) {
-        const cachedDescription = getStoredHistoryMediaDescription(userId, syncedPath, 'video');
-        if (cachedDescription) {
-          prefix = `[In reply to: ${tag} <Description kind="video">${cachedDescription}</Description>]\n`;
-        } else if (duration > MAX_VIDEO_DURATION_S) {
-          prefix = `[In reply to: ${tag} (video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s)]\n`;
-        } else {
-          prefix = `[In reply to: ${tag}]\n`;
-          try {
-            const buffer = await fetchBuffer();
-            if (buffer) mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
-              historyPath: syncedPath,
-              historyUserId: userId,
-            }));
-          } catch { }
-        }
-        return { prefix, mediaParts };
-      }
-
-      if (mediaType === 'document' && quoted._data?.mimetype === 'application/pdf') {
-        prefix = `[In reply to: ${tag}]\n`;
-        if (isQuotedInRecentHistory) {
-          try {
-            const buffer = await fetchBuffer();
-            if (buffer) {
-              mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
-                historyPath: syncedPath,
-                historyUserId: userId,
-              }));
-            }
-          } catch { }
-        }
-        return { prefix, mediaParts };
-      }
-
-      if (mediaType === 'document') {
-        prefix = `[In reply to: ${tag}]\n`;
-        return { prefix, mediaParts };
-      }
-
-      prefix = `[In reply to: ${tag}]\n`;
-      try {
-        const buffer = await fetchBuffer();
-        if (buffer) {
-          mediaParts.push(mediaToContentPart(buffer, quoted._data?.mimetype, {
-            historyPath: syncedPath,
-            historyUserId: userId,
-          }));
-        }
-      } catch { }
-      return { prefix, mediaParts };
-    }
-
-    if (quoted.body) {
-      const quotedMentionContacts = await _resolveMentionsForMessage(quoted, isGroup);
-      const rawQuoted = _replaceMentionsInBody(quoted.body, quotedMentionContacts);
-      const quotedText = cleanIncomingText(rawQuoted);
-      prefix = `[In reply to: ${quotedText}]\n`;
-      return { prefix, mediaParts };
-    }
-
-    return { prefix: '', mediaParts: [] };
-  } catch {
-    return { prefix: '', mediaParts: [] };
-  }
+async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup = false, platform = PLATFORM_WA_DEDICATED) {
+  return processWhatsAppQuotedReply(msg, chatId, userId, recentMessageIds, isGroup, platform);
 }
 
 /**
@@ -508,93 +314,63 @@ async function sendWhatsAppResponse(chat, responseData) {
  * @param {string} userId - storage id for media sync
  * @returns {Promise<object|null>} { skipped, buffer?, mimetype?, filename?, tag, reason? } or null
  */
-async function processCurrentMedia(msg, userId) {
+async function processCurrentMedia(msg, userId, opts = {}) {
   if (!msg.hasMedia) return null;
 
-  const mediaType = msg.type;
-  const isAudio = mediaType === 'audio' || mediaType === 'ptt';
-  const isVideo = mediaType === 'video';
-  const duration = Number(msg.duration || msg._data?.duration || 0);
+  const { chatId, isGemixVoice = false } = opts;
+  const r = await ingressWaMessageMedia(msg, userId, { chatId, isGemixVoice });
+  const frag = r.textFragment.trim();
 
-  if (isAudio && duration > MAX_AUDIO_DURATION_S) {
+  if (r.unsupported) {
+    return { skipped: true, tag: r.tag, reason: null };
+  }
+  if (frag.includes('<FileContent')) {
+    return { skipped: true, tag: r.tag, reason: null, inlineText: frag };
+  }
+  if (r.overDurationLimit) {
     return {
       skipped: true,
-      tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
-      reason: `audio too long: ${duration}s, max ${MAX_AUDIO_DURATION_S}s`,
+      tag: r.tag,
+      reason: r.durationNote || `${r.overDurationLimit} too long`,
+      overDurationLimit: r.overDurationLimit,
     };
   }
 
-  if (isVideo && duration > 0 && duration > MAX_VIDEO_DURATION_S) {
+  if (r.contentParts.length > 0) {
     return {
-      skipped: true,
-      tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
-      reason: `video too long: ${duration}s, max ${MAX_VIDEO_DURATION_S}s`,
+      skipped: false,
+      buffer: null,
+      mimetype: r.mimetype,
+      filename: r.filename,
+      syncedPath: r.syncedPath,
+      tag: r.tag,
+      contentParts: r.contentParts,
     };
   }
 
-  if (!isSupportedMedia(mediaType)) {
-    return {
-      skipped: true,
-      tag: mediaTag(msg._data?.filename, msg._data?.mimetype),
-      reason: null,
-    };
+  const mime = (r.mimetype || msg._data?.mimetype || '').toLowerCase();
+  if (msg.type === 'document' && mime !== 'application/pdf' && !frag.includes('<FileContent')) {
+    return { skipped: true, tag: r.tag, reason: null };
   }
 
   let buffer = null;
-  let mimetype = null;
-  let filename = msg._data?.filename || null;
-
   try {
     const media = await msg.downloadMedia();
-    if (media) {
-      buffer = Buffer.from(media.data, 'base64');
-      mimetype = media.mimetype;
-      filename = _resolveWaFilename(filename, msg.type, mimetype, msg.id.id);
-    }
-  } catch { }
-
-  let syncedPath = null;
-  if (buffer) {
-    const fetchBuffer = async () => buffer;
-    try {
-      syncedPath = await syncFileToHistory(userId, msg.id.id, fetchBuffer, filename);
-    } catch (err) {
-      log.warn(`Failed to sync current media to history: ${err.message}`);
-    }
-  }
-
-  const tag = syncedPath ? buildAttachmentTag(syncedPath, filename) : mediaTag(filename, mimetype);
+    if (media) buffer = Buffer.from(media.data, 'base64');
+  } catch { /* ignore */ }
 
   if (!buffer) {
-    return { skipped: true, tag, reason: 'file unavailable' };
-  }
-
-  if (mediaType === 'document' && mimetype !== 'application/pdf') {
-    // Plain-text / source-code documents are inlined directly into the
-    // user message so the model sees the file content without a read_file
-    // roundtrip. Other binary docs (docx, xlsx, zip, ...) keep tag-only.
-    if (isInlineableTextFile(filename, mimetype)) {
-      return {
-        skipped: true,
-        tag,
-        reason: null,
-        inlineText: buildInlineTextFilePart(filename, buffer),
-      };
-    }
-    return {
-      skipped: true,
-      tag,
-      reason: null,
-    };
+    return { skipped: true, tag: r.tag, reason: 'file unavailable' };
   }
 
   return {
     skipped: false,
     buffer,
-    mimetype,
-    filename,
-    syncedPath,
-    tag,
+    mimetype: r.mimetype,
+    filename: r.filename,
+    syncedPath: r.syncedPath,
+    tag: r.tag,
+    contentParts: [],
   };
 }
 
@@ -610,25 +386,17 @@ async function processCurrentMedia(msg, userId) {
  * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
  * @param {string} userId - storage id for media sync
  * @param {boolean} [isGroup=false] - whether chat is group (affects mentions)
+ * @param {string} [senderName='Unknown'] - display name for the message author
  * @returns {Promise<Array>} contentParts array (may be empty if message has no usable content)
  */
-async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
+async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, senderName = 'Unknown', platform = PLATFORM_WA_DEDICATED, recentMessageIds = null) {
   const contentParts = [];
   const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
   let textBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
 
-  // Early cleanup for pure-attachment sends: WhatsApp/the library often puts the
-  // document filename into .body when there is no user caption/text at all.
-  // We only strip when the *entire* trimmed body is exactly the filename (nothing else).
-  // This ensures that if the user writes other text (even if it happens to contain
-  // the filename), it is preserved.
-  const bodyFilenameHint = msg._data?.filename;
-  if (bodyFilenameHint && typeof textBody === 'string') {
-    const t = textBody.trim();
-    const fn = String(bodyFilenameHint);
-    if (t === fn || t === `[${fn}]`) {
-      textBody = '';
-    }
+  const waFilename = msg._data?.filename;
+  if (waFilename) {
+    textBody = _stripRedundantAttachmentCaption(textBody, [waFilename]);
   }
 
   if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
@@ -637,8 +405,8 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
     textBody = formatWhatsAppPollText(msg, `[Poll] ${textBody}`);
   }
 
-  const recentMessageIds = await _getRecentWhatsAppMessageIds(msg);
-  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup);
+  const recentIds = recentMessageIds || await getRecentWhatsAppMessageIds(msg);
+  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId, recentIds, isGroup, platform);
   if (quotedContent && quotedContent.prefix) {
     textBody = quotedContent.prefix + textBody;
   }
@@ -648,46 +416,65 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false) {
 
   const mediaResult = await processCurrentMedia(msg, userId);
   if (mediaResult) {
-    // Special handling for current-message inline text files: provide the actual content
-    // (via <FileContent>) rather than a bare [Attachment] tag.
-    // Text/code documents on the current message are inlined; attachments from prior
-    // messages use [Attachment] tags in the history context.
     if (mediaResult.skipped && mediaResult.inlineText) {
-      // Replace the tag with the inlined content for text files. Append any real user caption.
       const caption = textBody ? ` ${textBody}` : '';
       textBody = `${mediaResult.inlineText}${caption}`.trim();
     } else if (mediaResult.skipped) {
       const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
       textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
     } else {
-      contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype, {
-        historyPath: mediaResult.syncedPath,
-        historyUserId: userId,
-      }));
+      if (mediaResult.contentParts?.length) {
+        contentParts.push(...mediaResult.contentParts);
+      } else if (mediaResult.buffer) {
+        contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype, {
+          historyPath: mediaResult.syncedPath,
+          historyUserId: userId,
+        }));
+      }
       textBody = `${mediaResult.tag} ${textBody}`.trim();
     }
   } else if (msg.hasMedia) {
-    const tag = mediaTag(null, msg._data?.mimetype);
+    const tag = buildAttachmentTag(null, msg._data?.filename || 'file');
     textBody = `${tag} (file unavailable) ${textBody}`.trim();
   }
 
-  // Post-processing robustness: after tags/inline have been applied, if what remains
-  // in textBody is exactly the (resolved) attachment filename, drop it.
-  // This catches cases where the early hint from msg._data was not present/accurate.
-  // Only exact full-body match (pure attachment, no user text).
-  if (mediaResult && mediaResult.filename && textBody) {
-    const t = textBody.trim();
-    const fn = mediaResult.filename;
-    if (t === fn || t === `[${fn}]`) {
-      textBody = '';
+  if (mediaResult && textBody && !mediaResult.inlineText) {
+    const hints = _attachmentFilenameHints(waFilename, mediaResult.filename, mediaResult.syncedPath);
+    textBody = _stripRedundantAttachmentCaption(textBody, hints);
+    if (mediaResult.tag) {
+      textBody = _stripRedundantFilenameBesideAttachmentTag(textBody, mediaResult.tag, hints);
     }
   }
 
-  if (textBody) {
-    contentParts.unshift({ type: 'text', text: textBody });
+  if (!textBody.trim() && msg.hasQuotedMsg && contentParts.length === 0) {
+    textBody = '[In reply to a message]\n';
+  }
+
+  if (textBody.trim()) {
+    const tsMs = (msg.timestamp || 0) * 1000;
+    contentParts.unshift({ type: 'text', text: formatLabeledUserContent(tsMs, senderName, textBody.trim()) });
   }
 
   return contentParts;
 }
 
-module.exports = { buildWhatsAppHistory, buildIncomingContentParts, processCurrentMedia, sendWhatsAppResponse, extractQuotedMessageContent, _waMessageKey };
+/** True when the message should enter the batch pipeline (incl. quote-only, like Discord). */
+function waMessageHasUsableContent(msg) {
+  if (!msg) return false;
+  if (msg.hasMedia) return true;
+  if (msg.hasQuotedMsg) return true;
+  if (msg.body && String(msg.body).trim()) return true;
+  if (msg.type === 'vcard' || msg.type === 'multi_vcard' || msg.type === 'poll_creation') return true;
+  return false;
+}
+
+module.exports = {
+  buildWhatsAppHistory,
+  buildIncomingContentParts,
+  processCurrentMedia,
+  sendWhatsAppResponse,
+  extractQuotedMessageContent,
+  getRecentWhatsAppMessageIds,
+  waMessageHasUsableContent,
+  _waMessageKey,
+};

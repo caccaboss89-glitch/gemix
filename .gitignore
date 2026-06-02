@@ -11,6 +11,3 @@ src/data/**
 !src/data/skills/
 !src/data/skills/**
 SERVER_SETUP.md
-
-.kiro/
-graphify-out/

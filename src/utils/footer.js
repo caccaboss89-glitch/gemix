@@ -83,4 +83,12 @@ function buildScheduledFooter(createdAt) {
   return `${GEMIX_FOOTER_PREFIX}Messaggio Programmato il ${formatted}`;
 }
 
-module.exports = { addFooter, removeFooter, hasFooter, buildScheduledFooter, getModelDisplayName, hasScheduledFooter, removeScheduledFooter };
+module.exports = {
+  addFooter,
+  removeFooter,
+  hasFooter,
+  buildScheduledFooter,
+  getModelDisplayName,
+  hasScheduledFooter,
+  removeScheduledFooter,
+};

@@ -6,9 +6,8 @@
 // rewritten to public input_file URLs so xAI can fetch and process them
 // server-side (OCR/STT/frames).
 //
-// Images stay as data: URLs for image handling. Does not touch persisted
-// history and does not enforce size limits (those are left to xAI + the
-// handler error path).
+// Images stay as data: URLs. Size/duration limits are enforced when media
+// enters the buffer (platform handlers, read_file) before this rewrite runs.
 
 const fs = require('fs');
 const path = require('path');

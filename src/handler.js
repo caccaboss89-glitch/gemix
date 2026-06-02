@@ -3,8 +3,8 @@
 // Main message handler.
 //
 // One round of conversation looks like this:
-//   1. Resolve identity / memory / RAG context.
-//   2. Touch the per-user/group build workspace activity timestamp.
+//   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
+//   2. Touch the per-user/group build workspace activity timestamp (WA only).
 //   3. Build the messages array: system prompt + chat history + the current
 //      user content. Media parts (PDF, audio, video, plain text) are prepared
 //      as `input_file` parts (xAI fetches them server-side for native
@@ -23,6 +23,7 @@ const { isAdmin } = require('./config/members');
 const {
   MAX_TOOL_ROUNDS,
   PLATFORM_DISCORD,
+  PLATFORM_WA_PERSONAL,
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY,
   MAINTENANCE_USER_MESSAGE,
@@ -37,7 +38,7 @@ const { readMemory } = require('./utils/memoryStore');
 const { cleanAssistantResponse } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
-const { resolveStorageId } = require('./utils/userPaths');
+const { resolveStorageId, resolvePersonalMemoryFileId } = require('./utils/userPaths');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
@@ -73,6 +74,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
       await ctx.discordChannel.send({ content: message });
       log.info(`   ${kind} notification - Discord: ${message}`);
     } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
+      // Always the current WhatsApp conversation (personal pair chat, dedicated DM, or group).
       const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
       if (targetJid) {
         await sendWhatsAppDirect(targetJid, message);
@@ -101,6 +103,22 @@ function extractPlainTextContent(content) {
   return '';
 }
 
+function reloadLongTermMemory(ctx, ui) {
+  if (ctx.platform === PLATFORM_DISCORD) return;
+  const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
+  const isPersonalWa = ctx.platform === PLATFORM_WA_PERSONAL;
+  if (isWhatsAppGroup) {
+    ctx.groupMemory = readMemory('memory_' + getGroupTaskFileId(ctx.groupId));
+    ctx.userMemory = null;
+  } else if (isPersonalWa && ctx.chatId) {
+    ctx.groupMemory = readMemory(resolvePersonalMemoryFileId(ctx.chatId));
+    ctx.userMemory = null;
+  } else {
+    ctx.userMemory = readMemory('memory_' + ui.taskFileId);
+    ctx.groupMemory = null;
+  }
+}
+
 function getReleaseNotifyTarget(ctx, ui) {
   const waJid = ctx.isGroup
     ? ctx.groupId
@@ -115,6 +133,15 @@ function buildMaintenanceReleaseEnabledMessage() {
 
 function buildMaintenanceReleaseAlreadyEnabledMessage() {
   return `${RELEASE_NOTIFY_ALREADY_PREFIX}\n\nPotrai disabilitarle chiedendolo direttamente a GemiX quando tornerà disponibile.`;
+}
+
+const { resolveProfile, toolUnavailableMessage } = require('./config/platformCapabilities');
+
+function _toolNotAvailableMessage(toolName, ctx) {
+  return toolUnavailableMessage(toolName, resolveProfile(ctx), {
+    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
+    isFirstTurn: Boolean(ctx.isFirstTurn),
+  });
 }
 
 /**
@@ -180,25 +207,32 @@ async function handleMessage(ctx) {
       };
     }
 
-    // Memory: per-user (private/dedicated chats) or per-group (WA groups).
-    const memoryFileId = 'memory_' + ui.taskFileId;
     const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
+    const isPersonalWa = ctx.platform === PLATFORM_WA_PERSONAL;
+    const isDiscord = ctx.platform === PLATFORM_DISCORD;
+    const memoryFileId = isDiscord ? null : ('memory_' + ui.taskFileId);
+    const sharedMemoryFileId = isPersonalWa && ctx.chatId
+      ? resolvePersonalMemoryFileId(ctx.chatId)
+      : null;
 
     let userMemory = null;
     let groupMemory = null;
-    if (isWhatsAppGroup) {
-      const groupMemoryFileId = 'memory_' + getGroupTaskFileId(ctx.groupId);
-      groupMemory = readMemory(groupMemoryFileId);
-    } else {
-      userMemory = readMemory(memoryFileId);
+    if (!isDiscord) {
+      if (isWhatsAppGroup) {
+        const groupMemoryFileId = 'memory_' + getGroupTaskFileId(ctx.groupId);
+        groupMemory = readMemory(groupMemoryFileId);
+      } else if (sharedMemoryFileId) {
+        groupMemory = readMemory(sharedMemoryFileId);
+      } else {
+        userMemory = readMemory(memoryFileId);
+      }
     }
 
     ctx.userMemory = userMemory;
     ctx.groupMemory = groupMemory;
 
-    // RAG: server rules context for Discord (Statuto Albertino).
-    if (ctx.platform === PLATFORM_DISCORD) {
-      ctx.ragContext = loadRegolamento();
+    if (isDiscord) {
+      ctx.rulesContext = loadRegolamento();
     }
 
     const userCtx = {
@@ -206,7 +240,7 @@ async function handleMessage(ctx) {
       isAdmin: userIsAdmin,
       member: ui.member,
       taskFileId: ui.taskFileId,
-      memoryFileId,
+      memoryFileId: sharedMemoryFileId || memoryFileId,
       userId: ctx.userId,
       userName: ctx.userName,
       userPhone: ctx.userPhone || null,
@@ -216,10 +250,8 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      // First turn of a Discord thread: used to expose and force the
-      // set_conversation_title tool exactly once. "First" means no assistant
-      // message exists for the thread in the fetched history. The current
-      // user message is already included, so the flag is computed explicitly.
+      // First Discord thread turn: expose and force set_conversation_title once
+      // (no assistant message in fetched history yet).
       isFirstTurn: ctx.platform === PLATFORM_DISCORD
         && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
@@ -237,19 +269,15 @@ async function handleMessage(ctx) {
 
     const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
-    // -- Build workspace activity tracking --
-    // Touch the workspace's last-activity timestamp on every main turn so
-    // the TTL sweeper sees the user is alive across all platforms, not just
-    // when they invoke `build`. The same workspaceId is also used to
-    // surface a <UserWorkspace> listing in the system prompt when the
-    // engineering sub-agent has files in the workspace.
-    const workspaceId = resolveWorkspaceId(ctx);
+    // -- Build workspace activity tracking (WhatsApp only) --
+    // Touch last-activity on each main turn and refresh <UserWorkspace> in the prompt.
+    const workspaceId = isDiscord ? null : resolveWorkspaceId(ctx);
     if (workspaceId) {
       try { touchActivity(workspaceId); }
       catch (e) { log.warn(`touchActivity failed: ${e.message}`); }
     }
     const refreshUserWorkspace = () => {
-      if (!workspaceId) { ctx.userWorkspace = null; return; }
+      if (isDiscord || !workspaceId) { ctx.userWorkspace = null; return; }
       try {
         const listing = listWorkspaceFiles(workspaceId, 30);
         ctx.userWorkspace = listing.total > 0
@@ -266,6 +294,8 @@ async function handleMessage(ctx) {
     };
     refreshUserWorkspace();
 
+    ctx.isFirstTurn = userCtx.isFirstTurn;
+
     const messages = [
       { role: 'system', content: buildSystemPrompt(ctx) },
     ];
@@ -274,34 +304,37 @@ async function handleMessage(ctx) {
     }
     messages.push({ role: 'user', content: ctx.content });
 
-    // -- Media pre-processing (input_file URL conversion) --
-    // Walk all messages once and convert non-image media parts (PDF, audio,
-    // video, plain text) into `input_file` parts backed by the public
-    // attachment tunnel. xAI fetches them server-side and runs OCR / STT /
-    // frame extraction natively.
+    // Drop history files no longer referenced in the chat buffer (tags,
+    // FileContent paths, _historyPath on media parts). Runs before tunnel
+    // registration so prepareInputFiles only exposes files still on disk.
+    try {
+      const historyUserId = resolveStorageId(ctx);
+      if (historyUserId) {
+        if (ctx.historyLoadIncomplete) {
+          log.warn('History load incomplete: reference-based prune skipped');
+          if (isDiscord) {
+            pruneHistory(historyUserId, new Set(), {
+              maxAgeMs: DISCORD_MAX_AGE_MS,
+              ageOnly: true,
+            });
+          }
+        } else {
+          const referenced = collectReferencedHistoryFilenames(ctx.history, ctx.content);
+          const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};
+          pruneHistory(historyUserId, referenced, opts);
+        }
+      }
+    } catch (pruneErr) {
+      log.warn(`pruneHistory failed: ${pruneErr.message}`);
+    }
+
+    // Convert non-image media parts to input_file URLs for xAI native processing.
     try {
       await prepareInputFilesInMessages(messages, {
         ownerKey: workspaceIdToSlug(workspaceId) || resolveStorageId(ctx) || null,
       });
     } catch (e) {
       log.warn(`prepareInputFilesInMessages failed: ${e.message}`);
-    }
-
-    // ── Deterministic history prune ─────────────────────────────────────
-    // Every file in chat history that is no longer referenced from the
-    // current chat buffer is removed (100%, no probabilistic GC). On
-    // Discord a 30-day cap is enforced on attachments even when still
-    // referenced in replies.
-    try {
-      const isDiscord = ctx.platform === PLATFORM_DISCORD;
-      const historyUserId = resolveStorageId(ctx);
-      if (historyUserId) {
-        const referenced = collectReferencedHistoryFilenames(ctx.history, ctx.content);
-        const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};
-        pruneHistory(historyUserId, referenced, opts);
-      }
-    } catch (e) {
-      log.warn(`pruneHistory pre-call failed: ${e.message}`);
     }
 
     const deliveryCtx = {
@@ -368,6 +401,8 @@ async function handleMessage(ctx) {
       // Refresh the workspace listing before each AI call so any file the
       // build sub-agent just produced shows up immediately in <UserWorkspace>.
       refreshUserWorkspace();
+      reloadLongTermMemory(ctx, ui);
+      ctx.isFirstTurn = userCtx.isFirstTurn && !responseCtx.discordTitle;
       messages[0].content = buildSystemPrompt(ctx);
 
       // On the first Discord turn the title-setter tool is forced exactly once
@@ -402,7 +437,7 @@ async function handleMessage(ctx) {
         // Build a Set of tool names the AI is actually allowed to call this
         // round. Any tool name outside this set is rejected with a clear
         // error.
-        const allowedToolNames = new Set(tools.map(t => t.function?.name).filter(Boolean));
+        const allowedToolNames = new Set(roundTools.map(t => t.function?.name).filter(Boolean));
 
         for (const tc of orderedCalls) {
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
@@ -416,7 +451,7 @@ async function handleMessage(ctx) {
               tool_call_id: tc.id,
               content: JSON.stringify({
                 success: false,
-                error: `Tool "${tc.function.name}" is not available in the current context.`,
+                error: _toolNotAvailableMessage(tc.function.name, ctx),
               }),
             });
             continue;
@@ -509,6 +544,7 @@ async function handleMessage(ctx) {
     log.warn(`   Tool-round budget (${MAX_TOOL_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
     let wrapUpText = '';
     try {
+      reloadLongTermMemory(ctx, ui);
       messages[0].content = buildSystemPrompt(ctx);
       const noTitleTools = tools.filter(t => t.function?.name !== SET_CONVERSATION_TITLE_TOOL);
       messages.push({

@@ -1,9 +1,9 @@
 // src/utils/historySync.js
 //
 // Handles persistent storage of user/group chat history files, deterministic
-// pruning of unreferenced attachments, and metadata storage for media
-// descriptions and voice transcriptions. Also manages the recent voice text
-// cache used for WhatsApp voice message handling.
+// pruning of unreferenced attachments, and metadata for GemiX voice
+// transcriptions. Also manages the short-lived voice text cache written when
+// send_voice_message runs (matched to bot voice files in history).
 
 const fs = require('fs');
 const path = require('path');
@@ -12,10 +12,15 @@ const { createLogger } = require('./logger');
 const { sanitizeFilename } = require('./text');
 const { extractAttachmentTagPaths } = require('./media');
 
+const FILE_CONTENT_PATH_RE = /<FileContent\s+path="([^"]+)"/gi;
+
 const log = createLogger('HistorySync');
 
-// Discord-only age cap. WhatsApp deletes purely on chat-history reachability.
-const DISCORD_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// Discord-only age cap on on-disk history attachments. WhatsApp has no age cap
+// (only files not referenced in the current history buffer are removed).
+// After this TTL, files are deleted even if still tagged in history; the next
+// turn re-downloads them when buildDiscordHistory / buildIncoming runs sync.
+const DISCORD_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
 const RECENT_VOICE_CACHE_FILE = path.join(DATA_DIR, 'voiceTextCache.json');
 const RECENT_VOICE_MAX_ENTRIES = 200;
 const RECENT_VOICE_MATCH_TOLERANCE_MS = 20_000;
@@ -162,41 +167,6 @@ function _upsertMetaEntry(meta, historyFilename) {
   return { id, entry: meta[id], normalized };
 }
 
-function getStoredHistoryMediaDescription(userId, historyFilename, expectedKind = null) {
-  if (!userId || !historyFilename) return null;
-  const { metaFile } = getUserHistoryPaths(userId);
-  const normalized = _normalizeHistoryFilename(historyFilename);
-  if (!normalized) return null;
-
-  const meta = _loadMeta(metaFile, userId);
-  for (const entry of Object.values(meta)) {
-    if (_getEntryFilename(entry) !== normalized) continue;
-    if (!entry || typeof entry !== 'object' || !entry.mediaDescription) return null;
-    const desc = entry.mediaDescription;
-    if (expectedKind && desc.kind && desc.kind !== expectedKind) return null;
-    if (typeof desc.text !== 'string' || !desc.text.trim()) return null;
-    return desc.text.trim();
-  }
-  return null;
-}
-
-function storeHistoryMediaDescription(userId, historyFilename, kind, text) {
-  if (!userId || !historyFilename || !kind || !text) return false;
-  const { metaFile } = getUserHistoryPaths(userId);
-  const meta = _loadMeta(metaFile, userId);
-  const target = _upsertMetaEntry(meta, historyFilename);
-  if (!target.id || !target.normalized) return false;
-  meta[target.id] = {
-    ...target.entry,
-    mediaDescription: {
-      kind,
-      text: String(text).trim(),
-      updatedAt: Date.now(),
-    },
-  };
-  return _saveMeta(metaFile, meta, userId);
-}
-
 function getStoredHistoryVoiceTranscription(userId, historyFilename) {
   if (!userId || !historyFilename) return null;
   const { metaFile } = getUserHistoryPaths(userId);
@@ -231,10 +201,26 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
 }
 
 /**
+ * Transcription for GemiX (bot) voice attachments in chat history only.
+ * Reads history_meta first; otherwise matches the short cache written when
+ * send_voice_message runs, then persists into history_meta.
+ * Never used for end-user voice notes.
+ */
+function resolveGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestampMs) {
+  if (!userId || !syncedPath) return null;
+  const stored = getStoredHistoryVoiceTranscription(userId, syncedPath);
+  if (stored) return stored;
+  if (!chatId || !msgTimestampMs) return null;
+  const recent = retrieveRecentVoiceText(chatId, msgTimestampMs);
+  if (!recent) return null;
+  storeHistoryVoiceTranscription(userId, syncedPath, recent);
+  return recent;
+}
+
+/**
  * Save a file to the user's history folder. Handles deduplication by uniqueId.
  *
- * Files are stored as flat files in chat history.
- * Legacy PDF directory entries may still exist on disk from older versions.
+ * Files are stored as flat files under data/users/<id>/history/.
  *
  * @param {string} userId - The unique identifier for the user (e.g. from waJid or discord id)
  * @param {string} uniqueId - A unique ID for the attachment (e.g., Discord attachment ID or WA message ID)
@@ -319,14 +305,14 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
  * filename does not appear in the set of `[Attachment: <name>]`
  * tags the AI is about to see).
  *
- * Optionally also removes files older than `maxAgeMs` (used on Discord to
- * keep at most 30 days of attachments even if they are still referenced
- * via reply quotes).
+ * Optionally also removes files older than `maxAgeMs` (Discord: 4h; WA: none).
+ * Discord re-fetches missing files from the thread when history is rebuilt.
  *
  * @param {string} userId
  * @param {Set<string>|Iterable<string>} referencedFilenames - bare filenames present in the chat buffer (no "history/" prefix)
  * @param {object} [opts]
- * @param {number} [opts.maxAgeMs] - extra age cap (Discord uses 30d; WhatsApp omits)
+ * @param {number} [opts.maxAgeMs] - extra age cap (Discord: 4h via DISCORD_MAX_AGE_MS; WA: none)
+ * @param {boolean} [opts.ageOnly] - when true, delete only files older than maxAgeMs (safe if history load failed)
  * @returns {{deletedCount: number, ageDeletedCount: number, kept: number}}
  */
 function pruneHistory(userId, referencedFilenames, opts = {}) {
@@ -342,6 +328,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
 
   const now = Date.now();
   const maxAgeMs = Number.isFinite(opts.maxAgeMs) ? opts.maxAgeMs : null;
+  const ageOnly = Boolean(opts.ageOnly);
 
   let deletedCount = 0;
   let ageDeletedCount = 0;
@@ -365,7 +352,12 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
 
     let shouldDelete = false;
     let ageDelete = false;
-    if (!referenced.has(refKey) && !referenced.has(entry)) {
+    if (ageOnly) {
+      if (maxAgeMs !== null && (now - stat.mtimeMs) > maxAgeMs) {
+        shouldDelete = true;
+        ageDelete = true;
+      }
+    } else if (!referenced.has(refKey) && !referenced.has(entry)) {
       shouldDelete = true;
     } else if (maxAgeMs !== null && (now - stat.mtimeMs) > maxAgeMs) {
       shouldDelete = true;
@@ -419,36 +411,44 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
 }
 
 /**
- * Extract the bare filenames from every `[Attachment: <file>]` tag
- * found in the provided chat history. Used by the handler to feed pruneHistory.
+ * Collect on-disk history filenames still referenced by the chat buffer
+ * (attachment tags, inline FileContent paths, multimodal _historyPath hints).
  *
  * @param {Array<{content: any}>} historyMsgs
- * @param {any} [currentContent] - current incoming message content (already in scope before AI call)
+ * @param {any} [currentContent] - current turn user content
  * @returns {Set<string>}
  */
 function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
   const out = new Set();
-  const _scan = (text) => {
+  const _addName = (raw) => {
+    if (!raw || typeof raw !== 'string') return;
+    let name = raw.trim().replace(/\\/g, '/');
+    if (name.startsWith('history/')) name = name.slice('history/'.length).trim();
+    if (name) out.add(name);
+  };
+  const _scanText = (text) => {
     if (typeof text !== 'string' || text.length === 0) return;
-    for (const taggedPath of extractAttachmentTagPaths(text)) {
-      let name = taggedPath.trim();
-      if (name.startsWith('history/')) {
-        name = name.slice('history/'.length).trim();
-      }
-      if (name) out.add(name);
+    for (const taggedPath of extractAttachmentTagPaths(text)) _addName(taggedPath);
+    let m;
+    FILE_CONTENT_PATH_RE.lastIndex = 0;
+    while ((m = FILE_CONTENT_PATH_RE.exec(text)) !== null) {
+      _addName(m[1]);
     }
+  };
+  const _scanPart = (part) => {
+    if (!part || typeof part !== 'object') return;
+    if (typeof part.text === 'string') _scanText(part.text);
+    if (typeof part._historyPath === 'string') _addName(part._historyPath);
   };
   const _scanContent = (c) => {
     if (!c) return;
-    if (typeof c === 'string') return _scan(c);
+    if (typeof c === 'string') return _scanText(c);
     if (Array.isArray(c)) {
-      for (const part of c) {
-        if (part && typeof part === 'object' && typeof part.text === 'string') _scan(part.text);
-      }
+      for (const part of c) _scanPart(part);
     }
   };
   if (Array.isArray(historyMsgs)) {
-    for (const m of historyMsgs) _scanContent(m && m.content);
+    for (const msg of historyMsgs) _scanContent(msg && msg.content);
   }
   _scanContent(currentContent);
   return out;
@@ -459,10 +459,7 @@ _loadRecentVoiceEntries();
 module.exports = {
   syncFileToHistory,
   getUserHistoryPaths,
-  getStoredHistoryMediaDescription,
-  getStoredHistoryVoiceTranscription,
-  retrieveRecentVoiceText,
-  storeHistoryMediaDescription,
+  resolveGemixVoiceTranscription,
   storeHistoryVoiceTranscription,
   storeRecentVoiceText,
   pruneHistory,

@@ -12,11 +12,6 @@
 //
 // Concurrency: in-memory mutex per storageId so the read-modify-write
 // cycle is atomic across overlapping tool calls.
-//
-// History: this used to live inside the per-user `.state.json` together
-// with the legacy project state (current_project, locks, crash flags).
-// The cleanup that retired the project sub-system kept the voice limiter
-// intact and moved it here so it stops carrying that baggage.
 
 const fs = require('fs');
 const path = require('path');

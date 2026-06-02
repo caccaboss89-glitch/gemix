@@ -1,20 +1,27 @@
 // src/platforms/whatsapp/personal.js
 //
 // Personal WhatsApp account client (secondary number).
-// Handles QR auth, reconnection, and routes personal 1:1 messages that
-// contain @gemix (groups filtered prior to processing). Delegates to the shared WhatsApp handler + batcher.
+// Admin WhatsApp account: 2-participant chats (admin + one user). GemiX runs only
+// when @gemix is in the message body (admin or user). History/workspace are shared
+// per chat pair (not per caller). History: footer text opens a GemiX block; following
+// attachment-only fromMe messages stay GemiX until the other user writes or admin interrupts.
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const { buildWhatsAppHistory, buildIncomingContentParts, sendWhatsAppResponse, _waMessageKey } = require('./shared');
+const { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } = require('./shared');
+const { rebuildWhatsAppBatchParts } = require('../../utils/batchContentRefresh');
 const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
-const { handleMessage } = require('../../handler');
+
 const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
-const responseLock = require('../../utils/responseLock');
-const { pushMessage, hasPendingBatch } = require('../../utils/messageBatcher');
+const { enqueueBatchedTurn } = require('../../utils/batchIngress');
+const { analyzeBatchSpeakers } = require('../../utils/batchContext');
+
+const { resolvePersonalChatStorageId } = require('../../utils/userPaths');
+const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
+const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
 
 const log = createLogger('WA-PERSONAL');
@@ -127,6 +134,8 @@ async function onPersonalMessage(msg) {
     return;
   }
 
+  // Personal account: GemiX runs only when @gemix appears in this message's body
+  // (either participant). A reply/quote to a GemiX message alone is NOT enough.
   if (!(msg.body || '').toLowerCase().includes('@gemix')) return;
 
   if (msg.fromMe && (msg.body || '').includes('--GemiX •')) return;
@@ -175,32 +184,23 @@ async function onPersonalMessage(msg) {
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
-  // Personal account processes 1:1 chats only (groups filtered in onPersonalMessage before reaching here);
-  // isGroup is hardcoded false as a structural invariant for this platform.
-  const contentParts = await buildIncomingContentParts(msg, chat.id._serialized, phoneJid, false);
-
-  if (contentParts.length === 0) return;
+  // Admin↔user chat: shared history/workspace for the pair (not per-caller phoneJid).
+  if (!waMessageHasUsableContent(msg)) return;
 
   const messageKey = _waMessageKey(msg);
+  if (!messageKey) log.warn('   WA personal message without stable key — may duplicate in history');
   const batchKey = `wa_personal:${chat.id._serialized}`;
 
-  // If a batch is already accumulating for this chat, add to it and return
-  if (hasPendingBatch(batchKey)) {
+  const status = enqueueBatchedTurn({
+    batchKey,
+    entry: { msg, chat, userName, phoneJid, userIdentity, messageKey },
+    handler: _handlePersonalBatch,
+    log,
+    discardLogLabel: chat.id._serialized,
+  });
+  if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);
-    pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, messageKey }, _handlePersonalBatch);
-    return;
   }
-
-  // If GemiX is already responding, discard
-  const lockKey = batchKey;
-  if (responseLock.tryLock(lockKey) === false) {
-    log.warn(`   Ignoring message in chat ${chat.id._serialized}: GemiX is already responding`);
-    return;
-  }
-  const stopLockRenew = responseLock.startAutoRenew(lockKey);
-
-  // Start a new batch
-  pushMessage(batchKey, { contentParts, chat, senderJid, userName, phoneJid, userIdentity, messageKey, stopLockRenew }, _handlePersonalBatch);
 }
 
 /**
@@ -209,96 +209,78 @@ async function onPersonalMessage(msg) {
  */
 async function _handlePersonalBatch(entries) {
   const first = entries[0];
-  const { chat, senderJid, userName, phoneJid, userIdentity, stopLockRenew } = first;
+  const { chat, stopLockRenew } = first;
+  let waPresence = null;
 
-  const lockKey = `wa_personal:${chat.id._serialized}`;
-  let activeStopRenew = stopLockRenew;
-  if (!responseLock.refresh(lockKey)) {
-    if (!responseLock.tryLock(lockKey)) {
-      log.warn(`   Batch discarded for ${chat.id._serialized}: GemiX is already responding`);
-      return;
-    }
-    activeStopRenew = responseLock.startAutoRenew(lockKey);
-  }
-
-  let presence = null;
-  try {
-    // Merge all content parts from all entries
-    const allParts = [];
-    for (const entry of entries) {
-      allParts.push(...entry.contentParts);
-    }
-
-    // Collect keys of messages in this batch/turn to exclude from history (current user turn with tags/inline supplied separately after history)
-    const excludeKeys = new Set(
-      entries.map(e => e.messageKey).filter(Boolean)
-    );
-
-    // Fetch history at fire time (fresher state)
-    let history = [];
-    try {
-      history = await Promise.race([
-        buildWhatsAppHistory(chat, PLATFORM_WA_PERSONAL, phoneJid, excludeKeys.size > 0 ? excludeKeys : null),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('History fetch timeout')), 15000)
-        )
-      ]);
-    } catch (historyErr) {
-      log.warn(`   History fetch failed (${historyErr.message}), proceeding without history`);
-    }
-
-    presence = new WhatsAppPresence(chat);
-    try {
-      await presence.start('typing');
-    } catch { }
-
-    const ctx = {
-      platform: PLATFORM_WA_PERSONAL,
-      isGroup: false,
-      groupId: null,
-      groupName: null,
-      chatId: chat.id._serialized,
-      userId: senderJid,
-      userName,
-      userIdentity,
-      content: allParts.length === 1 && allParts[0].type === 'text'
-        ? allParts[0].text
-        : allParts,
-      history,
-      waJid: phoneJid,
-      presence,
-    };
-
-    const response = await handleMessage(ctx);
-
-    if (response.text) {
-      response.text = removeFooter(response.text);
-      if (!response.systemMessage) {
-        response.text = addFooter(response.text, getModelDisplayName(response.modelUsed));
+  await runTurnPipeline({
+    log,
+    lockKey: `wa_personal:${chat.id._serialized}`,
+    stopLockRenew,
+    entries,
+    discardLogLabel: chat.id._serialized,
+    loadHistory: async ({ entries: ents }) => {
+      const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
+      const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);
+      return fetchHistoryWithTimeout(
+        () => buildWhatsAppHistory(
+          chat,
+          PLATFORM_WA_PERSONAL,
+          historyStorageId,
+          excludeKeys.size > 0 ? excludeKeys : null,
+        ),
+        log,
+        'WA-PERSONAL',
+      );
+    },
+    prepareSession: async () => {
+      waPresence = new WhatsAppPresence(chat);
+      try { await waPresence.start('typing'); } catch { }
+      return { stop: () => waPresence.stop() };
+    },
+    buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
+      const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);
+      await rebuildWhatsAppBatchParts(ents, {
+        chat,
+        historyStorageId,
+        isGroup: false,
+        platform: PLATFORM_WA_PERSONAL,
+      });
+      const lat = latest || ents[0];
+      const { multiSpeaker } = analyzeBatchSpeakers(ents, PLATFORM_WA_PERSONAL);
+      return {
+        platform: PLATFORM_WA_PERSONAL,
+        isGroup: false,
+        groupId: null,
+        groupName: null,
+        chatId: chat.id._serialized,
+        userId: lat.phoneJid,
+        userName: lat.userName,
+        userIdentity: lat.userIdentity,
+        content: mergeBatchContentParts(ents),
+        history,
+        historyLoadIncomplete,
+        batchMultiSpeaker: multiSpeaker,
+        waJid: lat.phoneJid,
+        presence: waPresence,
+      };
+    },
+    transformResponse: (response) => {
+      if (response.text) {
+        response.text = removeFooter(response.text);
+        if (!response.systemMessage) {
+          response.text = addFooter(response.text, getModelDisplayName(response.modelUsed));
+        }
       }
-    }
-
-    try {
-      log.info(`\nSending response...`);
+      return response;
+    },
+    deliver: async (_ctx, response) => {
       await sendWhatsAppResponse(chat, response);
-      log.info(`   Message sent`);
-    } catch (err) {
-      log.error(`\nError sending response:`);
-      log.error(`   ${err.message}`);
-      try {
-        // Dynamic require for lazy loading on error path only (avoids pulling
-        // admin notifier into the hot path for every message).
-        const { notifyAdmin } = require('../../utils/adminNotifier');
-        await notifyAdmin('WA Personal Chat Delivery', `Failed to send response to chat ${chat.id._serialized}: ${err.message}`);
-      } catch (adminErr) {
-        log.error(`Failed to notify admin: ${adminErr.message}`);
-      }
-    }
-  } finally {
-    try { if (typeof activeStopRenew === 'function') activeStopRenew(); } catch { }
-    try { responseLock.unlock(lockKey); } catch { }
-    try { if (presence) await presence.stop(); } catch { }
-  }
+    },
+    onDeliverError: async () => {
+      const { notifyAdmin } = require('../../utils/adminNotifier');
+      await notifyAdmin('WA Personal Chat Delivery', `Failed to send response to chat ${chat.id._serialized}`);
+    },
+  });
 }
 
 module.exports = { initPersonalWhatsApp };

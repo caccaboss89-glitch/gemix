@@ -6,7 +6,7 @@
 // (for email/wa), the main execution switch, and unified error handling with
 // admin notification on uncaught failures. All individual tools are required here.
 
-const { isActiveMemberOnlyTool, validateToolArgs } = require('../ai/tools');
+const { isActiveMemberOnlyTool, isToolAllowedForUser, validateToolArgs } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
 const { generateImage, generateVideo } = require('./imagineGenerator');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
@@ -31,11 +31,12 @@ const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
+const { resolveProfile, toolUnavailableMessage } = require('../config/platformCapabilities');
 const { createLogger } = require('../utils/logger');
 const { storeRecentVoiceText } = require('../utils/historySync');
 const { toWhatsAppMediaArgs, toEmailAttachment, attachmentSize } = require('../utils/attachments');
 const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
-const { ensureUserSkeleton, resolveStorageId } = require('../utils/userPaths');
+
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/voiceCounter');
 const { MessageMedia } = require('whatsapp-web.js');
@@ -126,6 +127,16 @@ function _resolveTargetEmail(args, userCtx) {
 // identical results and wastes a round trip.
 const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'web_x_search', 'generate_image', 'generate_video', 'build']);
 
+function platformToolBlockReason(toolName, userCtx) {
+  if (!isToolAllowedForUser(toolName, userCtx)) {
+    return toolUnavailableMessage(toolName, resolveProfile(userCtx), {
+      isActiveMember: Boolean(userCtx.isActiveMember),
+      isFirstTurn: Boolean(userCtx.isFirstTurn),
+    });
+  }
+  return null;
+}
+
 /**
  * Execute a tool call and return the result.
  * Validates permissions, executes the tool, and collects responses/attachments.
@@ -190,6 +201,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     };
   }
 
+  const platformBlock = platformToolBlockReason(name, userCtx);
+  if (platformBlock) {
+    return {
+      toolCallId: toolCall.id,
+      result: JSON.stringify({ success: false, error: platformBlock }),
+    };
+  }
+
   let result;
 
   try {
@@ -237,9 +256,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             finalNames.push(finalName);
           }
           searchResult.image_filenames = finalNames;
-          searchResult.images_note = `${finalNames.length} cited image(s) were added to the delivery buffer, in the order referenced: `
-            + `${finalNames.join(', ')}. Refer to them naturally; do not paste URLs or Markdown image syntax. `
-            + `You may pass any of these filenames as a reference_image to generate_image/generate_video.`;
+          const { resolveProfile, buildWebSearchImagesNote } = require('../config/platformCapabilities');
+          searchResult.images_note = buildWebSearchImagesNote(finalNames, resolveProfile(userCtx));
         }
         // Strip internal fields before returning to the AI (not part of the schema).
         const { _stats: _ignored, _images: _ignored2, ...searchResultClean } = searchResult;
@@ -702,4 +720,4 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
   return { toolCallId: toolCall.id, result: finalResult };
 }
 
-module.exports = { executeTool, resetVoiceCount, getVoiceCount, incrementVoiceCount, getVoiceLimitChatKey: _getVoiceLimitChatKey };
+module.exports = { executeTool, resetVoiceCount, getVoiceLimitChatKey: _getVoiceLimitChatKey };

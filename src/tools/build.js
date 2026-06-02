@@ -27,7 +27,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { PLATFORM_DISCORD } = require('../config/constants');
 const { resolveWorkspaceId } = require('../utils/workspaceId');
+const { resolveProfile, toolUnavailableMessage, TOOL } = require('../config/platformCapabilities');
 const {
   ensureWorkspace,
   stageAttachmentBuffer,
@@ -202,6 +204,12 @@ function _mimeFromExt(ext) {
  * @returns {Promise<object>}
  */
 async function buildTool(args, userCtx, responseCtx) {
+  if (userCtx.platform === PLATFORM_DISCORD) {
+    return {
+      success: false,
+      error: toolUnavailableMessage(TOOL.BUILD, resolveProfile(userCtx)),
+    };
+  }
   const prompt = args && typeof args.prompt === 'string' ? args.prompt.trim() : '';
   if (!prompt) {
     return { success: false, error: 'Missing required argument "prompt".' };

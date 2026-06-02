@@ -19,16 +19,11 @@ const { mediaToContentPart } = require('../utils/media');
 const { ensureUserSkeleton, resolveStorageId, getHistoryDir } = require('../utils/userPaths');
 const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
 const { createLogger } = require('../utils/logger');
+const { isNonReadableExt, mainReadFileBlockedMessage } = require('../config/nonReadableExts');
+const { MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S, isAudioOverDurationLimit, isVideoOverDurationLimit } = require('../utils/mediaIngressLimits');
+const { getMediaDurationSec } = require('../utils/mediaDuration');
 
 const log = createLogger('ReadFileTool');
-
-// Binary archives the model cannot inspect directly. We surface a clear
-// refusal instead of silently failing.
-const NON_READABLE_EXTS = new Set([
-  '.exe', '.dll', '.so', '.bin', '.iso', '.dmg',
-  '.zip', '.tar', '.gz', '.7z', '.rar', '.jar',
-  '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt',
-]);
 
 const MAX_TEXT_BYTES = 50 * 1024;
 const MAX_IMAGE_READS = 10;
@@ -118,8 +113,8 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   const ext = path.extname(abs).toLowerCase();
   const fileSize = stat.size;
 
-  if (NON_READABLE_EXTS.has(ext)) {
-    return { success: false, error: `Files with extension "${ext}" cannot be read directly. Delegate the task to the build sub-agent (which can run scripts on the file).` };
+  if (isNonReadableExt(ext)) {
+    return { success: false, error: mainReadFileBlockedMessage(ext, userCtx.platform) };
   }
 
   // -- Images --------------------------------------------------------------
@@ -148,11 +143,25 @@ async function readFileTool(filePath, userCtx, responseCtx) {
       const maxMins = Math.round(MAX_AUDIO_BYTES / (16 * 1024 * 60));
       return { success: false, error: `Audio file exceeds size limit (max ~${maxMins} minutes).` };
     }
+    const audioDur = await getMediaDurationSec(fs.readFileSync(abs), ext);
+    if (isAudioOverDurationLimit(audioDur)) {
+      return {
+        success: false,
+        error: `Audio exceeds the ${MAX_AUDIO_DURATION_S}s limit (${Math.round(audioDur)}s). Tell the user the clip is too long for native playback in chat.`,
+      };
+    }
     return _buildInputFilePart(abs, displayPath, AUDIO_MIME[ext]);
   }
   if (VIDEO_EXTS.includes(ext)) {
     if (fileSize > MAX_VIDEO_BYTES) {
       return { success: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max).` };
+    }
+    const videoDur = await getMediaDurationSec(fs.readFileSync(abs), ext);
+    if (isVideoOverDurationLimit(videoDur)) {
+      return {
+        success: false,
+        error: `Video exceeds the ${MAX_VIDEO_DURATION_S}s limit (${Math.round(videoDur)}s). Tell the user the clip is too long for native playback in chat.`,
+      };
     }
     return _buildInputFilePart(abs, displayPath, VIDEO_MIME[ext]);
   }

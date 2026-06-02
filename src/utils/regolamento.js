@@ -1,8 +1,8 @@
 // src/utils/regolamento.js
 //
 // Single-source loader for the Discord server rules (Statuto Albertino).
-// The file is small (~24KB ≈ 6k tokens) so we inject it full-context in
-// the Discord system prompt instead of running an embedding-based RAG.
+// The file is small (~24KB ≈ 6k tokens) so it is injected in full into the
+// Discord system prompt (<RulesContext>), not exposed as a tool.
 //
 // Cached in-memory after the first read; the underlying file rarely
 // changes and a manual restart picks up edits.

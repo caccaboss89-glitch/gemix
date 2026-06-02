@@ -37,10 +37,7 @@ const {
   GEMIX_SANDBOX_PROXY_PORT,
 } = require('../config/env');
 const { SKILLS_DIR } = require('../utils/userPaths');
-const {
-  workspaceIdToSlug,
-  getBuildWorkspacePath,
-} = require('../utils/workspaceId');
+const { workspaceIdToSlug } = require('../utils/workspaceId');
 const { ensureWorkspace } = require('./buildWorkspace');
 const { createLogger } = require('../utils/logger');
 

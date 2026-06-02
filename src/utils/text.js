@@ -169,6 +169,21 @@ function cleanAssistantResponse(text) {
  * @param {string} text
  * @returns {string} Cleaned text
  */
+/**
+ * Prefix user message text for LLM context (history and current turn).
+ * @param {number} timestampMs - Unix ms
+ * @param {string} senderName - Display name
+ * @param {string} textBody - Message body (without prefix)
+ * @returns {string}
+ */
+function formatLabeledUserContent(timestampMs, senderName, textBody) {
+  if (textBody == null || !String(textBody).trim()) return textBody || '';
+  const { formatTimestamp } = require('./time');
+  const ts = formatTimestamp(timestampMs);
+  const name = (senderName || 'Unknown').trim() || 'Unknown';
+  return `[${ts}] ${name}: ${textBody}`;
+}
+
 function cleanIncomingText(text) {
   if (!text || typeof text !== 'string') return '';
   // Lazy require to avoid circular dependencies
@@ -184,4 +199,17 @@ function cleanIncomingText(text) {
   return cleaned.trim();
 }
 
-module.exports = { sanitizeFilename, stripVoiceTags, normalizeMarkdown, stripHistoryPrefixes, stripSystemMessages, cleanAssistantResponse, cleanIncomingText };
+/** Prefix prepended when a quoted message is outside the MAX_HISTORY window. */
+const REPLY_OUTSIDE_HISTORY_PREFIX = '[In reply to: (message outside recent history)]\n';
+
+module.exports = {
+  sanitizeFilename,
+  stripVoiceTags,
+  normalizeMarkdown,
+  stripHistoryPrefixes,
+  stripSystemMessages,
+  cleanAssistantResponse,
+  cleanIncomingText,
+  formatLabeledUserContent,
+  REPLY_OUTSIDE_HISTORY_PREFIX,
+};
