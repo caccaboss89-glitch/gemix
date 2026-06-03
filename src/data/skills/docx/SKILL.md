@@ -23,6 +23,17 @@ For reports, memos with visuals, covers, and product sheets, **embed images**
 files, your renders, or web search. After adding images, run `render_doc.py` and
 `read_file` the JPEG grid to catch overflow or bad placement.
 
+## Pitfalls (read before DELIVER)
+
+- **Illustrated reports** (sport, history, product…): ≥1 `ImageRun` unless user
+  asked text-only. No photos in `/workspace/` → `web_x_search` with
+  `search_images=true`. Before `DELIVER`, `inspect_docx.py` must not show
+  `Inline images/shapes: 0`.
+- **TOC**: manual index (plain paragraphs), not `TableOfContents` alone (raw
+  `TOC \\h` until Word updates). If you used a TOC field, one LibreOffice pass—
+  no Python TOC rewrite loops.
+- Never `convert_doc.py --to docx` on a file already `.docx`.
+
 A `.docx` is a ZIP of XML parts; a `.dotx` is a Word template, structurally the
 same. This skill uses a small, deliberate toolchain — pick by task:
 

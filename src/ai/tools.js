@@ -545,15 +545,14 @@ function buildBuildTool(isGroup) {
   return makeTool({
     name: 'build',
     description:
-      'Hand a build/code/document task to the engineering sub-agent. '
-      + `Persistent isolated workspace for ${scope} (4h inactivity TTL, 500 MB). `
-      + 'Call at most once per round — wait for the result before delegating again. '
-      + 'Also use build when the user asks for source/scripts/config from a recent build deliverable: prompt the sub-agent to list &lt;BuildWorkspace&gt; files still on disk and return them (do not invent paths or paste fake attachment tags). '
-      + 'If you need a specific asset (image/video/song) inside the build task, generate it FIRST in the main loop, then pass it via attachments[].',
+      'Delegate to engineering sub-agent (web_x_search + shell + skills inside). Brief prompt only — it researches and builds. '
+      + `Workspace for ${scope} (4h TTL, 500 MB). Once per round. `
+      + 'Re-fetch recent build files via &lt;BuildWorkspace&gt; list/deliver. '
+      + 'Generate image/video/song here first if the build needs them, then attachments[].',
     properties: {
       prompt: {
         type: 'string',
-        description: 'Detailed task instructions. Include desired output format, constraints, and how each attached file should be used. The sub-agent works from the provided prompt and workspace state only.',
+        description: 'What to deliver, format, constraints. Brief — sub-agent researches on its own.',
       },
       attachments: {
         type: 'array',

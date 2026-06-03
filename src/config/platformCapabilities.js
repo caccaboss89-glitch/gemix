@@ -247,7 +247,7 @@ function buildToolUsageLines(profile, opts = {}) {
   }
   if (has(TOOL.BUILD)) {
     lines.push(
-      '- build: create/edit deliverables, shell, skills, multi-step work. Pass assets via attachments[] when needed; returns text + files.',
+      '- build: brief prompt — sub-agent researches internally; skip web_x_search before build for file deliverables.',
       '- build (again): user wants sources/scripts from a recent build → one build call to list/deliver files still in the workspace (see &lt;BuildWorkspace&gt;); never fake [Attachment: …] in your reply—only files returned by build or in this turn\'s buffer ship.',
     );
   }
@@ -281,9 +281,7 @@ function buildCapabilitiesLines(profile, opts = {}) {
       '- Image search: real photos/illustrations on a topic (via web_x_search with search_images).',
     );
     if (has(TOOL.BUILD)) {
-      lines.push(
-        '- Research → file: turn search hits or public pages into a brief, table, or spreadsheet deliverable (web_x_search then build).',
-      );
+      lines.push('- Research → file: build (sub-agent researches).');
     }
   }
   if (has(TOOL.GENERATE_IMAGE) || has(TOOL.GENERATE_VIDEO)) {
