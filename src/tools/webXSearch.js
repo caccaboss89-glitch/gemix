@@ -2,8 +2,8 @@
 //
 // Single research tool, two gears, one code path:
 //
-//   - full_team=false (default): a single fast reasoning model
-//     (FAST_RESEARCH_MODEL, e.g. grok-4.20-non-reasoning-latest) runs web_search
+//   - full_team=false (default): a single fast model (FAST_RESEARCH_MODEL,
+//     e.g. grok-4.3-latest with reasoning effort low) runs web_search
 //     and x_search server-side. Quick lookups, no "consulting the team"
 //     banner. This is the everyday gear.
 //   - full_team=true: the grok-4.20-multi-agent team (4 agents) orchestrates
@@ -369,12 +369,8 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
     tools: _buildResearchTools(searchImages),
   };
 
-  // reasoning.effort is only supported by multi-agent and grok-4.3 models.
-  // The fast reasoning model (grok-4.20-non-reasoning-latest) rejects the param
-  // entirely with HTTP 400 - omit it for that gear.
-  if (fullTeam) {
-    body.reasoning = { effort };
-  }
+  // reasoning.effort: team uses medium; fast gear uses low on grok-4.3 (env default).
+  body.reasoning = { effort };
 
   logApiRequest(model, RESPONSES_URL, body);
   log.info(`   research call -> ${model} (${fullTeam ? 'team' : 'fast'}, images=${searchImages}, input: ${content.length} chars)`);
@@ -396,7 +392,7 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
-      const short = errBody.startsWith('<!') ? 'Cloudflare error' : errBody.substring(0, 500);
+      const short = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
       throw new Error(`HTTP ${res.status}: ${short}`);
     }
 

@@ -237,7 +237,7 @@ function buildToolUsageLines(profile, opts = {}) {
       '- Buffered files (from generate_image, web_x_search images, music_creator, ...) ship automatically with your reply in the current chat.',
     );
   }
-  lines.push('- Use bug_report if a tool error did NOT state the Admin was already notified, then inform the user.');
+  lines.push('- Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or problems encountered, then inform the user.');
   if (has(TOOL.UPDATE_MEMORY)) {
     lines.push('- Use update_memory for long-term preferences. Never store transient context (current task, session state, temporary data).');
   }

@@ -21,6 +21,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { createLogger } = require('./logger');
 const { mimeForExtension } = require('../config/mimeExtensions');
+const { getPublicBaseUrl } = require('./publicTunnelUrl');
 const env = require('../config/env');
 const {
   DATA_DIR,
@@ -182,15 +183,13 @@ function registerTempFile(filePath, originalName, opts = {}) {
       requestCount: 0,
     });
 
-    // Build URL: use env variable GEMIX_PUBLIC_URL if available, else fallback
-    let publicUrl = env.GEMIX_PUBLIC_URL || 'http://localhost:9998';
+    const publicUrl = getPublicBaseUrl();
     if (publicUrl === 'http://localhost:9998') {
-      log.warn(`GEMIX_PUBLIC_URL not set - temp links will be: ${publicUrl} (may not be accessible externally)`);
+      log.warn(`No public tunnel URL - temp links will be ${publicUrl} (not reachable by xAI)`);
     }
-    if (publicUrl.endsWith('/')) publicUrl = publicUrl.slice(0, -1);
     const url = `${publicUrl}/temp/${token}/${encodeURIComponent(finalName)}`;
 
-    log.info(`Registered temp file: ${finalName} (${stat.size} bytes, mime=${mimetype}, token=${token.slice(0, 8)}..., expires in ${expiresInMinutes}min)`);
+    log.info(`Registered temp file: ${finalName} (${stat.size} bytes, mime=${mimetype}, token=${token}, expires in ${expiresInMinutes}min, url=${url})`);
 
     return {
       token,

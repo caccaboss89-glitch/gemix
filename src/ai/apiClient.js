@@ -1,8 +1,8 @@
 // src/ai/apiClient.js
 //
 // Centralized API client for all LLM calls (Grok via Hermes).
-// Provides retry + timeout logic, structured request/response logging
-// with PII redaction, and log directory quota enforcement.
+// Provides retry + timeout logic, structured request/response logging,
+// and log directory quota enforcement.
 // Responses API path (callResponsesModel).
 
 const fs = require('fs');
@@ -18,61 +18,6 @@ const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour
 const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
 
 const crypto = require('crypto');
-
-// -- Redaction helpers -----------------------------------------------------
-//
-// We log every API request/response to disk for debugging. Without redaction
-// these files contain user PII (emails, phone numbers, names), long text,
-// tunnel URLs, and command strings that can include paths
-// or file contents. The redactor walks the body in-place (on a deep clone)
-// PII in free-text fields is still masked; full payloads are kept for debugging.
-
-const _EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-const _WA_JID_RE = /\b\d{8,15}@(?:c|s)\.us\b/g;
-const _PHONE_RE = /\b\+?\d{8,15}\b/g;
-
-function _redactStringPii(s) {
-  if (typeof s !== 'string' || s.length === 0) return s;
-  return s
-    .replace(_EMAIL_RE, '[REDACTED_EMAIL]')
-    .replace(_WA_JID_RE, '[REDACTED_JID]')
-    .replace(_PHONE_RE, (m) => (m.length >= 8 ? '[REDACTED_PHONE]' : m));
-}
-
-function _redactTunnelUrl(url) {
-  if (typeof url !== 'string' || !url) return url;
-  try {
-    const u = new URL(url);
-    return `${u.origin}${u.pathname}?[tunnel]`;
-  } catch {
-    return url.length > 40 ? `${url.slice(0, 24)}…[tunnel]` : url;
-  }
-}
-
-function _redactValue(value, key = '') {
-  if (value == null) return value;
-  if (key === 'file_url' && typeof value === 'string') {
-    return _redactTunnelUrl(value);
-  }
-  if (typeof value === 'string') {
-    return _redactStringPii(value);
-  }
-  if (Array.isArray(value)) return value.map(v => _redactValue(v));
-  if (typeof value === 'object') {
-    const out = {};
-    for (const k of Object.keys(value)) out[k] = _redactValue(value[k], k);
-    return out;
-  }
-  return value;
-}
-
-function _redactEntry(entry) {
-  try {
-    return _redactValue(entry);
-  } catch {
-    return entry;
-  }
-}
 
 /**
  * Enforce a total size quota on the log directory by deleting the oldest
@@ -166,10 +111,9 @@ function extractAttachmentsFromMessages(messages) {
         type: part.type,
       };
       if (part.type === 'input_file' && part.file_url) {
-        entry.file_url = typeof part.file_url === 'string' ? _redactTunnelUrl(part.file_url) : null;
-        entry.payloadHint = 'tunnel_url';
+        entry.file_url = part.file_url;
       } else if (part.type === 'image_url' && part.image_url?.url) {
-        entry.payloadHint = part.image_url.url.startsWith('http') ? 'url' : 'inline';
+        entry.image_url = part.image_url.url;
       }
       attachments.push(entry);
     });
@@ -185,7 +129,7 @@ function _pushResponsesPartAttachment(attachments, itemIndex, part, partIndex) {
       inputIndex: itemIndex,
       partIndex,
       type: 'input_image',
-      payloadHint: typeof part.image_url === 'string' && part.image_url.startsWith('http') ? 'url' : 'inline',
+      image_url: part.image_url,
     });
     return;
   }
@@ -194,8 +138,7 @@ function _pushResponsesPartAttachment(attachments, itemIndex, part, partIndex) {
       inputIndex: itemIndex,
       partIndex,
       type: 'input_file',
-      file_url: typeof part.file_url === 'string' ? _redactTunnelUrl(part.file_url) : null,
-      payloadHint: 'tunnel_url',
+      file_url: part.file_url,
     });
   }
 }
@@ -230,14 +173,14 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
     _enforceLogDirQuota();
     const now = new Date().toISOString();
     const requestAttachments = extractAttachmentsFromRequestBody(body);
-    const entry = _redactEntry({
+    const entry = {
       timestamp: now,
       model: modelName,
       apiUrl,
       requestBody: body,
       requestAttachments,
       ...extra,
-    });
+    };
     const serialized = JSON.stringify(entry, null, 2);
     const filePath = _getLogFilePath('api-request', now);
     fs.writeFileSync(filePath, serialized);
@@ -254,13 +197,13 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
     _enforceLogDirQuota();
     const now = new Date().toISOString();
     const responseLogFile = _getLogFilePath('api-response', now);
-    const entry = _redactEntry({
+    const entry = {
       timestamp: now,
       model: modelName,
       apiUrl,
       responseBody,
       ...extra,
-    });
+    };
     const serialized = JSON.stringify(entry, null, 2);
     fs.writeFileSync(responseLogFile, serialized);
     return responseLogFile;
@@ -301,7 +244,7 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) 
 
       if (!res.ok) {
         const errBody = await res.text();
-        const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody.substring(0, 500);
+        const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
 
@@ -364,7 +307,7 @@ async function callResponsesModel(modelName, apiUrl, body, apiKey, logExtra = {}
   if (!data || (!Array.isArray(data.output) && typeof data.output_text !== 'string')) {
     log.error(`   Malformed ${modelName} response (Responses API):`);
     log.error(`      output: ${typeof data?.output} | output_text: ${typeof data?.output_text}`);
-    log.error(`      full response: ${JSON.stringify(data).substring(0, 500)}`);
+    log.error(`      full response: ${JSON.stringify(data)}`);
 
     if (data?.error) {
       throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);

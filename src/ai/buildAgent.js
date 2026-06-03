@@ -438,7 +438,7 @@ async function _runToolCall(toolCall, ctx) {
   try { parsedArgs = JSON.parse(toolCall.function.arguments || '{}'); }
   catch { /* leave empty */ }
 
-  log.info(`   build tool: ${name} args=${JSON.stringify(parsedArgs).slice(0, 500)}`);
+  log.info(`   build tool: ${name} args=${JSON.stringify(parsedArgs)}`);
   switch (name) {
     case 'write_file':    return _executeWriteFile(ctx.workspaceId, parsedArgs);
     case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);

@@ -328,24 +328,12 @@ async function handleMessage(ctx) {
 
     const runToolCall = async (tc) => {
       try {
-        let argsPreview = '';
-        try {
-          const parsed = JSON.parse(tc.function.arguments || '{}');
-          argsPreview = JSON.stringify(parsed).slice(0, 1000);
-        } catch {
-          argsPreview = String(tc.function.arguments || '').slice(0, 1000);
-        }
-        log.info(`   Executing: ${tc.function.name} args=${argsPreview}`);
+        log.info(`   Executing: ${tc.function.name} args=${tc.function.arguments || '{}'}`);
         const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, tools);
-        let resultPreview;
-        if (Array.isArray(result)) {
-          resultPreview = `multimodal[${result.length}] parts=${result.map(p => p.type).join(',')}`;
-        } else if (typeof result === 'string') {
-          resultPreview = `text(${result.length}) ${result.slice(0, 1000).replace(/\s+/g, ' ')}`;
-        } else {
-          resultPreview = typeof result;
-        }
-        log.info(`   Result: ${resultPreview}`);
+        const resultLog = Array.isArray(result) || typeof result === 'object'
+          ? JSON.stringify(result)
+          : String(result ?? '');
+        log.info(`   Result: ${resultLog}`);
         return {
           role: 'tool',
           tool_call_id: toolCallId,
