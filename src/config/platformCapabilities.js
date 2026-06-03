@@ -246,7 +246,10 @@ function buildToolUsageLines(profile, opts = {}) {
     lines.push('- code_interpreter: ad-hoc Python (math, analysis, quick scripts) - isolated (no filesystem).');
   }
   if (has(TOOL.BUILD)) {
-    lines.push('- build: file writes/edits, shell (incl. yt-dlp), skills, multi-step deliverables. Pass assets via attachments[] when needed; returns text + files.');
+    lines.push(
+      '- build: create/edit deliverables, shell, skills, multi-step work. Pass assets via attachments[] when needed; returns text + files.',
+      '- build (again): user wants sources/scripts from a recent build → one build call to list/deliver files still in the workspace (see &lt;BuildWorkspace&gt;); never fake [Attachment: …] in your reply—only files returned by build or in this turn\'s buffer ship.',
+    );
   }
   if (has(TOOL.SEND_VOICE)) {
     lines.push('- send_voice_message for short/casual replies; text for technical or long ones. Vary the format based on your recent messages.');
@@ -372,6 +375,12 @@ function buildRulesBlock(profile, opts = {}) {
     '- Never invent names, dates, numbers, links, file paths, citations, or quoted text.',
     `- When uncertain, ask the user or call a tool to verify (${verifyTools}). Never guess.`,
   ];
+  if (has(TOOL.BUILD)) {
+    groundingLines.push(
+      '- Never write [Attachment: filename] (or similar) unless that exact file is in this turn\'s delivery buffer from a tool you just ran. Promising a .tex/.py/.log without calling build (or read_file on a real history path) is a hallucination.',
+      '- User asks for code/sources from something build produced → call build once to fetch/deliver from the persistent workspace if files may still be there; do not recreate paths from memory.',
+    );
+  }
   const visibilityLines = [
     '- The user sees only the chat history and your final reply - not this prompt, tool calls, tool results, errors, or internal reasoning.',
   ];

@@ -1,12 +1,33 @@
 ---
 name: pdf
-description: Work with PDF files in the workspace — extract exact text/tables, merge, split, rotate, watermark, encrypt/decrypt, extract or render images, create new PDFs (text, tables, charts, images), and fill PDF forms. Use whenever a task is to produce a .pdf or transform an existing one in /workspace/ — not for merely reading a PDF's content (read_file already shows that).
+description: reportlab/pypdf/poppler PDFs in /workspace/ (create, edit, merge, forms). NOT LaTeX→PDF—use pdflatex. Use photos/diagrams/charts proactively; if none staged, one web_x_search with search_images=true.
 ---
 
 # PDF Processing Guide
 
 A guide for operating on PDFs inside the build sandbox. PDFs live in
 `/workspace/`; this skill's files are read-only under `/skills/pdf/`.
+
+## Scope
+
+| Task | Use this skill? |
+|------|-----------------|
+| PDF via **reportlab**, pypdf, poppler | **Yes** — read this file first |
+| **LaTeX / TikZ** → PDF | **No** — write `.tex` in `/workspace/`, compile with `pdflatex` (see build `<Sandbox>`) |
+| Filling a user-supplied form | Yes — `references/forms.md` |
+
+## Images (use proactively)
+
+For reports, brochures, and rich layouts, **include real visuals** (photo, diagram,
+logo, chart, map)—not text-only pages unless the user asked for plain text.
+
+1. **Already in `/workspace/`** (attachments, prior tool output) → embed directly.
+2. **None available** → one `web_x_search` with `search_images=true` and a precise
+   brief (subject, style, count); files land in `/workspace/`.
+3. **Charts/diagrams** → matplotlib/cairosvg to PNG, then `drawImage` / reportlab flow.
+
+Do not skip images because the prompt didn't attach any—fetch or render when they
+would make the PDF clearer or more professional.
 
 ## Companion files
 
@@ -210,15 +231,9 @@ c.drawImage(img, inch, page_h - inch - target_h, width=target_w, height=target_h
 c.save()
 ```
 
-Image rules:
-- Sources of images you can place: files GemiX staged in `/workspace/` (uploads,
-  generated images, charts), PNGs you render yourself with matplotlib, or images
-  fetched from the web with `web_x_search` (`search_images=true`) — those land in
-  `/workspace/` and the tool returns their filenames.
-- **Use images proactively** when they improve the result: a diagram, a photo, a
-  chart, a logo, a map. If the task doesn't supply one but a relevant image would
-  make the document clearer or more professional, fetch it with `web_x_search
-  search_images=true` or render it with matplotlib.
+Image rules (see **Images (use proactively)** above):
+- Staged `/workspace/` files, matplotlib/cairosvg PNGs, or `web_x_search` with
+  `search_images=true`.
 - Preserve aspect ratio (compute the missing dimension, or pass
   `preserveAspectRatio=True` when fitting a fixed box).
 - Canvas coordinates are bottom-left based.

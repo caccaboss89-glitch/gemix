@@ -1,6 +1,6 @@
 ---
 name: docx
-description: Work with Word documents in the workspace — create, read, edit, or fill .docx/.dotx files; produce reports, letters, memos, templates, contracts with headings, tables of contents, footnotes, page numbers, headers/footers, multi-column layouts, tables and images; do find-and-replace in a Word file; fill a Word template (placeholders, loops, conditionals); accept tracked changes; or convert .doc/.dotx to .docx. Use whenever a Word document is the primary input or output in /workspace/. Do NOT use for PDFs, spreadsheets, or plain-text/Markdown deliverables, even if they contain prose.
+description: Word .docx/.dotx in /workspace/ (create, edit, templates). NOT PDF/LaTeX/plain Markdown. Embed photos/diagrams/charts proactively; if none staged, one web_x_search with search_images=true.
 ---
 
 # Word Document Guide
@@ -8,6 +8,20 @@ description: Work with Word documents in the workspace — create, read, edit, o
 A guide for creating, editing, and inspecting Word documents inside the build
 sandbox. Files live in `/workspace/` (read/write); this skill's files are
 read-only under `/skills/docx/`.
+
+## Images (use proactively)
+
+For reports, memos with visuals, covers, and product sheets, **embed images**
+(photo, diagram, logo, chart)—not text-only unless the user asked for plain text.
+
+1. **Already in `/workspace/`** (attachments, charts from earlier steps) → `ImageRun`.
+2. **None available** → one `web_x_search` with `search_images=true`; files land in
+   `/workspace/`.
+3. **Charts** → matplotlib → PNG → `ImageRun`.
+
+`generate_image` / `generate_video` are **not** available inside build—only staged
+files, your renders, or web search. After adding images, run `render_doc.py` and
+`read_file` the JPEG grid to catch overflow or bad placement.
 
 A `.docx` is a ZIP of XML parts; a `.dotx` is a Word template, structurally the
 same. This skill uses a small, deliberate toolchain — pick by task:
@@ -251,20 +265,9 @@ new Paragraph({
 // SVG also needs a PNG fallback: { type: "svg", data: svgBytes, fallback: { type: "png", data: pngBytes } }
 ```
 
-Where images come from — all land in `/workspace/`:
-1. Files GemiX staged there (user uploads, generated images/video frames,
-   charts passed as attachments).
-2. PNGs you render yourself with matplotlib (`fig.savefig("/workspace/x.png")`).
-3. Images fetched from the web with `web_x_search` (`search_images=true`) — the
-   tool saves them to `/workspace/` and returns their filenames.
-
-**Use images proactively** when they make the document clearer or more
-professional: a chart, a diagram, a logo, a photo, a map. If the task doesn't
-supply one but a relevant image would help, render it or fetch it — don't wait
-to be asked. (`generate_image`/`generate_video` do NOT exist inside build; only
-the three sources above.) Have an SVG? Either pass it as `type: "svg"` with a
-PNG fallback, or convert first with
-`cairosvg.svg2png(url="in.svg", write_to="/workspace/out.png")`.
+Where images come from (see **Images (use proactively)** above): staged files,
+matplotlib PNGs, or `web_x_search` with `search_images=true`. SVG: `type: "svg"`
+with PNG fallback, or `cairosvg.svg2png(...)`.
 
 ### Headers, footers, page numbers
 

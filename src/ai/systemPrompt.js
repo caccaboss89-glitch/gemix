@@ -113,7 +113,11 @@ function buildSystemPrompt(ctx) {
     const ws = ctx.userWorkspace;
     const items = ws.files.map(f => `    - ${f.relPath}`).join('\n');
     const more = ws.more ? '\n    ... and more' : '';
-    sections.push(`<BuildWorkspace files="${ws.total}">\n${items}${more}\n</BuildWorkspace>`);
+    sections.push(
+      `<BuildWorkspace files="${ws.total}">\n${items}${more}\n`
+      + '    Names here are on disk in the engineering workspace (4h TTL). To send them to the user, call build—do not paste fake attachment tags.\n'
+      + '</BuildWorkspace>',
+    );
   }
 
   return sections.join('\n');

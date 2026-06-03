@@ -87,7 +87,7 @@ module.exports = {
   //     per-workspace lock before giving up with "build busy".
   BUILD_WORKSPACE_TTL_MS: 4 * 60 * 60 * 1000,
   BUILD_WORKSPACE_QUOTA_MB: 500,
-  BUILD_MAX_ROUNDS: 50,
+  BUILD_MAX_ROUNDS: 60,
   BUILD_HARD_TIMEOUT_MS: 10 * 60 * 1000,
   BUILD_LOCK_WAIT_MS: 30 * 1000,
 
