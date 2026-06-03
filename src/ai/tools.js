@@ -546,6 +546,7 @@ function buildBuildTool(isGroup) {
     description:
       'Hand a build/code/document task to the engineering sub-agent. '
       + `Persistent isolated workspace for ${scope} (4h inactivity TTL, 500 MB). `
+      + 'Call at most once per round — wait for the result before delegating again. '
       + 'If you need a specific asset (image/video/song) inside the build task, generate it FIRST in the main loop, then pass it via attachments[].',
     properties: {
       prompt: {

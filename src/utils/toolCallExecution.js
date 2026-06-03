@@ -74,6 +74,40 @@ function partitionHandlerToolCalls(toolCalls, userCtx) {
 
 const BUILD_MUTATING_TOOLS = new Set(['write_file', 'edit_file']);
 
+/** Tools limited to one invocation per model turn (main brain + build sub-agent). */
+const ONCE_PER_ROUND_TOOL_NAMES = new Set(['web_x_search']);
+
+const ONCE_PER_ROUND_ERROR =
+  'can only be called once per round. Use the result from the previous call in this round.';
+
+/**
+ * Given tool calls in model order, return ids of duplicate once-per-round tools.
+ * Does not mutate any context — caller should reject these before execution.
+ *
+ * @param {object[]} toolCalls
+ * @param {Set<string>} [toolNames] - defaults to ONCE_PER_ROUND_TOOL_NAMES
+ * @returns {Set<string>} tool_call ids to block
+ */
+function oncePerRoundDuplicateIds(toolCalls, toolNames = ONCE_PER_ROUND_TOOL_NAMES) {
+  const blocked = new Set();
+  const seen = new Set();
+  if (!Array.isArray(toolCalls)) return blocked;
+  for (const tc of toolCalls) {
+    const name = tc.function?.name;
+    if (!name || !toolNames.has(name)) continue;
+    if (seen.has(name)) blocked.add(tc.id);
+    else seen.add(name);
+  }
+  return blocked;
+}
+
+function oncePerRoundErrorPayload(toolName) {
+  return JSON.stringify({
+    success: false,
+    error: `"${toolName}" ${ONCE_PER_ROUND_ERROR}`,
+  });
+}
+
 /**
  * Run build sub-agent tools preserving assistant call order:
  *   - read_file / web_x_search / … run in parallel batches
@@ -116,4 +150,8 @@ module.exports = {
   executeBuildToolCallsOrdered,
   BUILD_MUTATING_TOOLS,
   HANDLER_DELIVERY_TOOLS,
+  ONCE_PER_ROUND_TOOL_NAMES,
+  ONCE_PER_ROUND_ERROR,
+  oncePerRoundDuplicateIds,
+  oncePerRoundErrorPayload,
 };

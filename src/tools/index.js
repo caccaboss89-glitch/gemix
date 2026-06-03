@@ -730,4 +730,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
   return { toolCallId: toolCall.id, result: finalResult };
 }
 
-module.exports = { executeTool, resetVoiceCount, getVoiceLimitChatKey: _getVoiceLimitChatKey };
+module.exports = {
+  executeTool,
+  resetVoiceCount,
+  getVoiceLimitChatKey: _getVoiceLimitChatKey,
+  ONCE_PER_ROUND_TOOLS,
+};

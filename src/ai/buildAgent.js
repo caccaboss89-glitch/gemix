@@ -38,7 +38,11 @@ const {
 const { createLogger } = require('../utils/logger');
 const { isNonReadableExt, buildReadFileBlockedMessage } = require('../config/nonReadableExts');
 const { mimeForExtension } = require('../config/mimeExtensions');
-const { executeBuildToolCallsOrdered } = require('../utils/toolCallExecution');
+const {
+  executeBuildToolCallsOrdered,
+  oncePerRoundDuplicateIds,
+  oncePerRoundErrorPayload,
+} = require('../utils/toolCallExecution');
 
 const log = createLogger('BuildAgent');
 
@@ -556,9 +560,17 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       const assistantToPush = { ...assistant };
       if (assistantToPush.content === null || assistantToPush.content === undefined) delete assistantToPush.content;
       messages.push(assistantToPush);
+      const blockedOncePerRound = oncePerRoundDuplicateIds(assistant.tool_calls);
       const resultsById = await executeBuildToolCallsOrdered(
         assistant.tool_calls,
-        (tc) => _runToolCall(tc, ctx),
+        (tc) => {
+          if (blockedOncePerRound.has(tc.id)) {
+            const name = tc.function?.name || 'tool';
+            log.warn(`   build tool blocked (duplicate in round): ${name}`);
+            return oncePerRoundErrorPayload(name);
+          }
+          return _runToolCall(tc, ctx);
+        },
       );
 
       for (const tc of assistant.tool_calls) {

@@ -147,15 +147,39 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
  * @param {string} apiKey - API key for authentication
  * @returns {Promise<Response>} The raw fetch Response
  */
+function _formatRateLimitLog(status, errBody, headers) {
+  const parts = [`HTTP ${status} (rate limit / quota)`];
+  const retryAfter = headers?.get?.('retry-after');
+  if (retryAfter) parts.push(`Retry-After: ${retryAfter}s`);
+  for (const [key, value] of headers?.entries?.() || []) {
+    const lower = key.toLowerCase();
+    if (lower.includes('ratelimit') || lower.includes('rate-limit') || lower === 'x-request-id') {
+      parts.push(`${key}: ${value}`);
+    }
+  }
+  let detail = '';
+  if (errBody && !errBody.startsWith('<!')) {
+    try {
+      const parsed = JSON.parse(errBody);
+      const msg = parsed?.error?.message || parsed?.message || parsed?.detail;
+      if (msg) detail = String(msg).slice(0, 300);
+    } catch {
+      detail = errBody.slice(0, 300);
+    }
+  }
+  if (detail) parts.push(detail);
+  return parts.join(' — ');
+}
+
 async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) {
   logApiRequest(modelName, apiUrl, body, logExtra);
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
     let timer;
+    const attemptStarted = Date.now();
     try {
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-      const startTime = Date.now();
       const res = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -166,11 +190,14 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) 
         signal: controller.signal,
       });
       clearTimeout(timer);
-      const duration = Date.now() - startTime;
+      const duration = Date.now() - attemptStarted;
 
       if (!res.ok) {
         const errBody = await res.text();
         const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
+        if (res.status === 429) {
+          log.warn(`   ${_formatRateLimitLog(res.status, errBody, res.headers)}`);
+        }
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
 
@@ -178,19 +205,29 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) 
       return res;
     } catch (err) {
       if (timer) clearTimeout(timer);
+      const attemptMs = Date.now() - attemptStarted;
       const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
       const isNetworkError = err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message);
+      const is429 = err.message && /^HTTP 429/.test(err.message);
       const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (429|500|502|503|504)/.test(err.message));
-      const errMsg = err.name === 'AbortError' ? `Timeout (${API_TIMEOUT_MS / 1000}s)` : err.message;
+      const errMsg = err.name === 'AbortError'
+        ? `Timeout (request aborted after ${API_TIMEOUT_MS / 1000}s)`
+        : err.message;
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
         const delay = attempt * 3000;
-        log.warn(`   API attempt ${attempt}/${MAX_API_RETRIES} failed: ${errMsg} - retrying in ${delay / 1000}s...`);
+        const waitHint = is429
+          ? ' (rate limit — check Retry-After / xAI console for quota reset)'
+          : '';
+        log.warn(
+          `   API attempt ${attempt}/${MAX_API_RETRIES} failed after ${Math.round(attemptMs / 1000)}s: ${errMsg}`
+          + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${MAX_API_RETRIES}${waitHint}...`,
+        );
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
 
-      log.error(`   API error: ${errMsg}`);
+      log.error(`   API error after ${attempt} attempt(s), last try ${Math.round(attemptMs / 1000)}s: ${errMsg}`);
       await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
       throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
     }

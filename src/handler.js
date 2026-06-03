@@ -19,7 +19,7 @@
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolAccessError, SET_CONVERSATION_TITLE_TOOL } = require('./ai/tools');
-const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
+const { executeTool, resetVoiceCount, getVoiceLimitChatKey, ONCE_PER_ROUND_TOOLS } = require('./tools');
 const { isAdmin } = require('./config/members');
 const {
   MAX_TOOL_ROUNDS,
@@ -43,6 +43,8 @@ const { resolveStorageId, resolvePersonalMemoryFileId } = require('./utils/userP
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
+const { oncePerRoundDuplicateIds, oncePerRoundErrorPayload } = require('./utils/toolCallExecution');
+const { sendIntermediateNotification } = require('./utils/intermediateNotification');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
 const { markNotifiedInCall, clearCallNotifications } = require('./utils/notificationDedup');
 
@@ -53,37 +55,6 @@ const log = createLogger('Handler');
 const SESSION_MAX_DURATION_MS = 10 * 60 * 1000;
 
 const { partitionHandlerToolCalls } = require('./utils/toolCallExecution');
-
-/**
- * Send an intermediate notification message to the active chat (Discord channel
- * or WhatsApp JID), suppressing duplicates within the same AI call.
- *
- * Each (call, kind) pair is allowed at most ONE notification. This keeps the
- * UX calm even when several rounds of the same call would otherwise fire the
- * same banner repeatedly.
- *
- * @param {object} ctx - Handler context (must include `requestId` and platform info)
- * @param {string} kind - 'video_gen' | 'image_gen' | 'research' | etc.
- * @param {string} message - Text to send
- */
-async function sendIntermediateNotification(ctx, kind, message) {
-  if (!markNotifiedInCall(ctx, kind)) return;
-  try {
-    if (ctx.platform === PLATFORM_DISCORD && ctx.discordChannel) {
-      await ctx.discordChannel.send({ content: message });
-      log.info(`   ${kind} notification - Discord: ${message}`);
-    } else if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
-      // Always the current WhatsApp conversation (personal pair chat, dedicated DM, or group).
-      const targetJid = ctx.chatId || ctx.groupId || ctx.waJid;
-      if (targetJid) {
-        await sendWhatsAppDirect(targetJid, message);
-        log.info(`   ${kind} notification - WhatsApp: ${message}`);
-      }
-    }
-  } catch (err) {
-    log.warn(`Failed to send ${kind} notification: ${err.message}`);
-  }
-}
 
 function extractPlainTextContent(content) {
   if (typeof content === 'string') return content;
@@ -408,18 +379,28 @@ async function handleMessage(ctx) {
         const resultsById = new Map();
 
         const runPhase = async (batch, parallel) => {
+          const blockedOncePerRound = oncePerRoundDuplicateIds(batch, ONCE_PER_ROUND_TOOLS);
           if (parallel) {
             await Promise.all(batch.map(async (tc) => {
-              resultsById.set(tc.id, await recordToolResult(tc));
+              resultsById.set(tc.id, await recordToolResult(tc, blockedOncePerRound));
             }));
           } else {
             for (const tc of batch) {
-              resultsById.set(tc.id, await recordToolResult(tc));
+              resultsById.set(tc.id, await recordToolResult(tc, blockedOncePerRound));
             }
           }
         };
 
-        const recordToolResult = async (tc) => {
+        const recordToolResult = async (tc, blockedOncePerRound = new Set()) => {
+          if (blockedOncePerRound.has(tc.id)) {
+            const name = tc.function?.name || 'tool';
+            log.warn(`   Tool "${name}" blocked: duplicate once-per-round in same model turn`);
+            return {
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: oncePerRoundErrorPayload(name),
+            };
+          }
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
             return {
               role: 'tool',
