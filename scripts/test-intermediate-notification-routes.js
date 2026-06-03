@@ -7,6 +7,17 @@ const {
   PLATFORM_WA_DEDICATED,
 } = require('../src/config/constants');
 const { resolveIntermediateNotificationTarget } = require('../src/utils/intermediateNotification');
+const { hasFooter } = require('../src/utils/footer');
+
+// Mirror delivery formatting (personal WA needs footer for GemiX block detection).
+function formatWaText(message, platform) {
+  const { normalizeMarkdown } = require('../src/utils/text');
+  const { removeDiscordEmoji } = require('../src/utils/discord');
+  const { addFooter } = require('../src/utils/footer');
+  let text = normalizeMarkdown(removeDiscordEmoji(message));
+  if (platform === PLATFORM_WA_PERSONAL) text = addFooter(text, 'GemiX');
+  return text;
+}
 
 const chat = { sendMessage: async () => {} };
 const discordChannel = { send: async () => {} };
@@ -76,4 +87,11 @@ if (failed > 0) {
   console.error(`\n${failed} case(s) failed`);
   process.exit(1);
 }
+const sample = formatWaText('Sto delegando…', PLATFORM_WA_PERSONAL);
+if (!hasFooter(sample)) {
+  console.error('FAIL [WA personal footer on intermediate text]');
+  process.exit(1);
+}
+console.log('ok  [WA personal intermediate has GemiX footer]');
+
 console.log(`\nAll ${cases.length} routing cases passed.`);

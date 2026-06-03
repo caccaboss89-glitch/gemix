@@ -28,6 +28,7 @@ const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
 const { webXSearch } = require('../tools/webXSearch');
 const { getRomeTime } = require('../utils/time');
 const { sanitizeFilename } = require('../utils/text');
+const { WEB_X_SEARCH_RESEARCH_GUIDANCE } = require('./researchGuidance');
 const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 const { SKILLS_DIR } = require('../utils/userPaths');
 const {
@@ -128,10 +129,9 @@ function _buildAgentTools() {
       function: {
         name: 'web_x_search',
         description:
-          'Performs web and X searches from a research prompt to a specialized agent (or multi-agent team). '
-          + 'Use it for external/up-to-date information, fact-checking, or when web images are needed. '
-          + 'By default a single fast model handles the request. Set full_team=true only for deep, multi-faceted research. '
-          + 'Do not call multiple times in the same round.',
+          'Web and X research via agent or team. '
+          + WEB_X_SEARCH_RESEARCH_GUIDANCE
+          + ' At most one call per turn.',
         parameters: {
           type: 'object',
           properties: {

@@ -23,12 +23,18 @@ const { markNotifiedInCall } = require('./notificationDedup');
 const { sendWhatsAppDirect } = require('../tools/whatsappSender');
 const { removeDiscordEmoji } = require('./discord');
 const { normalizeMarkdown } = require('./text');
+const { addFooter } = require('./footer');
 const { createLogger } = require('./logger');
 
 const log = createLogger('Handler');
 
-function formatWhatsAppIntermediateText(message) {
-  return normalizeMarkdown(removeDiscordEmoji(message));
+function formatWhatsAppIntermediateText(message, platform) {
+  let text = normalizeMarkdown(removeDiscordEmoji(message));
+  // Personal WA history treats footer-bearing fromMe text as start of a GemiX block.
+  if (platform === PLATFORM_WA_PERSONAL) {
+    text = addFooter(text, 'GemiX');
+  }
+  return text;
 }
 
 /**
@@ -101,7 +107,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
       return true;
     }
 
-    const text = formatWhatsAppIntermediateText(message);
+    const text = formatWhatsAppIntermediateText(message, ctx.platform);
     if (target.channel === 'wa_chat') {
       await target.chat.sendMessage(text);
       log.info(`   ${kind} notification - WhatsApp (${target.platform}): ${message}`);

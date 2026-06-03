@@ -106,21 +106,22 @@ const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
 
 // -- Static tool definitions (schema never varies) -------------------------
 
+const { WEB_X_SEARCH_RESEARCH_GUIDANCE } = require('./researchGuidance');
+
 const TOOL_WEB_X_SEARCH = makeTool({
   name: 'web_x_search',
   description:
-    'Provides a research prompt to a specialized agent (or multi-agent team) that performs web and X searches. '
-    + 'Use it for external/up-to-date information, fact-checking, or when web images are needed. '
-    + 'By default a single fast model handles the request. Set full_team=true only for deep, multi-faceted research. '
-    + 'Do NOT call multiple times in the same round.',
+    'Web and X research via a specialized agent or 4x team. '
+    + WEB_X_SEARCH_RESEARCH_GUIDANCE
+    + ' At most once per round.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Detailed research brief: the exact question, any URLs to consult, desired output format, and constraints (date range, language, sources to prefer or avoid).',
+      description: 'Research brief (question, URLs, format, constraints). With full_team, include all sub-topics here.',
     },
     full_team: {
       type: 'boolean',
-      description: 'Set true for 4x multi-agent team (more deep); omit for fast single-model search (default).',
+      description: 'true = 4x team for deep research; false/omit = fast single lookup.',
     },
     search_images: {
       type: 'boolean',

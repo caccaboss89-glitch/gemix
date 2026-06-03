@@ -241,12 +241,12 @@ function buildToolUsageLines(profile, opts = {}) {
   if (has(TOOL.UPDATE_MEMORY)) {
     lines.push('- Use update_memory for long-term preferences. Never store transient context (current task, session state, temporary data).');
   }
-  lines.push('- Use web_x_search at most once per round. Provide only the search prompt and it will handle the search.');
+  lines.push('- web_x_search: at most once per round.');
   if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER)) {
     lines.push('- code_interpreter: ad-hoc Python (math, analysis, quick scripts) - isolated (no filesystem).');
   }
   if (has(TOOL.BUILD)) {
-    lines.push('- build: any task needing file writes/edits, shell (incl. yt-dlp downloads), skills, or multi-step deliverables. Pass any relevant files via attachments[] (history files, generated images/videos/songs, searched images). Returns text + files automatically.');
+    lines.push('- build: file writes/edits, shell (incl. yt-dlp), skills, multi-step deliverables. Pass assets via attachments[] when needed; returns text + files.');
   }
   if (has(TOOL.SEND_VOICE)) {
     lines.push('- send_voice_message for short/casual replies; text for technical or long ones. Vary the format based on your recent messages.');
