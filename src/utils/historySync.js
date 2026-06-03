@@ -249,13 +249,18 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     const existingName = _getEntryFilename(meta[uniqueId]);
     const existingPath = existingName ? path.join(historyDir, existingName) : null;
     if (existingPath && fs.existsSync(existingPath)) {
-      // Refresh timestamp to prevent premature deletion
-      const now = new Date();
       try {
-        // Works for both files and directories
-        fs.utimesSync(existingPath, now, now);
-      } catch { /* best-effort */ }
-      return existingName;
+        const st = fs.statSync(existingPath);
+        if (st.isFile() && st.size > 0) {
+          const now = new Date();
+          try { fs.utimesSync(existingPath, now, now); } catch { /* best-effort */ }
+          return existingName;
+        }
+        log.warn(`History cache for ${uniqueId} is empty (${existingName}), re-downloading`);
+        try { fs.unlinkSync(existingPath); } catch { /* ignore */ }
+      } catch { /* re-download below */ }
+      delete meta[uniqueId];
+      _saveMeta(metaFile, meta, userId);
     }
     // Entry missing on disk, clear from meta and re-save
     delete meta[uniqueId];

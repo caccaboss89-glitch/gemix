@@ -190,7 +190,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
     if (publicUrl.endsWith('/')) publicUrl = publicUrl.slice(0, -1);
     const url = `${publicUrl}/temp/${token}/${encodeURIComponent(finalName)}`;
 
-    log.info(`Registered temp file: ${finalName} (mime=${mimetype}, token=${token.slice(0, 8)}..., expires in ${expiresInMinutes}min)`);
+    log.info(`Registered temp file: ${finalName} (${stat.size} bytes, mime=${mimetype}, token=${token.slice(0, 8)}..., expires in ${expiresInMinutes}min)`);
 
     return {
       token,

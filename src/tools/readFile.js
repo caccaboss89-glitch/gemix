@@ -45,7 +45,10 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   const { abs, displayPath } = r;
 
   if (!fs.existsSync(abs)) {
-    return { success: false, error: `File not found at path "${displayPath}".` };
+    return {
+      success: false,
+      error: `File not found at path "${displayPath}". Use the filename from the [Attachment: ...] tag.`,
+    };
   }
 
   let stat;

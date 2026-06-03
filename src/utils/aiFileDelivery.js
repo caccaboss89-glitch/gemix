@@ -235,8 +235,22 @@ async function validateTunnelMediaFile(absPath, displayPath, opts = {}) {
   }
 
   if (kind === 'pdf') {
+    if (fileSize === 0) {
+      return { ok: false, error: `PDF "${displayPath}" is empty (0 bytes).` };
+    }
     if (fileSize > MAX_PDF_BYTES) {
       return { ok: false, error: `PDF "${displayPath}" exceeds the 48 MB xAI limit.` };
+    }
+    try {
+      const fd = fs.openSync(absPath, 'r');
+      const header = Buffer.alloc(5);
+      fs.readSync(fd, header, 0, 5, 0);
+      fs.closeSync(fd);
+      if (header.toString('ascii') !== '%PDF-') {
+        return { ok: false, error: `PDF "${displayPath}" does not look like a valid PDF file.` };
+      }
+    } catch (err) {
+      return { ok: false, error: `Cannot validate PDF "${displayPath}": ${err.message}` };
     }
     return { ok: true };
   }
@@ -299,10 +313,22 @@ async function appendTunnelInputFile(contentParts, opts) {
     : null;
   let kind = 'history';
 
+  if (absPath) {
+    try {
+      const st = fs.statSync(absPath);
+      if (!st.isFile() || st.size === 0) {
+        log.warn(`History file empty or missing for tunnel (${displayName}), re-fetching buffer`);
+        absPath = null;
+      }
+    } catch {
+      absPath = null;
+    }
+  }
+
   if (!absPath) {
     const buffer = typeof fetchBuffer === 'function' ? await fetchBuffer() : null;
     if (!buffer || !buffer.length) {
-      return { ok: false, error: 'file unavailable' };
+      return { ok: false, error: 'file unavailable (empty or download failed)' };
     }
     try {
       absPath = _materializeBufferToTemp(buffer, displayName, ownerKey);
@@ -320,8 +346,12 @@ async function appendTunnelInputFile(contentParts, opts) {
   }
 
   try {
+    const fileSize = fs.statSync(absPath).size;
     const urlInfo = getPublicAttachmentUrl(absPath, displayName, { kind, mimetype });
     contentParts.push({ type: 'input_file', file_url: urlInfo.url });
+    if (tunnelKindForExtension(ext, mimetype) === 'pdf') {
+      log.info(`PDF exposed via tunnel: ${displayName} (${fileSize} bytes, kind=${kind})`);
+    }
     return { ok: true, bumpImageCount: gate.bumpImageCount };
   } catch (err) {
     log.warn(`Tunnel registration failed for ${displayName}: ${err.message}`);
