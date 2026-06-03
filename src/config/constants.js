@@ -48,6 +48,8 @@ module.exports = {
   // API
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 60_000,
+  // Build sub-agent: longer Hermes/xAI waits (reasoning + large tool context).
+  BUILD_API_TIMEOUT_MS: 180_000,
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 64_000,
   // Main brain outer loop (client-side tool rounds). When exhausted the

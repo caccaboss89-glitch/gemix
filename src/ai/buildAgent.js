@@ -33,8 +33,10 @@ const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 const { SKILLS_DIR } = require('../utils/userPaths');
 const {
   BUILD_MAX_ROUNDS,
+  BUILD_API_TIMEOUT_MS,
   BUILD_HARD_TIMEOUT_MS,
   BUILD_WORKSPACE_QUOTA_MB,
+  MAX_TOOL_ROUNDS,
 } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { isNonReadableExt, buildReadFileBlockedMessage } = require('../config/nonReadableExts');
@@ -536,7 +538,9 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       input,
       max_output_tokens: 64_000,
       tool_choice: 'auto',
-      max_turns: BUILD_MAX_ROUNDS,
+      // Server-side cap per HTTP call (code_interpreter). Client bash/write/read
+      // rounds are bounded by the outer loop below — not by max_turns.
+      max_turns: MAX_TOOL_ROUNDS,
       store: false,
     };
     if (XAI_REASONING_REPLAY) {
@@ -547,7 +551,10 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
 
     let data;
     try {
-      data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY);
+      data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY, {
+        timeoutMs: BUILD_API_TIMEOUT_MS,
+        buildRound: rounds,
+      });
     } catch (err) {
       log.error(`build agent API call failed at round ${rounds}: ${err.message}`);
       return { success: false, error: err.message, roundsUsed: rounds };
@@ -636,7 +643,10 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       if (XAI_REASONING_REPLAY) {
         body.include = ['reasoning.encrypted_content'];
       }
-      const data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY);
+      const data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY, {
+        timeoutMs: BUILD_API_TIMEOUT_MS,
+        buildRound: 'wrap-up',
+      });
       finalText = responsesToAssistantMessage(data).content || '';
     } catch (err) {
       log.error(`   build forced wrap-up call failed: ${err.message}`);

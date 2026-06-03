@@ -171,14 +171,14 @@ function _formatRateLimitLog(status, errBody, headers) {
   return parts.join(' — ');
 }
 
-async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) {
+async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}, timeoutMs = API_TIMEOUT_MS) {
   logApiRequest(modelName, apiUrl, body, logExtra);
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
     let timer;
     const attemptStarted = Date.now();
     try {
       const controller = new AbortController();
-      timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+      timer = setTimeout(() => controller.abort(), timeoutMs);
 
       const res = await fetch(apiUrl, {
         method: 'POST',
@@ -211,7 +211,7 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) 
       const is429 = err.message && /^HTTP 429/.test(err.message);
       const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (429|500|502|503|504)/.test(err.message));
       const errMsg = err.name === 'AbortError'
-        ? `Timeout (request aborted after ${API_TIMEOUT_MS / 1000}s)`
+        ? `Timeout (request aborted after ${timeoutMs / 1000}s)`
         : err.message;
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
@@ -250,7 +250,9 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) 
  * @returns {Promise<object>} The full parsed JSON body
  */
 async function callResponsesModel(modelName, apiUrl, body, apiKey, logExtra = {}) {
-  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra);
+  const timeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : API_TIMEOUT_MS;
+  const { timeoutMs: _omit, ...requestLogExtra } = logExtra;
+  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey, requestLogExtra, timeoutMs);
 
   let data;
   try {
