@@ -115,6 +115,26 @@ function _toolContentToResponsesOutput(content) {
   return { output, extraUserParts };
 }
 
+/** xAI server-side tool output items that must be replayed on the next request. */
+const SERVER_SIDE_OUTPUT_TYPES = new Set([
+  'code_interpreter_call',
+  'web_search_call',
+  'x_search_call',
+]);
+
+function _pushFunctionCallInput(input, item) {
+  const callId = item.call_id || item.id;
+  if (!callId || typeof item.name !== 'string') return;
+  input.push({
+    type: 'function_call',
+    call_id: callId,
+    name: item.name,
+    arguments: typeof item.arguments === 'string'
+      ? item.arguments
+      : JSON.stringify(item.arguments ?? {}),
+  });
+}
+
 /**
  * Translate a chat-completions `messages[]` array into the equivalent
  * Responses API `{ instructions, input }` pair.
@@ -178,7 +198,16 @@ function chatMessagesToResponsesInput(messages) {
         if (text && text.length > 0) {
           input.push({ role: 'assistant', content: text });
         }
-        if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+        if (Array.isArray(msg._responsesOutputSequence) && msg._responsesOutputSequence.length > 0) {
+          for (const item of msg._responsesOutputSequence) {
+            if (!item || typeof item !== 'object') continue;
+            if (item.type === 'function_call') {
+              _pushFunctionCallInput(input, item);
+            } else if (SERVER_SIDE_OUTPUT_TYPES.has(item.type)) {
+              input.push(item);
+            }
+          }
+        } else if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
           for (const tc of msg.tool_calls) {
             if (!tc || tc.type !== 'function' || !tc.function) continue;
             input.push({
@@ -281,11 +310,10 @@ function chatToolsToResponsesTools(tools) {
  *     round-tripped back into the next call's `function_call_output.call_id`,
  *     so keeping `id === call_id` in the internal shape avoids a parallel
  *     mapping.
- *   - Reasoning items are ignored at this layer (the handler does not use
- *     them and they are not echoed back to the model).
- *   - When the model produces no text and no tool_calls (rare, but happens
- *     on safety refusals), the returned `content` is the empty string and
- *     `tool_calls` is omitted; downstream callers handle that case.
+ *   - Server-side tool items (e.g. code_interpreter_call) are stored on
+ *     `_responsesOutputSequence` and replayed into the next request input so
+ *     multi-round client tool loops still see completed server-side work.
+ *   - Reasoning items are ignored at this layer.
  *
  * @param {object} data - Parsed JSON body from /v1/responses
  * @returns {object}
@@ -294,6 +322,7 @@ function responsesToAssistantMessage(data) {
   const message = { role: 'assistant', content: '' };
   const toolCalls = [];
   const textPieces = [];
+  const outputSequence = [];
 
   if (Array.isArray(data?.output)) {
     for (const item of data.output) {
@@ -305,7 +334,6 @@ function responsesToAssistantMessage(data) {
           if (part.type === 'output_text' && typeof part.text === 'string') {
             textPieces.push(part.text);
           } else if (typeof part.text === 'string' && !part.type) {
-            // Defensive: some shapes return bare {text:'...'} parts.
             textPieces.push(part.text);
           }
         }
@@ -325,21 +353,23 @@ function responsesToAssistantMessage(data) {
               : JSON.stringify(item.arguments ?? {}),
           },
         });
+        outputSequence.push(item);
         continue;
       }
 
-      // Reasoning, web_search_call, custom_tool_call, etc.: not part of the
-      // chat-completion message contract - silently skipped.
+      if (SERVER_SIDE_OUTPUT_TYPES.has(item.type)) {
+        outputSequence.push(item);
+      }
     }
   }
 
-  // Convenience field that some xAI responses emit at the top level.
   if (textPieces.length === 0 && typeof data?.output_text === 'string' && data.output_text) {
     textPieces.push(data.output_text);
   }
 
   message.content = textPieces.join('').trim();
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
+  if (outputSequence.length > 0) message._responsesOutputSequence = outputSequence;
 
   return message;
 }

@@ -9,8 +9,8 @@
 //      user content. Media uses utils/incomingMediaIngress.js →
 //      aiFileDelivery.js: tunnel `input_file` URLs, inline <FileContent>, or
 //      [Attachment] tags only (Office/archives).
-//   4. Loop: call Grok (`/v1/responses`) - run tool calls in two phases per round
-//      (phase 1: parallel; phase 2: voice-to-current-chat only) - repeat
+//   4. Loop: call Grok (`/v1/responses`) - tool calls per round in three phases:
+//      (1) standard tools parallel, (2) delivery parallel, (3) voice-to-self last - repeat
 //      until the model returns plain text (final response) or the round
 //      budget is reached.
 //   5. Apply the research-team badge (web/X sources) and ship the reply
@@ -458,7 +458,8 @@ async function handleMessage(ctx) {
         };
 
         await runPhase(phases.phase1, true);
-        await runPhase(phases.phase2, false);
+        await runPhase(phases.phase2, true);
+        await runPhase(phases.phase3, false);
 
         for (const tc of orderedCalls) {
           const msg = resultsById.get(tc.id);

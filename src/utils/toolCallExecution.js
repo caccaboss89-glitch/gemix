@@ -24,7 +24,7 @@ function isSendVoiceMessageToCurrentUser(tc, userCtx) {
   try {
     args = parseToolCallArgs(tc);
   } catch {
-    return true;
+    return false;
   }
 
   const recipientName = args.recipient?.name || args.recipientName;
@@ -42,24 +42,34 @@ function isSendVoiceMessageToCurrentUser(tc, userCtx) {
   return false;
 }
 
+const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
+
 /**
  * @param {object[]} toolCalls - assistant tool_calls in model order
  * @param {object} userCtx
- * @returns {{ phase1: object[], phase2: object[] }}
- *   phase1: all tools in parallel (incl. send_email / send_whatsapp / voice to others)
- *   phase2: send_voice_message to current chat only (sequential, last; can end the turn)
+ * @returns {{ phase1: object[], phase2: object[], phase3: object[] }}
+ *   phase1: standard tools (parallel) — build, generate_*, read_file, web_x_search, …
+ *   phase2: outbound delivery (parallel) — send_email, send_whatsapp, voice to others
+ *   phase3: send_voice_message to current chat only (sequential; can end the turn)
  */
 function partitionHandlerToolCalls(toolCalls, userCtx) {
   const phase1 = [];
   const phase2 = [];
+  const phase3 = [];
   for (const tc of toolCalls) {
+    const name = tc.function?.name;
     if (isSendVoiceMessageToCurrentUser(tc, userCtx)) {
+      phase3.push(tc);
+    } else if (
+      HANDLER_DELIVERY_TOOLS.has(name)
+      || (name === 'send_voice_message')
+    ) {
       phase2.push(tc);
     } else {
       phase1.push(tc);
     }
   }
-  return { phase1, phase2 };
+  return { phase1, phase2, phase3 };
 }
 
 const BUILD_MUTATING_TOOLS = new Set(['write_file', 'edit_file']);
@@ -105,4 +115,5 @@ module.exports = {
   partitionHandlerToolCalls,
   executeBuildToolCallsOrdered,
   BUILD_MUTATING_TOOLS,
+  HANDLER_DELIVERY_TOOLS,
 };
