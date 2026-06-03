@@ -286,7 +286,7 @@ async function validateTunnelMediaFile(absPath, displayPath, opts = {}) {
   return { ok: false, error: `File type not supported for tunnel delivery: "${displayPath}".` };
 }
 
-async function appendTunnelInputFile(contentParts, opts) {
+async function _resolveTunnelDeliveryTarget(opts) {
   const {
     syncedPath,
     name,
@@ -295,10 +295,6 @@ async function appendTunnelInputFile(contentParts, opts) {
     fetchBuffer,
     ownerKey = null,
   } = opts;
-
-  if (classifyAiFileDelivery(name, contentType) !== DELIVERY_MODE.TUNNEL) {
-    return { ok: false, skipped: true };
-  }
 
   const ext = path.extname(name || '').toLowerCase();
   const mimetype = mimeForExtension(
@@ -328,16 +324,31 @@ async function appendTunnelInputFile(contentParts, opts) {
   if (!absPath) {
     const buffer = typeof fetchBuffer === 'function' ? await fetchBuffer() : null;
     if (!buffer || !buffer.length) {
-      return { ok: false, error: 'file unavailable (empty or download failed)' };
+      return { error: 'file unavailable (empty or download failed)' };
     }
     try {
       absPath = _materializeBufferToTemp(buffer, displayName, ownerKey);
       kind = 'temp';
     } catch (err) {
       log.warn(`Failed to materialize ${displayName}: ${err.message}`);
-      return { ok: false, error: err.message };
+      return { error: err.message };
     }
   }
+
+  return { absPath, displayName, mimetype, kind, ext };
+}
+
+async function appendTunnelInputFile(contentParts, opts) {
+  if (classifyAiFileDelivery(opts.name, opts.contentType) !== DELIVERY_MODE.TUNNEL) {
+    return { ok: false, skipped: true };
+  }
+
+  const resolved = await _resolveTunnelDeliveryTarget(opts);
+  if (resolved.error) {
+    return { ok: false, error: resolved.error };
+  }
+
+  const { absPath, displayName, mimetype, kind, ext } = resolved;
 
   const gate = await validateTunnelMediaFile(absPath, displayName, { ...opts, contentType: mimetype });
   if (!gate.ok) {
@@ -382,6 +393,7 @@ async function deliverSyncedAttachment(opts) {
     metadataDurationSec = 0,
     getVoiceTranscription = null,
     ownerKey = null,
+    registerTunnel = true,
   } = opts;
 
   const tag = buildAttachmentTag(syncedPath, name);
@@ -448,6 +460,27 @@ async function deliverSyncedAttachment(opts) {
         }
       }
     } catch { /* continue to tunnel */ }
+  }
+
+  if (!registerTunnel) {
+    let textFragment = `${tag} `;
+    if (mode === DELIVERY_MODE.TUNNEL && syncedPath && historyStorageId) {
+      const absPath = resolveHistoryAbsPath(historyStorageId, syncedPath);
+      if (absPath && fs.existsSync(absPath)) {
+        const ext = path.extname(name || '').toLowerCase();
+        const mimetype = mimeForExtension(
+          ext,
+          (contentType || '').split(';')[0].trim() || 'application/octet-stream',
+          contentType,
+        );
+        const displayName = path.basename(syncedPath || name || 'file');
+        const gate = await validateTunnelMediaFile(absPath, displayName, { contentType: mimetype });
+        if (!gate.ok) {
+          textFragment = `${tag} (${gate.error}) `;
+        }
+      }
+    }
+    return { tag, contentParts: [], textFragment };
   }
 
   const contentParts = [];

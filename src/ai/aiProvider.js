@@ -8,7 +8,7 @@
 //
 // Supports native multimodal input via input_file.
 
-const { HERMES_API_KEY, HERMES_BASE_URL, GROK_MODEL } = require('../config/env');
+const { HERMES_API_KEY, HERMES_BASE_URL, GROK_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
 const { MAX_TOKENS } = require('../config/constants');
 const { callResponsesModel } = require('./apiClient');
 const {
@@ -45,7 +45,13 @@ async function callAI(messages, tools = null, opts = {}) {
     // dominated by tool I/O, and extra reasoning budget is used to avoid
     // shipping sloppy answers. webXSearch / buildAgent use the same.
     reasoning: { effort: 'high' },
+    // Local conversation state (handler tool loop): do not rely on xAI server store.
+    store: false,
   };
+
+  if (XAI_REASONING_REPLAY) {
+    body.include = ['reasoning.encrypted_content'];
+  }
 
   // max_turns bounds xAI server-side tool turns (web_search/x_search/
   // code_interpreter) within a single request, so a runaway server-side

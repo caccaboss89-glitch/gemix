@@ -1,11 +1,7 @@
 // Resolves the public base URL for attachment tunnel links (xAI input_file, etc.).
 //
-// Priority:
-//   1. src/data/tunnel-public-url.txt (written by scripts/run-attachment-tunnel.sh;
-//      localtunnel prints "your url is: …") — always wins when present so a random
-//      subdomain after a failed --subdomain does not desync from GEMIX_PUBLIC_URL.
-//   2. GEMIX_PUBLIC_URL from .env
-//   3. http://localhost:9998
+// Source: src/data/tunnel-public-url.txt (written by scripts/run-attachment-tunnel.sh
+// when localtunnel prints "your url is: …"). Fallback: http://localhost:9998.
 
 const fs = require('fs');
 const path = require('path');
@@ -19,7 +15,7 @@ const DEFAULT_TUNNEL_URL_FILE = path.join(DATA_DIR, 'tunnel-public-url.txt');
 
 let _fileUrlCache = null;
 let _fileUrlMtime = 0;
-let _envMismatchWarned = false;
+let _missingFileWarned = false;
 
 function _tunnelUrlFilePath() {
   const custom = env.GEMIX_TUNNEL_URL_FILE;
@@ -58,19 +54,14 @@ function getPublicBaseUrl() {
   } catch { /* ignore */ }
 
   const fromFile = _readUrlFromFile();
-  const fromEnv = typeof env.GEMIX_PUBLIC_URL === 'string' && env.GEMIX_PUBLIC_URL.trim()
-    ? env.GEMIX_PUBLIC_URL.trim().replace(/\/+$/, '')
-    : null;
+  if (fromFile) return fromFile;
 
-  if (fromFile && fromEnv && fromFile !== fromEnv && !_envMismatchWarned) {
-    _envMismatchWarned = true;
+  if (!_missingFileWarned) {
+    _missingFileWarned = true;
     log.warn(
-      `GEMIX_PUBLIC_URL (${fromEnv}) differs from tunnel file (${fromFile}); using tunnel file for xAI attachment URLs`,
+      `Tunnel URL file missing (${_tunnelUrlFilePath()}) — attachment links use localhost until the tunnel script writes it`,
     );
   }
-
-  if (fromFile) return fromFile;
-  if (fromEnv) return fromEnv;
   return 'http://localhost:9998';
 }
 

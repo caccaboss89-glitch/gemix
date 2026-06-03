@@ -82,6 +82,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     historyStorageId,
     metadataDurationSec: duration,
     ownerKey: historyStorageId,
+    registerTunnel: options.historyTagOnly !== true,
     getVoiceTranscription: isGemixVoice && isAudioType
       ? async () => resolveGemixVoiceTranscription(
         historyStorageId, syncedPath, chatId, (msg.timestamp || 0) * 1000,
@@ -103,9 +104,11 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
 }
 
 async function ingressSyncedAttachment(opts) {
+  const { historyTagOnly, ...rest } = opts;
   return deliverSyncedAttachment({
-    ...opts,
+    ...rest,
     ownerKey: opts.historyStorageId,
+    registerTunnel: historyTagOnly !== true,
   });
 }
 
@@ -113,7 +116,7 @@ async function ingressSyncedAttachment(opts) {
  * Sync + classify one Discord attachment (current turn, quote, or history rebuild).
  */
 async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
-  const { getVoiceTranscription = null, metadataDurationSec = 0 } = options;
+  const { getVoiceTranscription = null, metadataDurationSec = 0, historyTagOnly = false } = options;
 
   if (isDiscordAttachmentOversize(att)) {
     const tag = buildAttachmentTag(null, att.name);
@@ -140,6 +143,7 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     fetchBuffer,
     historyStorageId,
     metadataDurationSec,
+    historyTagOnly,
     getVoiceTranscription: typeof getVoiceTranscription === 'function'
       ? async () => getVoiceTranscription(syncedPath)
       : null,

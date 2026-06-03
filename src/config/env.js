@@ -77,10 +77,11 @@ module.exports = {
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
   GITHUB_REPO: process.env.GITHUB_REPO,
   GEMIX_NOTIFY_URL: process.env.GEMIX_NOTIFY_URL,
-  GEMIX_PUBLIC_URL: process.env.GEMIX_PUBLIC_URL,
-  // Optional override file (default src/data/tunnel-public-url.txt) updated by the
-  // attachment tunnel PM2 script when localtunnel assigns a URL.
+  // Attachment tunnel public URL: src/data/tunnel-public-url.txt (see run-attachment-tunnel.sh).
   GEMIX_TUNNEL_URL_FILE: process.env.GEMIX_TUNNEL_URL_FILE || null,
+  GEMIX_TEMP_FILE_PORT: process.env.GEMIX_TEMP_FILE_PORT || null,
+  // Replay xAI encrypted reasoning blobs across tool rounds (same handler session).
+  XAI_REASONING_REPLAY: toBool(process.env.XAI_REASONING_REPLAY, true),
 
   // Feature Flags / Modes
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),

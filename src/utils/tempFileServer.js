@@ -22,7 +22,7 @@ const crypto = require('crypto');
 const { createLogger } = require('./logger');
 const { mimeForExtension } = require('../config/mimeExtensions');
 const { getPublicBaseUrl } = require('./publicTunnelUrl');
-const env = require('../config/env');
+const { GEMIX_TEMP_FILE_PORT } = require('../config/env');
 const {
   DATA_DIR,
   TUNNEL_TOKEN_TTL_HISTORY_MS,
@@ -32,13 +32,9 @@ const {
 const log = createLogger('TempFileServer');
 
 // Configuration
-let PORT = 9998;
-if (env.GEMIX_PUBLIC_URL) {
-  try {
-    const u = new URL(env.GEMIX_PUBLIC_URL);
-    if (u.port) PORT = parseInt(u.port, 10);
-  } catch { /* fallback to 9998 */ }
-}
+const PORT = GEMIX_TEMP_FILE_PORT
+  ? parseInt(String(GEMIX_TEMP_FILE_PORT), 10) || 9998
+  : 9998;
 // Default TTL kept for backward compatibility (existing fallback callers
 // did not pass ttlMs). Equivalent to TUNNEL_TOKEN_TTL_TEMP_MS.
 const DEFAULT_EXPIRATION_MS = TUNNEL_TOKEN_TTL_TEMP_MS;
@@ -209,8 +205,8 @@ function registerTempFile(filePath, originalName, opts = {}) {
  *
  * Use this when handing a file to xAI as `input_file` on /v1/responses, or
  * when emitting a public link for any other consumer. The function always
- * returns an HTTPS URL backed by the localtunnel reverse proxy (provided
- * GEMIX_PUBLIC_URL is set; falls back to localhost otherwise).
+ * returns an HTTPS URL backed by the localtunnel reverse proxy (from
+ * src/data/tunnel-public-url.txt; falls back to localhost if missing).
  *
  * @param {string} filePath - Absolute path to the file.
  * @param {string} originalName - Display name (used in URL and headers).

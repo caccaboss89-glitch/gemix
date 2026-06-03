@@ -369,8 +369,10 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
     tools: _buildResearchTools(searchImages),
   };
 
-  // reasoning.effort: team=medium, fast=low (grok-4.3).
-  body.reasoning = { effort };
+  // reasoning.effort: team=medium, fast=low (grok-4.3). Legacy *non-reasoning* models reject it.
+  if (!/non-reasoning/i.test(model)) {
+    body.reasoning = { effort };
+  }
 
   logApiRequest(model, RESPONSES_URL, body);
   log.info(`   research call -> ${model} (${fullTeam ? 'team' : 'fast'}, images=${searchImages}, input: ${content.length} chars)`);

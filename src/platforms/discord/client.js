@@ -450,6 +450,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
     for (const att of m.attachments.values()) {
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
+        historyTagOnly: true,
         metadataDurationSec: Number(att.duration || 0),
         getVoiceTranscription: isBot
           ? async (syncedPath) => resolveGemixVoiceTranscription(

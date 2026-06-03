@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { HERMES_API_KEY, HERMES_BASE_URL, BUILD_MODEL } = require('../config/env');
+const { HERMES_API_KEY, HERMES_BASE_URL, BUILD_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
 const { callResponsesModel } = require('./apiClient');
 const {
   chatMessagesToResponsesInput,
@@ -532,11 +532,12 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       input,
       max_output_tokens: 64_000,
       tool_choice: 'auto',
-      // max_turns bounds server-side tool turns (web_search/x_search/code_interpreter)
-      // per request; BUILD_MAX_ROUNDS bounds the client-side loop.
       max_turns: BUILD_MAX_ROUNDS,
-      // The model rejects any reasoning/reasoningEffort parameter (HTTP 400).
+      store: false,
     };
+    if (XAI_REASONING_REPLAY) {
+      body.include = ['reasoning.encrypted_content'];
+    }
     if (instructions) body.instructions = instructions;
     if (adaptedTools) body.tools = adaptedTools;
 
@@ -615,12 +616,14 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
         model: BUILD_MODEL,
         input,
         max_output_tokens: 64_000,
-        // tool_choice:'none' forces a text-only answer while keeping the tool
-        // definitions in context.
         tool_choice: 'none',
+        store: false,
       };
       if (instructions) body.instructions = instructions;
       if (adaptedTools) body.tools = adaptedTools;
+      if (XAI_REASONING_REPLAY) {
+        body.include = ['reasoning.encrypted_content'];
+      }
       const data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY);
       finalText = responsesToAssistantMessage(data).content || '';
     } catch (err) {

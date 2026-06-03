@@ -318,7 +318,7 @@ function buildLimitsLines(profile, opts = {}) {
     );
   } else {
     lines.push(
-      '- Use read_file on history attachment tags to load files into the turn.',
+      '- History attachments are tags only; call read_file if you need to see a file not in this turn.',
     );
   }
   if (cap.isDiscord) {

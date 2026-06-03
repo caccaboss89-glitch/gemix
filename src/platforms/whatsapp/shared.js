@@ -196,6 +196,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
         chatId: chat.id._serialized,
         isGemixVoice: platform !== PLATFORM_WA_PERSONAL && isGemiX,
+        historyTagOnly: true,
       });
       textContent = _stripRedundantFilenameBesideAttachmentTag(
         textContent, mediaIngress.tag, allFilenameHints,
