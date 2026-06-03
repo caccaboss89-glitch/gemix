@@ -285,27 +285,34 @@ function _runBridge(args, timeoutMs, extraEnv) {
 }
 
 /**
- * Pull the first https URL out of the bridge's stdout. The bridge already
- * reduces stdout to one line, but we still verify it's a clean URL so we
- * never feed garbage to fetch().
+ * Parse bridge stdout: HTTPS URL (hermes CDN) or local path (hermes cache file).
  */
-function _extractUrl(stdout) {
+function _resolveMediaFromBridgeStdout(stdout) {
   if (typeof stdout !== 'string') return null;
-  const trimmed = stdout.trim();
-  if (!trimmed) return null;
-  const match = trimmed.match(/https?:\/\/[^\s"'<>]+/);
-  if (!match) return null;
-  // Strip a few trailing punctuation chars that occasionally appear if
-  // the model added a stray period etc.
-  return match[0].replace(/[.,)\]\}\">]+$/, '');
+  const firstLine = stdout.trim().split(/\r?\n/)[0].trim();
+  if (!firstLine) return null;
+
+  const urlMatch = firstLine.match(/https?:\/\/[^\s"'<>]+/);
+  if (urlMatch) {
+    return {
+      kind: 'url',
+      ref: urlMatch[0].replace(/[.,)\]\}\">]+$/, ''),
+    };
+  }
+
+  if ((firstLine.startsWith('/') || /^[A-Za-z]:[\\/]/.test(firstLine)) && fs.existsSync(firstLine)) {
+    return { kind: 'path', ref: firstLine };
+  }
+  return null;
 }
 
-/**
- * Download a URL into a Buffer. Used for the media URL returned by hermes -z
- * (temporary URLs are downloaded immediately into memory).
- */
-async function _downloadToBuffer(url) {
-  const res = await fetch(url);
+async function _loadMediaBuffer(media) {
+  if (media.kind === 'path') {
+    const buf = fs.readFileSync(media.ref);
+    if (!buf || buf.length === 0) throw new Error('Local media file is empty.');
+    return buf;
+  }
+  const res = await fetch(media.ref);
   if (!res.ok) {
     throw new Error(`Download failed: HTTP ${res.status}`);
   }
@@ -314,6 +321,14 @@ async function _downloadToBuffer(url) {
     throw new Error('Download returned an empty body.');
   }
   return Buffer.from(arrBuf);
+}
+
+function _extFromMediaRef(media, fallbackExt) {
+  if (media.kind === 'path') {
+    return path.extname(media.ref).slice(1).toLowerCase() || fallbackExt;
+  }
+  const m = media.ref.match(/\.(png|jpe?g|webp|gif|mp4|webm|mov)(?:\?|$)/i);
+  return (m && m[1]) ? m[1].toLowerCase() : fallbackExt;
 }
 
 // -- generate_image ----------------------------------------------------------
@@ -383,23 +398,22 @@ async function generateImage(args, userCtx, responseCtx) {
     };
   }
 
-  const url = _extractUrl(result.stdout);
-  if (!url) {
-    await notifyAdmin('GenerateImage', `Bridge returned no URL. stdout="${result.stdout.slice(0, 300)}"`);
-    return { success: false, error: `Image generation produced no URL.${ADMIN_NOTIFIED_SUFFIX}` };
+  const media = _resolveMediaFromBridgeStdout(result.stdout);
+  if (!media) {
+    await notifyAdmin('GenerateImage', `Bridge returned no media ref. stdout="${result.stdout.slice(0, 300)}"`);
+    return { success: false, error: `Image generation produced no media reference.${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
   let buffer;
   try {
-    buffer = await _downloadToBuffer(url);
+    buffer = await _loadMediaBuffer(media);
   } catch (err) {
-    await notifyAdmin('GenerateImage', `Download from ${url} failed: ${err.message}`);
-    return { success: false, error: `Image download failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    await notifyAdmin('GenerateImage', `Load media from ${media.ref} failed: ${err.message}`);
+    return { success: false, error: `Image load failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
   const baseName = sanitizeFilename(prompt.slice(0, 30), 30) || 'image';
-  // hermes -z most often emits .jpeg URLs; preserve extension when present.
-  const urlExt = (url.match(/\.(png|jpe?g|webp|gif)(?:\?|$)/i) || [])[1] || 'png';
+  const urlExt = _extFromMediaRef(media, 'png');
   const desiredName = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
   const mimetype = mimeForExtension(`.${urlExt.toLowerCase()}`);
 
@@ -484,22 +498,22 @@ async function generateVideo(args, userCtx, responseCtx) {
     };
   }
 
-  const url = _extractUrl(result.stdout);
-  if (!url) {
-    await notifyAdmin('GenerateVideo', `Bridge returned no URL. stdout="${result.stdout.slice(0, 300)}"`);
-    return { success: false, error: `Video generation produced no URL.${ADMIN_NOTIFIED_SUFFIX}` };
+  const media = _resolveMediaFromBridgeStdout(result.stdout);
+  if (!media) {
+    await notifyAdmin('GenerateVideo', `Bridge returned no media ref. stdout="${result.stdout.slice(0, 300)}"`);
+    return { success: false, error: `Video generation produced no media reference.${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
   let buffer;
   try {
-    buffer = await _downloadToBuffer(url);
+    buffer = await _loadMediaBuffer(media);
   } catch (err) {
-    await notifyAdmin('GenerateVideo', `Download from ${url} failed: ${err.message}`);
-    return { success: false, error: `Video download failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    await notifyAdmin('GenerateVideo', `Load media from ${media.ref} failed: ${err.message}`);
+    return { success: false, error: `Video load failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
   }
 
   const baseName = sanitizeFilename(prompt.slice(0, 30), 30) || 'video';
-  const urlExt = (url.match(/\.(mp4|webm|mov)(?:\?|$)/i) || [])[1] || 'mp4';
+  const urlExt = _extFromMediaRef(media, 'mp4');
   const desiredName = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
   const mimetype = mimeForExtension(`.${urlExt.toLowerCase()}`);
 

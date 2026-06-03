@@ -46,7 +46,7 @@
 - *Animare una foto che hai inviato* trasformandola in un breve video, o generare una nuova immagine ispirandosi a più di riferimento.
 - *Montare e ritoccare video e audio*: unire clip, tagliare, convertire formati, aggiungere sottotitoli, estrarre o sostituire l'audio.
 - Leggere e capire al volo un PDF scansionato, un messaggio vocale o un video con parlato, senza perdere nulla.
-- Cercare informazioni aggiornate in tempo reale combinando ricerca web + post recenti su 𝕏/Twitter, con citazioni verificate.
+- Cercare informazioni aggiornate in tempo reale combinando ricerca web + post recenti su 𝕏, con citazioni verificate.
 - Creare una simulazione completa della traiettoria di un buco nero rotante e visualizzarla in un grafico 3D interattivo.
 - Risolvere equazioni di fisica quantistica complesse e generare grafici scientifici pronti per una pubblicazione.
 - Produrre un report finanziario professionale con Excel completo di formule, grafici e formattazione automatica, poi convertirlo in PDF elegante con watermark.

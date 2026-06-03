@@ -21,7 +21,6 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let audioChunks = [];
-  let textChunks = [];
   let buffer = '';
 
   try {
@@ -64,36 +63,25 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
           const data = JSON.parse(dataStr);
           const delta = data.choices?.[0]?.delta || {};
 
-          // 1. Official OpenAI-style audio
           if (delta.audio?.data) audioChunks.push(delta.audio.data);
-          if (delta.audio?.transcript) textChunks.push(delta.audio.transcript);
 
-          // 2. Lyria on OpenRouter: audio often arrives as raw base64 in content
           if (delta.content) {
             const c = delta.content.trim();
-            // Base64 audio is long, no spaces, and typically matches base64 charset
             if (c.length > 200 && !c.includes(' ') && /^[A-Za-z0-9+/=]+$/.test(c)) {
               audioChunks.push(c);
               log.info(`Found base64 audio chunk (${c.length} chars)`);
-            } else {
-              textChunks.push(c);
             }
           }
-        } catch (e) {
-          log.debug(`Failed to parse SSE line`);
+        } catch {
+          log.debug('Failed to parse SSE line');
         }
       }
     }
 
     const fullAudioBase64 = audioChunks.join('');
-    const fullLyrics = textChunks.join('').trim();
+    log.info(`Stream finished - Audio chunks: ${audioChunks.length}`);
 
-    log.info(`Stream finished - Audio chunks: ${audioChunks.length} | Lyrics length: ${fullLyrics.length}`);
-
-    return {
-      audio: { data: fullAudioBase64 },
-      lyrics: fullLyrics || 'Lyrics not available'
-    };
+    return { audio: { data: fullAudioBase64 } };
 
   } finally {
     clearTimeout(timeout);
@@ -148,7 +136,7 @@ async function musicCreator(prompt, userCtx) {
           content: [{ type: 'text', text: prompt.trim() }]
         }
       ],
-      modalities: ['text', 'audio'],
+      modalities: ['audio'],
       ...(model.includes('lyria') ? {} : {
         audio: { voice: 'alloy', format: 'mp3' }
       })
@@ -156,7 +144,6 @@ async function musicCreator(prompt, userCtx) {
 
     const result = await callLyriaStreaming(model, apiUrl, body, apiKey);
 
-    // === IF AUDIO EXISTS ===
     if (result.audio.data && result.audio.data.length > 100) {
       let audioBase64 = result.audio.data;
       if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
@@ -180,19 +167,16 @@ async function musicCreator(prompt, userCtx) {
       }
 
       return {
-        toolResult: { success: true, message: '🎵 Song generated successfully!', lyrics: result.lyrics },
+        toolResult: { success: true, message: '🎵 Song generated successfully!' },
         attachments: [{ name: filename, buffer, mimetype: 'audio/mp3', sendAudioAsVoice: true }]
       };
     }
 
-    // === FALLBACK: lyrics only ===
-    log.warn('Audio not received - returning only lyrics');
-
+    log.warn('Audio not received from music model');
     return {
       toolResult: {
-        success: true,
-        message: '🎵 Lyrics generated successfully!\n\n' + result.lyrics,
-        lyrics: result.lyrics
+        success: false,
+        error: 'Music generation did not return audio. Try again with a different prompt.',
       },
       attachments: []
     };

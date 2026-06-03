@@ -38,6 +38,7 @@ const {
 const { createLogger } = require('../utils/logger');
 const { isNonReadableExt, buildReadFileBlockedMessage } = require('../config/nonReadableExts');
 const { mimeForExtension } = require('../config/mimeExtensions');
+const { executeBuildToolCallsOrdered } = require('../utils/toolCallExecution');
 
 const log = createLogger('BuildAgent');
 
@@ -211,11 +212,13 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     notesBlock,
     '<Tools>',
     '  write_file / edit_file / bash / read_file / web_x_search / code_interpreter',
+    '  In one turn: read_file / web_x_search / … may run in parallel; write_file and edit_file always run one at a time (in call order); bash runs when you call it (after prior tools in the same turn).',
+    '  You can write a file and bash-run it in the same turn (write_file before bash).',
     '</Tools>',
     '<Sandbox>',
     '  Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
     '  Python 3.12 and Node.js 22. General-purpose pre-installed libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, jinja2, PyYAML, requests, unoserver. General CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. No pip/npm/apt at runtime. Document-format libraries (reportlab, pypdf, python-docx, openpyxl, python-pptx, pptxgenjs, ...) are documented inside the relevant skill - read its SKILL.md.',
-    '  yt-dlp: outbound traffic goes through the egress proxy (YouTube, X/Twitter, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly - no need to check if it is installed.',
+    '  yt-dlp: outbound traffic goes through the egress proxy (YouTube, X, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly - no need to check if it is installed.',
     '</Sandbox>',
     skillsBlock,
     '<Delivery>',
@@ -280,9 +283,12 @@ async function _executeReadFile(workspaceId, args, ctx = {}) {
   if (delivery.kind === 'error') return _toolErr(delivery.error);
   if (delivery.kind === 'tunnel') {
     if (delivery.bumpImageCount) ctx.imagesReadCount = (ctx.imagesReadCount ?? 0) + 1;
-    return delivery.parts;
+    return [
+      { type: 'text', text: JSON.stringify({ success: true, message: `File loaded: ${args.path}` }) },
+      ...delivery.parts,
+    ];
   }
-  return delivery.content;
+  return JSON.stringify({ success: true, message: delivery.content });
 }
 
 function _executeWriteFile(workspaceId, args) {
@@ -383,8 +389,10 @@ async function _executeWebXSearch(workspaceId, args, statsAccumulator) {
   } catch (err) { return _toolErr(`Research failed: ${err.message}`); }
 
   if (result && result._stats && statsAccumulator) {
-    statsAccumulator.webSources += result._stats.webSources || 0;
-    statsAccumulator.xPosts += result._stats.xPosts || 0;
+    const ws = result._stats.webSources || 0;
+    const xp = result._stats.xPosts || 0;
+    statsAccumulator.webSources = (statsAccumulator.webSources || 0) + ws;
+    statsAccumulator.xPosts = (statsAccumulator.xPosts || 0) + xp;
   }
 
   // Persist any returned images into the workspace root so the agent can use
@@ -547,12 +555,16 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       const assistantToPush = { ...assistant };
       if (assistantToPush.content === null || assistantToPush.content === undefined) delete assistantToPush.content;
       messages.push(assistantToPush);
+      const resultsById = await executeBuildToolCallsOrdered(
+        assistant.tool_calls,
+        (tc) => _runToolCall(tc, ctx),
+      );
+
       for (const tc of assistant.tool_calls) {
-        const result = await _runToolCall(tc, ctx);
         messages.push({
           role: 'tool',
           tool_call_id: tc.id,
-          content: result,
+          content: resultsById.get(tc.id),
         });
       }
       const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file']);

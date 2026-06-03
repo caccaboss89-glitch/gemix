@@ -73,7 +73,10 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   if (result.kind === 'error') return { success: false, error: result.error };
   if (result.kind === 'tunnel') {
     if (result.bumpImageCount) responseCtx.imagesReadCount++;
-    return result.parts;
+    return [
+      { type: 'text', text: JSON.stringify({ success: true, message: `File loaded: ${displayPath}` }) },
+      ...result.parts,
+    ];
   }
   return { success: true, message: result.content };
 }

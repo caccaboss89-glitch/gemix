@@ -58,6 +58,62 @@ function _loadMembers() {
 
 const ACTIVE_MEMBERS = _loadMembers();
 
+function _tokenizeMemberName(name) {
+  if (typeof name !== 'string') return [];
+  return name.toLowerCase().trim().split(/\s+/).filter(Boolean);
+}
+
+/** Tokens used for flexible name lookup (legal name + Discord/WhatsApp nicks). */
+function _memberSearchTokens(member) {
+  const tokens = new Set(_tokenizeMemberName(member.name));
+  if (Array.isArray(member.nicks)) {
+    for (const nick of member.nicks) {
+      for (const t of _tokenizeMemberName(nick)) {
+        tokens.add(t);
+        const stripped = t.replace(/\d+$/, '');
+        if (stripped.length >= 3 && stripped !== t) tokens.add(stripped);
+      }
+    }
+  }
+  return [...tokens];
+}
+
+/**
+ * Resolve an active member by full name, surname, given name(s), or any
+ * token subset (order-independent). Returns an ambiguity error when multiple
+ * members share the same matching token(s).
+ *
+ * @param {string} query
+ * @returns {{ ok: true, member: object } | { ok: false, error: string }}
+ */
+function resolveActiveMemberByName(query) {
+  if (!query || typeof query !== 'string') {
+    return { ok: false, error: 'Member name is required.' };
+  }
+  const trimmed = query.trim();
+  const qTokens = _tokenizeMemberName(trimmed);
+  if (qTokens.length === 0) {
+    return { ok: false, error: 'Member name is required.' };
+  }
+
+  const matches = ACTIVE_MEMBERS.filter((m) => {
+    const mTokens = _memberSearchTokens(m);
+    return qTokens.every((t) => mTokens.includes(t));
+  });
+
+  if (matches.length === 0) {
+    return { ok: false, error: `Member "${trimmed}" not found.` };
+  }
+  if (matches.length > 1) {
+    const names = matches.map((m) => m.name).join(', ');
+    return {
+      ok: false,
+      error: `Multiple members match "${trimmed}": ${names}. Specify a more precise name.`,
+    };
+  }
+  return { ok: true, member: matches[0] };
+}
+
 /**
  * Find a member by WhatsApp JID.
  * @param {string} jid - WhatsApp JID (e.g., '393922348132@c.us')
@@ -83,14 +139,13 @@ function findMemberByDiscord(username, displayName, nickname) {
 }
 
 /**
- * Find a member by full name (case-insensitive).
- * @param {string} name - Full member name
- * @returns {object|null} The member object or null if not found
+ * Find a member by name query (see resolveActiveMemberByName).
+ * @param {string} name
+ * @returns {object|null}
  */
 function findMemberByName(name) {
-  if (!name) return null;
-  const lower = name.toLowerCase().trim();
-  return ACTIVE_MEMBERS.find(m => m.name.toLowerCase() === lower) || null;
+  const resolved = resolveActiveMemberByName(name);
+  return resolved.ok ? resolved.member : null;
 }
 
 /**
@@ -102,4 +157,11 @@ function isAdmin(member) {
   return member !== null && member.admin === true;
 }
 
-module.exports = { ACTIVE_MEMBERS, findMemberByWa, findMemberByDiscord, findMemberByName, isAdmin };
+module.exports = {
+  ACTIVE_MEMBERS,
+  findMemberByWa,
+  findMemberByDiscord,
+  findMemberByName,
+  resolveActiveMemberByName,
+  isAdmin,
+};

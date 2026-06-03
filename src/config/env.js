@@ -57,7 +57,7 @@ module.exports = {
   // - Imagine (image/video gen): NOT proxied. Via CLI `hermes -z`
   //   wrapped by bridge/imagine.sh.
   // Multi-agent research model used by the web_x_search tool when full_team=true
-  // (web + X/Twitter + images via xAI native search, orchestrated by a 4x team).
+  // (web + X + images via xAI native search, orchestrated by a 4x team).
   MULTI_AGENT_MODEL: process.env.MULTI_AGENT_MODEL,
   // Fast research model: a single reasoning model used by web_x_search by
   // default (full_team omitted/false). Same tools/params as the team

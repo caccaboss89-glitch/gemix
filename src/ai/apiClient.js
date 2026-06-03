@@ -16,8 +16,7 @@ const apiLogDir = path.resolve(__dirname, '..', 'logs');
 const LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour
 const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
-const LOG_ENTRY_MAX_BYTES = 1 * 1024 * 1024;       // 1 MB cap per single entry post-redaction
-const REDACT_TEXT_KEEP = 4 * 1024;                  // keep first N chars of long text content parts
+
 const crypto = require('crypto');
 
 // -- Redaction helpers -----------------------------------------------------
@@ -26,8 +25,7 @@ const crypto = require('crypto');
 // these files contain user PII (emails, phone numbers, names), long text,
 // tunnel URLs, and command strings that can include paths
 // or file contents. The redactor walks the body in-place (on a deep clone)
-// and shrinks the heaviest fields without losing the structure needed for
-// debugging.
+// PII in free-text fields is still masked; full payloads are kept for debugging.
 
 const _EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const _WA_JID_RE = /\b\d{8,15}@(?:c|s)\.us\b/g;
@@ -57,11 +55,7 @@ function _redactValue(value, key = '') {
     return _redactTunnelUrl(value);
   }
   if (typeof value === 'string') {
-    let out = value;
-    if (out.length > REDACT_TEXT_KEEP) {
-      out = out.slice(0, REDACT_TEXT_KEEP) + `…[truncated ${out.length - REDACT_TEXT_KEEP} chars]`;
-    }
-    return _redactStringPii(out);
+    return _redactStringPii(value);
   }
   if (Array.isArray(value)) return value.map(v => _redactValue(v));
   if (typeof value === 'object') {
@@ -244,13 +238,7 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
       requestAttachments,
       ...extra,
     });
-    let serialized = JSON.stringify(entry, null, 2);
-    if (serialized.length > LOG_ENTRY_MAX_BYTES) {
-      // Defensive truncation: redacted entries should already fit, but very
-      // long aggregations (many tool rounds) can still blow past the cap.
-      serialized = serialized.slice(0, LOG_ENTRY_MAX_BYTES) +
-        `\n... [entry truncated at ${LOG_ENTRY_MAX_BYTES} bytes]`;
-    }
+    const serialized = JSON.stringify(entry, null, 2);
     const filePath = _getLogFilePath('api-request', now);
     fs.writeFileSync(filePath, serialized);
     return filePath;
@@ -273,11 +261,7 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
       responseBody,
       ...extra,
     });
-    let serialized = JSON.stringify(entry, null, 2);
-    if (serialized.length > LOG_ENTRY_MAX_BYTES) {
-      serialized = serialized.slice(0, LOG_ENTRY_MAX_BYTES) +
-        `\n... [entry truncated at ${LOG_ENTRY_MAX_BYTES} bytes]`;
-    }
+    const serialized = JSON.stringify(entry, null, 2);
     fs.writeFileSync(responseLogFile, serialized);
     return responseLogFile;
   } catch (err) {

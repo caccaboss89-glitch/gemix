@@ -9,7 +9,8 @@
 //      user content. Media uses utils/incomingMediaIngress.js →
 //      aiFileDelivery.js: tunnel `input_file` URLs, inline <FileContent>, or
 //      [Attachment] tags only (Office/archives).
-//   4. Loop: call Grok (`/v1/responses`) - run any tool calls - repeat
+//   4. Loop: call Grok (`/v1/responses`) - run tool calls in two phases per round
+//      (phase 1: parallel; phase 2: voice-to-current-chat only) - repeat
 //      until the model returns plain text (final response) or the round
 //      budget is reached.
 //   5. Apply the research-team badge (web/X sources) and ship the reply
@@ -51,9 +52,7 @@ const log = createLogger('Handler');
 // when the model keeps emitting tool_calls within the round limit.
 const SESSION_MAX_DURATION_MS = 10 * 60 * 1000;
 
-// Delivery tools always run last in a round so they ship the reply only
-// after every other tool has finished (e.g. write_file before send_*).
-const DELIVERY_TOOL_NAMES = new Set(['send_voice_message', 'send_whatsapp_message', 'send_email']);
+const { partitionHandlerToolCalls } = require('./utils/toolCallExecution');
 
 /**
  * Send an intermediate notification message to the active chat (Discord channel
@@ -84,17 +83,6 @@ async function sendIntermediateNotification(ctx, kind, message) {
   } catch (err) {
     log.warn(`Failed to send ${kind} notification: ${err.message}`);
   }
-}
-
-/**
- * Stable phase ordering for tool calls within a round:
- *   - phase 1: standard tools (read_file, web_x_search, build, …)
- *   - phase 2: delivery tools (send_voice_message, send_*) - always last
- *     so any preceding tool's output reaches the recipient via the buffer.
- */
-function orderToolCalls(toolCalls) {
-  const getPhase = (tc) => DELIVERY_TOOL_NAMES.has(tc.function.name) ? 2 : 1;
-  return [...toolCalls].sort((a, b) => getPhase(a) - getPhase(b));
 }
 
 function extractPlainTextContent(content) {
@@ -426,24 +414,33 @@ async function handleMessage(ctx) {
         // Reset per-round deduplication tracking for idempotent tools.
         deliveryCtx.roundCalledTools = new Set();
 
-        const orderedCalls = orderToolCalls(assistantMsg.tool_calls);
-        // Build a Set of tool names the AI is actually allowed to call this
-        // round. Any tool name outside this set is rejected with a clear
-        // error.
+        const orderedCalls = assistantMsg.tool_calls;
         const allowedToolNames = new Set(roundTools.map(t => t.function?.name).filter(Boolean));
+        const phases = partitionHandlerToolCalls(orderedCalls, userCtx);
+        const resultsById = new Map();
 
-        for (const tc of orderedCalls) {
+        const runPhase = async (batch, parallel) => {
+          if (parallel) {
+            await Promise.all(batch.map(async (tc) => {
+              resultsById.set(tc.id, await recordToolResult(tc));
+            }));
+          } else {
+            for (const tc of batch) {
+              resultsById.set(tc.id, await recordToolResult(tc));
+            }
+          }
+        };
+
+        const recordToolResult = async (tc) => {
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-            log.warn('   Skipping remaining tool calls: voice message already generated for this turn');
-            messages.push({
+            return {
               role: 'tool',
               tool_call_id: tc.id,
               content: JSON.stringify({
                 success: false,
                 error: 'Turn already completed via voice message; further tools were not run.',
               }),
-            });
-            continue;
+            };
           }
           const toolBlock = getToolAccessError(tc.function.name, userCtx, {
             allowedRoundNames: allowedToolNames,
@@ -451,14 +448,21 @@ async function handleMessage(ctx) {
           });
           if (toolBlock) {
             log.warn(`   Tool "${tc.function.name}" blocked: ${toolBlock}`);
-            messages.push({
+            return {
               role: 'tool',
               tool_call_id: tc.id,
               content: JSON.stringify({ success: false, error: toolBlock }),
-            });
-            continue;
+            };
           }
-          messages.push(await runToolCall(tc));
+          return runToolCall(tc);
+        };
+
+        await runPhase(phases.phase1, true);
+        await runPhase(phases.phase2, false);
+
+        for (const tc of orderedCalls) {
+          const msg = resultsById.get(tc.id);
+          if (msg) messages.push(msg);
         }
 
         // Token optimization: tunnel/input_file previews are stripped from tool

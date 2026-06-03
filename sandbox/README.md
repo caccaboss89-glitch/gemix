@@ -154,7 +154,7 @@ In assenza di motivi specifici, lascia i default.
 
 Il proxy nega il traffico in uscita per default e inoltra solo verso gli
 host nell'allowlist (`sandbox/proxy/proxy.py`, override via env
-`ALLOWED_HOSTS`). I default coprono YouTube, X/Twitter (`x.com`,
+`ALLOWED_HOSTS`). I default coprono YouTube, X (`x.com`,
 `api.x.com`, `twimg.com`, `t.co`), Instagram, TikTok, Facebook (necessari
 per `yt-dlp`).
 

@@ -18,7 +18,7 @@ const { readFileTool } = require('./readFile');
 const { generateFormalRequestPdf } = require('./formalRequestPdf');
 const { sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppDirect } = require('./whatsappSender');
-const { findMemberByName } = require('../config/members');
+const { resolveActiveMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
@@ -74,17 +74,17 @@ function _resolveTargetWaJid(args, userCtx) {
       return { jid, display: recipientPhone };
     }
     if (recipientName) {
-      const member = findMemberByName(recipientName);
-      if (member) return { jid: member.wa, display: member.name };
-      return { error: { success: false, error: `Member "${recipientName}" not found.` } };
+      const resolved = resolveActiveMemberByName(recipientName);
+      if (!resolved.ok) return { error: { success: false, error: resolved.error } };
+      return { jid: resolved.member.wa, display: resolved.member.name };
     }
     if (userCtx.waJid) {
       return { jid: userCtx.waJid, display: userCtx.userName || 'yourself' };
     }
   } else if (userCtx.isActiveMember && recipientName) {
-    const member = findMemberByName(recipientName);
-    if (!member) return { error: { success: false, error: `Member "${recipientName}" not found.` } };
-    return { jid: member.wa, display: member.name };
+    const resolved = resolveActiveMemberByName(recipientName);
+    if (!resolved.ok) return { error: { success: false, error: resolved.error } };
+    return { jid: resolved.member.wa, display: resolved.member.name };
   }
   if (!userCtx.waJid) return { error: { success: false, error: 'No WhatsApp number available.' } };
   return { jid: userCtx.waJid, display: 'yourself' };
@@ -110,14 +110,20 @@ function _resolveTargetEmail(args, userCtx) {
       return { email: recipientEmail, display: recipientEmail };
     }
     if (recipientName) {
-      const member = findMemberByName(recipientName);
-      if (member && member.email) return { email: member.email, display: member.name };
-      return { error: { success: false, error: `"${recipientName}" not found or has no email.` } };
+      const resolved = resolveActiveMemberByName(recipientName);
+      if (!resolved.ok) return { error: { success: false, error: resolved.error } };
+      if (!resolved.member.email) {
+        return { error: { success: false, error: `"${resolved.member.name}" has no email on file.` } };
+      }
+      return { email: resolved.member.email, display: resolved.member.name };
     }
   } else if (recipientName) {
-    const member = findMemberByName(recipientName);
-    if (member && member.email) return { email: member.email, display: member.name };
-    return { error: { success: false, error: `"${recipientName}" not found or has no email.` } };
+    const resolved = resolveActiveMemberByName(recipientName);
+    if (!resolved.ok) return { error: { success: false, error: resolved.error } };
+    if (!resolved.member.email) {
+      return { error: { success: false, error: `"${resolved.member.name}" has no email on file.` } };
+    }
+    return { email: resolved.member.email, display: resolved.member.name };
   }
   if (!userCtx.email) return { error: { success: false, error: 'No email address available.' } };
   return { email: userCtx.email, display: 'yourself' };
@@ -182,15 +188,18 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
   }
 
-  // -- Per-round deduplication ----------------------------------------------
-  if (ONCE_PER_ROUND_TOOLS.has(name) && deliveryCtx.roundCalledTools?.has(name)) {
-    return {
-      toolCallId: toolCall.id,
-      result: JSON.stringify({
-        success: false,
-        error: `"${name}" can only be called once per round. Use the result from the previous call in this round.`,
-      }),
-    };
+  // -- Per-round deduplication (reserve name before async work for parallel runs) --
+  if (ONCE_PER_ROUND_TOOLS.has(name)) {
+    if (deliveryCtx.roundCalledTools?.has(name)) {
+      return {
+        toolCallId: toolCall.id,
+        result: JSON.stringify({
+          success: false,
+          error: `"${name}" can only be called once per round. Use the result from the previous call in this round.`,
+        }),
+      };
+    }
+    deliveryCtx.roundCalledTools?.add(name);
   }
 
   const platformBlock = platformToolBlockReason(name, userCtx);
@@ -334,8 +343,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           // current user, the message is delivered in the current chat.
           let resolvesToSelf = false;
           if (recipientName) {
-            const member = findMemberByName(recipientName);
-            if (member && member.wa === userCtx.waJid) resolvesToSelf = true;
+            const resolved = resolveActiveMemberByName(recipientName);
+            if (resolved.ok && resolved.member.wa === userCtx.waJid) resolvesToSelf = true;
           }
           if (!resolvesToSelf && recipientPhone && userCtx.waJid) {
             const normalized = normalizePhoneToJid(recipientPhone);
@@ -369,6 +378,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
             break;
           }
+          deliveryCtx.contactedWA.add(targetJid.jid);
           try {
             const voiceBuf = await generateVoice(cleanText);
             const voiceMedia = new MessageMedia('audio/ogg', voiceBuf.toString('base64'), 'voice.ogg');
@@ -518,6 +528,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           result = { success: false, error: `You have already sent an email to this address. Each email can only receive 1 message per request.` };
           break;
         }
+        deliveryCtx.contactedEmail.add(targetEmail.email);
         try {
           // Try to send with fallback support for attachments
           if (includeAttachments && responseCtx.attachments.length > 0) {
@@ -590,8 +601,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
         const waRecipientName = args.recipient?.name || args.recipientName;
         if (waRecipientName) {
-          const member = findMemberByName(waRecipientName);
-          if (member && member.wa === userCtx.waJid) {
+          const resolved = resolveActiveMemberByName(waRecipientName);
+          if (resolved.ok && resolved.member.wa === userCtx.waJid) {
             result = { success: false, error: 'You cannot send to yourself. To reply in the current chat, omit the recipient.' };
             break;
           }
@@ -603,6 +614,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
           break;
         }
+        deliveryCtx.contactedWA.add(targetJid.jid);
         try {
           await sendWhatsAppDirect(targetJid.jid, args.message);
           if (includeAttachments && responseCtx.attachments.length > 0) {
@@ -705,11 +717,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     log.error(`   Unhandled tool error (${name}): ${err.message}`, err.stack);
     await notifyAdmin(`Tool Execution (${name})`, `Unhandled error: ${err.message}`);
     result = { success: false, error: `Error executing ${name}: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
-  }
-
-  // Track per-round calls for idempotent tools
-  if (ONCE_PER_ROUND_TOOLS.has(name)) {
-    deliveryCtx.roundCalledTools?.add(name);
   }
 
   let finalResult;

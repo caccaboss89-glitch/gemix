@@ -8,7 +8,7 @@
 const crypto = require('crypto');
 const { MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
 const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
-const { findMemberByName, findMemberByWa } = require('../config/members');
+const { resolveActiveMemberByName, findMemberByWa } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { removeDiscordEmoji } = require('../utils/discord');
 const { normalizeMarkdown } = require('../utils/text');
@@ -113,21 +113,19 @@ async function scheduleTasks(tasks, ctx) {
       if (ctx.isAdmin && waRecipient.phone) {
         destinations.whatsapp = normalizePhoneToJid(waRecipient.phone);
       } else if (ctx.isAdmin && waRecipient.name) {
-        const recipient = findMemberByName(waRecipient.name);
-        if (recipient) {
-          destinations.whatsapp = recipient.wa;
-        } else {
-          results.push({ success: false, error: `"${waRecipient.name}" not found among members. Use phone number for non-members.` });
+        const resolved = resolveActiveMemberByName(waRecipient.name);
+        if (!resolved.ok) {
+          results.push({ success: false, error: resolved.error });
           continue;
         }
+        destinations.whatsapp = resolved.member.wa;
       } else if (ctx.isActiveMember && waRecipient.name) {
-        const recipient = findMemberByName(waRecipient.name);
-        if (recipient) {
-          destinations.whatsapp = recipient.wa;
-        } else {
-          results.push({ success: false, error: `"${waRecipient.name}" not found among members.` });
+        const resolved = resolveActiveMemberByName(waRecipient.name);
+        if (!resolved.ok) {
+          results.push({ success: false, error: resolved.error });
           continue;
         }
+        destinations.whatsapp = resolved.member.wa;
       } else if (ctx.userPhone) {
         destinations.whatsapp = normalizePhoneToJid(ctx.userPhone);
       } else {
