@@ -95,90 +95,16 @@ function _getLogFilePath(prefix, timestamp) {
   return path.join(apiLogDir, `${prefix}-${sanitized}-${rand}.json`);
 }
 
-function extractAttachmentsFromMessages(messages) {
-  const attachments = [];
-
-  if (!Array.isArray(messages)) return attachments;
-
-  messages.forEach((message, index) => {
-    if (!message || !Array.isArray(message.content)) return;
-    message.content.forEach((part, partIndex) => {
-      if (!part || !part.type || part.type === 'text') return;
-      const entry = {
-        role: message.role || null,
-        messageIndex: index,
-        partIndex,
-        type: part.type,
-      };
-      if (part.type === 'input_file' && part.file_url) {
-        entry.file_url = part.file_url;
-      } else if (part.type === 'image_url' && part.image_url?.url) {
-        entry.image_url = part.image_url.url;
-      }
-      attachments.push(entry);
-    });
-  });
-
-  return attachments;
-}
-
-function _pushResponsesPartAttachment(attachments, itemIndex, part, partIndex) {
-  if (!part || typeof part !== 'object') return;
-  if (part.type === 'input_image' && part.image_url) {
-    attachments.push({
-      inputIndex: itemIndex,
-      partIndex,
-      type: 'input_image',
-      image_url: part.image_url,
-    });
-    return;
-  }
-  if (part.type === 'input_file' && part.file_url) {
-    attachments.push({
-      inputIndex: itemIndex,
-      partIndex,
-      type: 'input_file',
-      file_url: part.file_url,
-    });
-  }
-}
-
-function extractAttachmentsFromResponsesInput(input) {
-  const attachments = [];
-  if (!Array.isArray(input)) return attachments;
-
-  input.forEach((item, index) => {
-    if (!item || typeof item !== 'object') return;
-    _pushResponsesPartAttachment(attachments, index, item, 0);
-    if (Array.isArray(item.content)) {
-      item.content.forEach((part, partIndex) => {
-        _pushResponsesPartAttachment(attachments, index, part, partIndex);
-      });
-    }
-  });
-
-  return attachments;
-}
-
-function extractAttachmentsFromRequestBody(body) {
-  if (!body || typeof body !== 'object') return [];
-  if (Array.isArray(body.messages)) return extractAttachmentsFromMessages(body.messages);
-  if (Array.isArray(body.input)) return extractAttachmentsFromResponsesInput(body.input);
-  return [];
-}
-
 function logApiRequest(modelName, apiUrl, body, extra = {}) {
   try {
     ensureLogDir();
     _enforceLogDirQuota();
     const now = new Date().toISOString();
-    const requestAttachments = extractAttachmentsFromRequestBody(body);
     const entry = {
       timestamp: now,
       model: modelName,
       apiUrl,
       requestBody: body,
-      requestAttachments,
       ...extra,
     };
     const serialized = JSON.stringify(entry, null, 2);

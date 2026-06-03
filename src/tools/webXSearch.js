@@ -21,7 +21,12 @@
 // workspace), and replace each embed with a positional placeholder so the
 // brain never pastes a raw URL or references an image that does not ship.
 
-const { HERMES_API_KEY, HERMES_BASE_URL, MULTI_AGENT_MODEL, FAST_RESEARCH_MODEL } = require('../config/env');
+const {
+  HERMES_API_KEY,
+  HERMES_BASE_URL,
+  MULTI_AGENT_MODEL,
+  FAST_RESEARCH_MODEL,
+} = require('../config/env');
 const { MAX_IMAGE_BYTES, MAX_RESEARCH_IMAGES, RESEARCH_MAX_TURNS } = require('../config/constants');
 const { logApiRequest, logApiResponse } = require('../ai/apiClient');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
@@ -360,13 +365,12 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
   const body = {
     model,
     instructions,
-    // max_turns bounds the server-side tool-call turns and guarantees a final
-    // synthesized answer even if the budget is hit mid-research (xAI forces a
-    // tool-less synthesis at the limit - no round counter exposed to the model,
-    // same spirit as the main brain / build wrap-up).
+    // Single HTTP call: xAI runs web_search/x_search (and team sub-agents) inside
+    // max_turns on the server. No GemiX replay of reasoning blobs between requests.
     max_turns: RESEARCH_MAX_TURNS,
     input: [{ role: 'user', content }],
     tools: _buildResearchTools(searchImages),
+    store: false,
   };
 
   // reasoning.effort: team=medium, fast=low (grok-4.3). Legacy *non-reasoning* models reject it.

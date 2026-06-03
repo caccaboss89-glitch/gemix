@@ -180,10 +180,17 @@ function chatMessagesToResponsesInput(messages) {
       }
 
       case 'assistant': {
-        const storedOutput = msg._responsesOutput
-          || msg._responsesOutputSequence;
+        const storedOutput = msg._responsesOutput;
         if (Array.isArray(storedOutput) && storedOutput.length > 0) {
           _replayStoredOutput(input, storedOutput);
+          // Rare API shape: visible text only in output_text, not as a message item.
+          const hasMessageItem = storedOutput.some((i) => i && i.type === 'message');
+          if (!hasMessageItem) {
+            const text = _assistantContentToText(msg.content);
+            if (text && text.length > 0) {
+              input.push({ role: 'assistant', content: text });
+            }
+          }
         } else {
           const text = _assistantContentToText(msg.content);
           if (text && text.length > 0) {
@@ -311,8 +318,6 @@ function responsesToAssistantMessage(data) {
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
   if (responsesOutput.length > 0) {
     message._responsesOutput = responsesOutput;
-    // Back-compat alias for older in-memory turns in the same process.
-    message._responsesOutputSequence = responsesOutput;
   }
 
   return message;

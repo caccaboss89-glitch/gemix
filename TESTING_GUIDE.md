@@ -46,7 +46,7 @@ Dopo A1, in un **nuovo** messaggio: *“leggi il file che ti ho mandato prima”
 | 9 | Audio **molto lungo** (> limite in `constants`) | Tag con nota tipo `(audio too long: …s)` — **non** tunnel silenzioso. |
 | 10 | 11+ `read_file` su immagini diverse nello stesso turno | Dal decimo in poi: limite 10 immagini / errore esplicito. |
 
-**Log (facoltativo):** in `logs/api-request-*.json`, allegati come `tunnel_url` / `input_file`; URL non in chiaro intero; con turno handler compare `requestId`.
+**Log (facoltativo):** in `logs/api-request-*.json`, `input_file` con URL tunnel completi; nei round tool compare `reasoning` + replay nel round successivo; `requestId` per turno handler.
 
 ---
 
