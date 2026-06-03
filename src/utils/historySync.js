@@ -16,14 +16,14 @@ const FILE_CONTENT_PATH_RE = /<FileContent\s+path="([^"]+)"/gi;
 
 const log = createLogger('HistorySync');
 
-// Discord-only age cap on on-disk history attachments. WhatsApp has no age cap
-// (only files not referenced in the current history buffer are removed).
-// After this TTL, files are deleted even if still tagged in history; the next
-// turn re-downloads them when buildDiscordHistory / buildIncoming runs sync.
+// Age cap on on-disk history attachments when reference-based prune is skipped
+// (history fetch timeout/incomplete). Files older than this TTL are removed;
+// the next successful history rebuild re-syncs media from the last MAX_HISTORY messages.
 const DISCORD_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
-const RECENT_VOICE_CACHE_FILE = path.join(DATA_DIR, 'voiceTextCache.json');
+const GEMIX_VOICE_TEXT_CACHE_FILE = path.join(DATA_DIR, 'gemixVoiceTextCache.json');
 const RECENT_VOICE_MAX_ENTRIES = 200;
-const RECENT_VOICE_MATCH_TOLERANCE_MS = 20_000;
+/** Match cache entry to history message time (voice sent vs history rebuild delay). */
+const RECENT_VOICE_MATCH_TOLERANCE_MS = 120_000;
 const RECENT_VOICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 let recentVoiceEntries = [];
@@ -90,8 +90,15 @@ function _normalizeHistoryFilename(historyFilename) {
 
 function _loadRecentVoiceEntries() {
   try {
-    if (fs.existsSync(RECENT_VOICE_CACHE_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(RECENT_VOICE_CACHE_FILE, 'utf-8'));
+    const legacyPath = path.join(DATA_DIR, 'voiceTextCache.json');
+    if (!fs.existsSync(GEMIX_VOICE_TEXT_CACHE_FILE) && fs.existsSync(legacyPath)) {
+      try { fs.renameSync(legacyPath, GEMIX_VOICE_TEXT_CACHE_FILE); } catch { /* use legacy read below */ }
+    }
+    const readPath = fs.existsSync(GEMIX_VOICE_TEXT_CACHE_FILE)
+      ? GEMIX_VOICE_TEXT_CACHE_FILE
+      : (fs.existsSync(legacyPath) ? legacyPath : null);
+    if (readPath) {
+      const raw = JSON.parse(fs.readFileSync(readPath, 'utf-8'));
       recentVoiceEntries = Array.isArray(raw) ? raw : [];
     }
   } catch {
@@ -100,10 +107,10 @@ function _loadRecentVoiceEntries() {
 }
 
 function _saveRecentVoiceEntries() {
-  const tempFile = RECENT_VOICE_CACHE_FILE + '.tmp';
+  const tempFile = GEMIX_VOICE_TEXT_CACHE_FILE + '.tmp';
   try {
     fs.writeFileSync(tempFile, JSON.stringify(recentVoiceEntries), 'utf-8');
-    fs.renameSync(tempFile, RECENT_VOICE_CACHE_FILE);
+    fs.renameSync(tempFile, GEMIX_VOICE_TEXT_CACHE_FILE);
   } catch {
     if (fs.existsSync(tempFile)) {
       try { fs.unlinkSync(tempFile); } catch {}
@@ -118,10 +125,11 @@ function _cleanupRecentVoiceEntries() {
   if (recentVoiceEntries.length < before) _saveRecentVoiceEntries();
 }
 
-function storeRecentVoiceText(chatId, text) {
+function storeRecentVoiceText(chatId, text, msgTimestampMs = null) {
   if (!chatId || !text) return;
   _cleanupRecentVoiceEntries();
-  recentVoiceEntries.push({ chatId, ts: Date.now(), text });
+  const ts = Number(msgTimestampMs) > 0 ? Number(msgTimestampMs) : Date.now();
+  recentVoiceEntries.push({ chatId, ts, text });
   if (recentVoiceEntries.length > RECENT_VOICE_MAX_ENTRIES) {
     recentVoiceEntries = recentVoiceEntries.slice(-RECENT_VOICE_MAX_ENTRIES);
   }

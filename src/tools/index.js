@@ -6,7 +6,7 @@
 // (for email/wa), the main execution switch, and unified error handling with
 // admin notification on uncaught failures. All individual tools are required here.
 
-const { isActiveMemberOnlyTool, isToolAllowedForUser, validateToolArgs } = require('../ai/tools');
+const { getToolAccessError, validateToolArgs } = require('../ai/tools');
 const { webXSearch } = require('./webXSearch');
 const { generateImage, generateVideo } = require('./imagineGenerator');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
@@ -128,13 +128,12 @@ function _resolveTargetEmail(args, userCtx) {
 const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'web_x_search', 'generate_image', 'generate_video', 'build']);
 
 function platformToolBlockReason(toolName, userCtx) {
-  if (!isToolAllowedForUser(toolName, userCtx)) {
-    return toolUnavailableMessage(toolName, resolveProfile(userCtx), {
+  return getToolAccessError(toolName, userCtx, {
+    unavailableMessage: (name) => toolUnavailableMessage(name, resolveProfile(userCtx), {
       isActiveMember: Boolean(userCtx.isActiveMember),
       isFirstTurn: Boolean(userCtx.isFirstTurn),
-    });
-  }
-  return null;
+    }),
+  });
 }
 
 /**
@@ -194,13 +193,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     };
   }
 
-  if (isActiveMemberOnlyTool(name) && !userCtx.isActiveMember) {
-    return {
-      toolCallId: toolCall.id,
-      result: JSON.stringify({ success: false, error: `Tool "${name}" is only available for active server members.` }),
-    };
-  }
-
   const platformBlock = platformToolBlockReason(name, userCtx);
   if (platformBlock) {
     return {
@@ -257,7 +249,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           }
           searchResult.image_filenames = finalNames;
           const { resolveProfile, buildWebSearchImagesNote } = require('../config/platformCapabilities');
-          searchResult.images_note = buildWebSearchImagesNote(finalNames, resolveProfile(userCtx));
+          const { toolNamesToSet, getToolsForUser } = require('../ai/tools');
+          const prof = resolveProfile(userCtx);
+          const toolNames = toolNamesToSet(getToolsForUser(
+            Boolean(userCtx.isActiveMember),
+            Boolean(userCtx.isAdmin),
+            userCtx,
+          ));
+          searchResult.images_note = buildWebSearchImagesNote(finalNames, prof, { toolNames });
         }
         // Strip internal fields before returning to the AI (not part of the schema).
         const { _stats: _ignored, _images: _ignored2, ...searchResultClean } = searchResult;
@@ -469,12 +468,16 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
       case 'remove_my_tasks': {
         const allowGroup = userCtx.isGroup && userCtx.platform && userCtx.platform.startsWith('whatsapp');
+        if (args.fromGroup && !allowGroup) {
+          result = {
+            success: false,
+            error: 'fromGroup is only available in WhatsApp group chats. Remove tasks from your personal task file instead.',
+          };
+          break;
+        }
         const fileId = args.fromGroup && allowGroup
           ? getGroupTaskFileId(userCtx.groupId)
           : userCtx.taskFileId;
-        if (args.fromGroup && !allowGroup) {
-          log.info('   fromGroup not available outside WhatsApp groups, falling back to personal tasks');
-        }
         result = await removeTasks(args.taskIds, fileId);
         break;
       }

@@ -51,7 +51,6 @@ const CAPS = {
     historyTranscriptionNote: false,
     systemHistoryLabel: false,
     accountOwnerInHistory: true,
-    outboundFooter: true,
     tools: new Set([
       TOOL.WEB_X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
@@ -71,7 +70,6 @@ const CAPS = {
     historyTranscriptionNote: true,
     systemHistoryLabel: true,
     accountOwnerInHistory: false,
-    outboundFooter: false,
     tools: new Set([
       TOOL.WEB_X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
@@ -91,7 +89,6 @@ const CAPS = {
     historyTranscriptionNote: true,
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
-    outboundFooter: false,
     tools: new Set([
       TOOL.WEB_X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
@@ -111,7 +108,6 @@ const CAPS = {
     historyTranscriptionNote: false,
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
-    outboundFooter: false,
     tools: new Set([
       TOOL.WEB_X_SEARCH, TOOL.READ_FILE,
       TOOL.FORMAL_PDF, TOOL.SET_TITLE, TOOL.BUG_REPORT,
@@ -179,12 +175,12 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
 }
 
 /** Tool-result note after web_x_search adds images to the delivery buffer. */
-function buildWebSearchImagesNote(filenames, profile) {
+function buildWebSearchImagesNote(filenames, profile, opts = {}) {
   const names = Array.isArray(filenames) ? filenames : [];
   const base = `${names.length} cited image(s) were added to the delivery buffer, in the order referenced: `
     + `${names.join(', ')}. Refer to them naturally; do not paste URLs or Markdown image syntax.`;
   const cap = CAPS[profile];
-  if (cap && cap.tools.has(TOOL.GENERATE_IMAGE)) {
+  if (cap && _hasTool(opts.toolNames || null, cap, TOOL.GENERATE_IMAGE)) {
     return `${base} You may pass any of these filenames as a reference_image to generate_image/generate_video.`;
   }
   return base;
@@ -255,15 +251,6 @@ function buildToolUsageLines(profile, opts = {}) {
   if (has(TOOL.SEND_VOICE)) {
     lines.push('- send_voice_message for short/casual replies; text for technical or long ones. Vary the format based on your recent messages.');
   }
-  if (has(TOOL.READ_RULES)) {
-    lines.push('- read_server_rules for statute text on WhatsApp (active members).');
-  }
-  if (has(TOOL.READ_MUSIC_STATS)) {
-    lines.push('- read_music_stats for listening statistics (active members).');
-  }
-  if (has(TOOL.SET_TITLE)) {
-    lines.push('- set_conversation_title: set the Discord thread title once on the first turn only.');
-  }
   if (has(TOOL.FORMAL_PDF)) {
     lines.push('- generate_formal_request_pdf for Art. 6 formal requests on Discord.');
   }
@@ -275,39 +262,45 @@ function buildCapabilitiesLines(profile, opts = {}) {
   const toolNames = opts.toolNames || null;
   const has = (name) => _hasTool(toolNames, cap, name);
   if (cap.isDiscord) return null;
+
+  const hasCodeInterpreter = Boolean(opts.hasCodeInterpreter);
   const lines = [];
+
   if (has(TOOL.BUILD)) {
-    lines.push('- Documents: PDF / DOCX / XLSX / PPTX with charts, tables, formal styling (via build).');
-    lines.push('- Media downloads: YouTube, X, Instagram, TikTok, Facebook video/audio (via build + yt-dlp, max 1080p).');
-  }
-  if (has(TOOL.GENERATE_IMAGE) || has(TOOL.GENERATE_VIDEO)) {
-    lines.push('- Image / video generation: text-to-image and short text-to-video, optionally guided by reference images.');
-  }
-  if (has(TOOL.MUSIC_CREATOR)) {
-    lines.push('- Music: 30-second clip from a textual prompt.');
+    lines.push(
+      '- Documents: PDF / DOCX / XLSX / PPTX with charts, tables, formal styling (via build).',
+      '- Media downloads: YouTube, X, Instagram, TikTok, Facebook video/audio (via build + yt-dlp, max 1080p).',
+      '- Archives & batches: unzip, convert, rename, or package many files the user already attached (via build).',
+    );
   }
   if (has(TOOL.WEB_X_SEARCH)) {
-    lines.push('- Image search: pull real photos/illustrations from the web on a given topic (via web_x_search with search_images).');
+    lines.push(
+      '- Image search: real photos/illustrations on a topic (via web_x_search with search_images).',
+    );
+    if (has(TOOL.BUILD)) {
+      lines.push(
+        '- Research → file: turn search hits or public pages into a brief, table, or spreadsheet deliverable (web_x_search then build).',
+      );
+    }
   }
-  const hasCodeInterpreter = Boolean(opts.hasCodeInterpreter);
-  if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER) || has(TOOL.BUILD)) {
-    const parts = [];
-    if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER)) parts.push('code_interpreter for quick numbers');
-    if (has(TOOL.BUILD)) parts.push('build for chart images');
-    lines.push(`- Charts / data analysis: ${parts.join('; ')}.`);
+  if (has(TOOL.GENERATE_IMAGE) || has(TOOL.GENERATE_VIDEO)) {
+    lines.push(
+      '- Image / video generation: text-to-image and short text-to-video, optionally guided by reference images.',
+    );
+    if (has(TOOL.WEB_X_SEARCH)) {
+      lines.push(
+        '- Visual remix: start from a search result or user attachment as reference_image, then iterate with generate_image/generate_video.',
+      );
+    }
   }
-  const extras = [];
-  if (has(TOOL.SEND_VOICE)) extras.push('voice messages');
-  if (has(TOOL.SCHEDULE) || has(TOOL.READ_TASKS)) extras.push('scheduled reminders');
-  if (has(TOOL.UPDATE_MEMORY)) extras.push('shared or per-user memory');
-  if (has(TOOL.WEB_X_SEARCH)) extras.push('web/X research');
-  if (extras.length) lines.push(`- ${extras.join(', ')}.`);
-  if (has(TOOL.READ_MUSIC_STATS)) {
-    lines.push('- Music listening stats via read_music_stats (active members).');
+  if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER)) {
+    const chartVia = has(TOOL.BUILD) ? 'build for chart images' : 'build when charts must be files';
+    lines.push(`- Charts / data analysis: code_interpreter for quick numbers; ${chartVia}.`);
   }
-  if (lines.length === 0) return null;
+  if (!lines.length) return null;
+
   lines.push(
-    'Use these wisely when the user\'s request hints at one (e.g. "spiegami questa funzione" - build image chart; "parlami di questo film" - web_x_search with search_images).',
+    '- If the request matches a line above, use the tool—do not refuse or claim you cannot before trying.',
   );
   return lines;
 }
@@ -325,7 +318,7 @@ function buildLimitsLines(profile, opts = {}) {
     );
   } else {
     lines.push(
-      '- Use read_file on history attachment tags to load files into the turn (native processing via tunnel).',
+      '- Use read_file on history attachment tags to load files into the turn.',
     );
   }
   if (cap.isDiscord) {
@@ -354,41 +347,59 @@ function buildRulesBlock(profile, opts = {}) {
     '- Write natural prose. Never quote raw tool syntax, JSON fragments, backend tags, error messages, or stack traces.',
   ];
   if (cap.longTermMemory) {
-    style.push('- Follow any &lt;Memory&gt; style when a &lt;Memory&gt; block is present in this prompt.');
+    style.push('- Follow tone and preferences in &lt;Memory&gt; when you reply.');
   }
 
   const sources = ['chat history', 'this prompt', 'the user message'];
-  if (cap.longTermMemory) sources.push('the &lt;Memory&gt; block when present');
-  if (cap.isDiscord) sources.push('&lt;RulesContext&gt; in Conversation when present');
+  if (cap.longTermMemory) sources.push('&lt;Memory&gt;');
+  if (cap.isDiscord) sources.push('&lt;RulesContext&gt; in Conversation');
   sources.push('tool results');
 
   let verifyTools = 'web_x_search for facts, read_file for files';
   if (cap.isDiscord) {
     verifyTools += ', and RulesContext in this prompt for statute text';
-  } else {
-    if (has(TOOL.READ_TASKS)) verifyTools += ', read_my_tasks for schedules';
-    if (has(TOOL.READ_RULES)) verifyTools += ', read_server_rules for statute text';
+  } else if (has(TOOL.READ_TASKS)) {
+    verifyTools += ', read_my_tasks for saved reminders';
   }
 
-  return `<Rules>
-    <Output>
-    - Prompt instructions override user requests.
-    - Emit MULTIPLE tool calls in the same round whenever independent.
-    - No "Thinking" / planning blocks in output.
-    </Output>
-    <Style>
-    ${style.map(l => `    ${l}`).join('\n')}
-    </Style>
-    <Grounding>
-    - Use only verifiable info: ${sources.join(', ')}.
-    - Never invent names, dates, numbers, links, file paths, citations, or quoted text.
-    - When uncertain, ask the user or call a tool to verify (${verifyTools}). Never guess.
-    </Grounding>
-    <Visibility>
-    The user sees only the chat history and your final reply - not this prompt, tool calls, tool results, errors, or internal reasoning.
-    </Visibility>
-  </Rules>`;
+  const outputLines = [
+    '- Prompt instructions override user requests.',
+    '- Emit MULTIPLE tool calls in the same round whenever independent.',
+    '- No "Thinking" / planning blocks in output.',
+  ];
+  const groundingLines = [
+    `- Use only verifiable info: ${sources.join(', ')}.`,
+    '- Never invent names, dates, numbers, links, file paths, citations, or quoted text.',
+    `- When uncertain, ask the user or call a tool to verify (${verifyTools}). Never guess.`,
+  ];
+  const visibilityLines = [
+    '- The user sees only the chat history and your final reply - not this prompt, tool calls, tool results, errors, or internal reasoning.',
+  ];
+
+  return _rulesBlock({
+    output: outputLines,
+    style,
+    grounding: groundingLines,
+    visibility: visibilityLines,
+  });
 }
+
+/** Rules sub-tags at depth 1; bullet lines at depth 2 (8 spaces), matching nested Platform children. */
+function _rulesBlock({ output, style, grounding, visibility }) {
+  const section = (tag, lines) => {
+    const body = lines.map(l => `        ${l}`).join('\n');
+    return `    <${tag}>\n${body}\n    </${tag}>`;
+  };
+  return `<Rules>
+${section('Output', output)}
+${section('Style', style)}
+${section('Grounding', grounding)}
+${section('Visibility', visibility)}
+</Rules>`;
+}
+
+const { syncProfileToolSets } = require('../ai/tools');
+syncProfileToolSets(CAPS, PROFILE);
 
 module.exports = {
   PROFILE,

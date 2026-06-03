@@ -34,10 +34,6 @@ function ensureWorkspace(workspaceId) {
   return dir;
 }
 
-function _safeStat(p) {
-  try { return fs.statSync(p); } catch { return null; }
-}
-
 /**
  * Recursive size in bytes of the workspace tree. Symlinks are NOT followed
  * to avoid escapes via crafted links from inside the container.

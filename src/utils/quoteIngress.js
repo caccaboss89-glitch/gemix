@@ -1,6 +1,6 @@
 // Quote/reply handling when the referenced message is inside or outside MAX_HISTORY.
 
-const { PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED, MAX_HISTORY } = require('../config/constants');
 const { hasScheduledFooter } = require('./footer');
 const {
   buildPersonalGemixFlags,
@@ -13,26 +13,14 @@ const {
   cleanIncomingText,
 } = require('./text');
 const { replaceMentionsInBody, resolveMentionsForMessage } = require('./waMentions');
-const { buildAttachmentTag } = require('./media');
-const { syncFileToHistory, resolveGemixVoiceTranscription } = require('./historySync');
+const { resolveGemixVoiceTranscription } = require('./historySync');
 const {
-  createDiscordAttachmentBufferFetcher,
-  isDiscordAttachmentOversize,
-  formatDiscordOversizeNote,
-} = require('./discordAttachmentFetch');
-const { ingressSyncedAttachment } = require('./incomingMediaIngress');
-const { resolveIngressFilename } = require('./attachmentFilenames');
+  ingressWaMessageMedia,
+  ingressDiscordAttachment,
+} = require('./incomingMediaIngress');
 const { createLogger } = require('./logger');
 
 const log = createLogger('QuoteIngress');
-
-function createMemoizedFetchBuffer(fetchOnce) {
-  let promise = null;
-  return async () => {
-    if (!promise) promise = fetchOnce();
-    return promise;
-  };
-}
 
 function waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
@@ -55,7 +43,7 @@ async function resolvePersonalQuotedIsGemix(quoted, ingressMsg) {
   if (!quoted?.fromMe || !isPersonalGemixMediaContinuation(quoted)) return false;
   try {
     const chat = await ingressMsg.getChat();
-    const raw = await chat.fetchMessages({ limit: 55 });
+    const raw = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
     const flags = buildPersonalGemixFlags(raw);
     const qKey = waMessageKey(quoted);
     for (let i = 0; i < raw.length; i++) {
@@ -85,7 +73,7 @@ async function processWhatsAppQuotedReply(msg, chatId, historyStorageId, recentM
         ? await resolvePersonalQuotedIsGemix(quoted, msg)
         : isGemixWhatsAppMessage(quoted, platform, isGroup);
       const mediaResult = await _processWhatsAppQuotedMedia(
-        quoted, chatId, historyStorageId, isGroup, isQuotedGemix, platform,
+        quoted, chatId, historyStorageId, isQuotedGemix, platform,
       );
       if (quoted.body) {
         const mentionContacts = await resolveMentionsForMessage(quoted, isGroup);
@@ -113,37 +101,11 @@ async function processWhatsAppQuotedReply(msg, chatId, historyStorageId, recentM
   }
 }
 
-async function _processWhatsAppQuotedMedia(quoted, chatId, historyStorageId, isGroup, isQuotedGemix, platform) {
-  const quotedId = quoted.id?.id;
-  if (!quotedId) {
-    const tag = buildAttachmentTag(null, quoted._data?.filename || 'file');
-    return { prefix: `${tag} `, mediaParts: [] };
-  }
-  const filename = resolveIngressFilename(quoted._data?.filename, quoted._data?.mimetype, quotedId);
-  const duration = Number(quoted.duration || quoted._data?.duration || 0);
-  const fetchBuffer = createMemoizedFetchBuffer(async () => {
-    const media = await quoted.downloadMedia();
-    return media ? Buffer.from(media.data, 'base64') : null;
-  });
-  let syncedPath = null;
-  try {
-    syncedPath = await syncFileToHistory(historyStorageId, quotedId, fetchBuffer, filename);
-  } catch (err) {
-    log.warn(`Failed to sync quoted media to history: ${err.message}`);
-  }
-
-  const ingress = await ingressSyncedAttachment({
-    syncedPath,
-    name: filename,
-    contentType: quoted._data?.mimetype || '',
-    fetchBuffer,
-    historyStorageId,
-    metadataDurationSec: duration,
-    getVoiceTranscription: isQuotedGemix && platform !== PLATFORM_WA_PERSONAL
-      ? async () => resolveGemixVoiceTranscription(
-        historyStorageId, syncedPath, chatId, quoted.timestamp * 1000,
-      )
-      : null,
+async function _processWhatsAppQuotedMedia(quoted, chatId, historyStorageId, isQuotedGemix, platform) {
+  const isGemixVoice = isQuotedGemix && platform !== PLATFORM_WA_PERSONAL;
+  const ingress = await ingressWaMessageMedia(quoted, historyStorageId, {
+    chatId,
+    isGemixVoice,
   });
   const inner = ingress.textFragment.trim();
   return {
@@ -171,28 +133,11 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
 
     if (quotedMsg.attachments.size > 0) {
       for (const att of quotedMsg.attachments.values()) {
-        if (isDiscordAttachmentOversize(att)) {
-          const tag = buildAttachmentTag(null, att.name);
-          prefix += `[In reply to: ${tag}${formatDiscordOversizeNote(att)}]\n`;
-          continue;
-        }
-        const fetchBuffer = createDiscordAttachmentBufferFetcher(att);
-        let syncedPath = null;
-        try {
-          syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, att.name);
-        } catch (err) {
-          log.warn(`Failed to sync quoted file ${att.name}: ${err.message}`);
-        }
         const isQuotedBot = quotedMsg.author.id === botUserId;
-        const ingress = await ingressSyncedAttachment({
-          syncedPath,
-          name: att.name,
-          contentType: att.contentType || '',
-          fetchBuffer,
-          historyStorageId,
+        const ingress = await ingressDiscordAttachment(att, historyStorageId, {
           metadataDurationSec: Number(att.duration || 0),
           getVoiceTranscription: isQuotedBot
-            ? async () => resolveGemixVoiceTranscription(
+            ? async (syncedPath) => resolveGemixVoiceTranscription(
               historyStorageId,
               syncedPath,
               channel.id,

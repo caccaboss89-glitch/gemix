@@ -35,9 +35,14 @@ async function fetchHistoryWithTimeout(buildFn, log, label) {
       }),
     ]);
     let history = [];
-    if (Array.isArray(result)) history = result;
-    else if (result && Array.isArray(result.history)) history = result.history;
-    return { history, incomplete: false };
+    let incomplete = false;
+    if (Array.isArray(result)) {
+      history = result;
+    } else if (result && typeof result === 'object') {
+      if (Array.isArray(result.history)) history = result.history;
+      incomplete = Boolean(result.incomplete);
+    }
+    return { history, incomplete };
   } catch (err) {
     log.warn(`   History fetch failed (${label}: ${err.message}), proceeding without history`);
     return { history: [], incomplete: true };

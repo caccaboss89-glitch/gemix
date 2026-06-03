@@ -13,7 +13,7 @@ const { rebuildWhatsAppBatchParts } = require('../../utils/batchContentRefresh')
 const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
 
 const { identifyUser } = require('../../utils/userIdentifier');
-const { addFooter, removeFooter, getModelDisplayName } = require('../../utils/footer');
+const { addFooter, removeFooter, getModelDisplayName, hasFooter } = require('../../utils/footer');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
@@ -68,6 +68,8 @@ function initPersonalWhatsApp() {
 
   client.on('auth_failure', (msg) => {
     log.error('Auth failure:', msg);
+    log.error('Exiting so PM2 can restart with a fresh session (re-scan QR if needed).');
+    setTimeout(() => process.exit(1), 2000);
   });
 
   client.on('disconnected', (reason) => {
@@ -124,8 +126,9 @@ async function onPersonalMessage(msg) {
     otherDigits = normalizeDigits(chat.id._serialized);
   }
 
+  // Intentional: no queue until dedicated client is ready (pair-chat routing needs bot JID).
   if (!isDedicatedClientReady()) {
-    log.info('   Skipping personal message during startup until dedicated client identity is ready');
+    log.info('   Skipping personal message during startup until dedicated client identity is ready (not queued)');
     return;
   }
 
@@ -138,7 +141,7 @@ async function onPersonalMessage(msg) {
   // (either participant). A reply/quote to a GemiX message alone is NOT enough.
   if (!(msg.body || '').toLowerCase().includes('@gemix')) return;
 
-  if (msg.fromMe && (msg.body || '').includes('--GemiX •')) return;
+  if (msg.fromMe && hasFooter(msg.body || '')) return;
 
   let senderJid = msg.author || msg.from;
   if (typeof senderJid === 'string' && senderJid.includes(':')) {

@@ -66,6 +66,8 @@ function initDedicatedWhatsApp() {
 
   client.on('auth_failure', (msg) => {
     log.error('Auth failure:', msg);
+    log.error('Exiting so PM2 can restart with a fresh session (re-scan QR if needed).');
+    setTimeout(() => process.exit(1), 2000);
   });
 
   client.on('disconnected', (reason) => {
@@ -91,6 +93,11 @@ function initDedicatedWhatsApp() {
 }
 
 async function onDedicatedMessage(msg) {
+  if (!client?.info?.wid?._serialized) {
+    log.warn('Dedicated client not ready — ignoring message (not queued)');
+    return;
+  }
+
   const chat = await msg.getChat();
   const isGroup = chat.isGroup;
 

@@ -1,34 +1,37 @@
 // src/tools/taskRemover.js
 //
 // Removes tasks by ID(s) from a personal or group task file using taskStore.
-// Simple read-filter-write. Returns success with count or clear error.
 
-const { readTaskFile, writeTaskFile } = require('../utils/taskStore');
+const { modifyTaskFile } = require('../utils/taskStore');
 
 /**
- * Remove tasks by IDs from a user's or group's task file.
+ * Remove tasks by IDs from a user's or group's task file (atomic read-modify-write).
  * @param {string[]} taskIds - Array of task IDs to remove
  * @param {string} fileId - The task file ID (user's personal or group)
- * @returns {string} Result message
+ * @returns {Promise<object>} Result message
  */
 async function removeTasks(taskIds, fileId) {
-  const data = await readTaskFile(fileId);
+  let result = { success: false, error: 'No task file found. You have no scheduled tasks.' };
 
-  if (!data) {
-    return { success: false, error: 'No task file found. You have no scheduled tasks.' };
-  }
+  await modifyTaskFile(fileId, async (data) => {
+    if (!data || !Array.isArray(data.tasks) || data.tasks.length === 0) {
+      return data;
+    }
 
-  const before = data.tasks.length;
-  data.tasks = data.tasks.filter(t => !taskIds.includes(t.id));
-  const removed = before - data.tasks.length;
+    const before = data.tasks.length;
+    data.tasks = data.tasks.filter(t => !taskIds.includes(t.id));
+    const removed = before - data.tasks.length;
 
-  await writeTaskFile(fileId, data);
+    if (removed === 0) {
+      result = { success: false, error: 'No tasks found with the specified IDs.' };
+      return data;
+    }
 
-  if (removed === 0) {
-    return { success: false, error: 'No tasks found with the specified IDs.' };
-  }
+    result = { success: true, message: `${removed} task(s) removed successfully.` };
+    return data;
+  });
 
-  return { success: true, message: `${removed} task(s) removed successfully.` };
+  return result;
 }
 
 module.exports = { removeTasks };

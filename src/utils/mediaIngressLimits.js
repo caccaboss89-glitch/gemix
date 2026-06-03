@@ -1,8 +1,9 @@
 // src/utils/mediaIngressLimits.js
 //
 // Shared duration caps for media entering the model (current message,
-// chat history text, read_file → tunnel). Byte caps for read_file stay in
-// readFile.js; incoming Discord downloads use discordAttachmentFetch (25 MB).
+// chat history text, read_file → tunnel). Byte caps: aiFileDelivery.js
+// (200 KB ingress inline, 50 KB read_file text). Discord downloads: 25 MB
+// (discordAttachmentFetch.js).
 
 const fs = require('fs');
 const { MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../config/constants');

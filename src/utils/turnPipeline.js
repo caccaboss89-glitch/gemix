@@ -4,7 +4,7 @@ const responseLock = require('./responseLock');
 const { pickLatestBatchEntry } = require('./batchContext');
 const { normalizeHistoryLoad } = require('./historyFetch');
 
-const BATCH_LOCK_TTL_MS = 5 * 60 * 1000;
+const { BATCH_LOCK_TTL_MS } = require('../config/constants');
 
 /** Keep or re-acquire the per-chat lock before running a batched turn. */
 function _ensurePipelineLock(lockKey, stopLockRenew) {
@@ -58,6 +58,7 @@ async function runTurnPipeline(opts) {
     activeStopRenew = _ensurePipelineLock(lockKey, activeStopRenew);
     if (!activeStopRenew) {
       try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
+      // Intentional: while a turn is in flight, new messages are discarded (not queued).
       log.warn(`   Batch discarded for ${discardLogLabel}: GemiX is already responding (not queued)`);
       return;
     }
@@ -112,7 +113,9 @@ async function runTurnPipeline(opts) {
 function mergeBatchContentParts(entries) {
   const allParts = [];
   for (const entry of entries) {
-    allParts.push(...entry.contentParts);
+    if (Array.isArray(entry.contentParts)) {
+      allParts.push(...entry.contentParts);
+    }
   }
   if (allParts.length === 1 && allParts[0].type === 'text') {
     return allParts[0].text;

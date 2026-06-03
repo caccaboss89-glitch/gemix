@@ -56,11 +56,12 @@
 
 ### 2.2 read_file
 **Test Cases**:
-1. Read text file from history
-2. Read PDF from history
-3. Read image (should describe or OCR)
-4. Read audio (should transcribe)
+1. Read text file from history → `<FileContent>` in tool result
+2. Read PDF from history → tool returns text + `input_file` tunnel URL (dual parts); model/xAI processes PDF server-side
+3. Read image → tunnel URL (dual parts); vision on xAI side; **max 10 images per main-brain turn** via repeated `read_file`
+4. Read audio → tunnel URL; transcription/STT on xAI side (not local STT in Node)
 5. Try to read non-existent file
+6. Tunnel validation failure (oversize / too long) → attachment tag in history/current turn includes explicit error note in parentheses (not silent tag-only)
 
 **Attachments**: Send various media types in previous messages.
 
@@ -211,7 +212,10 @@ This is one of the most complex — test thoroughly:
 
 ### 5.3 Tunnel Attachments (`localtunnel`)
 - Generate image/video → verify it is accessible via public URL
+- **Incoming** WA/Discord attachments and **`read_file`** on history media use the same tunnel (`input_file` URL), not base64 in API bodies
+- Imagine reference images use tunnel URLs to the CLI (no base64 to Hermes)
 - Send large file → verify fallback message with temporary link works
+- API request logs: `requestAttachments` shows `tunnel_url` / `input_file`, not `base64:…` placeholders
 
 ### 5.4 Voice Message Pipeline
 - **Dedicated WA — user voice**: history shows voice attachment tag only (no `<Transcription>`); model uses `read_file` on the tag when needed
@@ -329,10 +333,10 @@ Run after changes to batch, personal history, tools, or prompts.
 ### E. Media ingress
 1. Audio > max duration → `(too long…)` note, not sent as native part.
 2. Unsupported WA sticker type → `[Attachment: …]` tag shape (not bare `[file.ext]`).
-3. Office doc on **current** message → tag-only, not base64 to model.
+3. Office doc on **current** message → tag-only, not tunneled to model (no base64 in API calls).
 
-**Document Version**: 2026-06-02  
-**Last Major Update**: Personal voice removal, GemiX history blocks, Limits `<Transcription>` scoped to dedicated WA only
+**Document Version**: 2026-06-03  
+**Last Major Update**: Unified `aiFileDelivery` policy (tunnel / inline / tag-only), docs aligned with xAI server-side media processing
 
 ---
 

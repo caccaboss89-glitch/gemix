@@ -35,4 +35,4 @@ function analyzeBatchSpeakers(entries, platform) {
   return { multiSpeaker: keys.size > 1, speakerCount: keys.size };
 }
 
-module.exports = { pickLatestBatchEntry, getBatchSpeakerKey, analyzeBatchSpeakers };
+module.exports = { pickLatestBatchEntry, analyzeBatchSpeakers };

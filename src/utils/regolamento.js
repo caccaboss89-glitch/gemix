@@ -15,6 +15,9 @@ const { createLogger } = require('./logger');
 const log = createLogger('Regolamento');
 
 const REGOLAMENTO_PATH = path.join(DATA_DIR, 'regolamento.txt');
+const REGOLAMENTO_UNAVAILABLE_PLACEHOLDER =
+  '[Statuto Albertino unavailable: regolamento.txt could not be loaded on the server. '
+  + 'Do not invent articles or rules; tell the user the official statute text is not available in this session.]';
 let _cached = null;
 
 /**
@@ -27,15 +30,20 @@ function loadRegolamento() {
   try {
     if (!fs.existsSync(REGOLAMENTO_PATH)) {
       log.warn(`regolamento.txt not found at ${REGOLAMENTO_PATH}`);
-      _cached = '';
+      _cached = REGOLAMENTO_UNAVAILABLE_PLACEHOLDER;
       return _cached;
     }
     _cached = fs.readFileSync(REGOLAMENTO_PATH, 'utf-8').trim();
+    if (!_cached) {
+      log.warn('regolamento.txt is empty');
+      _cached = REGOLAMENTO_UNAVAILABLE_PLACEHOLDER;
+      return _cached;
+    }
     log.info(`Regolamento loaded (${_cached.length} chars) - full-context inject enabled`);
     return _cached;
   } catch (err) {
     log.error(`Failed to read regolamento.txt: ${err.message}`);
-    _cached = '';
+    _cached = REGOLAMENTO_UNAVAILABLE_PLACEHOLDER;
     return _cached;
   }
 }

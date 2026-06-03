@@ -24,7 +24,7 @@ const {
   QUOTA_BYTES,
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
-const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
+const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
 const { webXSearch } = require('../tools/webXSearch');
 const { getRomeTime } = require('../utils/time');
 const { sanitizeFilename } = require('../utils/text');
@@ -37,24 +37,15 @@ const {
 } = require('../config/constants');
 const { createLogger } = require('../utils/logger');
 const { isNonReadableExt, buildReadFileBlockedMessage } = require('../config/nonReadableExts');
+const { mimeForExtension } = require('../config/mimeExtensions');
 
 const log = createLogger('BuildAgent');
 
 const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
 
-const READ_TEXT_MAX_BYTES = 50 * 1024;
 const WRITE_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const BASH_DEFAULT_TIMEOUT_MS = 30_000;
 const BASH_MAX_TIMEOUT_MS = 120_000;
-const TEXT_EXT_FOR_INLINE = new Set([
-  '.txt', '.md', '.rst', '.log', '.csv', '.tsv',
-  '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg',
-  '.sh', '.bash', '.ps1', '.dockerfile',
-  '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.rb', '.php',
-  '.java', '.kt', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cs',
-  '.html', '.htm', '.css', '.scss', '.svelte', '.vue',
-  '.sql', '.graphql',
-]);
 
 // -- Tool definitions exposed to the sub-agent -----------------------------
 //
@@ -244,10 +235,6 @@ function _toolErr(msg) {
   return JSON.stringify({ success: false, error: msg });
 }
 
-function _isTextExt(ext) {
-  return TEXT_EXT_FOR_INLINE.has(ext.toLowerCase());
-}
-
 function _classifyAgentPath(workspaceId, rawPath) {
   if (typeof rawPath !== 'string' || !rawPath) return { ok: false, reason: 'Empty path.' };
   if (rawPath.includes('\0')) return { ok: false, reason: 'Invalid path (null byte).' };
@@ -268,7 +255,7 @@ function _classifyAgentPath(workspaceId, rawPath) {
   return { ok: true, abs, zone: 'workspace' };
 }
 
-async function _executeReadFile(workspaceId, args) {
+async function _executeReadFile(workspaceId, args, ctx = {}) {
   const c = _classifyAgentPath(workspaceId, args && args.path);
   if (!c.ok) return _toolErr(c.reason);
   if (!fs.existsSync(c.abs)) return _toolErr(`File not found: ${args.path}`);
@@ -281,42 +268,21 @@ async function _executeReadFile(workspaceId, args) {
   const ext = path.extname(c.abs).toLowerCase();
   if (isNonReadableExt(ext)) return _toolErr(buildReadFileBlockedMessage(ext));
 
-  // Text/code inline.
-  if (_isTextExt(ext)) {
-    if (stat.size > READ_TEXT_MAX_BYTES * 4) return _toolErr(`Text file too large (max ${READ_TEXT_MAX_BYTES / 1024} KB).`);
-    let buf = fs.readFileSync(c.abs);
-    let text = buf.toString('utf-8');
-    let truncated = false;
-    if (Buffer.byteLength(text) > READ_TEXT_MAX_BYTES) {
-      text = buf.slice(0, READ_TEXT_MAX_BYTES).toString('utf-8') + '\n... (file truncated)';
-      truncated = true;
-    }
-    const lines = text.split(/\r?\n/);
-    const numbered = lines.map((l, i) => `${i + 1}: ${l}`).join('\n');
-    return `<FileContent path="${args.path}"${truncated ? ' truncated="true"' : ''}>\n${numbered}\n</FileContent>`;
-  }
+  const delivery = await deliverReadFileFromPath({
+    absPath: c.abs,
+    displayPath: args.path,
+    contentType: mimeForExtension(ext),
+    imagesReadCount: ctx.imagesReadCount ?? 0,
+    blockedMessage: buildReadFileBlockedMessage(ext),
+    tunnelStorageKind: 'temp',
+  });
 
-  // Binary (PDF/audio/video/image): expose via tunnel as input_file URL.
-  // The agent will see the file on the *next* round when this tool result
-  // becomes part of its conversation.
-  const mimetypeByExt = {
-    '.pdf': 'application/pdf',
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.webp': 'image/webp', '.gif': 'image/gif',
-    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
-    '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-  };
-  const mimetype = mimetypeByExt[ext] || 'application/octet-stream';
-  let urlInfo;
-  try {
-    urlInfo = getPublicAttachmentUrl(c.abs, path.basename(c.abs), { kind: 'temp', mimetype });
-  } catch (err) {
-    return _toolErr(`Cannot expose file via tunnel: ${err.message}`);
+  if (delivery.kind === 'error') return _toolErr(delivery.error);
+  if (delivery.kind === 'tunnel') {
+    if (delivery.bumpImageCount) ctx.imagesReadCount = (ctx.imagesReadCount ?? 0) + 1;
+    return delivery.parts;
   }
-  return [
-    { type: 'text', text: `[Attachment: ${args.path}]` },
-    { type: 'input_file', file_url: urlInfo.url },
-  ];
+  return delivery.content;
 }
 
 function _executeWriteFile(workspaceId, args) {
@@ -469,7 +435,7 @@ async function _runToolCall(toolCall, ctx) {
     case 'write_file':    return _executeWriteFile(ctx.workspaceId, parsedArgs);
     case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);
     case 'bash':          return await _executeBash(ctx.workspaceId, parsedArgs);
-    case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs);
+    case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs, ctx);
     case 'web_x_search':  return await _executeWebXSearch(ctx.workspaceId, parsedArgs, ctx.researchStats);
     default:              return _toolErr(`Unknown tool "${name}".`);
   }
@@ -527,7 +493,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
   ];
 
   const researchStats = { webSources: 0, xPosts: 0 };
-  const ctx = { workspaceId, researchStats };
+  const ctx = { workspaceId, researchStats, imagesReadCount: 0 };
 
   let rounds = 0;
   let finalText = null;
@@ -588,6 +554,20 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
           tool_call_id: tc.id,
           content: result,
         });
+      }
+      const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file']);
+      for (const msg of messages) {
+        if (msg.role === 'tool' && Array.isArray(msg.content)) {
+          if (msg._heavyMediaPreviewSeen) {
+            msg.content = msg.content.filter(p => !HEAVY_TOOL_PART_TYPES.has(p.type));
+            if (msg.content.length === 1 && msg.content[0].type === 'text') {
+              msg.content = msg.content[0].text;
+            }
+            delete msg._heavyMediaPreviewSeen;
+          } else if (msg.content.some(p => HEAVY_TOOL_PART_TYPES.has(p.type))) {
+            msg._heavyMediaPreviewSeen = true;
+          }
+        }
       }
       if (rounds >= BUILD_MAX_ROUNDS) budgetExhausted = true;
       continue;

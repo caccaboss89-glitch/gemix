@@ -1,22 +1,15 @@
 // Shared ingress helpers: classify attachments and turn synced history files
 // into native content parts + attachment-tag text (Discord + WA quote/current).
 
-const {
-  mediaToContentPart,
-  buildAttachmentTag,
-  isInlineableTextFile,
-  buildInlineTextFilePart,
-  isSupportedMedia,
-} = require('./media');
-const {
-  formatAudioTooLongNote,
-  formatVideoTooLongNote,
-  isAudioOverDurationLimit,
-  isVideoOverDurationLimit,
-  resolveMediaDurationSec,
-} = require('./mediaIngressLimits');
+const { buildAttachmentTag, isSupportedMedia } = require('./media');
+const { deliverSyncedAttachment } = require('./aiFileDelivery');
 const { resolveIngressFilename } = require('./attachmentFilenames');
 const { syncFileToHistory, resolveGemixVoiceTranscription } = require('./historySync');
+const {
+  createDiscordAttachmentBufferFetcher,
+  isDiscordAttachmentOversize,
+  formatDiscordOversizeNote,
+} = require('./discordAttachmentFetch');
 
 function createMemoizedFetchBuffer(fetchOnce) {
   let promise = null;
@@ -28,12 +21,6 @@ function createMemoizedFetchBuffer(fetchOnce) {
 
 /**
  * Sync + classify one WhatsApp message attachment (history or current turn).
- * @param {object} msg - whatsapp-web.js message
- * @param {string} historyStorageId
- * @param {object} [options]
- * @param {string} [options.chatId] - for GemiX voice transcription cache
- * @param {boolean} [options.isGemixVoice] - fromMe GemiX TTS voice on dedicated WA only
- * @returns {Promise<{ tag: string, textFragment: string, contentParts: Array, syncedPath, mimetype, filename, unsupported?: boolean }>}
  */
 async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
   const { chatId, isGemixVoice = false } = options;
@@ -53,6 +40,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
       mimetype: mimetypeHint,
       filename: waFilename,
       unsupported: true,
+      fetchBuffer: null,
     };
   }
 
@@ -66,6 +54,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
       mimetype: mimetypeHint,
       filename: waFilename,
       unsupported: true,
+      fetchBuffer: null,
     };
   }
   const filename = resolveIngressFilename(waFilename, mimetypeHint, msgId);
@@ -85,13 +74,14 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     syncedPath = await syncFileToHistory(historyStorageId, msgId, fetchBuffer, filename);
   } catch { /* tag-only */ }
 
-  const ingress = await ingressSyncedAttachment({
+  const ingress = await deliverSyncedAttachment({
     syncedPath,
     name: filename,
     contentType: mimetype || '',
     fetchBuffer,
     historyStorageId,
     metadataDurationSec: duration,
+    ownerKey: historyStorageId,
     getVoiceTranscription: isGemixVoice && isAudioType
       ? async () => resolveGemixVoiceTranscription(
         historyStorageId, syncedPath, chatId, (msg.timestamp || 0) * 1000,
@@ -108,174 +98,65 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     filename,
     overDurationLimit: ingress.overDurationLimit || null,
     durationNote: ingress.durationNote || null,
-  };
-}
-
-function classifyAttachment(name, contentType) {
-  const ext = (name || '').split('.').pop().toLowerCase();
-  const ct = contentType || '';
-  return {
-    ext,
-    isImage: ct.startsWith('image/'),
-    isAudio: ct.startsWith('audio/'),
-    isVideo: ct.startsWith('video/'),
-    isPdf: ct === 'application/pdf' || ext === 'pdf',
-    isDoc: ct.startsWith('application/') || ['pdf', 'txt', 'doc', 'docx', 'csv', 'json'].includes(ext),
-  };
-}
-
-/**
- * Turn a synced history file into zero or more native parts and a text fragment
- * (attachment tag, inline file, or duration note). Caller prepends to message body.
- *
- * @param {object} opts
- * @param {string|null} opts.syncedPath
- * @param {string} opts.name
- * @param {string} [opts.contentType]
- * @param {Function} opts.fetchBuffer - async () => Buffer|null
- * @param {string} opts.historyStorageId
- * @param {number} [opts.metadataDurationSec]
- * @param {Function|null} [opts.getVoiceTranscription] - async () => string|null (bot voice in quote)
- * @returns {Promise<{ tag: string, contentParts: Array, textFragment: string }>}
- */
-function _durationSkipResult(tag, kind, durationSec) {
-  const note = kind === 'audio'
-    ? formatAudioTooLongNote(durationSec)
-    : formatVideoTooLongNote(durationSec);
-  return {
-    tag,
-    contentParts: [],
-    textFragment: `${tag}${note} `,
-    overDurationLimit: kind,
-    durationNote: note.trim(),
+    fetchBuffer,
   };
 }
 
 async function ingressSyncedAttachment(opts) {
-  const {
+  return deliverSyncedAttachment({
+    ...opts,
+    ownerKey: opts.historyStorageId,
+  });
+}
+
+/**
+ * Sync + classify one Discord attachment (current turn, quote, or history rebuild).
+ */
+async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
+  const { getVoiceTranscription = null, metadataDurationSec = 0 } = options;
+
+  if (isDiscordAttachmentOversize(att)) {
+    const tag = buildAttachmentTag(null, att.name);
+    return {
+      tag,
+      textFragment: `${tag}${formatDiscordOversizeNote(att)} `,
+      contentParts: [],
+      syncedPath: null,
+      oversize: true,
+    };
+  }
+
+  const ingressName = resolveIngressFilename(att.name, att.contentType || '', att.id);
+  const fetchBuffer = createDiscordAttachmentBufferFetcher(att);
+  let syncedPath = null;
+  try {
+    syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, ingressName);
+  } catch { /* tag-only */ }
+
+  const ingress = await ingressSyncedAttachment({
     syncedPath,
-    name,
-    contentType = '',
+    name: ingressName,
+    contentType: att.contentType || '',
     fetchBuffer,
     historyStorageId,
-    metadataDurationSec = 0,
-    getVoiceTranscription = null,
-  } = opts;
+    metadataDurationSec,
+    getVoiceTranscription: typeof getVoiceTranscription === 'function'
+      ? async () => getVoiceTranscription(syncedPath)
+      : null,
+  });
 
-  const tag = buildAttachmentTag(syncedPath, name);
-  const kind = classifyAttachment(name, contentType);
-  const contentParts = [];
-  let textFragment = tag;
-
-  if (kind.isImage) {
-    try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        contentParts.push(mediaToContentPart(buffer, contentType, {
-          historyPath: syncedPath,
-          historyUserId: historyStorageId,
-        }));
-      }
-    } catch { /* tag only */ }
-    return { tag, contentParts, textFragment: `${tag} ` };
-  }
-
-  if (kind.isAudio) {
-    if (typeof getVoiceTranscription === 'function') {
-      const tx = await getVoiceTranscription();
-      if (tx) {
-        return {
-          tag,
-          contentParts: [],
-          textFragment: `${tag} <Transcription>${tx}</Transcription> `,
-        };
-      }
-    }
-    let audioDuration = metadataDurationSec;
-    try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        audioDuration = await resolveMediaDurationSec({
-          metadataSec: metadataDurationSec,
-          buffer,
-          extHint: kind.ext,
-        });
-        if (isAudioOverDurationLimit(audioDuration)) {
-          return _durationSkipResult(tag, 'audio', audioDuration);
-        }
-        contentParts.push(mediaToContentPart(buffer, contentType, {
-          historyPath: syncedPath,
-          historyUserId: historyStorageId,
-        }));
-      }
-    } catch { /* tag only */ }
-    return { tag, contentParts, textFragment: `${tag} ` };
-  }
-
-  if (kind.isVideo) {
-    try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        const dur = await resolveMediaDurationSec({
-          metadataSec: metadataDurationSec,
-          buffer,
-          extHint: kind.ext,
-        });
-        if (isVideoOverDurationLimit(dur)) {
-          return _durationSkipResult(tag, 'video', dur);
-        }
-        contentParts.push(mediaToContentPart(buffer, contentType, {
-          historyPath: syncedPath,
-          historyUserId: historyStorageId,
-        }));
-      }
-    } catch { /* tag only */ }
-    return { tag, contentParts, textFragment: `${tag} ` };
-  }
-
-  if (kind.isPdf) {
-    try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        contentParts.push(mediaToContentPart(buffer, contentType || 'application/pdf', {
-          historyPath: syncedPath,
-          historyUserId: historyStorageId,
-        }));
-      }
-    } catch { /* tag only */ }
-    return { tag, contentParts, textFragment: `${tag} ` };
-  }
-
-  if (isInlineableTextFile(name, contentType)) {
-    try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        const inline = buildInlineTextFilePart(syncedPath || name, buffer);
-        return { tag, contentParts: [], textFragment: `${inline} ` };
-      }
-    } catch { /* tag only */ }
-  }
-
-  if (kind.isDoc && !kind.isPdf) {
-    return { tag, contentParts: [], textFragment: `${tag} ` };
-  }
-
-  // Fallback: try native part for other binary types
-  try {
-    const buffer = await fetchBuffer();
-    if (buffer) {
-      contentParts.push(mediaToContentPart(buffer, contentType, {
-        historyPath: syncedPath,
-        historyUserId: historyStorageId,
-      }));
-    }
-  } catch { /* tag only */ }
-  return { tag, contentParts, textFragment: `${tag} ` };
+  return {
+    tag: ingress.tag,
+    textFragment: ingress.textFragment,
+    contentParts: ingress.contentParts,
+    syncedPath,
+    name: ingressName,
+  };
 }
 
 module.exports = {
   createMemoizedFetchBuffer,
   ingressWaMessageMedia,
-  classifyAttachment,
   ingressSyncedAttachment,
+  ingressDiscordAttachment,
 };

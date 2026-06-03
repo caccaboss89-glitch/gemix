@@ -236,6 +236,7 @@ const _MD_IMAGE_RE = /!\[([^\]]*)\]\(\s*(https?:\/\/[^\s)]+)\s*\)/g;
  * The placeholder order matches the attachment order exactly, so the brain
  * can refer to "la prima immagine / l'immagine 2" with confidence.
  */
+/** Download cited image URLs from model output. SSRF surface — accepted (research-sourced URLs only). */
 async function _extractAndStripImages(text, maxImages) {
   if (typeof text !== 'string' || !text.includes('![')) {
     return { text: text || '', images: [] };

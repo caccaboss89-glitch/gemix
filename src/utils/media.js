@@ -1,61 +1,15 @@
 // src/utils/media.js
 //
-// Helpers for building multimodal content parts and attachment tags.
+// Helpers for attachment tags and supported WhatsApp media types.
 
 const { SUPPORTED_MEDIA } = require('../config/constants');
 
-/**
- * Check if a media type is supported by the AI.
- * @param {string} type - Media type (e.g., 'image', 'audio')
- * @returns {boolean} True if media type is supported
- */
 function isSupportedMedia(type) {
   return SUPPORTED_MEDIA.includes(type);
 }
 
 /**
- * Convert media to a base64 content part for the user message.
- *
- * Produces `{ type: 'image_url', image_url: { url: `data:${cleanedMime};base64,${base64}` } }`.
- * When `opts.historyPath` or `opts.historyUserId` are non-empty strings, they are
- * copied to `_historyPath` / `_historyUserId` on the returned object.
- *
- * @param {Buffer} buffer
- * @param {string} mimetype - e.g. 'image/jpeg', 'audio/ogg', 'application/pdf'
- * @param {object} [opts]
- * @returns {object} Content part for the messages array
- */
-function mediaToContentPart(buffer, mimetype, opts = {}) {
-  // Strip parameters (e.g. 'audio/ogg; codecs=opus' -> 'audio/ogg')
-  const cleanMime = (mimetype || '').split(';')[0].trim();
-  const base64 = buffer.toString('base64');
-  const part = {
-    type: 'image_url',
-    image_url: { url: `data:${cleanMime};base64,${base64}` },
-  };
-  if (opts && typeof opts.historyPath === 'string' && opts.historyPath.trim()) {
-    part._historyPath = opts.historyPath.trim();
-  }
-  if (opts && typeof opts.historyUserId === 'string' && opts.historyUserId.trim()) {
-    part._historyUserId = opts.historyUserId.trim();
-  }
-  return part;
-}
-
-/**
- * Build a filename descriptor for unsupported or any media in history
- */
-function mediaTag(filename, mimetype) {
-  if (filename) return `[${filename}]`;
-  const ext = (mimetype || '').split('/')[1] || 'file';
-  return `[file.${ext}]`;
-}
-
-/**
  * Build a standardized attachment tag for AI context (always English).
- * @param {string|null} syncedPath - The synced history path (e.g. 'file.pdf'), or null if expired
- * @param {string|null} fallbackName - Fallback filename for expired attachments
- * @returns {string} Tag like '[Attachment: file.pdf]' or '[Attachment (expired): file.pdf]'
  */
 function buildAttachmentTag(syncedPath, fallbackName) {
   if (syncedPath) {
@@ -77,100 +31,8 @@ function extractAttachmentTagPaths(text) {
   return paths;
 }
 
-// -- Inline text-file ingestion --------------------------------------------
-//
-// For current messages, source-code and plain-text files have their content
-// inlined directly inside the user message text using <FileContent> tags.
-//
-// Attachments in chat history use [Attachment: filename] tags.
-// The model requests their content via read_file when needed.
-const INLINE_TEXT_EXTS = new Set([
-  // Plain text / docs
-  '.txt', '.md', '.rst', '.log', '.csv', '.tsv',
-  // Web / config
-  '.html', '.htm', '.xml', '.svg', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
-  // Shell / build
-  '.sh', '.bash', '.zsh', '.bat', '.ps1', '.makefile', '.dockerfile',
-  // Languages
-  '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.pyw', '.rb', '.php',
-  '.java', '.kt', '.scala', '.groovy', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cc', '.cs',
-  '.swift', '.m', '.mm', '.dart', '.lua', '.pl', '.r', '.jl',
-  // Web-frontend
-  '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
-  // Data / queries
-  '.sql', '.graphql', '.gql',
-  // Patches / diffs
-  '.patch', '.diff',
-]);
-
-const INLINE_TEXT_MIME_PREFIXES = ['text/'];
-const INLINE_TEXT_MIME_EXTRA = new Set([
-  'application/json',
-  'application/xml',
-  'application/javascript',
-  'application/x-yaml',
-  'application/x-sh',
-  'application/x-httpd-php',
-  'application/x-shellscript',
-]);
-
-const INLINE_TEXT_MAX_BYTES = 200 * 1024; // 200 KB cap per file
-
-/**
- * Decide whether a (filename, mimetype) pair is an inline-able text file.
- * Returns false for binary docs (pdf, docx, xlsx, zip, ...) and unknown types.
- */
-function isInlineableTextFile(filename, mimetype) {
-  const mime = (mimetype || '').split(';')[0].trim().toLowerCase();
-  if (mime) {
-    if (INLINE_TEXT_MIME_PREFIXES.some(p => mime.startsWith(p))) return true;
-    if (INLINE_TEXT_MIME_EXTRA.has(mime)) return true;
-  }
-  if (typeof filename === 'string' && filename) {
-    const idx = filename.lastIndexOf('.');
-    if (idx >= 0) {
-      const ext = filename.slice(idx).toLowerCase();
-      if (INLINE_TEXT_EXTS.has(ext)) return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Build an XML-tagged text part to inline a text-file body inside the user
- * message content. Produces output in this format:
- *
- *   <FileContent path="..." [truncated="true"]>
- *   1: line1
- *   2: line2
- *   ...
- *   </FileContent>
- *
- * @param {string} filename
- * @param {Buffer} buffer
- * @returns {string}
- */
-function buildInlineTextFilePart(filename, buffer) {
-  const totalSize = buffer.length;
-  let text = buffer.toString('utf-8');
-  let truncated = false;
-  if (Buffer.byteLength(text, 'utf-8') > INLINE_TEXT_MAX_BYTES) {
-    text = Buffer.from(text, 'utf-8').slice(0, INLINE_TEXT_MAX_BYTES).toString('utf-8') + '\n... (file truncated)';
-    truncated = true;
-  }
-  const lines = text.split(/\r?\n/);
-  const numberedText = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
-  const safePath = String(filename || 'file').replace(/[<>"'&]/g, '_');
-  const truncAttr = truncated ? ' truncated="true"' : '';
-  return `<FileContent path="${safePath}"${truncAttr}>\n${numberedText}\n</FileContent>`;
-}
-
 module.exports = {
   isSupportedMedia,
-  mediaToContentPart,
-  mediaTag,
   buildAttachmentTag,
   extractAttachmentTagPaths,
-  isInlineableTextFile,
-  buildInlineTextFilePart,
 };

@@ -20,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { createLogger } = require('./logger');
+const { mimeForExtension } = require('../config/mimeExtensions');
 const env = require('../config/env');
 const {
   DATA_DIR,
@@ -109,58 +110,15 @@ function _isAllowedPath(target) {
   }
 }
 
-// MIME map for the kinds of attachments xAI ingests via input_file. Kept
-// minimal on purpose: any extension not in this table falls back to
-// application/octet-stream + Content-Disposition: attachment, which forces
-// download (safe default) but xAI may then refuse the file. Extending this
-// table is the supported way to enable a new attachment type.
-const MIME_BY_EXT = {
-  // Documents
-  '.pdf': 'application/pdf',
-  // Images
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml',
-  // Audio
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.ogg': 'audio/ogg',
-  '.oga': 'audio/ogg',
-  '.opus': 'audio/ogg',
-  '.m4a': 'audio/mp4',
-  '.aac': 'audio/aac',
-  '.flac': 'audio/flac',
-  // Video
-  '.mp4': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.webm': 'video/webm',
-  '.mkv': 'video/x-matroska',
-  // Plain text & code (xAI accepts these as input_file too)
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.csv': 'text/csv',
-  '.json': 'application/json',
-  '.xml': 'application/xml',
-  '.yaml': 'application/x-yaml',
-  '.yml': 'application/x-yaml',
-  '.html': 'text/html',
-  '.htm': 'text/html',
-};
-
 /**
- * Resolve a MIME type from the original filename. Falls back to
- * application/octet-stream when the extension is unknown.
+ * Resolve a MIME type from the original filename (see mimeExtensions.js).
+ * Unknown extensions fall back to application/octet-stream + attachment disposition.
  */
 function _detectMime(originalName) {
   if (typeof originalName !== 'string' || !originalName) return 'application/octet-stream';
   const idx = originalName.lastIndexOf('.');
   if (idx < 0) return 'application/octet-stream';
-  const ext = originalName.slice(idx).toLowerCase();
-  return MIME_BY_EXT[ext] || 'application/octet-stream';
+  return mimeForExtension(originalName.slice(idx));
 }
 
 /**

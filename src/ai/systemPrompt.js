@@ -2,7 +2,7 @@
 
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
-const { PLATFORM_WA_PERSONAL } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL, PLATFORM_DISCORD } = require('../config/constants');
 const {
   PROFILE,
   resolveProfile,
@@ -18,6 +18,13 @@ const { escapeXml } = require('../utils/xmlEscape');
 
 const WA_FORMAT = '*bold* _italic_ ~strike~ `code` > citation';
 const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
+/** One level = 4 spaces. Section body depth 1; nested XML / Rules lists depth 2. */
+const PROMPT_INDENT = '    ';
+
+function _indentLines(text, depth) {
+  const pad = PROMPT_INDENT.repeat(depth);
+  return text.split('\n').map(l => (l.length ? pad + l : l)).join('\n');
+}
 
 function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
   const userCtx = {
@@ -34,6 +41,20 @@ function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
     else if (t?.function?.name) toolNames.add(t.function.name);
   }
   return { toolNames, hasCodeInterpreter };
+}
+
+function _callerLineInner(ctx, promptOpts) {
+  const status = promptOpts.isActiveMember !== false ? 'active member' : 'non-active';
+  return `${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.`;
+}
+
+function _buildBatchNote(profile) {
+  if (profile === PROFILE.DISCORD_THREAD) {
+    return '<BatchNote>This turn merges several messages from more than one participant. '
+      + 'Each line in the user message keeps its author label; &lt;Caller&gt; is the author of the latest message (permissions and task tools follow that author).</BatchNote>';
+  }
+  return '<BatchNote>This turn merges several messages from more than one participant. '
+    + 'Lines in the user content keep each speaker\'s label; &lt;Caller&gt; is only the author of the latest message (permissions and task tools follow that author).</BatchNote>';
 }
 
 function buildSystemPrompt(ctx) {
@@ -54,7 +75,7 @@ function buildSystemPrompt(ctx) {
   ]));
 
   const convo = [];
-  if (profile === PROFILE.DISCORD_THREAD) convo.push(_buildDiscordPlatform(ctx));
+  if (profile === PROFILE.DISCORD_THREAD) convo.push(_buildDiscordPlatform(ctx, promptOpts));
   else if (ctx.platform === PLATFORM_WA_PERSONAL) convo.push(_buildPersonalWaPlatform(ctx, promptOpts));
   else convo.push(_buildDedicatedWaPlatform(ctx, cap, promptOpts));
   if (isActiveMember) {
@@ -62,10 +83,7 @@ function buildSystemPrompt(ctx) {
     convo.push(`<ActiveMembers>${members}. Creator (always respected): Alberto Gagliardi.</ActiveMembers>`);
   }
   if (ctx.batchMultiSpeaker) {
-    convo.push(
-      '<BatchNote>This turn merges several messages from more than one participant. '
-      + 'Lines in the user content keep each speaker\'s label; &lt;Caller&gt; is only the author of the latest message (permissions and task tools follow that author).</BatchNote>',
-    );
+    convo.push(_buildBatchNote(profile));
   }
   sections.push(_blockRaw('Conversation', convo));
 
@@ -84,14 +102,10 @@ function buildSystemPrompt(ctx) {
     if (sharedMemory) {
       const label = ctx.platform === PLATFORM_WA_PERSONAL ? 'Chat' : 'Group';
       const body = escapeXml(ctx.groupMemory || DEFAULT_MEMORY);
-      sections.push(`<Memory>
-    <${label}>${body}</${label}>
-  </Memory>`);
+      sections.push(`<Memory>\n    <${label}>${body}</${label}>\n</Memory>`);
     } else {
       const body = escapeXml(ctx.userMemory || DEFAULT_MEMORY);
-      sections.push(`<Memory>
-    <User>${body}</User>
-  </Memory>`);
+      sections.push(`<Memory>\n    <User>${body}</User>\n</Memory>`);
     }
   }
 
@@ -105,60 +119,64 @@ function buildSystemPrompt(ctx) {
   return sections.join('\n');
 }
 
-function _buildDiscordPlatform(ctx) {
+function _buildDiscordPlatform(ctx, promptOpts) {
+  const i = PROMPT_INDENT;
   const lines = ['<Platform name="discord">'];
-  lines.push('  <Role>Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.</Role>');
-  lines.push('  <Format>Markdown supported (no tables). Cite web sources with links.</Format>');
-  if (ctx.availableEmojis) lines.push(`  <Emojis>${ctx.availableEmojis}</Emojis>`);
-  if (ctx.serverEvents) lines.push(`  <Events>${ctx.serverEvents}</Events>`);
-  if (ctx.rulesContext) lines.push(`  <RulesContext>${escapeXml(ctx.rulesContext)}</RulesContext>`);
+  lines.push(`${i}<Role>Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.</Role>`);
+  if (ctx.threadName && !ctx.isFirstTurn) {
+    lines.push(`${i}<ThreadTitle>${escapeXml(ctx.threadName)}</ThreadTitle>`);
+  }
+  lines.push(`${i}<Format>Markdown supported (no tables). Cite web sources with links.</Format>`);
+  if (ctx.availableEmojis) lines.push(`${i}<Emojis>${ctx.availableEmojis}</Emojis>`);
+  if (ctx.serverEvents) lines.push(`${i}<Events>${ctx.serverEvents}</Events>`);
+  if (ctx.rulesContext) lines.push(`${i}<RulesContext>${escapeXml(ctx.rulesContext)}</RulesContext>`);
+  lines.push(`${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
   lines.push('</Platform>');
   return lines.join('\n');
 }
 
 function _buildPersonalWaPlatform(ctx, promptOpts) {
-  const isActiveMember = promptOpts.isActiveMember !== false;
-  const status = isActiveMember ? 'active member' : 'non-active';
+  const i = PROMPT_INDENT;
   const lines = [
     '<Platform name="whatsapp_personal">',
-    '  <Rule>Admin-account chat with one other user (2 participants). Reply only when this message contains @gemix (not merely a reply to a prior GemiX message). History, memory, and build workspace are shared for this chat pair.</Rule>',
-    `  <Caller>${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.</Caller>`,
-    '  <AccountOwner>Messages labeled "Account Owner" in history are from Alberto Gagliardi (admin), not GemiX. GemiX replies use the footer on this account; file-only follow-ups after that text are also GemiX.</AccountOwner>',
-    `  <Format>${WA_FORMAT}</Format>`,
+    `${i}<Rule>Admin-account chat with one other user. Reply only when this message contains @gemix. History, memory, and build workspace are shared for this chat pair.</Rule>`,
+    `${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`,
+    `${i}<AccountOwner>Messages labeled "Account Owner" in history are from Alberto Gagliardi (admin), not GemiX. Your prior replies appear as assistant messages without a speaker prefix.</AccountOwner>`,
+    `${i}<Format>${WA_FORMAT}</Format>`,
   ];
   const access = buildCallerAccessNote(PROFILE.WA_PERSONAL, promptOpts);
-  if (access) lines.push(`  <CallerAccess>${access}</CallerAccess>`);
+  if (access) lines.push(`${i}<CallerAccess>${access}</CallerAccess>`);
   lines.push('</Platform>');
   return lines.join('\n');
 }
 
 function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
+  const i = PROMPT_INDENT;
   const lines = ['<Platform name="whatsapp_dedicated">'];
   if (ctx.isGroup) {
-    lines.push(`  <GroupName>${escapeXml(ctx.groupName) || 'unknown'}</GroupName>`);
-    lines.push('  <Rule>Reply only when tagged.</Rule>');
+    lines.push(`${i}<GroupName>${escapeXml(ctx.groupName) || 'unknown'}</GroupName>`);
+    lines.push(`${i}<Rule>Reply when @mentioned or when the user replies to a GemiX message.</Rule>`);
   } else {
-    lines.push('  <Rule>Private chat - reply to every message.</Rule>');
+    lines.push(`${i}<Rule>Private chat - reply to every message.</Rule>`);
   }
   if (cap.systemHistoryLabel) {
-    lines.push(`  <SystemMessages>${SYSTEM_LINE_RULE}</SystemMessages>`);
+    lines.push(`${i}<SystemMessages>${SYSTEM_LINE_RULE}</SystemMessages>`);
   }
-  lines.push(`  <Format>${WA_FORMAT}</Format>`);
+  lines.push(`${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
+  lines.push(`${i}<Format>${WA_FORMAT}</Format>`);
   const access = buildCallerAccessNote(resolveProfile(ctx), promptOpts);
-  if (access) lines.push(`  <CallerAccess>${access}</CallerAccess>`);
+  if (access) lines.push(`${i}<CallerAccess>${access}</CallerAccess>`);
   lines.push('</Platform>');
   return lines.join('\n');
 }
 
 function _block(tag, lines) {
-  const body = lines.map(l => `    ${l}`).join('\n');
+  const body = _indentLines(lines.join('\n'), 1);
   return `<${tag}>\n${body}\n</${tag}>`;
 }
 
 function _blockRaw(tag, blocks) {
-  const body = blocks
-    .map(b => b.split('\n').map(l => `    ${l}`).join('\n'))
-    .join('\n');
+  const body = blocks.map(b => _indentLines(b, 1)).join('\n');
   return `<${tag}>\n${body}\n</${tag}>`;
 }
 

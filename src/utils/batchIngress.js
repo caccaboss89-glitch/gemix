@@ -7,13 +7,17 @@
 const { pushMessage, hasPendingBatch } = require('./messageBatcher');
 const responseLock = require('./responseLock');
 
-/** Longer TTL while a debounced batch waits to fire (up to MAX_WAIT_MS in messageBatcher). */
-const BATCH_LOCK_TTL_MS = 5 * 60 * 1000;
+const { BATCH_LOCK_TTL_MS } = require('../config/constants');
 
-function _wrapBatchHandler(batchKey, handler) {
+function _wrapBatchHandler(batchKey, handler, log, discardLogLabel) {
   return async (entries) => {
     if (!responseLock.refresh(batchKey, BATCH_LOCK_TTL_MS)) {
-      responseLock.tryLock(batchKey, BATCH_LOCK_TTL_MS);
+      if (!responseLock.tryLock(batchKey, BATCH_LOCK_TTL_MS)) {
+        if (log && typeof log.warn === 'function') {
+          log.warn(`   Batch handler skipped for ${discardLogLabel}: lock not held (not queued)`);
+        }
+        return;
+      }
     }
     return handler(entries);
   };
@@ -24,7 +28,7 @@ function _wrapBatchHandler(batchKey, handler) {
  * @returns {'batched'|'started'|'discarded'} discarded = lock held, message ignored (no queue)
  */
 function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) {
-  const wrappedHandler = _wrapBatchHandler(batchKey, handler);
+  const wrappedHandler = _wrapBatchHandler(batchKey, handler, log, discardLogLabel);
   if (hasPendingBatch(batchKey)) {
     pushMessage(batchKey, entry, wrappedHandler);
     return 'batched';
@@ -36,7 +40,7 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) 
     return 'discarded';
   }
   const stopLockRenew = responseLock.startAutoRenew(batchKey, BATCH_LOCK_TTL_MS);
-  pushMessage(batchKey, { ...entry, stopLockRenew, lockAcquired: true }, wrappedHandler);
+  pushMessage(batchKey, { ...entry, stopLockRenew }, wrappedHandler);
   return 'started';
 }
 

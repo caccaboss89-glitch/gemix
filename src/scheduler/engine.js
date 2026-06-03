@@ -21,6 +21,8 @@ const { wipeWorkspace } = require('../sandbox/buildWorkspace');
 
 const log = createLogger('Scheduler');
 
+const TASK_DELIVERY_MAX_ATTEMPTS = 3;
+
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
 let lastReleaseCheckTime = 0;
@@ -135,6 +137,97 @@ function startScheduler() {
   _sweepBuildWorkspaces().catch(err => log.error('Build workspace initial sweep error:', err));
 }
 
+function _taskIsDue(task, nowTime) {
+  const taskDate = new Date(task.scheduledAt);
+  return !isNaN(taskDate.getTime()) && taskDate.getTime() <= nowTime;
+}
+
+/**
+ * Deliver a scheduled task. Throws if every configured destination fails.
+ */
+async function _deliverTask(task) {
+  let messageText = stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, ''));
+  messageText = normalizeMarkdown(messageText);
+
+  const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
+  messageText += scheduledFooter;
+
+  const dest = task.destinations || {};
+  const attempts = [];
+  if (dest.whatsapp) attempts.push(() => dedicatedClient.sendMessage(dest.whatsapp, messageText));
+  if (dest.whatsappGroup) attempts.push(() => dedicatedClient.sendMessage(dest.whatsappGroup, messageText));
+
+  if (!attempts.length) {
+    throw new Error('Task has no WhatsApp destinations configured');
+  }
+  if (!dedicatedClient) {
+    throw new Error('Dedicated WhatsApp client not available');
+  }
+
+  const errors = [];
+  for (const send of attempts) {
+    try {
+      await send();
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+  if (errors.length === attempts.length) {
+    throw new Error(errors.join('; '));
+  }
+}
+
+/**
+ * Run up to TASK_DELIVERY_MAX_ATTEMPTS immediate retries on failure.
+ * @returns {boolean} true when delivered successfully
+ */
+async function _executeTaskWithRetries(task) {
+  for (let attempt = 1; attempt <= TASK_DELIVERY_MAX_ATTEMPTS; attempt++) {
+    try {
+      await _deliverTask(task);
+      if (attempt > 1) {
+        log.info(`Task ${task.id} delivered on attempt ${attempt}/${TASK_DELIVERY_MAX_ATTEMPTS}`);
+      }
+      return true;
+    } catch (err) {
+      log.error(`Task ${task.id} attempt ${attempt}/${TASK_DELIVERY_MAX_ATTEMPTS} failed: ${err.message}`);
+      if (attempt >= TASK_DELIVERY_MAX_ATTEMPTS) {
+        log.error(`Task ${task.id} removed after ${TASK_DELIVERY_MAX_ATTEMPTS} failed delivery attempts`);
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+function _finalizeDueTasks(data, dueTasks, deliveredIds) {
+  const dueIds = new Set(dueTasks.map(t => t.id));
+  const updatedTasks = [];
+
+  for (const t of data.tasks) {
+    if (!dueIds.has(t.id)) {
+      updatedTasks.push(t);
+      continue;
+    }
+    if (!deliveredIds.has(t.id)) {
+      continue;
+    }
+    if (t.recurrence && t.recurrence.freq) {
+      const next = computeNextOccurrence(t.scheduledAt, t.recurrence.freq);
+      if (next && (!t.recurrence.endAt || new Date(next).getTime() <= new Date(t.recurrence.endAt).getTime())) {
+        t.scheduledAt = next;
+        updatedTasks.push(t);
+        log.info(`Recurring task ${t.id} rescheduled: ${t.scheduledAt}`);
+      } else {
+        log.info(`Recurring task ${t.id} ended (recurrence end reached).`);
+      }
+    }
+  }
+
+  data.tasks = updatedTasks;
+  return data;
+}
+
 async function checkAndExecuteTasks() {
   const now = new Date();
   const romeTimeStr = now.toLocaleString('sv-SE', { timeZone: 'Europe/Rome' });
@@ -168,92 +261,36 @@ async function checkAndExecuteTasks() {
 
   for (const file of files) {
     const fileId = file.replace('.json', '');
-    let tasksToExecute = [];
+    let dueTasks = [];
     try {
-      // modifyTaskFile holds the per-file lock for the entire read->execute->write cycle.
       await modifyTaskFile(fileId, async (data) => {
         if (!data || !data.tasks || data.tasks.length === 0) return data;
-
         const nowTime = now.getTime();
-        const dueTasks = data.tasks.filter(t => {
-          const taskDate = new Date(t.scheduledAt);
-          return !isNaN(taskDate.getTime()) && taskDate.getTime() <= nowTime;
-        });
-        if (dueTasks.length === 0) return data;
-
-        tasksToExecute = dueTasks;
-
-        // Advance recurring tasks or drop one-shot tasks
-        const nowAfterTime = Date.now();
-        const dueIds = new Set(dueTasks.map(t => t.id));
-        const updatedTasks = [];
-
-        for (const t of data.tasks) {
-          const taskDate = new Date(t.scheduledAt);
-          if (!dueIds.has(t.id) || isNaN(taskDate.getTime()) || taskDate.getTime() > nowAfterTime) {
-            updatedTasks.push(t);
-            continue;
-          }
-          if (t.recurrence && t.recurrence.freq) {
-            const next = computeNextOccurrence(t.scheduledAt, t.recurrence.freq);
-            if (next && (!t.recurrence.endAt || new Date(next).getTime() <= new Date(t.recurrence.endAt).getTime())) {
-              t.scheduledAt = next;
-              updatedTasks.push(t);
-              log.info(`Recurring task ${t.id} rescheduled: ${t.scheduledAt}`);
-            } else {
-              log.info(`Recurring task ${t.id} ended (recurrence end reached).`);
-            }
-          }
-          // Non-recurring tasks are simply dropped
-        }
-        data.tasks = updatedTasks;
+        dueTasks = data.tasks.filter(t => _taskIsDue(t, nowTime));
         return data;
       });
     } catch (err) {
-      log.error(`Task file processing error ${fileId}:`, err.message);
+      log.error(`Task file read error ${fileId}:`, err.message);
+      continue;
     }
 
+    if (!dueTasks.length) continue;
 
-    for (const task of tasksToExecute) {
-      try {
-        await executeTask(task);
+    const deliveredIds = new Set();
+    for (const task of dueTasks) {
+      if (await _executeTaskWithRetries(task)) {
+        deliveredIds.add(task.id);
         log.info(`Task executed: ${task.id}`);
-      } catch (err) {
-        log.error(`Task processing error ${task.id}:`, err.message);
       }
     }
-  }
-}
 
-/**
- * Execute a single scheduled task.
- * Handles static content and multiplatform delivery.
- * @param {object} task - Task object with content, destinations, etc.
- * @returns {Promise<void>}
- */
-async function executeTask(task) {
-  // Deliver via destinations
-  let messageText = stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, ''));
-  messageText = normalizeMarkdown(messageText);
-
-  const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
-  messageText += scheduledFooter;
-
-  const dest = task.destinations || {};
-
-  if (dest.whatsapp && dedicatedClient) {
     try {
-      await dedicatedClient.sendMessage(dest.whatsapp, messageText);
+      await modifyTaskFile(fileId, async (data) => {
+        if (!data || !data.tasks || data.tasks.length === 0) return data;
+        return _finalizeDueTasks(data, dueTasks, deliveredIds);
+      });
     } catch (err) {
-      log.error(`WA private send error ${dest.whatsapp}:`, err.message);
-    }
-  }
-
-  if (dest.whatsappGroup && dedicatedClient) {
-    try {
-      await dedicatedClient.sendMessage(dest.whatsappGroup, messageText);
-    } catch (err) {
-      log.error(`WA group send error ${dest.whatsappGroup}:`, err.message);
+      log.error(`Task file finalize error ${fileId}:`, err.message);
     }
   }
 }

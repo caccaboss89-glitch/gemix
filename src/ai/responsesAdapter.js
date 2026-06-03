@@ -76,19 +76,43 @@ function _assistantContentToText(content) {
 }
 
 /**
- * Stringify a `tool` message content for Responses' function_call_output.output.
- * Tool results are typically JSON strings; arrays are returned by the
- * multimodal image_search/read_file paths and require stable serialization here.
- *
- * `output` on `function_call_output` is required to be a string.
+ * Split multimodal tool results into a string `output` plus optional native
+ * input parts (tunnel URLs from read_file). Media parts are emitted as a
+ * follow-up user message so xAI receives real `input_file` / `input_image`.
  */
-function _toolOutputToString(content) {
-  if (typeof content === 'string') return content;
-  try {
-    return JSON.stringify(content);
-  } catch {
-    return String(content ?? '');
+function _toolContentToResponsesOutput(content) {
+  if (typeof content === 'string') {
+    return { output: content, extraUserParts: [] };
   }
+  if (!Array.isArray(content)) {
+    try {
+      return { output: JSON.stringify(content), extraUserParts: [] };
+    } catch {
+      return { output: String(content ?? ''), extraUserParts: [] };
+    }
+  }
+
+  const textPieces = [];
+  const extraUserParts = [];
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    if (part.type === 'text' && typeof part.text === 'string') {
+      textPieces.push(part.text);
+      continue;
+    }
+    if (part.type === 'input_file' && typeof part.file_url === 'string') {
+      extraUserParts.push({ type: 'input_file', file_url: part.file_url });
+      continue;
+    }
+    if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
+      extraUserParts.push({ type: 'input_image', image_url: part.image_url.url });
+    }
+  }
+
+  const output = textPieces.length > 0
+    ? textPieces.join('\n')
+    : JSON.stringify(content);
+  return { output, extraUserParts };
 }
 
 /**
@@ -172,11 +196,15 @@ function chatMessagesToResponsesInput(messages) {
 
       case 'tool': {
         if (!msg.tool_call_id) break;
+        const { output, extraUserParts } = _toolContentToResponsesOutput(msg.content);
         input.push({
           type: 'function_call_output',
           call_id: msg.tool_call_id,
-          output: _toolOutputToString(msg.content),
+          output,
         });
+        if (extraUserParts.length > 0) {
+          input.push({ role: 'user', content: extraUserParts });
+        }
         break;
       }
 

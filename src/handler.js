@@ -6,9 +6,9 @@
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
 //   2. Touch the per-user/group build workspace activity timestamp (WA only).
 //   3. Build the messages array: system prompt + chat history + the current
-//      user content. Media parts (PDF, audio, video, plain text) are prepared
-//      as `input_file` parts (xAI fetches them server-side for native
-//      processing).
+//      user content. Media uses utils/incomingMediaIngress.js →
+//      aiFileDelivery.js: tunnel `input_file` URLs, inline <FileContent>, or
+//      [Attachment] tags only (Office/archives).
 //   4. Loop: call Grok (`/v1/responses`) - run any tool calls - repeat
 //      until the model returns plain text (final response) or the round
 //      budget is reached.
@@ -17,7 +17,7 @@
 
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
-const { getToolsForUser, SET_CONVERSATION_TITLE_TOOL } = require('./ai/tools');
+const { getToolsForUser, getToolAccessError, SET_CONVERSATION_TITLE_TOOL } = require('./ai/tools');
 const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
 const { isAdmin } = require('./config/members');
 const {
@@ -30,7 +30,7 @@ const {
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
 } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { prepareInputFilesInMessages } = require('./utils/inputFileBuilder');
+
 const { resolveWorkspaceId, workspaceIdToSlug } = require('./utils/workspaceId');
 const { touchActivity } = require('./utils/buildState');
 const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
@@ -306,18 +306,16 @@ async function handleMessage(ctx) {
 
     // Drop history files no longer referenced in the chat buffer (tags,
     // FileContent paths, _historyPath on media parts). Runs before tunnel
-    // registration so prepareInputFiles only exposes files still on disk.
+    // registration so tunnel URLs only expose files still on disk.
     try {
       const historyUserId = resolveStorageId(ctx);
       if (historyUserId) {
         if (ctx.historyLoadIncomplete) {
-          log.warn('History load incomplete: reference-based prune skipped');
-          if (isDiscord) {
-            pruneHistory(historyUserId, new Set(), {
-              maxAgeMs: DISCORD_MAX_AGE_MS,
-              ageOnly: true,
-            });
-          }
+          log.warn('History load incomplete: reference-based prune skipped (age-only disk sweep)');
+          pruneHistory(historyUserId, new Set(), {
+            maxAgeMs: DISCORD_MAX_AGE_MS,
+            ageOnly: true,
+          });
         } else {
           const referenced = collectReferencedHistoryFilenames(ctx.history, ctx.content);
           const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};
@@ -326,15 +324,6 @@ async function handleMessage(ctx) {
       }
     } catch (pruneErr) {
       log.warn(`pruneHistory failed: ${pruneErr.message}`);
-    }
-
-    // Convert non-image media parts to input_file URLs for xAI native processing.
-    try {
-      await prepareInputFilesInMessages(messages, {
-        ownerKey: workspaceIdToSlug(workspaceId) || resolveStorageId(ctx) || null,
-      });
-    } catch (e) {
-      log.warn(`prepareInputFilesInMessages failed: ${e.message}`);
     }
 
     const deliveryCtx = {
@@ -346,6 +335,8 @@ async function handleMessage(ctx) {
     let rounds = 0;
     let lastModelUsed = null;
     const sessionStartTime = Date.now();
+    let sessionDurationLimitReached = false;
+    const discordThreadAllowsTitle = Boolean(userCtx.isFirstTurn);
 
     const runToolCall = async (tc) => {
       try {
@@ -386,7 +377,8 @@ async function handleMessage(ctx) {
       rounds++;
 
       if (Date.now() - sessionStartTime > SESSION_MAX_DURATION_MS) {
-        log.warn(`   Overall session duration limit reached (10 minutes), forcing wrap up`);
+        log.warn('   Session duration limit reached (10 minutes), forcing wrap up');
+        sessionDurationLimitReached = true;
         break;
       }
 
@@ -402,15 +394,16 @@ async function handleMessage(ctx) {
       // build sub-agent just produced shows up immediately in <UserWorkspace>.
       refreshUserWorkspace();
       reloadLongTermMemory(ctx, ui);
-      ctx.isFirstTurn = userCtx.isFirstTurn && !responseCtx.discordTitle;
+      userCtx.isFirstTurn = discordThreadAllowsTitle && !responseCtx.discordTitle;
+      ctx.isFirstTurn = userCtx.isFirstTurn;
       messages[0].content = buildSystemPrompt(ctx);
 
       // On the first Discord turn the title-setter tool is forced exactly once
       // via toolChoice so the thread gets named deterministically. It is
       // excluded from the tool list in every other round.
-      const callOpts = { maxTurns: MAX_TOOL_ROUNDS };
+      const callOpts = { maxTurns: MAX_TOOL_ROUNDS, requestId: ctx.requestId };
       let roundTools = tools;
-      const forceTitle = rounds === 1 && userCtx.isFirstTurn && !responseCtx.discordTitle;
+      const forceTitle = rounds === 1 && discordThreadAllowsTitle && !responseCtx.discordTitle;
       if (forceTitle) {
         callOpts.toolChoice = { type: 'function', name: SET_CONVERSATION_TITLE_TOOL };
       } else {
@@ -441,36 +434,46 @@ async function handleMessage(ctx) {
 
         for (const tc of orderedCalls) {
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-            log.warn(`   Tool loop interrupted: a tool already produced the final response`);
-            break;
-          }
-          if (!allowedToolNames.has(tc.function.name)) {
-            log.warn(`   Tool "${tc.function.name}" not in current allowed list - rejected`);
+            log.warn('   Skipping remaining tool calls: voice message already generated for this turn');
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
               content: JSON.stringify({
                 success: false,
-                error: _toolNotAvailableMessage(tc.function.name, ctx),
+                error: 'Turn already completed via voice message; further tools were not run.',
               }),
+            });
+            continue;
+          }
+          const toolBlock = getToolAccessError(tc.function.name, userCtx, {
+            allowedRoundNames: allowedToolNames,
+            unavailableMessage: (name) => _toolNotAvailableMessage(name, ctx),
+          });
+          if (toolBlock) {
+            log.warn(`   Tool "${tc.function.name}" blocked: ${toolBlock}`);
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ success: false, error: toolBlock }),
             });
             continue;
           }
           messages.push(await runToolCall(tc));
         }
 
-        // Token optimization: image previews are stripped from tool results
-        // after the AI evaluates them in the current round.
+        // Token optimization: tunnel/input_file previews are stripped from tool
+        // results after the model evaluates them in the current round.
+        const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file']);
         for (const msg of messages) {
           if (msg.role === 'tool' && Array.isArray(msg.content)) {
-            if (msg._imagePreviewSeen) {
-              msg.content = msg.content.filter(p => p.type !== 'image_url');
+            if (msg._heavyMediaPreviewSeen) {
+              msg.content = msg.content.filter(p => !HEAVY_TOOL_PART_TYPES.has(p.type));
               if (msg.content.length === 1 && msg.content[0].type === 'text') {
                 msg.content = msg.content[0].text;
               }
-              delete msg._imagePreviewSeen;
-            } else if (msg.content.some(p => p.type === 'image_url')) {
-              msg._imagePreviewSeen = true;
+              delete msg._heavyMediaPreviewSeen;
+            } else if (msg.content.some(p => HEAVY_TOOL_PART_TYPES.has(p.type))) {
+              msg._heavyMediaPreviewSeen = true;
             }
           }
         }
@@ -538,23 +541,29 @@ async function handleMessage(ctx) {
       };
     }
 
-    // ── Outer (client-side) loop budget exhausted ──────────────────────
-    // When the tool round budget is reached, one final call is made with
-    // toolChoice set to 'none' to obtain a text-only response.
-    log.warn(`   Tool-round budget (${MAX_TOOL_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
+    // ── Forced text wrap-up (session wall clock or tool-round budget) ───
+    const wrapUpReason = sessionDurationLimitReached
+      ? 'session time limit (10 minutes)'
+      : `tool-round budget (${MAX_TOOL_ROUNDS})`;
+    log.warn(`   Forcing final answer (${wrapUpReason}, tool_choice:none)`);
     let wrapUpText = '';
     try {
       reloadLongTermMemory(ctx, ui);
+      userCtx.isFirstTurn = discordThreadAllowsTitle && !responseCtx.discordTitle;
+      ctx.isFirstTurn = userCtx.isFirstTurn;
       messages[0].content = buildSystemPrompt(ctx);
       const noTitleTools = tools.filter(t => t.function?.name !== SET_CONVERSATION_TITLE_TOOL);
+      const wrapUpNote = sessionDurationLimitReached
+        ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now in natural language with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
+        : 'SYSTEM: You can no longer run tools for this turn. Reply now in natural language: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
       messages.push({
         role: 'user',
-        content:
-          'SYSTEM: You can no longer run tools for this turn. Reply now in natural language: ' +
-          'answer the user with everything you gathered, and if the task is not fully complete ' +
-          'tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.',
+        content: wrapUpNote,
       });
-      const { message: finalMsg, model: finalModel } = await callAI(messages, noTitleTools, { toolChoice: 'none' });
+      const { message: finalMsg, model: finalModel } = await callAI(messages, noTitleTools, {
+        toolChoice: 'none',
+        requestId: ctx.requestId,
+      });
       if (finalModel) lastModelUsed = finalModel;
       wrapUpText = cleanAssistantResponse(finalMsg.content || '');
     } catch (wrapErr) {

@@ -29,6 +29,7 @@ const { pushBufferAttachment } = require('../utils/attachments');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { sanitizeFilename } = require('../utils/text');
 const { createLogger } = require('../utils/logger');
+const { mimeForExtension } = require('../config/mimeExtensions');
 
 const log = createLogger('ImagineGenerator');
 
@@ -59,15 +60,8 @@ const MAX_REF_IMAGES_FOR_VIDEO = 7;
 // limit guards the upstream fetch, not a base64 payload.
 const MAX_REF_IMAGE_BYTES = 8 * 1024 * 1024;
 
-const REF_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
-const REF_IMAGE_MIME = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.bmp': 'image/bmp',
-};
+const { TUNNEL_IMAGE_EXTS, exposeTunnelFromAbsPath } = require('../utils/aiFileDelivery');
+const REF_IMAGE_EXTS = TUNNEL_IMAGE_EXTS;
 
 // -- Helpers -----------------------------------------------------------------
 
@@ -185,7 +179,7 @@ function _materializeRefToTemp(buffer, name, ownerKey) {
  *
  * Returns { ok:true, urls:[], names:[] } or { ok:false, reason }.
  */
-function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
+async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
   if (refList.length > max) {
     return { ok: false, reason: `Too many reference images (${refList.length}). Max allowed: ${max}.` };
   }
@@ -231,16 +225,14 @@ function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
       }
     }
 
-    let urlInfo;
-    try {
-      urlInfo = getPublicAttachmentUrl(diskPath, found.name || `ref${ext}`, {
-        kind: 'temp',
-        mimetype: REF_IMAGE_MIME[ext],
-      });
-    } catch (err) {
-      return { ok: false, reason: `Cannot expose reference "${raw}" via the attachment tunnel: ${err.message}` };
+    const tunnel = await exposeTunnelFromAbsPath(diskPath, found.name || `ref${ext}`, {
+      kind: 'temp',
+      contentType: mimeForExtension(ext),
+    });
+    if (!tunnel.success) {
+      return { ok: false, reason: tunnel.error || `Cannot expose reference "${raw}" via the attachment tunnel.` };
     }
-    urls.push(urlInfo.url);
+    urls.push(tunnel.url);
     names.push(found.name || raw);
   }
   return { ok: true, urls, names };
@@ -358,7 +350,7 @@ async function generateImage(args, userCtx, responseCtx) {
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
-  const refs = _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_IMAGE, userCtx, responseCtx);
+  const refs = await _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_IMAGE, userCtx, responseCtx);
   if (!refs.ok) {
     return { success: false, error: refs.reason };
   }
@@ -409,11 +401,7 @@ async function generateImage(args, userCtx, responseCtx) {
   // hermes -z most often emits .jpeg URLs; preserve extension when present.
   const urlExt = (url.match(/\.(png|jpe?g|webp|gif)(?:\?|$)/i) || [])[1] || 'png';
   const desiredName = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
-  const mimetype = urlExt.toLowerCase() === 'png' ? 'image/png'
-    : urlExt.toLowerCase().startsWith('jp') ? 'image/jpeg'
-      : urlExt.toLowerCase() === 'webp' ? 'image/webp'
-        : urlExt.toLowerCase() === 'gif' ? 'image/gif'
-          : 'application/octet-stream';
+  const mimetype = mimeForExtension(`.${urlExt.toLowerCase()}`);
 
   // Dedup against the buffer and obtain the final name reported to the model
   // for use as a reference_image.
@@ -463,7 +451,7 @@ async function generateVideo(args, userCtx, responseCtx) {
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
-  const refs = _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_VIDEO, userCtx, responseCtx);
+  const refs = await _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_VIDEO, userCtx, responseCtx);
   if (!refs.ok) {
     return { success: false, error: refs.reason };
   }
@@ -513,9 +501,7 @@ async function generateVideo(args, userCtx, responseCtx) {
   const baseName = sanitizeFilename(prompt.slice(0, 30), 30) || 'video';
   const urlExt = (url.match(/\.(mp4|webm|mov)(?:\?|$)/i) || [])[1] || 'mp4';
   const desiredName = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
-  const mimetype = urlExt.toLowerCase() === 'webm' ? 'video/webm'
-    : urlExt.toLowerCase() === 'mov' ? 'video/quicktime'
-      : 'video/mp4';
+  const mimetype = mimeForExtension(`.${urlExt.toLowerCase()}`);
 
   const filename = pushBufferAttachment(responseCtx, { name: desiredName, buffer, mimetype });
 

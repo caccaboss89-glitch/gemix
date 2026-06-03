@@ -2,7 +2,7 @@
 //
 // Centralized API client for all LLM calls (Grok via Hermes).
 // Provides retry + timeout logic, structured request/response logging
-// with PII + base64 redaction, and log directory quota enforcement.
+// with PII redaction, and log directory quota enforcement.
 // Responses API path (callResponsesModel).
 
 const fs = require('fs');
@@ -17,15 +17,14 @@ const LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour
 const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
 const LOG_ENTRY_MAX_BYTES = 1 * 1024 * 1024;       // 1 MB cap per single entry post-redaction
-const REDACT_BASE64_KEEP = 64;                      // keep first N chars of each base64 payload
 const REDACT_TEXT_KEEP = 4 * 1024;                  // keep first N chars of long text content parts
 const crypto = require('crypto');
 
 // -- Redaction helpers -----------------------------------------------------
 //
 // We log every API request/response to disk for debugging. Without redaction
-// these files contain user PII (emails, phone numbers, names), full base64
-// of incoming images/audio/video, and command strings that can include paths
+// these files contain user PII (emails, phone numbers, names), long text,
+// tunnel URLs, and command strings that can include paths
 // or file contents. The redactor walks the body in-place (on a deep clone)
 // and shrinks the heaviest fields without losing the structure needed for
 // debugging.
@@ -42,29 +41,32 @@ function _redactStringPii(s) {
     .replace(_PHONE_RE, (m) => (m.length >= 8 ? '[REDACTED_PHONE]' : m));
 }
 
-function _truncateBase64DataUrl(url) {
-  const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(url);
-  if (!m) return url;
-  const head = m[2].slice(0, REDACT_BASE64_KEEP);
-  return `data:${m[1]};base64,${head}…[truncated ${m[2].length - head.length} chars]`;
+function _redactTunnelUrl(url) {
+  if (typeof url !== 'string' || !url) return url;
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}?[tunnel]`;
+  } catch {
+    return url.length > 40 ? `${url.slice(0, 24)}…[tunnel]` : url;
+  }
 }
 
-function _redactValue(value) {
+function _redactValue(value, key = '') {
   if (value == null) return value;
+  if (key === 'file_url' && typeof value === 'string') {
+    return _redactTunnelUrl(value);
+  }
   if (typeof value === 'string') {
-    if (value.startsWith('data:') && value.includes(';base64,')) {
-      return _truncateBase64DataUrl(value);
-    }
     let out = value;
     if (out.length > REDACT_TEXT_KEEP) {
       out = out.slice(0, REDACT_TEXT_KEEP) + `…[truncated ${out.length - REDACT_TEXT_KEEP} chars]`;
     }
     return _redactStringPii(out);
   }
-  if (Array.isArray(value)) return value.map(_redactValue);
+  if (Array.isArray(value)) return value.map(v => _redactValue(v));
   if (typeof value === 'object') {
     const out = {};
-    for (const k of Object.keys(value)) out[k] = _redactValue(value[k]);
+    for (const k of Object.keys(value)) out[k] = _redactValue(value[k], k);
     return out;
   }
   return value;
@@ -161,25 +163,71 @@ function extractAttachmentsFromMessages(messages) {
 
   messages.forEach((message, index) => {
     if (!message || !Array.isArray(message.content)) return;
-    const mediaParts = message.content.filter(part => part && part.type && part.type !== 'text');
-    mediaParts.forEach((part, partIndex) => {
-      const dataUrl = part.image_url?.url || '';
-      let mimetype = null;
-      if (typeof dataUrl === 'string') {
-        const m = /^data:([^;]+);base64,/.exec(dataUrl);
-        if (m) mimetype = m[1];
-      }
-      attachments.push({
+    message.content.forEach((part, partIndex) => {
+      if (!part || !part.type || part.type === 'text') return;
+      const entry = {
         role: message.role || null,
         messageIndex: index,
         partIndex,
         type: part.type,
-        mimetype,
-      });
+      };
+      if (part.type === 'input_file' && part.file_url) {
+        entry.file_url = typeof part.file_url === 'string' ? _redactTunnelUrl(part.file_url) : null;
+        entry.payloadHint = 'tunnel_url';
+      } else if (part.type === 'image_url' && part.image_url?.url) {
+        entry.payloadHint = part.image_url.url.startsWith('http') ? 'url' : 'inline';
+      }
+      attachments.push(entry);
     });
   });
 
   return attachments;
+}
+
+function _pushResponsesPartAttachment(attachments, itemIndex, part, partIndex) {
+  if (!part || typeof part !== 'object') return;
+  if (part.type === 'input_image' && part.image_url) {
+    attachments.push({
+      inputIndex: itemIndex,
+      partIndex,
+      type: 'input_image',
+      payloadHint: typeof part.image_url === 'string' && part.image_url.startsWith('http') ? 'url' : 'inline',
+    });
+    return;
+  }
+  if (part.type === 'input_file' && part.file_url) {
+    attachments.push({
+      inputIndex: itemIndex,
+      partIndex,
+      type: 'input_file',
+      file_url: typeof part.file_url === 'string' ? _redactTunnelUrl(part.file_url) : null,
+      payloadHint: 'tunnel_url',
+    });
+  }
+}
+
+function extractAttachmentsFromResponsesInput(input) {
+  const attachments = [];
+  if (!Array.isArray(input)) return attachments;
+
+  input.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    _pushResponsesPartAttachment(attachments, index, item, 0);
+    if (Array.isArray(item.content)) {
+      item.content.forEach((part, partIndex) => {
+        _pushResponsesPartAttachment(attachments, index, part, partIndex);
+      });
+    }
+  });
+
+  return attachments;
+}
+
+function extractAttachmentsFromRequestBody(body) {
+  if (!body || typeof body !== 'object') return [];
+  if (Array.isArray(body.messages)) return extractAttachmentsFromMessages(body.messages);
+  if (Array.isArray(body.input)) return extractAttachmentsFromResponsesInput(body.input);
+  return [];
 }
 
 function logApiRequest(modelName, apiUrl, body, extra = {}) {
@@ -187,7 +235,7 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
     ensureLogDir();
     _enforceLogDirQuota();
     const now = new Date().toISOString();
-    const requestAttachments = extractAttachmentsFromMessages(body.messages);
+    const requestAttachments = extractAttachmentsFromRequestBody(body);
     const entry = _redactEntry({
       timestamp: now,
       model: modelName,
@@ -246,8 +294,8 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
  * @param {string} apiKey - API key for authentication
  * @returns {Promise<Response>} The raw fetch Response
  */
-async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
-  logApiRequest(modelName, apiUrl, body);
+async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}) {
+  logApiRequest(modelName, apiUrl, body, logExtra);
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
     let timer;
     try {
@@ -311,8 +359,8 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey) {
  * @param {string} apiKey
  * @returns {Promise<object>} The full parsed JSON body
  */
-async function callResponsesModel(modelName, apiUrl, body, apiKey) {
-  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey);
+async function callResponsesModel(modelName, apiUrl, body, apiKey, logExtra = {}) {
+  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra);
 
   let data;
   try {
@@ -324,7 +372,7 @@ async function callResponsesModel(modelName, apiUrl, body, apiKey) {
   }
 
   try {
-    logApiResponse(modelName, apiUrl, data);
+    logApiResponse(modelName, apiUrl, data, logExtra);
   } catch (err) {
     log.warn(`Failed to write API response log: ${err.message}`);
   }

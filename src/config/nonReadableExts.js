@@ -34,7 +34,6 @@ function buildReadFileBlockedMessage(ext) {
 }
 
 module.exports = {
-  NON_READABLE_EXTS,
   isNonReadableExt,
   mainReadFileBlockedMessage,
   buildReadFileBlockedMessage,

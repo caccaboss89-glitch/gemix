@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { PLATFORM_DISCORD } = require('../config/constants');
+const { mimeForExtension } = require('../config/mimeExtensions');
 const { resolveWorkspaceId } = require('../utils/workspaceId');
 const { resolveProfile, toolUnavailableMessage, TOOL } = require('../config/platformCapabilities');
 const {
@@ -40,7 +41,8 @@ const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
 const { runBuildAgent } = require('../ai/buildAgent');
 const { getUserHistoryPaths } = require('../utils/historySync');
 const { resolveStorageId } = require('../utils/userPaths');
-const { getPublicAttachmentUrl } = require('../utils/tempFileServer');
+
+const { classifyAiFileDelivery, DELIVERY_MODE, exposeTunnelFromAbsPath } = require('../utils/aiFileDelivery');
 const { sanitizeFilename } = require('../utils/text');
 const { pushBufferAttachment } = require('../utils/attachments');
 const { createLogger } = require('../utils/logger');
@@ -111,20 +113,21 @@ function _stageOne(attachment, workspaceId) {
  * Build an input_file URL part for a freshly-staged in-workspace file.
  * Used on round 1 only when the source is a buffer (i.e. content the model
  * has never seen before; for history files the agent reads them on demand).
+ *
+ * Security note: exposes a short-lived HTTPS URL on the attachment tunnel (accepted risk).
  */
-function _makeRound1FilePart(workspaceId, finalName, mimetypeHint) {
+async function _makeRound1FilePart(workspaceId, finalName, mimetypeHint) {
   const abs = resolveInsideWorkspace(workspaceId, finalName);
   if (!abs || !fs.existsSync(abs)) return null;
-  try {
-    const info = getPublicAttachmentUrl(abs, finalName, {
-      kind: 'temp',
-      mimetype: mimetypeHint,
-    });
-    return { name: finalName, url: info.url };
-  } catch (err) {
-    log.warn(`Failed to build round-1 input_file URL for ${finalName}: ${err.message}`);
+  const tunnel = await exposeTunnelFromAbsPath(abs, finalName, {
+    kind: 'temp',
+    contentType: mimetypeHint,
+  });
+  if (!tunnel.success) {
+    log.warn(`Round-1 tunnel skipped for ${finalName}: ${tunnel.error}`);
     return null;
   }
+  return { name: finalName, url: tunnel.url };
 }
 
 /**
@@ -160,7 +163,7 @@ function _attachDelivered(workspaceId, delivered, responseCtx) {
       continue;
     }
     const ext = path.extname(cleaned).toLowerCase();
-    const mimetype = _mimeFromExt(ext);
+    const mimetype = mimeForExtension(ext);
     // Dedup against the buffer (rename to name(1).ext on clash) so a generated
     // asset present in the buffer never shadows a build deliverable. The model
     // learns the final name via the returned `attached` list (build reports it
@@ -173,23 +176,6 @@ function _attachDelivered(workspaceId, delivered, responseCtx) {
     attached.push(finalName);
   }
   return { attached, missing };
-}
-
-const _MIME_BY_EXT = {
-  '.pdf': 'application/pdf',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp', '.gif': 'image/gif',
-  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
-  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  '.zip': 'application/zip',
-  '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv',
-  '.json': 'application/json',
-};
-function _mimeFromExt(ext) {
-  return _MIME_BY_EXT[ext.toLowerCase()] || 'application/octet-stream';
 }
 
 /**
@@ -271,11 +257,12 @@ async function buildTool(args, userCtx, responseCtx) {
         // Buffer sources: model has never seen this content; surface it
         // immediately on round 1 so the agent doesn't have to call read_file.
         if (r.source === 'buffer' && !r.filePath) {
-          // Find ext from the staged filename (sanitization may change it).
           const ext = path.extname(staged.finalName).toLowerCase();
-          const mimeHint = _MIME_BY_EXT[ext] || 'application/octet-stream';
-          const part = _makeRound1FilePart(workspaceId, staged.finalName, mimeHint);
-          if (part) attachmentParts.push(part);
+          const mimeHint = mimeForExtension(ext);
+          if (classifyAiFileDelivery(staged.finalName, mimeHint) === DELIVERY_MODE.TUNNEL) {
+            const part = await _makeRound1FilePart(workspaceId, staged.finalName, mimeHint);
+            if (part) attachmentParts.push(part);
+          }
         }
       } catch (err) {
         stagingErrors.push(`${r.requested}: ${err.message}`);

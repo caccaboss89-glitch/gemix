@@ -33,6 +33,7 @@ const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
  * @returns {Promise<{message: object, provider: string, model: string}>}
  */
 async function callAI(messages, tools = null, opts = {}) {
+  const logExtra = opts.requestId ? { requestId: opts.requestId } : {};
   const { instructions, input } = chatMessagesToResponsesInput(messages);
 
   const body = {
@@ -68,7 +69,7 @@ async function callAI(messages, tools = null, opts = {}) {
     body.tool_choice = opts.toolChoice || 'auto';
   }
 
-  const data = await callResponsesModel('Grok', RESPONSES_URL, body, HERMES_API_KEY);
+  const data = await callResponsesModel('Grok', RESPONSES_URL, body, HERMES_API_KEY, logExtra);
   const message = responsesToAssistantMessage(data);
   return { message, provider: 'Grok', model: GROK_MODEL };
 }

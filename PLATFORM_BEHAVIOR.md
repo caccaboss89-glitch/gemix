@@ -22,18 +22,24 @@ There is **no** embedding/RAG pipeline.
 
 ## System prompt layout (no duplicate limitations)
 
+**Indentation:** top-level section bodies at 4 spaces; nested content (Platform children, Rules bullets) at 8 spaces. Built in `systemPrompt.js` + `platformCapabilities.js` (`_rulesBlock`).
+
 | Section | Content |
 |---------|---------|
-| **Conversation → Platform** | Ingress rules, caller, account-owner note (personal), optional `<CallerAccess>` when caller is not an active member |
-| **ToolUsage / Capabilities** | Only tools present in the live schema (`getToolsForUser`) |
+| **Conversation → Platform** | Ingress rules; **`<Caller>`** on all profiles (who triggered the turn + active/non-active); personal **`<AccountOwner>`** (admin vs GemiX in history, no footer mechanics); optional **`<CallerAccess>`** when caller is not an active member; Discord **`<RulesContext>`**, optional **`<Emojis>`** / **`<Events>`** when non-empty in `ctx` |
+| **Conversation → BatchNote** | When `batchMultiSpeaker`: merged turn; `<Caller>` = author of the latest message (permissions / task tools follow that author) |
+| **ToolUsage** | Only tools in the live schema; operational notes (buffer, once-per-round, build, voice on dedicated, Discord title/PDF, …) |
+| **Capabilities** | **WA only** (omitted on Discord). Catalog of non-obvious deliverables (`Documents: …`, `Media downloads: …`, image search/generation, charts, closing “try tools before refusing”). Lines are gated on live `toolNames`; no duplicate of obvious tool names (e.g. music). Not a second ToolUsage block. |
 | **Limits** | Media duration caps; **`<Transcription>` note only on WA dedicated** (GemiX TTS voices in history); personal + Discord get the generic `read_file` on attachment tags line; Discord redirect (tell **the user** about dedicated WA for missing features) |
+| **Memory / BuildWorkspace** | When applicable; shared vs per-user/group labels |
 | **toolUnavailableMessage** | Runtime errors if the model calls a blocked tool (third person: “tell the user…”) |
 
 Voice on **personal** is not in the schema and is **not** described in Platform (avoids implying `music_creator` / other tools are unavailable).
 
 ## Ingress & batch
 
-- **While GemiX is answering**: new messages are **discarded**, not queued.
+- **While GemiX is answering**: new messages are **discarded**, not queued (see comments in `batchIngress.js` / `turnPipeline.js`).
+- **Platform clients not ready**: personal WA waits for dedicated identity; Discord skips until `isReady()` — no queue (by design).
 - **Debounce batch** (~2.5s, max 8s): rapid messages merge; quote window is recomputed **at batch fire** (`batchContentRefresh.js`).
 - **Lock**: 5 min TTL + renew at batch fire (`batchIngress.js`, `turnPipeline.js`).
 
@@ -60,8 +66,21 @@ No message-count or time cap. Voice tool is disabled on personal so replies are 
 
 ## History & media
 
+### File delivery to the model (source: `src/utils/aiFileDelivery.js`)
+
+| Mode | When | What the model sees |
+|------|------|---------------------|
+| **Tunnel** | PDF, images, audio, video (current turn or `read_file`) | `{type:'input_file', file_url:'https://…'}` via GemiX attachment tunnel — xAI runs vision/OCR/STT server-side on `/v1/responses` |
+| **Inline text** | Text/code on **current** message (ingress) | `<FileContent path="…">` in user text (up to 200 KB) |
+| **Tag only** | Office, archives, unknown binaries on ingress | `[Attachment: filename]` — use `read_file` (blocked for archives/office) or `build` / bash |
+| **History text** | Older text/code in chat | On rebuild, same `deliverSyncedAttachment` as ingress: inline `<FileContent>` up to 200 KB when small enough; otherwise `[Attachment: …]` tag. `read_file` still applies 50 KB cap for on-demand loads |
+
+Ingress path: `incomingMediaIngress.js` → `deliverSyncedAttachment()`. Discord/WA filenames without extension are normalized via `attachmentFilenames.resolveIngressFilename()`.
+
+**Image tunnel cap:** `MAX_IMAGE_READS` (10) applies to `read_file` and build `read_file` only — not to unlimited tunnel images on current-turn ingress (by design).
+
 - **MAX_HISTORY**: 50; quotes outside window → `REPLY_OUTSIDE_HISTORY_PREFIX`
-- **History fetch timeout**: 15s; if incomplete, reference prune skipped; Discord still runs **age-only** prune (4h)
+- **History fetch timeout**: 15s; if incomplete, reference prune skipped; **age-only** prune (4h TTL on disk) runs on all platforms — stale files are removed; next successful history fetch re-syncs media from the last `MAX_HISTORY` messages
 - **Discord attachments**: 25MB download cap in history rebuild
 - **Footer on outbound**: WA personal GemiX text replies only
 - **`[System]` in history**: WA dedicated private only
@@ -104,6 +123,18 @@ No message-count or time cap. Voice tool is disabled on personal so replies are 
 `read_server_rules`, `read_music_stats`, `send_email`, `send_whatsapp_message`
 
 Non-active callers: listed in `<CallerAccess>` (Conversation) when on WA; same list derived from live `toolNames` (not duplicated in Limits).
+
+## Prompt audit scripts (repo `scripts/`)
+
+Offline test utilities — no Hermes, no WhatsApp/Discord connection. Run from repo root with Node.
+
+| Script | Purpose |
+|--------|---------|
+| `dump-prompt-case.js <1-15>` | Print one synthetic system prompt for the matching audit case (see case table in script header). |
+| `regenerate-prompt-dumps.js` | Write all 15 prompts to `agent-tools/caseNN-dump.txt` and validate indent / banned lines. |
+| `dump-tools-case.js <6\|9>` | Print JSON schemas for selected tools on dedicated private (6) vs group (9). |
+
+Case IDs (prompt matrix): 1–5 personal WA; 6–8 dedicated private; 9–11 dedicated group; 12–15 Discord (first turn, follow-up, batch, emojis). Keep `CASES` in `dump-prompt-case.js` in sync when adding new prompt dimensions.
 
 ### ONCE_PER_ROUND
 

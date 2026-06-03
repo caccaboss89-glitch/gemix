@@ -562,19 +562,6 @@ function buildBuildTool(isGroup) {
   });
 }
 
-// -- Active-member-only tool check (runtime permission guard) --------------
-
-const ACTIVE_MEMBER_ONLY_TOOLS = new Set([
-  'read_server_rules',
-  'read_music_stats',
-  'send_email',
-  'send_whatsapp_message',
-]);
-
-function isActiveMemberOnlyTool(toolName) {
-  return ACTIVE_MEMBER_ONLY_TOOLS.has(toolName);
-}
-
 // -- Main builder: constructs tool list in a single pass -------------------
 
 function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
@@ -672,10 +659,81 @@ function isToolAllowedForUser(toolName, userCtx) {
   return tools.some(t => t?.function?.name === toolName);
 }
 
+/**
+ * Collect function tool names plus native server-side tools for prompt caps.
+ * @param {Array} tools
+ * @returns {Set<string>}
+ */
+function toolNamesToSet(tools) {
+  const names = new Set();
+  for (const t of tools) {
+    if (t?.type === 'code_interpreter') names.add('code_interpreter');
+    else if (t?.function?.name) names.add(t.function.name);
+  }
+  return names;
+}
+
+/**
+ * Build userCtx for a platform profile (member + admin tools included).
+ * @param {string} profile - PROFILE.* value from platformCapabilities
+ * @param {object} cap - CAPS[profile] entry
+ * @param {object} [overrides]
+ */
+function userCtxForProfile(profile, cap, profileEnum, overrides = {}) {
+  return {
+    platform: cap.platform,
+    isGroup: Boolean(cap.isGroup),
+    isFirstTurn: overrides.isFirstTurn ?? (profile === profileEnum.DISCORD_THREAD),
+    chatId: overrides.chatId ?? null,
+  };
+}
+
+/**
+ * Sync CAPS[].tools from getToolsForUser so static caps cannot drift from the registry.
+ * @param {object} caps - CAPS map from platformCapabilities
+ * @param {object} profileEnum - PROFILE enum from platformCapabilities
+ */
+function syncProfileToolSets(caps, profileEnum) {
+  for (const profile of Object.values(profileEnum)) {
+    const cap = caps[profile];
+    if (!cap) continue;
+    const tools = getToolsForUser(true, false, userCtxForProfile(profile, cap, profileEnum));
+    cap.tools = toolNamesToSet(tools);
+  }
+}
+
+/**
+ * Unified tool gate: round subset (e.g. title tool removed) then live schema.
+ * @param {string} toolName
+ * @param {object} userCtx
+ * @param {object} [opts]
+ * @param {Set<string>|null} [opts.allowedRoundNames] - names exposed to the model this round
+ * @param {Function} [opts.unavailableMessage] - (toolName, userCtx) => string
+ * @returns {string|null} Error message when blocked, else null.
+ */
+function getToolAccessError(toolName, userCtx, opts = {}) {
+  const allowedRound = opts.allowedRoundNames;
+  if (allowedRound && !allowedRound.has(toolName)) {
+    if (typeof opts.unavailableMessage === 'function') {
+      return opts.unavailableMessage(toolName, userCtx);
+    }
+    return `Tool "${toolName}" is not available in the current round.`;
+  }
+  if (!isToolAllowedForUser(toolName, userCtx)) {
+    if (typeof opts.unavailableMessage === 'function') {
+      return opts.unavailableMessage(toolName, userCtx);
+    }
+    return `Tool "${toolName}" is not available in the current context.`;
+  }
+  return null;
+}
+
 module.exports = {
   getToolsForUser,
   isToolAllowedForUser,
-  isActiveMemberOnlyTool,
+  getToolAccessError,
+  syncProfileToolSets,
+  toolNamesToSet,
   validateToolArgs,
   SET_CONVERSATION_TITLE_TOOL: 'set_conversation_title',
 };

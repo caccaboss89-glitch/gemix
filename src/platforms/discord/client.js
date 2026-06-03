@@ -11,8 +11,8 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { buildAttachmentTag } = require('../../utils/media');
-const { ingressSyncedAttachment } = require('../../utils/incomingMediaIngress');
+const { hasInlineFileContent } = require('../../utils/aiFileDelivery');
+const { ingressDiscordAttachment } = require('../../utils/incomingMediaIngress');
 
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
@@ -22,12 +22,7 @@ const {
   stripRedundantFilenameBesideAttachmentTag,
 } = require('../../utils/attachmentCaption');
 const { createLogger } = require('../../utils/logger');
-const {
-  createDiscordAttachmentBufferFetcher,
-  isDiscordAttachmentOversize,
-  formatDiscordOversizeNote,
-} = require('../../utils/discordAttachmentFetch');
-const { syncFileToHistory, resolveGemixVoiceTranscription } = require('../../utils/historySync');
+const { resolveGemixVoiceTranscription } = require('../../utils/historySync');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
 const { cleanIncomingText, formatLabeledUserContent } = require('../../utils/text');
@@ -123,24 +118,30 @@ function discordMessageHasUsableContent(msg) {
   return false;
 }
 
-async function rebuildDiscordBatchParts(entries, channel, starterMessageId, historyStorageId) {
-  const recentMessageIds = await _fetchRecentMessageIds(channel, starterMessageId);
+/**
+ * One channel.messages.fetch per turn. Used for history build and batch ingress.
+ * @returns {{ raw: import('discord.js').Collection, recentMessageIds: Set<string> }}
+ */
+async function fetchDiscordMessageWindow(channel, starterMessageId) {
+  const raw = await channel.messages.fetch({ limit: MAX_HISTORY + 5 });
+  const recentMessageIds = new Set(
+    [...raw.values()]
+      .filter(m => !starterMessageId || m.id !== starterMessageId)
+      .reverse()
+      .slice(-MAX_HISTORY)
+      .map(m => m.id),
+  );
+  return { raw, recentMessageIds };
+}
+
+async function rebuildDiscordBatchParts(entries, channel, starterMessageId, historyStorageId, recentMessageIds) {
+  const ids = recentMessageIds || (await fetchDiscordMessageWindow(channel, starterMessageId)).recentMessageIds;
   for (const ent of entries) {
     if (!ent.msg) continue;
     ent.contentParts = await buildDiscordIncomingContentParts(
-      ent.msg, channel, historyStorageId, recentMessageIds, ent.userName,
+      ent.msg, channel, historyStorageId, ids, ent.userName,
     );
   }
-}
-
-async function _fetchRecentMessageIds(channel, starterMessageId) {
-  const raw = await channel.messages.fetch({ limit: MAX_HISTORY + 5 });
-  const ids = [...raw.values()]
-    .filter(m => !starterMessageId || m.id !== starterMessageId)
-    .reverse()
-    .slice(-MAX_HISTORY)
-    .map(m => m.id);
-  return new Set(ids);
 }
 
 /**
@@ -159,38 +160,25 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
   const attachmentTags = [];
 
   for (const att of msg.attachments.values()) {
-    if (isDiscordAttachmentOversize(att)) {
-      const tag = buildAttachmentTag(null, att.name);
-      attachmentTags.push({ tag, name: att.name, syncedPath: null });
-      textBody = `${tag}${formatDiscordOversizeNote(att)} ${textBody}`.trim();
-      continue;
-    }
-    const fetchBuffer = createDiscordAttachmentBufferFetcher(att);
-    let syncedPath = null;
-    try {
-      syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, att.name);
-    } catch (err) {
-      log.warn(`Failed to sync file ${att.name}: ${err.message}`);
-    }
-    const ingress = await ingressSyncedAttachment({
-      syncedPath,
-      name: att.name,
-      contentType: att.contentType || '',
-      fetchBuffer,
-      historyStorageId,
+    const ingress = await ingressDiscordAttachment(att, historyStorageId, {
       metadataDurationSec: Number(att.duration || 0),
     });
+    if (ingress.oversize) {
+      attachmentTags.push({ tag: ingress.tag, name: att.name, syncedPath: null });
+      textBody = `${ingress.textFragment.trim()} ${textBody}`.trim();
+      continue;
+    }
     contentParts.push(...ingress.contentParts);
-    attachmentTags.push({ tag: ingress.tag, name: att.name, syncedPath });
+    attachmentTags.push({ tag: ingress.tag, name: ingress.name, syncedPath: ingress.syncedPath });
     const fragment = ingress.textFragment.trim();
-    if (fragment.includes('<FileContent')) {
+    if (hasInlineFileContent(fragment)) {
       textBody = `${fragment}${textBody ? ` ${textBody}` : ''}`.trim();
     } else {
       textBody = `${fragment} ${textBody}`.trim();
     }
   }
 
-  if (attachmentTags.length > 0 && textBody && !textBody.includes('<FileContent')) {
+  if (attachmentTags.length > 0 && textBody && !hasInlineFileContent(textBody)) {
     for (const { tag, name, syncedPath } of attachmentTags) {
       const hints = attachmentFilenameHints(name, name, syncedPath);
       textBody = stripRedundantAttachmentCaption(textBody, hints);
@@ -207,6 +195,10 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
 }
 
 async function onDiscordMessage(msg) {
+  if (!discordClient?.isReady?.()) {
+    log.info('   Skipping Discord message until client is ready (not queued)');
+    return;
+  }
   if (msg.author.id === discordClient.user.id) return;
   if (msg.author.bot) return;
 
@@ -222,10 +214,15 @@ async function onDiscordMessage(msg) {
   if (starterMessage && msg.id === starterMessage.id) return;
 
   const guild = discordClient.guilds.cache.get(GUILD_ID);
+  if (!guild) {
+    log.warn(`Guild ${GUILD_ID} not in cache — member nicknames/events/emojis omitted for this message`);
+  }
   let guildMember = null;
-  try {
-    guildMember = await guild.members.fetch(msg.author.id);
-  } catch { }
+  if (guild) {
+    try {
+      guildMember = await guild.members.fetch(msg.author.id);
+    } catch { /* member may have left */ }
+  }
 
   const userIdentity = identifyUser({
     platform: 'discord',
@@ -276,7 +273,7 @@ async function _discordGuildExtras(guild) {
     }
   } catch { /* ignore */ }
 
-  let serverEvents = 'No upcoming events.';
+  let serverEvents = '';
   try {
     const events = await guild.scheduledEvents.fetch();
     if (events.size > 0) {
@@ -368,11 +365,15 @@ async function _handleDiscordBatch(entries) {
     stopLockRenew,
     entries,
     discardLogLabel: `thread ${channel.id}`,
-    loadHistory: async ({ entries: ents }) => {
+    loadHistory: async ({ entries: ents, first }) => {
       const excludeMessageIds = new Set(ents.map(e => e.messageId).filter(Boolean));
       return fetchHistoryWithTimeout(
         async () => {
-          const built = await buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds);
+          const window = await fetchDiscordMessageWindow(channel, starterMessageId);
+          if (first) first._discordWindow = window;
+          const built = await buildDiscordHistory(
+            channel, starterMessageId, historyStorageId, excludeMessageIds, window,
+          );
           return built.history;
         },
         log,
@@ -383,8 +384,9 @@ async function _handleDiscordBatch(entries) {
       try { await channel.sendTyping(); } catch { /* ignore */ }
       return {};
     },
-    buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
-      await rebuildDiscordBatchParts(ents, channel, starterMessageId, historyStorageId);
+    buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest, first }) => {
+      const recentMessageIds = first?._discordWindow?.recentMessageIds;
+      await rebuildDiscordBatchParts(ents, channel, starterMessageId, historyStorageId, recentMessageIds);
       const lat = latest || ents[0];
       const { multiSpeaker } = analyzeBatchSpeakers(ents, 'discord');
       const extras = await _discordGuildExtras(guild);
@@ -427,8 +429,8 @@ async function _handleDiscordBatch(entries) {
  * @param {Set<string>|string|null} [excludeMessageIds] - Discord message IDs to omit
  *   (current batch); the merged user turn is passed separately as ctx.content.
  */
-async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds = null) {
-  const raw = await channel.messages.fetch({ limit: MAX_HISTORY + 5 });
+async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds = null, prefetched = null) {
+  const raw = prefetched?.raw || (await fetchDiscordMessageWindow(channel, starterMessageId)).raw;
   const exclude = excludeMessageIds instanceof Set
     ? excludeMessageIds
     : (excludeMessageIds ? new Set([excludeMessageIds]) : null);
@@ -447,29 +449,10 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     let textContent = cleanIncomingText(m.content || '');
 
     for (const att of m.attachments.values()) {
-      if (isDiscordAttachmentOversize(att)) {
-        const attachmentTag = buildAttachmentTag(null, att.name);
-        textContent = `${textContent} ${attachmentTag}${formatDiscordOversizeNote(att)}`.trim();
-        continue;
-      }
-      const fetchBuffer = createDiscordAttachmentBufferFetcher(att);
-      let syncedPath = null;
-      try {
-        syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, att.name);
-      } catch (err) {
-        log.warn(`Failed to sync history file ${att.name}: ${err.message}`);
-      }
-      const captionHints = attachmentFilenameHints(att.name, att.name, syncedPath);
-      textContent = stripRedundantAttachmentCaption(textContent, captionHints);
-      const ingress = await ingressSyncedAttachment({
-        syncedPath,
-        name: att.name,
-        contentType: att.contentType || '',
-        fetchBuffer,
-        historyStorageId,
+      const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         metadataDurationSec: Number(att.duration || 0),
         getVoiceTranscription: isBot
-          ? async () => resolveGemixVoiceTranscription(
+          ? async (syncedPath) => resolveGemixVoiceTranscription(
             historyStorageId,
             syncedPath,
             channel.id,
@@ -477,6 +460,12 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
           )
           : null,
       });
+      if (ingress.oversize) {
+        textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
+        continue;
+      }
+      const captionHints = attachmentFilenameHints(att.name, ingress.name, ingress.syncedPath);
+      textContent = stripRedundantAttachmentCaption(textContent, captionHints);
       textContent = stripRedundantFilenameBesideAttachmentTag(
         textContent,
         ingress.tag,

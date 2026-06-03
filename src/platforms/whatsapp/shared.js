@@ -13,7 +13,15 @@ const { hasScheduledFooter } = require('../../utils/footer');
 const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
 const { isSystemMessage } = require('../../config/systemMessages');
 
-const { mediaToContentPart, buildAttachmentTag } = require('../../utils/media');
+const { buildAttachmentTag } = require('../../utils/media');
+const {
+  classifyAiFileDelivery,
+  DELIVERY_MODE,
+  deliverSyncedAttachment,
+  hasIngressTextFragment,
+  hasInlineFileContent,
+} = require('../../utils/aiFileDelivery');
+const { resolveGemixVoiceTranscription } = require('../../utils/historySync');
 const { ingressWaMessageMedia } = require('../../utils/incomingMediaIngress');
 const {
   normalizeMarkdown,
@@ -193,6 +201,9 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
         textContent, mediaIngress.tag, allFilenameHints,
       );
       textContent = `${textContent} ${mediaIngress.textFragment.trim()}`.trim();
+      if (!textContent) {
+        textContent = (mediaIngress.tag || buildAttachmentTag(null, resolvedName || msg._data?.filename || 'file')).trim();
+      }
     }
 
     if (!textContent) continue;
@@ -324,7 +335,7 @@ async function processCurrentMedia(msg, userId, opts = {}) {
   if (r.unsupported) {
     return { skipped: true, tag: r.tag, reason: null };
   }
-  if (frag.includes('<FileContent')) {
+  if (hasIngressTextFragment(frag)) {
     return { skipped: true, tag: r.tag, reason: null, inlineText: frag };
   }
   if (r.overDurationLimit) {
@@ -348,15 +359,20 @@ async function processCurrentMedia(msg, userId, opts = {}) {
     };
   }
 
-  const mime = (r.mimetype || msg._data?.mimetype || '').toLowerCase();
-  if (msg.type === 'document' && mime !== 'application/pdf' && !frag.includes('<FileContent')) {
-    return { skipped: true, tag: r.tag, reason: null };
+  if (msg.type === 'document' && !hasInlineFileContent(frag)) {
+    const docMode = classifyAiFileDelivery(r.filename || msg._data?.filename || 'file', r.mimetype || '');
+    if (docMode === DELIVERY_MODE.TAG_ONLY) {
+      return { skipped: true, tag: r.tag, reason: null };
+    }
+  }
+
+  if (!r.fetchBuffer) {
+    return { skipped: true, tag: r.tag, reason: 'file unavailable' };
   }
 
   let buffer = null;
   try {
-    const media = await msg.downloadMedia();
-    if (media) buffer = Buffer.from(media.data, 'base64');
+    buffer = await r.fetchBuffer();
   } catch { /* ignore */ }
 
   if (!buffer) {
@@ -371,6 +387,8 @@ async function processCurrentMedia(msg, userId, opts = {}) {
     syncedPath: r.syncedPath,
     tag: r.tag,
     contentParts: [],
+    fetchBuffer: r.fetchBuffer,
+    isGemixVoice,
   };
 }
 
@@ -414,7 +432,13 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
     contentParts.push(...quotedContent.mediaParts);
   }
 
-  const mediaResult = await processCurrentMedia(msg, userId);
+  const isGemixCurrentTurn = platform !== PLATFORM_WA_PERSONAL && msg.fromMe
+    && !hasScheduledFooter(msg.body)
+    && !isSystemMessage(msg.body);
+  const mediaResult = await processCurrentMedia(msg, userId, {
+    chatId,
+    isGemixVoice: isGemixCurrentTurn,
+  });
   if (mediaResult) {
     if (mediaResult.skipped && mediaResult.inlineText) {
       const caption = textBody ? ` ${textBody}` : '';
@@ -425,11 +449,25 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
     } else {
       if (mediaResult.contentParts?.length) {
         contentParts.push(...mediaResult.contentParts);
-      } else if (mediaResult.buffer) {
-        contentParts.push(mediaToContentPart(mediaResult.buffer, mediaResult.mimetype, {
-          historyPath: mediaResult.syncedPath,
-          historyUserId: userId,
-        }));
+      } else if (mediaResult.fetchBuffer) {
+        const isAudioType = msg.type === 'audio' || msg.type === 'ptt';
+        const retry = await deliverSyncedAttachment({
+          syncedPath: mediaResult.syncedPath,
+          name: mediaResult.filename || 'file',
+          contentType: mediaResult.mimetype || '',
+          historyStorageId: userId,
+          fetchBuffer: mediaResult.fetchBuffer,
+          ownerKey: userId,
+          metadataDurationSec: Number(msg.duration || msg._data?.duration || 0),
+          getVoiceTranscription: isGemixCurrentTurn && isAudioType
+            ? async () => resolveGemixVoiceTranscription(
+              userId, mediaResult.syncedPath, chatId, (msg.timestamp || 0) * 1000,
+            )
+            : null,
+        });
+        if (retry.contentParts?.length) {
+          contentParts.push(...retry.contentParts);
+        }
       }
       textBody = `${mediaResult.tag} ${textBody}`.trim();
     }
@@ -471,9 +509,7 @@ function waMessageHasUsableContent(msg) {
 module.exports = {
   buildWhatsAppHistory,
   buildIncomingContentParts,
-  processCurrentMedia,
   sendWhatsAppResponse,
-  extractQuotedMessageContent,
   getRecentWhatsAppMessageIds,
   waMessageHasUsableContent,
   _waMessageKey,
