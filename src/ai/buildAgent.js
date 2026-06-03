@@ -241,6 +241,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '  - TeX setup: one bash checks pdflatex + kpsewhich for the packages you need—avoid many separate kpsewhich rounds.',
     '  - PDF via reportlab/pypdf or Word: read the matching /skills/*/SKILL.md first. LaTeX/TikZ PDFs use pdflatex here, not the pdf skill.',
     '  - web_x_search: at most one per turn; broad research → full_team=true once with a detailed prompt, not chains of fast searches.',
+    '  - To include images in documents (recommended): use any input images from GemiX or search for them on the web with search_images=true',
     '  - pdflatex: allow 2–3 passes for TOC/cross-refs; set bash timeout_ms 120000+ on large jobs.',
     '  - User wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, deliver existing files via &lt;DELIVER&gt; (zip with bash if many)—do not regenerate from memory.',
     '</Pitfalls>',
