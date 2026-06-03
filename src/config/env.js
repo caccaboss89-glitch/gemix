@@ -78,7 +78,7 @@ module.exports = {
   GITHUB_REPO: process.env.GITHUB_REPO,
   GEMIX_NOTIFY_URL: process.env.GEMIX_NOTIFY_URL,
   GEMIX_PUBLIC_URL: process.env.GEMIX_PUBLIC_URL,
-  // Optional override file (default data/tunnel-public-url.txt) updated by the
+  // Optional override file (default src/data/tunnel-public-url.txt) updated by the
   // attachment tunnel PM2 script when localtunnel assigns a URL.
   GEMIX_TUNNEL_URL_FILE: process.env.GEMIX_TUNNEL_URL_FILE || null,
 

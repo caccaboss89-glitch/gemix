@@ -1,7 +1,7 @@
 // Resolves the public base URL for attachment tunnel links (xAI input_file, etc.).
 //
 // Priority:
-//   1. data/tunnel-public-url.txt (written by scripts/run-attachment-tunnel.sh when
+//   1. src/data/tunnel-public-url.txt (written by scripts/run-attachment-tunnel.sh;
 //      localtunnel prints "your url is: …") — always wins when present so a random
 //      subdomain after a failed --subdomain does not desync from GEMIX_PUBLIC_URL.
 //   2. GEMIX_PUBLIC_URL from .env
@@ -53,6 +53,10 @@ function _readUrlFromFile() {
 }
 
 function getPublicBaseUrl() {
+  try {
+    fs.mkdirSync(path.dirname(DEFAULT_TUNNEL_URL_FILE), { recursive: true });
+  } catch { /* ignore */ }
+
   const fromFile = _readUrlFromFile();
   const fromEnv = typeof env.GEMIX_PUBLIC_URL === 'string' && env.GEMIX_PUBLIC_URL.trim()
     ? env.GEMIX_PUBLIC_URL.trim().replace(/\/+$/, '')

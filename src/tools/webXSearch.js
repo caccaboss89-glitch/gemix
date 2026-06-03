@@ -369,7 +369,7 @@ async function _callResearch(prompt, { fullTeam, searchImages }) {
     tools: _buildResearchTools(searchImages),
   };
 
-  // reasoning.effort: team uses medium; fast gear uses low on grok-4.3 (env default).
+  // reasoning.effort: team=medium, fast=low (grok-4.3).
   body.reasoning = { effort };
 
   logApiRequest(model, RESPONSES_URL, body);

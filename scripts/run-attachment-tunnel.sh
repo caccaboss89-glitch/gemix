@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs localtunnel for GemiX temp file server (port 9998) and keeps
-# data/tunnel-public-url.txt in sync with the live "your url is:" line.
+# src/data/tunnel-public-url.txt in sync with the live "your url is:" line.
 #
 # PM2 example (from repo root on the VPS):
 #   pm2 start scripts/run-attachment-tunnel.sh --name "[GemiX] Tunnel-Allegati" --interpreter bash
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-URL_FILE="${GEMIX_TUNNEL_URL_FILE:-$ROOT/data/tunnel-public-url.txt}"
+URL_FILE="${GEMIX_TUNNEL_URL_FILE:-$ROOT/src/data/tunnel-public-url.txt}"
 PORT="${GEMIX_TEMP_FILE_PORT:-9998}"
 SUBDOMAIN="${LT_SUBDOMAIN:-}"
 
