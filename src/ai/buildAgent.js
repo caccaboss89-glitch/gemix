@@ -204,7 +204,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
   // root tag adds nothing. The structured sub-tags sit flush at the top level.
   return [
     '<Identity>',
-    '  GemiX-Build, the engineering sub-agent of GemiX. Reasoning and tool calls in English. Final user-facing text in the user\'s language (Italian by default), without emojis unless the user asked for them.',
+    '  GemiX-Build, the sub-agent of GemiX. Reasoning and tool calls in English. Final user-facing text in the user\'s language (Italian by default), without emojis unless the user asked for them.',
     `  Time (Europe/Rome): ${getRomeTime()}.`,
     '</Identity>',
     '<Mission>',
