@@ -21,7 +21,7 @@
 //   8. Release the lock and return a structured tool result to the main brain.
 //
 // The tool call is rate-limited to once per main-brain round (set in
-// ONCE_PER_ROUND_TOOLS in tools/index.js) so the agent finishes before the
+// PER_ROUND_TOOL_LIMITS in toolCallExecution.js) so the agent finishes before the
 // main brain considers another delegation.
 
 const fs = require('fs');

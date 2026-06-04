@@ -10,10 +10,10 @@
 #   bridge/imagine.sh image "<prompt>" [aspect_ratio]
 #   bridge/imagine.sh video "<prompt>" [aspect_ratio] [duration_s] [resolution]
 #
-# Reference images (optional):
+# Reference images (video only, optional):
 #   Pass a SPACE-SEPARATED list of public HTTPS URLs via the IMAGINE_REF_URLS
 #   environment variable. xAI fetches each URL server-side and uses it as a
-#   reference for image-to-image / image-to-video / reference-to-video. The
+#   reference for image-to-video / reference-to-video. The
 #   wrapper folds the URLs into the prompt (the CLI cannot ingest binaries,
 #   but it does consume reference images mentioned as URLs - verified in
 #   production). URLs travel via env (not argv) so they never get split or
@@ -67,7 +67,7 @@ esac
 
 # Reference images: the caller (imagineGenerator.js) builds the natural-language
 # clause that mentions each reference as "<filename> (<public_url>)" and encodes
-# the image-vs-video / 1-vs-many intent. We just append it verbatim. xAI fetches
+# the 1-vs-many video intent. We just append it verbatim. xAI fetches
 # each URL server-side and uses it as a visual reference. The clause is forced
 # onto a single line (hermes -z stops at the first newline).
 REF_CLAUSE_FLAT=""

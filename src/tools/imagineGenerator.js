@@ -6,11 +6,11 @@
 // (bridge/imagine.sh) via bash. The wrapper returns the media URL on stdout,
 // which is downloaded and stored as a buffered attachment for delivery.
 //
-// Reference images for image-to-image, image-to-video and reference-to-video
-// are supported. Filenames are resolved from the current-turn buffer or
-// chat history. They are exposed as HTTPS URLs via the public attachment
-// tunnel and passed to the bridge through the IMAGINE_REF_URLS environment
-// variable. The bridge incorporates them into the prompt as natural language.
+// Reference images for image-to-video and reference-to-video (generate_video
+// only; Hermes image_gen does not support refs). Filenames are resolved from
+// the current-turn buffer or chat history, exposed as HTTPS URLs via the public
+// attachment tunnel and passed to the bridge via IMAGINE_REF_URLS. The bridge
+// incorporates them into the prompt as natural language.
 // No base64 or binary inputs are sent to the CLI.
 
 const fs = require('fs');
@@ -22,7 +22,7 @@ const {
   IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL,
 } = require('../config/env');
-const { getPublicAttachmentUrl, tempDirForOwner } = require('../utils/tempFileServer');
+const { tempDirForOwner } = require('../utils/tempFileServer');
 const { getHistoryDir, resolveStorageId } = require('../utils/userPaths');
 const { resolveWorkspaceId, workspaceIdToSlug } = require('../utils/workspaceId');
 const { pushBufferAttachment } = require('../utils/attachments');
@@ -50,10 +50,7 @@ const MAX_PROMPT_LEN = 2000;
 const ALLOWED_IMAGE_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4']);
 const ALLOWED_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16']);
 
-// xAI Imagine accepts up to 3 reference images for image-to-image / editing
-// and up to 7 for reference-to-video (1 -> image-to-video). Hard caps so the
-// model cannot ask for more.
-const MAX_REF_IMAGES_FOR_IMAGE = 3;
+// xAI Imagine accepts up to 7 reference images for video (1 -> image-to-video).
 const MAX_REF_IMAGES_FOR_VIDEO = 7;
 
 // Single reference image size cap. The tunnel serves the raw bytes, so the
@@ -89,11 +86,9 @@ function _cleanPrompt(prompt) {
 
 /**
  * Build the natural-language reference clause folded into the CLI prompt.
- * Because the hermes -z CLI has no structured JSON body, 1-vs-many and
- * image-vs-video intent must be expressed in natural language words inside
- * the prompt itself:
+ * Because the hermes -z CLI has no structured JSON body, 1-vs-many intent
+ * must be expressed in natural language inside the prompt:
  *
- *   - image gen (any count): references guide subject / style / composition.
  *   - video gen, 1 reference: image-to-video - animate that exact image
  *     (it is the starting frame).
  *   - video gen, 2-7 references: reference-to-video - keep the depicted
@@ -106,17 +101,13 @@ function _cleanPrompt(prompt) {
  *
  * Returns '' when there are no references.
  */
-function _buildRefClause(kind, names, urls) {
+function _buildRefClause(names, urls) {
   if (!urls || urls.length === 0) return '';
   const pairs = names.map((n, i) => `"${n}" (${urls[i]})`).join(', ');
-  if (kind === 'video') {
-    if (urls.length === 1) {
-      return ` Use this image as the starting frame and animate it (image-to-video): ${pairs}.`;
-    }
-    return ` Use these images as visual references for the video - keep the depicted subjects, characters and style consistent: ${pairs}.`;
+  if (urls.length === 1) {
+    return ` Use this image as the starting frame and animate it (image-to-video): ${pairs}.`;
   }
-  // image
-  return ` Use the following image(s) as visual reference to guide subject, style and composition: ${pairs}.`;
+  return ` Use these images as visual references for the video - keep the depicted subjects, characters and style consistent: ${pairs}.`;
 }
 
 /**
@@ -336,7 +327,6 @@ function _extFromMediaRef(media, fallbackExt) {
 /**
  * @param {object} args
  * @param {string} args.prompt
- * @param {string[]} [args.reference_images]   Filenames (history / current-turn buffer).
  * @param {string} [args.aspect_ratio]
  * @param {object} userCtx
  * @param {object} responseCtx
@@ -344,6 +334,14 @@ function _extFromMediaRef(media, fallbackExt) {
 async function generateImage(args, userCtx, responseCtx) {
   if (!HERMES_API_KEY) return { success: false, error: 'HERMES_API_KEY is not configured.' };
   if (!IMAGE_GEN_MODEL) return { success: false, error: 'IMAGE_GEN_MODEL is not configured.' };
+
+  const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
+  if (refList.length > 0) {
+    return {
+      success: false,
+      error: 'Reference images are not supported for generate_image (text-to-image only). Use generate_video for image-to-video or reference-guided clips.',
+    };
+  }
 
   const { prompt, truncated } = _cleanPrompt(args && args.prompt);
   if (!prompt || prompt.length < 3) {
@@ -364,25 +362,14 @@ async function generateImage(args, userCtx, responseCtx) {
     return { success: false, error: 'Could not resolve storage ID for this context.' };
   }
 
-  const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
-  const refs = await _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_IMAGE, userCtx, responseCtx);
-  if (!refs.ok) {
-    return { success: false, error: refs.reason };
-  }
-
   const cliArgs = ['image', prompt];
   if (aspect !== null) cliArgs.push(aspect);
 
-  const refClause = _buildRefClause('image', refs.names, refs.urls);
-  const extraEnv = refs.urls.length > 0
-    ? { IMAGINE_REF_CLAUSE: refClause, IMAGINE_REF_URLS: refs.urls.join(' ') }
-    : undefined;
-
-  log.info(`generate_image: aspect=${aspect || 'omitted'}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
+  log.info(`generate_image: aspect=${aspect || 'omitted'}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
   let result;
   try {
-    result = await _runBridge(cliArgs, IMAGE_TIMEOUT_MS, extraEnv);
+    result = await _runBridge(cliArgs, IMAGE_TIMEOUT_MS);
   } catch (err) {
     await notifyAdmin('GenerateImage', err.message);
     return { success: false, error: `Image generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -417,19 +404,14 @@ async function generateImage(args, userCtx, responseCtx) {
   const desiredName = `${baseName}_${Date.now()}.${urlExt.toLowerCase()}`;
   const mimetype = mimeForExtension(`.${urlExt.toLowerCase()}`);
 
-  // Dedup against the buffer and obtain the final name reported to the model
-  // for use as a reference_image.
   const filename = pushBufferAttachment(responseCtx, { name: desiredName, buffer, mimetype });
 
   const truncNote = truncated ? ' (prompt was truncated)' : '';
-  const refNote = refs.names.length > 0
-    ? ` Used ${refs.names.length} reference image(s): ${refs.names.join(', ')}.`
-    : '';
   return {
     success: true,
     filename,
     message: `Image generated successfully and pushed to the delivery buffer as "${filename}". `
-      + `You can reuse this filename as a reference_image in a later generate_image/generate_video call.${refNote}${truncNote}`,
+      + `You can pass this filename as reference_images in generate_video.${truncNote}`,
   };
 }
 
@@ -473,7 +455,7 @@ async function generateVideo(args, userCtx, responseCtx) {
   // Fixed parameters: 10 seconds duration at 720p resolution.
   const cliArgs = ['video', prompt, aspect, '10', '720p'];
 
-  const refClause = _buildRefClause('video', refs.names, refs.urls);
+  const refClause = _buildRefClause(refs.names, refs.urls);
   const extraEnv = refs.urls.length > 0
     ? { IMAGINE_REF_CLAUSE: refClause, IMAGINE_REF_URLS: refs.urls.join(' ') }
     : undefined;

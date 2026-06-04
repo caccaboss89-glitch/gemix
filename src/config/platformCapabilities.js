@@ -180,8 +180,8 @@ function buildWebSearchImagesNote(filenames, profile, opts = {}) {
   const base = `${names.length} cited image(s) were added to the delivery buffer, in the order referenced: `
     + `${names.join(', ')}. Refer to them naturally; do not paste URLs or Markdown image syntax.`;
   const cap = CAPS[profile];
-  if (cap && _hasTool(opts.toolNames || null, cap, TOOL.GENERATE_IMAGE)) {
-    return `${base} You may pass any of these filenames as a reference_image to generate_image/generate_video.`;
+  if (cap && _hasTool(opts.toolNames || null, cap, TOOL.GENERATE_VIDEO)) {
+    return `${base} You may pass any of these filenames as reference_images in generate_video.`;
   }
   return base;
 }
@@ -251,6 +251,12 @@ function buildToolUsageLines(profile, opts = {}) {
       '- build (again): user wants sources/scripts from a recent build → one build call to list/deliver files still in the workspace (see &lt;BuildWorkspace&gt;); never fake [Attachment: …] in your reply—only files returned by build or in this turn\'s buffer ship.',
     );
   }
+  if (has(TOOL.GENERATE_IMAGE)) {
+    lines.push('- generate_image: text-to-image only (no reference images); up to 5 per round.');
+  }
+  if (has(TOOL.GENERATE_VIDEO)) {
+    lines.push('- generate_video: optional reference_images; up to 3 per round.');
+  }
   if (has(TOOL.SEND_VOICE)) {
     lines.push('- send_voice_message for short/casual replies; text for technical or long ones. Vary the format based on your recent messages.');
   }
@@ -284,13 +290,16 @@ function buildCapabilitiesLines(profile, opts = {}) {
       lines.push('- Research → file: build (sub-agent researches).');
     }
   }
-  if (has(TOOL.GENERATE_IMAGE) || has(TOOL.GENERATE_VIDEO)) {
+  if (has(TOOL.GENERATE_IMAGE)) {
+    lines.push('- Image generation: text-to-image (generate_image).');
+  }
+  if (has(TOOL.GENERATE_VIDEO)) {
     lines.push(
-      '- Image / video generation: text-to-image and short text-to-video, optionally guided by reference images.',
+      '- Video generation: text-to-video or guided by reference images (generate_video).',
     );
     if (has(TOOL.WEB_X_SEARCH)) {
       lines.push(
-        '- Visual remix: start from a search result or user attachment as reference_image, then iterate with generate_image/generate_video.',
+        '- Visual remix: start from a search result or user attachment as reference_images in generate_video.',
       );
     }
   }

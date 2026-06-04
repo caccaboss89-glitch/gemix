@@ -97,6 +97,9 @@ module.exports = {
   // The research model is instructed to cite at most 6; we cap defensively
   // so the brain never references an image that wasn't actually attached.
   MAX_RESEARCH_IMAGES: 6,
+  // Main brain: max generate_image / generate_video tool calls in one model turn.
+  MAX_GENERATE_IMAGE_PER_ROUND: 5,
+  MAX_GENERATE_VIDEO_PER_ROUND: 3,
   MAX_TTS_CHARS: 1000,
   MAX_AUDIO_DURATION_S: 600,
   MAX_VIDEO_DURATION_S: 120,

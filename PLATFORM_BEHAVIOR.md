@@ -104,7 +104,8 @@ Ingress path: `incomingMediaIngress.js` → `deliverSyncedAttachment()`. Discord
 | `read_file` | Read history attachment | All | |
 | `code_interpreter` | xAI Python sandbox | WA only | Not Discord |
 | `music_creator` | 30s music clip | WA only | **Available on personal** |
-| `generate_image` / `generate_video` | Imagine | WA only | Once per round |
+| `generate_image` | Imagine (text-to-image) | WA only | Up to 5 per round; no reference images |
+| `generate_video` | Imagine (text/reference-to-video) | WA only | Up to 3 per round; optional `reference_images` |
 | `build` | Engineering sub-agent | WA only | Not Discord |
 | `send_voice_message` | TTS voice | **WA dedicated only** | **Not** `whatsapp_personal` |
 | `send_whatsapp_message` | WA to other recipient | WA + Discord | **Active member** |
@@ -136,6 +137,8 @@ Offline test utilities — no Hermes, no WhatsApp/Discord connection. Run from r
 
 Case IDs (prompt matrix): 1–5 personal WA; 6–8 dedicated private; 9–11 dedicated group; 12–15 Discord (first turn, follow-up, batch, emojis). Keep `CASES` in `dump-prompt-case.js` in sync when adding new prompt dimensions.
 
-### ONCE_PER_ROUND
+### Per-round tool limits
 
-`read_music_stats`, `read_server_rules`, `web_x_search`, `generate_image`, `generate_video`, `build`
+Once per round: `read_music_stats`, `read_server_rules`, `web_x_search`, `build`.
+
+Higher caps (same model turn): `generate_image` up to 5, `generate_video` up to 3 (`PER_ROUND_TOOL_LIMITS` in `toolCallExecution.js`).

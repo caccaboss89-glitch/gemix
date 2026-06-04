@@ -227,28 +227,24 @@ const TOOL_MUSIC_CREATOR = makeTool({
 //
 // Available to all users (active or not) on every platform except Discord.
 //
-// Reference images are supported: pass filenames already visible to the model
+// generate_image: text-to-image only (Hermes image_gen does not support refs).
+//
+// generate_video reference images: pass filenames already visible to the model
 // - a file the user just sent ([Attachment: name] tag), a file from chat
 // history, an image returned by web_x_search (search_images=true; its
 // image_filenames are reported), or an image produced by an earlier
 // generate_image call (its filename is reported in the result). The backend
 // resolves each filename (current-turn delivery buffer first, then chat
 // history), exposes it through the public attachment tunnel, and hands the
-// URL to xAI, which fetches it server-side and uses it as a visual reference
-// (image-to-image / image-to-video / reference-to-video).
+// URL to xAI, which fetches it server-side (image-to-video / reference-to-video).
 
 const TOOL_GENERATE_IMAGE = makeTool({
   name: 'generate_image',
-  description: 'Generate an image from a textual prompt, optionally guided by reference images. Result is pushed to the delivery buffer.',
+  description: 'Generate an image from a textual prompt (text-to-image). Reference images are not supported. Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Image description: subject, style, lighting, mood, composition. If you pass reference images, mention them here by filename (e.g. "place the subject of photo.jpg into a beach scene").',
-    },
-    reference_images: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Up to 3 image filenames WITH extension (e.g. "photo.jpg"). Sources: a file the user just sent, a chat-history file, a web_x_search result image, or a previously generated image. The exact filename must already appear in the conversation. Omit for pure text-to-image.',
+      description: 'Image description: subject, style, lighting, mood, composition.',
     },
     aspect_ratio: {
       type: 'string',
@@ -584,8 +580,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 1b. Grok Imagine - image and video generation. Available only on
   // WhatsApp since both produce binary media that is delivered through
-  // the WA attachment pipeline. Both go in the ONCE_PER_ROUND_TOOLS set
-  // in tools/index.js.
+  // the WA attachment pipeline. Per-round caps (5 images, 3 videos) live in
+  // PER_ROUND_TOOL_LIMITS (toolCallExecution.js).
   if (isWhatsApp) {
     tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO);
   }

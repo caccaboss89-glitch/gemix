@@ -19,7 +19,7 @@
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolAccessError, SET_CONVERSATION_TITLE_TOOL } = require('./ai/tools');
-const { executeTool, resetVoiceCount, getVoiceLimitChatKey, ONCE_PER_ROUND_TOOLS } = require('./tools');
+const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
 const { isAdmin } = require('./config/members');
 const {
   MAX_TOOL_ROUNDS,
@@ -43,7 +43,11 @@ const { resolveStorageId, resolvePersonalMemoryFileId } = require('./utils/userP
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
-const { oncePerRoundDuplicateIds, oncePerRoundErrorPayload } = require('./utils/toolCallExecution');
+const {
+  perRoundCappedDuplicateIds,
+  perRoundCapErrorPayload,
+  PER_ROUND_TOOL_LIMITS,
+} = require('./utils/toolCallExecution');
 const { sendIntermediateNotification } = require('./utils/intermediateNotification');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
 const { markNotifiedInCall, clearCallNotifications } = require('./utils/notificationDedup');
@@ -288,7 +292,7 @@ async function handleMessage(ctx) {
     const deliveryCtx = {
       contactedWA: new Set(),
       contactedEmail: new Set(),
-      roundCalledTools: new Set(),
+      roundToolCounts: new Map(),
     };
 
     let rounds = 0;
@@ -370,8 +374,8 @@ async function handleMessage(ctx) {
         }
         messages.push(assistantMsg);
 
-        // Reset per-round deduplication tracking for idempotent tools.
-        deliveryCtx.roundCalledTools = new Set();
+        // Reset per-round tool caps (generate_image x5, generate_video x3, etc.).
+        deliveryCtx.roundToolCounts = new Map();
 
         const orderedCalls = assistantMsg.tool_calls;
         const allowedToolNames = new Set(roundTools.map(t => t.function?.name).filter(Boolean));
@@ -379,7 +383,7 @@ async function handleMessage(ctx) {
         const resultsById = new Map();
 
         const runPhase = async (batch, parallel) => {
-          const blockedOncePerRound = oncePerRoundDuplicateIds(batch, ONCE_PER_ROUND_TOOLS);
+          const blockedOncePerRound = perRoundCappedDuplicateIds(batch, PER_ROUND_TOOL_LIMITS);
           if (parallel) {
             await Promise.all(batch.map(async (tc) => {
               resultsById.set(tc.id, await recordToolResult(tc, blockedOncePerRound));
@@ -394,11 +398,12 @@ async function handleMessage(ctx) {
         const recordToolResult = async (tc, blockedOncePerRound = new Set()) => {
           if (blockedOncePerRound.has(tc.id)) {
             const name = tc.function?.name || 'tool';
-            log.warn(`   Tool "${name}" blocked: duplicate once-per-round in same model turn`);
+            const cap = PER_ROUND_TOOL_LIMITS[name];
+            log.warn(`   Tool "${name}" blocked: per-round cap (${cap}) exceeded in same model turn`);
             return {
               role: 'tool',
               tool_call_id: tc.id,
-              content: oncePerRoundErrorPayload(name),
+              content: perRoundCapErrorPayload(name, cap),
             };
           }
           if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {

@@ -2,7 +2,7 @@
 //
 // Central dispatcher for all tool calls from the main brain.
 // Responsibilities: permission checks, schema validation via validateToolArgs,
-// ONCE_PER_ROUND deduplication (for build/imagine/etc.), recipient resolution
+// Per-round tool caps (build/imagine/etc.), recipient resolution
 // (for email/wa), the main execution switch, and unified error handling with
 // admin notification on uncaught failures. All individual tools are required here.
 
@@ -39,6 +39,10 @@ const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require(
 
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/voiceCounter');
+const {
+  PER_ROUND_TOOL_LIMITS,
+  perRoundCapErrorPayload,
+} = require('../utils/toolCallExecution');
 const { MessageMedia } = require('whatsapp-web.js');
 
 const log = createLogger('Tools');
@@ -129,10 +133,6 @@ function _resolveTargetEmail(args, userCtx) {
   return { email: userCtx.email, display: 'yourself' };
 }
 
-// Tools that should only be called once per round - calling them again produces
-// identical results and wastes a round trip.
-const ONCE_PER_ROUND_TOOLS = new Set(['read_music_stats', 'read_server_rules', 'web_x_search', 'generate_image', 'generate_video', 'build']);
-
 function platformToolBlockReason(toolName, userCtx) {
   return getToolAccessError(toolName, userCtx, {
     unavailableMessage: (name) => toolUnavailableMessage(name, resolveProfile(userCtx), {
@@ -148,7 +148,7 @@ function platformToolBlockReason(toolName, userCtx) {
  * @param {object} toolCall - The tool call from the AI model { id, function: { name, arguments } }
  * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, isGroup, groupId }
  * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
- * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set, roundCalledTools: Set }
+ * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set, roundToolCounts: Map }
  * @param {Array} [toolDefs] - Optional list of currently-allowed tool definitions, used for early arg validation.
  * @returns {Promise<object>} { toolCallId: string, result: string }
  */
@@ -188,18 +188,18 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
   }
 
-  // -- Per-round deduplication (reserve name before async work for parallel runs) --
-  if (ONCE_PER_ROUND_TOOLS.has(name)) {
-    if (deliveryCtx.roundCalledTools?.has(name)) {
+  // -- Per-round caps (reserve slot before async work for parallel runs) --
+  const roundCap = PER_ROUND_TOOL_LIMITS[name];
+  if (Number.isFinite(roundCap) && roundCap >= 1) {
+    const counts = deliveryCtx.roundToolCounts;
+    const used = counts?.get(name) || 0;
+    if (used >= roundCap) {
       return {
         toolCallId: toolCall.id,
-        result: JSON.stringify({
-          success: false,
-          error: `"${name}" can only be called once per round. Use the result from the previous call in this round.`,
-        }),
+        result: perRoundCapErrorPayload(name, roundCap),
       };
     }
-    deliveryCtx.roundCalledTools?.add(name);
+    if (counts) counts.set(name, used + 1);
   }
 
   const platformBlock = platformToolBlockReason(name, userCtx);
@@ -734,5 +734,5 @@ module.exports = {
   executeTool,
   resetVoiceCount,
   getVoiceLimitChatKey: _getVoiceLimitChatKey,
-  ONCE_PER_ROUND_TOOLS,
+  PER_ROUND_TOOL_LIMITS,
 };
