@@ -248,6 +248,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '  - web_x_search: once per turn; illustrated DOCX/report → search_images=true; broad facts → full_team=true once.',
     '  - pdflatex: allow 2–3 passes for TOC/cross-refs; set bash timeout_ms 120000+ on large jobs.',
     '  - User wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, deliver existing files via &lt;DELIVER&gt; (zip with bash if many)—do not regenerate from memory.',
+    '  - Proxy/sandbox/CLI broken (same infra error twice): stop—no retry loops; &lt;DELIVER&gt;&lt;/DELIVER&gt; and tell GemiX-Main the fault so it can bug_report.',
     '</Pitfalls>',
   ].join('\n');
 }
