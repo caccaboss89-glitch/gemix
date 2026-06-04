@@ -129,23 +129,22 @@ async function handleMessage(ctx) {
     const userIsAdmin = ui.member ? isAdmin(ui.member) : false;
     let maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
     
-    // DEBUG: log what we received for maintenance command check
-    log.info(`   [MAINTENANCE DEBUG] Raw maintenanceCommand: "${maintenanceCommand}" | Length: ${maintenanceCommand.length}`);
-    log.info(`   [MAINTENANCE DEBUG] Expected: "${MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()}" | Length: ${MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase().length}`);
-    
-    // Extract command from formatted message: [HH:MM:SS] UserName: /command ...
-    // WhatsApp messages have timestamp/sender prefix, so extract the first token after the colon
-    const cmdMatch = maintenanceCommand.match(/:\s*(\S+)/);
-    if (cmdMatch) {
-      maintenanceCommand = cmdMatch[1];
-      log.info(`   [MAINTENANCE DEBUG] After regex extraction: "${maintenanceCommand}"`);
+    // Extract command from formatted message: [DATE, TIME] UserName: /command ...
+    // Find the LAST colon (after the username) and extract the first token after it
+    const lastColonIdx = maintenanceCommand.lastIndexOf(':');
+    if (lastColonIdx !== -1) {
+      const afterColon = maintenanceCommand.substring(lastColonIdx + 1).trim();
+      const firstToken = afterColon.split(/\s+/)[0];
+      if (firstToken) {
+        maintenanceCommand = firstToken;
+      }
     }
+    
     const releaseNotifyTarget = getReleaseNotifyTarget(ctx, ui);
 
     // -- Maintenance gate --
     // Blocks every non-admin request with a fixed message. Admins always pass.
     if (MAINTENANCE_MODE && MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
-      log.info(`   [MAINTENANCE DEBUG] Checking: "${maintenanceCommand}" === "${MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()}"`);
       if (maintenanceCommand === MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
         const enableResult = enableReleaseNotify(releaseNotifyTarget.chatId, releaseNotifyTarget.waJid);
         const alreadyEnabled = Boolean(enableResult.alreadyEnabled);
