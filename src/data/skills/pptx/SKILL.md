@@ -32,6 +32,8 @@ Read the relevant companion file with `read_file` (e.g.
   mood, typography, density). Use it instead of reading the taxonomy by hand.
 - `scripts/render_slides.py` — render a `.pptx` to per-slide JPEGs plus a
   contact sheet, for visual QA.
+- `scripts/inspect_pptx.py` — verify each slide has a solid background (catches
+  white slides with light text before delivery).
 - `scripts/soffice.py` — internal helper imported by `render_slides.py` to
   launch headless LibreOffice; you never run it directly.
 
@@ -115,24 +117,30 @@ make a slide clearer or more professional, fetch it or render it.
 from the source image's natural ratio instead of setting width and height
 independently (which stretches the image).
 
-## Visual QA (required)
+## Visual QA (required, bounded)
 
-Your first render is rarely perfect. After creating or editing a deck, render
-it and inspect the images — assume there are problems and look for them.
+After creating or editing a deck:
 
 ```bash
+python /skills/pptx/scripts/inspect_pptx.py /workspace/output.pptx
 python /skills/pptx/scripts/render_slides.py /workspace/output.pptx
 ```
 
-This writes `slide-01.jpg`, `slide-02.jpg`, … and a `contact-sheet.jpg` next to
-the `.pptx`. `read_file` the contact sheet first to scan the whole deck, then
-`read_file` an individual slide image where you spot an issue.
+`inspect_pptx.py` must exit 0 (every slide needs `slide.background` for dark
+themes — otherwise PowerPoint shows white with pale text). Then `read_file`
+**only** `contact-sheet.jpg` to scan the deck. Open individual `slide-NN.jpg`
+files only where the contact sheet shows a defect (max 1–3 slides). Do **not**
+`read_file` every slide — that burns rounds without improving quality.
 
-Look for: text overflowing or clipped at box/edge boundaries; overlapping
-elements (text through shapes, stacked items); insufficient margins (< ~0.4");
-low-contrast text or icons (light on light, dark on dark); leftover placeholder
-text from a template; uneven spacing; and style consistency across slides.
+Look for: **low contrast** (light text on white — fix backgrounds/palette);
+text overflow; overlaps; bad margins; placeholder text; inconsistent styling.
 
-Fix what you find, then re-render and re-check the affected slides — one fix
-often reveals another. Do not declare success until a full pass shows no new
-issues.
+At most **two** render passes. Prefer `edit_file` on the template `.js` over
+rewriting the whole deck or `sed` bulk edits.
+
+## Round discipline (all Office-style deliverables)
+
+Creating from a template: **one** template search, **one** fact `web_x_search`,
+optional **one** image search, then build → inspect → render → deliver. Do not
+re-read templates, list directories, or dump slide text in Python loops. See
+`references/creating.md` for the full PPTX checklist.

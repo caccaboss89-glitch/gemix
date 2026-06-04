@@ -386,4 +386,18 @@ python /skills/docx/scripts/render_doc.py /workspace/output.docx
 This catches overflowing tables, wrong fonts, misplaced images, empty
 placeholders, and bad page breaks that are invisible in the raw structure. For a
 single long document, `convert_doc.py --to pdf` then `read_file` the PDF also
-works.
+works. **One** page grid is enough — do not re-render more than twice.
+
+## Round budget (typical report: 12–22 tool calls)
+
+| Once | Avoid |
+|------|--------|
+| `read_file` SKILL.md (+ editing.md only if filling/editing an attachment) | Re-reading the same guides |
+| One `web_x_search` (`full_team=true`) for facts | Multiple overlapping research calls |
+| One `web_x_search` (`search_images=true`) if visuals needed | Extra image-only searches |
+| `inspect_docx.py` before deliver on illustrated docs | Skipping image-count check |
+| `render_doc.py` → `read_file` the JPEG grid once | Per-page `read_file` loops; 3+ renders |
+| `edit_file` / `fill_template.js` surgical fixes | Rebuilding the whole document from memory |
+
+Match heading/body contrast to the template (dark cover → light text on dark fill;
+light body pages → dark text on white — never light gray on white).

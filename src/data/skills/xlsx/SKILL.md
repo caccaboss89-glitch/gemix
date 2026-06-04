@@ -44,6 +44,15 @@ Formula recalculation: headless LibreOffice (`soffice`), driven by
 - Professional, consistent font unless the user asks otherwise (e.g. Calibri,
   Arial). Match an existing file's formatting and conventions exactly when
   editing it — never impose your own style on an established template.
+
+## Round budget (typical workbook: 10–18 tool calls)
+
+| Once | Avoid |
+|------|--------|
+| `pandas`/`openpyxl` inspect (head, sheet names, dtypes) | `read_file` on `.xlsx` (fails) |
+| One `web_x_search` only if external facts are required | Multiple research calls for static data |
+| `recalc.py` after writing formulas | Re-running recalc after every tiny edit |
+| One export/QA pass | Rebuilding the whole workbook from scratch when a file was supplied |
 - Zero formula errors in the delivered file (#REF!, #DIV/0!, #VALUE!, #N/A,
   #NAME?, #NULL!, #NUM!). Verify with `scripts/recalc.py`.
 - Any user-facing text inside the sheet (labels, headers, notes) goes in the

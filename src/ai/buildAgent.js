@@ -33,6 +33,7 @@ const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 const { SKILLS_DIR } = require('../utils/userPaths');
 const {
   BUILD_MAX_ROUNDS,
+  BUILD_MAX_WEB_SEARCH_PER_BUILD,
   BUILD_API_TIMEOUT_MS,
   BUILD_HARD_TIMEOUT_MS,
   BUILD_WORKSPACE_QUOTA_MB,
@@ -133,7 +134,8 @@ function _buildAgentTools() {
         description:
           'Web and X research via agent or team. '
           + WEB_X_SEARCH_RESEARCH_GUIDANCE
-          + ' At most one call per turn.',
+          + ` At most one call per turn and at most ${BUILD_MAX_WEB_SEARCH_PER_BUILD} calls per build`
+          + ' (combine topics: one full_team facts pass, optional one search_images).',
         parameters: {
           type: 'object',
           properties: {
@@ -239,7 +241,10 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '  - Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
     '  - LaTeX write_file/edit_file: tool JSON needs escaped backslashes, but the .tex on disk must have normal LaTeX (one \\ per command). After writing, verify with bash (head -c 200 file.tex | cat -A) before pdflatex; if you see \\\\documentclass, fix escapes—do not burn rounds on blind rewrites.',
     '  - TeX setup: one bash checks pdflatex + kpsewhich for the packages you need—avoid many separate kpsewhich rounds.',
-    '  - Word/PDF via skills: read matching SKILL.md first (DOCX: images + TOC pitfalls). LaTeX → pdflatex, not pdf skill.',
+    '  - Word/PDF/PPTX/XLSX: read the matching /skills/*/SKILL.md once, then execute — do not re-read guides or companion files you already loaded this task.',
+    '  - Office round budget: aim for 12–22 tool calls on a typical deck/report (not 40+). One fact web_x_search (full_team=true); optional one image search (search_images=true); one visual QA pass (contact sheet / page grid), not per-page read_file loops.',
+    '  - PPTX: cp a /skills/pptx/templates/*.js and edit content — never rewrite 500+ lines from scratch. Run inspect_pptx.py before deliver; dark briefs need slide.background on every slide (see pptx creating.md).',
+    '  - DOCX/PDF: one render_doc.py or PDF read for QA; fix then re-render once. No python loops dumping every paragraph/slide unless debugging a specific bug.',
     '  - web_x_search: once per turn; illustrated DOCX/report → search_images=true; broad facts → full_team=true once.',
     '  - pdflatex: allow 2–3 passes for TOC/cross-refs; set bash timeout_ms 120000+ on large jobs.',
     '  - User wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, deliver existing files via &lt;DELIVER&gt; (zip with bash if many)—do not regenerate from memory.',
@@ -459,7 +464,16 @@ async function _runToolCall(toolCall, ctx) {
     case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);
     case 'bash':          return await _executeBash(ctx.workspaceId, parsedArgs);
     case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs, ctx);
-    case 'web_x_search':  return await _executeWebXSearch(ctx.workspaceId, parsedArgs, ctx.researchStats);
+    case 'web_x_search': {
+      if (ctx.webSearchCount >= BUILD_MAX_WEB_SEARCH_PER_BUILD) {
+        return _toolErr(
+          `web_x_search limit reached for this build (max ${BUILD_MAX_WEB_SEARCH_PER_BUILD}: `
+          + 'one full_team facts pass, optional one search_images). Combine remaining questions into edit_file/bash — do not start another research call.',
+        );
+      }
+      ctx.webSearchCount += 1;
+      return await _executeWebXSearch(ctx.workspaceId, parsedArgs, ctx.researchStats);
+    }
     default:              return _toolErr(`Unknown tool "${name}".`);
   }
 }
@@ -516,7 +530,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
   ];
 
   const researchStats = { webSources: 0, xPosts: 0 };
-  const ctx = { workspaceId, researchStats, imagesReadCount: 0 };
+  const ctx = { workspaceId, researchStats, imagesReadCount: 0, webSearchCount: 0 };
 
   let rounds = 0;
   let finalText = null;

@@ -127,12 +127,25 @@ async function handleMessage(ctx) {
     const ui = ctx.userIdentity;
     const isActiveMember = ui.isActiveMember;
     const userIsAdmin = ui.member ? isAdmin(ui.member) : false;
-    const maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
+    let maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
+    
+    // DEBUG: log what we received for maintenance command check
+    log.info(`   [MAINTENANCE DEBUG] Raw maintenanceCommand: "${maintenanceCommand}" | Length: ${maintenanceCommand.length}`);
+    log.info(`   [MAINTENANCE DEBUG] Expected: "${MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()}" | Length: ${MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase().length}`);
+    
+    // Extract command from formatted message: [HH:MM:SS] UserName: /command ...
+    // WhatsApp messages have timestamp/sender prefix, so extract the first token after the colon
+    const cmdMatch = maintenanceCommand.match(/:\s*(\S+)/);
+    if (cmdMatch) {
+      maintenanceCommand = cmdMatch[1];
+      log.info(`   [MAINTENANCE DEBUG] After regex extraction: "${maintenanceCommand}"`);
+    }
     const releaseNotifyTarget = getReleaseNotifyTarget(ctx, ui);
 
     // -- Maintenance gate --
     // Blocks every non-admin request with a fixed message. Admins always pass.
     if (MAINTENANCE_MODE && MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
+      log.info(`   [MAINTENANCE DEBUG] Checking: "${maintenanceCommand}" === "${MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()}"`);
       if (maintenanceCommand === MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
         const enableResult = enableReleaseNotify(releaseNotifyTarget.chatId, releaseNotifyTarget.waJid);
         const alreadyEnabled = Boolean(enableResult.alreadyEnabled);

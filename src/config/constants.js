@@ -30,8 +30,7 @@ module.exports = {
   // TTS engine selection
   XAI_TTS_ENABLED,
   MAINTENANCE_USER_MESSAGE:
-    MAINTENANCE_PREFIX + ' per un aggiornamento importante.\n\n' +
-    'Tornerò online a breve con *nuove capacità avanzate* per la nuova versione *2.0*.\n\n' +
+    MAINTENANCE_PREFIX +
     `Se vuoi essere avvisato non appena escono nuovi aggiornamenti, scrivi: \`${MAINTENANCE_RELEASE_NOTIFY_COMMAND}\`.\n\n` +
     'L\'arrivo di *promemoria programmati già impostati* continuerà a funzionare, grazie per la pazienza! 👷‍♂️',
 
@@ -88,6 +87,8 @@ module.exports = {
   BUILD_WORKSPACE_TTL_MS: 4 * 60 * 60 * 1000,
   BUILD_WORKSPACE_QUOTA_MB: 500,
   BUILD_MAX_ROUNDS: 60,
+  // Build sub-agent: cap total web_x_search across all turns (facts + images).
+  BUILD_MAX_WEB_SEARCH_PER_BUILD: 2,
   BUILD_HARD_TIMEOUT_MS: 10 * 60 * 1000,
   BUILD_LOCK_WAIT_MS: 30 * 1000,
 

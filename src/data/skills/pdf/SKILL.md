@@ -71,6 +71,20 @@ server-side) instead of looking for a local OCR tool.
   built-in fonts cannot render emoji and show them as black boxes.
 - When editing an existing PDF, match its existing layout and conventions
   rather than imposing a new style.
+- **Contrast:** dark page backgrounds need light text; white/light pages need
+  dark text (`#1E293B`, `#363636`). Light gray on white is not readable.
+
+## Round budget (typical PDF: 12–20 tool calls)
+
+| Once | Avoid |
+|------|--------|
+| `read_file` this SKILL.md | Re-reading guides |
+| One `web_x_search` for facts; optional one with `search_images=true` | Redundant research passes |
+| Build PDF script → `read_file` output PDF or page images once | Many partial drafts; retyping extracted text |
+| One fix pass if QA shows layout/contrast issues | Blind full rewrites |
+
+LaTeX PDFs use `pdflatex` in `/workspace/` (not this skill) — still one package
+check bash, 2–3 compile passes max, not dozens of kpsewhich calls.
 
 ## Quick Start
 
