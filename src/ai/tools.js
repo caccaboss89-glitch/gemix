@@ -542,7 +542,7 @@ function buildBuildTool(isGroup) {
     name: 'build',
     description:
       'Delegate to engineering sub-agent (web_x_search + shell + skills inside). Brief prompt only — it researches and builds. '
-      + `Workspace for ${scope} (4h TTL, 500 MB). Once per round. `
+      + `Workspace for ${scope} (4h TTL, 500 MB). At most once per round. `
       + 'Re-fetch recent build files via &lt;BuildWorkspace&gt; list/deliver. '
       + 'Generate image/video/song here first if the build needs them, then attachments[].',
     properties: {

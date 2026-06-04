@@ -229,7 +229,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '  Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
     '  Python 3.12 and Node.js 22. General-purpose pre-installed libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, jinja2, PyYAML, requests, unoserver. General CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. No pip/npm/apt at runtime.',
     '  PDF: LaTeX → pdflatex; reportlab → /skills/pdf/SKILL.md. Word → /skills/docx/SKILL.md (pitfalls there).',
-    '  yt-dlp: outbound traffic goes through the egress proxy (YouTube, X, Instagram, TikTok, Facebook are allowlisted). Use yt-dlp directly - no need to check if it is installed.',
+    '  yt-dlp: egress proxy (only YT/X/IG/TikTok/FB). One download → &lt;DELIVER&gt;; no -F/rm/ffprobe/curl/DNS probes after success.',
     '</Sandbox>',
     skillsBlock,
     '<Delivery>',
