@@ -1,0 +1,7 @@
+# === Ignora TUTTO tranne sandbox/ ===
+# Solo sandbox/ viene copiato nell'immagine Docker
+# Tutto il resto viene montato come volume al runtime
+
+# === Tutto il progetto ===
+*
+!sandbox/
