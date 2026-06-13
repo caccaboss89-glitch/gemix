@@ -18,7 +18,7 @@ const {
   responsesToAssistantMessage,
   extractServerSearchStats,
 } = require('./responsesAdapter');
-const { BUILD_RESPONSE_FORMAT, parseStructuredReply } = require('./responseSchema');
+const { BUILD_RESPONSE_FORMAT, applyResponsesTextFormat, parseStructuredReply } = require('./responseSchema');
 const { NATIVE_SEARCH_TOOLS } = require('./tools');
 const { renewBuildLock } = require('../utils/buildState');
 const {
@@ -510,8 +510,8 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       // Fixed structured final answer: message + optional attachments.
       // No reasoning.effort here: BUILD_MODEL (e.g. grok-build-0.1) rejects
       // that parameter ("does not support parameter reasoningEffort").
-      response_format: BUILD_RESPONSE_FORMAT,
     };
+    applyResponsesTextFormat(body, BUILD_RESPONSE_FORMAT);
     if (XAI_REASONING_REPLAY) {
       body.include = ['reasoning.encrypted_content'];
     }
@@ -599,8 +599,8 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
         max_output_tokens: 64_000,
         tool_choice: 'none',
         store: false,
-        response_format: BUILD_RESPONSE_FORMAT,
       };
+      applyResponsesTextFormat(body, BUILD_RESPONSE_FORMAT);
       if (instructions) body.instructions = instructions;
       if (adaptedTools) body.tools = adaptedTools;
       if (XAI_REASONING_REPLAY) {

@@ -1,6 +1,6 @@
 // src/ai/responseSchema.js
 //
-// Structured output (`response_format` json_schema) for assistant replies.
+// Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
 //
 // Main brain (GemiX): schema is attached only when the turn needs structured
 // fields — first Discord thread message (`conversation_title`) and/or
@@ -24,7 +24,7 @@ const TITLE_FIELD_DESC =
   'Concise topic title for this new conversation (max ~80 chars), no emojis, in the user\'s language.';
 
 /**
- * Build the main-brain response_format for the current round, or null when a
+ * Build the main-brain text.format schema for the current round, or null when a
  * plain text reply is expected.
  *
  * @param {object} opts
@@ -54,46 +54,50 @@ function buildGemixResponseFormat({ includeTitle = false, includeAttachments = f
 
   return {
     type: 'json_schema',
-    json_schema: {
-      name: 'gemix_reply',
-      strict: true,
-      schema: {
-        type: 'object',
-        properties,
-        required,
-        additionalProperties: false,
-      },
+    name: 'gemix_reply',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties,
+      required,
+      additionalProperties: false,
     },
   };
 }
 
-/** Fixed response_format for the build sub-agent's final answer. */
+/** Fixed text.format schema for the build sub-agent's final answer. */
 const BUILD_RESPONSE_FORMAT = {
   type: 'json_schema',
-  json_schema: {
-    name: 'build_result',
-    strict: true,
-    schema: {
-      type: 'object',
-      properties: {
-        message: {
-          type: 'string',
-          description: 'Final user-facing text (user\'s language). Plain text only.',
-        },
-        attachments: {
-          type: 'array',
-          items: { type: 'string' },
-          description:
-            'OPTIONAL. Include only when you want to deliver files to the user with this answer. '
-            + 'Each entry is a /workspace/ path and/or a public https URL to fetch (e.g. images from '
-            + 'web/X search). If you have nothing to send, omit this field — do not pass an empty array.',
-        },
+  name: 'build_result',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      message: {
+        type: 'string',
+        description: 'Final user-facing text (user\'s language). Plain text only.',
       },
-      required: ['message'],
-      additionalProperties: false,
+      attachments: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'OPTIONAL. Include only when you want to deliver files to the user with this answer. '
+          + 'Each entry is a /workspace/ path and/or a public https URL to fetch (e.g. images from '
+          + 'web/X search). If you have nothing to send, omit this field — do not pass an empty array.',
+      },
     },
+    required: ['message'],
+    additionalProperties: false,
   },
 };
+
+/** Attach structured output to a /v1/responses request body. */
+function applyResponsesTextFormat(body, format) {
+  if (format) {
+    body.text = { format };
+  }
+  return body;
+}
 
 /**
  * Parse a structured final reply. Tolerates code fences and stray text
@@ -142,5 +146,6 @@ function parseStructuredReply(raw) {
 module.exports = {
   buildGemixResponseFormat,
   BUILD_RESPONSE_FORMAT,
+  applyResponsesTextFormat,
   parseStructuredReply,
 };

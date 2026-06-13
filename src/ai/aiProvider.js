@@ -7,11 +7,12 @@
 //
 // Supports native multimodal input (input_text / input_image / input_file),
 // native server-side tools (web_search, x_search, code_interpreter) and
-// structured output via response_format json_schema.
+// structured output via text.format json_schema.
 
 const { GROK_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
 const { MAX_TOKENS } = require('../config/constants');
 const { callResponsesModel } = require('./apiClient');
+const { applyResponsesTextFormat } = require('./responseSchema');
 const {
   chatMessagesToResponsesInput,
   chatToolsToResponsesTools,
@@ -30,8 +31,8 @@ const {
  * @param {string|object} [opts.toolChoice] - Override tool_choice (e.g. 'none'
  *   for the forced final wrap-up call).
  * @param {number} [opts.maxTurns] - max_turns for server-side tool loops.
- * @param {object|null} [opts.responseFormat] - response_format payload
- *   (json_schema) when the reply must be structured.
+ * @param {object|null} [opts.responseFormat] - text.format json_schema payload
+ *   when the reply must be structured.
  * @returns {Promise<{message: object, provider: string, model: string,
  *   searchStats: {webSources: number, xPosts: number}}>}
  */
@@ -76,9 +77,7 @@ async function callAI(messages, tools = null, opts = {}) {
     body.tool_choice = opts.toolChoice || 'auto';
   }
 
-  if (opts.responseFormat) {
-    body.response_format = opts.responseFormat;
-  }
+  applyResponsesTextFormat(body, opts.responseFormat);
 
   const data = await callResponsesModel('Grok', body, logExtra);
   const message = responsesToAssistantMessage(data);
