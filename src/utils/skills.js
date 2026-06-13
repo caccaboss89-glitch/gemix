@@ -84,7 +84,7 @@ function formatSkillsForPrompt(skills) {
     return '<Skills empty="true"/>';
   }
   const lines = ['<Skills>'];
-  lines.push('    Each skill below is a guided workflow with helper scripts. When a task matches a skill\'s purpose, read its SKILL.md and any companion guides you need in one read_file call (path: string array) before writing your own code, then follow it.');
+  lines.push('    Each skill below is a guided workflow with helper scripts. When a task matches a skill\'s purpose, read its SKILL.md and any companion guides you need before writing your own code, then follow it.');
   for (const s of skills) {
     lines.push(`    <Skill name="${escapeXml(s.name)}" doc="/skills/${escapeXml(s.filename)}">${escapeXml(s.description)}</Skill>`);
   }

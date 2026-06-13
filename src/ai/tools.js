@@ -129,12 +129,15 @@ const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
-  description: 'Read one or more files from chat history by their [Attachment: filename] tags (text/code, images, audio, video, PDF, Office, archives).',
+  description:
+    'Use to load the real content of past files in chat history (text/code, images, audio, video, PDF, Office, archives): '
+    + 'history shows only their [Attachment: filename] tags, never the content itself. '
+    + 'Always read a file before talking about it; batch every file you need into one call.',
   properties: {
     path: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Filenames from [Attachment: …] tags in history (e.g. ["notes.txt", "clip.mp4"]). Pass multiple paths to read them in one call.',
+      description: 'Filenames from the [Attachment: …] tags in history, e.g. ["photo.jpg", "clip.mp4"].',
     },
   },
   required: ['path'],
@@ -142,7 +145,7 @@ const TOOL_READ_FILE = makeTool({
 
 const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
-  description: 'Read the server rules (Statuto Albertino / Constitution). Use when you need the full statute text on WhatsApp.',
+  description: 'Read the server rules (Statuto Albertino / Constitution). Use when you need the full statute text.',
   properties: {},
 });
 
@@ -196,7 +199,7 @@ const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
 
 const TOOL_MUSIC_CREATOR = makeTool({
   name: 'music_creator',
-  description: 'Create a 30-second music clip from a prompt.',
+  description: 'Create a 30-second music clip from a prompt. Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
@@ -291,13 +294,7 @@ function buildVoiceTool({ hasDeliverableFiles = false } = {}) {
   };
 
   if (hasDeliverableFiles) {
-    properties.attachments = {
-      ...DELIVERY_ATTACHMENTS_PROP,
-      description:
-        'OPTIONAL. Include only when you want files sent together with this voice message in the '
-        + 'current chat: delivery-buffer filenames and/or public https URLs. '
-        + 'Omit the field if you have nothing to attach.',
-    };
+    properties.attachments = DELIVERY_ATTACHMENTS_PROP;
   }
 
   return makeTool({

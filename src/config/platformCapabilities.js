@@ -202,7 +202,7 @@ function buildCallerAccessNote(profile, opts = {}) {
  *   - deliverables and/or first Discord turn -> the structured JSON reply
  *     contract for the fields that are actually in the schema this turn.
  */
-function _buildDeliveryLines(delivery, has) {
+function _buildDeliveryLines(delivery) {
   const d = delivery || {};
   const active = Boolean(d.active);
   const includeTitle = Boolean(d.includeTitle);
@@ -213,28 +213,15 @@ function _buildDeliveryLines(delivery, has) {
       '- Tools that produce files push them into a delivery buffer. When files are available for delivery, the system adds the delivery instructions and parameters you need in later rounds.',
     );
   } else {
-    let line = '- Deliverable files exist, so your final reply is structured JSON: put the user-facing text in `response`'
-      + (includeTitle ? ' and the thread title in `conversation_title`' : '')
-      + '. To send files in THIS chat, optionally list them in `attachments` (delivery-buffer filenames and/or public https URLs, e.g. images from web/X search). '
+    let line = '- Deliverable files exist, so your final reply is structured JSON: put the user-facing text in `response`. '
+      + 'To send files in THIS chat, optionally list them in `attachments` (delivery-buffer filenames and/or public https URLs, e.g. images from web/X search). '
       + 'Omit `attachments` entirely if you have nothing to send.';
     const bufferFiles = Array.isArray(d.bufferFiles) ? d.bufferFiles : [];
     if (bufferFiles.length > 0) {
       line += ` Delivery buffer now: ${bufferFiles.join(', ')}.`;
     }
+    line += ' Any delivery tool in your list takes the same optional `attachments`.';
     lines.push(line);
-    const recipientTools = [];
-    if (has(TOOL.SEND_WHATSAPP)) recipientTools.push('send_whatsapp_message');
-    if (has(TOOL.SEND_EMAIL)) recipientTools.push('send_email');
-    if (recipientTools.length > 0) {
-      lines.push(
-        `- To deliver files to a recipient via ${recipientTools.join(' / ')}, optionally list them in that tool's \`attachments\` parameter (same format). Omit the field if you have nothing to attach.`,
-      );
-    }
-    if (has(TOOL.SEND_VOICE)) {
-      lines.push(
-        '- send_voice_message can attach files in the current chat together with the voice note (same `attachments` format).',
-      );
-    }
   }
 
   if (includeTitle && !active) {
@@ -258,10 +245,7 @@ function buildToolUsageLines(profile, opts = {}) {
   const lines = [
     '- Execute tools silently. Reply once, after all of them complete.',
   ];
-  lines.push(..._buildDeliveryLines(opts.delivery, has));
-  if (has(TOOL.BUILD)) {
-    lines.push('- BuildWorkspace paths are on disk until build delivers them—they are not in the delivery buffer yet.');
-  }
+  lines.push(..._buildDeliveryLines(opts.delivery));
   lines.push('- Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.');
   if (has(TOOL.UPDATE_MEMORY)) {
     lines.push('- Use update_memory for long-term preferences. Never store transient context (current task, session state, temporary data).');
@@ -298,13 +282,12 @@ function buildCapabilitiesLines(profile, opts = {}) {
   return lines;
 }
 
-function buildLimitsLines(profile, opts = {}) {
-  const toolNames = opts.toolNames || null;
+function buildLimitsLines(profile) {
   const cap = CAPS[profile];
-  const has = (name) => _hasTool(toolNames, cap, name);
-  let historyLine = '- Chat history: [Attachment] tags only (read_file with path: ["filename", …] — batch multiple files in one call).';
+  let historyLine =
+    '- Chat history shows past files as [Attachment: filename] tags — names only, not their content; load any you need with read_file.';
   if (cap.historyTranscriptionNote) {
-    historyLine += ' Your past voice notes also attach a native transcript on the current turn.';
+    historyLine += ' Your past voice notes also carry a native transcript on the current turn.';
   }
   const lines = [
     `- Incoming media: audio > ${MAX_AUDIO_DURATION_S}s and video > ${MAX_VIDEO_DURATION_S}s are dropped and replaced inline with a "(too long, max Ns)" note. If the file is still attached, it passed the check - read it.`,
@@ -346,9 +329,9 @@ function buildRulesBlock(profile, opts = {}) {
   if (cap.isDiscord) sources.push('&lt;RulesContext&gt; in Conversation');
   sources.push('tool results');
 
-  let verifyTools = 'web/X search for facts, read_file (path array) for files';
+  let verifyTools = 'read_file for past files, web/X search for facts';
   if (cap.isDiscord) {
-    verifyTools += ', and RulesContext in this prompt for statute text';
+    verifyTools += ', RulesContext in this prompt for statute text';
   } else if (has(TOOL.READ_TASKS)) {
     verifyTools += ', read_my_tasks for saved reminders';
   }
@@ -360,8 +343,10 @@ function buildRulesBlock(profile, opts = {}) {
   ];
   const groundingLines = [
     `- Use only verifiable info: ${sources.join(', ')}.`,
-    '- Never invent fact, names, dates, numbers, links, file paths, citations, or quoted text.',
-    `- When uncertain, ask the user or call a tool to verify (${verifyTools}). Never guess.`,
+    '- Never invent or assume facts, names, dates, numbers, links, file paths, citations, quoted text, '
+      + 'or the content of an [Attachment] you have not loaded with read_file this turn.',
+    `- When unsure, slow down: verify with a tool (${verifyTools}) or ask the user, and if something stays unconfirmed say so plainly — never guess or rush.`,
+    '- Before sending, silently confirm your reply follows every rule above and states only verified facts.',
   ];
 
   const visibilityText =

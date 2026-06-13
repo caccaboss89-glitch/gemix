@@ -100,7 +100,7 @@ function buildSystemPrompt(ctx) {
   const capLines = buildCapabilitiesLines(profile, promptOpts);
   if (capLines) sections.push(_block('Capabilities', capLines));
 
-  sections.push(_block('Limits', buildLimitsLines(profile, promptOpts)));
+  sections.push(_block('Limits', buildLimitsLines(profile)));
 
   if (cap.longTermMemory) {
     let defaultMemory = 'Default guidelines: reply in Italian; use emojis sparingly.';
@@ -126,7 +126,7 @@ function buildSystemPrompt(ctx) {
       const more = ws.more ? '\n    ... and more' : '';
       sections.push(
         `<BuildWorkspace files="${total}">\n${items}${more}\n`
-        + '    On disk only (4h TTL)—not in the delivery buffer until build delivers them; call build to re-send listed files. Never type [Attachment: ...] in your reply.\n'
+        + '    On disk only (4h TTL)—not in the delivery buffer until build delivers them; call build to re-send listed files.\n'
         + '</BuildWorkspace>',
       );
     } else {

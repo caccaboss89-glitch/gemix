@@ -228,7 +228,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '  Media deliverables (converted/re-encoded images, video, audio): prefer a single .zip so the chat platform does not re-encode them.',
     '</Delivery>',
     '<Pitfalls>',
-    '  Always paths under /workspace/ or /skills/. read_file path is a string array — batch every file you need in one call. read_file opens Office files and archives natively for UNDERSTANDING only — to extract exact text/data or edit them, use the skill scripts (never retype what you saw).',
+    '  Always paths under /workspace/ or /skills/. read_file opens Office files and archives natively for UNDERSTANDING only — to extract exact text/data or edit them, use the skill scripts (never retype what you saw).',
     '  Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
     '  If user wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, list the existing files in `attachments` (zip with bash if many).',
     '  yt-dlp: if a download command fails, retry once with a simpler yt-dlp line — never spend rounds on discovery (which, find, pip list, curl tests).',
@@ -707,4 +707,7 @@ function _buildUserContent(prompt, attachmentParts) {
 
 module.exports = {
   runBuildAgent,
+  // Exported for the offline prompt-dump script (scripts/regenerate-prompt-dumps.js).
+  _buildSystemPrompt,
+  _buildAgentTools,
 };
