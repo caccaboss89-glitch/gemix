@@ -126,9 +126,9 @@ const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
-  description: 'Read the content of a file from chat history (text/code, images, audio, video, PDF, Office documents, archives).',
+  description: 'Read a file from chat history by its [Attachment: filename] tag (text/code, images, audio, video, PDF, Office, archives).',
   properties: {
-    path: { type: 'string', description: 'Filename from chat history (e.g. "report.pdf").' },
+    path: { type: 'string', description: 'Filename from an [Attachment: …] tag in history (e.g. "clip.mp4").' },
   },
   required: ['path'],
 });
@@ -276,7 +276,7 @@ const DELIVERY_ATTACHMENTS_PROP = {
     + 'https URL to fetch. If you have nothing to attach, omit this field — do not pass an empty array.',
 };
 
-function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = false, hasDeliverableFiles = false } = {}) {
+function buildVoiceTool({ hasDeliverableFiles = false } = {}) {
   const properties = {
     text: {
       type: 'string',
@@ -288,36 +288,15 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
     properties.attachments = {
       ...DELIVERY_ATTACHMENTS_PROP,
       description:
-        'OPTIONAL. Include only when you want files sent together with this voice message '
-        + '(current chat or chosen recipient): delivery-buffer filenames and/or public https URLs. '
+        'OPTIONAL. Include only when you want files sent together with this voice message in the '
+        + 'current chat: delivery-buffer filenames and/or public https URLs. '
         + 'Omit the field if you have nothing to attach.',
-    };
-  }
-
-  if (includeRecipientName || includeRecipientPhone) {
-    const recipientProps = {};
-    if (includeRecipientName) {
-      recipientProps.name = {
-        type: 'string',
-        description: 'Member name. Omit to reply in the current chat.',
-      };
-    }
-    if (includeRecipientPhone) {
-      recipientProps.phone = {
-        type: 'string',
-        description: 'Phone number with country code (e.g. +393XXXXXXXXX). Omit to reply in the current chat.',
-      };
-    }
-    properties.recipient = {
-      type: 'object',
-      description: 'Specific recipient. Omit to reply in the current chat.',
-      properties: recipientProps,
     };
   }
 
   return makeTool({
     name: 'send_voice_message',
-    description: 'Delivery tool - send a voice message for short/casual replies. Without "recipient" replies in the current chat; with a different recipient, sends to that recipient.',
+    description: 'Delivery tool - send a voice message in the current chat for short/casual replies.',
     properties,
     required: ['text'],
   });
@@ -609,11 +588,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 3. Communication & Delivery (no voice on personal WA: replies are text + attachments only)
   if (!isDiscord && userCtx.platform !== PLATFORM_WA_PERSONAL) {
-    tools.push(buildVoiceTool({
-      includeRecipientName: isAdmin || (isActiveMember && isWhatsApp),
-      includeRecipientPhone: isAdmin,
-      hasDeliverableFiles,
-    }));
+    tools.push(buildVoiceTool({ hasDeliverableFiles }));
   }
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);

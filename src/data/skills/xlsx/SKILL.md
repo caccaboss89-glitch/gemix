@@ -12,11 +12,11 @@ sandbox. Files live in `/workspace/`; this skill's files are read-only under
 ## Companion files
 
 - `scripts/recalc.py` — recalculates every formula in an .xlsx via headless
-  LibreOffice and reports any formula errors as JSON. Run it after writing
-  formulas with openpyxl (see "Recalculating formulas"). Use it only when the
-  workbook contains formulas.
+LibreOffice and reports any formula errors as JSON. Run it after writing
+formulas with openpyxl (see "Recalculating formulas"). Use it only when the
+workbook contains formulas.
 - `scripts/soffice.py` — internal helper imported by `recalc.py` to launch
-  LibreOffice; you never run it directly.
+LibreOffice; you never run it directly.
 
 ## Inspecting a spreadsheet
 
@@ -25,9 +25,9 @@ values, formulas, or transforms, load with `pandas` or `openpyxl` — never rety
 numbers you eyeballed:
 
 - `.xlsx` / `.xlsm`: use `pandas`/`openpyxl` and print what you need (`df.head()`,
-  `df.info()`, cell values, sheet names).
+`df.info()`, cell values, sheet names).
 - `.csv` / `.tsv`: plain text — `read_file` works for a quick look, but load with
-  `pandas` for exact computation.
+`pandas` for exact computation.
 
 ## Available tools
 
@@ -41,21 +41,24 @@ Formula recalculation: headless LibreOffice (`soffice`), driven by
 ## Output requirements
 
 - Professional, consistent font unless the user asks otherwise (e.g. Calibri,
-  Arial). Match an existing file's formatting and conventions exactly when
-  editing it — never impose your own style on an established template.
+Arial). Match an existing file's formatting and conventions exactly when
+editing it — never impose your own style on an established template.
 
 ## Round budget (typical workbook: 10–18 tool calls)
 
-| Once | Avoid |
-|------|--------|
-| `pandas`/`openpyxl` inspect (head, sheet names, dtypes) | Relying on `read_file` alone for exact cell values |
-| One `web_search` only if external facts are required | Multiple research calls for static data |
-| `recalc.py` after writing formulas | Re-running recalc after every tiny edit |
-| One export/QA pass | Rebuilding the whole workbook from scratch when a file was supplied |
+
+| Once                                                    | Avoid                                                               |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| `pandas`/`openpyxl` inspect (head, sheet names, dtypes) | Relying on `read_file` alone for exact cell values                  |
+| One `web_search` only if external facts are required    | Multiple research calls for static data                             |
+| `recalc.py` after writing formulas                      | Re-running recalc after every tiny edit                             |
+| One export/QA pass                                      | Rebuilding the whole workbook from scratch when a file was supplied |
+
+
 - Zero formula errors in the delivered file (#REF!, #DIV/0!, #VALUE!, #N/A,
-  #NAME?, #NULL!, #NUM!). Verify with `scripts/recalc.py`.
+#NAME?, #NULL!, #NUM!). Verify with `scripts/recalc.py`.
 - Any user-facing text inside the sheet (labels, headers, notes) goes in the
-  user's language, without emojis unless the user asked for them.
+user's language, without emojis unless the user asked for them.
 
 ## Reading and analysing data
 
@@ -75,6 +78,7 @@ df.to_excel("/workspace/output.xlsx", index=False)
 ```
 
 CSV / TSV:
+
 ```python
 df = pd.read_csv("/workspace/data.csv")
 df = pd.read_csv("/workspace/data.tsv", sep="\t")
@@ -152,10 +156,11 @@ wb.save("/workspace/modified.xlsx")
 ## Charts
 
 Two options:
+
 - Native Excel chart with openpyxl (`openpyxl.chart`) — stays editable inside
-  the spreadsheet.
+the spreadsheet.
 - Or render a chart image with matplotlib and embed it with
-  `openpyxl.drawing.image.Image` (a static picture, not editable).
+`openpyxl.drawing.image.Image` (a static picture, not editable).
 
 Images you embed can come from: files GemiX staged in `/workspace/` (uploads,
 generated images), PNGs you render with matplotlib, or images fetched from the
@@ -185,6 +190,7 @@ wb.save("/workspace/chart.xlsx")
 ```
 
 To embed a matplotlib PNG instead:
+
 ```python
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image
@@ -227,25 +233,25 @@ python /skills/xlsx/scripts/recalc.py /workspace/output.xlsx 60
 
 ## Verifying formulas
 
-- Read calculated values back with `load_workbook("/workspace/file.xlsx",
-  data_only=True)`. Warning: if you open with `data_only=True` and then save,
-  the formulas are replaced by their values and lost — only use it for reading.
+- Read calculated values back with `load_workbook("/workspace/file.xlsx", data_only=True)`. Warning: if you open with `data_only=True` and then save,
+the formulas are replaced by their values and lost — only use it for reading.
 - openpyxl is 1-based (`row=1, column=1` is A1); a pandas DataFrame row 5 maps
-  to Excel row 6 once a header row is present.
+to Excel row 6 once a header row is present.
 - Guard against `#DIV/0!` (check denominators) and `#REF!` (verify every
-  reference points where you intend). Cross-sheet references use
-  `SheetName!A1`.
+reference points where you intend). Cross-sheet references use
+`SheetName!A1`.
 - Test a couple of formulas on a small range before applying them across the
-  whole sheet.
+whole sheet.
 
 ## Best practices
 
 - pandas for analysis and bulk export; openpyxl for formulas, formatting, and
-  Excel-specific features.
+Excel-specific features.
 - Specify dtypes to avoid inference surprises:
-  `pd.read_excel("/workspace/f.xlsx", dtype={"id": str})`.
+`pd.read_excel("/workspace/f.xlsx", dtype={"id": str})`.
 - Large files: `pd.read_excel(..., usecols=[...])` to read only needed columns,
-  or `load_workbook(..., read_only=True)` for streaming reads.
+or `load_workbook(..., read_only=True)` for streaming reads.
 - Parse dates explicitly: `pd.read_excel(..., parse_dates=["date_column"])`.
 - Inside the spreadsheet, add cell comments to document non-obvious formulas or
-  the source of any hardcoded value.
+the source of any hardcoded value.
+

@@ -15,7 +15,7 @@ const { isSystemMessage } = require('../../config/systemMessages');
 
 const { buildAttachmentTag } = require('../../utils/media');
 const { MAX_IMAGE_READS } = require('../../utils/aiFileDelivery');
-const { resolveGemixVoiceTranscription } = require('../../utils/historySync');
+const { resolveGemixVoiceTranscription, storeRecentVoiceText } = require('../../utils/historySync');
 const { ingressWaMessageMedia, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 const {
   normalizeMarkdown,
@@ -189,10 +189,10 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       const allFilenameHints = _attachmentFilenameHints(waFilename, resolvedName, null);
       textContent = _stripRedundantAttachmentCaption(textContent, allFilenameHints);
 
-      // User attachments ship natively (parts on the user message); bot-side
-      // entries stay tag-only (assistant role cannot carry input parts).
+      // History: [Attachment] tags only (no native re-upload). Native parts are
+      // reserved for the current user turn and GemiX voice transcript files.
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
-        tagOnly: isFromBot,
+        tagOnly: true,
       });
       // GemiX voice messages: persist the transcription into history meta so
       // the handler can attach the transcript file to the current turn.
@@ -269,6 +269,12 @@ async function sendWhatsAppResponse(chat, responseData) {
   if (hasVoice) {
     const media = new MessageMedia('audio/ogg', responseData.voiceBuffer.toString('base64'), 'voice.ogg');
     await chat.sendMessage(media, { sendAudioAsVoice: true });
+    if (responseData.voiceTranscriptText) {
+      storeRecentVoiceText(
+        responseData.voiceTranscriptChatId || chat.id?._serialized,
+        responseData.voiceTranscriptText,
+      );
+    }
     // Continue to send attachments below (don't return early)
   }
 

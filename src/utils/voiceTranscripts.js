@@ -7,12 +7,17 @@
 // an input_file part on every call. The transcript text comes from
 // history_meta (persisted when the voice message was generated - see
 // historySync.js).
+//
+// These files live alongside the chat history under
+// data/users/<storageId>/voice_transcripts/ (not in .tempfiles) because they
+// are part of history: they persist as long as their voice file is in history
+// and are pruned by pruneOrphanVoiceTranscripts when it is dropped.
 
 const fs = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('../config/constants');
 const { extractAttachmentTagPaths } = require('./media');
 const { getStoredHistoryVoiceTranscription } = require('./historySync');
-const { tempDirForOwner } = require('./tempFileServer');
 const { uploadFileForXai } = require('./xaiUpload');
 const { createLogger } = require('./logger');
 
@@ -20,11 +25,19 @@ const log = createLogger('VoiceTranscripts');
 
 const VOICE_AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a']);
 
+function _transcriptDirFor(storageId) {
+  return path.join(DATA_DIR, 'users', String(storageId), 'voice_transcripts');
+}
+
+function _transcriptPathFor(storageId, voiceName) {
+  const safe = path.basename(voiceName).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return path.join(_transcriptDirFor(storageId), `${safe}.transcript.txt`);
+}
+
 function _transcriptFileFor(storageId, voiceName, text) {
-  const dir = path.join(tempDirForOwner(storageId), 'voice_transcripts');
+  const dir = _transcriptDirFor(storageId);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const safe = voiceName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const filePath = path.join(dir, `${safe}.transcript.txt`);
+  const filePath = _transcriptPathFor(storageId, voiceName);
   // Only rewrite when the content changed, so the upload cache (keyed on
   // mtime) keeps returning the same public URL across turns.
   let current = null;
@@ -71,4 +84,29 @@ async function collectGemixVoiceTranscriptParts(history, storageId) {
   return parts;
 }
 
-module.exports = { collectGemixVoiceTranscriptParts };
+function pruneOrphanVoiceTranscripts(storageId, historyDir) {
+  if (!storageId || !historyDir || !fs.existsSync(historyDir)) return;
+  const transcriptDir = _transcriptDirFor(storageId);
+  if (!fs.existsSync(transcriptDir)) return;
+
+  let historyFiles;
+  try { historyFiles = fs.readdirSync(historyDir); }
+  catch { return; }
+
+  const historySafeNames = new Set(
+    historyFiles.map((name) => path.basename(name).replace(/[^a-zA-Z0-9._-]/g, '_')),
+  );
+
+  for (const f of fs.readdirSync(transcriptDir)) {
+    if (!f.endsWith('.transcript.txt')) continue;
+    const voiceSafe = f.slice(0, -'.transcript.txt'.length);
+    if (!historySafeNames.has(voiceSafe)) {
+      try { fs.unlinkSync(path.join(transcriptDir, f)); } catch { /* ignore */ }
+    }
+  }
+}
+
+module.exports = {
+  collectGemixVoiceTranscriptParts,
+  pruneOrphanVoiceTranscripts,
+};

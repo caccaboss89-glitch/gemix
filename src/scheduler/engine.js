@@ -9,7 +9,7 @@ const fsPromises = require('fs').promises;
 const fs = require('fs');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
 const { getRomeISO, convertRomeLocalToISO } = require('../utils/time');
-const { buildScheduledFooter } = require('../utils/footer');
+const { addScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { checkNewRelease } = require('./releaseMonitor');
 const { modifyTaskFile } = require('../utils/taskStore');
@@ -151,9 +151,7 @@ async function _deliverTask(task) {
     stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, '')),
   );
   messageText = normalizeMarkdown(messageText);
-
-  const scheduledFooter = buildScheduledFooter(task.createdAt || getRomeISO());
-  messageText += scheduledFooter;
+  messageText = addScheduledFooter(messageText, task.createdAt || getRomeISO());
 
   const dest = task.destinations || {};
   const attempts = [];

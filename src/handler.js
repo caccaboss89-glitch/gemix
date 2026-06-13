@@ -36,6 +36,7 @@ const {
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
 } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
+const { appendBlock } = require('./utils/footer');
 
 const { resolveWorkspaceId, workspaceIdToSlug } = require('./utils/workspaceId');
 const { touchActivity } = require('./utils/buildState');
@@ -577,7 +578,7 @@ async function handleMessage(ctx) {
           const parts = [];
           if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
           if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
-          text = `${text}\n\n${parts.join('. ')}.`;
+          text = appendBlock(text, `\n\n${parts.join('. ')}.`);
           log.info(`   Research badge: ${parts.join(', ')}`);
         }
       }
@@ -592,6 +593,8 @@ async function handleMessage(ctx) {
           attachments: responseCtx.attachments,
           discordTitle: responseCtx.discordTitle || '',
           modelUsed: lastModelUsed,
+          voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
+          voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
         };
       }
 
@@ -616,6 +619,8 @@ async function handleMessage(ctx) {
         attachments: responseCtx.attachments,
         discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
+        voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
+        voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
       };
     }
 
@@ -671,7 +676,7 @@ async function handleMessage(ctx) {
         const parts = [];
         if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
         if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
-        wrapUpText = `${wrapUpText}\n\n${parts.join('. ')}.`;
+        wrapUpText = appendBlock(wrapUpText, `\n\n${parts.join('. ')}.`);
       }
     }
 

@@ -8,7 +8,7 @@
 
 const { getToolAccessError, validateToolArgs } = require('../ai/tools');
 const { generateImage, generateVideo } = require('./imagineGenerator');
-const { generateVoice, stripVocalTags } = require('./voiceMessage');
+const { generateVoice } = require('./voiceMessage');
 const { stripOutgoingDeliveryArtifacts } = require('../utils/text');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
@@ -33,7 +33,6 @@ const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { resolveProfile, toolUnavailableMessage } = require('../config/platformCapabilities');
 const { createLogger } = require('../utils/logger');
-const { storeRecentVoiceText } = require('../utils/historySync');
 const { toWhatsAppMediaArgs, toEmailAttachment, attachmentSize } = require('../utils/attachments');
 const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
 
@@ -269,40 +268,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, ''),
         );
 
-        // Delivery to a specific recipient (or, if the recipient resolves
-        // to the current user, gracefully fall through to "current chat").
-        let hasRecipient = args.recipient?.name || args.recipient?.phone || args.recipientName || args.recipientPhone;
-        let targetChatKey = chatKey;
-        let targetJid = null;
-
-        if (hasRecipient) {
-          const recipientName = args.recipient?.name || args.recipientName;
-          const recipientPhone = args.recipient?.phone || args.recipientPhone;
-          // Self-recipient handling: when the specified recipient resolves to the
-          // current user, the message is delivered in the current chat.
-          let resolvesToSelf = false;
-          if (recipientName) {
-            const resolved = resolveActiveMemberByName(recipientName);
-            if (resolved.ok && resolved.member.wa === userCtx.waJid) resolvesToSelf = true;
-          }
-          if (!resolvesToSelf && recipientPhone && userCtx.waJid) {
-            const normalized = normalizePhoneToJid(recipientPhone);
-            if (normalized === userCtx.waJid) resolvesToSelf = true;
-          }
-          if (resolvesToSelf) {
-            hasRecipient = false;
-          } else {
-            targetJid = _resolveTargetWaJid(args, userCtx);
-            if (targetJid.error) { result = targetJid.error; break; }
-            targetChatKey = targetJid.jid;
-          }
-        }
-
-        const currentCount = await getVoiceCount(userCtx, targetChatKey);
+        const currentCount = await getVoiceCount(userCtx, chatKey);
         if (currentCount >= 3) {
-          log.warn(`Voice limit exceeded in chat ${targetChatKey}: counter=${currentCount}`);
-          await resetVoiceCount(userCtx, targetChatKey);
-          result = { success: false, error: hasRecipient ? `Voice limit exceeded: the recipient (${targetJid.display}) has already received 3 consecutive voice messages. Send a normal text message instead, no voice.` : 'Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.' };
+          log.warn(`Voice limit exceeded in chat ${chatKey}: counter=${currentCount}`);
+          await resetVoiceCount(userCtx, chatKey);
+          result = { success: false, error: 'Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.' };
           break;
         }
 
@@ -318,64 +288,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           ? ` Attachment(s) not resolved and NOT sent: ${voiceSelection.missing.join(', ')}.`
           : '';
 
-        if (hasRecipient) {
-          if (deliveryCtx.contactedWA.has(targetJid.jid)) {
-            result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
-            break;
-          }
-          deliveryCtx.contactedWA.add(targetJid.jid);
-          try {
-            const voiceBuf = await generateVoice(cleanText);
-            const voiceMedia = new MessageMedia('audio/ogg', voiceBuf.toString('base64'), 'voice.ogg');
-            await sendWhatsAppDirect(targetJid.jid, voiceMedia, { sendAudioAsVoice: true });
-
-            // Send the selected attachments with fallback support
-            if (voiceSelection.attachments.length > 0) {
-              const sendAttachment = async (att) => {
-                const m = toWhatsAppMediaArgs(att);
-                if (!m) {
-                  throw new Error(`Cannot convert attachment to WhatsApp media: ${att.name || 'unknown'}`);
-                }
-                const media = new MessageMedia(m.mimetype, m.base64, m.name);
-                const options = {};
-                if (att.sendAudioAsVoice) options.sendAudioAsVoice = true;
-                await sendWhatsAppDirect(targetJid.jid, media, options);
-              };
-
-              const sendResult = await sendAttachmentsWithFallback(
-                voiceSelection.attachments,
-                sendAttachment,
-                { platform: 'whatsapp' }
-              );
-
-              // If there are failed attachments, send fallback message
-              if (sendResult.fallbackMessage) {
-                try {
-                  await sendWhatsAppDirect(targetJid.jid, sendResult.fallbackMessage);
-                  log.info(`Sent fallback message for ${sendResult.failed.length} attachment(s)`);
-                } catch (err) {
-                  log.error(`Failed to send fallback message: ${err.message}`);
-                }
-              }
-
-              const attachmentsSentCount = sendResult.sent.length;
-              const attachmentsFailedCount = sendResult.failed.length;
-
-              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}${attachmentsFailedCount > 0 ? ` (${attachmentsFailedCount} via temporary links)` : ''}.${voiceMissingNote}` };
-            } else {
-              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}.${voiceMissingNote}` };
-            }
-
-            await incrementVoiceCount(userCtx, targetChatKey);
-            storeRecentVoiceText(targetJid.jid, stripVocalTags(cleanText));
-          } catch (err) {
-            await notifyAdmin('Voice Message Delivery', `Failed to send voice message to ${targetJid.jid}: ${err.message}`);
-            result = { success: false, error: `Error sending voice message: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
-          }
-          break;
-        }
-
-        // Otherwise, send as reply in the current chat
+        // Send as reply in the current chat
         if (responseCtx.voiceBuffer) {
           return {
             toolCallId: toolCall.id,
@@ -388,12 +301,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         // Voice to the current chat ends the turn: only the files selected in
         // `attachments` ship after the voice note.
         responseCtx.attachments = voiceSelection.attachments;
+        responseCtx.pendingVoiceTranscript = {
+          chatId: userCtx.chatId || chatKey,
+          text: cleanText,
+        };
         result = {
           success: true,
           message: `Voice message generated successfully${voiceSelection.attachments.length > 0 ? ` with ${voiceSelection.attachments.length} attachment(s)` : ''}. Do not send any text message.${voiceMissingNote}`,
         };
         await incrementVoiceCount(userCtx, chatKey);
-        storeRecentVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
         break;
       }
 

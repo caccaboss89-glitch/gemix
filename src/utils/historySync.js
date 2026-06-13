@@ -88,15 +88,8 @@ function _normalizeHistoryFilename(historyFilename) {
 
 function _loadRecentVoiceEntries() {
   try {
-    const legacyPath = path.join(DATA_DIR, 'voiceTextCache.json');
-    if (!fs.existsSync(GEMIX_VOICE_TEXT_CACHE_FILE) && fs.existsSync(legacyPath)) {
-      try { fs.renameSync(legacyPath, GEMIX_VOICE_TEXT_CACHE_FILE); } catch { /* use legacy read below */ }
-    }
-    const readPath = fs.existsSync(GEMIX_VOICE_TEXT_CACHE_FILE)
-      ? GEMIX_VOICE_TEXT_CACHE_FILE
-      : (fs.existsSync(legacyPath) ? legacyPath : null);
-    if (readPath) {
-      const raw = JSON.parse(fs.readFileSync(readPath, 'utf-8'));
+    if (fs.existsSync(GEMIX_VOICE_TEXT_CACHE_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(GEMIX_VOICE_TEXT_CACHE_FILE, 'utf-8'));
       recentVoiceEntries = Array.isArray(raw) ? raw : [];
     }
   } catch {
@@ -418,6 +411,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
   if (deletedCount > 0) {
     log.info(`pruneHistory user=${userId} removed=${deletedCount} (age-based=${ageDeletedCount}) kept=${kept}`);
   }
+  require('./voiceTranscripts').pruneOrphanVoiceTranscripts(userId, historyDir);
   return { deletedCount, ageDeletedCount, kept };
 }
 

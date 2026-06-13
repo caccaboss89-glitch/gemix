@@ -222,14 +222,17 @@ function _buildDeliveryLines(delivery, has) {
       line += ` Delivery buffer now: ${bufferFiles.join(', ')}.`;
     }
     lines.push(line);
-    const deliveryTools = [];
-    if (has(TOOL.SEND_WHATSAPP)) deliveryTools.push('send_whatsapp_message');
-    if (has(TOOL.SEND_EMAIL)) deliveryTools.push('send_email');
-    if (has(TOOL.SEND_VOICE)) deliveryTools.push('send_voice_message');
-    if (deliveryTools.length > 0) {
+    const recipientTools = [];
+    if (has(TOOL.SEND_WHATSAPP)) recipientTools.push('send_whatsapp_message');
+    if (has(TOOL.SEND_EMAIL)) recipientTools.push('send_email');
+    if (recipientTools.length > 0) {
       lines.push(
-        `- To deliver files to a recipient via ${deliveryTools.join(' / ')}, optionally list them in that tool's \`attachments\` parameter (same format). Omit the field if you have nothing to attach.`
-        + (has(TOOL.SEND_VOICE) ? ' send_voice_message can also attach files in the current chat together with the voice note.' : ''),
+        `- To deliver files to a recipient via ${recipientTools.join(' / ')}, optionally list them in that tool's \`attachments\` parameter (same format). Omit the field if you have nothing to attach.`,
+      );
+    }
+    if (has(TOOL.SEND_VOICE)) {
+      lines.push(
+        '- send_voice_message can attach files in the current chat together with the voice note (same `attachments` format).',
       );
     }
   }
@@ -299,15 +302,15 @@ function buildLimitsLines(profile, opts = {}) {
   const toolNames = opts.toolNames || null;
   const cap = CAPS[profile];
   const has = (name) => _hasTool(toolNames, cap, name);
-  const lines = [
-    `- Incoming media: audio > ${MAX_AUDIO_DURATION_S}s and video > ${MAX_VIDEO_DURATION_S}s are dropped and replaced inline with a "(too long, max Ns)" note next to the file tag. If the file is still attached, it passed the check - read it.`,
-    '- User files in history are attached natively next to their [Attachment] tags - read them directly. Files YOU produced in past turns are tags only: call read_file to view one.',
-  ];
+  let historyLine = '- Chat history: [Attachment] tags only (use read_file if necessary).';
   if (cap.historyTranscriptionNote) {
-    lines.push(
-      '- Your voice messages in history: a transcript file named after the voice file (e.g. "voice.ogg.transcript.txt") is attached to the current request, so you always know what you said.',
-    );
+    historyLine += ' Your past voice notes also attach a native transcript on the current turn.';
   }
+  const lines = [
+    `- Incoming media: audio > ${MAX_AUDIO_DURATION_S}s and video > ${MAX_VIDEO_DURATION_S}s are dropped and replaced inline with a "(too long, max Ns)" note. If the file is still attached, it passed the check - read it.`,
+    historyLine,
+    '- Files in the CURRENT user message arrive natively; history does not re-upload them.',
+  ];
   if (cap.isDiscord) {
     lines.push(
       '- If the user asks for voice replies, scheduled tasks, build/file deliverables, imagine, music clips, or music listening stats, explain that those are on the dedicated GemiX WhatsApp account (not in this Discord session).',

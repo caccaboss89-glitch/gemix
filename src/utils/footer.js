@@ -6,6 +6,15 @@
 const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
 
 /**
+ * Append a suffix that starts with a blank line (e.g. GEMIX_FOOTER_PREFIX).
+ * Strips trailing whitespace on the body so the suffix never lands on the same line.
+ */
+function appendBlock(body, suffix) {
+  const trimmed = typeof body === 'string' ? body.replace(/\s+$/u, '') : '';
+  return trimmed + suffix;
+}
+
+/**
  * Map model ID to human-readable display name.
  * @param {string} modelId - The model identifier (e.g., 'grok-4-latest')
  * @returns {string} The human-readable model name or the original ID if not found
@@ -29,7 +38,8 @@ function getModelDisplayName(modelId) {
  * @returns {string} Text with appended GemiX footer
  */
 function addFooter(text, modelName) {
-  return text + GEMIX_FOOTER_PREFIX + modelName;
+  const body = removeScheduledFooter(removeFooter(text || ''));
+  return appendBlock(body, `${GEMIX_FOOTER_PREFIX}${modelName}`);
 }
 
 /**
@@ -39,7 +49,7 @@ function addFooter(text, modelName) {
  */
 function removeFooter(text) {
   if (!text) return '';
-  return text.replace(/\n+--GemiX\s*•.*$/gi, '').trim();
+  return text.replace(/\n*--GemiX\s*•(?!\s*Messaggio Programmato)[^\n]*/gi, '').trim();
 }
 
 /**
@@ -69,7 +79,7 @@ function hasScheduledFooter(text) {
  */
 function removeScheduledFooter(text) {
   if (!text) return '';
-  return text.replace(/\n+--GemiX\s*•\s*Messaggio Programmato il.*$/gi, '').trim();
+  return text.replace(/\n*--GemiX\s*•\s*Messaggio Programmato il[^\n]*/gi, '').trim();
 }
 
 /**
@@ -79,15 +89,35 @@ function removeScheduledFooter(text) {
  */
 function buildScheduledFooter(createdAt) {
   const d = new Date(createdAt);
-  const formatted = d.toLocaleString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const formatted = d.toLocaleString('it-IT', {
+    timeZone: 'Europe/Rome',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   return `${GEMIX_FOOTER_PREFIX}Messaggio Programmato il ${formatted}`;
 }
 
+/**
+ * Append scheduled footer to message body (strips any prior footers first).
+ * @param {string} text
+ * @param {string} createdAt
+ * @returns {string}
+ */
+function addScheduledFooter(text, createdAt) {
+  const body = removeScheduledFooter(removeFooter(text || ''));
+  return appendBlock(body, buildScheduledFooter(createdAt));
+}
+
 module.exports = {
+  appendBlock,
   addFooter,
   removeFooter,
   hasFooter,
   buildScheduledFooter,
+  addScheduledFooter,
   getModelDisplayName,
   hasScheduledFooter,
   removeScheduledFooter,

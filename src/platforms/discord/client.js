@@ -444,10 +444,9 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     const mediaParts = [];
 
     for (const att of m.attachments.values()) {
-      // User attachments ship natively (parts on the user message); bot-side
-      // entries stay tag-only (assistant role cannot carry input parts).
+      // History: tag-only. Native parts belong on the current turn only.
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
-        tagOnly: isBot,
+        tagOnly: true,
         metadataDurationSec: Number(att.duration || 0),
       });
       if (ingress.oversize) {
