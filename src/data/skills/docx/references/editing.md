@@ -25,7 +25,7 @@ First inspect the file (always — `read_file` gives a semantic overview; use
 
 ```bash
 python /skills/docx/scripts/inspect_docx.py /workspace/template.docx --text --tables
-python /skills/docx/scripts/render_doc.py /workspace/template.docx   # then read_file /workspace/doc_pages.jpg
+python /skills/docx/scripts/render_doc.py /workspace/template.docx   # then read_file path: ["/workspace/doc_pages.jpg"]
 ```
 
 Then choose:
@@ -172,7 +172,7 @@ Always render the result and look at it before delivering:
 
 ```bash
 python /skills/docx/scripts/render_doc.py /workspace/filled.docx
-# then: read_file /workspace/doc_pages.jpg
+# then: read_file path: ["/workspace/doc_pages.jpg"]
 ```
 
 ## Common pitfalls

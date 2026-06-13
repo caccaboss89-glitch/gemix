@@ -29,6 +29,7 @@ const {
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
 const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
+const { normalizeReadFilePaths } = require('../tools/readFile');
 const { downloadPublicFile } = require('../utils/fetch');
 const { getRomeTime } = require('../utils/time');
 const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
@@ -112,11 +113,15 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'read_file',
-        description: 'Read a file from /workspace/ or /skills/: text/code (exact content with line numbers), images, audio, video, PDF, Office documents, archives (parsed natively).',
+        description: 'Read one or more files from /workspace/ or /skills/: text/code (exact content with line numbers), images, audio, video, PDF, Office documents, archives (parsed natively).',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'Path: /workspace/<rel> or /skills/<rel>.' },
+            path: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Paths under /workspace/<rel> or /skills/<rel>. Pass multiple paths to read them in one call.',
+            },
           },
           required: ['path'],
         },
@@ -206,6 +211,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     notesBlock,
     '<ToolUsage>',
     '  Emit MULTIPLE tool calls in the same round whenever independent — do not waste rounds on serial reads/searches you could batch.',
+    '  read_file path is a string array: pass every file you need in one call (e.g. SKILL.md + a references/*.md) instead of separate read_file rounds.',
     '  The system runs tools intelligently: in parallel when possible, bash always last. You can write and run files in the same round.',
     '  web_search / x_search run server-side at zero round cost. Web image search returns image URLs: pass them to download_file to save the bytes into /workspace/ before embedding them in a document.',
     '</ToolUsage>',
@@ -222,7 +228,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '  Media deliverables (converted/re-encoded images, video, audio): prefer a single .zip so the chat platform does not re-encode them.',
     '</Delivery>',
     '<Pitfalls>',
-    '  Always paths under /workspace/ or /skills/. read_file opens Office files and archives natively for UNDERSTANDING only — to extract exact text/data or edit them, use the skill scripts (never retype what you saw).',
+    '  Always paths under /workspace/ or /skills/. read_file path is a string array — batch every file you need in one call. read_file opens Office files and archives natively for UNDERSTANDING only — to extract exact text/data or edit them, use the skill scripts (never retype what you saw).',
     '  Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
     '  If user wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, list the existing files in `attachments` (zip with bash if many).',
     '  yt-dlp: if a download command fails, retry once with a simpler yt-dlp line — never spend rounds on discovery (which, find, pip list, curl tests).',
@@ -257,41 +263,80 @@ function _classifyAgentPath(workspaceId, rawPath) {
   return { ok: true, abs, zone: 'workspace' };
 }
 
-async function _executeReadFile(workspaceId, args, ctx = {}) {
-  const c = _classifyAgentPath(workspaceId, args && args.path);
-  if (!c.ok) return _toolErr(c.reason);
-  if (!fs.existsSync(c.abs)) return _toolErr(`File not found: ${args.path}`);
+async function _readOneAgentFile(workspaceId, filePath, ctx) {
+  const c = _classifyAgentPath(workspaceId, filePath);
+  if (!c.ok) return { kind: 'error', path: filePath, error: c.reason };
+  if (!fs.existsSync(c.abs)) return { kind: 'error', path: filePath, error: `File not found: ${filePath}` };
 
   let stat;
   try { stat = fs.statSync(c.abs); }
-  catch (err) { return _toolErr(`Cannot stat: ${err.message}`); }
-  if (stat.isDirectory()) return _toolErr('Path is a directory.');
+  catch (err) { return { kind: 'error', path: filePath, error: `Cannot stat: ${err.message}` }; }
+  if (stat.isDirectory()) return { kind: 'error', path: filePath, error: 'Path is a directory.' };
 
   const ext = path.extname(c.abs).toLowerCase();
-  if (isNonReadableExt(ext)) return _toolErr(buildReadFileBlockedMessage(ext));
+  if (isNonReadableExt(ext)) return { kind: 'error', path: filePath, error: buildReadFileBlockedMessage(ext) };
 
   const delivery = await deliverReadFileFromPath({
     absPath: c.abs,
-    displayPath: args.path,
+    displayPath: filePath,
     contentType: mimeForExtension(ext),
     imagesReadCount: ctx.imagesReadCount ?? 0,
     blockedMessage: buildReadFileBlockedMessage(ext),
   });
 
-  if (delivery.kind === 'error') return _toolErr(delivery.error);
+  if (delivery.kind === 'error') return { kind: 'error', path: filePath, error: delivery.error };
   if (delivery.kind === 'parts') {
     if (delivery.bumpImageCount) ctx.imagesReadCount = (ctx.imagesReadCount ?? 0) + 1;
+    return { kind: 'parts', displayPath: filePath, parts: delivery.parts };
+  }
+  return {
+    kind: 'inline',
+    displayPath: filePath,
+    content: delivery.content,
+    truncated: delivery.truncated,
+  };
+}
+
+async function _executeReadFile(workspaceId, args, ctx = {}) {
+  const norm = normalizeReadFilePaths(args && args.path);
+  if (!norm.ok) return _toolErr(norm.error);
+
+  const fileResults = [];
+  const mediaParts = [];
+  let hasMediaParts = false;
+
+  for (const filePath of norm.paths) {
+    const one = await _readOneAgentFile(workspaceId, filePath, ctx);
+    if (one.kind === 'error') {
+      fileResults.push({ path: one.path, success: false, error: one.error });
+      continue;
+    }
+    if (one.kind === 'parts') {
+      hasMediaParts = true;
+      fileResults.push({ path: one.displayPath, success: true });
+      mediaParts.push(...one.parts);
+      continue;
+    }
+    fileResults.push({
+      path: one.displayPath,
+      success: true,
+      content: one.content,
+      ...(one.truncated ? { truncated: true } : {}),
+    });
+  }
+
+  const payload = {
+    success: fileResults.every(f => f.success),
+    files: fileResults,
+  };
+
+  if (hasMediaParts) {
     return [
-      { type: 'text', text: JSON.stringify({ success: true, message: `File loaded: ${args.path}` }) },
-      ...delivery.parts,
+      { type: 'text', text: JSON.stringify(payload) },
+      ...mediaParts,
     ];
   }
-  return JSON.stringify({
-    success: true,
-    path: args.path,
-    content: delivery.content,
-    ...(delivery.truncated ? { truncated: true } : {}),
-  });
+  return JSON.stringify(payload);
 }
 
 function _executeWriteFile(workspaceId, args) {

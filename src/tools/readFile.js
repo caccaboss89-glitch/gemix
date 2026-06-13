@@ -1,6 +1,6 @@
 // src/tools/readFile.js
 //
-// Tool used by the main brain to pull a specific file from chat history
+// Tool used by the main brain to pull specific file(s) from chat history
 // into the conversation via aiFileDelivery (native input_file/input_image
 // parts, or inline numbered text for text/code). Scope: history only —
 // build sub-agent uses the same policy in ai/buildAgent.js for /workspace/
@@ -13,6 +13,20 @@ const { ensureUserSkeleton, resolveStorageId, getHistoryDir } = require('../util
 const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
 const { mainReadFileBlockedMessage } = require('../config/nonReadableExts');
 const { mimeForExtension } = require('../config/mimeExtensions');
+
+function normalizeReadFilePaths(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, error: 'path must be a non-empty array of strings.' };
+  }
+  const paths = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || !item.trim()) {
+      return { ok: false, error: 'Each path must be a non-empty string.' };
+    }
+    paths.push(item.trim());
+  }
+  return { ok: true, paths };
+}
 
 function _resolveHistoryPath(rawPath, userCtx) {
   if (typeof rawPath !== 'string') return { ok: false, reason: 'Missing path.' };
@@ -33,21 +47,15 @@ function _resolveHistoryPath(rawPath, userCtx) {
   return { ok: true, abs, displayPath: `history/${rel.replace(/\\/g, '/')}` };
 }
 
-async function readFileTool(filePath, userCtx, responseCtx) {
-  if (responseCtx.imagesReadCount === undefined) responseCtx.imagesReadCount = 0;
-
-  if (!resolveStorageId(userCtx)) {
-    return { success: false, error: 'Could not resolve storage ID for this context.' };
-  }
-  ensureUserSkeleton(userCtx);
-
+async function _readOneHistoryFile(filePath, userCtx, responseCtx) {
   const r = _resolveHistoryPath(filePath, userCtx);
-  if (!r.ok) return { success: false, error: `Access denied: ${r.reason}` };
+  if (!r.ok) return { kind: 'error', path: filePath, error: `Access denied: ${r.reason}` };
   const { abs, displayPath } = r;
 
   if (!fs.existsSync(abs)) {
     return {
-      success: false,
+      kind: 'error',
+      path: displayPath,
       error: `File not found at path "${displayPath}". Use the filename from the [Attachment: ...] tag.`,
     };
   }
@@ -55,17 +63,20 @@ async function readFileTool(filePath, userCtx, responseCtx) {
   let stat;
   try { stat = fs.statSync(abs); }
   catch (err) {
-    if (err.code === 'EACCES') return { success: false, error: `Access denied to file "${displayPath}".` };
-    return { success: false, error: `Cannot read file "${displayPath}": ${err.message}` };
+    if (err.code === 'EACCES') {
+      return { kind: 'error', path: displayPath, error: `Access denied to file "${displayPath}".` };
+    }
+    return { kind: 'error', path: displayPath, error: `Cannot read file "${displayPath}": ${err.message}` };
   }
 
-  if (stat.isDirectory()) return { success: false, error: 'Path is a directory, not a file.' };
+  if (stat.isDirectory()) {
+    return { kind: 'error', path: displayPath, error: 'Path is a directory, not a file.' };
+  }
 
   const now = new Date();
   try { fs.utimesSync(abs, now, now); } catch { /* ignore */ }
 
   const ext = path.extname(abs).toLowerCase();
-
   const result = await deliverReadFileFromPath({
     absPath: abs,
     displayPath,
@@ -74,20 +85,66 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     blockedMessage: mainReadFileBlockedMessage(ext),
   });
 
-  if (result.kind === 'error') return { success: false, error: result.error };
+  if (result.kind === 'error') return { kind: 'error', path: displayPath, error: result.error };
   if (result.kind === 'parts') {
     if (result.bumpImageCount) responseCtx.imagesReadCount++;
-    return [
-      { type: 'text', text: JSON.stringify({ success: true, message: `File loaded: ${displayPath}` }) },
-      ...result.parts,
-    ];
+    return { kind: 'parts', displayPath, parts: result.parts };
   }
   return {
-    success: true,
-    path: displayPath,
+    kind: 'inline',
+    displayPath,
     content: result.content,
-    ...(result.truncated ? { truncated: true } : {}),
+    truncated: result.truncated,
   };
 }
 
-module.exports = { readFileTool };
+async function readFileTool(paths, userCtx, responseCtx) {
+  if (responseCtx.imagesReadCount === undefined) responseCtx.imagesReadCount = 0;
+
+  const norm = normalizeReadFilePaths(paths);
+  if (!norm.ok) return { success: false, error: norm.error };
+
+  if (!resolveStorageId(userCtx)) {
+    return { success: false, error: 'Could not resolve storage ID for this context.' };
+  }
+  ensureUserSkeleton(userCtx);
+
+  const fileResults = [];
+  const mediaParts = [];
+  let hasMediaParts = false;
+
+  for (const filePath of norm.paths) {
+    const one = await _readOneHistoryFile(filePath, userCtx, responseCtx);
+    if (one.kind === 'error') {
+      fileResults.push({ path: one.path, success: false, error: one.error });
+      continue;
+    }
+    if (one.kind === 'parts') {
+      hasMediaParts = true;
+      fileResults.push({ path: one.displayPath, success: true });
+      mediaParts.push(...one.parts);
+      continue;
+    }
+    fileResults.push({
+      path: one.displayPath,
+      success: true,
+      content: one.content,
+      ...(one.truncated ? { truncated: true } : {}),
+    });
+  }
+
+  const payload = {
+    success: fileResults.every(f => f.success),
+    files: fileResults,
+  };
+
+  if (hasMediaParts) {
+    return [
+      { type: 'text', text: JSON.stringify(payload) },
+      ...mediaParts,
+    ];
+  }
+  return payload;
+}
+
+module.exports = { readFileTool, normalizeReadFilePaths };

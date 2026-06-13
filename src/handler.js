@@ -10,11 +10,11 @@
 //      aiFileDelivery.js: native `input_image` / `input_file` parts via
 //      public URLs, or [Attachment] tags only (raw binaries).
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in three phases:
-//      (1) standard tools parallel, (2) delivery parallel, (3) voice-to-self last - repeat
+//      (1) standard tools parallel, (2) delivery parallel, (3) voice last - repeat
 //      until the model returns the final response or the round budget is
 //      reached. While deliverable files exist (and on the first Discord
 //      thread turn) the final reply is structured JSON (response /
-//      attachments / conversation_title) enforced via response_format.
+//      attachments / conversation_title) enforced via text.format.
 //   5. Apply the research badge (real web/X search counts) and ship the
 //      reply back to the platform.
 
@@ -340,7 +340,7 @@ async function handleMessage(ctx) {
     // Structured-reply state, recomputed before every AI call:
     //   - deliverable files exist -> optional `attachments` field,
     //   - first Discord thread turn -> required `conversation_title`.
-    // When neither applies the reply stays plain text (no response_format).
+    // When neither applies the reply stays plain text (no text.format).
     const computeDeliveryState = () => {
       const bufferFiles = (responseCtx.attachments || []).map(a => a.name).filter(Boolean);
       return {
@@ -429,7 +429,7 @@ async function handleMessage(ctx) {
       reloadLongTermMemory(ctx, ui);
 
       // Delivery / structured-reply state for this round: the prompt, the
-      // delivery tool parameters, and the response_format all follow it.
+      // delivery tool parameters, and text.format all follow it.
       const deliveryState = computeDeliveryState();
       ctx.deliveryState = deliveryState;
       ctx.isFirstTurn = deliveryState.includeTitle;
@@ -464,7 +464,7 @@ async function handleMessage(ctx) {
 
         const orderedCalls = assistantMsg.tool_calls;
         const allowedToolNames = new Set(roundTools.map(t => t.function?.name).filter(Boolean));
-        const phases = partitionHandlerToolCalls(orderedCalls, userCtx);
+        const phases = partitionHandlerToolCalls(orderedCalls);
         const resultsById = new Map();
 
         const runPhase = async (batch, parallel) => {
@@ -545,7 +545,7 @@ async function handleMessage(ctx) {
         continue;
       }
 
-      // Structured replies (response_format active) carry the user-facing
+      // Structured replies (text.format active) carry the user-facing
       // text in `response`, plus optional attachments and the Discord title.
       let finalAttachments = [];
       let text;

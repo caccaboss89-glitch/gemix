@@ -16,7 +16,7 @@ files are read-only under `/skills/ffmpeg/`.
   extract/remove audio, change volume, GIF, soft & burn-in subtitles, mixed-codec
   concat, frame-rate, speed up/down, text & image overlays, rotate, loudness
   normalize, contact sheet/storyboard, slideshow, social-media crops, and more.
-  Read it with `read_file /skills/ffmpeg/references/recipes.md` when the core
+  Read it with `read_file` `path: ["/skills/ffmpeg/references/recipes.md"]` when the core
   recipes below don't cover the task, or for complex `filter_complex`, multi-input,
   or advanced stream-mapping work.
 
@@ -74,7 +74,7 @@ mv "$TMP_OUTPUT" "$OUTPUT"
 - Use only local `/workspace/` paths with `-i`; never a user-supplied URL.
 - Never delete the input file unless the user explicitly asks.
 - After generating output, verify with `ffprobe` (and, when content matters,
-  `read_file` the result).
+  `read_file` with `path: ["/workspace/output.ext"]`).
 - Clean up any temp files/dirs after a successful operation.
 
 ## Inspect first
@@ -325,7 +325,7 @@ would make the video clearer or more polished and the task didn't supply one, ru
 8. Web-compatible? H.264 + AAC + `yuv420p` + `+faststart`.
 9. Frame-accurate cut? Output-side `-ss`, re-encode.
 10. Heavy encode? Raise `timeout_ms`, add `-threads 4`, pick a sane preset/CRF.
-11. Verify output with `ffprobe` (and `read_file` it when content matters).
+11. Verify output with `ffprobe` (and `read_file` with `path: ["/workspace/output.ext"]` when content matters).
 
 ## Agent behavior rules
 
@@ -342,10 +342,10 @@ would make the video clearer or more polished and the task didn't supply one, ru
    into a filter string — use `textfile=` for user-supplied text.
 8. Use `-n` unless overwrite was explicitly requested; write to a new output path.
 9. Run each multi-line recipe as one bash command (shell state doesn't persist).
-10. Verify the output with `ffprobe`; for content, `read_file` the result.
+10. Verify the output with `ffprobe`; for content, `read_file` with `path: ["/workspace/output.ext"]`.
 11. If ffmpeg fails, read the error and adjust — do not retry the same command.
-12. For complex `filter_complex`, multi-input, or advanced tasks, read
-    `references/recipes.md`.
+12. For complex `filter_complex`, multi-input, or advanced tasks, `read_file`
+    `path: ["/skills/ffmpeg/references/recipes.md"]`.
 
 ## References
 

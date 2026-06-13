@@ -9,6 +9,8 @@
 //     users/
 //       <storageId>/                  ← chat history (WA jid/group, Discord thread id)
 //         history/
+//         history_meta.json
+//         voice_transcripts/
 //         voice_counts.json
 //       user_<sanitized>/             ← build workspaces (workspaceId user:…)
 //       group_<sanitized>/             ← build workspaces (workspaceId group:…)

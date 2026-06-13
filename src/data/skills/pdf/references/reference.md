@@ -54,7 +54,7 @@ with pdfplumber.open("/workspace/complex_table.pdf") as pdf:
         "intersection_tolerance": 15,
     })
 
-    # Visual debugging: render the detected layout to inspect with read_file
+    # Visual debugging: render the detected layout, then read_file path: ["/workspace/debug_layout.png"]
     page.to_image(resolution=150).save("/workspace/debug_layout.png")
 ```
 

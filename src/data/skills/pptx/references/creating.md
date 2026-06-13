@@ -95,23 +95,23 @@ python /skills/pptx/scripts/render_slides.py /workspace/presentation.pptx
 1. **`inspect_pptx.py` must pass** before you deliver. If it fails with
    "no slide sets slide.background", restore the template's `addChrome()` on
    every slide function — do not deliver.
-2. `read_file` **only** `contact-sheet.jpg` first. If slides look white but the
+2. One `read_file` with `path: ["/workspace/contact-sheet.jpg"]` first. If slides look white but the
    brief was dark-themed, backgrounds failed — fix the `.js`, re-run node +
    inspect + render (one pass).
-3. `read_file` at most **1–3** individual `slide-NN.jpg` files where the contact
-   sheet shows a defect. **Never** read every slide — that wastes rounds and tokens.
+3. Add at most **1–3** `slide-NN.jpg` paths to the same `read_file` call where the contact
+   sheet shows a defect. **Never** batch every slide — that wastes rounds and tokens.
 4. At most **two** render cycles total unless the deck is still broken.
 
 ### Round budget (typical deck: 12–20 tool calls, not 40+)
 
 | Once | Avoid |
 |------|--------|
-| `read_file` this creating guide + SKILL.md | Re-reading the same guides |
+| One `read_file` `path: ["/skills/pptx/SKILL.md", "/skills/pptx/references/creating.md"]` | Re-reading the same guides |
 | One `search_templates.py` query (best keywords) | Second search + `ls`/`grep` templates |
 | One `web_search` for facts | Extra research passes for subtopics |
 | One `web_search` for images + `download_file` if photos needed | Third overlapping search |
 | `cp` template → `edit_file` content → `node` → inspect → render | `write_file` 500+ line rewrite; `tail`/`wc` on templates |
-| `read_file` contact-sheet only (+ 1–3 slides if needed) | `read_file` all `slide-*.jpg`; python loops dumping every slide's text |
+| One `read_file` `path: ["/workspace/contact-sheet.jpg", …]` (+ up to 3 slide JPEGs) | Batching all `slide-*.jpg`; python loops dumping every slide's text |
 | One targeted `edit_file` + re-render if QA fails | `sed -i` bulk edits on `.js`; 3+ full re-renders |
 
 ---

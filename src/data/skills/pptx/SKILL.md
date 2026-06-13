@@ -17,8 +17,8 @@ read-only under `/skills/pptx/`.
 | The user attached/referenced a `.pptx` to change | Editing — read [references/editing.md](references/editing.md) |
 | Just need to read/extract text from a `.pptx` | See "Reading a presentation" below |
 
-Read the relevant companion file with `read_file` (e.g.
-`read_file /skills/pptx/references/creating.md`) when the task calls for it.
+Read the relevant companion file with one `read_file` call (e.g.
+`path: ["/skills/pptx/references/creating.md"]`) when the task calls for it.
 
 ## Companion files
 
@@ -41,7 +41,7 @@ Read the relevant companion file with `read_file` (e.g.
 
 `read_file` parses `.pptx` natively for **understanding**. For **exact** text/data
 or programmatic edits, use `python-pptx` and print what you need. To QA the visual
-result, render to images first (see below) and `read_file` the PNG/JPEG.
+result, render to images first (see below) and `read_file` with `path: ["/workspace/contact-sheet.jpg", …]`.
 
 When you need a deck's exact text/data (to transform, copy, or summarize it),
 extract it with `python-pptx`; do not retype what you think it says.
@@ -124,10 +124,10 @@ python /skills/pptx/scripts/render_slides.py /workspace/output.pptx
 ```
 
 `inspect_pptx.py` must exit 0 (every slide needs `slide.background` for dark
-themes — otherwise PowerPoint shows white with pale text). Then `read_file`
-**only** `contact-sheet.jpg` to scan the deck. Open individual `slide-NN.jpg`
-files only where the contact sheet shows a defect (max 1–3 slides). Do **not**
-`read_file` every slide — that burns rounds without improving quality.
+themes — otherwise PowerPoint shows white with pale text). Then one `read_file`
+with `path: ["/workspace/contact-sheet.jpg"]` to scan the deck. Add individual
+`slide-NN.jpg` paths to the same call only where the contact sheet shows a defect
+(max 1–3 slides). Do **not** batch every slide — that burns rounds without improving quality.
 
 Look for: **low contrast** (light text on white — fix backgrounds/palette);
 text overflow; overlaps; bad margins; placeholder text; inconsistent styling.

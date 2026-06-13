@@ -199,6 +199,6 @@ Then render and inspect (see SKILL.md "Visual QA"):
 python /skills/pptx/scripts/render_slides.py /workspace/output.pptx
 ```
 
-`read_file` the `contact-sheet.jpg`, then scan each slide for leftover template
+`read_file` with `path: ["/workspace/contact-sheet.jpg"]`, then scan each slide for leftover template
 text, overflow, overlaps, and broken layouts. Fix, re-save, and re-render until
 a full pass is clean.

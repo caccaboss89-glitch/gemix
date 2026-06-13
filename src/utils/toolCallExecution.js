@@ -2,12 +2,10 @@
 //
 // Shared helpers for ordering and batching tool calls within one model turn.
 
-const { resolveActiveMemberByName } = require('../config/members');
 const {
   MAX_GENERATE_IMAGE_PER_ROUND,
   MAX_GENERATE_VIDEO_PER_ROUND,
 } = require('../config/constants');
-const { normalizePhoneToJid } = require('../tools/whatsappSender');
 
 function parseToolCallArgs(tc) {
   const raw = JSON.parse(tc.function.arguments || '{}');
@@ -22,28 +20,8 @@ function parseToolCallArgs(tc) {
  * Voice message to the current chat ends the turn; it must run after all other
  * tools in the same round so preceding tools still execute.
  */
-function isSendVoiceMessageToCurrentUser(tc, userCtx) {
-  if (!tc?.function || tc.function.name !== 'send_voice_message') return false;
-  let args;
-  try {
-    args = parseToolCallArgs(tc);
-  } catch {
-    return false;
-  }
-
-  const recipientName = args.recipient?.name || args.recipientName;
-  const recipientPhone = args.recipient?.phone || args.recipientPhone;
-  if (!recipientName && !recipientPhone) return true;
-
-  if (recipientName) {
-    const resolved = resolveActiveMemberByName(recipientName);
-    if (resolved.ok && resolved.member.wa === userCtx.waJid) return true;
-  }
-  if (recipientPhone && userCtx.waJid) {
-    const normalized = normalizePhoneToJid(recipientPhone);
-    if (normalized === userCtx.waJid) return true;
-  }
-  return false;
+function isSendVoiceMessageToCurrentUser(tc) {
+  return tc?.function?.name === 'send_voice_message';
 }
 
 const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
@@ -53,21 +31,18 @@ const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
  * @param {object} userCtx
  * @returns {{ phase1: object[], phase2: object[], phase3: object[] }}
  *   phase1: standard tools (parallel) — build, generate_*, read_file, …
- *   phase2: outbound delivery (parallel) — send_email, send_whatsapp, voice to others
- *   phase3: send_voice_message to current chat only (sequential; can end the turn)
+ *   phase2: outbound delivery (parallel) — send_email, send_whatsapp_message
+ *   phase3: send_voice_message (current chat only; sequential; can end the turn)
  */
-function partitionHandlerToolCalls(toolCalls, userCtx) {
+function partitionHandlerToolCalls(toolCalls) {
   const phase1 = [];
   const phase2 = [];
   const phase3 = [];
   for (const tc of toolCalls) {
     const name = tc.function?.name;
-    if (isSendVoiceMessageToCurrentUser(tc, userCtx)) {
+    if (isSendVoiceMessageToCurrentUser(tc)) {
       phase3.push(tc);
-    } else if (
-      HANDLER_DELIVERY_TOOLS.has(name)
-      || (name === 'send_voice_message')
-    ) {
+    } else if (HANDLER_DELIVERY_TOOLS.has(name)) {
       phase2.push(tc);
     } else {
       phase1.push(tc);

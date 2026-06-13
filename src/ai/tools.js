@@ -84,6 +84,9 @@ function validateToolArgs(args, toolDef) {
     const propSchema = props[key];
     if (!propSchema) continue; // unknown extra props are tolerated
     if (value === undefined || value === null) continue;
+    if (propSchema.type === 'array' && required.includes(key) && Array.isArray(value) && value.length === 0) {
+      return `Argument "${key}" must be a non-empty array.`;
+    }
     if (!_matchesType(value, propSchema.type)) {
       return `Argument "${key}" has wrong type (expected ${propSchema.type}).`;
     }
@@ -126,9 +129,13 @@ const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
-  description: 'Read a file from chat history by its [Attachment: filename] tag (text/code, images, audio, video, PDF, Office, archives).',
+  description: 'Read one or more files from chat history by their [Attachment: filename] tags (text/code, images, audio, video, PDF, Office, archives).',
   properties: {
-    path: { type: 'string', description: 'Filename from an [Attachment: …] tag in history (e.g. "clip.mp4").' },
+    path: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Filenames from [Attachment: …] tags in history (e.g. ["notes.txt", "clip.mp4"]). Pass multiple paths to read them in one call.',
+    },
   },
   required: ['path'],
 });
@@ -216,7 +223,7 @@ const TOOL_GENERATE_IMAGE = makeTool({
   properties: {
     prompt: {
       type: 'string',
-      description: 'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them ONLY as <IMAGE_0>, <IMAGE_1>, <IMAGE_2> in array order - never by filename.',
+      description: 'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them ALWAYS as <IMAGE_0>, <IMAGE_1>, <IMAGE_2> in array order - never by filename.',
     },
     reference_images: {
       type: 'array',
@@ -238,7 +245,7 @@ const TOOL_GENERATE_VIDEO = makeTool({
   properties: {
     prompt: {
       type: 'string',
-      description: 'Video description: subject, action, camera movement, style, lighting. When passing reference images, refer to them ONLY as <IMAGE_0>, <IMAGE_1>, ... in array order - never by filename.',
+      description: 'Video description: subject, action, camera movement, style, lighting. When passing reference images, refer to them ALWAYS as <IMAGE_0>, <IMAGE_1>, ... in array order - never by filename.',
     },
     reference_images: {
       type: 'array',
@@ -259,8 +266,7 @@ const TOOL_GENERATE_VIDEO = makeTool({
 // Speech tags interpreted natively by xAI TTS. GemiX writes them directly
 // in the voice text (woven in, never narrated).
 const VOICE_TEXT_DESC =
-  'Text to speak (max 1000 chars), in the language you want. No emoji. '
-  + 'Make the delivery lively and human by weaving xAI speech tags into the text where natural (never narrate them). '
+  'Text to speak (max 1000 chars), in the language you want. No emoji. Always use tags for a better and more human result. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
 

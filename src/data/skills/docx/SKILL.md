@@ -21,13 +21,13 @@ For reports, memos with visuals, covers, and product sheets, **embed images**
 
 `generate_image` / `generate_video` are **not** available inside build—only staged
 files, your renders, or web search. After adding images, run `render_doc.py` and
-`read_file` the JPEG grid to catch overflow or bad placement.
+`read_file` with `path: ["/workspace/doc_pages.jpg"]` to catch overflow or bad placement.
 
 ## Pitfalls (read before delivery)
 
 - **Round budget**: typical report **12–22** tool calls — one `web_search`
   for facts, optional one `web_search` for images (`download_file` the URLs), one QA
-  render (`render_doc.py` → `read_file` grid); fix once, re-render at most once.
+  render (`render_doc.py` → `read_file` `path: ["/workspace/doc_pages.jpg"]`); fix once, re-render at most once.
   No Python loops dumping every paragraph unless debugging a specific bug.
 - **Illustrated reports** (sport, history, product…): ≥1 `ImageRun` unless user
   asked text-only. No photos in `/workspace/` → `web_search` for images, then
@@ -71,8 +71,8 @@ same. This skill uses a small, deliberate toolchain — pick by task:
 - `scripts/soffice.py` — internal helper imported by the conversion/render/
   accept scripts to launch LibreOffice; you never run it directly.
 
-Read `references/editing.md` with `read_file` (`read_file
-/skills/docx/references/editing.md`) only when the task is about an existing
+Read `references/editing.md` with one `read_file` call — `path:
+["/skills/docx/references/editing.md"]` — only when the task is about an existing
 document.
 
 ## Inspecting a document (read vs. extract)
@@ -85,8 +85,8 @@ what you saw:
   file.docx` (add `--text` for the full paragraph list, `--tables` for full
   table dumps).
 - Visual layout: `python /skills/docx/scripts/render_doc.py file.docx` → a
-  labeled page grid you then `read_file` as an image, or `convert_doc.py --to
-  pdf` and `read_file` the PDF.
+  labeled page grid you then `read_file` with `path: ["/workspace/doc_pages.jpg"]`, or `convert_doc.py --to
+  pdf` and `read_file` with `path: ["/workspace/file.pdf"]`.
 
 Read-vs-extract rule: use `read_file` or the scripts above to *understand* a
 document; to copy its exact text/values into another file, pull them with
@@ -373,9 +373,10 @@ from scratch with docx-js. See `references/editing.md` for the full template wor
 
 ## Editing or filling an existing document
 
-When the user attaches a `.docx`/`.dotx`, **read `references/editing.md` and follow it** —
-the rule is to edit/fill the supplied file (keeping its design) rather than
-rebuilding it from scratch.
+When the user attaches a `.docx`/`.dotx`, **read it with one `read_file` call** —
+`path: ["/skills/docx/references/editing.md"]` — and follow that guide. The rule
+is to edit/fill the supplied file (keeping its design) rather than rebuilding it
+from scratch.
 
 ## Visual verification (before delivering)
 
@@ -384,23 +385,23 @@ the structure alone, and do not rely on `read_file` alone for pixel-perfect QA:
 
 ```bash
 python /skills/docx/scripts/render_doc.py /workspace/output.docx
-# then: read_file /workspace/doc_pages.jpg
+# then: read_file path: ["/workspace/doc_pages.jpg"]
 ```
 
 This catches overflowing tables, wrong fonts, misplaced images, empty
 placeholders, and bad page breaks that are invisible in the raw structure. For a
-single long document, `convert_doc.py --to pdf` then `read_file` the PDF also
+single long document, `convert_doc.py --to pdf` then `read_file` with `path: ["/workspace/file.pdf"]` also
 works. **One** page grid is enough — do not re-render more than twice.
 
 ## Round budget (typical report: 12–22 tool calls)
 
 | Once | Avoid |
 |------|--------|
-| `read_file` SKILL.md (+ editing.md only if filling/editing an attachment) | Re-reading the same guides |
+| One `read_file` `path: ["/skills/docx/SKILL.md", "/skills/docx/references/editing.md"]` (omit editing.md when not filling/editing an attachment) | Re-reading the same guides |
 | One `web_search` for facts | Multiple overlapping research calls |
 | One `web_search` for images + `download_file` if visuals needed | Extra image-only searches |
 | `inspect_docx.py` before deliver on illustrated docs | Skipping image-count check |
-| `render_doc.py` → `read_file` the JPEG grid once | Per-page `read_file` loops; 3+ renders |
+| `render_doc.py` → one `read_file` `path: ["/workspace/doc_pages.jpg"]` | Per-page `read_file` loops; 3+ renders |
 | `edit_file` / `fill_template.js` surgical fixes | Rebuilding the whole document from memory |
 
 Match heading/body contrast to the template (dark cover → light text on dark fill;

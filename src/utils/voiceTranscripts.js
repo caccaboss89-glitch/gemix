@@ -9,9 +9,9 @@
 // historySync.js).
 //
 // These files live alongside the chat history under
-// data/users/<storageId>/voice_transcripts/ (not in .tempfiles) because they
-// are part of history: they persist as long as their voice file is in history
-// and are pruned by pruneOrphanVoiceTranscripts when it is dropped.
+// data/users/<storageId>/voice_transcripts/. They persist as long as their
+// voice file is in history and are pruned by pruneOrphanVoiceTranscripts when
+// it is dropped.
 
 const fs = require('fs');
 const path = require('path');

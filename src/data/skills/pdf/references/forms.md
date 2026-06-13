@@ -82,7 +82,7 @@ fix `field_values.json` and retry.
 ```bash
 python /skills/pdf/scripts/convert_pdf_to_images.py /workspace/output.pdf /workspace/verify/
 ```
-Then `read_file` the images in `/workspace/verify/` to confirm each value
+Then one `read_file` call with all verify PNGs in `path` (e.g. `["/workspace/verify/page-1.png", …]`) to confirm each value
 appears in the correct field.
 
 # Non-fillable fields
@@ -186,7 +186,7 @@ usable text labels (e.g. text shows as "(cid:X)" patterns).
 ```bash
 python /skills/pdf/scripts/convert_pdf_to_images.py /workspace/form.pdf /workspace/images/
 ```
-Then `read_file` each page image to see it.
+Then one `read_file` with all page images in `path` (e.g. `["/workspace/images/page_1.png", …]`).
 
 ### B.2: Initial field identification
 From each page image, get rough estimates of field locations: labels, entry
@@ -206,7 +206,7 @@ crop = img.crop((50, 120, 350, 200))
 crop.save("/workspace/crops/name_field.png")
 ```
 
-`read_file` the cropped image and determine precise coordinates:
+`read_file` with `path: ["/workspace/crops/name_field.png"]` and determine precise coordinates:
 1. The exact pixel where the entry area begins (after the label)
 2. Where the entry area ends (before the next field or edge)
 3. The top and bottom of the entry line/box
@@ -243,7 +243,7 @@ Use `image_width`/`image_height` (this signals image coordinates):
 Optional: render your boxes onto a page image to eyeball them before filling:
 ```bash
 python /skills/pdf/scripts/create_validation_image.py 1 /workspace/fields.json /workspace/images/page_1.png /workspace/validation_page_1.png
-# then: read_file /workspace/validation_page_1.png
+# then: read_file path: ["/workspace/validation_page_1.png"]
 ```
 
 ### B.5: Validate bounding boxes
@@ -283,7 +283,7 @@ python /skills/pdf/scripts/fill_pdf_form_with_annotations.py /workspace/form.pdf
 ```bash
 python /skills/pdf/scripts/convert_pdf_to_images.py /workspace/output.pdf /workspace/verify/
 ```
-`read_file` the images and check text placement. If text is mispositioned:
+`read_file` with all verify images in one `path` array and check text placement. If text is mispositioned:
 - Approach A: confirm you used PDF coordinates with `pdf_width`/`pdf_height`.
 - Approach B: confirm image dimensions match and the pixel coordinates are right.
 - Hybrid: confirm the image→PDF coordinate conversions are correct.

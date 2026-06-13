@@ -40,7 +40,7 @@ would make the PDF clearer or more professional.
   helper scripts in `scripts/` exist only for that workflow and are documented
   inside `references/forms.md`; ignore them unless you are filling a form.
 
-Read a companion file with `read_file` (e.g. `read_file /skills/pdf/references/forms.md`)
+Read a companion file with one `read_file` call (e.g. `path: ["/skills/pdf/references/forms.md"]`)
 only when the task calls for it.
 
 ## Read vs. extract
@@ -61,7 +61,7 @@ Command line: `pdftotext`, `pdftoppm`, `pdfimages`, `pdfinfo`, `pdftohtml`
 
 Not available: `qpdf`, `pdftk`, `pytesseract`/`tesseract`, ImageMagick, and
 JavaScript PDF libraries. Use the Python/poppler equivalents below. For a
-scanned/image-only PDF whose text is needed, `read_file` the PDF (OCR is done
+scanned/image-only PDF whose text is needed, `read_file` with `path: ["/workspace/file.pdf"]` (OCR is done
 server-side) instead of looking for a local OCR tool.
 
 ## Output requirements
@@ -78,9 +78,9 @@ server-side) instead of looking for a local OCR tool.
 
 | Once | Avoid |
 |------|--------|
-| `read_file` this SKILL.md | Re-reading guides |
+| One `read_file` `path: ["/skills/pdf/SKILL.md"]` | Re-reading guides |
 | One `web_search` for facts; optional one for images + `download_file` | Redundant research passes |
-| Build PDF script → `read_file` output PDF or page images once | Many partial drafts; retyping extracted text |
+| Build PDF script → one `read_file` `path: ["/workspace/output.pdf"]` or page PNGs batched in one call | Many partial drafts; retyping extracted text |
 | One fix pass if QA shows layout/contrast issues | Blind full rewrites |
 
 LaTeX PDFs use `pdflatex` in `/workspace/` (not this skill):
@@ -339,7 +339,7 @@ extraction, and rotation use `pypdf` (above), since `qpdf`/`pdftk` are absent.
 ## Scanned PDFs
 
 `pdftotext` returns little or nothing for image-only pages, and there is no
-local OCR engine. To get a scanned PDF's text, `read_file` the PDF (OCR runs
+local OCR engine. To get a scanned PDF's text, `read_file` with `path: ["/workspace/scan.pdf"]` (OCR runs
 server-side). Extract from the source where possible and fall back to that view
 only for genuinely image-only pages.
 
@@ -357,19 +357,20 @@ only for genuinely image-only pages.
 | Extract embedded images | pdfimages | `pdfimages -all input.pdf prefix` |
 | Render pages to images | pdftoppm / pdf2image | page snapshots |
 | Compress / optimize | ghostscript | `gs -dPDFSETTINGS=/ebook ...` |
-| OCR a scanned PDF | read_file | read_file the PDF, use the returned text |
+| OCR a scanned PDF | read_file | `path: ["/workspace/scan.pdf"]` — use the returned text |
 | Fill a PDF form | scripts (see references/forms.md) | follow `references/forms.md` |
 
 ## Visual verification
 
 After creating or editing a PDF (especially after filling a form), render the
-relevant pages to PNG in `/workspace/` and `read_file` them to confirm fonts,
+relevant pages to PNG in `/workspace/` and `read_file` them in one call (`path:
+["/workspace/verify-1.png", …]`) to confirm fonts,
 layout, image placement, and field values. Do NOT `read_file` the produced
 `.pdf` for QA — that re-ingests parsed text, not the real layout. Render to PNG:
 
 ```bash
 pdftoppm -png -r 300 -f 1 -l 1 /workspace/output.pdf /workspace/verify
-# then: read_file /workspace/verify-1.png
+# then: read_file path: ["/workspace/verify-1.png"]
 ```
 
 Render selectively (one page at a time) to keep it cheap. This catches

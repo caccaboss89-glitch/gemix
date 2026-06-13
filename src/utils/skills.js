@@ -74,8 +74,8 @@ function loadSkills() {
  * sub-agent's system prompt. Dynamic: whatever skill folders exist on disk
  * (each with a SKILL.md whose frontmatter carries name + description) show up
  * here, so there is no static list to maintain. The description tells the
- * agent WHEN a skill applies; it reads the full SKILL.md with read_file only
- * when it actually needs the recipe.
+ * agent WHEN a skill applies; it reads SKILL.md and any companion guides in one
+ * read_file call (path is a string array) only when it actually needs the recipe.
  *
  * Indentation matches the surrounding two-space prompt blocks.
  */
@@ -84,7 +84,7 @@ function formatSkillsForPrompt(skills) {
     return '<Skills empty="true"/>';
   }
   const lines = ['<Skills>'];
-  lines.push('    Each skill below is a guided workflow with helper scripts. When a task matches a skill\'s purpose, read its SKILL.md with read_file BEFORE writing your own code, then follow it.');
+  lines.push('    Each skill below is a guided workflow with helper scripts. When a task matches a skill\'s purpose, read its SKILL.md and any companion guides you need in one read_file call (path: string array) before writing your own code, then follow it.');
   for (const s of skills) {
     lines.push(`    <Skill name="${escapeXml(s.name)}" doc="/skills/${escapeXml(s.filename)}">${escapeXml(s.description)}</Skill>`);
   }

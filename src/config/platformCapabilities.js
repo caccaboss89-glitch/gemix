@@ -302,7 +302,7 @@ function buildLimitsLines(profile, opts = {}) {
   const toolNames = opts.toolNames || null;
   const cap = CAPS[profile];
   const has = (name) => _hasTool(toolNames, cap, name);
-  let historyLine = '- Chat history: [Attachment] tags only (use read_file if necessary).';
+  let historyLine = '- Chat history: [Attachment] tags only (read_file with path: ["filename", …] — batch multiple files in one call).';
   if (cap.historyTranscriptionNote) {
     historyLine += ' Your past voice notes also attach a native transcript on the current turn.';
   }
@@ -346,7 +346,7 @@ function buildRulesBlock(profile, opts = {}) {
   if (cap.isDiscord) sources.push('&lt;RulesContext&gt; in Conversation');
   sources.push('tool results');
 
-  let verifyTools = 'web/X search for facts, read_file for files';
+  let verifyTools = 'web/X search for facts, read_file (path array) for files';
   if (cap.isDiscord) {
     verifyTools += ', and RulesContext in this prompt for statute text';
   } else if (has(TOOL.READ_TASKS)) {

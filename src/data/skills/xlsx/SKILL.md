@@ -20,13 +20,13 @@ LibreOffice; you never run it directly.
 
 ## Inspecting a spreadsheet
 
-`read_file` parses `.xlsx`/`.xlsm` natively for **understanding**. For **exact**
+`read_file` `path: ["file.xlsx"]` parses `.xlsx`/`.xlsm` natively for **understanding** (batch multiple paths in one call if needed). For **exact**
 values, formulas, or transforms, load with `pandas` or `openpyxl` — never retype
 numbers you eyeballed:
 
 - `.xlsx` / `.xlsm`: use `pandas`/`openpyxl` and print what you need (`df.head()`,
 `df.info()`, cell values, sheet names).
-- `.csv` / `.tsv`: plain text — `read_file` works for a quick look, but load with
+- `.csv` / `.tsv`: plain text — `read_file` `path: ["file.csv"]` works for a quick look, but load with
 `pandas` for exact computation.
 
 ## Available tools
