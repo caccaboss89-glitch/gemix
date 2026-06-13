@@ -307,7 +307,7 @@ function validatePrompt(text, caseId) {
 
   const rules = prompt.match(/<Rules>[\s\S]*?<\/Rules>/);
   if (rules) {
-    for (const tag of ['Output', 'Style', 'Grounding', 'Visibility']) {
+    for (const tag of ['Output', 'Style', 'Grounding']) {
       const re = new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n    </${tag}>`);
       const m = rules[0].match(re);
       if (!m) {
@@ -320,6 +320,10 @@ function validatePrompt(text, caseId) {
           ISSUES.push({ caseId, msg: `Rules <${tag}> line missing 8-space indent: ${bl.slice(0, 40)}` });
         }
       }
+    }
+    // Visibility is a single-line tag at depth 1.
+    if (!/ {4}<Visibility>[^\n]+<\/Visibility>/.test(rules[0])) {
+      ISSUES.push({ caseId, msg: 'Rules <Visibility> line malformed' });
     }
   }
 

@@ -18,7 +18,8 @@ const PROFILE = {
 
 /** Tool names that may appear at runtime (before admin/active-member trimming). */
 const TOOL = {
-  WEB_X_SEARCH: 'web_x_search',
+  WEB_SEARCH: 'web_search',
+  X_SEARCH: 'x_search',
   READ_FILE: 'read_file',
   MUSIC_CREATOR: 'music_creator',
   GENERATE_IMAGE: 'generate_image',
@@ -36,7 +37,6 @@ const TOOL = {
   READ_RULES: 'read_server_rules',
   READ_MUSIC_STATS: 'read_music_stats',
   FORMAL_PDF: 'generate_formal_request_pdf',
-  SET_TITLE: 'set_conversation_title',
   BUG_REPORT: 'bug_report',
 };
 
@@ -52,7 +52,7 @@ const CAPS = {
     systemHistoryLabel: false,
     accountOwnerInHistory: true,
     tools: new Set([
-      TOOL.WEB_X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
@@ -71,7 +71,7 @@ const CAPS = {
     systemHistoryLabel: true,
     accountOwnerInHistory: false,
     tools: new Set([
-      TOOL.WEB_X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SEND_VOICE, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
@@ -90,7 +90,7 @@ const CAPS = {
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
     tools: new Set([
-      TOOL.WEB_X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SEND_VOICE, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
@@ -109,8 +109,8 @@ const CAPS = {
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
     tools: new Set([
-      TOOL.WEB_X_SEARCH, TOOL.READ_FILE,
-      TOOL.FORMAL_PDF, TOOL.SET_TITLE, TOOL.BUG_REPORT,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE,
+      TOOL.FORMAL_PDF, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
   },
@@ -132,14 +132,10 @@ function getCapabilities(ctx) {
 function toolUnavailableMessage(toolName, profile, opts = {}) {
   const cap = CAPS[profile] || CAPS[PROFILE.WA_DEDICATED_PRIVATE];
   const isActiveMember = opts.isActiveMember !== false;
-  const isFirstTurn = Boolean(opts.isFirstTurn);
 
   const memberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL, TOOL.READ_RULES, TOOL.READ_MUSIC_STATS];
   if (!isActiveMember && memberOnly.includes(toolName)) {
     return `"${toolName}" is only available to active server members on WhatsApp.`;
-  }
-  if (cap.isDiscord && toolName === TOOL.SET_TITLE && !isFirstTurn) {
-    return 'set_conversation_title is only available on the first message of a Discord thread.';
   }
 
   if (toolName === TOOL.UPDATE_MEMORY && cap.isDiscord) {
@@ -168,22 +164,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   if (toolName === TOOL.FORMAL_PDF && !cap.isDiscord) {
     return 'Formal PDF requests (generate_formal_request_pdf) are only available on Discord GemiX threads.';
   }
-  if (toolName === TOOL.SET_TITLE && !cap.isDiscord) {
-    return 'set_conversation_title is only available on Discord GemiX threads.';
-  }
   return `Tool "${toolName}" is not available in the current context.`;
-}
-
-/** Tool-result note after web_x_search adds images to the delivery buffer. */
-function buildWebSearchImagesNote(filenames, profile, opts = {}) {
-  const names = Array.isArray(filenames) ? filenames : [];
-  const base = `${names.length} cited image(s) were added to the delivery buffer, in the order referenced: `
-    + `${names.join(', ')}. Refer to them naturally; do not paste URLs or Markdown image syntax.`;
-  const cap = CAPS[profile];
-  if (cap && _hasTool(opts.toolNames || null, cap, TOOL.GENERATE_VIDEO)) {
-    return `${base} You may pass any of these filenames as reference_images in generate_video.`;
-  }
-  return base;
 }
 
 /** @param {Set<string>|null} toolNames - live tool names from getToolsForUser; null = legacy cap.tools */
@@ -213,6 +194,59 @@ function buildCallerAccessNote(profile, opts = {}) {
   return `Caller is not an active server member — not in your tool list this turn: ${missing.join(', ')}. Do not invoke them; if asked, explain active-member status is required.`;
 }
 
+/**
+ * Delivery / structured-reply instructions. Strictly state-dependent so the
+ * model never reads instructions for features that are not unlocked yet:
+ *   - no deliverables, no title -> only a heads-up that instructions appear
+ *     when files enter the buffer;
+ *   - deliverables and/or first Discord turn -> the structured JSON reply
+ *     contract for the fields that are actually in the schema this turn.
+ */
+function _buildDeliveryLines(delivery, has) {
+  const d = delivery || {};
+  const active = Boolean(d.active);
+  const includeTitle = Boolean(d.includeTitle);
+  const lines = [];
+
+  if (!active) {
+    lines.push(
+      '- Tools that produce files push them into a delivery buffer. When files are available for delivery, the system adds the delivery instructions and parameters you need in later rounds.',
+    );
+  } else {
+    let line = '- Deliverable files exist, so your final reply is structured JSON: put the user-facing text in `response`'
+      + (includeTitle ? ' and the thread title in `conversation_title`' : '')
+      + '. To send files in THIS chat, optionally list them in `attachments` (delivery-buffer filenames and/or public https URLs, e.g. images from web/X search). '
+      + 'Omit `attachments` entirely if you have nothing to send.';
+    const bufferFiles = Array.isArray(d.bufferFiles) ? d.bufferFiles : [];
+    if (bufferFiles.length > 0) {
+      line += ` Delivery buffer now: ${bufferFiles.join(', ')}.`;
+    }
+    lines.push(line);
+    const deliveryTools = [];
+    if (has(TOOL.SEND_WHATSAPP)) deliveryTools.push('send_whatsapp_message');
+    if (has(TOOL.SEND_EMAIL)) deliveryTools.push('send_email');
+    if (has(TOOL.SEND_VOICE)) deliveryTools.push('send_voice_message');
+    if (deliveryTools.length > 0) {
+      lines.push(
+        `- To deliver files to a recipient via ${deliveryTools.join(' / ')}, optionally list them in that tool's \`attachments\` parameter (same format). Omit the field if you have nothing to attach.`
+        + (has(TOOL.SEND_VOICE) ? ' send_voice_message can also attach files in the current chat together with the voice note.' : ''),
+      );
+    }
+  }
+
+  if (includeTitle && !active) {
+    lines.push(
+      '- First message of this thread: your final reply is structured JSON — put the user-facing text in `response` and a short topic title in `conversation_title`.',
+    );
+  } else if (includeTitle && active) {
+    lines.push(
+      '- First message of this thread: `conversation_title` is required (short topic title, user\'s language, no emoji).',
+    );
+  }
+
+  return lines;
+}
+
 function buildToolUsageLines(profile, opts = {}) {
   const toolNames = opts.toolNames || null;
   const hasCodeInterpreter = Boolean(opts.hasCodeInterpreter);
@@ -221,14 +255,10 @@ function buildToolUsageLines(profile, opts = {}) {
   const lines = [
     '- Execute tools silently. Reply once, after all of them complete.',
   ];
-  let buf = '- Files produced this turn ship automatically below your reply (delivery buffer). On delivery tools, includeAttachments (default true) controls whether buffered files are forwarded (all or none).';
+  lines.push(..._buildDeliveryLines(opts.delivery, has));
   if (has(TOOL.BUILD)) {
-    buf += ' BuildWorkspace paths are on disk until build delivers them—they are not in the buffer yet.';
+    lines.push('- BuildWorkspace paths are on disk until build delivers them—they are not in the delivery buffer yet.');
   }
-  if (has(TOOL.SEND_VOICE)) {
-    buf += ' For send_voice_message in the current chat this flag is ignored: buffered files always ship.';
-  }
-  lines.push(buf);
   lines.push('- Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.');
   if (has(TOOL.UPDATE_MEMORY)) {
     lines.push('- Use update_memory for long-term preferences. Never store transient context (current task, session state, temporary data).');
@@ -254,8 +284,8 @@ function buildCapabilitiesLines(profile, opts = {}) {
       `- File deliverables—documents, yt-dlp downloads, archives, batch transforms on user files, research-to-file, charts in files—use build${skillsHint}.`,
     );
   }
-  if (has(TOOL.WEB_X_SEARCH)) {
-    lines.push('- Image search on a topic (web_x_search with search_images).');
+  if (has(TOOL.WEB_SEARCH)) {
+    lines.push('- Image search on the web (web_search): the image URLs you find can be sent in chat, used as reference_images, or passed to build.');
   }
   if (!lines.length) return null;
 
@@ -271,14 +301,11 @@ function buildLimitsLines(profile, opts = {}) {
   const has = (name) => _hasTool(toolNames, cap, name);
   const lines = [
     `- Incoming media: audio > ${MAX_AUDIO_DURATION_S}s and video > ${MAX_VIDEO_DURATION_S}s are dropped and replaced inline with a "(too long, max Ns)" note next to the file tag. If the file is still attached, it passed the check - read it.`,
+    '- User files in history are attached natively next to their [Attachment] tags - read them directly. Files YOU produced in past turns are tags only: call read_file to view one.',
   ];
   if (cap.historyTranscriptionNote) {
     lines.push(
-      '- GemiX voice messages in chat history may include text inside a &lt;Transcription&gt; wrapper (history only—never echo it in your reply); otherwise use read_file on the attachment tag.',
-    );
-  } else {
-    lines.push(
-      '- History attachments are tags only; call read_file if you need to see a file not in this turn.',
+      '- Your voice messages in history: a transcript file named after the voice file (e.g. "voice.ogg.transcript.txt") is attached to the current request, so you always know what you said.',
     );
   }
   if (cap.isDiscord) {
@@ -300,8 +327,7 @@ function buildRulesBlock(profile, opts = {}) {
   if (has(TOOL.SEND_EMAIL)) deliveryTools.push('send_email');
   const proseRule =
     '- Write natural prose. Never quote raw tool syntax, JSON fragments, backend tags, error messages, stack traces, '
-    + '[Attachment: ...], &lt;Transcription&gt;, or &lt;FileContent&gt; '
-    + '(those appear only in history for past media; your files ship via the delivery buffer).';
+    + 'or [Attachment: ...] tags (those appear only in history for past media; your files ship only when you list them for delivery).';
   const style = [
     deliveryTools.length
       ? `- These rules apply to your final reply AND to any text you pass to delivery tools (${deliveryTools.join(', ')}).`
@@ -317,7 +343,7 @@ function buildRulesBlock(profile, opts = {}) {
   if (cap.isDiscord) sources.push('&lt;RulesContext&gt; in Conversation');
   sources.push('tool results');
 
-  let verifyTools = 'web_x_search for facts, read_file for files';
+  let verifyTools = 'web/X search for facts, read_file for files';
   if (cap.isDiscord) {
     verifyTools += ', and RulesContext in this prompt for statute text';
   } else if (has(TOOL.READ_TASKS)) {
@@ -375,6 +401,5 @@ module.exports = {
   buildCapabilitiesLines,
   buildLimitsLines,
   buildRulesBlock,
-  buildWebSearchImagesNote,
   buildCallerAccessNote,
 };

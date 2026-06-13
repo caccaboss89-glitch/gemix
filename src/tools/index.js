@@ -7,7 +7,6 @@
 // admin notification on uncaught failures. All individual tools are required here.
 
 const { getToolAccessError, validateToolArgs } = require('../ai/tools');
-const { webXSearch } = require('./webXSearch');
 const { generateImage, generateVideo } = require('./imagineGenerator');
 const { generateVoice, stripVocalTags } = require('./voiceMessage');
 const { stripOutgoingDeliveryArtifacts } = require('../utils/text');
@@ -39,6 +38,7 @@ const { toWhatsAppMediaArgs, toEmailAttachment, attachmentSize } = require('../u
 const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
 
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
+const { resolveDeliverySelection } = require('../utils/deliverySelection');
 const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/voiceCounter');
 const {
   PER_ROUND_TOOL_LIMITS,
@@ -222,69 +222,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
 
     switch (name) {
-      case 'web_x_search': {
-        const fullTeam = args.full_team === true;
-        const searchImages = args.search_images === true;
-        // The "consulting the research team" banner is only meaningful for
-        // the slow multi-agent team. The fast single-model gear is quick and
-        // stays silent (no intermediate message at all).
-        if (fullTeam && typeof userCtx.sendIntermediateNotification === 'function') {
-          const { buildResearchNotificationMessage } = require('../utils/notificationDedup');
-          await userCtx.sendIntermediateNotification('research', buildResearchNotificationMessage());
-        }
-        const searchResult = await webXSearch(args.prompt, { fullTeam, searchImages });
-        // Accumulate usage stats for the final message badge.
-        // Multiple web_x_search calls in the same round are additive.
-        if (searchResult._stats) {
-          if (!responseCtx.researchStats) {
-            responseCtx.researchStats = { webSources: 0, xPosts: 0 };
-          }
-          responseCtx.researchStats.webSources += searchResult._stats.webSources;
-          responseCtx.researchStats.xPosts += searchResult._stats.xPosts;
-        }
-        // Push any images the research returned to the delivery buffer, in the
-        // same order they are referenced in the report text. Dedup against the
-        // buffer so the names stay collision-free; if any image is renamed,
-        // rewrite images_note so the model is told the exact final names (it
-        // addresses them by name for reference_images / build attachments).
-        if (Array.isArray(searchResult._images) && searchResult._images.length > 0) {
-          const finalNames = [];
-          for (const img of searchResult._images) {
-            const finalName = pushBufferAttachment(responseCtx, {
-              name: img.name,
-              buffer: img.buffer,
-              mimetype: img.mimetype,
-            });
-            finalNames.push(finalName);
-          }
-          searchResult.image_filenames = finalNames;
-          const { resolveProfile, buildWebSearchImagesNote } = require('../config/platformCapabilities');
-          const { toolNamesToSet, getToolsForUser } = require('../ai/tools');
-          const prof = resolveProfile(userCtx);
-          const toolNames = toolNamesToSet(getToolsForUser(
-            Boolean(userCtx.isActiveMember),
-            Boolean(userCtx.isAdmin),
-            userCtx,
-          ));
-          searchResult.images_note = buildWebSearchImagesNote(finalNames, prof, { toolNames });
-        }
-        // Strip internal fields before returning to the AI (not part of the schema).
-        const { _stats: _ignored, _images: _ignored2, ...searchResultClean } = searchResult;
-        result = searchResultClean;
-        break;
-      }
-
-      case 'set_conversation_title': {
-        // Discord first-turn forced tool. Record the title on responseCtx; the
-        // handler picks it up to rename the thread. No user-visible output.
-        const title = stripOutgoingDeliveryArtifacts(
-          String(args.title || '').replace(/[\u0000-\u001F]/g, ''),
-        ).trim().substring(0, 100);
-        if (title) responseCtx.discordTitle = title;
-        result = { success: true, message: 'Conversation title set.' };
-        break;
-      }
-
       case 'generate_image': {
         if (typeof userCtx.sendIntermediateNotification === 'function') {
           await userCtx.sendIntermediateNotification(
@@ -374,8 +311,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           break;
         }
 
+        // Files explicitly selected by the model (delivery-buffer names or
+        // public URLs). The parameter only exists while deliverables exist.
+        const voiceSelection = await resolveDeliverySelection(args.attachments, responseCtx);
+        const voiceMissingNote = voiceSelection.missing.length > 0
+          ? ` Attachment(s) not resolved and NOT sent: ${voiceSelection.missing.join(', ')}.`
+          : '';
+
         if (hasRecipient) {
-          const includeAttachments = args.includeAttachments !== false;
           if (deliveryCtx.contactedWA.has(targetJid.jid)) {
             result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
             break;
@@ -386,8 +329,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             const voiceMedia = new MessageMedia('audio/ogg', voiceBuf.toString('base64'), 'voice.ogg');
             await sendWhatsAppDirect(targetJid.jid, voiceMedia, { sendAudioAsVoice: true });
 
-            // Send accumulated attachments with fallback support
-            if (includeAttachments && responseCtx.attachments.length > 0) {
+            // Send the selected attachments with fallback support
+            if (voiceSelection.attachments.length > 0) {
               const sendAttachment = async (att) => {
                 const m = toWhatsAppMediaArgs(att);
                 if (!m) {
@@ -400,7 +343,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
               };
 
               const sendResult = await sendAttachmentsWithFallback(
-                responseCtx.attachments,
+                voiceSelection.attachments,
                 sendAttachment,
                 { platform: 'whatsapp' }
               );
@@ -418,11 +361,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
               const attachmentsSentCount = sendResult.sent.length;
               const attachmentsFailedCount = sendResult.failed.length;
 
-              deliveryCtx.contactedWA.add(targetJid.jid);
-              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}${attachmentsFailedCount > 0 ? ` (${attachmentsFailedCount} via temporary links)` : ''}.` };
+              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}${attachmentsFailedCount > 0 ? ` (${attachmentsFailedCount} via temporary links)` : ''}.${voiceMissingNote}` };
             } else {
-              deliveryCtx.contactedWA.add(targetJid.jid);
-              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}.` };
+              result = { success: true, message: `Voice message sent successfully to ${targetJid.display}.${voiceMissingNote}` };
             }
 
             await incrementVoiceCount(userCtx, targetChatKey);
@@ -444,7 +385,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         const voiceBuffer = await generateVoice(cleanText);
         responseCtx.voiceBuffer = voiceBuffer;
         responseCtx.isVoiceOnly = true;
-        result = { success: true, message: 'Voice message generated successfully. Do not send any text message.' };
+        // Voice to the current chat ends the turn: only the files selected in
+        // `attachments` ship after the voice note.
+        responseCtx.attachments = voiceSelection.attachments;
+        result = {
+          success: true,
+          message: `Voice message generated successfully${voiceSelection.attachments.length > 0 ? ` with ${voiceSelection.attachments.length} attachment(s)` : ''}. Do not send any text message.${voiceMissingNote}`,
+        };
         await incrementVoiceCount(userCtx, chatKey);
         storeRecentVoiceText(userCtx.chatId || chatKey, stripVocalTags(cleanText));
         break;
@@ -523,7 +470,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       }
 
       case 'send_email': {
-        const includeAttachments = args.includeAttachments !== false;
         const targetEmail = _resolveTargetEmail(args, userCtx);
         if (targetEmail.error) { result = targetEmail.error; break; }
         if (deliveryCtx.contactedEmail.has(targetEmail.email)) {
@@ -531,13 +477,19 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           break;
         }
         deliveryCtx.contactedEmail.add(targetEmail.email);
+        // Files explicitly selected by the model (delivery-buffer names or
+        // public URLs). The parameter only exists while deliverables exist.
+        const emailSelection = await resolveDeliverySelection(args.attachments, responseCtx);
+        const emailMissingNote = emailSelection.missing.length > 0
+          ? ` Attachment(s) not resolved and NOT sent: ${emailSelection.missing.join(', ')}.`
+          : '';
         try {
           // Try to send with fallback support for attachments
-          if (includeAttachments && responseCtx.attachments.length > 0) {
+          if (emailSelection.attachments.length > 0) {
             // Validation step: separate sent vs failed (link-fallback)
             const sent = [];
             const failed = [];
-            for (const att of responseCtx.attachments) {
+            for (const att of emailSelection.attachments) {
               const emailAtt = toEmailAttachment(att);
               // Check if valid and not too large for direct email (arbitrary 15MB limit)
               const MAX_EMAIL_ATT_SIZE = 15 * 1024 * 1024;
@@ -575,8 +527,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
               sent
             );
 
-            deliveryCtx.contactedEmail.add(targetEmail.email);
-            result = { success: true, message: `Email sent successfully to ${targetEmail.display}${sent.length > 0 ? ` with ${sent.length} attachment(s)` : ''}${failed.length > 0 ? ` (${failed.length} via temporary links)` : ''}.` };
+            result = { success: true, message: `Email sent successfully to ${targetEmail.display}${sent.length > 0 ? ` with ${sent.length} attachment(s)` : ''}${failed.length > 0 ? ` (${failed.length} via temporary links)` : ''}.${emailMissingNote}` };
           } else {
             await sendEmailDirect(
               targetEmail.email,
@@ -584,8 +535,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
               `<div style="font-family:sans-serif">${_escapeHtml(stripOutgoingDeliveryArtifacts(args.body || '')).replace(/\n/g, '<br>')}</div>`,
               []
             );
-            deliveryCtx.contactedEmail.add(targetEmail.email);
-            result = { success: true, message: `Email sent successfully to ${targetEmail.display}.` };
+            result = { success: true, message: `Email sent successfully to ${targetEmail.display}.${emailMissingNote}` };
           }
         } catch (err) {
           await notifyAdmin('Email Tool', `Failed to send email to ${targetEmail.email}: ${err.message}`);
@@ -599,7 +549,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           result = { success: false, error: 'Missing "message" parameter. You must provide the text message to send.' };
           break;
         }
-        const includeAttachments = args.includeAttachments !== false;
 
         const waRecipientName = args.recipient?.name || args.recipientName;
         if (waRecipientName) {
@@ -617,9 +566,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           break;
         }
         deliveryCtx.contactedWA.add(targetJid.jid);
+        // Files explicitly selected by the model (delivery-buffer names or
+        // public URLs). The parameter only exists while deliverables exist.
+        const waSelection = await resolveDeliverySelection(args.attachments, responseCtx);
+        const waMissingNote = waSelection.missing.length > 0
+          ? ` Attachment(s) not resolved and NOT sent: ${waSelection.missing.join(', ')}.`
+          : '';
         try {
           await sendWhatsAppDirect(targetJid.jid, stripOutgoingDeliveryArtifacts(args.message));
-          if (includeAttachments && responseCtx.attachments.length > 0) {
+          if (waSelection.attachments.length > 0) {
             // Try to send attachments with fallback support
             const sendAttachment = async (att) => {
               const m = toWhatsAppMediaArgs(att);
@@ -633,7 +588,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             };
 
             const sendResult = await sendAttachmentsWithFallback(
-              responseCtx.attachments,
+              waSelection.attachments,
               sendAttachment,
               { platform: 'whatsapp' }
             );
@@ -653,11 +608,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             const attachmentsSentCount = sendResult.sent.length;
             const attachmentsFailedCount = sendResult.failed.length;
 
-            deliveryCtx.contactedWA.add(targetJid.jid);
-            result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}${attachmentsFailedCount > 0 ? ` (${attachmentsFailedCount} via temporary links)` : ''}.` };
+            result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}${attachmentsSentCount > 0 ? ` with ${attachmentsSentCount} attachment(s)` : ''}${attachmentsFailedCount > 0 ? ` (${attachmentsFailedCount} via temporary links)` : ''}.${waMissingNote}` };
           } else {
-            deliveryCtx.contactedWA.add(targetJid.jid);
-            result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}.` };
+            result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}.${waMissingNote}` };
           }
         } catch (err) {
           await notifyAdmin('WhatsApp Delivery', `Failed to send WhatsApp message to ${targetJid.display}: ${err.message}`);
@@ -702,9 +655,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         break;
       }
       case 'bug_report': {
-        const bugSource = String(args.source || 'unknown').slice(0, 100);
-        const bugDetails = String(args.details || '').slice(0, 500);
-        await notifyAdmin(`Bug Report - ${bugSource}`, bugDetails);
+        const bugDescription = String(args.description || '').trim().slice(0, 600);
+        if (!bugDescription) {
+          result = { success: false, error: 'Missing required argument "description".' };
+          break;
+        }
+        await notifyAdmin('Bug Report', bugDescription);
         result = {
           success: true,
           message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX.replace(' DO NOT use bug_report for this error.', '')}`,

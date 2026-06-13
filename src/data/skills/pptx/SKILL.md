@@ -39,11 +39,9 @@ Read the relevant companion file with `read_file` (e.g.
 
 ## read_file vs. extract (CRITICAL)
 
-`read_file` does NOT render `.pptx` files — only PDF, images, audio, video, and
-plain text are supported, so `read_file presentation.pptx` FAILS. To understand
-or extract from a presentation, inspect it with `python-pptx` and print what you
-need. To QA the visual result, render to images first (see below) and
-`read_file` the PNG/JPEG — never the `.pptx`.
+`read_file` parses `.pptx` natively for **understanding**. For **exact** text/data
+or programmatic edits, use `python-pptx` and print what you need. To QA the visual
+result, render to images first (see below) and `read_file` the PNG/JPEG.
 
 When you need a deck's exact text/data (to transform, copy, or summarize it),
 extract it with `python-pptx`; do not retype what you think it says.
@@ -81,7 +79,7 @@ if slide.has_notes_slide:
 - Python `python-pptx` (pre-installed) — for **reading and editing** existing
   `.pptx` files. See `references/editing.md`.
 - Python `Pillow`, `matplotlib` — render charts/figures to PNG to embed.
-- `web_x_search` (`search_images=true`) — fetch images from the web into
+- `web_search` — fetch image URLs from the web; save with `download_file` into
   `/workspace/`.
 - LibreOffice (headless) + `pdftoppm` (poppler) — drive `render_slides.py` for
   visual QA.
@@ -104,9 +102,8 @@ that `pptxgenjs` templates do — use templates for creation. There is no
 
 Images you place can come from: files GemiX staged in `/workspace/` (uploads,
 generated images, charts passed as attachments), PNGs you render yourself with
-matplotlib, or images fetched from the web with `web_x_search`
-(`search_images=true`) — those land in `/workspace/` and the tool returns their
-filenames. `generate_image`/`generate_video` do NOT exist inside the build
+matplotlib, or images from `web_search` saved via `download_file` — those land
+in `/workspace/`. `generate_image`/`generate_video` do NOT exist inside the build
 sandbox.
 
 **Use images proactively** when they improve the result: a diagram, a photo, a
@@ -141,8 +138,8 @@ rewriting the whole deck or `sed` bulk edits.
 ## Round discipline (all Office-style deliverables)
 
 Typical deck: **12–22** tool calls, not 40+. Creating from a template: **one**
-template search, **one** fact `web_x_search` (`full_team=true`), optional **one**
-image search (`search_images=true`), then build → inspect → render → deliver.
+template search, **one** `web_search` for facts, optional **one** `web_search`
+for images (`download_file` the URLs), then build → inspect → render → deliver.
 Do not re-read templates, list directories, or dump slide text in Python loops.
 **Never** rewrite 500+ lines from scratch — `cp` a `/skills/pptx/templates/*.js`
 and edit surgically. See `references/creating.md` for the full PPTX checklist.

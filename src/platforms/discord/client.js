@@ -11,8 +11,8 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { hasInlineFileContent } = require('../../utils/aiFileDelivery');
-const { ingressDiscordAttachment } = require('../../utils/incomingMediaIngress');
+const { MAX_IMAGE_READS } = require('../../utils/aiFileDelivery');
+const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
@@ -22,7 +22,6 @@ const {
   stripRedundantFilenameBesideAttachmentTag,
 } = require('../../utils/attachmentCaption');
 const { createLogger } = require('../../utils/logger');
-const { resolveGemixVoiceTranscription } = require('../../utils/historySync');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
 const { stripOutgoingDeliveryArtifacts } = require('../../utils/text');
@@ -151,9 +150,8 @@ async function rebuildDiscordBatchParts(entries, channel, starterMessageId, hist
  */
 async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, recentMessageIds, senderName) {
   let textBody = msg.content || '';
-  const botUserId = discordClient?.user?.id;
   const { prefix, mediaParts: quotedMediaParts } = await processDiscordQuotedReply(
-    msg, channel, historyStorageId, recentMessageIds, botUserId,
+    msg, channel, historyStorageId, recentMessageIds,
   );
   textBody = prefix + textBody;
 
@@ -171,15 +169,10 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
     }
     contentParts.push(...ingress.contentParts);
     attachmentTags.push({ tag: ingress.tag, name: ingress.name, syncedPath: ingress.syncedPath });
-    const fragment = ingress.textFragment.trim();
-    if (hasInlineFileContent(fragment)) {
-      textBody = `${fragment}${textBody ? ` ${textBody}` : ''}`.trim();
-    } else {
-      textBody = `${fragment} ${textBody}`.trim();
-    }
+    textBody = `${ingress.textFragment.trim()} ${textBody}`.trim();
   }
 
-  if (attachmentTags.length > 0 && textBody && !hasInlineFileContent(textBody)) {
+  if (attachmentTags.length > 0 && textBody) {
     for (const { tag, name, syncedPath } of attachmentTags) {
       const hints = attachmentFilenameHints(name, name, syncedPath);
       textBody = stripRedundantAttachmentCaption(textBody, hints);
@@ -448,19 +441,14 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     const ts = formatTimestamp(m.createdAt);
     const isBot = m.author.id === discordClient.user.id;
     let textContent = cleanIncomingText(m.content || '');
+    const mediaParts = [];
 
     for (const att of m.attachments.values()) {
+      // User attachments ship natively (parts on the user message); bot-side
+      // entries stay tag-only (assistant role cannot carry input parts).
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
-        historyTagOnly: true,
+        tagOnly: isBot,
         metadataDurationSec: Number(att.duration || 0),
-        getVoiceTranscription: isBot
-          ? async (syncedPath) => resolveGemixVoiceTranscription(
-            historyStorageId,
-            syncedPath,
-            channel.id,
-            m.createdAt?.getTime?.(),
-          )
-          : null,
       });
       if (ingress.oversize) {
         textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
@@ -474,18 +462,25 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
         captionHints,
       );
       textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
+      mediaParts.push(...ingress.contentParts);
     }
 
     if (!textContent) continue;
 
     const senderName = isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username);
     const prefix = `[${ts}] ${senderName}: `;
+    const finalText = isBot ? textContent : `${prefix}${textContent}`;
 
     history.push({
       role: isBot ? 'assistant' : 'user',
-      content: isBot ? textContent : `${prefix}${textContent}`,
+      content: mediaParts.length > 0
+        ? [{ type: 'text', text: finalText }, ...mediaParts]
+        : finalText,
     });
   }
+
+  // Bound the vision cost of re-attached history images (newest kept).
+  capHistoryImageParts(history, MAX_IMAGE_READS);
 
   return { history, recentMessageIds };
 }

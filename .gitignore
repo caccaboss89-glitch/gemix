@@ -1,21 +1,29 @@
+# IDE
+.cursor/
+graphify-out/
+
+# Dependency and cache
 node_modules/
-agent-tools/
-.tempfiles/
-.env
 .wwebjs_auth/
 .wwebjs_cache/
-src/logs/
-package-lock.json
 __pycache__/
 **/__pycache__/
 *.pyc
-data/
 
+# Runtime files
+bin/
+src/logs/
+data/
 src/data/**
 !src/data/skills/
 !src/data/skills/**
-scripts/*
-!scripts/regenerate-prompt-dumps.js
-SERVER_SETUP.md
+.tempfiles/
 
-bin/yt-dlp
+# Dev test scripts
+scripts/
+agent-tools/
+
+# Configuration
+.env
+package-lock.json
+SERVER_SETUP.md

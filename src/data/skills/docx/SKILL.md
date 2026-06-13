@@ -15,7 +15,7 @@ For reports, memos with visuals, covers, and product sheets, **embed images**
 (photo, diagram, logo, chart)—not text-only unless the user asked for plain text.
 
 1. **Already in `/workspace/`** (attachments, charts from earlier steps) → `ImageRun`.
-2. **None available** → one `web_x_search` with `search_images=true`; files land in
+2. **None available** → one `web_search` for images; save URLs with `download_file` into
    `/workspace/`.
 3. **Charts** → matplotlib → PNG → `ImageRun`.
 
@@ -23,15 +23,15 @@ For reports, memos with visuals, covers, and product sheets, **embed images**
 files, your renders, or web search. After adding images, run `render_doc.py` and
 `read_file` the JPEG grid to catch overflow or bad placement.
 
-## Pitfalls (read before DELIVER)
+## Pitfalls (read before delivery)
 
-- **Round budget**: typical report **12–22** tool calls — one fact `web_x_search`
-  (`full_team=true`), optional one image search (`search_images=true`), one QA
+- **Round budget**: typical report **12–22** tool calls — one `web_search`
+  for facts, optional one `web_search` for images (`download_file` the URLs), one QA
   render (`render_doc.py` → `read_file` grid); fix once, re-render at most once.
   No Python loops dumping every paragraph unless debugging a specific bug.
 - **Illustrated reports** (sport, history, product…): ≥1 `ImageRun` unless user
-  asked text-only. No photos in `/workspace/` → `web_x_search` with
-  `search_images=true`. Before `DELIVER`, `inspect_docx.py` must not show
+  asked text-only. No photos in `/workspace/` → `web_search` for images, then
+  `download_file`. Before delivery, `inspect_docx.py` must not show
   `Inline images/shapes: 0`.
 - **TOC**: manual index (plain paragraphs), not `TableOfContents` alone (raw
   `TOC \\h` until Word updates). If you used a TOC field, one LibreOffice pass—
@@ -46,7 +46,7 @@ same. This skill uses a small, deliberate toolchain — pick by task:
 | **Create** a document from scratch | **docx-js** (Node) | Native TOC, footnotes, columns, hyperlinks, precise tables — highest fidelity |
 | **Fill a template** with placeholders/loops/conditionals | **docxtemplater** (Node) via `fill_template.js` | Real templating engine; keeps the template's design |
 | **Literal find-and-replace** on a normal Word file | **python-docx** via `replace_text.py` | Simple value swaps preserving run formatting |
-| **Inspect** structure/text/tables | **python-docx** via `inspect_docx.py` | `read_file` can't open `.docx` |
+| **Inspect** structure/text/tables | **python-docx** via `inspect_docx.py` | Exact structure dumps; `read_file` gives a semantic overview only |
 | **Convert / render / accept changes** | LibreOffice via the `.py` helpers | No Node/Python-lib equivalent |
 
 ## Companion files
@@ -77,9 +77,9 @@ document.
 
 ## Inspecting a document (read vs. extract)
 
-`read_file` does NOT render Word files — only PDF, images, audio, video, and
-plain-text are supported, and **`.docx`/`.dotx` will fail.** To understand a
-document:
+`read_file` parses `.docx`/`.dotx` natively for **understanding** (semantic view).
+For **exact** text/values or structural inspection, use the scripts — never retype
+what you saw:
 
 - Structure / text / tables: run `python /skills/docx/scripts/inspect_docx.py
   file.docx` (add `--text` for the full paragraph list, `--tables` for full
@@ -88,9 +88,9 @@ document:
   labeled page grid you then `read_file` as an image, or `convert_doc.py --to
   pdf` and `read_file` the PDF.
 
-Read-vs-extract rule: use the above to *understand* a document; to copy its
-exact text/values into another file, pull them with `python-docx`
-(`Document(...).paragraphs`, `table.rows`), never by retyping what you saw.
+Read-vs-extract rule: use `read_file` or the scripts above to *understand* a
+document; to copy its exact text/values into another file, pull them with
+`python-docx` (`Document(...).paragraphs`, `table.rows`), never by retyping.
 
 ## Available tools
 
@@ -281,7 +281,7 @@ new Paragraph({
 ```
 
 Where images come from (see **Images (use proactively)** above): staged files,
-matplotlib PNGs, or `web_x_search` with `search_images=true`. SVG: `type: "svg"`
+matplotlib PNGs, or `web_search` images saved via `download_file`. SVG: `type: "svg"`
 with PNG fallback, or `cairosvg.svg2png(...)`.
 
 ### Headers, footers, page numbers
@@ -380,7 +380,7 @@ rebuilding it from scratch.
 ## Visual verification (before delivering)
 
 After creating or editing a document, render it and look at it — do NOT trust
-the structure alone, and do NOT `read_file` the `.docx` (that fails anyway):
+the structure alone, and do not rely on `read_file` alone for pixel-perfect QA:
 
 ```bash
 python /skills/docx/scripts/render_doc.py /workspace/output.docx
@@ -397,8 +397,8 @@ works. **One** page grid is enough — do not re-render more than twice.
 | Once | Avoid |
 |------|--------|
 | `read_file` SKILL.md (+ editing.md only if filling/editing an attachment) | Re-reading the same guides |
-| One `web_x_search` (`full_team=true`) for facts | Multiple overlapping research calls |
-| One `web_x_search` (`search_images=true`) if visuals needed | Extra image-only searches |
+| One `web_search` for facts | Multiple overlapping research calls |
+| One `web_search` for images + `download_file` if visuals needed | Extra image-only searches |
 | `inspect_docx.py` before deliver on illustrated docs | Skipping image-count check |
 | `render_doc.py` → `read_file` the JPEG grid once | Per-page `read_file` loops; 3+ renders |
 | `edit_file` / `fill_template.js` surgical fixes | Rebuilding the whole document from memory |

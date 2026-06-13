@@ -96,45 +96,37 @@ function validateToolArgs(args, toolDef) {
   return null;
 }
 
-// -- xAI code_interpreter - native server-side tool -----------------------
+// -- xAI native server-side tools ------------------------------------------
 //
-// Passed straight through to /v1/responses as `{type:'code_interpreter'}`.
-// xAI runs the Python sandbox itself and folds the result back into the
-// same response (no extra round trip in our outer loop). The bot does NOT
-// implement a function tool with this name: the model invokes the native
-// path, we never see it as a tool_call.
+// Passed straight through to /v1/responses as `{type:'<name>', ...}`.
+// xAI runs them inside the same request and folds the results back into the
+// response (zero extra rounds in our outer loop). The bot does NOT implement
+// function tools with these names: the model invokes the native path, we
+// never see them as tool_calls.
 const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
+
+const TOOL_WEB_SEARCH_NATIVE = {
+  type: 'web_search',
+  num_results: 10,
+  enable_image_understanding: true,
+  enable_image_search: true,
+};
+
+const TOOL_X_SEARCH_NATIVE = {
+  type: 'x_search',
+  limit: 5,
+  enable_image_understanding: true,
+  enable_video_understanding: true,
+};
+
+/** Native server-side search tools (web + X), shared by main brain and build agent. */
+const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 
 // -- Static tool definitions (schema never varies) -------------------------
 
-const { WEB_X_SEARCH_RESEARCH_GUIDANCE } = require('./researchGuidance');
-
-const TOOL_WEB_X_SEARCH = makeTool({
-  name: 'web_x_search',
-  description:
-    'Web and X research via a specialized agent or 4x team. '
-    + WEB_X_SEARCH_RESEARCH_GUIDANCE
-    + ' At most once per round.',
-  properties: {
-    prompt: {
-      type: 'string',
-      description: 'Research brief (question, URLs, format, constraints). With full_team, include all sub-topics here.',
-    },
-    full_team: {
-      type: 'boolean',
-      description: 'true = 4x team for deep research; false/omit = fast single lookup.',
-    },
-    search_images: {
-      type: 'boolean',
-      description: 'Set true for include relevant images from the web (if requested or useful). Images are added to the delivery buffer. Omit for text-only research.',
-    },
-  },
-  required: ['prompt'],
-});
-
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
-  description: 'Read the content of a file from chat history (only for text/code, images, audio, video, PDF).',
+  description: 'Read the content of a file from chat history (text/code, images, audio, video, PDF, Office documents, archives).',
   properties: {
     path: { type: 'string', description: 'Filename from chat history (e.g. "report.pdf").' },
   },
@@ -145,23 +137,6 @@ const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
   description: 'Read the server rules (Statuto Albertino / Constitution). Use when you need the full statute text on WhatsApp.',
   properties: {},
-});
-
-// -- Discord conversation title (forced on the first turn) -----------------
-//
-// On the FIRST message of a Discord thread we expose this tool and force its use (tool_choice), so
-// the thread title is set deterministically exactly once. It is NOT offered
-// on later turns, so the model never second-guesses or rewrites the title.
-const TOOL_SET_CONVERSATION_TITLE = makeTool({
-  name: 'set_conversation_title',
-  description: 'Set the title of this Discord conversation/thread. Called once at the start to name the conversation after its topic.',
-  properties: {
-    title: {
-      type: 'string',
-      description: 'Concise topic title (max ~80 chars), no emojis, in the user\'s language.',
-    },
-  },
-  required: ['title'],
 });
 
 const TOOL_READ_MUSIC_STATS = makeTool({
@@ -228,29 +203,30 @@ const TOOL_MUSIC_CREATOR = makeTool({
 //
 // Available to all users (active or not) on every platform except Discord.
 //
-// generate_image: text-to-image only (Hermes image_gen does not support refs).
-//
-// generate_video reference images: pass filenames already visible to the model
-// - a file the user just sent ([Attachment: name] tag), a file from chat
-// history, an image returned by web_x_search (search_images=true; its
-// image_filenames are reported), or an image produced by an earlier
-// generate_image call (its filename is reported in the result). The backend
-// resolves each filename (current-turn delivery buffer first, then chat
-// history), exposes it through the public attachment tunnel, and hands the
-// URL to xAI, which fetches it server-side (image-to-video / reference-to-video).
+// Reference images: each entry is a filename already visible to the model
+// (a file the user just sent, a chat-history file, or a previously generated
+// image - its filename is reported in the tool result) OR a public https URL
+// (e.g. an image found via web/X search). The backend resolves filenames
+// (current-turn delivery buffer first, then chat history), exposes them as
+// public URLs, and xAI fetches everything server-side.
 
 const TOOL_GENERATE_IMAGE = makeTool({
   name: 'generate_image',
-  description: 'Generate an image from a textual prompt (text-to-image). Reference images are not supported. Result is pushed to the delivery buffer.',
+  description: 'Generate an image from a textual prompt, optionally guided by up to 3 reference images (editing, composition, style transfer). Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Image description: subject, style, lighting, mood, composition.',
+      description: 'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them ONLY as <IMAGE_0>, <IMAGE_1>, <IMAGE_2> in array order - never by filename.',
+    },
+    reference_images: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Up to 3 images: filenames WITH extension from the delivery buffer or chat history, or public https URLs. Order matters (<IMAGE_0> = first entry). 1 image = edit/transform it; 2-3 = combine subjects, transfer styles, or create a new image from the references. Omit for pure text-to-image.',
     },
     aspect_ratio: {
       type: 'string',
       enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
-      description: 'Aspect ratio. Omit for automatic.',
+      description: 'Aspect ratio for pure text-to-image. Omit for automatic. Ignored with reference images (output follows the input image).',
     },
   },
   required: ['prompt'],
@@ -258,21 +234,21 @@ const TOOL_GENERATE_IMAGE = makeTool({
 
 const TOOL_GENERATE_VIDEO = makeTool({
   name: 'generate_video',
-  description: 'Generate a 10-second 720p video from a textual prompt, optionally guided by reference images. Result is pushed to the delivery buffer.',
+  description: 'Generate a 10-second 720p video from a textual prompt, optionally guided by reference images. It can NOT modify or extend an existing video - only reference IMAGES are accepted. Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Video description: subject, action, camera movement, style, lighting. If you pass reference images, mention them here by filename.',
+      description: 'Video description: subject, action, camera movement, style, lighting. When passing reference images, refer to them ONLY as <IMAGE_0>, <IMAGE_1>, ... in array order - never by filename.',
     },
     reference_images: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Up to 7 image filenames WITH extension (e.g. "photo.jpg"). 1 image = animate that exact image (image-to-video); 2–7 = keep those subjects/style consistent (reference-to-video). Sources: a file the user just sent, a chat-history file, a web_x_search result image, or a previously generated image. The exact filename must already appear in the conversation. Omit for pure text-to-video.',
+      description: 'Up to 7 images: filenames WITH extension from the delivery buffer or chat history, or public https URLs. 1 image = that exact image becomes the first frame and is animated (image-to-video); 2-7 = the images guide subjects/characters/style consistency (reference-to-video). Omit for pure text-to-video.',
     },
     aspect_ratio: {
       type: 'string',
-      enum: ['16:9', '9:16', '1:1'],
-      description: 'Aspect ratio. Default 16:9.',
+      enum: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'],
+      description: 'Aspect ratio. Default 16:9. With a single reference image, omit to respect the input image.',
     },
   },
   required: ['prompt'],
@@ -280,19 +256,45 @@ const TOOL_GENERATE_VIDEO = makeTool({
 
 // -- Dynamic tool builders (schema varies by grade/platform) -------------
 
-function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = false } = {}) {
+// Speech tags interpreted natively by xAI TTS. GemiX writes them directly
+// in the voice text (woven in, never narrated).
+const VOICE_TEXT_DESC =
+  'Text to speak (max 1000 chars), in the language you want. No emoji. '
+  + 'Make the delivery lively and human by weaving xAI speech tags into the text where natural (never narrate them). '
+  + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
+  + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
+
+// Attachments parameter for delivery tools. Only exposed while deliverable
+// files exist (delivery buffer non-empty or search-derived URLs available),
+// so the model never sees delivery options it cannot use yet.
+const DELIVERY_ATTACHMENTS_PROP = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'OPTIONAL. Include only when you want to attach files to this delivery. Each entry is a '
+    + 'delivery-buffer filename (exactly as reported by the tool that produced it) and/or a public '
+    + 'https URL to fetch. If you have nothing to attach, omit this field — do not pass an empty array.',
+};
+
+function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = false, hasDeliverableFiles = false } = {}) {
   const properties = {
     text: {
       type: 'string',
-      description: 'Plain text to speak (max 1000 chars). Do NOT add vocal effect tags - TTS adds them automatically. Just write the message in the language you want. No emoji.',
+      description: VOICE_TEXT_DESC,
     },
   };
 
-  if (includeRecipientName || includeRecipientPhone) {
-    properties.includeAttachments = {
-      type: 'boolean',
-      description: 'Forward buffered files together with the voice (default true). Ignored when the recipient is omitted or is the current chat.',
+  if (hasDeliverableFiles) {
+    properties.attachments = {
+      ...DELIVERY_ATTACHMENTS_PROP,
+      description:
+        'OPTIONAL. Include only when you want files sent together with this voice message '
+        + '(current chat or chosen recipient): delivery-buffer filenames and/or public https URLs. '
+        + 'Omit the field if you have nothing to attach.',
     };
+  }
+
+  if (includeRecipientName || includeRecipientPhone) {
     const recipientProps = {};
     if (includeRecipientName) {
       recipientProps.name = {
@@ -321,7 +323,7 @@ function buildVoiceTool({ includeRecipientName = false, includeRecipientPhone = 
   });
 }
 
-function buildWhatsAppTool(isAdmin) {
+function buildWhatsAppTool(isAdmin, hasDeliverableFiles = false) {
   const recipientProps = {
     name: {
       type: 'string',
@@ -338,10 +340,6 @@ function buildWhatsAppTool(isAdmin) {
 
   const properties = {
     message: { type: 'string', description: 'Message text' },
-    includeAttachments: {
-      type: 'boolean',
-      description: 'Forward buffered files to this recipient (default true).',
-    },
     recipient: {
       type: 'object',
       description: 'Recipient',
@@ -349,6 +347,9 @@ function buildWhatsAppTool(isAdmin) {
       required: isAdmin ? [] : ['name'],
     },
   };
+  if (hasDeliverableFiles) {
+    properties.attachments = DELIVERY_ATTACHMENTS_PROP;
+  }
 
   return makeTool({
     name: 'send_whatsapp_message',
@@ -358,7 +359,7 @@ function buildWhatsAppTool(isAdmin) {
   });
 }
 
-function buildEmailTool(isAdmin) {
+function buildEmailTool(isAdmin, hasDeliverableFiles = false) {
   const recipientProps = {
     name: {
       type: 'string',
@@ -376,10 +377,6 @@ function buildEmailTool(isAdmin) {
   const properties = {
     subject: { type: 'string', description: 'Email subject' },
     body: { type: 'string', description: 'HTML body (no markdown)' },
-    includeAttachments: {
-      type: 'boolean',
-      description: 'Forward buffered files to this recipient (default true).',
-    },
     recipient: {
       type: 'object',
       description: 'Recipient',
@@ -387,6 +384,9 @@ function buildEmailTool(isAdmin) {
       required: isAdmin ? [] : ['name'],
     },
   };
+  if (hasDeliverableFiles) {
+    properties.attachments = DELIVERY_ATTACHMENTS_PROP;
+  }
 
   return makeTool({
     name: 'send_email',
@@ -524,17 +524,19 @@ const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
   description: 'Report a bug/failure. Use ONLY if the tool error DOES NOT state the Admin was already notified, or for general logical bugs. Inform the user in your final response.',
   properties: {
-    source: { type: 'string', description: 'Component or context where the issue occurred (e.g. "build", "yt-dlp", "proxy", "attachments")' },
-    details: { type: 'string', description: 'Brief but clear description of the problem' },
+    description: {
+      type: 'string',
+      description: 'Brief but clear description of the problem (what failed, where, and any relevant context).',
+    },
   },
-  required: ['source', 'details'],
+  required: ['description'],
 });
 
 // -- Build sub-agent (build tool) ------------------------------------
 //
 // Delegates complex file write, shell, document or multi-step tasks to an
 // isolated build sub-agent with its own workspace. The sub-agent returns
-// text + any files announced via <DELIVER>. Pass relevant assets via attachments[].
+// structured JSON (message + optional attachments). Pass relevant assets via attachments[].
 // The sub-agent has its own isolated context (no chat history).
 
 function buildBuildTool(isGroup) {
@@ -542,7 +544,7 @@ function buildBuildTool(isGroup) {
   return makeTool({
     name: 'build',
     description:
-      'Delegate to build sub-agent (web_x_search + shell + skills inside). Brief prompt only — it researches and builds. '
+      'Delegate to build sub-agent (web/X search + shell + skills inside). Brief prompt only — it researches and builds. '
       + `Workspace for ${scope} (4h TTL, 500 MB). At most once per round. `
       + 'Re-fetch recent build files via &lt;BuildWorkspace&gt; list/deliver. '
       + 'Generate image/video/song first if the build needs them, then attachments[].',
@@ -554,7 +556,7 @@ function buildBuildTool(isGroup) {
       attachments: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Filenames (with extension) in the delivery buffer or chat history—not paths only listed in <BuildWorkspace> (use a deliver-only build prompt for those). Empty/omit if none.',
+        description: 'Files to stage into the build workspace: filenames (with extension) from the delivery buffer or chat history, or public https URLs to download — not paths only listed in <BuildWorkspace> (use a deliver-only build prompt for those). Empty/omit if none.',
       },
     },
     required: ['prompt'],
@@ -567,12 +569,16 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
   const isWhatsAppGroup = isWhatsApp && userCtx.isGroup;
   const isDiscord = userCtx.platform === PLATFORM_DISCORD;
+  // Deliverable files exist (delivery buffer non-empty or search-derived
+  // URLs available): expose the attachments parameter on delivery tools.
+  const hasDeliverableFiles = Boolean(userCtx.hasDeliverableFiles);
 
   const tools = [];
 
-  // 1. Search & Information Retrieval
+  // 1. Search & Information Retrieval. web_search and x_search are native
+  // xAI server-side tools (zero round cost), available on every platform.
   tools.push(
-    TOOL_WEB_X_SEARCH,
+    ...NATIVE_SEARCH_TOOLS,
     TOOL_READ_FILE,
   );
   if (isWhatsApp) {
@@ -606,19 +612,15 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildVoiceTool({
       includeRecipientName: isAdmin || (isActiveMember && isWhatsApp),
       includeRecipientPhone: isAdmin,
+      hasDeliverableFiles,
     }));
   }
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
-    // First message of a thread: offer (and force, via tool_choice in the
-    // handler) the title-setter so the conversation gets named exactly once.
-    if (userCtx.isFirstTurn) {
-      tools.push(TOOL_SET_CONVERSATION_TITLE);
-    }
   }
   if (isActiveMember) {
-    tools.push(buildEmailTool(isAdmin));
-    tools.push(buildWhatsAppTool(isAdmin));
+    tools.push(buildEmailTool(isAdmin, hasDeliverableFiles));
+    tools.push(buildWhatsAppTool(isAdmin, hasDeliverableFiles));
   }
 
   // 4. Task Management
@@ -659,30 +661,28 @@ function isToolAllowedForUser(toolName, userCtx) {
 }
 
 /**
- * Collect function tool names plus native server-side tools for prompt caps.
+ * Collect function tool names plus native server-side tool types for prompt caps.
  * @param {Array} tools
  * @returns {Set<string>}
  */
 function toolNamesToSet(tools) {
   const names = new Set();
   for (const t of tools) {
-    if (t?.type === 'code_interpreter') names.add('code_interpreter');
-    else if (t?.function?.name) names.add(t.function.name);
+    if (t?.function?.name) names.add(t.function.name);
+    else if (typeof t?.type === 'string' && t.type !== 'function') names.add(t.type);
   }
   return names;
 }
 
 /**
  * Build userCtx for a platform profile (member + admin tools included).
- * @param {string} profile - PROFILE.* value from platformCapabilities
  * @param {object} cap - CAPS[profile] entry
  * @param {object} [overrides]
  */
-function userCtxForProfile(profile, cap, profileEnum, overrides = {}) {
+function userCtxForProfile(cap, overrides = {}) {
   return {
     platform: cap.platform,
     isGroup: Boolean(cap.isGroup),
-    isFirstTurn: overrides.isFirstTurn ?? (profile === profileEnum.DISCORD_THREAD),
     chatId: overrides.chatId ?? null,
   };
 }
@@ -696,13 +696,13 @@ function syncProfileToolSets(caps, profileEnum) {
   for (const profile of Object.values(profileEnum)) {
     const cap = caps[profile];
     if (!cap) continue;
-    const tools = getToolsForUser(true, false, userCtxForProfile(profile, cap, profileEnum));
+    const tools = getToolsForUser(true, false, userCtxForProfile(cap));
     cap.tools = toolNamesToSet(tools);
   }
 }
 
 /**
- * Unified tool gate: round subset (e.g. title tool removed) then live schema.
+ * Unified tool gate: optional per-round name subset, then live schema check.
  * @param {string} toolName
  * @param {object} userCtx
  * @param {object} [opts]
@@ -729,10 +729,9 @@ function getToolAccessError(toolName, userCtx, opts = {}) {
 
 module.exports = {
   getToolsForUser,
-  isToolAllowedForUser,
   getToolAccessError,
   syncProfileToolSets,
   toolNamesToSet,
   validateToolArgs,
-  SET_CONVERSATION_TITLE_TOOL: 'set_conversation_title',
+  NATIVE_SEARCH_TOOLS,
 };

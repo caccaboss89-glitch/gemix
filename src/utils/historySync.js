@@ -12,8 +12,6 @@ const { createLogger } = require('./logger');
 const { sanitizeFilename } = require('./text');
 const { extractAttachmentTagPaths } = require('./media');
 
-const FILE_CONTENT_PATH_RE = /<FileContent\s+path="([^"]+)"/gi;
-
 const log = createLogger('HistorySync');
 
 // Age cap on on-disk history attachments when reference-based prune is skipped
@@ -425,7 +423,7 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
 
 /**
  * Collect on-disk history filenames still referenced by the chat buffer
- * (attachment tags, inline FileContent paths, multimodal _historyPath hints).
+ * (attachment tags, multimodal _historyPath hints).
  *
  * @param {Array<{content: any}>} historyMsgs
  * @param {any} [currentContent] - current turn user content
@@ -442,11 +440,6 @@ function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
   const _scanText = (text) => {
     if (typeof text !== 'string' || text.length === 0) return;
     for (const taggedPath of extractAttachmentTagPaths(text)) _addName(taggedPath);
-    let m;
-    FILE_CONTENT_PATH_RE.lastIndex = 0;
-    while ((m = FILE_CONTENT_PATH_RE.exec(text)) !== null) {
-      _addName(m[1]);
-    }
   };
   const _scanPart = (part) => {
     if (!part || typeof part !== 'object') return;
@@ -473,6 +466,7 @@ module.exports = {
   syncFileToHistory,
   getUserHistoryPaths,
   resolveGemixVoiceTranscription,
+  getStoredHistoryVoiceTranscription,
   storeHistoryVoiceTranscription,
   storeRecentVoiceText,
   pruneHistory,

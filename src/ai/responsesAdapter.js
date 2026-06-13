@@ -323,8 +323,80 @@ function responsesToAssistantMessage(data) {
   return message;
 }
 
+// -- Server-side search stats ------------------------------------------------
+
+const _X_POST_URL_RE = /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status\//i;
+
+function _collectCitationUrls(data) {
+  const urls = [];
+  const push = (raw) => {
+    const url = typeof raw === 'string' ? raw : raw?.url || raw?.uri;
+    if (typeof url === 'string' && url) urls.push(url.trim());
+  };
+  if (Array.isArray(data?.citations)) data.citations.forEach(push);
+  if (Array.isArray(data?.output)) {
+    for (const item of data.output) {
+      if (Array.isArray(item?.citations)) item.citations.forEach(push);
+      if (Array.isArray(item?.content)) {
+        for (const part of item.content) {
+          if (Array.isArray(part?.annotations)) part.annotations.forEach(push);
+          if (Array.isArray(part?.citations)) part.citations.forEach(push);
+        }
+      }
+    }
+  }
+  return urls;
+}
+
+/**
+ * Real server-side search statistics from a Responses API payload.
+ * Sums the actual sources fetched by each `web_search_call` and the actual
+ * posts returned by each `x_search_call` (no estimation). Used for the
+ * research badge appended to user-facing replies.
+ *
+ * @param {object} data - Parsed /v1/responses payload.
+ * @returns {{ webSources: number, xPosts: number }}
+ */
+function extractServerSearchStats(data) {
+  let webSources = 0;
+  let xPosts = 0;
+  let xCalls = 0;
+
+  if (Array.isArray(data?.output)) {
+    for (const item of data.output) {
+      if (!item || typeof item !== 'object') continue;
+      if (item.type === 'web_search_call') {
+        const action = item.action || {};
+        if (Array.isArray(action.sources)) webSources += action.sources.length;
+        else if (action.type === 'open_page') webSources += 1;
+        continue;
+      }
+      if (item.type === 'x_search_call') {
+        xCalls++;
+        const action = item.action || {};
+        if (Array.isArray(action.sources)) xPosts += action.sources.length;
+        else if (Array.isArray(action.results)) xPosts += action.results.length;
+        else if (Array.isArray(item.results)) xPosts += item.results.length;
+      }
+    }
+  }
+
+  // Some payloads expose X results only through citations: count distinct
+  // post URLs actually cited (still real data, no estimation).
+  if (xCalls > 0 && xPosts === 0) {
+    const seen = new Set();
+    for (const url of _collectCitationUrls(data)) {
+      if (_X_POST_URL_RE.test(url)) seen.add(url);
+    }
+    xPosts = seen.size;
+  }
+
+  return { webSources, xPosts };
+}
+
 module.exports = {
   chatMessagesToResponsesInput,
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
+  extractServerSearchStats,
 };

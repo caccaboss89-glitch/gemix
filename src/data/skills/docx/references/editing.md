@@ -20,7 +20,8 @@ first.
 
 ## Pick the right approach
 
-First inspect the file (always — `read_file` can't open `.docx`):
+First inspect the file (always — `read_file` gives a semantic overview; use
+`inspect_docx.py` for exact structure):
 
 ```bash
 python /skills/docx/scripts/inspect_docx.py /workspace/template.docx --text --tables

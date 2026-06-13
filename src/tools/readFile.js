@@ -1,9 +1,10 @@
 // src/tools/readFile.js
 //
 // Tool used by the main brain to pull a specific file from chat history
-// into the conversation via aiFileDelivery (tunnel input_file or inline
-// <FileContent>). Scope: history only — build sub-agent uses the same
-// policy in ai/buildAgent.js for /workspace/ and /skills/.
+// into the conversation via aiFileDelivery (native input_file/input_image
+// parts, or inline numbered text for text/code). Scope: history only —
+// build sub-agent uses the same policy in ai/buildAgent.js for /workspace/
+// and /skills/.
 
 const fs = require('fs');
 const path = require('path');
@@ -70,18 +71,23 @@ async function readFileTool(filePath, userCtx, responseCtx) {
     displayPath,
     contentType: mimeForExtension(ext),
     imagesReadCount: responseCtx.imagesReadCount,
-    blockedMessage: mainReadFileBlockedMessage(ext, userCtx.platform),
+    blockedMessage: mainReadFileBlockedMessage(ext),
   });
 
   if (result.kind === 'error') return { success: false, error: result.error };
-  if (result.kind === 'tunnel') {
+  if (result.kind === 'parts') {
     if (result.bumpImageCount) responseCtx.imagesReadCount++;
     return [
       { type: 'text', text: JSON.stringify({ success: true, message: `File loaded: ${displayPath}` }) },
       ...result.parts,
     ];
   }
-  return { success: true, message: result.content };
+  return {
+    success: true,
+    path: displayPath,
+    content: result.content,
+    ...(result.truncated ? { truncated: true } : {}),
+  };
 }
 
 module.exports = { readFileTool };

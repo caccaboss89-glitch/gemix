@@ -1,13 +1,11 @@
 // src/tools/voiceMessage.js
 //
 // Voice generation pipeline. Produces OGG/Opus audio buffers for WhatsApp
-// voice messages. Uses xAI TTS via Hermes bridge when enabled (primary),
-// with Google Translate TTS fallback. Always applies MP3-to-Opus transcode.
-// Strips vocal tags for Google TTS input.
+// voice messages. Uses the direct xAI TTS endpoint (`POST /v1/tts`) when
+// enabled (primary), with Google Translate TTS fallback. Always applies
+// MP3-to-Opus transcode. Strips vocal tags for Google TTS input (speech
+// tags are written by GemiX itself in the send_voice_message text).
 
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
 const { fetchWithTimeout } = require('../utils/fetch');
@@ -15,20 +13,20 @@ const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier')
 const { createLogger } = require('../utils/logger');
 const { XAI_TTS_ENABLED } = require('../config/constants');
 const { FFMPEG_PATH } = require('../config/env');
+const { getXaiAuth } = require('../config/xaiAuth');
 
 const log = createLogger('TTS');
 
-// Absolute path to the wrapper script. Spawned via `bash` (executable bit not required).
-const BRIDGE_SCRIPT = path.resolve(__dirname, '..', '..', 'bridge', 'tts.sh');
+// xAI TTS request timeout (usually completes in a few seconds).
+const TTS_REQUEST_TIMEOUT_MS = 90 * 1000;
 
-// Absolute path to temp directory for audio output (shared location with tempFileServer.js).
-const TEMP_DIR = path.resolve(__dirname, '..', '..', '.tempfiles');
-
-// TTS bridge call timeout. Hermes -t tts usually completes in 5-30 s; ceiling set high to handle cold starts.
-const TTS_BRIDGE_TIMEOUT_MS = 90 * 1000;
-
-// Overall voice generation timeout covering bridge and transcode. On expiry, the call fails rather than hanging.
+// Overall voice generation timeout covering TTS and transcode. On expiry, the call fails rather than hanging.
 const VOICE_GENERATION_TIMEOUT_MS = 120 * 1000;
+
+// Fixed xAI TTS parameters: voice + auto language detection + MP3 output
+// (transcoded to OGG/Opus for WhatsApp below).
+const TTS_VOICE_ID = 'leo';
+const TTS_OUTPUT_FORMAT = { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 };
 
 /**
  * Strip vocal effect tags from text.
@@ -104,11 +102,12 @@ function convertMp3ToWhatsAppOpus(mp3Buffer) {
 }
 
 /**
- * Generate voice audio using xAI TTS via the Hermes CLI bridge (primary)
- * with Google Translate TTS fallback.
+ * Generate voice audio using the direct xAI TTS endpoint (primary) with
+ * Google Translate TTS fallback.
  * Enforces a global timeout to prevent indefinite hangs on TTS or ffmpeg failures.
- * @param {string} text - Plain text to convert to speech (max 1000 characters,
- *   no vocal tags from the caller - the bridge tells Hermes to insert them).
+ * @param {string} text - Text to convert to speech (max 1000 characters).
+ *   May contain xAI speech tags ([pause], <soft>...</soft>, ...) - GemiX
+ *   writes them directly; they are stripped for the Google fallback.
  * @returns {Promise<Buffer>} OGG/Opus audio buffer (48kHz mono, iOS-optimized WhatsApp format)
  */
 async function generateVoice(text) {
@@ -127,13 +126,13 @@ async function generateVoice(text) {
 }
 
 async function _generateVoice(text) {
-  // Try xAI TTS via the Hermes CLI bridge first (only if enabled).
+  // Try the direct xAI TTS endpoint first (only if enabled).
   if (XAI_TTS_ENABLED) {
     try {
-      const mp3Buffer = await xaiTTSViaBridge(text);
+      const mp3Buffer = await xaiTTS(text);
       return await convertMp3ToWhatsAppOpus(mp3Buffer);
     } catch (err) {
-      log.warn('xAI TTS bridge failed, falling back to Google Translate:', err.message);
+      log.warn('xAI TTS failed, falling back to Google Translate:', err.message);
       await notifyAdmin('xAI TTS (Fallback)', err.message);
     }
   }
@@ -154,89 +153,51 @@ async function _generateVoice(text) {
   }
 }
 
-// -- xAI TTS via Hermes CLI bridge ----------------------------------------
+// -- xAI TTS (direct endpoint) ----------------------------------------------
 
 /**
- * Spawn `bash bridge/tts.sh <text> <output_path>` and collect its result.
- * Returns the MP3 buffer read from the output path on success.
- *
- * Mirrors imagineGenerator.js's _runBridge: spawn with no shell (only
- * `bash` as the script interpreter), positional args so prompts cannot be
- * misinterpreted as shell metacharacters.
+ * Call `POST /v1/tts` and return the MP3 buffer. The response body is the
+ * raw audio binary (not JSON). Speech tags in the text are interpreted
+ * natively by the endpoint. On HTTP 401, reloads the auth file once and
+ * retries before surfacing the error (token may have rotated on disk).
  */
-async function xaiTTSViaBridge(text) {
-  if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
+async function xaiTTS(text) {
+  let forceTokenReload = false;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const { baseUrl, token } = getXaiAuth(forceTokenReload);
+    forceTokenReload = false;
+
+    const res = await fetchWithTimeout(`${baseUrl}/tts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        text,
+        voice_id: TTS_VOICE_ID,
+        language: 'auto',
+        output_format: TTS_OUTPUT_FORMAT,
+      }),
+    }, TTS_REQUEST_TIMEOUT_MS);
+
+    if (res.status === 401 && attempt < 2) {
+      forceTokenReload = true;
+      continue;
+    }
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`xAI TTS HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+    }
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length === 0) {
+      throw new Error('xAI TTS returned an empty audio body.');
+    }
+    return buffer;
   }
-  const outputPath = path.join(
-    TEMP_DIR,
-    `tts_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.mp3`,
-  );
-
-  const { code, stdout, stderr } = await _runBridge(
-    [text, outputPath],
-    TTS_BRIDGE_TIMEOUT_MS,
-  );
-
-  if (code !== 0) {
-    const tail = (stderr || stdout || '').slice(-500).trim();
-    // Best-effort cleanup of output file (bridge may create the parent dir).
-    _safeUnlink(outputPath);
-    throw new Error(`Bridge exit ${code}: ${tail || 'no diagnostic output'}`);
-  }
-
-  if (!fs.existsSync(outputPath)) {
-    throw new Error(`Bridge succeeded but no audio file at ${outputPath}`);
-  }
-
-  let buffer;
-  try {
-    buffer = fs.readFileSync(outputPath);
-  } finally {
-    _safeUnlink(outputPath);
-  }
-
-  if (!buffer || buffer.length === 0) {
-    throw new Error('TTS bridge produced an empty audio file.');
-  }
-  return buffer;
-}
-
-function _runBridge(args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('bash', [BRIDGE_SCRIPT, ...args], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try { child.kill('SIGKILL'); } catch { /* best effort */ }
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(new Error(`TTS bridge spawn failed: ${err.message}`));
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        return reject(new Error(`TTS bridge timed out after ${Math.round(timeoutMs / 1000)}s`));
-      }
-      resolve({ code: code ?? -1, stdout, stderr });
-    });
-  });
-}
-
-function _safeUnlink(filePath) {
-  try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+  throw new Error('xAI TTS failed after auth retry.');
 }
 
 // -- Google Translate TTS (fallback) --------------------------------------

@@ -6,15 +6,16 @@
 
 require('dotenv').config();
 
+const path = require('path');
+const os = require('os');
+
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
+
+const XAI_USE_API_KEY = toBool(process.env.XAI_USE_API_KEY, false);
 
 // Every value below must be set in .env (no || null in exports).
 const REQUIRED = [
-  'HERMES_BASE_URL',
-  'HERMES_API_KEY',
   'GROK_MODEL',
-  'MULTI_AGENT_MODEL',
-  'FAST_RESEARCH_MODEL',
   'IMAGE_GEN_MODEL',
   'VIDEO_GEN_MODEL',
   'OPENROUTER_BASE_URL',
@@ -37,6 +38,11 @@ const REQUIRED = [
   'GEMIX_TEMP_FILE_PORT',
 ];
 const missing = REQUIRED.filter((k) => !process.env[k] || !String(process.env[k]).trim());
+if (XAI_USE_API_KEY) {
+  if (!process.env.XAI_API_KEY || !String(process.env.XAI_API_KEY).trim()) {
+    missing.push('XAI_API_KEY (required when XAI_USE_API_KEY=true)');
+  }
+}
 if (missing.length > 0) {
   // eslint-disable-next-line no-console
   console.error(`\n❌ Missing required env variables: ${missing.join(', ')}.\n   Define them in .env before starting GemiX.\n`);
@@ -44,10 +50,14 @@ if (missing.length > 0) {
 }
 
 module.exports = {
-  HERMES_BASE_URL: process.env.HERMES_BASE_URL,
-  HERMES_API_KEY: process.env.HERMES_API_KEY,
   GROK_MODEL: process.env.GROK_MODEL,
   BUILD_MODEL: process.env.BUILD_MODEL || process.env.GROK_MODEL,
+
+  // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.
+  XAI_USE_API_KEY,
+  XAI_API_KEY: process.env.XAI_API_KEY || '',
+  XAI_AUTH_FILE: process.env.XAI_AUTH_FILE || path.join(os.homedir(), '.hermes', 'auth.json'),
+  XAI_BASE_URL: (process.env.XAI_BASE_URL || 'https://api.x.ai/v1').replace(/\/+$/, ''),
 
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
@@ -56,8 +66,6 @@ module.exports = {
   MUSIC_STATS_URL: process.env.MUSIC_STATS_URL,
   MUSIC_WRAP_URL: process.env.MUSIC_WRAP_URL,
 
-  MULTI_AGENT_MODEL: process.env.MULTI_AGENT_MODEL,
-  FAST_RESEARCH_MODEL: process.env.FAST_RESEARCH_MODEL,
   IMAGE_GEN_MODEL: process.env.IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL,
 

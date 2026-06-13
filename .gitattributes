@@ -1,6 +1,5 @@
-# Force LF line endings for shell scripts and the bridge directory.
+# Force LF line endings for shell scripts.
 # These scripts run on the production Linux VPS - keep LF on commit so
 # checkouts on any platform don't break the shebang line.
 *.sh                text eol=lf
-bridge/**           text eol=lf
 sandbox/entrypoint.sh text eol=lf

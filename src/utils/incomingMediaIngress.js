@@ -4,7 +4,7 @@
 const { buildAttachmentTag, isSupportedMedia } = require('./media');
 const { deliverSyncedAttachment } = require('./aiFileDelivery');
 const { resolveIngressFilename } = require('./attachmentFilenames');
-const { syncFileToHistory, resolveGemixVoiceTranscription } = require('./historySync');
+const { syncFileToHistory } = require('./historySync');
 const {
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,
@@ -21,9 +21,13 @@ function createMemoizedFetchBuffer(fetchOnce) {
 
 /**
  * Sync + classify one WhatsApp message attachment (history or current turn).
+ * @param {object} msg - whatsapp-web.js message
+ * @param {string} historyStorageId
+ * @param {object} [options]
+ * @param {boolean} [options.tagOnly] - tag without native parts (assistant-side
+ *   history entries whose role cannot carry input parts).
  */
 async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
-  const { chatId, isGemixVoice = false } = options;
   const mediaType = msg.type;
   const waFilename = msg._data?.filename;
   const mimetypeHint = msg._data?.mimetype || null;
@@ -59,7 +63,6 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
   }
   const filename = resolveIngressFilename(waFilename, mimetypeHint, msgId);
   const duration = Number(msg.duration || msg._data?.duration || 0);
-  const isAudioType = mediaType === 'audio' || mediaType === 'ptt';
 
   let mimetype = mimetypeHint;
   const fetchBuffer = createMemoizedFetchBuffer(async () => {
@@ -82,12 +85,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     historyStorageId,
     metadataDurationSec: duration,
     ownerKey: historyStorageId,
-    registerTunnel: options.historyTagOnly !== true,
-    getVoiceTranscription: isGemixVoice && isAudioType
-      ? async () => resolveGemixVoiceTranscription(
-        historyStorageId, syncedPath, chatId, (msg.timestamp || 0) * 1000,
-      )
-      : null,
+    tagOnly: options.tagOnly === true,
   });
 
   return {
@@ -103,20 +101,11 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
   };
 }
 
-async function ingressSyncedAttachment(opts) {
-  const { historyTagOnly, ...rest } = opts;
-  return deliverSyncedAttachment({
-    ...rest,
-    ownerKey: opts.historyStorageId,
-    registerTunnel: historyTagOnly !== true,
-  });
-}
-
 /**
  * Sync + classify one Discord attachment (current turn, quote, or history rebuild).
  */
 async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
-  const { getVoiceTranscription = null, metadataDurationSec = 0, historyTagOnly = false } = options;
+  const { metadataDurationSec = 0, tagOnly = false } = options;
 
   if (isDiscordAttachmentOversize(att)) {
     const tag = buildAttachmentTag(null, att.name);
@@ -136,17 +125,15 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, ingressName);
   } catch { /* tag-only */ }
 
-  const ingress = await ingressSyncedAttachment({
+  const ingress = await deliverSyncedAttachment({
     syncedPath,
     name: ingressName,
     contentType: att.contentType || '',
     fetchBuffer,
     historyStorageId,
     metadataDurationSec,
-    historyTagOnly,
-    getVoiceTranscription: typeof getVoiceTranscription === 'function'
-      ? async () => getVoiceTranscription(syncedPath)
-      : null,
+    ownerKey: historyStorageId,
+    tagOnly,
   });
 
   return {
@@ -158,9 +145,42 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
   };
 }
 
+/**
+ * Cap the number of input_image parts across rebuilt history messages.
+ * Walks from the NEWEST message backwards keeping up to `max` images; older
+ * image parts are dropped (their [Attachment] tag text remains, so the model
+ * can still read_file them on demand). Documents (input_file) are not capped:
+ * xAI handles them with server-side retrieval at negligible token cost,
+ * while every attached image is processed by vision on each call.
+ *
+ * @param {Array} historyMessages - chat-completion messages (content string or parts array).
+ * @param {number} max
+ */
+function capHistoryImageParts(historyMessages, max) {
+  if (!Array.isArray(historyMessages)) return;
+  let kept = 0;
+  for (let i = historyMessages.length - 1; i >= 0; i--) {
+    const msg = historyMessages[i];
+    if (!msg || !Array.isArray(msg.content)) continue;
+    const content = [];
+    for (const part of msg.content) {
+      if (part && part.type === 'input_image') {
+        if (kept >= max) continue;
+        kept++;
+      }
+      content.push(part);
+    }
+    if (content.length === 1 && content[0].type === 'text') {
+      msg.content = content[0].text;
+    } else {
+      msg.content = content;
+    }
+  }
+}
+
 module.exports = {
   createMemoizedFetchBuffer,
   ingressWaMessageMedia,
-  ingressSyncedAttachment,
   ingressDiscordAttachment,
+  capHistoryImageParts,
 };

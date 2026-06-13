@@ -7,18 +7,23 @@
 //   2. Touch the per-user/group build workspace activity timestamp (WA only).
 //   3. Build the messages array: system prompt + chat history + the current
 //      user content. Media uses utils/incomingMediaIngress.js →
-//      aiFileDelivery.js: tunnel `input_file` URLs, inline <FileContent>, or
-//      [Attachment] tags only (Office/archives).
+//      aiFileDelivery.js: native `input_image` / `input_file` parts via
+//      public URLs, or [Attachment] tags only (raw binaries).
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in three phases:
 //      (1) standard tools parallel, (2) delivery parallel, (3) voice-to-self last - repeat
-//      until the model returns plain text (final response) or the round
-//      budget is reached.
-//   5. Apply the research-team badge (web/X sources) and ship the reply
-//      back to the platform.
+//      until the model returns the final response or the round budget is
+//      reached. While deliverable files exist (and on the first Discord
+//      thread turn) the final reply is structured JSON (response /
+//      attachments / conversation_title) enforced via response_format.
+//   5. Apply the research badge (real web/X search counts) and ship the
+//      reply back to the platform.
 
 const { callAI } = require('./ai/aiProvider');
 const { buildSystemPrompt } = require('./ai/systemPrompt');
-const { getToolsForUser, getToolAccessError, SET_CONVERSATION_TITLE_TOOL } = require('./ai/tools');
+const { getToolsForUser, getToolAccessError } = require('./ai/tools');
+const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/responseSchema');
+const { resolveDeliverySelection } = require('./utils/deliverySelection');
+const { collectGemixVoiceTranscriptParts } = require('./utils/voiceTranscripts');
 const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
 const { isAdmin } = require('./config/members');
 const {
@@ -36,7 +41,7 @@ const { resolveWorkspaceId, workspaceIdToSlug } = require('./utils/workspaceId')
 const { touchActivity } = require('./utils/buildState');
 const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
 const { readMemory } = require('./utils/memoryStore');
-const { cleanAssistantResponse } = require('./utils/text');
+const { cleanAssistantResponse, stripOutgoingDeliveryArtifacts } = require('./utils/text');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
 const { resolveStorageId, resolvePersonalMemoryFileId } = require('./utils/userPaths');
@@ -118,9 +123,12 @@ async function handleMessage(ctx) {
     voiceBuffer: null,
     isVoiceOnly: false,
     discordTitle: '',
-    // Accumulated research stats from web_x_search calls and any agent
-    // sub-runs (e.g. build) - used for the badge appended to the reply.
+    // Accumulated stats from native server-side web/X searches (main brain
+    // and build sub-agent) - used for the badge appended to the reply.
     researchStats: null,
+    // True once a server-side search ran this turn: the model may hold
+    // public URLs it wants to deliver, so the structured reply activates.
+    searchUsed: false,
   };
 
   try {
@@ -225,14 +233,14 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      // First Discord thread turn: expose and force set_conversation_title once
-      // (no assistant message in fetched history yet).
+      // First Discord thread turn: the structured reply carries the required
+      // conversation_title (no assistant message in fetched history yet).
       isFirstTurn: ctx.platform === PLATFORM_DISCORD
         && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
       // Bound helper for tools that want to fire an intermediate notification
-      // (e.g. web_x_search - "Sto consultando il team di ricerca...").
+      // (e.g. build - "Sto delegando il lavoro al coder agent...").
       // Dedup is enforced per (call, kind) inside sendIntermediateNotification.
       sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message),
     };
@@ -241,8 +249,6 @@ async function handleMessage(ctx) {
     // receives ctx, not userCtx) uses the same call-scoped ID as the dedup
     // keys written by the tools dispatcher (which receives userCtx).
     ctx.requestId = userCtx.requestId;
-
-    const tools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
 
     // -- Build workspace activity tracking (WhatsApp only) --
     // Touch last-activity on each main turn and refresh <UserWorkspace> in the prompt.
@@ -277,11 +283,28 @@ async function handleMessage(ctx) {
     if (ctx.history && ctx.history.length > 0) {
       messages.push(...ctx.history);
     }
-    messages.push({ role: 'user', content: ctx.content });
+
+    // GemiX voice messages in history are tags only (assistant entries carry
+    // no file parts): attach their transcript .txt files to the current turn
+    // so the model always sees what was said.
+    let currentContent = ctx.content;
+    try {
+      const transcriptParts = await collectGemixVoiceTranscriptParts(ctx.history, resolveStorageId(ctx));
+      if (transcriptParts.length > 0) {
+        const baseParts = typeof currentContent === 'string'
+          ? [{ type: 'text', text: currentContent }]
+          : [...(Array.isArray(currentContent) ? currentContent : [])];
+        currentContent = [...baseParts, ...transcriptParts];
+        log.info(`   Attached ${transcriptParts.length} voice transcript file(s) to the current turn`);
+      }
+    } catch (txErr) {
+      log.warn(`voice transcript attach failed: ${txErr.message}`);
+    }
+    messages.push({ role: 'user', content: currentContent });
 
     // Drop history files no longer referenced in the chat buffer (tags,
-    // FileContent paths, _historyPath on media parts). Runs before tunnel
-    // registration so tunnel URLs only expose files still on disk.
+    // _historyPath on media parts). Runs first so public-URL uploads only
+    // expose files still on disk.
     try {
       const historyUserId = resolveStorageId(ctx);
       if (historyUserId) {
@@ -311,12 +334,58 @@ async function handleMessage(ctx) {
     let lastModelUsed = null;
     const sessionStartTime = Date.now();
     let sessionDurationLimitReached = false;
-    const discordThreadAllowsTitle = Boolean(userCtx.isFirstTurn);
+    const discordFirstTurn = Boolean(userCtx.isFirstTurn);
+
+    // Structured-reply state, recomputed before every AI call:
+    //   - deliverable files exist -> optional `attachments` field,
+    //   - first Discord thread turn -> required `conversation_title`.
+    // When neither applies the reply stays plain text (no response_format).
+    const computeDeliveryState = () => {
+      const bufferFiles = (responseCtx.attachments || []).map(a => a.name).filter(Boolean);
+      return {
+        active: bufferFiles.length > 0 || responseCtx.searchUsed,
+        bufferFiles,
+        includeTitle: discordFirstTurn && !responseCtx.discordTitle,
+      };
+    };
+
+    const accumulateSearchStats = (searchStats) => {
+      if (!searchStats || (searchStats.webSources === 0 && searchStats.xPosts === 0)) return;
+      if (!responseCtx.researchStats) {
+        responseCtx.researchStats = { webSources: 0, xPosts: 0 };
+      }
+      responseCtx.researchStats.webSources += searchStats.webSources;
+      responseCtx.researchStats.xPosts += searchStats.xPosts;
+      responseCtx.searchUsed = true;
+    };
+
+    // Resolve the attachments the model listed in its structured final reply
+    // (delivery-buffer filenames and/or public URLs). Only listed files ship.
+    const resolveFinalAttachments = async (parsed) => {
+      if (!parsed.structured) return [];
+      const { attachments, missing } = await resolveDeliverySelection(parsed.attachments, responseCtx);
+      if (missing.length > 0) {
+        log.warn(`   Final reply attachments not resolved: ${missing.join(', ')}`);
+      }
+      return attachments;
+    };
+
+    const applyParsedTitle = (parsed) => {
+      if (!parsed.title) return;
+      const title = stripOutgoingDeliveryArtifacts(
+        parsed.title.replace(/[\u0000-\u001F]/g, ''),
+      ).trim().substring(0, 100);
+      if (title) responseCtx.discordTitle = title;
+    };
+
+    // Tool defs of the round in flight (rebuilt per round: the delivery
+    // attachments parameter appears only while deliverable files exist).
+    let currentRoundTools = [];
 
     const runToolCall = async (tc) => {
       try {
         log.info(`   Executing: ${tc.function.name} args=${tc.function.arguments || '{}'}`);
-        const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, tools);
+        const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, currentRoundTools);
         const resultLog = Array.isArray(result) || typeof result === 'object'
           ? JSON.stringify(result)
           : String(result ?? '');
@@ -357,24 +426,27 @@ async function handleMessage(ctx) {
       // build sub-agent just produced shows up immediately in <UserWorkspace>.
       refreshUserWorkspace();
       reloadLongTermMemory(ctx, ui);
-      userCtx.isFirstTurn = discordThreadAllowsTitle && !responseCtx.discordTitle;
-      ctx.isFirstTurn = userCtx.isFirstTurn;
+
+      // Delivery / structured-reply state for this round: the prompt, the
+      // delivery tool parameters, and the response_format all follow it.
+      const deliveryState = computeDeliveryState();
+      ctx.deliveryState = deliveryState;
+      ctx.isFirstTurn = deliveryState.includeTitle;
+      userCtx.isFirstTurn = deliveryState.includeTitle;
+      userCtx.hasDeliverableFiles = deliveryState.active;
       messages[0].content = buildSystemPrompt(ctx);
 
-      // On the first Discord turn the title-setter tool is forced exactly once
-      // via toolChoice so the thread gets named deterministically. It is
-      // excluded from the tool list in every other round.
-      const callOpts = { maxTurns: MAX_TOOL_ROUNDS, requestId: ctx.requestId };
-      let roundTools = tools;
-      const forceTitle = rounds === 1 && discordThreadAllowsTitle && !responseCtx.discordTitle;
-      if (forceTitle) {
-        callOpts.toolChoice = { type: 'function', name: SET_CONVERSATION_TITLE_TOOL };
-      } else {
-        roundTools = tools.filter(t => t.function?.name !== SET_CONVERSATION_TITLE_TOOL);
-      }
+      const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
+      currentRoundTools = roundTools;
+      const responseFormat = buildGemixResponseFormat({
+        includeTitle: deliveryState.includeTitle,
+        includeAttachments: deliveryState.active,
+      });
+      const callOpts = { maxTurns: MAX_TOOL_ROUNDS, requestId: ctx.requestId, responseFormat };
 
-      const { message: assistantMsg, provider, model } = await callAI(messages, roundTools, callOpts);
+      const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
       lastModelUsed = model;
+      accumulateSearchStats(searchStats);
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
@@ -452,9 +524,9 @@ async function handleMessage(ctx) {
           if (msg) messages.push(msg);
         }
 
-        // Token optimization: tunnel/input_file previews are stripped from tool
+        // Token optimization: native file/image previews are stripped from tool
         // results after the model evaluates them in the current round.
-        const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file']);
+        const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file', 'input_image']);
         for (const msg of messages) {
           if (msg.role === 'tool' && Array.isArray(msg.content)) {
             if (msg._heavyMediaPreviewSeen) {
@@ -472,18 +544,33 @@ async function handleMessage(ctx) {
         continue;
       }
 
-      let text = cleanAssistantResponse(assistantMsg.content || '');
-      log.info(`   [${pLabel}] Response generated (${text.length} chars)`);
+      // Structured replies (response_format active) carry the user-facing
+      // text in `response`, plus optional attachments and the Discord title.
+      let finalAttachments = [];
+      let text;
+      if (responseFormat) {
+        const parsed = parseStructuredReply(assistantMsg.content || '');
+        if (!parsed.structured) {
+          log.warn('   Structured reply expected but content was not valid JSON; using raw text');
+        }
+        applyParsedTitle(parsed);
+        finalAttachments = await resolveFinalAttachments(parsed);
+        text = cleanAssistantResponse(parsed.text || '');
+      } else {
+        text = cleanAssistantResponse(assistantMsg.content || '');
+      }
+      log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
-      if (!text.trim() && !responseCtx.isVoiceOnly && (!responseCtx.attachments || responseCtx.attachments.length === 0)) {
+      if (!text.trim() && !responseCtx.isVoiceOnly && finalAttachments.length === 0) {
         log.warn('   Empty AI response, sending fallback');
         text = FALLBACK_ERROR_PREFIX;
       }
 
       // ── Research badge ──────────────────────────────────────────────────
-      // Append "🌐: N sources. 𝕏: N posts." when web_x_search is used.
-      // Only shown on text replies (not voice-only). Omit a section when its
-      // count is zero so the badge stays minimal.
+      // Append "🌐: N sources. 𝕏: N posts." when server-side web/X search
+      // ran (real counts from the API payloads). Only shown on text replies
+      // (not voice-only). Omit a section when its count is zero so the badge
+      // stays minimal.
       if (text.trim() && !responseCtx.isVoiceOnly && responseCtx.researchStats) {
         const { webSources, xPosts } = responseCtx.researchStats;
         if (webSources > 0 || xPosts > 0) {
@@ -513,7 +600,7 @@ async function handleMessage(ctx) {
         text: text || null,
         voiceBuffer: null,
         isVoiceOnly: false,
-        attachments: responseCtx.attachments,
+        attachments: finalAttachments,
         discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
       };
@@ -538,25 +625,42 @@ async function handleMessage(ctx) {
       : `tool-round budget (${MAX_TOOL_ROUNDS})`;
     log.warn(`   Forcing final answer (${wrapUpReason}, tool_choice:none)`);
     let wrapUpText = '';
+    let wrapUpAttachments = [];
     try {
       reloadLongTermMemory(ctx, ui);
-      userCtx.isFirstTurn = discordThreadAllowsTitle && !responseCtx.discordTitle;
-      ctx.isFirstTurn = userCtx.isFirstTurn;
+      const deliveryState = computeDeliveryState();
+      ctx.deliveryState = deliveryState;
+      ctx.isFirstTurn = deliveryState.includeTitle;
+      userCtx.isFirstTurn = deliveryState.includeTitle;
+      userCtx.hasDeliverableFiles = deliveryState.active;
       messages[0].content = buildSystemPrompt(ctx);
-      const noTitleTools = tools.filter(t => t.function?.name !== SET_CONVERSATION_TITLE_TOOL);
+      const wrapUpTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
+      const responseFormat = buildGemixResponseFormat({
+        includeTitle: deliveryState.includeTitle,
+        includeAttachments: deliveryState.active,
+      });
       const wrapUpNote = sessionDurationLimitReached
-        ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now in natural language with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
-        : 'SYSTEM: You can no longer run tools for this turn. Reply now in natural language: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
+        ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
+        : 'SYSTEM: You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
       messages.push({
         role: 'user',
         content: wrapUpNote,
       });
-      const { message: finalMsg, model: finalModel } = await callAI(messages, noTitleTools, {
+      const { message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
         toolChoice: 'none',
         requestId: ctx.requestId,
+        responseFormat,
       });
       if (finalModel) lastModelUsed = finalModel;
-      wrapUpText = cleanAssistantResponse(finalMsg.content || '');
+      accumulateSearchStats(searchStats);
+      if (responseFormat) {
+        const parsed = parseStructuredReply(finalMsg.content || '');
+        applyParsedTitle(parsed);
+        wrapUpAttachments = await resolveFinalAttachments(parsed);
+        wrapUpText = cleanAssistantResponse(parsed.text || '');
+      } else {
+        wrapUpText = cleanAssistantResponse(finalMsg.content || '');
+      }
     } catch (wrapErr) {
       log.error(`   Forced wrap-up call failed: ${wrapErr.message}`);
     }
@@ -576,7 +680,7 @@ async function handleMessage(ctx) {
       text: wrapUpText.trim() ? wrapUpText : FALLBACK_ERROR_PREFIX,
       voiceBuffer: null,
       isVoiceOnly: false,
-      attachments: responseCtx.attachments || [],
+      attachments: wrapUpAttachments,
       discordTitle: responseCtx.discordTitle || '',
       modelUsed: lastModelUsed,
     };

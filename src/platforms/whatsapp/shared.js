@@ -14,15 +14,9 @@ const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
 const { isSystemMessage } = require('../../config/systemMessages');
 
 const { buildAttachmentTag } = require('../../utils/media');
-const {
-  classifyAiFileDelivery,
-  DELIVERY_MODE,
-  deliverSyncedAttachment,
-  hasIngressTextFragment,
-  hasInlineFileContent,
-} = require('../../utils/aiFileDelivery');
+const { MAX_IMAGE_READS } = require('../../utils/aiFileDelivery');
 const { resolveGemixVoiceTranscription } = require('../../utils/historySync');
-const { ingressWaMessageMedia } = require('../../utils/incomingMediaIngress');
+const { ingressWaMessageMedia, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 const {
   normalizeMarkdown,
   stripOutgoingDeliveryArtifacts,
@@ -188,17 +182,26 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       }
     }
 
+    let mediaParts = [];
     if (msg.hasMedia) {
       const waFilename = msg._data?.filename;
       const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
       const allFilenameHints = _attachmentFilenameHints(waFilename, resolvedName, null);
       textContent = _stripRedundantAttachmentCaption(textContent, allFilenameHints);
 
+      // User attachments ship natively (parts on the user message); bot-side
+      // entries stay tag-only (assistant role cannot carry input parts).
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
-        chatId: chat.id._serialized,
-        isGemixVoice: platform !== PLATFORM_WA_PERSONAL && isGemiX,
-        historyTagOnly: true,
+        tagOnly: isFromBot,
       });
+      // GemiX voice messages: persist the transcription into history meta so
+      // the handler can attach the transcript file to the current turn.
+      if (platform !== PLATFORM_WA_PERSONAL && isGemiX
+          && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {
+        resolveGemixVoiceTranscription(
+          userId, mediaIngress.syncedPath, chat.id._serialized, (msg.timestamp || 0) * 1000,
+        );
+      }
       textContent = _stripRedundantFilenameBesideAttachmentTag(
         textContent, mediaIngress.tag, allFilenameHints,
       );
@@ -206,6 +209,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       if (!textContent) {
         textContent = (mediaIngress.tag || buildAttachmentTag(null, resolvedName || msg._data?.filename || 'file')).trim();
       }
+      mediaParts = mediaIngress.contentParts || [];
     }
 
     if (!textContent) continue;
@@ -216,18 +220,24 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     // For real users: labeled prefix (role user)
     // For system events: labeled prefix including [System] tag (role assistant)
     const useLabeledContent = !isFromBot || isSystemEvent;
+    const finalText = useLabeledContent ? `${prefix}${textContent}` : textContent;
     historyMessages.push({
       role: isFromBot ? 'assistant' : 'user',
-      content: useLabeledContent ? `${prefix}${textContent}` : textContent,
+      content: mediaParts.length > 0
+        ? [{ type: 'text', text: finalText }, ...mediaParts]
+        : finalText,
     });
   }
+
+  // Bound the vision cost of re-attached history images (newest kept).
+  capHistoryImageParts(historyMessages, MAX_IMAGE_READS);
 
   return historyMessages;
 }
 
 /**
  * Extract quoted message content if this message is a reply.
- * Handles media (images, video, audio with transcription/duration, PDF if in recent history)
+ * Handles media (images, video, audio with duration limits, documents).
  * and plain quoted text. Uses recentMessageIds to decide PDF media inclusion.
  * @param {object} msg - The whatsapp-web.js message object
  * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
@@ -320,39 +330,33 @@ async function sendWhatsAppResponse(chat, responseData) {
 }
 
 /**
- * Process current message media: applies duration limits for audio/video,
- * inlines text/code documents as <FileContent>, and returns tags or buffers
- * for supported media.
+ * Process current message media: applies duration limits for audio/video and
+ * returns native content parts (input_image / input_file via public URL) for
+ * supported media. Skipped media carries its tag (plus any inline note) in
+ * `fragment`.
  * @param {object} msg - The whatsapp-web.js message object
  * @param {string} userId - storage id for media sync
- * @returns {Promise<object|null>} { skipped, buffer?, mimetype?, filename?, tag, reason? } or null
+ * @returns {Promise<object|null>} { skipped, fragment?, filename?, syncedPath?, tag, contentParts? } or null
  */
-async function processCurrentMedia(msg, userId, opts = {}) {
+async function processCurrentMedia(msg, userId) {
   if (!msg.hasMedia) return null;
 
-  const { chatId, isGemixVoice = false } = opts;
-  const r = await ingressWaMessageMedia(msg, userId, { chatId, isGemixVoice });
-  const frag = r.textFragment.trim();
+  const r = await ingressWaMessageMedia(msg, userId, {});
 
   if (r.unsupported) {
-    return { skipped: true, tag: r.tag, reason: null };
-  }
-  if (hasIngressTextFragment(frag)) {
-    return { skipped: true, tag: r.tag, reason: null, inlineText: frag };
+    return { skipped: true, tag: r.tag, fragment: r.tag };
   }
   if (r.overDurationLimit) {
     return {
       skipped: true,
       tag: r.tag,
-      reason: r.durationNote || `${r.overDurationLimit} too long`,
+      fragment: r.textFragment.trim(),
       overDurationLimit: r.overDurationLimit,
     };
   }
-
   if (r.contentParts.length > 0) {
     return {
       skipped: false,
-      buffer: null,
       mimetype: r.mimetype,
       filename: r.filename,
       syncedPath: r.syncedPath,
@@ -360,50 +364,25 @@ async function processCurrentMedia(msg, userId, opts = {}) {
       contentParts: r.contentParts,
     };
   }
-
-  if (msg.type === 'document' && !hasInlineFileContent(frag)) {
-    const docMode = classifyAiFileDelivery(r.filename || msg._data?.filename || 'file', r.mimetype || '');
-    if (docMode === DELIVERY_MODE.TAG_ONLY) {
-      return { skipped: true, tag: r.tag, reason: null };
-    }
-  }
-
-  if (!r.fetchBuffer) {
-    return { skipped: true, tag: r.tag, reason: 'file unavailable' };
-  }
-
-  let buffer = null;
-  try {
-    buffer = await r.fetchBuffer();
-  } catch { /* ignore */ }
-
-  if (!buffer) {
-    return { skipped: true, tag: r.tag, reason: 'file unavailable' };
-  }
-
+  // Tag-only (raw binary) or ingestion failure: the fragment carries the
+  // tag and any "(error)" note for the model.
   return {
-    skipped: false,
-    buffer,
-    mimetype: r.mimetype,
+    skipped: true,
+    tag: r.tag,
+    fragment: r.textFragment.trim(),
     filename: r.filename,
     syncedPath: r.syncedPath,
-    tag: r.tag,
-    contentParts: [],
-    fetchBuffer: r.fetchBuffer,
-    isGemixVoice,
   };
 }
 
 /**
  * Build the contentParts array for an incoming WhatsApp message.
- * Handles vcard/poll text formatting, quoted message content, and current message media.
- *
- * For text/code documents on the *current* message we inline the content as <FileContent>
- * (replacing the [Attachment] tag) so the model sees it immediately without needing read_file.
+ * Handles vcard/poll text formatting, quoted message content, and current
+ * message media (attached natively as input_image / input_file parts).
  * Pure-attachment sends (no caption) have redundant filename bodies cleaned.
  *
  * @param {object} msg - The whatsapp-web.js message object
- * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
+ * @param {string} chatId - The chat's serialized ID
  * @param {string} userId - storage id for media sync
  * @param {boolean} [isGroup=false] - whether chat is group (affects mentions)
  * @param {string} [senderName='Unknown'] - display name for the message author
@@ -434,43 +413,12 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
     contentParts.push(...quotedContent.mediaParts);
   }
 
-  const isGemixCurrentTurn = platform !== PLATFORM_WA_PERSONAL && msg.fromMe
-    && !hasScheduledFooter(msg.body)
-    && !isSystemMessage(msg.body);
-  const mediaResult = await processCurrentMedia(msg, userId, {
-    chatId,
-    isGemixVoice: isGemixCurrentTurn,
-  });
+  const mediaResult = await processCurrentMedia(msg, userId);
   if (mediaResult) {
-    if (mediaResult.skipped && mediaResult.inlineText) {
-      const caption = textBody ? ` ${textBody}` : '';
-      textBody = `${mediaResult.inlineText}${caption}`.trim();
-    } else if (mediaResult.skipped) {
-      const suffix = mediaResult.reason ? ` (${mediaResult.reason})` : '';
-      textBody = `${mediaResult.tag}${suffix} ${textBody}`.trim();
+    if (mediaResult.skipped) {
+      textBody = `${mediaResult.fragment || mediaResult.tag} ${textBody}`.trim();
     } else {
-      if (mediaResult.contentParts?.length) {
-        contentParts.push(...mediaResult.contentParts);
-      } else if (mediaResult.fetchBuffer) {
-        const isAudioType = msg.type === 'audio' || msg.type === 'ptt';
-        const retry = await deliverSyncedAttachment({
-          syncedPath: mediaResult.syncedPath,
-          name: mediaResult.filename || 'file',
-          contentType: mediaResult.mimetype || '',
-          historyStorageId: userId,
-          fetchBuffer: mediaResult.fetchBuffer,
-          ownerKey: userId,
-          metadataDurationSec: Number(msg.duration || msg._data?.duration || 0),
-          getVoiceTranscription: isGemixCurrentTurn && isAudioType
-            ? async () => resolveGemixVoiceTranscription(
-              userId, mediaResult.syncedPath, chatId, (msg.timestamp || 0) * 1000,
-            )
-            : null,
-        });
-        if (retry.contentParts?.length) {
-          contentParts.push(...retry.contentParts);
-        }
-      }
+      contentParts.push(...mediaResult.contentParts);
       textBody = `${mediaResult.tag} ${textBody}`.trim();
     }
   } else if (msg.hasMedia) {
@@ -478,7 +426,7 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
     textBody = `${tag} (file unavailable) ${textBody}`.trim();
   }
 
-  if (mediaResult && textBody && !mediaResult.inlineText) {
+  if (mediaResult && textBody) {
     const hints = _attachmentFilenameHints(waFilename, mediaResult.filename, mediaResult.syncedPath);
     textBody = _stripRedundantAttachmentCaption(textBody, hints);
     if (mediaResult.tag) {

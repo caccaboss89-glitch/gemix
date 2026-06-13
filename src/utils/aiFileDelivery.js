@@ -1,12 +1,25 @@
-// Central policy for how files reach xAI: tunnel URL, inline <FileContent>, or tag-only.
+// Central policy for how files reach xAI on /v1/responses.
+//
+// Every supported file is exposed through a public URL (tmpfile.link upload,
+// see utils/xaiUpload.js) and attached natively:
+//   - supported image types            -> { type: 'input_image', image_url }
+//   - everything else (text/code, PDF, Office, archives, audio, video, ...)
+//                                      -> { type: 'input_file', file_url }
+// xAI fetches the URL server-side and parses it natively (OCR/STT/vision,
+// Office and archive parsing, semantic file search) without inlining the
+// content into the prompt. Only raw binaries (.exe, .iso, ...) stay tag-only.
+//
+// read_file on plain text/code returns the content inline in the JSON tool
+// result (numbered lines) - exact bytes matter there (e.g. build edit_file).
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { DATA_DIR, MAX_IMAGE_BYTES } = require('../config/constants');
-const { mimeForExtension } = require('../config/mimeExtensions');
+const { mimeForExtension, mimeBase } = require('../config/mimeExtensions');
 const { isNonReadableExt, mainReadFileBlockedMessage } = require('../config/nonReadableExts');
-const { getPublicAttachmentUrl, tempDirForOwner } = require('./tempFileServer');
+const { tempDirForOwner } = require('./tempFileServer');
+const { uploadFileForXai } = require('./xaiUpload');
 const { buildAttachmentTag } = require('./media');
 const {
   formatAudioTooLongNote,
@@ -21,29 +34,28 @@ const { createLogger } = require('./logger');
 const log = createLogger('AiFileDelivery');
 
 const DELIVERY_MODE = {
-  TUNNEL: 'tunnel',
-  INLINE_TEXT: 'inline_text',
-  TAG_ONLY: 'tag_only',
+  IMAGE: 'image',     // input_image (xAI-supported image types only)
+  FILE: 'file',       // input_file (documents, code, PDF, Office, archives, audio, video)
+  TAG_ONLY: 'tag_only', // raw binaries - [Attachment] tag only
 };
 
-/** Max inline bytes on current-turn ingress (WA/Discord). */
-const INGRESS_INLINE_TEXT_MAX_BYTES = 200 * 1024;
-/** Max inline bytes when read_file loads text from disk. */
-const READ_FILE_TEXT_MAX_BYTES = 50 * 1024;
+/** Image types accepted by xAI as input_image. Everything else goes input_file. */
+const XAI_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.ico']);
+const XAI_IMAGE_MIMES = new Set([
+  'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
+  'image/x-icon', 'image/vnd.microsoft.icon',
+]);
 
-/** Extensions tunneled to xAI (aligned with ingress MIME policy). */
-const TUNNEL_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg', '.tiff', '.tif']);
-const TUNNEL_AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a', '.flac', '.aac']);
-const TUNNEL_VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi']);
+const AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a', '.flac', '.aac']);
+const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi']);
+const OFFICE_ARCHIVE_EXTS = new Set([
+  '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt',
+  '.zip', '.jar', '.7z', '.rar', '.tar', '.gz',
+]);
 
-const MAX_IMAGE_READS = 10;
-const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
-const MAX_PDF_BYTES = 48 * 1024 * 1024;
-
-const INLINE_TEXT_EXTS = new Set([
+const TEXT_FILE_EXTS = new Set([
   '.txt', '.md', '.rst', '.log', '.csv', '.tsv',
-  '.html', '.htm', '.xml', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
+  '.html', '.htm', '.xml', '.svg', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
   '.sh', '.bash', '.zsh', '.bat', '.ps1', '.makefile', '.dockerfile',
   '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.pyw', '.rb', '.php',
   '.java', '.kt', '.scala', '.groovy', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cc', '.cs',
@@ -53,8 +65,8 @@ const INLINE_TEXT_EXTS = new Set([
   '.patch', '.diff',
 ]);
 
-const INLINE_TEXT_MIME_PREFIXES = ['text/'];
-const INLINE_TEXT_MIME_EXTRA = new Set([
+const TEXT_MIME_PREFIXES = ['text/'];
+const TEXT_MIME_EXTRA = new Set([
   'application/json',
   'application/xml',
   'application/javascript',
@@ -64,36 +76,211 @@ const INLINE_TEXT_MIME_EXTRA = new Set([
   'application/x-shellscript',
 ]);
 
-function isInlineableTextFile(filename, mimetype) {
-  const mime = (mimetype || '').split(';')[0].trim().toLowerCase();
+// Size caps for xAI ingestion.
+const MAX_IMAGE_READS = 10;
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
+const MAX_PDF_BYTES = 48 * 1024 * 1024;   // xAI PDF limit
+const MAX_DOC_BYTES = 48 * 1024 * 1024;   // generic documents/archives
+
+/** Max bytes for inline text reads (read_file on text/code). */
+const READ_FILE_TEXT_MAX_BYTES = 50 * 1024;
+
+function _extOf(name) {
+  return path.extname(name || '').toLowerCase();
+}
+
+function isTextualFile(filename, mimetype) {
+  const mime = mimeBase(mimetype || '');
   if (mime) {
-    if (INLINE_TEXT_MIME_PREFIXES.some(p => mime.startsWith(p))) return true;
-    if (INLINE_TEXT_MIME_EXTRA.has(mime)) return true;
+    if (TEXT_MIME_PREFIXES.some(p => mime.startsWith(p)) && !mime.startsWith('text/rtf')) return true;
+    if (TEXT_MIME_EXTRA.has(mime)) return true;
   }
-  if (typeof filename === 'string' && filename) {
-    const idx = filename.lastIndexOf('.');
-    if (idx >= 0) {
-      const ext = filename.slice(idx).toLowerCase();
-      if (INLINE_TEXT_EXTS.has(ext)) return true;
-    }
-  }
-  return false;
-}
-
-function hasInlineFileContent(text) {
-  return typeof text === 'string' && text.includes('<FileContent');
-}
-
-function hasIngressTextFragment(text) {
-  return typeof text === 'string' && (text.includes('<FileContent') || text.includes('<Transcription>'));
+  return TEXT_FILE_EXTS.has(_extOf(filename));
 }
 
 /**
- * Build numbered <FileContent> XML from a buffer.
- * @param {string} displayPath - path attribute (history/... or /workspace/...)
- * @param {Buffer} buffer
- * @param {{ maxBytes?: number, sanitizePath?: boolean }} [opts]
+ * Decide how a file is shown to xAI: input_image, input_file or tag-only.
  */
+function classifyAiFileDelivery(name, contentType) {
+  const ext = _extOf(name);
+  const ct = mimeBase(contentType || '');
+
+  if (isNonReadableExt(ext)) return DELIVERY_MODE.TAG_ONLY;
+  if (XAI_IMAGE_EXTS.has(ext) || XAI_IMAGE_MIMES.has(ct)) return DELIVERY_MODE.IMAGE;
+
+  if (
+    ext === '.pdf' || ct === 'application/pdf'
+    || AUDIO_EXTS.has(ext) || VIDEO_EXTS.has(ext)
+    || OFFICE_ARCHIVE_EXTS.has(ext)
+    || isTextualFile(name, contentType)
+    // Unsupported image subtypes (gif, bmp, tiff, ...) are still parsed
+    // server-side as generic files.
+    || ct.startsWith('image/') || ct.startsWith('audio/') || ct.startsWith('video/')
+  ) {
+    return DELIVERY_MODE.FILE;
+  }
+
+  return DELIVERY_MODE.TAG_ONLY;
+}
+
+// -- Media kind + validation --------------------------------------------------
+
+function _mediaKindFor(name, contentType) {
+  const ext = _extOf(name);
+  const ct = mimeBase(contentType || '');
+  if (XAI_IMAGE_EXTS.has(ext) || XAI_IMAGE_MIMES.has(ct)) return 'image';
+  if (ext === '.pdf' || ct === 'application/pdf') return 'pdf';
+  if (ext === '.webm') {
+    if (ct === 'audio/webm' || (ct.startsWith('audio/') && !ct.startsWith('video/'))) return 'audio';
+    return 'video';
+  }
+  if (AUDIO_EXTS.has(ext) || ct.startsWith('audio/')) return 'audio';
+  if (VIDEO_EXTS.has(ext) || ct.startsWith('video/')) return 'video';
+  return 'doc';
+}
+
+/**
+ * Validate a file on disk before exposing it to xAI (size, duration, image
+ * count budget, PDF header). Returns { ok, bumpImageCount? } or { ok:false, error }.
+ */
+async function validateXaiFile(absPath, displayPath, opts = {}) {
+  const contentType = opts.contentType || opts.mimetype || '';
+  let stat;
+  try { stat = fs.statSync(absPath); }
+  catch (err) {
+    return { ok: false, error: `Cannot read file "${displayPath}": ${err.message}` };
+  }
+  const fileSize = stat.size;
+  if (fileSize === 0) {
+    return { ok: false, error: `File "${displayPath}" is empty (0 bytes).` };
+  }
+
+  const kind = _mediaKindFor(path.basename(absPath), contentType);
+
+  if (kind === 'image') {
+    const count = opts.imagesReadCount ?? 0;
+    if (count >= MAX_IMAGE_READS) {
+      return { ok: false, error: `Image limit reached. You can only read up to ${MAX_IMAGE_READS} images per call.` };
+    }
+    if (fileSize > MAX_IMAGE_BYTES) {
+      return { ok: false, error: `Image "${displayPath}" exceeds the size limit (${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB).` };
+    }
+    return { ok: true, bumpImageCount: true };
+  }
+
+  if (kind === 'pdf') {
+    if (fileSize > MAX_PDF_BYTES) {
+      return { ok: false, error: `PDF "${displayPath}" exceeds the 48 MB xAI limit.` };
+    }
+    try {
+      const fd = fs.openSync(absPath, 'r');
+      const header = Buffer.alloc(5);
+      fs.readSync(fd, header, 0, 5, 0);
+      fs.closeSync(fd);
+      if (header.toString('ascii') !== '%PDF-') {
+        return { ok: false, error: `PDF "${displayPath}" does not look like a valid PDF file.` };
+      }
+    } catch (err) {
+      return { ok: false, error: `Cannot validate PDF "${displayPath}": ${err.message}` };
+    }
+    return { ok: true };
+  }
+
+  if (kind === 'audio') {
+    if (fileSize > MAX_AUDIO_BYTES) {
+      return { ok: false, error: `Audio file exceeds size limit (${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)} MB max).` };
+    }
+    const audioDur = await getMediaDurationSec(fs.readFileSync(absPath), _extOf(absPath).slice(1) || 'ogg');
+    if (isAudioOverDurationLimit(audioDur)) {
+      return {
+        ok: false,
+        error: `Audio exceeds the duration limit (${Math.round(audioDur)}s). Tell the user the clip is too long for native playback in chat.`,
+      };
+    }
+    return { ok: true };
+  }
+
+  if (kind === 'video') {
+    if (fileSize > MAX_VIDEO_BYTES) {
+      return { ok: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max).` };
+    }
+    const videoDur = await getMediaDurationSec(fs.readFileSync(absPath), _extOf(absPath).slice(1) || 'mp4');
+    if (isVideoOverDurationLimit(videoDur)) {
+      return {
+        ok: false,
+        error: `Video exceeds the duration limit (${Math.round(videoDur)}s). Tell the user the clip is too long for native playback in chat.`,
+      };
+    }
+    return { ok: true };
+  }
+
+  if (fileSize > MAX_DOC_BYTES) {
+    return { ok: false, error: `File "${displayPath}" exceeds the size limit (${Math.round(MAX_DOC_BYTES / 1024 / 1024)} MB max).` };
+  }
+  return { ok: true };
+}
+
+// -- Part building --------------------------------------------------------------
+
+function _filePartFor(mode, url) {
+  return mode === DELIVERY_MODE.IMAGE
+    ? { type: 'input_image', image_url: url }
+    : { type: 'input_file', file_url: url };
+}
+
+/**
+ * Validate + upload a file on disk and return the xAI content parts
+ * ([Attachment] label + input_image/input_file).
+ *
+ * @returns {Promise<{ success: true, url: string, parts: object[], bumpImageCount?: boolean }
+ *   | { success: false, error: string }>}
+ */
+async function buildXaiFileParts(absPath, displayPath, opts = {}) {
+  const ext = _extOf(absPath);
+  const mimetype = opts.mimetype || opts.contentType
+    || mimeForExtension(ext, 'application/octet-stream', opts.contentType);
+  const mode = classifyAiFileDelivery(path.basename(absPath), mimetype);
+  if (mode === DELIVERY_MODE.TAG_ONLY) {
+    return { success: false, error: `File type not supported for xAI ingestion: "${displayPath}".` };
+  }
+
+  const gate = await validateXaiFile(absPath, displayPath, { ...opts, contentType: mimetype });
+  if (!gate.ok) {
+    return { success: false, error: gate.error };
+  }
+
+  let url;
+  try {
+    url = await uploadFileForXai(absPath, path.basename(displayPath || absPath), mimetype);
+  } catch (err) {
+    log.warn(`Upload failed for ${displayPath}: ${err.message}`);
+    return { success: false, error: `Cannot expose "${displayPath}" to xAI: ${err.message}` };
+  }
+
+  return {
+    success: true,
+    url,
+    parts: [
+      { type: 'text', text: `[Attachment: ${displayPath}]` },
+      _filePartFor(mode, url),
+    ],
+    bumpImageCount: gate.bumpImageCount,
+  };
+}
+
+/**
+ * Validate + upload a file on disk and return its public URL only (image/video
+ * generation references, build round-1 ingestion).
+ */
+async function exposeXaiUrlFromAbsPath(absPath, displayPath, opts = {}) {
+  const built = await buildXaiFileParts(absPath, displayPath, opts);
+  if (!built.success) return built;
+  return { success: true, url: built.url, bumpImageCount: built.bumpImageCount };
+}
+
+// -- Inline text reads (read_file) ----------------------------------------------
+
 function _truncateUtf8Text(text, maxBytes) {
   const buf = Buffer.from(text, 'utf-8');
   if (buf.length <= maxBytes) return { text, truncated: false };
@@ -105,30 +292,13 @@ function _truncateUtf8Text(text, maxBytes) {
   };
 }
 
-function buildInlineTextFilePart(displayPath, buffer, opts = {}) {
-  const maxBytes = opts.maxBytes ?? INGRESS_INLINE_TEXT_MAX_BYTES;
-  const sanitize = opts.sanitizePath !== false;
-  let text = buffer.toString('utf-8');
-  let truncated = false;
-  if (Buffer.byteLength(text, 'utf-8') > maxBytes) {
-    const cut = _truncateUtf8Text(text, maxBytes);
-    text = cut.text;
-    truncated = cut.truncated;
-  }
-  const lines = text.split(/\r?\n/);
-  const numberedText = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
-  const pathAttr = sanitize
-    ? String(displayPath || 'file').replace(/[<>"'&]/g, '_')
-    : String(displayPath || 'file');
-  const truncAttr = truncated ? ' truncated="true"' : '';
-  return `<FileContent path="${pathAttr}"${truncAttr}>\n${numberedText}\n</FileContent>`;
-}
-
 /**
- * Read a file from disk and return inline <FileContent> XML.
- * @returns {{ ok: true, content: string } | { ok: false, error: string }}
+ * Read a text/code file from disk as numbered lines ("1: ..."), capped at
+ * READ_FILE_TEXT_MAX_BYTES. Returned as plain content for the JSON tool
+ * result - exact bytes, no markup.
+ * @returns {{ ok: true, content: string, truncated: boolean } | { ok: false, error: string }}
  */
-function readInlineTextFromPath(absPath, displayPath, opts = {}) {
+function readNumberedTextFromPath(absPath, displayPath, opts = {}) {
   const maxBytes = opts.maxBytes ?? READ_FILE_TEXT_MAX_BYTES;
   let stat;
   try { stat = fs.statSync(absPath); }
@@ -139,54 +309,21 @@ function readInlineTextFromPath(absPath, displayPath, opts = {}) {
     return { ok: false, error: `File is too large to read as text (max ${maxBytes / 1024} KB).` };
   }
   try {
-    const buffer = fs.readFileSync(absPath);
-    return {
-      ok: true,
-      content: buildInlineTextFilePart(displayPath, buffer, { maxBytes, sanitizePath: false }),
-    };
+    let text = fs.readFileSync(absPath).toString('utf-8');
+    let truncated = false;
+    if (Buffer.byteLength(text, 'utf-8') > maxBytes) {
+      const cut = _truncateUtf8Text(text, maxBytes);
+      text = cut.text;
+      truncated = cut.truncated;
+    }
+    const numbered = text.split(/\r?\n/).map((line, i) => `${i + 1}: ${line}`).join('\n');
+    return { ok: true, content: numbered, truncated };
   } catch (err) {
     return { ok: false, error: `Cannot read file "${displayPath}": ${err.message}` };
   }
 }
 
-function tunnelKindForExtension(ext, contentType = '') {
-  const e = (ext || '').toLowerCase();
-  const key = e.startsWith('.') ? e : (e ? `.${e}` : '');
-  if (key === '.pdf') return 'pdf';
-  if (key === '.webm') {
-    const ct = (contentType || '').split(';')[0].trim().toLowerCase();
-    if (ct === 'audio/webm' || (ct.startsWith('audio/') && !ct.startsWith('video/'))) return 'audio';
-    return 'video';
-  }
-  if (TUNNEL_IMAGE_EXTS.has(key)) return 'image';
-  if (TUNNEL_AUDIO_EXTS.has(key)) return 'audio';
-  if (TUNNEL_VIDEO_EXTS.has(key)) return 'video';
-  return null;
-}
-
-function _tunnelKindFromMime(contentType) {
-  const ct = (contentType || '').split(';')[0].trim().toLowerCase();
-  if (ct.startsWith('image/')) return 'image';
-  if (ct === 'application/pdf') return 'pdf';
-  if (ct.startsWith('audio/')) return 'audio';
-  if (ct.startsWith('video/')) return 'video';
-  return null;
-}
-
-function classifyAiFileDelivery(name, contentType) {
-  const ext = path.extname(name || '').toLowerCase();
-  const ct = (contentType || '').split(';')[0].trim().toLowerCase();
-  if (isNonReadableExt(ext)) return DELIVERY_MODE.TAG_ONLY;
-  if (tunnelKindForExtension(ext, contentType)) return DELIVERY_MODE.TUNNEL;
-  if (isInlineableTextFile(name, contentType)) return DELIVERY_MODE.INLINE_TEXT;
-
-  if (ct.startsWith('image/') || ct.startsWith('audio/') || ct.startsWith('video/')) {
-    return DELIVERY_MODE.TUNNEL;
-  }
-  if (ct === 'application/pdf' || ext === '.pdf') return DELIVERY_MODE.TUNNEL;
-
-  return DELIVERY_MODE.TAG_ONLY;
-}
+// -- Ingress (current turn, quotes, history) -------------------------------------
 
 function resolveHistoryAbsPath(historyUserId, historyPath) {
   const uid = typeof historyUserId === 'string' ? historyUserId.trim() : '';
@@ -210,83 +347,7 @@ function _materializeBufferToTemp(buffer, originalName, ownerKey) {
   return filePath;
 }
 
-async function validateTunnelMediaFile(absPath, displayPath, opts = {}) {
-  const ext = path.extname(absPath).toLowerCase();
-  const contentType = opts.contentType || opts.mimetype || '';
-  let stat;
-  try { stat = fs.statSync(absPath); }
-  catch (err) {
-    return { ok: false, error: `Cannot read file "${displayPath}": ${err.message}` };
-  }
-
-  const fileSize = stat.size;
-  let kind = tunnelKindForExtension(ext, contentType) || _tunnelKindFromMime(contentType);
-
-  if (kind === 'image') {
-    const count = opts.imagesReadCount ?? 0;
-    if (count >= MAX_IMAGE_READS) {
-      return { ok: false, error: `Image limit reached. You can only read up to ${MAX_IMAGE_READS} images per call.` };
-    }
-    if (fileSize === 0) return { ok: false, error: `Image file "${displayPath}" is empty.` };
-    if (fileSize > MAX_IMAGE_BYTES) {
-      return { ok: false, error: `Image "${displayPath}" exceeds the size limit (${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB).` };
-    }
-    return { ok: true, bumpImageCount: true };
-  }
-
-  if (kind === 'pdf') {
-    if (fileSize === 0) {
-      return { ok: false, error: `PDF "${displayPath}" is empty (0 bytes).` };
-    }
-    if (fileSize > MAX_PDF_BYTES) {
-      return { ok: false, error: `PDF "${displayPath}" exceeds the 48 MB xAI limit.` };
-    }
-    try {
-      const fd = fs.openSync(absPath, 'r');
-      const header = Buffer.alloc(5);
-      fs.readSync(fd, header, 0, 5, 0);
-      fs.closeSync(fd);
-      if (header.toString('ascii') !== '%PDF-') {
-        return { ok: false, error: `PDF "${displayPath}" does not look like a valid PDF file.` };
-      }
-    } catch (err) {
-      return { ok: false, error: `Cannot validate PDF "${displayPath}": ${err.message}` };
-    }
-    return { ok: true };
-  }
-
-  if (kind === 'audio') {
-    if (fileSize > MAX_AUDIO_BYTES) {
-      return { ok: false, error: `Audio file exceeds size limit (${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)} MB max).` };
-    }
-    const audioDur = await getMediaDurationSec(fs.readFileSync(absPath), ext.slice(1) || 'ogg');
-    if (isAudioOverDurationLimit(audioDur)) {
-      return {
-        ok: false,
-        error: `Audio exceeds the duration limit (${Math.round(audioDur)}s). Tell the user the clip is too long for native playback in chat.`,
-      };
-    }
-    return { ok: true };
-  }
-
-  if (kind === 'video') {
-    if (fileSize > MAX_VIDEO_BYTES) {
-      return { ok: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max).` };
-    }
-    const videoDur = await getMediaDurationSec(fs.readFileSync(absPath), ext.slice(1) || 'mp4');
-    if (isVideoOverDurationLimit(videoDur)) {
-      return {
-        ok: false,
-        error: `Video exceeds the duration limit (${Math.round(videoDur)}s). Tell the user the clip is too long for native playback in chat.`,
-      };
-    }
-    return { ok: true };
-  }
-
-  return { ok: false, error: `File type not supported for tunnel delivery: "${displayPath}".` };
-}
-
-async function _resolveTunnelDeliveryTarget(opts) {
+async function _resolveIngressTarget(opts) {
   const {
     syncedPath,
     name,
@@ -296,10 +357,10 @@ async function _resolveTunnelDeliveryTarget(opts) {
     ownerKey = null,
   } = opts;
 
-  const ext = path.extname(name || '').toLowerCase();
+  const ext = _extOf(name);
   const mimetype = mimeForExtension(
     ext,
-    (contentType || '').split(';')[0].trim() || 'application/octet-stream',
+    mimeBase(contentType) || 'application/octet-stream',
     contentType,
   );
   const displayName = path.basename(syncedPath || name || 'file');
@@ -307,13 +368,12 @@ async function _resolveTunnelDeliveryTarget(opts) {
   let absPath = syncedPath && historyStorageId
     ? resolveHistoryAbsPath(historyStorageId, syncedPath)
     : null;
-  let kind = 'history';
 
   if (absPath) {
     try {
       const st = fs.statSync(absPath);
       if (!st.isFile() || st.size === 0) {
-        log.warn(`History file empty or missing for tunnel (${displayName}), re-fetching buffer`);
+        log.warn(`History file empty or missing (${displayName}), re-fetching buffer`);
         absPath = null;
       }
     } catch {
@@ -328,46 +388,13 @@ async function _resolveTunnelDeliveryTarget(opts) {
     }
     try {
       absPath = _materializeBufferToTemp(buffer, displayName, ownerKey);
-      kind = 'temp';
     } catch (err) {
       log.warn(`Failed to materialize ${displayName}: ${err.message}`);
       return { error: err.message };
     }
   }
 
-  return { absPath, displayName, mimetype, kind, ext };
-}
-
-async function appendTunnelInputFile(contentParts, opts) {
-  if (classifyAiFileDelivery(opts.name, opts.contentType) !== DELIVERY_MODE.TUNNEL) {
-    return { ok: false, skipped: true };
-  }
-
-  const resolved = await _resolveTunnelDeliveryTarget(opts);
-  if (resolved.error) {
-    return { ok: false, error: resolved.error };
-  }
-
-  const { absPath, displayName, mimetype, kind, ext } = resolved;
-
-  const gate = await validateTunnelMediaFile(absPath, displayName, { ...opts, contentType: mimetype });
-  if (!gate.ok) {
-    log.warn(`Tunnel validation failed for ${displayName}: ${gate.error}`);
-    return { ok: false, error: gate.error };
-  }
-
-  try {
-    const fileSize = fs.statSync(absPath).size;
-    const urlInfo = getPublicAttachmentUrl(absPath, displayName, { kind, mimetype });
-    contentParts.push({ type: 'input_file', file_url: urlInfo.url });
-    if (tunnelKindForExtension(ext, mimetype) === 'pdf') {
-      log.info(`PDF exposed via tunnel: ${displayName} (${fileSize} bytes, kind=${kind})`);
-    }
-    return { ok: true, bumpImageCount: gate.bumpImageCount };
-  } catch (err) {
-    log.warn(`Tunnel registration failed for ${displayName}: ${err.message}`);
-    return { ok: false, error: `Cannot expose "${displayName}" via attachment tunnel: ${err.message}` };
-  }
+  return { absPath, displayName, mimetype };
 }
 
 function _durationSkipResult(tag, kind, durationSec) {
@@ -383,168 +410,105 @@ function _durationSkipResult(tag, kind, durationSec) {
   };
 }
 
+/**
+ * Turn a synced attachment into the [Attachment] tag + native content parts.
+ *
+ * @param {object} opts
+ * @param {string|null} opts.syncedPath - history-relative filename (when synced).
+ * @param {string} opts.name
+ * @param {string} [opts.contentType]
+ * @param {Function} opts.fetchBuffer - async () => Buffer|null
+ * @param {string} opts.historyStorageId
+ * @param {number} [opts.metadataDurationSec]
+ * @param {string|null} [opts.ownerKey] - temp-dir isolation key for buffer files.
+ * @param {boolean} [opts.tagOnly] - emit the tag without parts (assistant-side
+ *   history entries, whose role cannot carry input parts).
+ * @returns {Promise<{ tag: string, contentParts: object[], textFragment: string,
+ *   overDurationLimit?: string, durationNote?: string }>}
+ */
 async function deliverSyncedAttachment(opts) {
   const {
     syncedPath,
     name,
     contentType = '',
     fetchBuffer,
-    historyStorageId,
     metadataDurationSec = 0,
-    getVoiceTranscription = null,
-    ownerKey = null,
-    registerTunnel = true,
+    tagOnly = false,
   } = opts;
 
   const tag = buildAttachmentTag(syncedPath, name);
   const mode = classifyAiFileDelivery(name, contentType);
-  const ct = (contentType || '').split(';')[0].trim().toLowerCase();
+  const kind = _mediaKindFor(name, contentType);
 
   if (mode === DELIVERY_MODE.TAG_ONLY) {
     return { tag, contentParts: [], textFragment: `${tag} ` };
   }
 
-  if (mode === DELIVERY_MODE.INLINE_TEXT) {
+  // Duration gates run before any upload so over-limit clips are skipped with
+  // an inline note instead of being attached. Prefer metadata / the synced
+  // history file on disk; only fall back to fetching the platform buffer.
+  if (kind === 'audio' || kind === 'video') {
     try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        const inline = buildInlineTextFilePart(syncedPath || name, buffer, {
-          maxBytes: INGRESS_INLINE_TEXT_MAX_BYTES,
-          sanitizePath: true,
-        });
-        return { tag, contentParts: [], textFragment: `${inline} ` };
+      const historyAbsPath = syncedPath && opts.historyStorageId
+        ? resolveHistoryAbsPath(opts.historyStorageId, syncedPath)
+        : null;
+      let probeBuffer = null;
+      if (!historyAbsPath && !(Number(metadataDurationSec) > 0) && typeof fetchBuffer === 'function') {
+        probeBuffer = await fetchBuffer();
       }
-    } catch { /* tag only */ }
+      const dur = await resolveMediaDurationSec({
+        metadataSec: metadataDurationSec,
+        buffer: probeBuffer,
+        extHint: _extOf(name).slice(1),
+        historyAbsPath,
+      });
+      if (kind === 'audio' && isAudioOverDurationLimit(dur)) {
+        return _durationSkipResult(tag, 'audio', dur);
+      }
+      if (kind === 'video' && isVideoOverDurationLimit(dur)) {
+        return _durationSkipResult(tag, 'video', dur);
+      }
+    } catch { /* continue to upload */ }
+  }
+
+  if (tagOnly) {
     return { tag, contentParts: [], textFragment: `${tag} ` };
   }
 
-  const tunnelKind = tunnelKindForExtension(path.extname(name || ''), contentType);
-  if ((ct.startsWith('audio/') || tunnelKind === 'audio') && typeof getVoiceTranscription === 'function') {
-    const tx = await getVoiceTranscription();
-    if (tx) {
-      return {
-        tag,
-        contentParts: [],
-        textFragment: `${tag} <Transcription>${tx}</Transcription> `,
-      };
-    }
+  const resolved = await _resolveIngressTarget(opts);
+  if (resolved.error) {
+    return { tag, contentParts: [], textFragment: `${tag} (${resolved.error}) ` };
   }
 
-  if (ct.startsWith('audio/') || tunnelKind === 'audio') {
-    try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        const audioDuration = await resolveMediaDurationSec({
-          metadataSec: metadataDurationSec,
-          buffer,
-          extHint: path.extname(name || '').slice(1),
-        });
-        if (isAudioOverDurationLimit(audioDuration)) {
-          return _durationSkipResult(tag, 'audio', audioDuration);
-        }
-      }
-    } catch { /* continue to tunnel */ }
-  }
-
-  if (ct.startsWith('video/') || tunnelKind === 'video') {
-    try {
-      const buffer = await fetchBuffer();
-      if (buffer) {
-        const dur = await resolveMediaDurationSec({
-          metadataSec: metadataDurationSec,
-          buffer,
-          extHint: path.extname(name || '').slice(1),
-        });
-        if (isVideoOverDurationLimit(dur)) {
-          return _durationSkipResult(tag, 'video', dur);
-        }
-      }
-    } catch { /* continue to tunnel */ }
-  }
-
-  if (!registerTunnel) {
-    let textFragment = `${tag} `;
-    if (mode === DELIVERY_MODE.TUNNEL && syncedPath && historyStorageId) {
-      const absPath = resolveHistoryAbsPath(historyStorageId, syncedPath);
-      if (absPath && fs.existsSync(absPath)) {
-        const ext = path.extname(name || '').toLowerCase();
-        const mimetype = mimeForExtension(
-          ext,
-          (contentType || '').split(';')[0].trim() || 'application/octet-stream',
-          contentType,
-        );
-        const displayName = path.basename(syncedPath || name || 'file');
-        const gate = await validateTunnelMediaFile(absPath, displayName, { contentType: mimetype });
-        if (!gate.ok) {
-          textFragment = `${tag} (${gate.error}) `;
-        }
-      }
-    }
-    return { tag, contentParts: [], textFragment };
-  }
-
-  const contentParts = [];
-  const tunnel = await appendTunnelInputFile(contentParts, {
-    syncedPath,
-    name,
-    contentType,
-    historyStorageId,
-    fetchBuffer,
-    ownerKey,
+  const built = await buildXaiFileParts(resolved.absPath, resolved.displayName, {
+    mimetype: resolved.mimetype,
+    imagesReadCount: opts.imagesReadCount ?? 0,
   });
-
-  let textFragment = `${tag} `;
-  if (!tunnel.ok && !tunnel.skipped && tunnel.error) {
-    textFragment = `${tag} (${tunnel.error}) `;
+  if (!built.success) {
+    log.warn(`xAI ingestion skipped for ${resolved.displayName}: ${built.error}`);
+    return { tag, contentParts: [], textFragment: `${tag} (${built.error}) ` };
   }
-  return { tag, contentParts, textFragment };
-}
 
-/**
- * Register an on-disk file on the attachment tunnel (build round-1, imagine refs).
- * @returns {Promise<{ success: true, url: string, parts: object[], bumpImageCount?: boolean } | { success: false, error: string }>}
- */
-async function exposeTunnelFromAbsPath(absPath, displayPath, opts = {}) {
-  const ext = path.extname(absPath).toLowerCase();
-  const mimetype = opts.mimetype || opts.contentType || mimeForExtension(ext, 'application/octet-stream', opts.contentType);
-  const tunnel = await buildTunnelAttachmentParts(
-    absPath,
-    displayPath,
-    mimetype,
-    opts.kind || 'history',
-    { ...opts, contentType: mimetype },
-  );
-  if (!tunnel.success) return tunnel;
-  const filePart = tunnel.parts.find(p => p && p.type === 'input_file');
+  // Tag travels in the text fragment; only the native part goes in contentParts.
+  const filePart = built.parts.find(p => p.type === 'input_file' || p.type === 'input_image');
   return {
-    success: true,
-    url: filePart && filePart.file_url,
-    parts: tunnel.parts,
-    bumpImageCount: tunnel.bumpImageCount,
+    tag,
+    contentParts: filePart ? [filePart] : [],
+    textFragment: `${tag} `,
+    bumpImageCount: built.bumpImageCount,
   };
 }
 
-async function buildTunnelAttachmentParts(absPath, displayPath, mimetype, kind = 'history', opts = {}) {
-  const gate = await validateTunnelMediaFile(absPath, displayPath, { ...opts, contentType: mimetype });
-  if (!gate.ok) {
-    return { success: false, error: gate.error };
-  }
-  try {
-    const urlInfo = getPublicAttachmentUrl(absPath, path.basename(absPath), { kind, mimetype });
-    const parts = [
-      { type: 'text', text: `[Attachment: ${displayPath}]` },
-      { type: 'input_file', file_url: urlInfo.url },
-    ];
-    return { success: true, parts, bumpImageCount: gate.bumpImageCount };
-  } catch (err) {
-    log.warn(`Failed to expose ${displayPath} via tunnel: ${err.message}`);
-    return { success: false, error: `Cannot expose "${displayPath}" via attachment tunnel: ${err.message}` };
-  }
-}
+// -- read_file delivery (history + build workspace/skills) ------------------------
 
 /**
- * Unified read_file delivery (history + build workspace/skills).
- * @returns {Promise<{ kind: 'tunnel', parts: object[], bumpImageCount?: boolean } | { kind: 'inline', content: string } | { kind: 'error', error: string }>}
+ * Unified read_file delivery.
+ * Text/code -> inline numbered content (exact bytes for editing workflows).
+ * Everything else supported -> upload + native parts.
+ *
+ * @returns {Promise<{ kind: 'parts', parts: object[], bumpImageCount?: boolean }
+ *   | { kind: 'inline', content: string, truncated: boolean }
+ *   | { kind: 'error', error: string }>}
  */
 async function deliverReadFileFromPath({
   absPath,
@@ -552,40 +516,40 @@ async function deliverReadFileFromPath({
   contentType = '',
   imagesReadCount = 0,
   blockedMessage,
-  tunnelStorageKind = 'history',
 }) {
-  const ext = path.extname(absPath).toLowerCase();
+  const ext = _extOf(absPath);
   const mimetype = contentType || mimeForExtension(ext, 'application/octet-stream', contentType);
-  const mode = classifyAiFileDelivery(path.basename(absPath), mimetype);
-
-  if (mode === DELIVERY_MODE.TUNNEL) {
-    const tunnel = await buildTunnelAttachmentParts(absPath, displayPath, mimetype, tunnelStorageKind, {
-      imagesReadCount,
-      contentType: mimetype,
-    });
-    if (!tunnel.success) return { kind: 'error', error: tunnel.error };
-    return { kind: 'tunnel', parts: tunnel.parts, bumpImageCount: tunnel.bumpImageCount };
-  }
-
-  if (mode === DELIVERY_MODE.INLINE_TEXT) {
-    const inline = readInlineTextFromPath(absPath, displayPath, { maxBytes: READ_FILE_TEXT_MAX_BYTES });
-    if (!inline.ok) return { kind: 'error', error: inline.error };
-    return { kind: 'inline', content: inline.content };
-  }
 
   if (isNonReadableExt(ext)) {
-    return { kind: 'error', error: blockedMessage || mainReadFileBlockedMessage(ext, 'whatsapp') };
+    return { kind: 'error', error: blockedMessage || mainReadFileBlockedMessage(ext) };
   }
-  return { kind: 'error', error: `File type not supported for read_file: "${displayPath}".` };
+
+  if (isTextualFile(path.basename(absPath), mimetype)) {
+    const inline = readNumberedTextFromPath(absPath, displayPath);
+    if (!inline.ok) return { kind: 'error', error: inline.error };
+    return { kind: 'inline', content: inline.content, truncated: inline.truncated };
+  }
+
+  const mode = classifyAiFileDelivery(path.basename(absPath), mimetype);
+  if (mode === DELIVERY_MODE.TAG_ONLY) {
+    return { kind: 'error', error: `File type not supported for read_file: "${displayPath}".` };
+  }
+
+  const built = await buildXaiFileParts(absPath, displayPath, {
+    mimetype,
+    imagesReadCount,
+  });
+  if (!built.success) return { kind: 'error', error: built.error };
+  return { kind: 'parts', parts: built.parts, bumpImageCount: built.bumpImageCount };
 }
 
 module.exports = {
   DELIVERY_MODE,
-  TUNNEL_IMAGE_EXTS,
+  XAI_IMAGE_EXTS,
+  MAX_IMAGE_READS,
   classifyAiFileDelivery,
-  hasInlineFileContent,
-  hasIngressTextFragment,
+  buildXaiFileParts,
+  exposeXaiUrlFromAbsPath,
   deliverReadFileFromPath,
   deliverSyncedAttachment,
-  exposeTunnelFromAbsPath,
 };

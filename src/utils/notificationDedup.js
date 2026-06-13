@@ -50,7 +50,7 @@ function getChatKey(ctx) {
  * invocation - the caller should stay silent.
  *
  * @param {object} ctx  - Handler context; must have `requestId` set.
- * @param {string} kind - Notification kind: 'research' | 'image_gen' | 'video_gen' | etc.
+ * @param {string} kind - Notification kind: 'image_gen' | 'video_gen' | 'build' | etc.
  * @returns {boolean}
  */
 function markNotifiedInCall(ctx, kind) {
@@ -79,17 +79,6 @@ function clearCallNotifications(ctx) {
 // -- Message builders ------------------------------------------------------
 
 /**
- * Fixed research notification. Sent BEFORE the multi-agent team is queried,
- * so the user knows GemiX is actively consulting the research team and is
- * about to wait for their report before answering. Searches are capped at
- * one per round so no plural variant is needed.
- * @returns {string}
- */
-function buildResearchNotificationMessage() {
-  return '🔎 Sto consultando il team di ricerca prima di risponderti, attendi un attimo...';
-}
-
-/**
  * Fixed build notification. Sent BEFORE the build sub-agent is invoked,
  * so the user knows the host is delegating the task and is about to wait for
  * the deliverable. Dedup key 'build' ensures it fires once per AI call even
@@ -116,6 +105,5 @@ module.exports = {
   getChatKey,
   markNotifiedInCall,
   clearCallNotifications,
-  buildResearchNotificationMessage,
   buildEngineeringNotificationMessage,
 };

@@ -1,14 +1,14 @@
 // src/utils/tempFileServer.js
 // HTTP server that hosts temporary files with expiration.
 //
-// Two access patterns:
-//   1. Fallback delivery: temp links sent to the user when WhatsApp/Discord
-//      reject the attachment (legacy behaviour, 1h TTL).
-//   2. xAI ingestion: public URLs handed to /v1/responses as `input_file`
-//      so Grok can fetch PDF/audio/video/text natively. xAI fetches the
-//      file once shortly after the request - short-lived tokens are fine
-//      for buffer-backed assets, longer ones (24h) for files already living
-//      in chat history that may be re-referenced across turns.
+// Serves the temporary download links sent to USERS when WhatsApp/Discord
+// reject or cannot carry an attachment directly (delivery fallback, see
+// utils/attachmentFallback.js). Files bound for xAI use tmpfile.link
+// instead (utils/xaiUpload.js) - this server never feeds the model.
+//
+// It also owns the .tempfiles/ staging directory (tempDirForOwner), where
+// per-user buffers are materialized before upload/delivery and periodically
+// swept.
 //
 // Each token is 128-bit random (crypto.randomBytes(16)). Listing is
 // disabled (regex match on /temp/<32hex>/<name> only). Path traversal is
@@ -118,10 +118,10 @@ function _detectMime(originalName) {
 }
 
 /**
- * Decide the Content-Disposition for a given MIME. Inline for everything
- * xAI is expected to fetch and parse (PDF, images, audio, video, text);
- * attachment for unknown types so that a leaked link triggers a download
- * dialog and not e.g. arbitrary execution in a browser.
+ * Decide the Content-Disposition for a given MIME. Inline for media a
+ * browser can preview (PDF, images, audio, video, text); attachment for
+ * unknown types so that a leaked link triggers a download dialog and not
+ * e.g. arbitrary execution in a browser.
  */
 function _detectDisposition(mimetype) {
   if (mimetype === 'application/octet-stream') return 'attachment';
@@ -180,7 +180,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
 
     const publicUrl = getPublicBaseUrl();
     if (publicUrl === 'http://localhost:9998') {
-      log.warn(`No public tunnel URL - temp links will be ${publicUrl} (not reachable by xAI)`);
+      log.warn(`No public tunnel URL - temp links will be ${publicUrl} (not reachable from outside)`);
     }
     const url = `${publicUrl}/temp/${token}/${encodeURIComponent(finalName)}`;
 
@@ -200,11 +200,9 @@ function registerTempFile(filePath, originalName, opts = {}) {
 }
 
 /**
- * Convenience wrapper for the new attachment-passing strategy.
- *
- * Use this when handing a file to xAI as `input_file` on /v1/responses, or
- * when emitting a public link for any other consumer. The function always
- * returns an HTTPS URL from GEMIX_PUBLIC_ATTACHMENT_BASE_URL (Caddy → this server).
+ * Emit a public temporary download link for a user (delivery fallback).
+ * The function always returns an HTTPS URL from
+ * GEMIX_PUBLIC_ATTACHMENT_BASE_URL (Caddy → this server).
  *
  * @param {string} filePath - Absolute path to the file.
  * @param {string} originalName - Display name (used in URL and headers).

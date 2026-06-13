@@ -4,10 +4,9 @@
 // Used by the main brain via userCtx.sendIntermediateNotification.
 //
 // Tools that trigger notifications (see tools/index.js):
-//   - web_x_search (full_team=true)  → kind 'research'
-//   - generate_image                 → kind 'image_gen'
-//   - generate_video                 → kind 'video_gen'
-//   - build                          → kind 'build'
+//   - generate_image → kind 'image_gen'
+//   - generate_video → kind 'video_gen'
+//   - build          → kind 'build'
 //
 // Platform routing:
 //   Discord          → ctx.discordChannel.send

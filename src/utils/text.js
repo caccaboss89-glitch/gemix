@@ -87,11 +87,6 @@ const IN_REPLY_TO_PREFIX_RE = /^\[In reply to:\s*(?:\[[^\]]*\]|[^\]])*\](?:\n|\s
 
 // Model must not echo these in user-facing text (history/ingress only).
 const OUT_ATTACHMENT_TAG_RE = /\[Attachment:\s*[^\]]+\]/gi;
-const OUT_TRANSCRIPTION_RE = /<Transcription>[\s\S]*?<\/Transcription>/gi;
-const OUT_TRANSCRIPTION_OPEN_RE = /<Transcription>[\s\S]*$/gi;
-// Matches ingress shape: <FileContent path="..." [truncated="true"]>…</FileContent>
-const OUT_FILE_CONTENT_RE = /<FileContent\s+[^>]*>[\s\S]*?<\/FileContent>/gi;
-const OUT_FILE_CONTENT_OPEN_RE = /<FileContent\s+[^>]*>/gi;
 
 /**
  * Strip any GemiX-generated system-message lines that the AI may have
@@ -140,12 +135,7 @@ function stripSystemMessages(text) {
  */
 function stripOutgoingDeliveryArtifacts(text) {
   if (!text || typeof text !== 'string') return '';
-  let cleaned = text
-    .replace(OUT_ATTACHMENT_TAG_RE, '')
-    .replace(OUT_TRANSCRIPTION_RE, '')
-    .replace(OUT_TRANSCRIPTION_OPEN_RE, '')
-    .replace(OUT_FILE_CONTENT_RE, '')
-    .replace(OUT_FILE_CONTENT_OPEN_RE, '');
+  let cleaned = text.replace(OUT_ATTACHMENT_TAG_RE, '');
   cleaned = cleaned.replace(/[ \t]{2,}/g, ' ');
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -167,7 +157,7 @@ function stripHistoryPrefixes(text) {
  * 5. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
  * 6. Strips any GemiX system-message lines accidentally echoed by the AI
  *    (release banners, maintenance, temp-attachment notice, fallback error...)
- * 7. Strips [Attachment: ...], &lt;Transcription&gt;, &lt;FileContent&gt; echoes
+ * 7. Strips [Attachment: ...] echoes
  * @param {string} text
  * @returns {string} Cleaned response text
  */

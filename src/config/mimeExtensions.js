@@ -1,5 +1,5 @@
 // Shared MIME → file-extension map (no leading dot). Used for ingress filenames
-// and tunnel URL registration (see utils/aiFileDelivery.js).
+// and xAI public-URL ingestion (see utils/aiFileDelivery.js).
 
 /** @type {Record<string, string>} */
 const MIME_EXTENSION_MAP = {
@@ -28,6 +28,8 @@ const MIME_EXTENSION_MAP = {
   'video/quicktime': 'mov',
   'video/x-matroska': 'mkv',
   'video/x-msvideo': 'avi',
+  'image/x-icon': 'ico',
+  'image/vnd.microsoft.icon': 'ico',
   'application/json': 'json',
   'application/xml': 'xml',
   'text/xml': 'xml',
@@ -37,7 +39,16 @@ const MIME_EXTENSION_MAP = {
   'text/markdown': 'md',
   'application/zip': 'zip',
   'application/x-zip-compressed': 'zip',
+  'application/x-7z-compressed': '7z',
+  'application/vnd.rar': 'rar',
+  'application/x-rar-compressed': 'rar',
+  'application/x-tar': 'tar',
+  'application/gzip': 'gz',
+  'application/java-archive': 'jar',
   'application/octet-stream': 'bin',
+  'application/msword': 'doc',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.ms-powerpoint': 'ppt',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
@@ -64,7 +75,7 @@ function dottedExtensionForMime(mime, fallback = '') {
   return ext ? `.${ext}` : '';
 }
 
-/** Prefer these MIME types when several map to the same extension (build + tunnel). */
+/** Prefer these MIME types when several map to the same extension. */
 const EXT_TO_MIME_PREFER = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -73,7 +84,7 @@ const EXT_TO_MIME_PREFER = {
   '.tif': 'image/tiff',
 };
 
-/** Extensions absent from MIME_EXTENSION_MAP or with tunnel-specific MIME. */
+/** Extensions absent from MIME_EXTENSION_MAP or needing a specific MIME. */
 const EXT_TO_MIME_ALIASES = {
   '.svg': 'image/svg+xml',
   '.oga': 'audio/ogg',

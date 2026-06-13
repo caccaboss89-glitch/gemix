@@ -20,15 +20,14 @@ sandbox. Files live in `/workspace/`; this skill's files are read-only under
 
 ## Inspecting a spreadsheet
 
-`read_file` does NOT render spreadsheets — only PDF, images, audio, video, and
-plain-text files are supported. So:
+`read_file` parses `.xlsx`/`.xlsm` natively for **understanding**. For **exact**
+values, formulas, or transforms, load with `pandas` or `openpyxl` — never retype
+numbers you eyeballed:
 
-- `.xlsx` / `.xlsm`: do NOT `read_file` them (it will fail). Inspect them by
-  loading with `pandas` or `openpyxl` and printing what you need (`df.head()`,
+- `.xlsx` / `.xlsm`: use `pandas`/`openpyxl` and print what you need (`df.head()`,
   `df.info()`, cell values, sheet names).
-- `.csv` / `.tsv`: these are plain text, so `read_file` works for a quick look —
-  but to compute on or transform the data, load it with `pandas` so the values
-  are exact (never retype numbers you eyeballed).
+- `.csv` / `.tsv`: plain text — `read_file` works for a quick look, but load with
+  `pandas` for exact computation.
 
 ## Available tools
 
@@ -49,8 +48,8 @@ Formula recalculation: headless LibreOffice (`soffice`), driven by
 
 | Once | Avoid |
 |------|--------|
-| `pandas`/`openpyxl` inspect (head, sheet names, dtypes) | `read_file` on `.xlsx` (fails) |
-| One `web_x_search` only if external facts are required | Multiple research calls for static data |
+| `pandas`/`openpyxl` inspect (head, sheet names, dtypes) | Relying on `read_file` alone for exact cell values |
+| One `web_search` only if external facts are required | Multiple research calls for static data |
 | `recalc.py` after writing formulas | Re-running recalc after every tiny edit |
 | One export/QA pass | Rebuilding the whole workbook from scratch when a file was supplied |
 - Zero formula errors in the delivered file (#REF!, #DIV/0!, #VALUE!, #N/A,
@@ -160,7 +159,7 @@ Two options:
 
 Images you embed can come from: files GemiX staged in `/workspace/` (uploads,
 generated images), PNGs you render with matplotlib, or images fetched from the
-web with `web_x_search` (`search_images=true`), which land in `/workspace/`.
+web with `web_search` (save image URLs via `download_file`), which land in `/workspace/`.
 **Use images proactively** when they improve the result: a chart, a logo, a
 photo, a diagram. If the task doesn't supply one but a relevant image would make
 the spreadsheet clearer or more useful, fetch it or render it.

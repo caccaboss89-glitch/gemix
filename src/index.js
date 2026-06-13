@@ -67,13 +67,13 @@ const { setAdminNotifierClient } = require('./utils/adminNotifier');
 const buildSandbox = require('./sandbox/buildSandbox');
 const { startInternalNotifyServer } = require('./utils/internalNotifyServer');
 const { startTempFileServer } = require('./utils/tempFileServer');
-const { HERMES_BASE_URL, GROK_MODEL } = require('./config/env');
+const { GROK_MODEL } = require('./config/env');
+const { getXaiAuth, describeXaiAuthSource } = require('./config/xaiAuth');
 
 log.info('GemiX - Avvio in corso...\n');
-log.info(`   Hermes proxy: ${HERMES_BASE_URL} (model: ${GROK_MODEL})`);
 
-// Soft preflight: the Hermes proxy is pinged at startup without blocking
-// initialization. A warning is logged if the preflight fails.
+// Soft preflight: validate the xAI credentials file and ping the API at
+// startup without blocking initialization. A warning is logged on failure.
 (async () => {
   try {
     await buildSandbox.validateYtDlpAtStartup();
@@ -83,17 +83,22 @@ log.info(`   Hermes proxy: ${HERMES_BASE_URL} (model: ${GROK_MODEL})`);
   }
 
   try {
+    const { token, baseUrl } = getXaiAuth();
+    log.info(`   xAI API: ${baseUrl} (model: ${GROK_MODEL}, auth: ${describeXaiAuthSource()})`);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3000);
-    const res = await fetch(`${HERMES_BASE_URL.replace(/\/+$/, '')}/models`, { signal: ctrl.signal }).catch(() => null);
+    const res = await fetch(`${baseUrl}/models`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      signal: ctrl.signal,
+    }).catch(() => null);
     clearTimeout(timer);
-    if (res && (res.ok || res.status === 401 || res.status === 404)) {
-      log.info('   Hermes proxy reachable');
+    if (res && res.ok) {
+      log.info('   xAI API reachable');
     } else {
-      log.warn(`   Hermes proxy preflight returned status ${res ? res.status : 'no-response'} - first AI call may fail`);
+      log.warn(`   xAI preflight returned status ${res ? res.status : 'no-response'} - first AI call may fail`);
     }
   } catch (err) {
-    log.warn(`   Hermes proxy preflight failed (${err.message}) - make sure 'hermes proxy start --provider xai --port 8000' is running`);
+    log.warn(`   xAI auth preflight failed (${err.message}) - check XAI_USE_API_KEY / XAI_API_KEY or auth file`);
   }
 
   const dedicatedWa = initDedicatedWhatsApp();

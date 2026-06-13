@@ -47,7 +47,7 @@ module.exports = {
   // API
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 60_000,
-  // Build sub-agent: longer Hermes/xAI waits (reasoning + large tool context).
+  // Build sub-agent: longer xAI waits (reasoning + large tool context).
   BUILD_API_TIMEOUT_MS: 180_000,
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 64_000,
@@ -57,20 +57,15 @@ module.exports = {
   // Also passed as `max_turns` on the Responses body to bound server-side
   // sub-tool turns (web_search/x_search/code_interpreter) per request.
   MAX_TOOL_ROUNDS: 10,
-  // max_turns for the research tool (web_x_search). Pure server-side tools,
-  // so xAI guarantees a synthesized final answer when the limit is hit.
-  RESEARCH_MAX_TURNS: 10,
 
   // Build sub-agent sandbox container.
   // Memory cap and idle TTL for the sandbox.
   SANDBOX_MEMORY_MB: 1536,
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
 
-  // Public temp file URLs (tempFileServer + Caddy) - token TTLs.
-  // History tunnel tokens use a 24h lease while the file remains on disk
-  // (until prune or Discord 4h age cap). Re-register on read_file if needed.
-  // Temp items are short-lived buffers (one-shot generated images, audio
-  // freshly downloaded from WhatsApp) and use a 1h TTL.
+  // Public temp file URLs (tempFileServer + Caddy) - token TTLs for the
+  // temporary download links sent to USERS (delivery fallback). xAI never
+  // uses these links: files for xAI go through tmpfile.link (utils/xaiUpload.js).
   TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,
   TUNNEL_TOKEN_TTL_TEMP_MS: 60 * 60 * 1000,
 
@@ -87,17 +82,11 @@ module.exports = {
   BUILD_WORKSPACE_TTL_MS: 4 * 60 * 60 * 1000,
   BUILD_WORKSPACE_QUOTA_MB: 500,
   BUILD_MAX_ROUNDS: 60,
-  // Build sub-agent: cap total web_x_search across all turns (facts + images).
-  BUILD_MAX_WEB_SEARCH_PER_BUILD: 2,
   BUILD_HARD_TIMEOUT_MS: 10 * 60 * 1000,
   BUILD_LOCK_WAIT_MS: 30 * 1000,
 
   // Media
   MAX_IMAGE_BYTES: 7_500_000,
-  // Max images extracted from a web_x_search run (when search_images=true).
-  // The research model is instructed to cite at most 6; we cap defensively
-  // so the brain never references an image that wasn't actually attached.
-  MAX_RESEARCH_IMAGES: 6,
   // Main brain: max generate_image / generate_video tool calls in one model turn.
   MAX_GENERATE_IMAGE_PER_ROUND: 5,
   MAX_GENERATE_VIDEO_PER_ROUND: 3,

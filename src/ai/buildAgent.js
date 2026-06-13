@@ -2,20 +2,24 @@
 //
 // Build sub-agent for the `build` tool.
 // Runs an isolated conversation with dedicated tools
-// (write_file/edit_file/bash/read_file/web_x_search/code_interpreter).
-// Host (tools/build.js) manages lock, workspace staging and <DELIVER> parsing.
+// (write_file/edit_file/bash/read_file/download_file + native xAI
+// web_search/x_search/code_interpreter). Host (tools/build.js) manages lock,
+// workspace staging and delivery of the files announced in the structured
+// final answer (fixed JSON schema: message + optional attachments).
 // See: sandbox/buildWorkspace.js, utils/buildState.js, utils/skills.js
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
-const { HERMES_API_KEY, HERMES_BASE_URL, BUILD_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
+const { BUILD_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
 const { callResponsesModel } = require('./apiClient');
 const {
   chatMessagesToResponsesInput,
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
+  extractServerSearchStats,
 } = require('./responsesAdapter');
+const { BUILD_RESPONSE_FORMAT, parseStructuredReply } = require('./responseSchema');
+const { NATIVE_SEARCH_TOOLS } = require('./tools');
 const { renewBuildLock } = require('../utils/buildState');
 const {
   listWorkspaceFiles,
@@ -25,15 +29,12 @@ const {
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
 const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
-const { webXSearch } = require('../tools/webXSearch');
+const { downloadPublicFile } = require('../utils/fetch');
 const { getRomeTime } = require('../utils/time');
-const { sanitizeFilename } = require('../utils/text');
-const { WEB_X_SEARCH_RESEARCH_GUIDANCE } = require('./researchGuidance');
 const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 const { SKILLS_DIR } = require('../utils/userPaths');
 const {
   BUILD_MAX_ROUNDS,
-  BUILD_MAX_WEB_SEARCH_PER_BUILD,
   BUILD_API_TIMEOUT_MS,
   BUILD_HARD_TIMEOUT_MS,
   BUILD_WORKSPACE_QUOTA_MB,
@@ -42,25 +43,19 @@ const {
 const { createLogger } = require('../utils/logger');
 const { isNonReadableExt, buildReadFileBlockedMessage } = require('../config/nonReadableExts');
 const { mimeForExtension } = require('../config/mimeExtensions');
-const {
-  executeBuildToolCallsOrdered,
-  oncePerRoundDuplicateIds,
-  oncePerRoundErrorPayload,
-} = require('../utils/toolCallExecution');
+const { executeBuildToolCallsOrdered } = require('../utils/toolCallExecution');
 
 const log = createLogger('BuildAgent');
 
-const RESPONSES_URL = `${HERMES_BASE_URL.replace(/\/+$/, '')}/responses`;
-
 const WRITE_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const DOWNLOAD_FILE_MAX_BYTES = 60 * 1024 * 1024;
 const BASH_DEFAULT_TIMEOUT_MS = 30_000;
 const BASH_MAX_TIMEOUT_MS = 120_000;
 
 // -- Tool definitions exposed to the sub-agent -----------------------------
 //
-// Defines the tools available to the sub-agent, including function tools
-// and the native `{type:'code_interpreter'}` for server-side Python sandbox
-// (zero round cost).
+// Function tools run host-side; native xAI tools (web_search, x_search,
+// code_interpreter) run server-side inside the same request (zero round cost).
 
 function _buildAgentTools() {
   return [
@@ -117,7 +112,7 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'read_file',
-        description: 'Read a file from /workspace/ or /skills/. Only for text/code, images, audio, video, PDF.',
+        description: 'Read a file from /workspace/ or /skills/: text/code (exact content with line numbers), images, audio, video, PDF, Office documents, archives (parsed natively).',
         parameters: {
           type: 'object',
           properties: {
@@ -130,33 +125,22 @@ function _buildAgentTools() {
     {
       type: 'function',
       function: {
-        name: 'web_x_search',
-        description:
-          'Web and X research via agent or team. '
-          + WEB_X_SEARCH_RESEARCH_GUIDANCE
-          + ` At most one call per turn and at most ${BUILD_MAX_WEB_SEARCH_PER_BUILD} calls per build`
-          + ' (combine topics: one full_team facts pass, optional one search_images).',
+        name: 'download_file',
+        description: 'Download a public https URL into /workspace/ (e.g. an image found via web/X search, to embed in a document). Max 60 MB.',
         parameters: {
           type: 'object',
           properties: {
-            prompt: {
-              type: 'string',
-              description: 'Detailed research brief: the exact question, any URLs to consult, desired output format, and constraints (date range, language, sources to prefer or avoid).',
-            },
-            full_team: {
-              type: 'boolean',
-              description: 'Set true for 4x multi-agent team (more deep); omit for fast single-model search (default).',
-            },
-            search_images: {
-              type: 'boolean',
-              description: 'true → download images to /workspace/ for ImageRun in DOCX/PDF. Default false. Use true for illustrated reports unless user said text-only.',
-            },
+            url: { type: 'string', description: 'Public http(s) URL to fetch.' },
+            path: { type: 'string', description: 'Destination path relative to /workspace/ (e.g. "img/photo.jpg").' },
           },
-          required: ['prompt'],
+          required: ['url', 'path'],
         },
       },
     },
-    // Native xAI server-side Python sandbox (zero round cost).
+    // Native xAI server-side tools (zero round cost): web + X search with
+    // image/video understanding and web image search, plus the isolated
+    // Python sandbox.
+    ...NATIVE_SEARCH_TOOLS,
     { type: 'code_interpreter' },
   ];
 }
@@ -209,7 +193,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '</Identity>',
     '<Mission>',
     '  Execute the build/code/document task delegated by GemiX-Main. Produce',
-    '  deliverables in /workspace/ and announce them via &lt;DELIVER&gt;.',
+    '  deliverables in /workspace/ and list them in the `attachments` field of your final JSON answer.',
     '  If the prompt only asks to send existing workspace files (sources, logs, .tex),',
     '  list &lt;WorkspaceState&gt;, deliver what is still on disk—do not rebuild from memory.',
     '</Mission>',
@@ -223,25 +207,26 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '<ToolUsage>',
     '  Emit MULTIPLE tool calls in the same round whenever independent — do not waste rounds on serial reads/searches you could batch.',
     '  The system runs tools intelligently: in parallel when possible, bash always last. You can write and run files in the same round.',
+    '  web_search / x_search run server-side at zero round cost. Web image search returns image URLs: pass them to download_file to save the bytes into /workspace/ before embedding them in a document.',
     '</ToolUsage>',
     '<Sandbox>',
     '  Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
     '  Python 3.12 and Node.js 22. General-purpose pre-installed libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, jinja2, PyYAML, requests, unoserver. General CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. No pip/npm/apt at runtime.',
-    '  Outbound: only YouTube, X/Twitter, Instagram, TikTok, Facebook — other hosts are blocked by the system.',
+    '  Outbound: only YouTube, X/Twitter, Instagram, TikTok, Facebook — other hosts are blocked by the system (use download_file, which runs outside the sandbox, for anything else).',
     '  yt-dlp: pre-installed. Those platforms only. Run the download command immediately — never which/find/pip/curl/python checks to locate or test yt-dlp. No --proxy, no extractor-arg probes.',
     '</Sandbox>',
     skillsBlock,
     '<Delivery>',
-    '  End your final response with &lt;DELIVER&gt;file1.ext, file2.ext&lt;/DELIVER&gt; listing files in /workspace/ to send to the user.',
-    '  Empty &lt;DELIVER&gt;&lt;/DELIVER&gt; means "text response only, no files". The tag is REQUIRED on the final response - files NOT listed will not reach the user.',
-    '  Media deliverables (converted/re-encoded images, video, audio): prefer a single .zip in &lt;DELIVER&gt; so the chat platform does not re-encode them.',
+    '  Your final answer is structured JSON: `message` (required user-facing text) and `attachments` (optional array).',
+    '  List in `attachments` the /workspace/ paths to send to the user, and/or public https URLs to fetch (e.g. images found via web/X search). Files NOT listed will not reach the user; omit the field for a text-only result.',
+    '  Media deliverables (converted/re-encoded images, video, audio): prefer a single .zip so the chat platform does not re-encode them.',
     '</Delivery>',
     '<Pitfalls>',
-    '  Always paths under /workspace/ or /skills/. read_file refuses binary archives (.zip etc.) - use bash (unzip, etc.) instead.',
+    '  Always paths under /workspace/ or /skills/. read_file opens Office files and archives natively for UNDERSTANDING only — to extract exact text/data or edit them, use the skill scripts (never retype what you saw).',
     '  Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
-    '  If user wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, deliver existing files via &lt;DELIVER&gt; (zip with bash if many).',
+    '  If user wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, list the existing files in `attachments` (zip with bash if many).',
     '  yt-dlp: if a download command fails, retry once with a simpler yt-dlp line — never spend rounds on discovery (which, find, pip list, curl tests).',
-    '  IMPORTANT: same yt-dlp/sandbox/CLI infrastructure error twice — stop; no retries or workarounds (system fault). &lt;DELIVER&gt;&lt;/DELIVER&gt; and tell GemiX-Main for bug_report.',
+    '  IMPORTANT: same yt-dlp/sandbox/CLI infrastructure error twice — stop; no retries or workarounds (system fault). Deliver no files and tell GemiX-Main for bug_report.',
     '</Pitfalls>',
   ].join('\n');
 }
@@ -291,18 +276,22 @@ async function _executeReadFile(workspaceId, args, ctx = {}) {
     contentType: mimeForExtension(ext),
     imagesReadCount: ctx.imagesReadCount ?? 0,
     blockedMessage: buildReadFileBlockedMessage(ext),
-    tunnelStorageKind: 'temp',
   });
 
   if (delivery.kind === 'error') return _toolErr(delivery.error);
-  if (delivery.kind === 'tunnel') {
+  if (delivery.kind === 'parts') {
     if (delivery.bumpImageCount) ctx.imagesReadCount = (ctx.imagesReadCount ?? 0) + 1;
     return [
       { type: 'text', text: JSON.stringify({ success: true, message: `File loaded: ${args.path}` }) },
       ...delivery.parts,
     ];
   }
-  return JSON.stringify({ success: true, message: delivery.content });
+  return JSON.stringify({
+    success: true,
+    path: args.path,
+    content: delivery.content,
+    ...(delivery.truncated ? { truncated: true } : {}),
+  });
 }
 
 function _executeWriteFile(workspaceId, args) {
@@ -391,59 +380,38 @@ async function _executeBash(workspaceId, args) {
   });
 }
 
-async function _executeWebXSearch(workspaceId, args, statsAccumulator) {
+/**
+ * download_file: host-side fetch of a public URL into /workspace/.
+ * Runs OUTSIDE the sandbox (its egress allowlist does not apply), so the
+ * agent can save e.g. web-search image URLs for embedding in documents.
+ */
+async function _executeDownloadFile(workspaceId, args) {
   const a = args || {};
-  if (typeof a.prompt !== 'string' || !a.prompt.trim()) return _toolErr('Missing prompt.');
-  const fullTeam = a.full_team === true;
-  const searchImages = a.search_images === true;
+  const c = _classifyAgentPath(workspaceId, a.path);
+  if (!c.ok || c.zone !== 'workspace') return _toolErr(c.reason || 'Downloads are only allowed under /workspace/.');
 
-  let result;
+  let downloaded;
   try {
-    result = await webXSearch(a.prompt, { fullTeam, searchImages });
-  } catch (err) { return _toolErr(`Research failed: ${err.message}`); }
-
-  if (result && result._stats && statsAccumulator) {
-    const ws = result._stats.webSources || 0;
-    const xp = result._stats.xPosts || 0;
-    statsAccumulator.webSources = (statsAccumulator.webSources || 0) + ws;
-    statsAccumulator.xPosts = (statsAccumulator.xPosts || 0) + xp;
+    downloaded = await downloadPublicFile(a.url, { maxBytes: DOWNLOAD_FILE_MAX_BYTES });
+  } catch (err) {
+    return _toolErr(`Download failed: ${err.message}`);
   }
 
-  // Persist any returned images into the workspace root so the agent can use
-  // them in the build (e.g. embed in a PDF). Filenames are echoed back.
-  const saved = [];
-  if (Array.isArray(result?._images) && result._images.length > 0) {
-    for (const img of result._images) {
-      if (!img || !Buffer.isBuffer(img.buffer)) continue;
-      const baseName = sanitizeFilename(img.name || `img_${crypto.randomBytes(4).toString('hex')}.jpg`);
-      const ext = path.extname(baseName);
-      const stem = baseName.slice(0, baseName.length - ext.length);
-      let finalName = baseName;
-      let abs = resolveInsideWorkspace(workspaceId, finalName);
-      if (!abs) continue;
-      let i = 1;
-      while (fs.existsSync(abs)) {
-        finalName = `${stem}(${i})${ext}`;
-        abs = resolveInsideWorkspace(workspaceId, finalName);
-        i++;
-        if (i > 999) break;
-      }
-      const sizeBefore = workspaceSizeBytes(workspaceId);
-      if (sizeBefore + img.buffer.length > QUOTA_BYTES) {
-        saved.push({ name: finalName, error: 'workspace quota exceeded' });
-        continue;
-      }
-      try { fs.writeFileSync(abs, img.buffer); saved.push({ name: finalName, size: img.buffer.length }); }
-      catch (err) { saved.push({ name: finalName, error: err.message }); }
-    }
+  const sizeBefore = workspaceSizeBytes(workspaceId);
+  const existingSize = fs.existsSync(c.abs) ? (fs.statSync(c.abs).size || 0) : 0;
+  if (sizeBefore - existingSize + downloaded.buffer.length > QUOTA_BYTES) {
+    return _toolErr(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
   }
-
-  const { _stats: _ignored, _images: _ignored2, images_added: _ig3, images_note: _ig4, image_filenames: _ig5, ...clean } = result || {};
-  if (saved.length > 0) {
-    clean.saved_images = saved.map(s => s.error ? `${s.name} (failed: ${s.error})` : s.name);
-    clean.images_note = 'The saved images are in /workspace/ under the listed filenames. Use those exact paths in your scripts.';
-  }
-  return JSON.stringify(clean);
+  try { fs.mkdirSync(path.dirname(c.abs), { recursive: true }); }
+  catch (err) { return _toolErr(`Cannot create parent dir: ${err.message}`); }
+  try { fs.writeFileSync(c.abs, downloaded.buffer); }
+  catch (err) { return _toolErr(`Write failed: ${err.message}`); }
+  return JSON.stringify({
+    success: true,
+    path: a.path,
+    size: downloaded.buffer.length,
+    content_type: downloaded.mimetype,
+  });
 }
 
 async function _runToolCall(toolCall, ctx) {
@@ -458,35 +426,9 @@ async function _runToolCall(toolCall, ctx) {
     case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);
     case 'bash':          return await _executeBash(ctx.workspaceId, parsedArgs);
     case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs, ctx);
-    case 'web_x_search': {
-      if (ctx.webSearchCount >= BUILD_MAX_WEB_SEARCH_PER_BUILD) {
-        return _toolErr(
-          `web_x_search limit reached for this build (max ${BUILD_MAX_WEB_SEARCH_PER_BUILD}: `
-          + 'one full_team facts pass, optional one search_images). Combine remaining questions into edit_file/bash — do not start another research call.',
-        );
-      }
-      ctx.webSearchCount += 1;
-      return await _executeWebXSearch(ctx.workspaceId, parsedArgs, ctx.researchStats);
-    }
+    case 'download_file': return await _executeDownloadFile(ctx.workspaceId, parsedArgs);
     default:              return _toolErr(`Unknown tool "${name}".`);
   }
-}
-
-// -- DELIVER tag parsing ---------------------------------------------------
-
-function _parseDeliverTag(text) {
-  if (typeof text !== 'string') return { remaining: text, files: [] };
-  const re = /<DELIVER>([\s\S]*?)<\/DELIVER>/i;
-  const match = re.exec(text);
-  if (!match) return { remaining: text, files: [] };
-  const inner = match[1].trim();
-  const files = inner
-    .split(/[\n,]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s => s.replace(/^\/+|\/+$/g, ''));
-  const remaining = text.replace(re, '').trim();
-  return { remaining, files };
 }
 
 // -- Main entry: run the build agent ---------------------------------------
@@ -505,8 +447,8 @@ function _parseDeliverTag(text) {
  * @param {string} args.lockOwnerId - owner id for renewing the lock per round.
  * @returns {Promise<{
  *   success: boolean,
- *   message?: string,             // user-facing text, DELIVER tag stripped
- *   delivered?: string[],         // workspace-relative filenames
+ *   message?: string,             // user-facing text from the structured answer
+ *   delivered?: string[],         // workspace-relative paths and/or public URLs
  *   roundsUsed: number,
  *   research_stats?: { webSources:number, xPosts:number },
  *   error?: string,
@@ -524,7 +466,13 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
   ];
 
   const researchStats = { webSources: 0, xPosts: 0 };
-  const ctx = { workspaceId, researchStats, imagesReadCount: 0, webSearchCount: 0 };
+  const ctx = { workspaceId, imagesReadCount: 0 };
+
+  const accumulateSearchStats = (data) => {
+    const stats = extractServerSearchStats(data);
+    researchStats.webSources += stats.webSources;
+    researchStats.xPosts += stats.xPosts;
+  };
 
   let rounds = 0;
   let finalText = null;
@@ -555,10 +503,14 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       input,
       max_output_tokens: 64_000,
       tool_choice: 'auto',
-      // Server-side cap per HTTP call (code_interpreter). Client bash/write/read
-      // rounds are bounded by the outer loop below — not by max_turns.
+      // Server-side cap per HTTP call (web_search/x_search/code_interpreter).
+      // Client tool rounds are bounded by the outer loop below — not by max_turns.
       max_turns: MAX_TOOL_ROUNDS,
       store: false,
+      // Fixed structured final answer: message + optional attachments.
+      // No reasoning.effort here: BUILD_MODEL (e.g. grok-build-0.1) rejects
+      // that parameter ("does not support parameter reasoningEffort").
+      response_format: BUILD_RESPONSE_FORMAT,
     };
     if (XAI_REASONING_REPLAY) {
       body.include = ['reasoning.encrypted_content'];
@@ -568,7 +520,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
 
     let data;
     try {
-      data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY, {
+      data = await callResponsesModel('Grok-Build', body, {
         timeoutMs: BUILD_API_TIMEOUT_MS,
         buildRound: rounds,
       });
@@ -577,6 +529,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       return { success: false, error: err.message, roundsUsed: rounds };
     }
 
+    accumulateSearchStats(data);
     const assistant = responsesToAssistantMessage(data);
 
     if (Array.isArray(assistant.tool_calls) && assistant.tool_calls.length > 0) {
@@ -584,17 +537,9 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       const assistantToPush = { ...assistant };
       if (assistantToPush.content === null || assistantToPush.content === undefined) delete assistantToPush.content;
       messages.push(assistantToPush);
-      const blockedOncePerRound = oncePerRoundDuplicateIds(assistant.tool_calls);
       const resultsById = await executeBuildToolCallsOrdered(
         assistant.tool_calls,
-        (tc) => {
-          if (blockedOncePerRound.has(tc.id)) {
-            const name = tc.function?.name || 'tool';
-            log.warn(`   build tool blocked (duplicate in round): ${name}`);
-            return oncePerRoundErrorPayload(name);
-          }
-          return _runToolCall(tc, ctx);
-        },
+        (tc) => _runToolCall(tc, ctx),
       );
 
       for (const tc of assistant.tool_calls) {
@@ -604,7 +549,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
           content: resultsById.get(tc.id),
         });
       }
-      const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file']);
+      const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file', 'input_image']);
       for (const msg of messages) {
         if (msg.role === 'tool' && Array.isArray(msg.content)) {
           if (msg._heavyMediaPreviewSeen) {
@@ -630,8 +575,8 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
   // -- Round budget / hard-timeout exhausted -------------------------------
   // When no final text has been produced by the time the round budget or hard
   // timeout is reached, a final request is issued with tool_choice:'none' to
-  // obtain a text-only response. This lets the agent summarize completed work
-  // and include any <DELIVER> tag.
+  // obtain a structured final answer. This lets the agent summarize completed
+  // work and list any usable files.
   if (finalText === null && budgetExhausted) {
     log.warn(`   build round budget (${BUILD_MAX_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
     renewBuildLock(workspaceId, lockOwnerId);
@@ -640,10 +585,10 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       role: 'user',
       content:
         'SYSTEM: You have reached your work budget and can no longer run tools. ' +
-        'Write your final response now: explain to the user (in their language) ' +
+        'Write your final answer now: in `message`, explain to the user (in their language) ' +
         'what you accomplished and that you had to stop before fully finishing, summarizing the ' +
-        'current state of the work. Then list any usable files you already produced in /workspace/ ' +
-        'with a <DELIVER>...</DELIVER> tag (empty if none).',
+        'current state of the work. List any usable files you already produced in /workspace/ ' +
+        'in the `attachments` field (omit it if none).',
     });
     try {
       const { instructions, input } = chatMessagesToResponsesInput(messages);
@@ -654,16 +599,18 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
         max_output_tokens: 64_000,
         tool_choice: 'none',
         store: false,
+        response_format: BUILD_RESPONSE_FORMAT,
       };
       if (instructions) body.instructions = instructions;
       if (adaptedTools) body.tools = adaptedTools;
       if (XAI_REASONING_REPLAY) {
         body.include = ['reasoning.encrypted_content'];
       }
-      const data = await callResponsesModel('Grok-Build', RESPONSES_URL, body, HERMES_API_KEY, {
+      const data = await callResponsesModel('Grok-Build', body, {
         timeoutMs: BUILD_API_TIMEOUT_MS,
         buildRound: 'wrap-up',
       });
+      accumulateSearchStats(data);
       finalText = responsesToAssistantMessage(data).content || '';
     } catch (err) {
       log.error(`   build forced wrap-up call failed: ${err.message}`);
@@ -680,11 +627,15 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
     };
   }
 
-  const { remaining, files } = _parseDeliverTag(finalText);
+  const parsed = parseStructuredReply(finalText);
+  if (!parsed.structured) {
+    log.warn('build agent final answer was not valid JSON; treating it as plain text.');
+  }
+  const files = parsed.attachments;
   log.info(`build agent finished: rounds=${rounds}, deliver=${files.length}`);
   return {
     success: true,
-    message: remaining,
+    message: parsed.text || '',
     delivered: files,
     roundsUsed: rounds,
     research_stats: researchStats,
@@ -700,7 +651,9 @@ function _buildUserContent(prompt, attachmentParts) {
     for (const att of attachmentParts) {
       if (att && typeof att.url === 'string') {
         if (att.name) parts.push({ type: 'text', text: `[Attachment: ${att.name}]` });
-        parts.push({ type: 'input_file', file_url: att.url });
+        parts.push(att.isImage
+          ? { type: 'input_image', image_url: att.url }
+          : { type: 'input_file', file_url: att.url });
       }
     }
   }

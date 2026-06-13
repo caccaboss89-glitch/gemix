@@ -136,7 +136,7 @@ def swap_picture(slide, pic_shape, new_path):
 ```
 
 Image sources: files GemiX staged in `/workspace/`, PNGs you render with
-matplotlib, or images from `web_x_search` (`search_images=true`). Use images
+matplotlib, or images from `web_search` saved via `download_file`. Use images
 proactively when they improve the slide.
 
 ## Add / remove / reorder slides

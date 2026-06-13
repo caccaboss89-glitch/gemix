@@ -48,10 +48,6 @@ function isAdminGemixBlockInterrupt(msg) {
   return _effectiveBody(msg).trim().length > 0;
 }
 
-function isPersonalQuotedGemix(msg) {
-  return isPersonalGemixTextReply(msg);
-}
-
 /**
  * @param {Array} messages - oldest → newest
  * @returns {boolean[]}
@@ -99,9 +95,5 @@ function buildPersonalGemixFlags(messages) {
 }
 
 module.exports = {
-  isPersonalGemixTextReply,
-  isAttachmentOnlyFromMe,
-  isAdminGemixBlockInterrupt,
-  isPersonalQuotedGemix,
   buildPersonalGemixFlags,
 };

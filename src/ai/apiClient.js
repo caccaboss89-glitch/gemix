@@ -1,14 +1,15 @@
 // src/ai/apiClient.js
 //
-// Centralized API client for all LLM calls (Grok via Hermes).
-// Provides retry + timeout logic, structured request/response logging,
-// and log directory quota enforcement.
-// Responses API path (callResponsesModel).
+// Centralized API client for all direct xAI LLM calls (`/v1/responses`).
+// Reads the OAuth token from config/xaiAuth.js on every attempt (the auth
+// file is refreshed externally), provides retry + timeout logic, structured
+// request/response logging, and log directory quota enforcement.
 
 const fs = require('fs');
 const path = require('path');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
+const { getXaiAuth } = require('../config/xaiAuth');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('API');
@@ -139,14 +140,6 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
   }
 }
 
-/**
- * Unified API client with retry and timeout logic.
- * @param {string} modelName - Model name for logging (e.g., 'Grok')
- * @param {string} apiUrl - Full API endpoint URL
- * @param {object} body - Request body
- * @param {string} apiKey - API key for authentication
- * @returns {Promise<Response>} The raw fetch Response
- */
 function _formatRateLimitLog(status, errBody, headers) {
   const parts = [`HTTP ${status} (rate limit / quota)`];
   const retryAfter = headers?.get?.('retry-after');
@@ -171,12 +164,26 @@ function _formatRateLimitLog(status, errBody, headers) {
   return parts.join(' — ');
 }
 
-async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}, timeoutMs = API_TIMEOUT_MS) {
+/**
+ * Unified xAI API client with retry and timeout logic.
+ * The bearer token is resolved per attempt from the auth file; a 401 forces
+ * a fresh read on the next attempt (the external refresher may have rotated
+ * the token between attempts).
+ *
+ * @param {string} modelName - Model name for logging (e.g., 'Grok')
+ * @param {string} apiUrl - Full API endpoint URL
+ * @param {object} body - Request body
+ * @returns {Promise<Response>} The raw fetch Response
+ */
+async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutMs = API_TIMEOUT_MS) {
   logApiRequest(modelName, apiUrl, body, logExtra);
+  let forceTokenReload = false;
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
     let timer;
     const attemptStarted = Date.now();
     try {
+      const { token } = getXaiAuth(forceTokenReload);
+      forceTokenReload = false;
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -184,7 +191,7 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}, 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -198,6 +205,10 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}, 
         if (res.status === 429) {
           log.warn(`   ${_formatRateLimitLog(res.status, errBody, res.headers)}`);
         }
+        if (res.status === 401) {
+          // Token likely rotated on disk between our cached read and now.
+          forceTokenReload = true;
+        }
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
 
@@ -209,7 +220,7 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}, 
       const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
       const isNetworkError = err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message);
       const is429 = err.message && /^HTTP 429/.test(err.message);
-      const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (429|500|502|503|504)/.test(err.message));
+      const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (401|429|500|502|503|504)/.test(err.message));
       const errMsg = err.name === 'AbortError'
         ? `Timeout (request aborted after ${timeoutMs / 1000}s)`
         : err.message;
@@ -238,21 +249,19 @@ async function callApiWithRetry(modelName, apiUrl, body, apiKey, logExtra = {}, 
  * Call an AI model on the xAI Responses API (`/v1/responses`) and return
  * the parsed raw payload (not yet adapted to chat-completion shape).
  *
- * Callers (e.g. aiProvider.callAI for the main brain, webXSearch for the
- * research team) are in charge of translating `output[]` into whatever they
- * need. For the main brain we use `responsesToAssistantMessage` from
- * responsesAdapter.js to reach the chat-style message the handler expects.
+ * Callers (aiProvider.callAI for the main brain, buildAgent for the build
+ * sub-agent) translate `output[]` via responsesToAssistantMessage into the
+ * chat-style message shape the handler expects.
  *
  * @param {string} modelName
- * @param {string} apiUrl - Full URL to /v1/responses
  * @param {object} body
- * @param {string} apiKey
  * @returns {Promise<object>} The full parsed JSON body
  */
-async function callResponsesModel(modelName, apiUrl, body, apiKey, logExtra = {}) {
+async function callResponsesModel(modelName, body, logExtra = {}) {
+  const apiUrl = `${getXaiAuth().baseUrl}/responses`;
   const timeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : API_TIMEOUT_MS;
   const { timeoutMs: _omit, ...requestLogExtra } = logExtra;
-  const res = await callApiWithRetry(modelName, apiUrl, body, apiKey, requestLogExtra, timeoutMs);
+  const res = await callApiWithRetry(modelName, apiUrl, body, requestLogExtra, timeoutMs);
 
   let data;
   try {
@@ -283,4 +292,4 @@ async function callResponsesModel(modelName, apiUrl, body, apiKey, logExtra = {}
   return data;
 }
 
-module.exports = { callResponsesModel, logApiRequest, logApiResponse };
+module.exports = { callResponsesModel, callApiWithRetry, logApiRequest, logApiResponse };

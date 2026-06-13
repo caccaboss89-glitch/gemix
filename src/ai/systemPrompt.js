@@ -31,8 +31,8 @@ function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
   const userCtx = {
     platform: ctx.platform,
     isGroup: ctx.isGroup,
-    isFirstTurn: Boolean(ctx.isFirstTurn),
     chatId: ctx.chatId,
+    hasDeliverableFiles: Boolean(ctx.deliveryState?.active),
   };
   const tools = getToolsForUser(isActiveMember, isAdmin, userCtx);
   const toolNames = new Set();
@@ -40,6 +40,7 @@ function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
   for (const t of tools) {
     if (t && t.type === 'code_interpreter') hasCodeInterpreter = true;
     else if (t?.function?.name) toolNames.add(t.function.name);
+    else if (typeof t?.type === 'string' && t.type !== 'function') toolNames.add(t.type);
   }
   return { toolNames, hasCodeInterpreter };
 }
@@ -65,7 +66,10 @@ function buildSystemPrompt(ctx) {
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
   const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
-  const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter };
+  // Delivery / structured-reply state for this round (set by handler.js).
+  // Outside the handler (e.g. prompt audit script) it defaults to inactive.
+  const delivery = ctx.deliveryState || { active: false, bufferFiles: [], includeTitle: false };
+  const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter, delivery };
 
   const sections = [];
 
