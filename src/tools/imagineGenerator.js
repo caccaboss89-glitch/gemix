@@ -326,7 +326,7 @@ async function generateImage(args, userCtx, responseCtx) {
     success: true,
     filename,
     message: `Image generated successfully and pushed to the delivery buffer as "${filename}". `
-      + `You can pass this filename as a reference image in generate_image or generate_video.${truncNote}`,
+      + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`,
   };
 }
 

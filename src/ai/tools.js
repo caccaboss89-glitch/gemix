@@ -132,6 +132,7 @@ const TOOL_READ_FILE = makeTool({
   description:
     'Use to load the real content of past files in chat history (text/code, images, audio, video, PDF, Office, archives): '
     + 'history shows only their [Attachment: filename] tags, never the content itself. '
+    + 'On success, files are injected into the current turn. '
     + 'Always read a file before talking about it; batch every file you need into one call.',
   properties: {
     path: {

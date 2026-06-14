@@ -17,7 +17,7 @@ const {
 const { getToolsForUser } = require('./tools');
 const { escapeXml } = require('../utils/xmlEscape');
 
-const WA_FORMAT = '*bold* _italic_ ~strike~ `code` > citation';
+const WA_FORMAT = 'Use only these Markdown: *bold* _italic_ ~strike~ `code`; line-start > quote. Other formats (e.g., [text](url)) are not supported.';
 const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
 /** One level = 4 spaces. Section body depth 1; nested XML / Rules lists depth 2. */
 const PROMPT_INDENT = '    ';
@@ -148,7 +148,7 @@ function _buildDiscordPlatform(ctx, promptOpts) {
   if (ctx.threadName && !ctx.isFirstTurn) {
     lines.push(`${i}<ThreadTitle>${escapeXml(ctx.threadName)}</ThreadTitle>`);
   }
-  lines.push(`${i}<Format>Markdown supported (no tables). Cite web sources with links.</Format>`);
+  lines.push(`${i}<Format>Markdown supported (but no tables). Cite web sources with links.</Format>`);
   if (ctx.availableEmojis) lines.push(`${i}<Emojis>${ctx.availableEmojis}</Emojis>`);
   if (ctx.serverEvents) lines.push(`${i}<Events>${ctx.serverEvents}</Events>`);
   if (ctx.rulesContext) lines.push(`${i}<RulesContext>${escapeXml(ctx.rulesContext)}</RulesContext>`);

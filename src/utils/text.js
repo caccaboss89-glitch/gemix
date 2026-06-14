@@ -38,6 +38,25 @@ function stripVoiceTags(text) {
   return text.replace(VOICE_TAGS_INLINE_RE, '').replace(VOICE_TAGS_WRAP_RE, '');
 }
 
+// Matches markdown inline links (not images): [text](url) and footnote-style [[n]](url).
+const MD_FOOTNOTE_LINK_RE = /\[\[[^\]]*\]\]\([^)]*\)/g;
+const MD_INLINE_LINK_RE = /(?<!!)\[[^\]]+\]\([^)]*\)/g;
+
+/**
+ * Strip markdown link syntax from outgoing text. Bare https:// URLs are kept.
+ * Used on WhatsApp where [text](url) is not rendered as a link.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripMarkdownLinks(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text
+    .replace(MD_FOOTNOTE_LINK_RE, '')
+    .replace(MD_INLINE_LINK_RE, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ +\n/g, '\n');
+}
+
 /**
  * Normalize Markdown for WhatsApp (which has limited MD support).
  * - ### - removed (headings not supported)
@@ -45,11 +64,13 @@ function stripVoiceTags(text) {
  * - **text** - *text* (bold)
  * - __text__ - _text_ (italic)
  * - ~~text~~ - ~text~ (strikethrough)
+ * - [text](url) / [[n]](url) - removed (bare URLs kept)
  * @param {string} text
  * @returns {string}
  */
 function normalizeMarkdown(text) {
   if (!text || typeof text !== 'string') return text;
+  text = stripMarkdownLinks(text);
   // Remove heading markers (###) completely - WhatsApp doesn't support them
   text = text.replace(/^#{1,6}\s+/gm, '');
   // * bullet points - - bullet points (better WhatsApp compatibility)
@@ -223,6 +244,7 @@ module.exports = {
   sanitizeFilename,
   stripVoiceTags,
   normalizeMarkdown,
+  stripMarkdownLinks,
   stripHistoryPrefixes,
   stripSystemMessages,
   stripOutgoingDeliveryArtifacts,

@@ -98,6 +98,29 @@ async function _readOneHistoryFile(filePath, userCtx, responseCtx) {
   };
 }
 
+function _buildReadFileMessage(fileResults, hasMediaParts) {
+  const ok = fileResults.filter((f) => f.success);
+  if (ok.length === 0) return undefined;
+
+  const parts = [];
+  const inline = ok.filter((f) => f.content !== undefined);
+  const media = ok.filter((f) => f.content === undefined);
+
+  if (media.length > 0 && hasMediaParts) {
+    const names = media.map((f) => f.path).join(', ');
+    parts.push(
+      `Added to the current turn: ${names}. `
+    );
+  }
+
+  const fail = fileResults.filter((f) => !f.success);
+  if (fail.length > 0) {
+    parts.push(`${fail.length} file(s) failed.`);
+  }
+
+  return parts.length > 0 ? parts.join(' ') : undefined;
+}
+
 async function readFileTool(paths, userCtx, responseCtx) {
   if (responseCtx.imagesReadCount === undefined) responseCtx.imagesReadCount = 0;
 
@@ -137,6 +160,8 @@ async function readFileTool(paths, userCtx, responseCtx) {
     success: fileResults.every(f => f.success),
     files: fileResults,
   };
+  const message = _buildReadFileMessage(fileResults, hasMediaParts);
+  if (message) payload.message = message;
 
   if (hasMediaParts) {
     return [
