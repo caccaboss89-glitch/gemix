@@ -94,7 +94,7 @@ function _toolContentToResponsesOutput(content) {
 const SERVER_SIDE_OUTPUT_TYPES = new Set([
   'code_interpreter_call',
   'web_search_call',
-  'x_search_call',
+  'custom_tool_call',
 ]);
 
 function _cloneOutputItem(item) {
@@ -325,34 +325,57 @@ function responsesToAssistantMessage(data) {
 
 // -- Server-side search stats ------------------------------------------------
 
-const _X_POST_URL_RE = /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status\//i;
+/** xAI X sub-tools invoked via `custom_tool_call` under the native `x_search` tool. */
+const _X_CUSTOM_TOOL_ESTIMATE = {
+  x_keyword_search: (input) => _limitFromCustomToolInput(input),
+  x_semantic_search: (input) => _limitFromCustomToolInput(input),
+  x_user_search: () => 1,
+  x_thread_fetch: () => 1,
+  view_x_video: () => 1,
+};
 
-function _collectCitationUrls(data) {
-  const urls = [];
-  const push = (raw) => {
-    const url = typeof raw === 'string' ? raw : raw?.url || raw?.uri;
-    if (typeof url === 'string' && url) urls.push(url.trim());
-  };
-  if (Array.isArray(data?.citations)) data.citations.forEach(push);
-  if (Array.isArray(data?.output)) {
-    for (const item of data.output) {
-      if (Array.isArray(item?.citations)) item.citations.forEach(push);
-      if (Array.isArray(item?.content)) {
-        for (const part of item.content) {
-          if (Array.isArray(part?.annotations)) part.annotations.forEach(push);
-          if (Array.isArray(part?.citations)) part.citations.forEach(push);
-        }
-      }
-    }
+function _parseCustomToolInput(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-  return urls;
+}
+
+function _limitFromCustomToolInput(raw) {
+  const obj = _parseCustomToolInput(raw);
+  if (!obj) return 0;
+  const limit = obj.limit;
+  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
+    return Math.floor(limit);
+  }
+  if (typeof limit === 'string') {
+    const n = parseInt(limit, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+function _estimateXCustomToolCall(item) {
+  const name = item?.name;
+  if (typeof name !== 'string') return 0;
+  const estimate = _X_CUSTOM_TOOL_ESTIMATE[name];
+  return estimate ? estimate(item.input) : 0;
 }
 
 /**
- * Real server-side search statistics from a Responses API payload.
- * Sums the actual sources fetched by each `web_search_call` and the actual
- * posts returned by each `x_search_call` (no estimation). Used for the
- * research badge appended to user-facing replies.
+ * Server-side search statistics from a Responses API payload for the research
+ * badge appended to user-facing replies.
+ *
+ * Web: sums URLs from each `web_search_call` (`action.sources`) and counts
+ * each `open_page` browse as 1.
+ *
+ * X: estimates from each `custom_tool_call` X sub-tool (x_keyword_search and
+ * x_semantic_search use the `limit` in call input; x_user_search,
+ * x_thread_fetch, and view_x_video count as 1).
  *
  * @param {object} data - Parsed /v1/responses payload.
  * @returns {{ webSources: number, xPosts: number }}
@@ -360,7 +383,6 @@ function _collectCitationUrls(data) {
 function extractServerSearchStats(data) {
   let webSources = 0;
   let xPosts = 0;
-  let xCalls = 0;
 
   if (Array.isArray(data?.output)) {
     for (const item of data.output) {
@@ -371,24 +393,10 @@ function extractServerSearchStats(data) {
         else if (action.type === 'open_page') webSources += 1;
         continue;
       }
-      if (item.type === 'x_search_call') {
-        xCalls++;
-        const action = item.action || {};
-        if (Array.isArray(action.sources)) xPosts += action.sources.length;
-        else if (Array.isArray(action.results)) xPosts += action.results.length;
-        else if (Array.isArray(item.results)) xPosts += item.results.length;
+      if (item.type === 'custom_tool_call') {
+        xPosts += _estimateXCustomToolCall(item);
       }
     }
-  }
-
-  // Some payloads expose X results only through citations: count distinct
-  // post URLs actually cited (still real data, no estimation).
-  if (xCalls > 0 && xPosts === 0) {
-    const seen = new Set();
-    for (const url of _collectCitationUrls(data)) {
-      if (_X_POST_URL_RE.test(url)) seen.add(url);
-    }
-    xPosts = seen.size;
   }
 
   return { webSources, xPosts };

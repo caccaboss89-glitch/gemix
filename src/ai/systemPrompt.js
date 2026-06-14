@@ -3,7 +3,7 @@
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
 const { ADMIN_NAME } = require('../config/env');
-const { PLATFORM_WA_PERSONAL, PLATFORM_DISCORD } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL } = require('../config/constants');
 const {
   PROFILE,
   resolveProfile,
@@ -17,7 +17,7 @@ const {
 const { getToolsForUser } = require('./tools');
 const { escapeXml } = require('../utils/xmlEscape');
 
-const WA_FORMAT = 'Use only these Markdown: *bold* _italic_ ~strike~ `code`; line-start > quote. Other formats (e.g., [text](url)) are not supported.';
+const WA_FORMAT = 'Use only: *bold* _italic_ ~strike~ `code`; line-start > quote other formats are not supported. Markdown url citation is not supported.';
 const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
 /** One level = 4 spaces. Section body depth 1; nested XML / Rules lists depth 2. */
 const PROMPT_INDENT = '    ';

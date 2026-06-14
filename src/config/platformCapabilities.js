@@ -346,7 +346,7 @@ function buildRulesBlock(profile, opts = {}) {
     '- Never invent or assume facts, names, dates, numbers, links, file paths, citations, quoted text, '
       + 'or the content of an [Attachment] you have not loaded with read_file this turn.',
     `- When unsure, slow down: verify with a tool (${verifyTools}) or ask the user, and if something stays unconfirmed say so plainly — never guess or rush.`,
-    '- Before sending, silently confirm your reply follows every rule above and states only verified facts.',
+    '- Before sending, silently confirm your reply follows every rule above, states only verified facts, and makes no unstated promises.',
   ];
 
   const visibilityText =
