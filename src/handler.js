@@ -29,6 +29,7 @@ const { isAdmin } = require('./config/members');
 const {
   MAX_TOOL_ROUNDS,
   PLATFORM_DISCORD,
+  PLATFORM_WA_DEDICATED,
   PLATFORM_WA_PERSONAL,
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY,
@@ -36,7 +37,7 @@ const {
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
 } = require('./config/constants');
 const { createLogger } = require('./utils/logger');
-const { appendBlock } = require('./utils/footer');
+const { appendResearchBadge, buildResearchBadgeText } = require('./utils/footer');
 
 const { resolveWorkspaceId, workspaceIdToSlug } = require('./utils/workspaceId');
 const { touchActivity } = require('./utils/buildState');
@@ -116,7 +117,7 @@ function _toolNotAvailableMessage(toolName, ctx) {
 /**
  * Main message handler. Takes a normalized context and returns a response object.
  * @param {object} ctx
- * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle? }
+ * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, researchFooter? }
  */
 async function handleMessage(ctx) {
   const responseCtx = {
@@ -573,19 +574,20 @@ async function handleMessage(ctx) {
       // (not voice-only). Omit a section when its count is zero so the badge
       // stays minimal.
       if (text.trim() && !responseCtx.isVoiceOnly && responseCtx.researchStats) {
-        const { webSources, xPosts } = responseCtx.researchStats;
-        if (webSources > 0 || xPosts > 0) {
-          const parts = [];
-          if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
-          if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
-          text = appendBlock(text, `\n\n${parts.join('. ')}.`);
-          log.info(`   Research badge: ${parts.join(', ')}`);
+        const badge = buildResearchBadgeText(responseCtx.researchStats);
+        if (badge) {
+          text = appendResearchBadge(text, responseCtx.researchStats);
+          log.info(`   Research badge: ${badge}`);
         }
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
         log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
         await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
+        const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
+          ? buildResearchBadgeText(responseCtx.researchStats)
+          : null;
+        if (researchFooter) log.info(`   Research badge (voice follow-up): ${researchFooter}`);
         return {
           text: null,
           voiceBuffer: responseCtx.voiceBuffer,
@@ -595,6 +597,7 @@ async function handleMessage(ctx) {
           modelUsed: lastModelUsed,
           voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
           voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
+          researchFooter,
         };
       }
 
@@ -612,6 +615,10 @@ async function handleMessage(ctx) {
     if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
       log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
       await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
+      const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
+        ? buildResearchBadgeText(responseCtx.researchStats)
+        : null;
+      if (researchFooter) log.info(`   Research badge (voice follow-up): ${researchFooter}`);
       return {
         text: null,
         voiceBuffer: responseCtx.voiceBuffer,
@@ -621,6 +628,7 @@ async function handleMessage(ctx) {
         modelUsed: lastModelUsed,
         voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
         voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
+        researchFooter,
       };
     }
 
@@ -671,13 +679,7 @@ async function handleMessage(ctx) {
     }
 
     if (wrapUpText.trim() && responseCtx.researchStats) {
-      const { webSources, xPosts } = responseCtx.researchStats;
-      if (webSources > 0 || xPosts > 0) {
-        const parts = [];
-        if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
-        if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
-        wrapUpText = appendBlock(wrapUpText, `\n\n${parts.join('. ')}.`);
-      }
+      wrapUpText = appendResearchBadge(wrapUpText, responseCtx.researchStats);
     }
 
     try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed: ${vcErr.message}`); }

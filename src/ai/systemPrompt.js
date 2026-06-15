@@ -17,7 +17,7 @@ const {
 const { getToolsForUser } = require('./tools');
 const { escapeXml } = require('../utils/xmlEscape');
 
-const WA_FORMAT = 'Use only: *bold* _italic_ ~strike~ `code`; line-start > quote other formats are not supported. Markdown url citation is not supported.';
+const WA_FORMAT = 'Use only: *bold* _italic_ ~strike~ `code` > quote line-start other formats are not supported. Markdown url citation is not supported.';
 const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
 /** One level = 4 spaces. Section body depth 1; nested XML / Rules lists depth 2. */
 const PROMPT_INDENT = '    ';

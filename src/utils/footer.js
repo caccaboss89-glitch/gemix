@@ -111,6 +111,34 @@ function addScheduledFooter(text, createdAt) {
   return appendBlock(body, buildScheduledFooter(createdAt));
 }
 
+/**
+ * Build the server-side research badge line (web/X counts).
+ * @param {{ webSources?: number, xPosts?: number }|null} stats
+ * @returns {string|null} e.g. "🌐: 3 sources. 𝕏: 2 posts." or null when no badge applies
+ */
+function buildResearchBadgeText(stats) {
+  if (!stats) return null;
+  const webSources = stats.webSources || 0;
+  const xPosts = stats.xPosts || 0;
+  if (webSources <= 0 && xPosts <= 0) return null;
+  const parts = [];
+  if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
+  if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
+  return `${parts.join('. ')}.`;
+}
+
+/**
+ * Append the research badge block to a text reply (text replies only).
+ * @param {string} text
+ * @param {{ webSources?: number, xPosts?: number }|null} stats
+ * @returns {string}
+ */
+function appendResearchBadge(text, stats) {
+  const badge = buildResearchBadgeText(stats);
+  if (!badge || !text || !String(text).trim()) return text;
+  return appendBlock(text, `\n\n${badge}`);
+}
+
 module.exports = {
   appendBlock,
   addFooter,
@@ -121,4 +149,6 @@ module.exports = {
   getModelDisplayName,
   hasScheduledFooter,
   removeScheduledFooter,
+  buildResearchBadgeText,
+  appendResearchBadge,
 };

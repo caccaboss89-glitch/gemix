@@ -251,11 +251,39 @@ async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds
 }
 
 /**
+ * Send plain text to a WhatsApp chat with chunking and retry.
+ * @param {object} chat
+ * @param {string} text
+ * @returns {Promise<void>}
+ */
+async function _sendTextWithRetry(chat, text) {
+  const cleanedText = normalizeMarkdown(stripOutgoingDeliveryArtifacts(text));
+  const chunkSize = 40000;
+  const chunks = [];
+  for (let i = 0; i < cleanedText.length; i += chunkSize) {
+    chunks.push(cleanedText.slice(i, i + chunkSize));
+  }
+  for (const chunk of chunks) {
+    let attempts = 3;
+    while (attempts > 0) {
+      try {
+        await chat.sendMessage(chunk);
+        break;
+      } catch (err) {
+        attempts--;
+        if (attempts === 0) throw err;
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+  }
+}
+
+/**
  * Send response back to WhatsApp chat.
  * Handles text messages, voice messages, and file attachments.
  * Build audio/video and oversized files use temp download links; other media try direct send first, then temp links on failure.
  * @param {object} chat - The whatsapp-web.js Chat object
- * @param {object} responseData - Response data { text, voiceBuffer, isVoiceOnly, attachments }
+ * @param {object} responseData - Response data { text, voiceBuffer, isVoiceOnly, attachments, researchFooter? }
  * @returns {Promise<void>}
  */
 async function sendWhatsAppResponse(chat, responseData) {
@@ -275,29 +303,18 @@ async function sendWhatsAppResponse(chat, responseData) {
         responseData.voiceTranscriptText,
       );
     }
+    const researchFooter = typeof responseData.researchFooter === 'string'
+      ? responseData.researchFooter.trim()
+      : '';
+    if (researchFooter) {
+      await _sendTextWithRetry(chat, researchFooter);
+      log.info(`   Sent research badge after voice: ${researchFooter}`);
+    }
     // Continue to send attachments below (don't return early)
   }
 
   if (hasText) {
-    const cleanedText = normalizeMarkdown(stripOutgoingDeliveryArtifacts(responseData.text));
-    const chunkSize = 40000;
-    const chunks = [];
-    for (let i = 0; i < cleanedText.length; i += chunkSize) {
-      chunks.push(cleanedText.slice(i, i + chunkSize));
-    }
-    for (const chunk of chunks) {
-      let attempts = 3;
-      while (attempts > 0) {
-        try {
-          await chat.sendMessage(chunk);
-          break;
-        } catch (err) {
-          attempts--;
-          if (attempts === 0) throw err;
-          await new Promise(r => setTimeout(r, 2000));
-        }
-      }
-    }
+    await _sendTextWithRetry(chat, responseData.text);
   }
 
   if (hasAttachments) {
