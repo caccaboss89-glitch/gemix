@@ -253,6 +253,9 @@ function buildToolUsageLines(profile, opts = {}) {
   if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER)) {
     lines.push('- code_interpreter: ad-hoc Python (math, analysis, quick scripts) - isolated (no build sub-agent filesystem).');
   }
+  if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
+    lines.push('- Use web/X search on your own when real-time or external context would improve the answer (live events, social posts/screenshots, unfamiliar references) — don\'t guess when a quick search settles it.');
+  }
   return lines;
 }
 
@@ -294,6 +297,9 @@ function buildLimitsLines(profile) {
     historyLine,
     '- Files in the CURRENT user message arrive natively; history does not re-upload them.',
   ];
+  if (!cap.isDiscord) {
+    lines.push('- Stickers and meme images are emotional reactions: reply lightly, acknowledge only the tone, without describing the image or asking for explanations.');
+  }
   if (cap.isDiscord) {
     lines.push(
       '- If the user asks for voice replies, scheduled tasks, build/file deliverables, imagine, music clips, or music listening stats, explain that those are on the dedicated GemiX WhatsApp account (not in this Discord session).',
@@ -320,6 +326,9 @@ function buildRulesBlock(profile, opts = {}) {
       : '- These rules apply to your final reply.',
     proseRule,
   ];
+  if (cap.isWhatsApp) {
+    style.push('- Never add a footer or signature, the system appends those automatically when needed.');
+  }
   if (cap.longTermMemory) {
     style.push('- Follow tone and preferences in &lt;Memory&gt; when you reply.');
   }

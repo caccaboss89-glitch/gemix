@@ -206,6 +206,15 @@ async function onPersonalMessage(msg) {
   }
 }
 
+async function resolvePersonalChatOtherName(chat) {
+  try {
+    const contact = await chat.getContact();
+    const name = contact?.pushname || contact?.name;
+    if (name && String(name).trim()) return String(name).trim();
+  } catch { /* best effort */ }
+  return null;
+}
+
 /**
  * Batch handler: called by the batcher once the debounce window closes.
  * Merges all accumulated content parts and calls handleMessage once.
@@ -250,6 +259,7 @@ async function _handlePersonalBatch(entries) {
       });
       const lat = latest || ents[0];
       const { multiSpeaker } = analyzeBatchSpeakers(ents, PLATFORM_WA_PERSONAL);
+      const personalOtherUserName = await resolvePersonalChatOtherName(chat);
       return {
         platform: PLATFORM_WA_PERSONAL,
         isGroup: false,
@@ -259,6 +269,7 @@ async function _handlePersonalBatch(entries) {
         userId: lat.phoneJid,
         userName: lat.userName,
         userIdentity: lat.userIdentity,
+        personalOtherUserName,
         content: mergeBatchContentParts(ents),
         history,
         historyLoadIncomplete,
@@ -277,7 +288,7 @@ async function _handlePersonalBatch(entries) {
       return response;
     },
     deliver: async (_ctx, response) => {
-      await sendWhatsAppResponse(chat, response);
+      await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_PERSONAL });
     },
     onDeliverError: async () => {
       const { notifyAdmin } = require('../../utils/adminNotifier');

@@ -29,7 +29,6 @@ const { pushBufferAttachment } = require('../utils/attachments');
 const { musicCreator } = require('./musicCreator');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
-const { removeDiscordEmoji } = require('../utils/discord');
 const { MAX_TTS_CHARS } = require('../config/constants');
 const { resolveProfile, toolUnavailableMessage } = require('../config/platformCapabilities');
 const { createLogger } = require('../utils/logger');
@@ -264,7 +263,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           break;
         }
         let cleanText = stripOutgoingDeliveryArtifacts(
-          removeDiscordEmoji(args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
+          (args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
             .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, ''),
         );
 

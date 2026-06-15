@@ -20,9 +20,23 @@ function removeDiscordEmoji(text) {
   text = text.replace(/<#\d+>/g, '');
   // Remove Discord role mention format: <@&id>
   text = text.replace(/<@&\d+>/g, '');
-  // Clean up extra spaces
-  text = text.replace(/\s{2,}/g, ' ').trim();
+  // Collapse runs of horizontal whitespace (spaces/tabs) left behind, but keep
+  // newlines intact so multi-line bodies and trailing footers stay on their own lines.
+  text = text.replace(/[^\S\r\n]{2,}/g, ' ').replace(/[^\S\r\n]+\n/g, '\n').trim();
   return text;
 }
 
-module.exports = { removeDiscordEmoji };
+/**
+ * Sanitize a Discord forum thread title before setName.
+ * Strips Discord emoji/mention syntax and control characters; caps length.
+ * @param {string} title
+ * @param {number} [maxLen=100]
+ * @returns {string}
+ */
+function sanitizeDiscordThreadTitle(title, maxLen = 100) {
+  if (!title || typeof title !== 'string') return '';
+  const cleaned = removeDiscordEmoji(title.replace(/[\u0000-\u001F]/g, ''));
+  return cleaned.trim().substring(0, maxLen);
+}
+
+module.exports = { removeDiscordEmoji, sanitizeDiscordThreadTitle };

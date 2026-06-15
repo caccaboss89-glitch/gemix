@@ -10,7 +10,6 @@ const { MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants')
 const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
 const { resolveActiveMemberByName, findMemberByWa } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
-const { removeDiscordEmoji } = require('../utils/discord');
 const { normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('../utils/text');
 const { modifyTaskFile } = require('../utils/taskStore');
 
@@ -146,7 +145,7 @@ async function scheduleTasks(tasks, ctx) {
     }
 
     const cleanContent = normalizeMarkdown(
-      stripOutgoingDeliveryArtifacts(removeDiscordEmoji(task.content).replace(/^\[GemiX\]\s*/i, '')),
+      stripOutgoingDeliveryArtifacts(task.content.replace(/^\[GemiX\]\s*/i, '')),
     );
 
     const newTask = {

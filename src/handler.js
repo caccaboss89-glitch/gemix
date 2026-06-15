@@ -44,6 +44,7 @@ const { touchActivity } = require('./utils/buildState');
 const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
 const { readMemory } = require('./utils/memoryStore');
 const { cleanAssistantResponse, stripOutgoingDeliveryArtifacts } = require('./utils/text');
+const { sanitizeDiscordThreadTitle } = require('./utils/discord');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
 const { resolveStorageId, resolvePersonalMemoryFileId } = require('./utils/userPaths');
@@ -374,9 +375,7 @@ async function handleMessage(ctx) {
 
     const applyParsedTitle = (parsed) => {
       if (!parsed.title) return;
-      const title = stripOutgoingDeliveryArtifacts(
-        parsed.title.replace(/[\u0000-\u001F]/g, ''),
-      ).trim().substring(0, 100);
+      const title = sanitizeDiscordThreadTitle(stripOutgoingDeliveryArtifacts(parsed.title));
       if (title) responseCtx.discordTitle = title;
     };
 

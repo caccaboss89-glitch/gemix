@@ -24,8 +24,12 @@ const {
 const { createLogger } = require('../../utils/logger');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
-const { stripOutgoingDeliveryArtifacts } = require('../../utils/text');
-const { cleanIncomingText, formatLabeledUserContent } = require('../../utils/text');
+const {
+  stripOutgoingDeliveryArtifacts,
+  cleanIncomingText,
+  formatLabeledUserContent,
+} = require('../../utils/text');
+const { sanitizeDiscordThreadTitle } = require('../../utils/discord');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
 const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPipeline');
 const { processDiscordQuotedReply } = require('../../utils/quoteIngress');
@@ -340,7 +344,7 @@ async function deliverDiscordResponse(channel, response) {
   }
 
   if (newTitle && newTitle.length > 0) {
-    const safeTitle = newTitle.replace(/[\u0000-\u001F]/g, '').trim().substring(0, 100);
+    const safeTitle = sanitizeDiscordThreadTitle(newTitle);
     if (safeTitle) {
       channel.setName(safeTitle)
         .then(() => log.info(`   Thread renamed: "${safeTitle}"`))

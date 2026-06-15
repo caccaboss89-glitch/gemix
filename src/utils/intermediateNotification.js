@@ -28,7 +28,7 @@ const { createLogger } = require('./logger');
 const log = createLogger('Handler');
 
 function formatWhatsAppIntermediateText(message, platform) {
-  let text = normalizeMarkdown(stripOutgoingDeliveryArtifacts(removeDiscordEmoji(message)));
+  let text = normalizeMarkdown(stripOutgoingDeliveryArtifacts(message));
   // Personal WA history treats footer-bearing fromMe text as start of a GemiX block.
   if (platform === PLATFORM_WA_PERSONAL) {
     text = addFooter(text, 'GemiX');

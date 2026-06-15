@@ -3,7 +3,8 @@
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
 const { ADMIN_NAME } = require('../config/env');
-const { PLATFORM_WA_PERSONAL } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL, META_AI_NAME } = require('../config/constants');
+const { formatParticipantsForPrompt } = require('../utils/waParticipants');
 const {
   PROFILE,
   resolveProfile,
@@ -159,11 +160,15 @@ function _buildDiscordPlatform(ctx, promptOpts) {
 
 function _buildPersonalWaPlatform(ctx, promptOpts) {
   const i = PROMPT_INDENT;
+  const otherName = ctx.personalOtherUserName
+    ? escapeXml(ctx.personalOtherUserName)
+    : 'the other participant';
   const lines = [
     '<Platform name="whatsapp_personal">',
     `${i}<Rule>Admin-account chat with one other user. Reply only when this message contains @gemix. History, memory, and build workspace are shared for this chat pair.</Rule>`,
+    `${i}<Chat>You (GemiX), ${escapeXml(ADMIN_NAME)} (Account Owner), ${otherName}, and ${META_AI_NAME} (never tag it or @gemix)</Chat>`,
+    `${i}<HistoryNotes>Admin messages appear in history under the label "Account Owner", not their name. Your replies have no speaker prefix.</HistoryNotes>`,
     `${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`,
-    `${i}<AccountOwner>Messages labeled "Account Owner" in history are from ${escapeXml(ADMIN_NAME)} (admin). Your prior replies appear as assistant messages without a speaker prefix.</AccountOwner>`,
     `${i}<Format>${WA_FORMAT}</Format>`,
   ];
   const access = buildCallerAccessNote(PROFILE.WA_PERSONAL, promptOpts);
@@ -178,11 +183,21 @@ function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
   if (ctx.isGroup) {
     lines.push(`${i}<GroupName>${escapeXml(ctx.groupName) || 'unknown'}</GroupName>`);
     lines.push(`${i}<Rule>Reply when @mentioned or when the user replies to a GemiX message.</Rule>`);
+    const roster = Array.isArray(ctx.groupParticipants) ? ctx.groupParticipants : [];
+    if (roster.length > 0) {
+      const body = formatParticipantsForPrompt(roster, escapeXml)
+        .split('\n')
+        .map(l => `${i}${i}${l}`)
+        .join('\n');
+      lines.push(`${i}<Participants>\n${body}\n${i}</Participants>`);
+    }
+    lines.push(`${i}<Mentions>Tag a member with @ then their number (digits only, no +). Tag only a third person you are talking about, not the one you are replying to.</Mentions>`);
   } else {
     lines.push(`${i}<Rule>Private chat - reply to every message.</Rule>`);
+    lines.push(`${i}<Chat>You (GemiX), ${escapeXml(ctx.userName)}, and ${META_AI_NAME} (users can summon — never tag it).</Chat>`);
   }
   if (cap.systemHistoryLabel) {
-    lines.push(`${i}<SystemMessages>${SYSTEM_LINE_RULE}</SystemMessages>`);
+    lines.push(`${i}<HistoryNotes>${SYSTEM_LINE_RULE}</HistoryNotes>`);
   }
   lines.push(`${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
   lines.push(`${i}<Format>${WA_FORMAT}</Format>`);

@@ -1,10 +1,9 @@
 // src/tools/whatsappSender.js
 //
 // Thin wrapper around the dedicated WhatsApp client for direct sending.
-// Used by scheduler and recipient tools (email/wa). Provides normalizePhoneToJid
-// helper and applies text sanitization via discord/text utils before delivery.
+// Used by scheduler and recipient tools. Applies WhatsApp text sanitization
+// before delivery (normalizeMarkdown, stripOutgoingDeliveryArtifacts).
 
-const { removeDiscordEmoji } = require('../utils/discord');
 const { normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('../utils/text');
 
 let dedicatedClient = null;
@@ -53,7 +52,7 @@ async function sendWhatsAppDirect(chatId, message, options = {}) {
   if (!dedicatedClient) throw new Error('Dedicated WhatsApp client not available');
   // Only clean text messages; MessageMedia objects must be passed through untouched
   if (typeof message === 'string') {
-    message = normalizeMarkdown(stripOutgoingDeliveryArtifacts(removeDiscordEmoji(message)));
+    message = normalizeMarkdown(stripOutgoingDeliveryArtifacts(message));
   }
 
   await dedicatedClient.sendMessage(chatId, message, options);

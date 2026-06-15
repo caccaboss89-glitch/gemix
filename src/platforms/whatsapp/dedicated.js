@@ -12,7 +12,7 @@ const { rebuildWhatsAppBatchParts } = require('../../utils/batchContentRefresh')
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
-const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED } = require('../../config/constants');
+const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED, META_AI_NUMBER } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
@@ -20,6 +20,7 @@ const { pickLatestBatchEntry } = require('../../utils/batchContext');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
 const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
+const { buildGroupParticipants } = require('../../utils/waParticipants');
 
 const log = createLogger('WA-DEDICATED');
 
@@ -119,6 +120,16 @@ async function onDedicatedMessage(msg) {
     }
 
     if (!isMentioned && !isReplyToBot) return;
+  } else {
+    // Private chat: every message would normally trigger GemiX. Stay silent
+    // when the user is talking to Meta AI here (tags it) or when the incoming
+    // message is Meta AI's own reply — those are not for GemiX.
+    const senderDigits = (msg.author || msg.from || '').replace(/\D/g, '');
+    const bodyHasMetaTag = new RegExp(`(?<!\\d)@${META_AI_NUMBER}(?!\\d)`).test(msg.body || '');
+    if (senderDigits === META_AI_NUMBER || bodyHasMetaTag) {
+      log.info('   Skipping dedicated private message addressed to / from Meta AI');
+      return;
+    }
   }
 
   let senderJid = msg.author || msg.from;
@@ -215,11 +226,20 @@ async function _handleDedicatedBatch(entries) {
       });
       const lat = latest || ents[0];
       const { multiSpeaker } = analyzeBatchSpeakers(ents, PLATFORM_WA_DEDICATED);
+      let groupParticipants = null;
+      if (isGroup) {
+        try {
+          groupParticipants = await buildGroupParticipants(chat);
+        } catch (err) {
+          log.warn(`   Failed to build group participant roster: ${err.message}`);
+        }
+      }
       return {
         platform: PLATFORM_WA_DEDICATED,
         isGroup,
         groupId: isGroup ? chat.id._serialized : null,
         groupName: isGroup ? chat.name : null,
+        groupParticipants,
         chatId: chat.id._serialized,
         userId: isGroup ? lat.senderJid : lat.phoneJid,
         userName: lat.userName,
@@ -233,7 +253,7 @@ async function _handleDedicatedBatch(entries) {
       };
     },
     deliver: async (_ctx, response) => {
-      await sendWhatsAppResponse(chat, response);
+      await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_DEDICATED });
     },
     onDeliverError: async () => {
       const { notifyAdmin } = require('../../utils/adminNotifier');

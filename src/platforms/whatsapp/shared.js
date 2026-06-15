@@ -41,38 +41,18 @@ function _waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
 }
 
-/**
- * Replace WhatsApp @<digits> mention tags inside a body with @<DisplayName>
- * so the AI can understand who is being mentioned.
- *
- * WhatsApp encodes mentions in `msg.body` as `@<phone-digits>` (e.g.
- * `@390000000000000`); the human-readable name lives in the contact metadata
- * fetched via `msg.getMentions()`. We resolve each numeric tag to the best
- * available display name with the following priority:
- *
- *   1. contact.pushname  -> public profile name the contact set on their own
- *                          WhatsApp profile. Preferred because it's how the
- *                          person presents themselves and is consistent for
- *                          everyone reading the chat.
- *   2. contact.name      -> name as saved in the OWNER's phone address book
- *                          (only set when the contact is in rubrica AND has
- *                          been synced via Multi-Device).
- *   3. contact.shortName -> the abbreviated form of `name` (rare, but useful
- *                          when neither pushname nor full name are available).
- *   4. contact.number    -> formatted phone number.
- *   5. contact.id.user   -> raw digits, last-resort fallback.
- *
- * There is no single getFormattedName()-style helper in whatsapp-web.js;
- * the priority must be coded manually. See https://docs.wwebjs.dev/Contact.html.
- *
- * Falls through silently when mentions can't be resolved (e.g. group
- * membership data unavailable) - the original numeric tag is kept.
- *
- * @param {string} body - raw msg.body
- * @param {Array} contacts - resolved Contact objects from msg.getMentions()
- * @returns {string}
- */
-const { replaceMentionsInBody: _replaceMentionsInBody, resolveMentionsForMessage: _resolveMentionsForMessage } = require('../../utils/waMentions');
+// Mention handling: rewrite the @<id> tags WhatsApp encodes in a body into
+// @<phone-number> (resolving @lid ids to the real number) so the model never
+// sees a raw @lid and can map each tag to a name via <Participants>; plus the
+// outgoing helpers that strip disallowed tags and collect mention JIDs.
+// See utils/waMentions.js.
+const {
+  replaceMentionsInBody: _replaceMentionsInBody,
+  resolveMentionsForMessage: _resolveMentionsForMessage,
+  stripDisallowedOutgoingMentions,
+  normalizeOutgoingMentionTags,
+  collectMentionJids,
+} = require('../../utils/waMentions');
 const { processWhatsAppQuotedReply } = require('../../utils/quoteIngress');
 
 async function getRecentWhatsAppMessageIds(msg) {
@@ -254,20 +234,22 @@ async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds
  * Send plain text to a WhatsApp chat with chunking and retry.
  * @param {object} chat
  * @param {string} text
+ * @param {string[]} [mentions] - WhatsApp JIDs to tag as real @mentions (groups only)
  * @returns {Promise<void>}
  */
-async function _sendTextWithRetry(chat, text) {
+async function _sendTextWithRetry(chat, text, mentions = []) {
   const cleanedText = normalizeMarkdown(stripOutgoingDeliveryArtifacts(text));
   const chunkSize = 40000;
   const chunks = [];
   for (let i = 0; i < cleanedText.length; i += chunkSize) {
     chunks.push(cleanedText.slice(i, i + chunkSize));
   }
+  const sendOptions = Array.isArray(mentions) && mentions.length > 0 ? { mentions } : undefined;
   for (const chunk of chunks) {
     let attempts = 3;
     while (attempts > 0) {
       try {
-        await chat.sendMessage(chunk);
+        await chat.sendMessage(chunk, sendOptions);
         break;
       } catch (err) {
         attempts--;
@@ -284,9 +266,24 @@ async function _sendTextWithRetry(chat, text) {
  * Build audio/video and oversized files use temp download links; other media try direct send first, then temp links on failure.
  * @param {object} chat - The whatsapp-web.js Chat object
  * @param {object} responseData - Response data { text, voiceBuffer, isVoiceOnly, attachments, researchFooter? }
+ * @param {{ platform?: string }} [opts] - delivery context (platform drives mention filtering)
  * @returns {Promise<void>}
  */
-async function sendWhatsAppResponse(chat, responseData) {
+async function sendWhatsAppResponse(chat, responseData, opts = {}) {
+  const isPersonal = opts.platform === PLATFORM_WA_PERSONAL;
+  const isGroup = Boolean(chat?.isGroup);
+  // Strip the tags GemiX must never send (Meta AI everywhere; its own @gemix on
+  // the personal account) and, in groups, turn the @<number> tags it kept into
+  // real WhatsApp mentions.
+  let outgoingMentions = [];
+  if (typeof responseData.text === 'string' && responseData.text.trim()) {
+    responseData.text = stripDisallowedOutgoingMentions(responseData.text, { isPersonal });
+    if (isGroup) {
+      responseData.text = normalizeOutgoingMentionTags(responseData.text);
+      outgoingMentions = collectMentionJids(responseData.text);
+    }
+  }
+
   const hasText = typeof responseData.text === 'string' && responseData.text.trim().length > 0;
   const hasVoice = responseData.isVoiceOnly && responseData.voiceBuffer;
   const hasAttachments = Array.isArray(responseData.attachments) && responseData.attachments.length > 0;
@@ -314,7 +311,7 @@ async function sendWhatsAppResponse(chat, responseData) {
   }
 
   if (hasText) {
-    await _sendTextWithRetry(chat, responseData.text);
+    await _sendTextWithRetry(chat, responseData.text, outgoingMentions);
   }
 
   if (hasAttachments) {
