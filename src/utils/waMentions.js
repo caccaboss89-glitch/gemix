@@ -38,7 +38,7 @@ function replaceMentionsInBody(body, contacts) {
     const tagDigits = (c.id.user || '').toString().replace(/\D/g, '');
     if (!tagDigits) continue;
     const phone = _contactPhoneDigits(c) || tagDigits;
-    const re = new RegExp(`@${tagDigits}(?!\\d)`, 'g');
+    const re = new RegExp(`(?<!\\d)@${tagDigits}(?!\\d)`, 'g');
     out = out.replace(re, `@${phone}`);
   }
   return out;
@@ -89,6 +89,7 @@ async function resolveMentionsForMessage(msg, isGroup) {
 }
 
 const META_TAG_RE = new RegExp(`(?<!\\d)@${META_AI_NUMBER}(?!\\d)`, 'g');
+const META_TAG_TEST_RE = new RegExp(`(?<!\\d)@${META_AI_NUMBER}(?!\\d)`);
 const GEMIX_TAG_RE = /@gemix\b/gi;
 
 /**
@@ -129,6 +130,12 @@ function normalizeOutgoingMentionTags(text) {
   });
 }
 
+/** True when text contains a @Meta AI tag (including sloppy spacing/+ prefix). */
+function containsMetaAiTag(text) {
+  if (!text || typeof text !== 'string') return false;
+  return META_TAG_TEST_RE.test(normalizeOutgoingMentionTags(text));
+}
+
 /**
  * Collect the WhatsApp mention JIDs for the @<phone-number> tags GemiX wrote,
  * so the platform can pass them as real mentions. Meta AI is excluded (its tag
@@ -138,9 +145,8 @@ function normalizeOutgoingMentionTags(text) {
  */
 function collectMentionJids(text) {
   if (!text || typeof text !== 'string') return [];
-  const normalized = normalizeOutgoingMentionTags(text);
   const jids = new Set();
-  for (const m of normalized.matchAll(OUT_MENTION_RE)) {
+  for (const m of text.matchAll(OUT_MENTION_RE)) {
     const digits = m[1];
     if (digits === META_AI_NUMBER) continue;
     jids.add(`${digits}@c.us`);
@@ -153,5 +159,6 @@ module.exports = {
   resolveMentionsForMessage,
   stripDisallowedOutgoingMentions,
   normalizeOutgoingMentionTags,
+  containsMetaAiTag,
   collectMentionJids,
 };

@@ -25,7 +25,7 @@ const { normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('./text');
 const { addFooter } = require('./footer');
 const { createLogger } = require('./logger');
 
-const log = createLogger('Handler');
+const log = createLogger('IntermediateNotification');
 
 function formatWhatsAppIntermediateText(message, platform) {
   let text = normalizeMarkdown(stripOutgoingDeliveryArtifacts(message));
@@ -116,7 +116,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
     }
 
     if (target.channel === 'wa_dedicated_jid') {
-      await sendWhatsAppDirect(target.jid, message);
+      await sendWhatsAppDirect(target.jid, text);
       log.info(`   ${kind} notification - WhatsApp (dedicated JID): ${message}`);
       return true;
     }

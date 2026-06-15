@@ -185,13 +185,9 @@ function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
     lines.push(`${i}<Rule>Reply when @mentioned or when the user replies to a GemiX message.</Rule>`);
     const roster = Array.isArray(ctx.groupParticipants) ? ctx.groupParticipants : [];
     if (roster.length > 0) {
-      const body = formatParticipantsForPrompt(roster, escapeXml)
-        .split('\n')
-        .map(l => `${i}${i}${l}`)
-        .join('\n');
-      lines.push(`${i}<Participants>\n${body}\n${i}</Participants>`);
+      lines.push(`${i}<Participants>${formatParticipantsForPrompt(roster, escapeXml)}</Participants>`);
     }
-    lines.push(`${i}<Mentions>Tag a member with @ then their number (digits only, no +). Tag only a third person you are talking about, not the one you are replying to.</Mentions>`);
+    lines.push(`${i}<Mentions>Tag only third parties, not the person you're replying to, with @ and their number (digits only, no +). Never add their name after the tag.</Mentions>`);
   } else {
     lines.push(`${i}<Rule>Private chat - reply to every message.</Rule>`);
     lines.push(`${i}<Chat>You (GemiX), ${escapeXml(ctx.userName)}, and ${META_AI_NAME} (users can summon — never tag it).</Chat>`);

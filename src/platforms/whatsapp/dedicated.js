@@ -13,6 +13,8 @@ const { rebuildWhatsAppBatchParts } = require('../../utils/batchContentRefresh')
 const { identifyUser } = require('../../utils/userIdentifier');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED, META_AI_NUMBER } = require('../../config/constants');
+const { CHROMIUM_PATH } = require('../../config/env');
+const { containsMetaAiTag } = require('../../utils/waMentions');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
@@ -37,7 +39,7 @@ function initDedicatedWhatsApp() {
   client = new Client({
     authStrategy: new LocalAuth({ clientId: 'dedicated' }),
     puppeteer: {
-      executablePath: '/usr/bin/chromium',
+      executablePath: CHROMIUM_PATH,
       headless: true,
       args: PUPPETEER_ARGS,
       protocolTimeout: 120000,
@@ -125,8 +127,7 @@ async function onDedicatedMessage(msg) {
     // when the user is talking to Meta AI here (tags it) or when the incoming
     // message is Meta AI's own reply — those are not for GemiX.
     const senderDigits = (msg.author || msg.from || '').replace(/\D/g, '');
-    const bodyHasMetaTag = new RegExp(`(?<!\\d)@${META_AI_NUMBER}(?!\\d)`).test(msg.body || '');
-    if (senderDigits === META_AI_NUMBER || bodyHasMetaTag) {
+    if (senderDigits === META_AI_NUMBER || containsMetaAiTag(msg.body || '')) {
       log.info('   Skipping dedicated private message addressed to / from Meta AI');
       return;
     }

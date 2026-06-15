@@ -15,6 +15,7 @@ const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName, hasFooter } = require('../../utils/footer');
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
+const { CHROMIUM_PATH } = require('../../config/env');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
@@ -39,7 +40,7 @@ function initPersonalWhatsApp() {
   client = new Client({
     authStrategy: new LocalAuth({ clientId: 'personal' }),
     puppeteer: {
-      executablePath: '/usr/bin/chromium',
+      executablePath: CHROMIUM_PATH,
       headless: true,
       args: PUPPETEER_ARGS,
       protocolTimeout: 120000,

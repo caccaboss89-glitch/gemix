@@ -277,11 +277,9 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
   // real WhatsApp mentions.
   let outgoingMentions = [];
   if (typeof responseData.text === 'string' && responseData.text.trim()) {
+    responseData.text = normalizeOutgoingMentionTags(responseData.text);
     responseData.text = stripDisallowedOutgoingMentions(responseData.text, { isPersonal });
-    if (isGroup) {
-      responseData.text = normalizeOutgoingMentionTags(responseData.text);
-      outgoingMentions = collectMentionJids(responseData.text);
-    }
+    if (isGroup) outgoingMentions = collectMentionJids(responseData.text);
   }
 
   const hasText = typeof responseData.text === 'string' && responseData.text.trim().length > 0;

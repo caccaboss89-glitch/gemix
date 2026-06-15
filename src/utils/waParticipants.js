@@ -74,10 +74,7 @@ async function buildGroupParticipants(chat) {
 }
 
 /**
- * Render the participant roster as prompt lines, annotating GemiX and Meta AI.
- * @param {Array<{number:string,name:string,isGemix:boolean,isMeta:boolean}>} participants
- * @param {(s:string)=>string} esc - XML escaper for the display names
- * @returns {string} newline-separated "Name (note): number" lines
+ * @returns {string} comma-separated "Name (note): number" roster
  */
 function formatParticipantsForPrompt(participants, esc) {
   const escape = typeof esc === 'function' ? esc : (s => s);
@@ -85,10 +82,10 @@ function formatParticipantsForPrompt(participants, esc) {
     .map((p) => {
       const name = escape(p.name || p.number);
       if (p.isGemix) return `${name} (you): ${p.number}`;
-      if (p.isMeta) return `${name} (tool the users can summon — never tag it): ${p.number}`;
+      if (p.isMeta) return `${name} (never tag): ${p.number}`;
       return `${name}: ${p.number}`;
     })
-    .join('\n');
+    .join(', ');
 }
 
 module.exports = { buildGroupParticipants, formatParticipantsForPrompt };

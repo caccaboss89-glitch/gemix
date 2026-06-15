@@ -93,6 +93,7 @@ MAX_UPSTREAM_CONNECT_S: int = int(os.environ.get("UPSTREAM_CONNECT_TIMEOUT_S", "
 GEMIX_NOTIFY_URL: str | None = os.environ.get(
     "GEMIX_NOTIFY_URL"
 )  # e.g. http://host.docker.internal:9999/notify
+GEMIX_NOTIFY_SECRET: str = os.environ.get("GEMIX_NOTIFY_SECRET", "")
 
 # Per-source cooldown for admin notifications (avoid spam)
 _notify_cooldowns: dict[str, float] = {}
@@ -113,10 +114,13 @@ def _notify_admin(source: str, details: str) -> None:
     def _post() -> None:
         try:
             payload = json.dumps({"source": source, "details": details}).encode()
+            headers: dict[str, str] = {"Content-Type": "application/json"}
+            if GEMIX_NOTIFY_SECRET:
+                headers["X-Notify-Secret"] = GEMIX_NOTIFY_SECRET
             req = urllib.request.Request(
                 GEMIX_NOTIFY_URL,
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=5):

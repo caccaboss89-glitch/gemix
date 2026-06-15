@@ -29,6 +29,7 @@ services:
       # On Linux Docker: http://172.17.0.1:9999/notify
       # On Docker Desktop: http://host.docker.internal:9999/notify
       GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
+      GEMIX_NOTIFY_SECRET: "${GEMIX_NOTIFY_SECRET:-}"
     networks:
       egress: {}           # internet access (for forwarding to allowed hosts)
       sandbox_net: {}      # reachable by sandboxes as hostname "gemix-sandbox-proxy"

@@ -22,6 +22,8 @@ if (env.GEMIX_NOTIFY_URL) {
   } catch { /* fallback to 9999 */ }
 }
 
+const NOTIFY_SECRET = env.GEMIX_NOTIFY_SECRET || '';
+
 let _server = null;
 
 function startInternalNotifyServer() {
@@ -37,6 +39,10 @@ function startInternalNotifyServer() {
     req.on('data', chunk => { body += chunk; if (body.length > 4096) req.destroy(); });
     req.on('end', async () => {
       try {
+        if (NOTIFY_SECRET && req.headers['x-notify-secret'] !== NOTIFY_SECRET) {
+          res.writeHead(403).end('forbidden');
+          return;
+        }
         const { source, details } = JSON.parse(body);
         if (source && details) {
           log.warn(`Proxy notification: [${source}] ${details}`);

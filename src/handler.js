@@ -406,6 +406,26 @@ async function handleMessage(ctx) {
       }
     };
 
+    const buildVoiceReturn = async () => {
+      log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
+      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
+      const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
+        ? buildResearchBadgeText(responseCtx.researchStats)
+        : null;
+      if (researchFooter) log.info(`   Research badge (voice follow-up): ${researchFooter}`);
+      return {
+        text: null,
+        voiceBuffer: responseCtx.voiceBuffer,
+        isVoiceOnly: true,
+        attachments: responseCtx.attachments,
+        discordTitle: responseCtx.discordTitle || '',
+        modelUsed: lastModelUsed,
+        voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
+        voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
+        researchFooter,
+      };
+    };
+
     while (rounds < MAX_TOOL_ROUNDS) {
       rounds++;
 
@@ -581,23 +601,7 @@ async function handleMessage(ctx) {
       }
 
       if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
-        await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
-        const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
-          ? buildResearchBadgeText(responseCtx.researchStats)
-          : null;
-        if (researchFooter) log.info(`   Research badge (voice follow-up): ${researchFooter}`);
-        return {
-          text: null,
-          voiceBuffer: responseCtx.voiceBuffer,
-          isVoiceOnly: true,
-          attachments: responseCtx.attachments,
-          discordTitle: responseCtx.discordTitle || '',
-          modelUsed: lastModelUsed,
-          voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
-          voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
-          researchFooter,
-        };
+        return await buildVoiceReturn();
       }
 
       await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
@@ -612,23 +616,7 @@ async function handleMessage(ctx) {
     }
 
     if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-      log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
-      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
-      const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
-        ? buildResearchBadgeText(responseCtx.researchStats)
-        : null;
-      if (researchFooter) log.info(`   Research badge (voice follow-up): ${researchFooter}`);
-      return {
-        text: null,
-        voiceBuffer: responseCtx.voiceBuffer,
-        isVoiceOnly: true,
-        attachments: responseCtx.attachments,
-        discordTitle: responseCtx.discordTitle || '',
-        modelUsed: lastModelUsed,
-        voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
-        voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
-        researchFooter,
-      };
+      return await buildVoiceReturn();
     }
 
     // ── Forced text wrap-up (session wall clock or tool-round budget) ───

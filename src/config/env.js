@@ -96,4 +96,7 @@ module.exports = {
   GEMIX_SANDBOX_NETWORK: process.env.GEMIX_SANDBOX_NETWORK || 'gemix_sandbox_net',
   GEMIX_SANDBOX_PROXY_HOST: process.env.GEMIX_SANDBOX_PROXY_HOST || 'gemix-sandbox-proxy',
   GEMIX_SANDBOX_PROXY_PORT: process.env.GEMIX_SANDBOX_PROXY_PORT || '8080',
+
+  GEMIX_NOTIFY_SECRET: process.env.GEMIX_NOTIFY_SECRET || '',
+  CHROMIUM_PATH: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
 };
