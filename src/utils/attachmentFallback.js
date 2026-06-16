@@ -29,8 +29,13 @@ function formatExpiryItalian(minutes) {
   return `${hPart} e ${remPart}`;
 }
 
+/** Prevent WhatsApp from wrapping https URLs at hyphen boundaries (e.g. gemix-allegati). */
+function formatUrlForWhatsApp(url) {
+  if (typeof url !== 'string' || !url) return url;
+  return url.replace(/-/g, '-\u2060');
+}
+
 /**
- * Process failed attachments and create a fallback message with download links.
  * 
  * @param {Array<object>} failedAttachments - Array of attachment objects that failed to send
  * @param {object} options
@@ -108,11 +113,11 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
   if (fallbackLinks.length === 1) {
     const link = fallbackLinks[0];
     const sizeMB = (link.size / 1048576).toFixed(2);
-    messageText += `📄 ${link.name} (${sizeMB} MB)\n${link.url}`;
+    messageText += `📄 ${link.name} (${sizeMB} MB)\n${formatUrlForWhatsApp(link.url)}`;
   } else {
     messageText += fallbackLinks.map((link, idx) => {
       const sizeMB = (link.size / 1048576).toFixed(2);
-      return `${idx + 1}. ${link.name} (${sizeMB} MB)\n${link.url}`;
+      return `${idx + 1}. ${link.name} (${sizeMB} MB)\n${formatUrlForWhatsApp(link.url)}`;
     }).join('\n\n');
   }
 
@@ -309,4 +314,5 @@ module.exports = {
   sendAttachmentsWithFallback,
   partitionWhatsAppAttachments,
   bundleWhatsAppTempLinkAttachments,
+  formatUrlForWhatsApp,
 };

@@ -153,6 +153,49 @@ function _renderSkills() {
   return formatSkillsForPrompt(loadSkills());
 }
 
+const FINISH_NUDGE =
+  'SYSTEM: WorkspaceState already contains the deliverable. Stop verification, discovery, and metadata commands. Reply now with final JSON (message + attachments copied from WorkspaceState).';
+
+function _bashCommandFromToolCall(tc) {
+  if (tc?.function?.name !== 'bash') return '';
+  try {
+    const args = typeof tc.function.arguments === 'string'
+      ? JSON.parse(tc.function.arguments)
+      : tc.function.arguments;
+    return args?.command || '';
+  } catch {
+    return '';
+  }
+}
+
+function _isProbeBash(cmd) {
+  return /\b(which|ffprobe|ls\s+-|ytsearch[2-9]|ytsearch[1-9]\d|--version|write-info-json|embed-chapter|add-metadata)\b/i.test(cmd);
+}
+
+function _maybeInjectFinishNudge(messages, workspaceId, rounds) {
+  const { total } = listWorkspaceFiles(workspaceId, 1);
+  if (total === 0) return;
+
+  let probeCount = 0;
+  let downloadCount = 0;
+  for (const m of messages) {
+    if (m.role !== 'assistant' || !Array.isArray(m.tool_calls)) continue;
+    for (const tc of m.tool_calls) {
+      const cmd = _bashCommandFromToolCall(tc);
+      if (!cmd) continue;
+      if (_isProbeBash(cmd)) probeCount++;
+      if (/\byt-dlp\b/i.test(cmd)) downloadCount++;
+    }
+  }
+
+  const wasteful = rounds >= 2 && probeCount >= 1 && downloadCount >= 1;
+  const tooManyRounds = rounds >= 4;
+  if (!wasteful && !tooManyRounds) return;
+  const last = messages[messages.length - 1];
+  if (last?.role === 'user' && last.content === FINISH_NUDGE) return;
+  messages.push({ role: 'user', content: FINISH_NUDGE });
+}
+
 function _buildSystemPrompt(workspaceId, renamedAttachments) {
   const stateBlock = _renderWorkspaceState(workspaceId);
   const notesBlock = _renderAttachmentNotes(renamedAttachments);
@@ -185,15 +228,15 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '  bash / write_file / edit_file / read_file run here. code_interpreter is separate (no /workspace/).',
     '  Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, poppler, curl/wget. No pip/npm/apt.',
     '  Downloads via bash: yt-dlp (video/audio), curl -L -o (files/images). Save under /workspace/.',
-    '  yt-dlp: run immediately — no extra rounds on ls/ffprobe/metadata probes unless the brief asks for verification or fixes, no --proxy. On content failure, one simpler retry max.',
+    '  yt-dlp: run immediately — no extra checks (e.g. yt-dlp version/ls/ffprobe/metadata probes) unless the brief asks for verification or fixes, no --proxy. On content failure, one simpler retry max.',
     '</Sandbox>',
     ...(skillsBlock ? [skillsBlock] : []),
     '<Delivery>',
     '  Final JSON: `message` (required) + optional `attachments` (workspace paths and/or https URLs). Unlisted files are not delivered.',
     '  Attach only what the brief asks for — skip scratch files (sources, logs, .tex, intermediates) unless requested.',
     '  `attachments` paths must match &lt;WorkspaceState&gt; exactly.',
-    '  Resend-only brief: attach only paths listed in &lt;WorkspaceState&gt;; do not rebuild.',
-    '  Re-encoded media (video/audio/images) or many deliverables: zip first.',
+    '  Resend-only brief: attach only paths listed in &lt;WorkspaceState&gt;.',
+    '  Many deliverables: zip first.',
     '</Delivery>',
     '<Pitfalls>',
     '  Network/proxy failure (502, CONNECT error, timeout, could not resolve): internet is down — stop, no retries, tell GemiX-Main for bug_report.',
@@ -538,6 +581,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
           }
         }
       }
+      _maybeInjectFinishNudge(messages, workspaceId, rounds);
       if (rounds >= BUILD_MAX_ROUNDS) budgetExhausted = true;
       continue;
     }
