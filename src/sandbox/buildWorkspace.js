@@ -227,6 +227,39 @@ function workspaceIsEmpty(workspaceId) {
 }
 
 /**
+ * Normalize a workspace path from a build-agent `attachments` entry (or tool
+ * path) to a relative path under the workspace root.
+ *
+ * Accepts common variants: "song.mp3", "/workspace/song.mp3", "workspace/song.mp3",
+ * "out/song.mp3", "./song.mp3", backslashes, optional file:// prefix.
+ * Returns null for empty paths, null bytes, or .. escape attempts.
+ */
+function normalizeWorkspaceRelPath(rawPath) {
+  if (typeof rawPath !== 'string') return null;
+  let s = rawPath.trim();
+  if (!s || s.includes('\0')) return null;
+
+  s = s.replace(/\\/g, '/');
+
+  if (/^file:\/\//i.test(s)) {
+    try {
+      s = decodeURIComponent(s.replace(/^file:\/\//i, '/'));
+    } catch {
+      s = s.replace(/^file:\/\//i, '');
+    }
+  }
+
+  while (s.startsWith('./')) s = s.slice(2);
+  s = s.replace(/^\/+/, '');
+  while (/^workspace\//i.test(s)) s = s.slice(/^workspace\//i.exec(s)[0].length);
+  if (!s) return null;
+
+  const segments = s.split('/').filter(seg => seg !== '' && seg !== '.');
+  if (segments.some(seg => seg === '..')) return null;
+  return segments.join('/');
+}
+
+/**
  * Resolve a relative path inside the workspace, ensuring containment.
  * Returns absolute path on success, null on escape attempt.
  */
@@ -250,5 +283,6 @@ module.exports = {
   wipeWorkspace,
   workspaceIsEmpty,
   resolveInsideWorkspace,
+  normalizeWorkspaceRelPath,
   QUOTA_BYTES,
 };

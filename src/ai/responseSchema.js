@@ -80,8 +80,9 @@ const BUILD_RESPONSE_FORMAT = {
         items: { type: 'string' },
         description:
           'OPTIONAL. Include only when you want to deliver files to the user with this answer. '
-          + 'Each entry is a /workspace/ path and/or a public https URL to fetch (e.g. images from '
-          + 'web/X search). If you have nothing to send, omit this field — do not pass an empty array.',
+          + 'Each entry is a workspace path exactly as listed in WorkspaceState (basename or /workspace/…) '
+          + 'and/or a public https URL to fetch (e.g. images from web/X search). '
+          + 'If you have nothing to send, omit this field — do not pass an empty array.',
       },
     },
     required: ['message'],

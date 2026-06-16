@@ -81,21 +81,25 @@ docker network inspect gemix_sandbox_egress >/dev/null 2>&1 || docker network cr
 ### 5. Avviare il proxy
 
 Il proxy inoltra tutto l'egress upstream al SOCKS5 residenziale (tailsocks →
-Redmi). `--add-host` permette al container di raggiungere tailsocks sull'host;
-`REDMI_SOCKS_HOST`/`REDMI_SOCKS_PORT` puntano al SOCKS5 (vedi SERVER_SETUP.md §1
-per il relay se tailsocks ascolta solo su loopback).
+Redmi). Su Linux con rete `gemix_sandbox_egress` dedicata:
+
+- tailsocks di solito ascolta solo su `127.0.0.1:5040` → relay **socat** +
+  regole **iptables** sul bridge egress (vedi **SERVER_SETUP.md §1**);
+- `REDMI_SOCKS_HOST` = gateway della rete egress (es. `172.19.0.1`), **non**
+  `host.docker.internal`.
 
 ```bash
+EGRESS_GW=$(docker network inspect gemix_sandbox_egress -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+
 docker rm -f gemix-sandbox-proxy 2>/dev/null || true
 
 docker run -d \
   --name gemix-sandbox-proxy \
   --restart unless-stopped \
   --network gemix_sandbox_egress \
-  --add-host=host.docker.internal:host-gateway \
-  -e REDMI_SOCKS_HOST=host.docker.internal \
+  -e REDMI_SOCKS_HOST="$EGRESS_GW" \
   -e REDMI_SOCKS_PORT=5040 \
-  -e GEMIX_NOTIFY_URL="http://host.docker.internal:9999/notify" \
+  -e GEMIX_NOTIFY_URL="http://${EGRESS_GW}:9999/notify" \
   gemix-sandbox-proxy:latest
 
 docker network connect gemix_sandbox_net gemix-sandbox-proxy 2>/dev/null || true

@@ -25,6 +25,7 @@ const {
   listWorkspaceFiles,
   workspaceSizeBytes,
   resolveInsideWorkspace,
+  normalizeWorkspaceRelPath,
   QUOTA_BYTES,
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
@@ -183,15 +184,14 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '<Sandbox>',
     '  bash / write_file / edit_file / read_file run here. code_interpreter is separate (no /workspace/).',
     '  Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, poppler, curl/wget. No pip/npm/apt.',
-    '  Downloads via bash: yt-dlp (video/audio), curl -L -o or wget (files/images). Save under /workspace/.',
-    '  Run yt-dlp immediately — no discovery probes, no --proxy. On content failure, one simpler retry max.',
-    '  Web search image URLs: curl -L -o to /workspace/ before embedding in documents or video.',
+    '  Downloads via bash: yt-dlp (video/audio), curl -L -o (files/images). Save under /workspace/.',
+    '  yt-dlp: run immediately — no extra rounds on ls/ffprobe/metadata probes unless the brief asks for verification or fixes, no --proxy. On content failure, one simpler retry max.',
     '</Sandbox>',
     ...(skillsBlock ? [skillsBlock] : []),
     '<Delivery>',
-    '  Final JSON: `message` (required) + optional `attachments` (/workspace/ paths and/or https URLs). Unlisted files are not delivered.',
+    '  Final JSON: `message` (required) + optional `attachments` (workspace paths and/or https URLs). Unlisted files are not delivered.',
     '  Attach only what the brief asks for — skip scratch files (sources, logs, .tex, intermediates) unless requested.',
-    '  Every /workspace/ path in `attachments` must appear in &lt;WorkspaceState&gt;; never invent paths.',
+    '  `attachments` paths must match &lt;WorkspaceState&gt; — use the listed basename (e.g. `song.mp3`) or the full form `/workspace/song.mp3`.',
     '  Resend-only brief: attach only paths listed in &lt;WorkspaceState&gt;; do not rebuild.',
     '  Re-encoded media (video/audio/images) or many deliverables: zip first.',
     '</Delivery>',
@@ -220,9 +220,8 @@ function _classifyAgentPath(workspaceId, rawPath) {
     return { ok: true, abs, zone: 'skills' };
   }
   // Default: workspace
-  const wsRel = trimmed.startsWith('/workspace/')
-    ? trimmed.slice('/workspace/'.length)
-    : trimmed.replace(/^\/+/, '');
+  const wsRel = normalizeWorkspaceRelPath(trimmed);
+  if (!wsRel) return { ok: false, reason: 'Invalid workspace path.' };
   const abs = resolveInsideWorkspace(workspaceId, wsRel);
   if (!abs) return { ok: false, reason: 'Path escapes /workspace/.' };
   return { ok: true, abs, zone: 'workspace' };

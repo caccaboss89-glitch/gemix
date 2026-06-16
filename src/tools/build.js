@@ -41,6 +41,7 @@ const {
   stageAttachmentBuffer,
   stageAttachmentFromPath,
   resolveInsideWorkspace,
+  normalizeWorkspaceRelPath,
 } = require('../sandbox/buildWorkspace');
 const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
 const { runBuildAgent } = require('../ai/buildAgent');
@@ -196,12 +197,12 @@ async function _attachDelivered(workspaceId, delivered, responseCtx) {
       continue;
     }
 
-    const relRaw = entry.replace(/^\/+/, '').replace(/\\/g, '/');
-    if (!relRaw || relRaw.split('/').some(seg => seg === '..' || seg === '.')) {
+    const wsRel = normalizeWorkspaceRelPath(entry);
+    if (!wsRel) {
       missing.push(entry || '(empty)');
       continue;
     }
-    const cleaned = relRaw
+    const cleaned = wsRel
       .split('/')
       .map(seg => sanitizeFilename(seg))
       .filter(Boolean)
