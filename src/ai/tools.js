@@ -529,7 +529,7 @@ function buildBuildTool(isGroup) {
   return makeTool({
     name: 'build',
     description:
-      'Delegate to build sub-agent (web/X search + shell + skills inside). Brief prompt only — it researches and builds. '
+      'Delegate to build sub-agent (work on files, bash, yt-dlp, ffmpeg, skills inside). Brief prompt only — it researches and builds. '
       + `Workspace for ${scope} (4h TTL, 500 MB). At most once per round. `
       + 'Generate image/video/song first if the build needs them, then attachments[].',
     properties: {

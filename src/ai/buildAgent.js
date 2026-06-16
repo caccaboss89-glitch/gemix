@@ -191,7 +191,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '<Delivery>',
     '  Final JSON: `message` (required) + optional `attachments` (workspace paths and/or https URLs). Unlisted files are not delivered.',
     '  Attach only what the brief asks for — skip scratch files (sources, logs, .tex, intermediates) unless requested.',
-    '  `attachments` paths must match &lt;WorkspaceState&gt; — use the listed basename (e.g. `song.mp3`) or the full form `/workspace/song.mp3`.',
+    '  `attachments` paths must match &lt;WorkspaceState&gt; exactly.',
     '  Resend-only brief: attach only paths listed in &lt;WorkspaceState&gt;; do not rebuild.',
     '  Re-encoded media (video/audio/images) or many deliverables: zip first.',
     '</Delivery>',

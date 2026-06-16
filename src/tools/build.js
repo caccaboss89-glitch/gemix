@@ -42,6 +42,7 @@ const {
   stageAttachmentFromPath,
   resolveInsideWorkspace,
   normalizeWorkspaceRelPath,
+  resolveWorkspaceDeliveryFile,
 } = require('../sandbox/buildWorkspace');
 const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
 const { runBuildAgent } = require('../ai/buildAgent');
@@ -202,19 +203,15 @@ async function _attachDelivered(workspaceId, delivered, responseCtx) {
       missing.push(entry || '(empty)');
       continue;
     }
-    const cleaned = wsRel
-      .split('/')
-      .map(seg => sanitizeFilename(seg))
-      .filter(Boolean)
-      .join('/');
+    const resolved = resolveWorkspaceDeliveryFile(workspaceId, wsRel);
+    if (!resolved) {
+      missing.push(wsRel);
+      continue;
+    }
+    const { abs, relPath: cleaned } = resolved;
     if (!cleaned) continue;
     if (seenSources.has(cleaned)) continue;
     seenSources.add(cleaned);
-    const abs = resolveInsideWorkspace(workspaceId, cleaned);
-    if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
-      missing.push(cleaned);
-      continue;
-    }
     const ext = path.extname(cleaned).toLowerCase();
     const mimetype = mimeForExtension(ext);
     const displayName = path.basename(cleaned);

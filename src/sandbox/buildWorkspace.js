@@ -259,6 +259,63 @@ function normalizeWorkspaceRelPath(rawPath) {
   return segments.join('/');
 }
 
+/** Loose key for matching basenames when spaces/underscores/punctuation differ. */
+function looseBasenameKey(name) {
+  const base = path.basename(String(name || '')).normalize('NFC');
+  const ext = path.extname(base).toLowerCase();
+  const stem = ext ? base.slice(0, -ext.length) : base;
+  const stemKey = stem
+    .toLowerCase()
+    .replace(/[\s_.-]+/g, '')
+    .replace(/[^a-z0-9àèéìòù]/g, '');
+  const extKey = ext.replace(/[^a-z0-9]/g, '');
+  return stemKey + extKey;
+}
+
+/**
+ * Resolve a workspace delivery path to an on-disk file.
+ * Tries exact path, then case-insensitive basename, then loose basename match
+ * (spaces vs underscores) when the match is unambiguous.
+ *
+ * @returns {{ abs: string, relPath: string } | null}
+ */
+function resolveWorkspaceDeliveryFile(workspaceId, wsRel) {
+  if (!wsRel || typeof wsRel !== 'string') return null;
+  const normalized = wsRel.normalize('NFC');
+  if (normalized.split('/').some(seg => seg === '..' || seg === '.')) return null;
+
+  const tryRel = (relativePath) => {
+    const abs = resolveInsideWorkspace(workspaceId, relativePath);
+    if (!abs || !fs.existsSync(abs)) return null;
+    try {
+      return fs.statSync(abs).isFile() ? { abs, relPath: relativePath } : null;
+    } catch {
+      return null;
+    }
+  };
+
+  for (const candidate of new Set([normalized, wsRel])) {
+    const exact = tryRel(candidate);
+    if (exact) return exact;
+  }
+
+  const { files } = listWorkspaceFiles(workspaceId, 500);
+  if (files.length === 0) return null;
+
+  const baseLower = path.basename(normalized).toLowerCase();
+  const caseMatches = files.filter(
+    f => path.basename(f.relPath).normalize('NFC').toLowerCase() === baseLower,
+  );
+  if (caseMatches.length === 1) return tryRel(caseMatches[0].relPath);
+
+  const wantKey = looseBasenameKey(normalized);
+  if (!wantKey) return null;
+  const looseMatches = files.filter(f => looseBasenameKey(f.relPath) === wantKey);
+  if (looseMatches.length === 1) return tryRel(looseMatches[0].relPath);
+
+  return null;
+}
+
 /**
  * Resolve a relative path inside the workspace, ensuring containment.
  * Returns absolute path on success, null on escape attempt.
@@ -284,5 +341,6 @@ module.exports = {
   workspaceIsEmpty,
   resolveInsideWorkspace,
   normalizeWorkspaceRelPath,
+  resolveWorkspaceDeliveryFile,
   QUOTA_BYTES,
 };
