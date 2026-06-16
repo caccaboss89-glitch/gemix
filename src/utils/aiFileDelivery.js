@@ -9,8 +9,9 @@
 // Office and archive parsing, semantic file search) without inlining the
 // content into the prompt. Only raw binaries (.exe, .iso, ...) stay tag-only.
 //
-// read_file on plain text/code returns the content inline in the JSON tool
-// result (numbered lines) - exact bytes matter there (e.g. build edit_file).
+// read_file on plain text/code in the build sub-agent returns the content inline
+// in the JSON tool result (numbered lines) — exact bytes matter for edit_file.
+// GemiX main read_file always uses the URL path above (input_file).
 
 const fs = require('fs');
 const path = require('path');
@@ -83,7 +84,7 @@ const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 const MAX_PDF_BYTES = 48 * 1024 * 1024;   // xAI PDF limit
 const MAX_DOC_BYTES = 48 * 1024 * 1024;   // generic documents/archives
 
-/** Max bytes for inline text reads (read_file on text/code). */
+/** Max bytes for build read_file inline text/code reads. */
 const READ_FILE_TEXT_MAX_BYTES = 50 * 1024;
 
 function _extOf(name) {
@@ -279,7 +280,7 @@ async function exposeXaiUrlFromAbsPath(absPath, displayPath, opts = {}) {
   return { success: true, url: built.url, bumpImageCount: built.bumpImageCount };
 }
 
-// -- Inline text reads (read_file) ----------------------------------------------
+// -- Build read_file: inline numbered text ------------------------------------
 
 function _truncateUtf8Text(text, maxBytes) {
   const buf = Buffer.from(text, 'utf-8');
@@ -503,8 +504,8 @@ async function deliverSyncedAttachment(opts) {
 
 /**
  * Unified read_file delivery.
- * Text/code -> inline numbered content (exact bytes for editing workflows).
- * Everything else supported -> upload + native parts.
+ * Main: always upload + native parts (input_file / input_image).
+ * Build (inlineTextCode): text/code -> inline numbered content for edit_file.
  *
  * @returns {Promise<{ kind: 'parts', parts: object[], bumpImageCount?: boolean }
  *   | { kind: 'inline', content: string, truncated: boolean }
@@ -516,6 +517,8 @@ async function deliverReadFileFromPath({
   contentType = '',
   imagesReadCount = 0,
   blockedMessage,
+  /** Build sub-agent only: inline numbered text for edit_file. Main always URL. */
+  inlineTextCode = false,
 }) {
   const ext = _extOf(absPath);
   const mimetype = contentType || mimeForExtension(ext, 'application/octet-stream', contentType);
@@ -524,7 +527,7 @@ async function deliverReadFileFromPath({
     return { kind: 'error', error: blockedMessage || mainReadFileBlockedMessage(ext) };
   }
 
-  if (isTextualFile(path.basename(absPath), mimetype)) {
+  if (inlineTextCode && isTextualFile(path.basename(absPath), mimetype)) {
     const inline = readNumberedTextFromPath(absPath, displayPath);
     if (!inline.ok) return { kind: 'error', error: inline.error };
     return { kind: 'inline', content: inline.content, truncated: inline.truncated };

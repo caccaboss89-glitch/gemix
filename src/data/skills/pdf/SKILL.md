@@ -22,8 +22,7 @@ For reports, brochures, and rich layouts, **include real visuals** (photo, diagr
 logo, chart, map)—not text-only pages unless the user asked for plain text.
 
 1. **Already in `/workspace/`** (attachments, prior tool output) → embed directly.
-2. **None available** → one `web_search` for images and a precise
-   brief (subject, style, count); save URLs with `download_file` into `/workspace/`.
+2. **None available** → one `web_search` for images; download URLs with `curl -L -o /workspace/... URL` via bash.
 3. **Charts/diagrams** → matplotlib/cairosvg to PNG, then `drawImage` / reportlab flow.
 
 Do not skip images because the prompt didn't attach any—fetch or render when they
@@ -79,7 +78,7 @@ server-side) instead of looking for a local OCR tool.
 | Once | Avoid |
 |------|--------|
 | One `read_file` `path: ["/skills/pdf/SKILL.md"]` | Re-reading guides |
-| One `web_search` for facts; optional one for images + `download_file` | Redundant research passes |
+| One `web_search` for facts; optional one for images + `curl -L -o` | Redundant research passes |
 | Build PDF script → one `read_file` `path: ["/workspace/output.pdf"]` or page PNGs batched in one call | Many partial drafts; retyping extracted text |
 | One fix pass if QA shows layout/contrast issues | Blind full rewrites |
 
@@ -255,7 +254,7 @@ c.save()
 
 Image rules (see **Images (use proactively)** above):
 - Staged `/workspace/` files, matplotlib/cairosvg PNGs, or `web_search` images
-  saved via `download_file`.
+  saved via `curl -L -o`.
 - Preserve aspect ratio (compute the missing dimension, or pass
   `preserveAspectRatio=True` when fitting a fixed box).
 - Canvas coordinates are bottom-left based.

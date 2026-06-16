@@ -60,6 +60,13 @@ RUN pip install --no-cache-dir --retries 5 --timeout 120 -r /opt/sandbox/require
 # -- unoserver for LibreOffice field updates (TOC, indexes) ------------------
 RUN pip install --no-cache-dir --retries 5 --timeout 120 unoserver
 
+# -- yt-dlp (media downloads) -----------------------------------------------
+# Installed at build time (pip is disabled at runtime below). Left unpinned on
+# purpose: extractors must stay current with site changes, so a fresh copy is
+# pulled on every image rebuild. All its traffic exits via the egress proxy
+# (residential IP), so anti-datacenter blocks are bypassed like any other host.
+RUN pip install --no-cache-dir --retries 5 --timeout 120 yt-dlp
+
 # -- Node.js + PptxGenJS (pptx skill: deck generation from templates) --------
 # Node is the engine the pptx templates run on. pptxgenjs is the only hard
 # dependency; the icon libraries (react-icons/react/react-dom/sharp) are used

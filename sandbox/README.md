@@ -18,7 +18,8 @@ quando il workspace supera la sua TTL globale (4h dall'ultima interazione).
 - network Docker `gemix_sandbox_net` esistente (internal)
 - network Docker `gemix_sandbox_egress` esistente (bridge normale)
 - container proxy `gemix-sandbox-proxy` in esecuzione (collegato a entrambe
-  le network) - unico ponte tra il sandbox network e Internet
+  le network) - unico ponte tra il sandbox network e Internet, che inoltra
+  l'egress al SOCKS5 residenziale (tailsocks → Redmi)
 - l'utente che esegue GemiX deve poter parlare con Docker
 
 Se manca uno di questi, la prima chiamata `build` fallisce in `getOrCreate()`.
@@ -79,6 +80,11 @@ docker network inspect gemix_sandbox_egress >/dev/null 2>&1 || docker network cr
 
 ### 5. Avviare il proxy
 
+Il proxy inoltra tutto l'egress upstream al SOCKS5 residenziale (tailsocks →
+Redmi). `--add-host` permette al container di raggiungere tailsocks sull'host;
+`REDMI_SOCKS_HOST`/`REDMI_SOCKS_PORT` puntano al SOCKS5 (vedi SERVER_SETUP.md §1
+per il relay se tailsocks ascolta solo su loopback).
+
 ```bash
 docker rm -f gemix-sandbox-proxy 2>/dev/null || true
 
@@ -86,6 +92,10 @@ docker run -d \
   --name gemix-sandbox-proxy \
   --restart unless-stopped \
   --network gemix_sandbox_egress \
+  --add-host=host.docker.internal:host-gateway \
+  -e REDMI_SOCKS_HOST=host.docker.internal \
+  -e REDMI_SOCKS_PORT=5040 \
+  -e GEMIX_NOTIFY_URL="http://host.docker.internal:9999/notify" \
   gemix-sandbox-proxy:latest
 
 docker network connect gemix_sandbox_net gemix-sandbox-proxy 2>/dev/null || true
@@ -106,7 +116,7 @@ lo riusano.
 | :--- | :--- |
 | File JS sotto `src/` | restart GemiX, niente Docker rebuild |
 | `sandbox/Dockerfile` / `requirements-sandbox.txt` / `preload_models.py` | rebuild `gemix-sandbox:latest` + restart GemiX || `sandbox/proxy/*` | rebuild `gemix-sandbox-proxy:latest` + ricreare il container del proxy + restart GemiX |
-| Allowlist proxy (`ALLOWED_HOSTS`) | ricreare il container del proxy con la nuova env |
+| Endpoint SOCKS upstream (`REDMI_SOCKS_HOST`/`REDMI_SOCKS_PORT`) | ricreare il container del proxy con la nuova env |
 
 Esempio rebuild sandbox principale:
 
@@ -150,42 +160,33 @@ Variabili d'ambiente che il `buildSandbox` riconosce:
 
 In assenza di motivi specifici, lascia i default.
 
-## yt-dlp (build agent — host, non container)
+## Egress (proxy → SOCKS5 residenziale)
 
-I comandi `yt-dlp` del sub-agent `build` **non** girano nel container Docker.
-GemiX li intercetta e li esegue **sul VPS host** con proxy SOCKS5 residenziale
-(`socks5h://127.0.0.1:5040` via tailsocks → exit node Tailscale, vedi
-`SERVER_SETUP.md`).
+Tutto il traffico in uscita del container build (`curl`/`wget`/`yt-dlp`/
+`requests`/Python) passa per `gemix-sandbox-proxy`, che inoltra ogni connessione
+**upstream** al SOCKS5 residenziale `tailsocks` (Redmi 10C via Tailscale), con
+DNS risolto lato Redmi (socks5h). Così l'IP residenziale bypassa i blocchi
+anti-datacenter, mantenendo un unico chokepoint con logging.
 
-**Prerequisiti sul VPS:**
+- **Nessuna allowlist:** qualunque host è raggiungibile. `yt-dlp` è installato
+  nell'immagine (`Dockerfile`) e gira in-container come ogni altro comando —
+  niente più esecuzione host-side.
+- **Fail-closed:** nessun fallback su internet diretto. Se il Redmi/tailsocks è
+  giù, il container resta senza internet; i download falliscono con errore
+  proxy/502 e il sub-agent lo segnala come guasto di sistema senza riprovare.
+- **Config:** env `REDMI_SOCKS_HOST` / `REDMI_SOCKS_PORT` sul container proxy
+  (default `host.docker.internal:5040`); il container deve poter raggiungere
+  tailsocks (vedi SERVER_SETUP.md §1).
 
-1. PM2 `[Rete] Tailscale-Proxy` (tailsocks su `127.0.0.1:5040`)
-2. Opzionale: binario in `bin/yt-dlp` (gitignored); altrimenti `yt-dlp` dal PATH
-3. All'avvio GemiX verifica che la porta 5040 risponda — se tailsocks è giù, il bot non parte
+I log del proxy registrano `event=allow_connect` / `event=allow_http` per ogni
+richiesta e `event=upstream_fail` quando l'egress residenziale non risponde.
 
-**Test rapido:**
+**Test rapido del SOCKS residenziale (sull'host):**
 
 ```bash
 ss -tlnp | grep 5040
-yt-dlp --simulate --print "%(title)s" --proxy socks5://127.0.0.1:5040 "URL_YOUTUBE"
+yt-dlp --simulate --print "%(title)s" --proxy socks5h://127.0.0.1:5040 "URL_YOUTUBE"
 ```
-
-Non serve `gemix-socks-relay` né variabili env dedicate: il proxy HTTP del
-sandbox (`gemix-sandbox-proxy`) serve solo a `curl`/`wget` **dentro** il container.
-
-## Allowlist del proxy
-
-Il proxy nega il traffico in uscita per default e inoltra solo verso gli
-host nell'allowlist (`sandbox/proxy/proxy.py`, override via env
-`ALLOWED_HOSTS`). I default coprono YouTube, X (`x.com`,
-`api.x.com`, `twimg.com`, `t.co`), Instagram, TikTok, Facebook (per
-`curl`/`wget` nel container).
-
-`yt-dlp` del build agent gira **sull'host** via tailsocks SOCKS5, non passa
-da questo proxy HTTP.
-
-I log del proxy registrano `event=allow_*` o `event=deny_*` per ogni
-richiesta — utili per debug di `curl`/`wget` nel sandbox, non per yt-dlp.
 
 ## Avviare manualmente una sandbox (debug)
 

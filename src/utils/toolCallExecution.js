@@ -105,7 +105,7 @@ function perRoundCapErrorPayload(toolName, limit) {
 
 /**
  * Run build sub-agent tools preserving assistant call order:
- *   - read_file / download_file / … run in parallel batches
+ *   - read_file / web_search / … run in parallel batches
  *   - write_file & edit_file run alone (sequential), flushing any pending batch first
  *   - bash runs when reached (after prior work), flushing any pending batch first
  *

@@ -122,8 +122,4 @@ module.exports = {
     '--single-process',
   ],
   WA_QR_TIMEOUT: 120_000,
-
-  // Host-side yt-dlp (tailsocks / SERVER_SETUP.md) — not the Docker HTTP egress proxy.
-  YTDLP_SOCKS_HOST: '127.0.0.1',
-  YTDLP_SOCKS_PORT: 5040,
 };

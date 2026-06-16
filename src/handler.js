@@ -12,9 +12,9 @@
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in three phases:
 //      (1) standard tools parallel, (2) delivery parallel, (3) voice last - repeat
 //      until the model returns the final response or the round budget is
-//      reached. While deliverable files exist (and on the first Discord
-//      thread turn) the final reply is structured JSON (response /
-//      attachments / conversation_title) enforced via text.format.
+//      reached. The final reply is always structured JSON (response /
+//      optional attachments, plus conversation_title on the first Discord
+//      thread turn) enforced via a fixed text.format schema.
 //   5. Apply the research badge (real web/X search counts) and ship the
 //      reply back to the platform.
 
@@ -129,9 +129,6 @@ async function handleMessage(ctx) {
     // Accumulated stats from native server-side web/X searches (main brain
     // and build sub-agent) - used for the badge appended to the reply.
     researchStats: null,
-    // True once a server-side search ran this turn: the model may hold
-    // public URLs it wants to deliver, so the structured reply activates.
-    searchUsed: false,
   };
 
   try {
@@ -254,7 +251,7 @@ async function handleMessage(ctx) {
     ctx.requestId = userCtx.requestId;
 
     // -- Build workspace activity tracking (WhatsApp only) --
-    // Touch last-activity on each main turn and refresh <UserWorkspace> in the prompt.
+    // Touch last-activity on each main turn and refresh <BuildWorkspace> in the prompt.
     const workspaceId = isDiscord ? null : resolveWorkspaceId(ctx);
     if (workspaceId) {
       try { touchActivity(workspaceId); }
@@ -339,14 +336,13 @@ async function handleMessage(ctx) {
     let sessionDurationLimitReached = false;
     const discordFirstTurn = Boolean(userCtx.isFirstTurn);
 
-    // Structured-reply state, recomputed before every AI call:
-    //   - deliverable files exist -> optional `attachments` field,
-    //   - first Discord thread turn -> required `conversation_title`.
-    // When neither applies the reply stays plain text (no text.format).
+    // Structured-reply state, recomputed before every AI call: `bufferFiles`
+    // lists what is currently in the delivery buffer (surfaced in the prompt),
+    // and `includeTitle` flags the first Discord thread turn (which adds the
+    // required `conversation_title`). The JSON schema itself is fixed every round.
     const computeDeliveryState = () => {
       const bufferFiles = (responseCtx.attachments || []).map(a => a.name).filter(Boolean);
       return {
-        active: bufferFiles.length > 0 || responseCtx.searchUsed,
         bufferFiles,
         includeTitle: discordFirstTurn && !responseCtx.discordTitle,
       };
@@ -359,7 +355,6 @@ async function handleMessage(ctx) {
       }
       responseCtx.researchStats.webSources += searchStats.webSources;
       responseCtx.researchStats.xPosts += searchStats.xPosts;
-      responseCtx.searchUsed = true;
     };
 
     // Resolve the attachments the model listed in its structured final reply
@@ -444,25 +439,21 @@ async function handleMessage(ctx) {
       log.info(`[${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
 
       // Refresh the workspace listing before each AI call so any file the
-      // build sub-agent just produced shows up immediately in <UserWorkspace>.
+      // build sub-agent just produced shows up immediately in <BuildWorkspace>.
       refreshUserWorkspace();
       reloadLongTermMemory(ctx, ui);
 
-      // Delivery / structured-reply state for this round: the prompt, the
-      // delivery tool parameters, and text.format all follow it.
+      // Delivery / structured-reply state for this round: drives the prompt's
+      // delivery instructions and whether conversation_title is required.
       const deliveryState = computeDeliveryState();
       ctx.deliveryState = deliveryState;
       ctx.isFirstTurn = deliveryState.includeTitle;
       userCtx.isFirstTurn = deliveryState.includeTitle;
-      userCtx.hasDeliverableFiles = deliveryState.active;
       messages[0].content = buildSystemPrompt(ctx);
 
       const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       currentRoundTools = roundTools;
-      const responseFormat = buildGemixResponseFormat({
-        includeTitle: deliveryState.includeTitle,
-        includeAttachments: deliveryState.active,
-      });
+      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle });
       const callOpts = { maxTurns: MAX_TOOL_ROUNDS, requestId: ctx.requestId, responseFormat };
 
       const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
@@ -565,21 +556,15 @@ async function handleMessage(ctx) {
         continue;
       }
 
-      // Structured replies (text.format active) carry the user-facing
-      // text in `response`, plus optional attachments and the Discord title.
-      let finalAttachments = [];
-      let text;
-      if (responseFormat) {
-        const parsed = parseStructuredReply(assistantMsg.content || '');
-        if (!parsed.structured) {
-          log.warn('   Structured reply expected but content was not valid JSON; using raw text');
-        }
-        applyParsedTitle(parsed);
-        finalAttachments = await resolveFinalAttachments(parsed);
-        text = cleanAssistantResponse(parsed.text || '');
-      } else {
-        text = cleanAssistantResponse(assistantMsg.content || '');
+      // The fixed structured reply carries the user-facing text in `response`,
+      // plus optional attachments and the Discord title.
+      const parsed = parseStructuredReply(assistantMsg.content || '');
+      if (!parsed.structured) {
+        log.warn('   Structured reply expected but content was not valid JSON; using raw text');
       }
+      applyParsedTitle(parsed);
+      const finalAttachments = await resolveFinalAttachments(parsed);
+      let text = cleanAssistantResponse(parsed.text || '');
       log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
       if (!text.trim() && !responseCtx.isVoiceOnly && finalAttachments.length === 0) {
@@ -632,13 +617,9 @@ async function handleMessage(ctx) {
       ctx.deliveryState = deliveryState;
       ctx.isFirstTurn = deliveryState.includeTitle;
       userCtx.isFirstTurn = deliveryState.includeTitle;
-      userCtx.hasDeliverableFiles = deliveryState.active;
       messages[0].content = buildSystemPrompt(ctx);
       const wrapUpTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
-      const responseFormat = buildGemixResponseFormat({
-        includeTitle: deliveryState.includeTitle,
-        includeAttachments: deliveryState.active,
-      });
+      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle });
       const wrapUpNote = sessionDurationLimitReached
         ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'SYSTEM: You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
@@ -653,14 +634,10 @@ async function handleMessage(ctx) {
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
-      if (responseFormat) {
-        const parsed = parseStructuredReply(finalMsg.content || '');
-        applyParsedTitle(parsed);
-        wrapUpAttachments = await resolveFinalAttachments(parsed);
-        wrapUpText = cleanAssistantResponse(parsed.text || '');
-      } else {
-        wrapUpText = cleanAssistantResponse(finalMsg.content || '');
-      }
+      const parsed = parseStructuredReply(finalMsg.content || '');
+      applyParsedTitle(parsed);
+      wrapUpAttachments = await resolveFinalAttachments(parsed);
+      wrapUpText = cleanAssistantResponse(parsed.text || '');
     } catch (wrapErr) {
       log.error(`   Forced wrap-up call failed: ${wrapErr.message}`);
     }

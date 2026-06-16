@@ -36,7 +36,7 @@ Excel-specific features), `pandas` (data analysis and bulk operations),
 `Pillow`/`matplotlib` (charts you embed as images).
 
 Formula recalculation: headless LibreOffice (`soffice`), driven by
-`scripts/recalc.py`. No internet access in the sandbox.
+`scripts/recalc.py`.
 
 ## Output requirements
 
@@ -164,7 +164,7 @@ the spreadsheet.
 
 Images you embed can come from: files GemiX staged in `/workspace/` (uploads,
 generated images), PNGs you render with matplotlib, or images fetched from the
-web with `web_search` (save image URLs via `download_file`), which land in `/workspace/`.
+web with `web_search` (download image URLs via `curl -L -o`), which land in `/workspace/`.
 **Use images proactively** when they improve the result: a chart, a logo, a
 photo, a diagram. If the task doesn't supply one but a relevant image would make
 the spreadsheet clearer or more useful, fetch it or render it.

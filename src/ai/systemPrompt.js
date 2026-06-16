@@ -33,7 +33,6 @@ function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
     platform: ctx.platform,
     isGroup: ctx.isGroup,
     chatId: ctx.chatId,
-    hasDeliverableFiles: Boolean(ctx.deliveryState?.active),
   };
   const tools = getToolsForUser(isActiveMember, isAdmin, userCtx);
   const toolNames = new Set();
@@ -68,8 +67,8 @@ function buildSystemPrompt(ctx) {
   const cap = getCapabilities(ctx);
   const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
   // Delivery / structured-reply state for this round (set by handler.js).
-  // Outside the handler (e.g. prompt audit script) it defaults to inactive.
-  const delivery = ctx.deliveryState || { active: false, bufferFiles: [], includeTitle: false };
+  // Outside the handler (e.g. prompt audit script) it defaults to empty.
+  const delivery = ctx.deliveryState || { bufferFiles: [], includeTitle: false };
   const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter, delivery };
 
   const sections = [];
@@ -101,6 +100,10 @@ function buildSystemPrompt(ctx) {
   const capLines = buildCapabilitiesLines(profile, promptOpts);
   if (capLines) sections.push(_block('Capabilities', capLines));
 
+  if (cap.buildWorkspace) {
+    sections.push(_renderBuildWorkspace(ctx.userWorkspace));
+  }
+
   sections.push(_block('Limits', buildLimitsLines(profile)));
 
   if (cap.longTermMemory) {
@@ -119,27 +122,28 @@ function buildSystemPrompt(ctx) {
     }
   }
 
-  if (cap.buildWorkspace) {
-    const ws = ctx.userWorkspace;
-    const total = ws?.total ?? 0;
-    if (total > 0) {
-      const items = ws.files.map(f => `    - ${f.relPath}`).join('\n');
-      const more = ws.more ? '\n    ... and more' : '';
-      sections.push(
-        `<BuildWorkspace files="${total}">\n${items}${more}\n`
-        + '    On disk only (4h TTL)—not in the delivery buffer until build delivers them; call build to re-send listed files.\n'
-        + '</BuildWorkspace>',
-      );
-    } else {
-      sections.push(
-        '<BuildWorkspace files="0">\n'
-        + '    Build sub-agent workspace is empty (4h TTL). Do not call build to search or re-deliver files the user asks about.\n'
-        + '</BuildWorkspace>',
-      );
-    }
-  }
-
   return sections.join('\n');
+}
+
+/** Persisted build sub-agent workspace listing (WhatsApp only). Always emitted. */
+function _renderBuildWorkspace(ws) {
+  const total = ws?.total ?? 0;
+  if (total > 0) {
+    const items = ws.files.map(f => `    - ${f.relPath}`).join('\n');
+    const more = ws.more ? '\n    ... and more' : '';
+    return (
+      `<BuildWorkspace files="${total}">\n${items}${more}\n`
+      + '    On disk only (4h TTL) — not in the delivery buffer until build returns them.\n'
+      + '    To re-send: build with a resend-only prompt and attachments=[].\n'
+      + '</BuildWorkspace>'
+    );
+  }
+  return (
+    '<BuildWorkspace files="0">\n'
+    + '    (empty — authoritative; do not call build to search for missing files)\n'
+    + '    If the user asks for a past build output, explain it expired (4h TTL).\n'
+    + '</BuildWorkspace>'
+  );
 }
 
 function _buildDiscordPlatform(ctx, promptOpts) {

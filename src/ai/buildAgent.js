@@ -2,7 +2,7 @@
 //
 // Build sub-agent for the `build` tool.
 // Runs an isolated conversation with dedicated tools
-// (write_file/edit_file/bash/read_file/download_file + native xAI
+// (write_file/edit_file/bash/read_file + native xAI
 // web_search/x_search/code_interpreter). Host (tools/build.js) manages lock,
 // workspace staging and delivery of the files announced in the structured
 // final answer (fixed JSON schema: message + optional attachments).
@@ -19,7 +19,7 @@ const {
   extractServerSearchStats,
 } = require('./responsesAdapter');
 const { BUILD_RESPONSE_FORMAT, applyResponsesTextFormat, parseStructuredReply } = require('./responseSchema');
-const { NATIVE_SEARCH_TOOLS } = require('./tools');
+const { NATIVE_SEARCH_TOOLS, BUILD_TOOL_READ_FILE } = require('./tools');
 const { renewBuildLock } = require('../utils/buildState');
 const {
   listWorkspaceFiles,
@@ -30,7 +30,6 @@ const {
 const buildSandbox = require('../sandbox/buildSandbox');
 const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
 const { normalizeReadFilePaths } = require('../tools/readFile');
-const { downloadPublicFile } = require('../utils/fetch');
 const { getRomeTime } = require('../utils/time');
 const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 const { SKILLS_DIR } = require('../utils/userPaths');
@@ -49,7 +48,6 @@ const { executeBuildToolCallsOrdered } = require('../utils/toolCallExecution');
 const log = createLogger('BuildAgent');
 
 const WRITE_FILE_MAX_BYTES = 5 * 1024 * 1024;
-const DOWNLOAD_FILE_MAX_BYTES = 60 * 1024 * 1024;
 const BASH_DEFAULT_TIMEOUT_MS = 30_000;
 const BASH_MAX_TIMEOUT_MS = 120_000;
 
@@ -109,40 +107,8 @@ function _buildAgentTools() {
         },
       },
     },
-    {
-      type: 'function',
-      function: {
-        name: 'read_file',
-        description: 'Read one or more files from /workspace/ or /skills/: text/code (exact content with line numbers), images, audio, video, PDF, Office documents, archives (parsed natively).',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Paths under /workspace/<rel> or /skills/<rel>. Pass multiple paths to read them in one call.',
-            },
-          },
-          required: ['path'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'download_file',
-        description: 'Download a public https URL into /workspace/ (e.g. an image found via web/X search, to embed in a document). Max 60 MB.',
-        parameters: {
-          type: 'object',
-          properties: {
-            url: { type: 'string', description: 'Public http(s) URL to fetch.' },
-            path: { type: 'string', description: 'Destination path relative to /workspace/ (e.g. "img/photo.jpg").' },
-          },
-          required: ['url', 'path'],
-        },
-      },
-    },
-    // Native xAI server-side tools (zero round cost): web + X search with
+    BUILD_TOOL_READ_FILE,
+    // Native xAI server-side tools (web + X search with
     // image/video understanding and web image search, plus the isolated
     // Python sandbox.
     ...NATIVE_SEARCH_TOOLS,
@@ -154,26 +120,29 @@ function _buildAgentTools() {
 
 function _renderWorkspaceState(workspaceId) {
   const { files, total, more } = listWorkspaceFiles(workspaceId, 200);
-  if (total === 0) return '<WorkspaceState empty="true"/>';
   const sizeBytes = workspaceSizeBytes(workspaceId);
+  const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
+  if (total === 0) {
+    return `  <WorkspaceState files="0" total_size_mb="${sizeMb}" quota_mb="${BUILD_WORKSPACE_QUOTA_MB}">\n    (empty)\n  </WorkspaceState>`;
+  }
   const lines = files.map(f => {
     const ageMin = Math.max(0, Math.floor((Date.now() - f.mtimeMs) / 60000));
     const sizeKb = (f.size / 1024).toFixed(1);
-    return `  ${f.relPath}  (${sizeKb} KB, ${ageMin} min ago)`;
+    return `    ${f.relPath}  (${sizeKb} KB, ${ageMin} min ago)`;
   });
-  if (more) lines.push(`  ... and more (showing first ${files.length})`);
-  const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
-  return `<WorkspaceState files="${total}" total_size_mb="${sizeMb}" quota_mb="${BUILD_WORKSPACE_QUOTA_MB}">\n${lines.join('\n')}\n</WorkspaceState>`;
+  if (more) lines.push(`    ... and more (showing first ${files.length})`);
+  return `  <WorkspaceState files="${total}" total_size_mb="${sizeMb}" quota_mb="${BUILD_WORKSPACE_QUOTA_MB}">\n${lines.join('\n')}\n  </WorkspaceState>`;
 }
 
+/** Only when host staged an attachment and the filename collided (e.g. report.pdf → report(1).pdf). */
 function _renderAttachmentNotes(renamedAttachments) {
   if (!Array.isArray(renamedAttachments) || renamedAttachments.length === 0) {
-    return '<AttachmentNotes/>';
+    return '';
   }
   const items = renamedAttachments.map(a =>
-    `  - "${a.requested}" was already present in the workspace and was renamed to "${a.actual}". Use "${a.actual}" in your operations.`
+    `    - brief/staging name "${a.requested}" → on disk "${a.actual}" (use "${a.actual}")`
   );
-  return `<AttachmentNotes>\n${items.join('\n')}\n</AttachmentNotes>`;
+  return `  <AttachmentNotes>\n    Upload filename collision — use the on-disk name below, not the name from the brief.\n${items.join('\n')}\n  </AttachmentNotes>`;
 }
 
 // Build the <Skills> block dynamically from the skill folders mounted at
@@ -193,46 +162,42 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
   // root tag adds nothing. The structured sub-tags sit flush at the top level.
   return [
     '<Identity>',
-    '  GemiX-Build, the sub-agent of GemiX. Reasoning and tool calls in English. Final user-facing text in the user\'s language (Italian by default), without emojis unless the user asked for them.',
+    '  GemiX-Build sub-agent. Final reply text in the user\'s language (Italian default), no emojis unless asked.',
     `  Time (Europe/Rome): ${getRomeTime()}.`,
     '</Identity>',
     '<Mission>',
-    '  Execute the build/code/document task delegated by GemiX-Main. Produce',
-    '  deliverables in /workspace/ and list them in the `attachments` field of your final JSON answer.',
-    '  If the prompt only asks to send existing workspace files (sources, logs, .tex),',
-    '  list &lt;WorkspaceState&gt;, deliver what is still on disk—do not rebuild from memory.',
+    '  Execute the task brief from GemiX-Main inside /workspace/.',
+    '  Reply once with structured JSON when done (see &lt;Delivery&gt;).',
     '</Mission>',
     '<Workspace>',
-    '  Working dir: /workspace/  (writable, no fixed structure)',
-    '  Skills: /skills/          (read-only)',
-    `  Quota: ${BUILD_WORKSPACE_QUOTA_MB} MB. Files persist across build calls in the same session.`,
-    '</Workspace>',
+    '  /workspace/ (writable), /skills/ (read-only). Operate only under these paths.',
+    `  ${BUILD_WORKSPACE_QUOTA_MB} MB quota; files persist for the session.`,
+    '  &lt;WorkspaceState&gt; is the authoritative on-disk file list (refreshed each round). When files="0", the workspace is empty — do not ls/find/bash to probe.',
     stateBlock,
-    notesBlock,
+    ...(notesBlock ? [notesBlock] : []),
+    '</Workspace>',
     '<ToolUsage>',
-    '  Emit MULTIPLE tool calls in the same round whenever independent — do not waste rounds on serial reads/searches you could batch.',
-    '  read_file path is a string array: pass every file you need in one call (e.g. SKILL.md + a references/*.md) instead of separate read_file rounds.',
-    '  The system runs tools intelligently: in parallel when possible, bash always last. You can write and run files in the same round.',
-    '  web_search / x_search run server-side at zero round cost. Web image search returns image URLs: pass them to download_file to save the bytes into /workspace/ before embedding them in a document.',
+    '  Batch independent tool calls in one round. The system runs tools in parallel when possible; bash runs last.',
+    '  You can write and run files in the same round.',
     '</ToolUsage>',
     '<Sandbox>',
-    '  Applies to bash / write_file / edit_file / read_file (the Docker sandbox at /workspace/). NOT code_interpreter, which is a separate isolated xAI Python environment with its own libraries and no access to /workspace/.',
-    '  Python 3.12 and Node.js 22. General-purpose pre-installed libs: numpy, scipy, sympy, mpmath, pandas, matplotlib, seaborn, plotly, Pillow, cairosvg, rembg, jinja2, PyYAML, requests, unoserver. General CLI: ffmpeg, yt-dlp, gs (ghostscript), pdftotext/pdftoppm/pdfimages/pdfinfo/pdftohtml (poppler-utils), libreoffice (headless), pdflatex/xelatex/lualatex (TeX Live), dvipng, curl, wget. No pip/npm/apt at runtime.',
-    '  Outbound: only YouTube, X/Twitter, Instagram, TikTok, Facebook — other hosts are blocked by the system (use download_file, which runs outside the sandbox, for anything else).',
-    '  yt-dlp: pre-installed. Those platforms only. Run the download command immediately — never which/find/pip/curl/python checks to locate or test yt-dlp. No --proxy, no extractor-arg probes.',
+    '  bash / write_file / edit_file / read_file run here. code_interpreter is separate (no /workspace/).',
+    '  Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, poppler, curl/wget. No pip/npm/apt.',
+    '  Downloads via bash: yt-dlp (video/audio), curl -L -o or wget (files/images). Save under /workspace/.',
+    '  Run yt-dlp immediately — no discovery probes, no --proxy. On content failure, one simpler retry max.',
+    '  Web search image URLs: curl -L -o to /workspace/ before embedding in documents or video.',
     '</Sandbox>',
-    skillsBlock,
+    ...(skillsBlock ? [skillsBlock] : []),
     '<Delivery>',
-    '  Your final answer is structured JSON: `message` (required user-facing text) and `attachments` (optional array).',
-    '  List in `attachments` the /workspace/ paths to send to the user, and/or public https URLs to fetch (e.g. images found via web/X search). Files NOT listed will not reach the user; omit the field for a text-only result.',
-    '  Media deliverables (converted/re-encoded images, video, audio): prefer a single .zip so the chat platform does not re-encode them.',
+    '  Final JSON: `message` (required) + optional `attachments` (/workspace/ paths and/or https URLs). Unlisted files are not delivered.',
+    '  Attach only what the brief asks for — skip scratch files (sources, logs, .tex, intermediates) unless requested.',
+    '  Every /workspace/ path in `attachments` must appear in &lt;WorkspaceState&gt;; never invent paths.',
+    '  Resend-only brief: attach only paths listed in &lt;WorkspaceState&gt;; do not rebuild.',
+    '  Re-encoded media (video/audio/images) or many deliverables: zip first.',
     '</Delivery>',
     '<Pitfalls>',
-    '  Always paths under /workspace/ or /skills/. read_file opens Office files and archives natively for UNDERSTANDING only — to extract exact text/data or edit them, use the skill scripts (never retype what you saw).',
-    '  Files passed as attachments live in /workspace/ root; if &lt;AttachmentNotes&gt; lists a rename, use the renamed name.',
-    '  If user wants prior workspace sources (.tex, scripts, logs): read &lt;WorkspaceState&gt;, list the existing files in `attachments` (zip with bash if many).',
-    '  yt-dlp: if a download command fails, retry once with a simpler yt-dlp line — never spend rounds on discovery (which, find, pip list, curl tests).',
-    '  IMPORTANT: same yt-dlp/sandbox/CLI infrastructure error twice — stop; no retries or workarounds (system fault). Deliver no files and tell GemiX-Main for bug_report.',
+    '  Network/proxy failure (502, CONNECT error, timeout, could not resolve): internet is down — stop, no retries, tell GemiX-Main for bug_report.',
+    '  Same infrastructure error twice: stop, no workarounds, bug_report.',
     '</Pitfalls>',
   ].join('\n');
 }
@@ -282,6 +247,7 @@ async function _readOneAgentFile(workspaceId, filePath, ctx) {
     contentType: mimeForExtension(ext),
     imagesReadCount: ctx.imagesReadCount ?? 0,
     blockedMessage: buildReadFileBlockedMessage(ext),
+    inlineTextCode: true,
   });
 
   if (delivery.kind === 'error') return { kind: 'error', path: filePath, error: delivery.error };
@@ -425,40 +391,6 @@ async function _executeBash(workspaceId, args) {
   });
 }
 
-/**
- * download_file: host-side fetch of a public URL into /workspace/.
- * Runs OUTSIDE the sandbox (its egress allowlist does not apply), so the
- * agent can save e.g. web-search image URLs for embedding in documents.
- */
-async function _executeDownloadFile(workspaceId, args) {
-  const a = args || {};
-  const c = _classifyAgentPath(workspaceId, a.path);
-  if (!c.ok || c.zone !== 'workspace') return _toolErr(c.reason || 'Downloads are only allowed under /workspace/.');
-
-  let downloaded;
-  try {
-    downloaded = await downloadPublicFile(a.url, { maxBytes: DOWNLOAD_FILE_MAX_BYTES });
-  } catch (err) {
-    return _toolErr(`Download failed: ${err.message}`);
-  }
-
-  const sizeBefore = workspaceSizeBytes(workspaceId);
-  const existingSize = fs.existsSync(c.abs) ? (fs.statSync(c.abs).size || 0) : 0;
-  if (sizeBefore - existingSize + downloaded.buffer.length > QUOTA_BYTES) {
-    return _toolErr(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
-  }
-  try { fs.mkdirSync(path.dirname(c.abs), { recursive: true }); }
-  catch (err) { return _toolErr(`Cannot create parent dir: ${err.message}`); }
-  try { fs.writeFileSync(c.abs, downloaded.buffer); }
-  catch (err) { return _toolErr(`Write failed: ${err.message}`); }
-  return JSON.stringify({
-    success: true,
-    path: a.path,
-    size: downloaded.buffer.length,
-    content_type: downloaded.mimetype,
-  });
-}
-
 async function _runToolCall(toolCall, ctx) {
   const name = toolCall.function && toolCall.function.name;
   let parsedArgs = {};
@@ -471,7 +403,6 @@ async function _runToolCall(toolCall, ctx) {
     case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);
     case 'bash':          return await _executeBash(ctx.workspaceId, parsedArgs);
     case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs, ctx);
-    case 'download_file': return await _executeDownloadFile(ctx.workspaceId, parsedArgs);
     default:              return _toolErr(`Unknown tool "${name}".`);
   }
 }

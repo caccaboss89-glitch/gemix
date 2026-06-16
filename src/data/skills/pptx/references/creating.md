@@ -109,7 +109,7 @@ python /skills/pptx/scripts/render_slides.py /workspace/presentation.pptx
 | One `read_file` `path: ["/skills/pptx/SKILL.md", "/skills/pptx/references/creating.md"]` | Re-reading the same guides |
 | One `search_templates.py` query (best keywords) | Second search + `ls`/`grep` templates |
 | One `web_search` for facts | Extra research passes for subtopics |
-| One `web_search` for images + `download_file` if photos needed | Third overlapping search |
+| One `web_search` for images + `curl -L -o` if photos needed | Third overlapping search |
 | `cp` template → `edit_file` content → `node` → inspect → render | `write_file` 500+ line rewrite; `tail`/`wc` on templates |
 | One `read_file` `path: ["/workspace/contact-sheet.jpg", …]` (+ up to 3 slide JPEGs) | Batching all `slide-*.jpg`; python loops dumping every slide's text |
 | One targeted `edit_file` + re-render if QA fails | `sed -i` bulk edits on `.js`; 3+ full re-renders |

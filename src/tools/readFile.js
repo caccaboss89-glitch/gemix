@@ -1,10 +1,9 @@
 // src/tools/readFile.js
 //
 // Tool used by the main brain to pull specific file(s) from chat history
-// into the conversation via aiFileDelivery (native input_file/input_image
-// parts, or inline numbered text for text/code). Scope: history only —
-// build sub-agent uses the same policy in ai/buildAgent.js for /workspace/
-// and /skills/.
+// into the conversation via aiFileDelivery (public URL + native input_file/
+// input_image parts). Scope: history only — build sub-agent inlines text/code
+// for edit_file; main always uses the URL path.
 
 const fs = require('fs');
 const path = require('path');
@@ -86,39 +85,21 @@ async function _readOneHistoryFile(filePath, userCtx, responseCtx) {
   });
 
   if (result.kind === 'error') return { kind: 'error', path: displayPath, error: result.error };
-  if (result.kind === 'parts') {
-    if (result.bumpImageCount) responseCtx.imagesReadCount++;
-    return { kind: 'parts', displayPath, parts: result.parts };
+  if (result.kind !== 'parts') {
+    return {
+      kind: 'error',
+      path: displayPath,
+      error: `Unexpected read_file delivery for "${displayPath}".`,
+    };
   }
-  return {
-    kind: 'inline',
-    displayPath,
-    content: result.content,
-    truncated: result.truncated,
-  };
+  if (result.bumpImageCount) responseCtx.imagesReadCount++;
+  return { kind: 'parts', displayPath, parts: result.parts };
 }
 
-function _buildReadFileMessage(fileResults, hasMediaParts) {
-  const ok = fileResults.filter((f) => f.success);
-  if (ok.length === 0) return undefined;
-
-  const parts = [];
-  const inline = ok.filter((f) => f.content !== undefined);
-  const media = ok.filter((f) => f.content === undefined);
-
-  if (media.length > 0 && hasMediaParts) {
-    const names = media.map((f) => f.path).join(', ');
-    parts.push(
-      `Added to the current turn: ${names}. `
-    );
-  }
-
+function _buildReadFileMessage(fileResults) {
   const fail = fileResults.filter((f) => !f.success);
-  if (fail.length > 0) {
-    parts.push(`${fail.length} file(s) failed.`);
-  }
-
-  return parts.length > 0 ? parts.join(' ') : undefined;
+  if (fail.length === 0) return undefined;
+  return `${fail.length} file(s) failed.`;
 }
 
 async function readFileTool(paths, userCtx, responseCtx) {
@@ -142,25 +123,16 @@ async function readFileTool(paths, userCtx, responseCtx) {
       fileResults.push({ path: one.path, success: false, error: one.error });
       continue;
     }
-    if (one.kind === 'parts') {
-      hasMediaParts = true;
-      fileResults.push({ path: one.displayPath, success: true });
-      mediaParts.push(...one.parts);
-      continue;
-    }
-    fileResults.push({
-      path: one.displayPath,
-      success: true,
-      content: one.content,
-      ...(one.truncated ? { truncated: true } : {}),
-    });
+    hasMediaParts = true;
+    fileResults.push({ path: one.displayPath, success: true });
+    mediaParts.push(...one.parts);
   }
 
   const payload = {
     success: fileResults.every(f => f.success),
     files: fileResults,
   };
-  const message = _buildReadFileMessage(fileResults, hasMediaParts);
+  const message = _buildReadFileMessage(fileResults);
   if (message) payload.message = message;
 
   if (hasMediaParts) {

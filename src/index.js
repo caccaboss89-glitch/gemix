@@ -76,13 +76,6 @@ log.info('GemiX - Avvio in corso...\n');
 // startup without blocking initialization. A warning is logged on failure.
 (async () => {
   try {
-    await buildSandbox.validateYtDlpAtStartup();
-  } catch (err) {
-    log.error(`yt-dlp preflight failed: ${err.message}`);
-    process.exit(1);
-  }
-
-  try {
     const { token, baseUrl } = getXaiAuth();
     log.info(`   xAI API: ${baseUrl} (model: ${GROK_MODEL}, auth: ${describeXaiAuthSource()})`);
     const ctrl = new AbortController();

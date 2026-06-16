@@ -81,14 +81,14 @@ function loadSkills() {
  */
 function formatSkillsForPrompt(skills) {
   if (!Array.isArray(skills) || skills.length === 0) {
-    return '<Skills empty="true"/>';
+    return '';
   }
   const lines = ['<Skills>'];
   lines.push('    Each skill below is a guided workflow with helper scripts. When a task matches a skill\'s purpose, read its SKILL.md and any companion guides you need before writing your own code, then follow it.');
   for (const s of skills) {
     lines.push(`    <Skill name="${escapeXml(s.name)}" doc="/skills/${escapeXml(s.filename)}">${escapeXml(s.description)}</Skill>`);
   }
-  lines.push('  </Skills>');
+  lines.push('</Skills>');
   return lines.join('\n');
 }
 

@@ -1,10 +1,10 @@
 # GemiX Python Sandbox - pre-installed libraries.
 # Install with: pip install -r requirements-sandbox.txt
 #
-# NOTE: the sandbox has NO free internet access. Only allowlisted hosts
-# (YouTube, X, Instagram, TikTok, Facebook) are reachable via the HTTP egress
-# proxy for curl/wget. Build-agent yt-dlp runs on the VPS host (tailsocks), not
-# here. Other network calls fail — use web_search / browse_page / read_url_content.
+# NOTE: all sandbox egress (curl/wget/yt-dlp/requests) is forwarded by the HTTP
+# egress proxy upstream through the residential SOCKS5 (Redmi). Any host is
+# reachable; there is no allowlist. If the Redmi is offline the sandbox has no
+# internet at all (fail-closed). yt-dlp is installed in the image (see Dockerfile).
 
 # -- Kernel runtime (required) --
 jupyter_server==2.14.2
@@ -45,4 +45,4 @@ PyYAML==6.0.2
 
 # -- Networking helper (used by AI for controlled APIs, must respect proxy) --
 requests==2.32.3
-# yt-dlp: NOT installed in container — build agent runs it on VPS host (tailsocks).
+# yt-dlp is installed unpinned in the Dockerfile (must stay current with site extractors).

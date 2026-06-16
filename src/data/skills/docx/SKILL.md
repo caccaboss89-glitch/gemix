@@ -15,8 +15,7 @@ For reports, memos with visuals, covers, and product sheets, **embed images**
 (photo, diagram, logo, chart)—not text-only unless the user asked for plain text.
 
 1. **Already in `/workspace/`** (attachments, charts from earlier steps) → `ImageRun`.
-2. **None available** → one `web_search` for images; save URLs with `download_file` into
-   `/workspace/`.
+2. **None available** → one `web_search` for images; download URLs with `curl -L -o /workspace/... URL` via bash.
 3. **Charts** → matplotlib → PNG → `ImageRun`.
 
 `generate_image` / `generate_video` are **not** available inside build—only staged
@@ -26,12 +25,12 @@ files, your renders, or web search. After adding images, run `render_doc.py` and
 ## Pitfalls (read before delivery)
 
 - **Round budget**: typical report **12–22** tool calls — one `web_search`
-  for facts, optional one `web_search` for images (`download_file` the URLs), one QA
+  for facts, optional one `web_search` for images (`curl -L -o` the URLs), one QA
   render (`render_doc.py` → `read_file` `path: ["/workspace/doc_pages.jpg"]`); fix once, re-render at most once.
   No Python loops dumping every paragraph unless debugging a specific bug.
 - **Illustrated reports** (sport, history, product…): ≥1 `ImageRun` unless user
   asked text-only. No photos in `/workspace/` → `web_search` for images, then
-  `download_file`. Before delivery, `inspect_docx.py` must not show
+  `curl -L -o`. Before delivery, `inspect_docx.py` must not show
   `Inline images/shapes: 0`.
 - **TOC**: manual index (plain paragraphs), not `TableOfContents` alone (raw
   `TOC \\h` until Word updates). If you used a TOC field, one LibreOffice pass—
@@ -281,7 +280,7 @@ new Paragraph({
 ```
 
 Where images come from (see **Images (use proactively)** above): staged files,
-matplotlib PNGs, or `web_search` images saved via `download_file`. SVG: `type: "svg"`
+matplotlib PNGs, or `web_search` images saved via `curl -L -o`. SVG: `type: "svg"`
 with PNG fallback, or `cairosvg.svg2png(...)`.
 
 ### Headers, footers, page numbers
@@ -399,7 +398,7 @@ works. **One** page grid is enough — do not re-render more than twice.
 |------|--------|
 | One `read_file` `path: ["/skills/docx/SKILL.md", "/skills/docx/references/editing.md"]` (omit editing.md when not filling/editing an attachment) | Re-reading the same guides |
 | One `web_search` for facts | Multiple overlapping research calls |
-| One `web_search` for images + `download_file` if visuals needed | Extra image-only searches |
+| One `web_search` for images + `curl -L -o` if visuals needed | Extra image-only searches |
 | `inspect_docx.py` before deliver on illustrated docs | Skipping image-count check |
 | `render_doc.py` → one `read_file` `path: ["/workspace/doc_pages.jpg"]` | Per-page `read_file` loops; 3+ renders |
 | `edit_file` / `fill_template.js` surgical fixes | Rebuilding the whole document from memory |

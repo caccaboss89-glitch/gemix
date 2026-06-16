@@ -21,17 +21,22 @@ services:
     image: gemix-sandbox-proxy:latest
     container_name: gemix-sandbox-proxy
     restart: unless-stopped
-    # Default allowlist lives in proxy.py; override here to widen it.
+    # Forwards ALL sandbox egress upstream to the residential SOCKS5
+    # (tailsocks -> Redmi). No allowlist. Fail-closed when the Redmi is off.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      # ALLOWED_HOSTS: "youtube.com,twitter.com,x.com,instagram.com,tiktok.com,facebook.com"
       PROXY_PORT: "8080"
+      # Residential SOCKS5 upstream reachable from this container.
+      REDMI_SOCKS_HOST: "${REDMI_SOCKS_HOST:-host.docker.internal}"
+      REDMI_SOCKS_PORT: "${REDMI_SOCKS_PORT:-5040}"
       # URL of the host's internal notify server - set to reach the Node process.
       # On Linux Docker: http://172.17.0.1:9999/notify
       # On Docker Desktop: http://host.docker.internal:9999/notify
       GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
       GEMIX_NOTIFY_SECRET: "${GEMIX_NOTIFY_SECRET:-}"
     networks:
-      egress: {}           # internet access (for forwarding to allowed hosts)
+      egress: {}           # path to the host (reaches tailsocks); upstream is SOCKS5
       sandbox_net: {}      # reachable by sandboxes as hostname "gemix-sandbox-proxy"
     # Do NOT expose the port to the host - the proxy must only be reachable
     # from sandbox_net.
@@ -52,6 +57,8 @@ services:
     environment:
       HTTP_PROXY:  "http://gemix-sandbox-proxy:8080"
       HTTPS_PROXY: "http://gemix-sandbox-proxy:8080"
+      http_proxy:  "http://gemix-sandbox-proxy:8080"
+      https_proxy: "http://gemix-sandbox-proxy:8080"
       NO_PROXY:    "localhost,127.0.0.1"
       GEMIX_BUILD: "1"
     networks:

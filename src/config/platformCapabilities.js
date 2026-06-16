@@ -195,40 +195,27 @@ function buildCallerAccessNote(profile, opts = {}) {
 }
 
 /**
- * Delivery / structured-reply instructions. Strictly state-dependent so the
- * model never reads instructions for features that are not unlocked yet:
- *   - no deliverables, no title -> only a heads-up that instructions appear
- *     when files enter the buffer;
- *   - deliverables and/or first Discord turn -> the structured JSON reply
- *     contract for the fields that are actually in the schema this turn.
+ * Delivery / structured-reply instructions. The JSON schema is fixed every
+ * round (`response` + optional `attachments`), so the contract is stated up
+ * front and is always present. `conversation_title` is the only conditional
+ * field (added on the first Discord thread turn).
  */
 function _buildDeliveryLines(delivery) {
   const d = delivery || {};
-  const active = Boolean(d.active);
   const includeTitle = Boolean(d.includeTitle);
   const lines = [];
 
-  if (!active) {
-    lines.push(
-      '- Tools that produce files push them into a delivery buffer. When files are available for delivery, the system adds the delivery instructions and parameters you need in later rounds.',
-    );
-  } else {
-    let line = '- Deliverable files exist, so your final reply is structured JSON: put the user-facing text in `response`. '
-      + 'To send files in THIS chat, optionally list them in `attachments` (delivery-buffer filenames and/or public https URLs, e.g. images from web/X search). '
-      + 'Omit `attachments` entirely if you have nothing to send.';
-    const bufferFiles = Array.isArray(d.bufferFiles) ? d.bufferFiles : [];
-    if (bufferFiles.length > 0) {
-      line += ` Delivery buffer now: ${bufferFiles.join(', ')}.`;
-    }
-    line += ' Any delivery tool in your list takes the same optional `attachments`.';
-    lines.push(line);
+  let line = '- Your final reply is structured JSON: put the user-facing text in `response`. '
+    + 'To send files in THIS chat, list them in `attachments` (delivery-buffer filenames and/or public https URLs, e.g. images from web/X search). '
+    + 'Omit `attachments` entirely if you have nothing to send.';
+  const bufferFiles = Array.isArray(d.bufferFiles) ? d.bufferFiles : [];
+  if (bufferFiles.length > 0) {
+    line += ` Delivery buffer now: ${bufferFiles.join(', ')}.`;
   }
+  line += ' Any delivery tool in your list takes the same optional `attachments`.';
+  lines.push(line);
 
-  if (includeTitle && !active) {
-    lines.push(
-      '- First message of this thread: your final reply is structured JSON — put the user-facing text in `response` and a short topic title in `conversation_title`.',
-    );
-  } else if (includeTitle && active) {
+  if (includeTitle) {
     lines.push(
       '- First message of this thread: `conversation_title` is required (short topic title, user\'s language, no emoji).',
     );
@@ -288,7 +275,7 @@ function buildCapabilitiesLines(profile, opts = {}) {
 function buildLimitsLines(profile) {
   const cap = CAPS[profile];
   let historyLine =
-    '- Chat history shows past files as [Attachment: filename] tags — names only, not their content; load any you need with read_file.';
+    '- Chat history shows past files as [Attachment: filename] tags — names only, not their content.';
   if (cap.historyTranscriptionNote) {
     historyLine += ' Your past voice notes also carry a native transcript on the current turn.';
   }
@@ -353,7 +340,7 @@ function buildRulesBlock(profile, opts = {}) {
   const groundingLines = [
     `- Use only verifiable info: ${sources.join(', ')}.`,
     '- Never invent or assume facts, names, dates, numbers, links, file paths, citations, quoted text, '
-      + 'or the content of an [Attachment] you have not loaded with read_file this turn.',
+      + 'or unverified content from an [Attachment] tag.',
     `- When unsure, slow down: verify with a tool (${verifyTools}) or ask the user, and if something stays unconfirmed say so plainly — never guess or rush.`,
     '- Before sending, silently confirm your reply follows every rule above, states only verified facts, and makes no unstated promises.',
   ];

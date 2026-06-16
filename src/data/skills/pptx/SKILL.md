@@ -79,8 +79,7 @@ if slide.has_notes_slide:
 - Python `python-pptx` (pre-installed) — for **reading and editing** existing
   `.pptx` files. See `references/editing.md`.
 - Python `Pillow`, `matplotlib` — render charts/figures to PNG to embed.
-- `web_search` — fetch image URLs from the web; save with `download_file` into
-  `/workspace/`.
+- `web_search` — fetch image URLs; download with `curl -L -o /workspace/... URL` via bash.
 - LibreOffice (headless) + `pdftoppm` (poppler) — drive `render_slides.py` for
   visual QA.
 
@@ -102,7 +101,7 @@ that `pptxgenjs` templates do — use templates for creation. There is no
 
 Images you place can come from: files GemiX staged in `/workspace/` (uploads,
 generated images, charts passed as attachments), PNGs you render yourself with
-matplotlib, or images from `web_search` saved via `download_file` — those land
+matplotlib, or images from `web_search` saved via `curl -L -o` — those land
 in `/workspace/`. `generate_image`/`generate_video` do NOT exist inside the build
 sandbox.
 
@@ -139,7 +138,7 @@ rewriting the whole deck or `sed` bulk edits.
 
 Typical deck: **12–22** tool calls, not 40+. Creating from a template: **one**
 template search, **one** `web_search` for facts, optional **one** `web_search`
-for images (`download_file` the URLs), then build → inspect → render → deliver.
+for images (`curl -L -o` the URLs), then build → inspect → render → deliver.
 Do not re-read templates, list directories, or dump slide text in Python loops.
 **Never** rewrite 500+ lines from scratch — `cp` a `/skills/pptx/templates/*.js`
 and edit surgically. See `references/creating.md` for the full PPTX checklist.

@@ -130,15 +130,26 @@ const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
   description:
-    'Use to load the real content of past files in chat history (text/code, images, audio, video, PDF, Office, archives): '
-    + 'history shows only their [Attachment: filename] tags, never the content itself. '
-    + 'On success, files are injected into the current turn. '
-    + 'Always read a file before talking about it; batch every file you need into one call.',
+    'Load past files from chat history (text/code, images, audio, video, PDF, Office, archives). '
+    + 'History shows only [Attachment: filename] tags.',
   properties: {
     path: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Filenames from the [Attachment: …] tags in history, e.g. ["photo.jpg", "clip.mp4"].',
+      description: 'Filenames from [Attachment: …] tags, e.g. ["photo.jpg", "clip.mp4"].',
+    },
+  },
+  required: ['path'],
+});
+
+const BUILD_TOOL_READ_FILE = makeTool({
+  name: 'read_file',
+  description: 'Load files from /workspace/ or /skills/.',
+  properties: {
+    path: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Paths under /workspace/ or /skills/, e.g. ["/skills/docx/SKILL.md", "/workspace/out/report.pdf"].',
     },
   },
   required: ['path'],
@@ -274,9 +285,7 @@ const VOICE_TEXT_DESC =
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
 
-// Attachments parameter for delivery tools. Only exposed while deliverable
-// files exist (delivery buffer non-empty or search-derived URLs available),
-// so the model never sees delivery options it cannot use yet.
+// Optional attachments on delivery tools and on the fixed JSON reply schema.
 const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string' },
@@ -286,17 +295,14 @@ const DELIVERY_ATTACHMENTS_PROP = {
     + 'https URL to fetch. If you have nothing to attach, omit this field — do not pass an empty array.',
 };
 
-function buildVoiceTool({ hasDeliverableFiles = false } = {}) {
+function buildVoiceTool() {
   const properties = {
     text: {
       type: 'string',
       description: VOICE_TEXT_DESC,
     },
+    attachments: DELIVERY_ATTACHMENTS_PROP,
   };
-
-  if (hasDeliverableFiles) {
-    properties.attachments = DELIVERY_ATTACHMENTS_PROP;
-  }
 
   return makeTool({
     name: 'send_voice_message',
@@ -306,7 +312,7 @@ function buildVoiceTool({ hasDeliverableFiles = false } = {}) {
   });
 }
 
-function buildWhatsAppTool(isAdmin, hasDeliverableFiles = false) {
+function buildWhatsAppTool(isAdmin) {
   const recipientProps = {
     name: {
       type: 'string',
@@ -329,10 +335,8 @@ function buildWhatsAppTool(isAdmin, hasDeliverableFiles = false) {
       properties: recipientProps,
       required: isAdmin ? [] : ['name'],
     },
+    attachments: DELIVERY_ATTACHMENTS_PROP,
   };
-  if (hasDeliverableFiles) {
-    properties.attachments = DELIVERY_ATTACHMENTS_PROP;
-  }
 
   return makeTool({
     name: 'send_whatsapp_message',
@@ -342,7 +346,7 @@ function buildWhatsAppTool(isAdmin, hasDeliverableFiles = false) {
   });
 }
 
-function buildEmailTool(isAdmin, hasDeliverableFiles = false) {
+function buildEmailTool(isAdmin) {
   const recipientProps = {
     name: {
       type: 'string',
@@ -366,10 +370,8 @@ function buildEmailTool(isAdmin, hasDeliverableFiles = false) {
       properties: recipientProps,
       required: isAdmin ? [] : ['name'],
     },
+    attachments: DELIVERY_ATTACHMENTS_PROP,
   };
-  if (hasDeliverableFiles) {
-    properties.attachments = DELIVERY_ATTACHMENTS_PROP;
-  }
 
   return makeTool({
     name: 'send_email',
@@ -529,7 +531,6 @@ function buildBuildTool(isGroup) {
     description:
       'Delegate to build sub-agent (web/X search + shell + skills inside). Brief prompt only — it researches and builds. '
       + `Workspace for ${scope} (4h TTL, 500 MB). At most once per round. `
-      + 'Re-fetch recent build files via &lt;BuildWorkspace&gt; list/deliver. '
       + 'Generate image/video/song first if the build needs them, then attachments[].',
     properties: {
       prompt: {
@@ -539,7 +540,7 @@ function buildBuildTool(isGroup) {
       attachments: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Files to stage into the build workspace: filenames (with extension) from the delivery buffer or chat history, or public https URLs to download — not paths only listed in <BuildWorkspace> (use a deliver-only build prompt for those). Empty/omit if none.',
+        description: 'Files to stage into the build workspace: filenames from the delivery buffer or chat history, or public https URLs. Empty/omit if none.',
       },
     },
     required: ['prompt'],
@@ -552,9 +553,6 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
   const isWhatsAppGroup = isWhatsApp && userCtx.isGroup;
   const isDiscord = userCtx.platform === PLATFORM_DISCORD;
-  // Deliverable files exist (delivery buffer non-empty or search-derived
-  // URLs available): expose the attachments parameter on delivery tools.
-  const hasDeliverableFiles = Boolean(userCtx.hasDeliverableFiles);
 
   const tools = [];
 
@@ -592,14 +590,14 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 3. Communication & Delivery (no voice on personal WA: replies are text + attachments only)
   if (!isDiscord && userCtx.platform !== PLATFORM_WA_PERSONAL) {
-    tools.push(buildVoiceTool({ hasDeliverableFiles }));
+    tools.push(buildVoiceTool());
   }
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   }
   if (isActiveMember) {
-    tools.push(buildEmailTool(isAdmin, hasDeliverableFiles));
-    tools.push(buildWhatsAppTool(isAdmin, hasDeliverableFiles));
+    tools.push(buildEmailTool(isAdmin));
+    tools.push(buildWhatsAppTool(isAdmin));
   }
 
   // 4. Task Management
@@ -713,4 +711,5 @@ module.exports = {
   toolNamesToSet,
   validateToolArgs,
   NATIVE_SEARCH_TOOLS,
+  BUILD_TOOL_READ_FILE,
 };

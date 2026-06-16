@@ -1,27 +1,34 @@
 """
 GemiX sandbox egress proxy.
 
-Enforces a strict domain allowlist for outbound HTTP(S) traffic originating
-from a sandbox container. This is the ONLY bridge between the sandbox network
-and the outside world - the sandbox itself runs with no default route.
+The ONLY bridge between the (internal, no-default-route) sandbox network and
+the outside world. Every outbound HTTP(S) request from a build sandbox is
+forwarded upstream through a SOCKS5 proxy that exits on a residential IP
+(tailsocks -> Tailscale -> Redmi phone, see SERVER_SETUP.md). This gives the
+in-container `yt-dlp`/`curl`/`wget` the same residential egress that bypasses
+datacenter anti-bot blocks.
 
 Protocol support:
-- HTTP CONNECT  (HTTPS tunneling) - by far the common case (requests, httpx).
-- Plain HTTP GET/POST              - forwarded verbatim when host matches.
+- HTTP CONNECT  (HTTPS tunneling) - by far the common case (requests, httpx, yt-dlp).
+- Plain HTTP GET/POST/...           - forwarded verbatim.
 
-Allowlist rules:
-- Matched against the request host (for CONNECT) or the Host header / URL
-  (for plain HTTP).
-- Match semantics: exact domain OR suffix match with a leading dot.
-  Example: ".example.com" matches "api.example.com" and "www.example.com",
-  but "api.example.com" only matches exactly.
-- Configured via env var ALLOWED_HOSTS (comma-separated). Defaults cover
-  social/video domains for in-container curl/wget (build yt-dlp is host-side).
+Routing:
+- There is NO host allowlist: any host is reachable, because the residential
+  exit is the whole point and downloads target arbitrary CDNs/images.
+- Upstream connections are made via SOCKS5 with remote DNS (socks5h semantics):
+  the destination hostname is resolved on the Redmi side, never locally.
+- Fail-closed: if the SOCKS5 upstream (Redmi) is unreachable, the request fails
+  with 502 and there is no direct-internet fallback. When the Redmi is off, the
+  sandbox simply has no internet (intended security property).
 
 Operational:
 - Listens on 0.0.0.0:${PROXY_PORT:-8080} (only reachable from the internal
   sandbox docker network).
-- Structured log line for every request: allowed / denied, host, method, size.
+- Reaches the SOCKS5 upstream at ${REDMI_SOCKS_HOST:-host.docker.internal}:
+  ${REDMI_SOCKS_PORT:-5040}. On Linux, run the container with
+  `--add-host=host.docker.internal:host-gateway` and make tailsocks listen on
+  an address the container can reach (see SERVER_SETUP.md).
+- Structured log line per request: allow/upstream_fail, host, method, bytes.
 - No per-client authentication - the internal docker network is the trust
   boundary. Do NOT expose this port to the host / internet.
 """
@@ -32,64 +39,25 @@ import json
 import os
 import socket
 import socketserver
+import struct
 import sys
 import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler
-from typing import Iterable
 from urllib.parse import urlparse
 
 # -- Configuration ---------------------------------------------------------
 
-DEFAULT_ALLOWED = [
-    # YouTube / Video Delivery (curl/wget in sandbox; yt-dlp is host-side)
-    ".youtube.com",
-    "youtube.com",
-    ".googlevideo.com",
-    ".ytimg.com",
-    # X / Twitter (curl/wget in sandbox)
-    ".twitter.com",
-    "twitter.com",
-    ".x.com",
-    "x.com",
-    "api.x.com",
-    ".twimg.com",
-    "twimg.com",
-    ".t.co",
-    "t.co",
-    # Instagram
-    ".instagram.com",
-    "instagram.com",
-    ".cdninstagram.com",
-    "cdninstagram.com",
-    # TikTok
-    ".tiktok.com",
-    "tiktok.com",
-    ".tiktokv.com",
-    ".byteoversea.com",
-    ".ibyteimg.com",
-    ".tiktokcdn.com",
-    ".tiktokcdn-us.com",
-    # Facebook
-    ".facebook.com",
-    "facebook.com",
-    ".fbcdn.net",
-    "fbcdn.net",
-]
-
-
-def _parse_allowlist(raw: str | None) -> list[str]:
-    if not raw:
-        return list(DEFAULT_ALLOWED)
-    items = [x.strip() for x in raw.split(",")]
-    return [x.lower() for x in items if x]
-
-
-ALLOWED_HOSTS: list[str] = _parse_allowlist(os.environ.get("ALLOWED_HOSTS"))
 PROXY_PORT: int = int(os.environ.get("PROXY_PORT", "8080"))
 TUNNEL_TIMEOUT_S: int = int(os.environ.get("TUNNEL_TIMEOUT_S", "120"))
 MAX_UPSTREAM_CONNECT_S: int = int(os.environ.get("UPSTREAM_CONNECT_TIMEOUT_S", "15"))
+
+# Residential SOCKS5 upstream (tailsocks -> Tailscale -> Redmi). All egress
+# exits here; there is no direct-internet fallback.
+REDMI_SOCKS_HOST: str = os.environ.get("REDMI_SOCKS_HOST", "host.docker.internal")
+REDMI_SOCKS_PORT: int = int(os.environ.get("REDMI_SOCKS_PORT", "5040"))
+
 GEMIX_NOTIFY_URL: str | None = os.environ.get(
     "GEMIX_NOTIFY_URL"
 )  # e.g. http://host.docker.internal:9999/notify
@@ -131,19 +99,77 @@ def _notify_admin(source: str, details: str) -> None:
     threading.Thread(target=_post, daemon=True).start()
 
 
-def host_allowed(host: str, allowlist: Iterable[str] = ALLOWED_HOSTS) -> bool:
-    """Return True if `host` matches the allowlist."""
-    if not host:
-        return False
-    h = host.lower().split(":", 1)[0]  # strip port
-    for rule in allowlist:
-        if rule.startswith("."):
-            if h == rule[1:] or h.endswith(rule):
-                return True
+# -- SOCKS5 upstream client (no third-party deps) --------------------------
+
+
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise OSError("socks5 upstream closed early")
+        buf += chunk
+    return buf
+
+
+def socks5_connect(dst_host: str, dst_port: int, timeout: int) -> socket.socket:
+    """
+    Open a tunnel to dst_host:dst_port through the SOCKS5 upstream (Redmi),
+    resolving the destination hostname on the upstream side (socks5h). Returns a
+    connected socket on success; raises OSError if the upstream or the target is
+    unreachable.
+    """
+    sock = socket.create_connection(
+        (REDMI_SOCKS_HOST, REDMI_SOCKS_PORT), timeout=timeout
+    )
+    try:
+        sock.settimeout(timeout)
+        # Greeting: VER=5, NMETHODS=1, METHOD=0 (no auth).
+        sock.sendall(b"\x05\x01\x00")
+        greeting = _recv_exact(sock, 2)
+        if greeting[0] != 0x05 or greeting[1] != 0x00:
+            raise OSError("socks5 upstream rejected no-auth handshake")
+
+        try:
+            host_bytes = dst_host.encode("idna")
+        except Exception:
+            host_bytes = dst_host.encode("ascii", "ignore")
+        if not host_bytes or len(host_bytes) > 255:
+            raise OSError(f"invalid destination host: {dst_host!r}")
+
+        # CONNECT with domain ATYP (0x03) so the upstream resolves DNS.
+        request = (
+            b"\x05\x01\x00\x03"
+            + bytes([len(host_bytes)])
+            + host_bytes
+            + struct.pack(">H", dst_port)
+        )
+        sock.sendall(request)
+
+        reply = _recv_exact(sock, 4)
+        if reply[0] != 0x05 or reply[1] != 0x00:
+            raise OSError(f"socks5 CONNECT failed (reply code {reply[1]})")
+
+        # Drain the bound address so the socket is positioned at the tunnel start.
+        atyp = reply[3]
+        if atyp == 0x01:  # IPv4
+            _recv_exact(sock, 4 + 2)
+        elif atyp == 0x03:  # domain
+            dlen = _recv_exact(sock, 1)[0]
+            _recv_exact(sock, dlen + 2)
+        elif atyp == 0x04:  # IPv6
+            _recv_exact(sock, 16 + 2)
         else:
-            if h == rule:
-                return True
-    return False
+            raise OSError(f"socks5 bad address type in reply ({atyp})")
+
+        sock.settimeout(None)
+        return sock
+    except Exception:
+        try:
+            sock.close()
+        except Exception:
+            pass
+        raise
 
 
 # -- Logger (thread-safe single-line records) ------------------------------
@@ -163,7 +189,7 @@ def _log(level: str, **fields) -> None:
 
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "GemixSandboxProxy/1.0"
+    server_version = "GemixSandboxProxy/2.0"
 
     # Silence default noisy per-request log
     def log_message(self, format, *args):  # noqa: N802 (BaseHTTPRequestHandler API)
@@ -179,27 +205,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._reject(400, "bad target")
             return
 
-        if not host_allowed(host):
-            _log("warn", event="deny_connect", host=host, port=port)
-            _notify_admin(
-                "Proxy - deny_connect",
-                f"Connessione bloccata verso host non autorizzato: {host}:{port}",
-            )
-            self._reject(403, f"host {host} not allowed")
-            return
-
-        # Connect upstream
         try:
-            upstream = socket.create_connection(
-                (host, port), timeout=MAX_UPSTREAM_CONNECT_S
-            )
+            upstream = socks5_connect(host, port, MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
                 "Proxy - upstream_fail (CONNECT)",
-                f"Connessione upstream fallita verso {host}:{port} - {e}",
+                f"Egress residenziale (Redmi) non raggiungibile per {host}:{port} - {e}",
             )
-            self._reject(502, "upstream connect failed")
+            self._reject(502, "residential upstream unavailable")
             return
         _log("info", event="allow_connect", host=host, port=port)
         try:
@@ -217,31 +231,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         host = parsed.hostname or self.headers.get("Host", "")
         port = parsed.port or 80
-        if not host_allowed(host):
-            _log("warn", event="deny_http", method=self.command, host=host)
-            _notify_admin(
-                "Proxy - deny_http",
-                f"Richiesta HTTP bloccata verso host non autorizzato: {self.command} {host}",
-            )
-            self._reject(403, f"host {host} not allowed")
+        if not host:
+            self._reject(400, "missing host")
             return
 
         path = parsed.path or "/"
         if parsed.query:
             path += "?" + parsed.query
 
-        # Build upstream request
         try:
-            upstream = socket.create_connection(
-                (host, port), timeout=MAX_UPSTREAM_CONNECT_S
-            )
+            upstream = socks5_connect(host, port, MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
                 "Proxy - upstream_fail (HTTP)",
-                f"Connessione upstream fallita verso {host}:{port} - {e}",
+                f"Egress residenziale (Redmi) non raggiungibile per {host}:{port} - {e}",
             )
-            self._reject(502, "upstream connect failed")
+            self._reject(502, "residential upstream unavailable")
             return
 
         content_length = int(self.headers.get("Content-Length", "0") or 0)
@@ -352,7 +358,7 @@ def main() -> int:
         "info",
         event="startup",
         port=PROXY_PORT,
-        allowlist=",".join(ALLOWED_HOSTS),
+        upstream=f"socks5h://{REDMI_SOCKS_HOST}:{REDMI_SOCKS_PORT}",
     )
     server = ThreadingHTTPServer(("0.0.0.0", PROXY_PORT), ProxyHandler)
     try:

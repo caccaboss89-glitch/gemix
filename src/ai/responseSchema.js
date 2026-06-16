@@ -2,14 +2,16 @@
 //
 // Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
 //
-// Main brain (GemiX): schema is attached only when the turn needs structured
-// fields — first Discord thread message (`conversation_title`) and/or
-// deliverable files or post-search URLs (`attachments`). Otherwise plain text.
-// The schema rides on the same HTTP call as tools (no extra round). Per xAI
-// docs, json_schema applies only to the final output_text, not to tool calls.
+// Main brain (GemiX): fixed schema on every round — `response` (required) plus
+// optional `attachments`, with `conversation_title` added on the first Discord
+// thread turn. Keeping it fixed means `attachments` is always available, even on
+// a single-round turn where xAI runs web/X search server-side (so found image
+// URLs can still be delivered). The schema rides on the same HTTP call as tools
+// (no extra round). Per xAI docs, json_schema applies only to the final
+// output_text, not to tool calls.
 //
-// Build sub-agent: fixed schema (`message` required, `attachments` optional)
-// on every round of its inner loop (same pattern as the main brain).
+// Build sub-agent: same pattern — fixed schema (`message` required,
+// `attachments` optional) on every round of its inner loop.
 
 const RESPONSE_FIELD_DESC =
   'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax.';
@@ -24,32 +26,28 @@ const TITLE_FIELD_DESC =
   'Concise topic title for this new conversation (max ~80 chars), no emojis, in the user\'s language.';
 
 /**
- * Build the main-brain text.format schema for the current round, or null when a
- * plain text reply is expected.
+ * Build the fixed main-brain text.format schema for the current round:
+ * `response` (required) + optional `attachments`, plus `conversation_title`
+ * (required) on the first Discord thread turn.
  *
  * @param {object} opts
  * @param {boolean} [opts.includeTitle] - First Discord thread turn (title not set yet).
- * @param {boolean} [opts.includeAttachments] - Deliverable files are available.
- * @returns {object|null}
+ * @returns {object}
  */
-function buildGemixResponseFormat({ includeTitle = false, includeAttachments = false } = {}) {
-  if (!includeTitle && !includeAttachments) return null;
-
+function buildGemixResponseFormat({ includeTitle = false } = {}) {
   const properties = {
     response: { type: 'string', description: RESPONSE_FIELD_DESC },
+    attachments: {
+      type: 'array',
+      items: { type: 'string' },
+      description: GEMIX_ATTACHMENTS_FIELD_DESC,
+    },
   };
   const required = ['response'];
 
   if (includeTitle) {
     properties.conversation_title = { type: 'string', description: TITLE_FIELD_DESC };
     required.push('conversation_title');
-  }
-  if (includeAttachments) {
-    properties.attachments = {
-      type: 'array',
-      items: { type: 'string' },
-      description: GEMIX_ATTACHMENTS_FIELD_DESC,
-    };
   }
 
   return {

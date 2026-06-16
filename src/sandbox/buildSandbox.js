@@ -20,25 +20,18 @@
 //   - The base image's ENTRYPOINT (Jupyter Server) is overridden with
 //     `Cmd:['sleep','infinity']` + `Entrypoint:[]` so the container is
 //     a quiet idle process we can attach to.
-//   - Standalone `yt-dlp` bash commands run on the **host** (not in Docker),
-//     via tailsocks socks5h://127.0.0.1:5040 — same as SERVER_SETUP.md.
-//     Output lands in the bind-mounted build_workspace dir.
+//   - All egress (curl/wget/yt-dlp/requests) goes through the egress proxy,
+//     which forwards upstream via the residential SOCKS5 (Redmi). yt-dlp is
+//     installed in the image and runs in-container like any other command.
 
 const crypto = require('crypto');
-const { exec } = require('child_process');
 const fs = require('fs');
-const net = require('net');
 const path = require('path');
 const stream = require('stream');
-const util = require('util');
-
-const execAsync = util.promisify(exec);
 
 const {
   SANDBOX_MEMORY_MB,
   SANDBOX_IDLE_TTL_MS,
-  YTDLP_SOCKS_HOST,
-  YTDLP_SOCKS_PORT,
 } = require('../config/constants');
 const {
   GEMIX_SANDBOX_IMAGE,
@@ -58,113 +51,6 @@ const SANDBOX_IMAGE = GEMIX_SANDBOX_IMAGE;
 const SANDBOX_NETWORK = GEMIX_SANDBOX_NETWORK;
 const PROXY_HOSTNAME = GEMIX_SANDBOX_PROXY_HOST;
 const PROXY_PORT = GEMIX_SANDBOX_PROXY_PORT;
-
-const GEMIX_BIN_DIR = path.resolve(__dirname, '..', '..', 'bin');
-const YTDLP_BIN_HOST_PATH = path.join(GEMIX_BIN_DIR, 'yt-dlp');
-
-/** Fail fast at pm2 start on Linux — not on first build call. */
-async function validateYtDlpAtStartup() {
-  if (process.platform !== 'linux') return;
-
-  const proxyOk = await _checkSocksProxy(YTDLP_SOCKS_HOST, YTDLP_SOCKS_PORT);
-  if (!proxyOk) {
-    throw new Error(
-      `tailsocks offline (${YTDLP_SOCKS_HOST}:${YTDLP_SOCKS_PORT}). `
-      + 'Start PM2 [Rete] Tailscale-Proxy (see SERVER_SETUP.md).'
-    );
-  }
-
-  const ytdlpBin = fs.existsSync(YTDLP_BIN_HOST_PATH) ? YTDLP_BIN_HOST_PATH : 'yt-dlp (PATH)';
-  log.info(`yt-dlp (build): host via socks5h://${YTDLP_SOCKS_HOST}:${YTDLP_SOCKS_PORT} bin=${ytdlpBin}`);
-}
-
-/** Container fs/pip probes — stay in sandbox (yt-dlp is not installed there). */
-function _isYtDlpDiscoveryProbe(command) {
-  const t = String(command || '').trim();
-  if (!/\byt-dlp\b/i.test(t)) return false;
-  return /\b(find|locate|grep|pip\s+(list|install)|apt\s+list|dpkg\s+-l|import\s+yt_dlp)\b/i.test(t)
-    || /\bfind\b[^\n;|&]*yt-dlp/i.test(t)
-    || /\becho\b[^\n;|&]*yt-dlp/i.test(t);
-}
-
-/** Run on VPS host (tailsocks) when the command actually invokes yt-dlp CLI. */
-function _shouldExecYtDlpOnHost(command) {
-  if (process.platform !== 'linux') return false;
-  const t = String(command || '').trim();
-  if (!/\byt-dlp\b/.test(t)) return false;
-  if (_isYtDlpDiscoveryProbe(command)) return false;
-  return true;
-}
-
-function _checkSocksProxy(host, port, timeoutMs = 2000) {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    const done = (ok) => {
-      try { socket.destroy(); } catch { /* */ }
-      resolve(ok);
-    };
-    socket.setTimeout(timeoutMs);
-    socket.once('connect', () => done(true));
-    socket.once('timeout', () => done(false));
-    socket.once('error', () => done(false));
-    socket.connect(port, host);
-  });
-}
-
-/**
- * Run yt-dlp on the VPS host (tailsocks @ 127.0.0.1:5040). Paths /workspace/…
- * are rewritten to the real build_workspace directory on disk.
- */
-async function execYtDlpOnHost(workspaceId, command, timeoutMs) {
-  const workspaceDir = ensureWorkspace(workspaceId);
-  if (!workspaceDir) throw new Error('Cannot resolve workspace directory');
-
-  const proxyOk = await _checkSocksProxy(YTDLP_SOCKS_HOST, YTDLP_SOCKS_PORT);
-  if (!proxyOk) {
-    throw new Error(
-      `tailsocks offline (${YTDLP_SOCKS_HOST}:${YTDLP_SOCKS_PORT}). `
-      + 'Start PM2 [Rete] Tailscale-Proxy (see SERVER_SETUP.md).'
-    );
-  }
-
-  const ytdlpBin = fs.existsSync(YTDLP_BIN_HOST_PATH) ? YTDLP_BIN_HOST_PATH : 'yt-dlp';
-  const hostCmd = command.replace(/\/workspace\b/g, workspaceDir);
-  const proxy = `socks5h://${YTDLP_SOCKS_HOST}:${YTDLP_SOCKS_PORT}`;
-  const wrapper = `yt-dlp() { "${ytdlpBin}" --proxy "${proxy}" "$@"; }; `;
-  const fullCmd = wrapper + hostCmd;
-
-  const startedAt = Date.now();
-  try {
-    const hostEnv = { ...process.env };
-    delete hostEnv.HTTP_PROXY;
-    delete hostEnv.HTTPS_PROXY;
-    delete hostEnv.http_proxy;
-    delete hostEnv.https_proxy;
-    const result = await execAsync(fullCmd, {
-      cwd: workspaceDir,
-      timeout: timeoutMs,
-      shell: '/bin/bash',
-      maxBuffer: 16 * 1024 * 1024,
-      env: hostEnv,
-    });
-    return {
-      rc: 0,
-      stdout: result.stdout || '',
-      stderr: result.stderr || '',
-      timedOut: false,
-      durationMs: Date.now() - startedAt,
-    };
-  } catch (err) {
-    const timedOut = Boolean(err.killed);
-    return {
-      rc: typeof err.code === 'number' ? err.code : (timedOut ? 124 : 1),
-      stdout: err.stdout || '',
-      stderr: err.stderr || '',
-      timedOut,
-      durationMs: Date.now() - startedAt,
-    };
-  }
-}
 
 /** Map<workspaceId, BuildSandboxEntry> */
 const _pool = new Map();
@@ -232,10 +118,13 @@ async function _spawnContainer(workspaceId) {
   const env = [
     'HOME=/tmp',
     'GEMIX_BUILD=1',
-    // Outbound traffic from the sandbox goes through the egress proxy
-    // (allowlisted, see sandbox/proxy/proxy.py). yt-dlp is host-side.
+    // All outbound traffic (curl/wget/yt-dlp/requests) goes through the egress
+    // proxy, which forwards upstream via the residential SOCKS5 (Redmi). See
+    // sandbox/proxy/proxy.py. No allowlist; fail-closed when the Redmi is off.
     `HTTP_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
     `HTTPS_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
+    `http_proxy=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
+    `https_proxy=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
     'NO_PROXY=localhost,127.0.0.1',
   ];
 
@@ -331,9 +220,8 @@ async function getOrCreate(workspaceId) {
 /**
  * Run a shell command inside the container (one shot via `docker exec`).
  * The command is executed via `/bin/bash -lc`, so full shell syntax
- * (pipes, &&, ||, ;, redirection, subshells) is supported.
- *
- * `yt-dlp` CLI invocations are intercepted and run on the host (not discovery probes).
+ * (pipes, &&, ||, ;, redirection, subshells) is supported. Everything runs
+ * in-container, including yt-dlp and other downloads (egress via the proxy).
  *
  * @param {string} workspaceId
  * @param {string} command
@@ -343,10 +231,6 @@ async function getOrCreate(workspaceId) {
  */
 async function execBash(workspaceId, command, opts = {}) {
   const timeoutMs = Math.max(1000, Math.min(Number(opts.timeoutMs) || 30000, 120000));
-
-  if (_shouldExecYtDlpOnHost(command)) {
-    return execYtDlpOnHost(workspaceId, command, timeoutMs);
-  }
 
   const entry = await getOrCreate(workspaceId);
   entry.lastUsedAt = Date.now();
@@ -495,7 +379,6 @@ module.exports = {
   shutdown,
   shutdownAll,
   cleanupOrphanBuildSandboxes,
-  validateYtDlpAtStartup,
   // Diagnostics
   _pool,
 };

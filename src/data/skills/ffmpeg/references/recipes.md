@@ -383,7 +383,7 @@ ffmpeg -n \
 ```
 
 The overlay image can be a file already in `/workspace/`, a PNG you rendered, or one
-fetched with `web_search` and saved via `download_file`.
+fetched with `web_search` and saved via `curl -L -o /workspace/... URL` (bash).
 
 ---
 
