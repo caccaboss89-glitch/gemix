@@ -4,7 +4,7 @@
 // identity object containing the member record (if active), active status,
 // and the canonical taskFileId (WhatsApp memory, scheduled tasks, etc.).
 
-const { findMemberByWa, findMemberByDiscord } = require('../config/members');
+const { findMemberByWa, findMemberByDiscord, isAdmin } = require('../config/members');
 const { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_WA, TASK_PREFIX_GROUP } = require('../config/constants');
 
 /**
@@ -15,7 +15,7 @@ const { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_W
  * @param {string} [ctx.discordUsername] - Discord username
  * @param {string} [ctx.discordDisplayName] - Discord display name
  * @param {string} [ctx.discordNickname] - Discord server nickname
- * @returns {{ member: object|null, isActiveMember: boolean, taskFileId: string }}
+ * @returns {{ member: object|null, isActiveMember: boolean, isAdmin: boolean, taskFileId: string }}
  */
 function identifyUser(ctx) {
   let member = null;
@@ -39,7 +39,7 @@ function identifyUser(ctx) {
     taskFileId = TASK_PREFIX_WA + ctx.userId.replace('@c.us', '');
   }
 
-  return { member, isActiveMember, taskFileId };
+  return { member, isActiveMember, isAdmin: isAdmin(member), taskFileId };
 }
 
 /**

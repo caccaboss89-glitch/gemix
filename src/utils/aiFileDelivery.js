@@ -9,9 +9,10 @@
 // Office and archive parsing, semantic file search) without inlining the
 // content into the prompt. Only raw binaries (.exe, .iso, ...) stay tag-only.
 //
-// read_file on plain text/code in the build sub-agent returns the content inline
+// read_file in the build sub-agent returns plain text/code content inline
 // in the JSON tool result (numbered lines) — exact bytes matter for edit_file.
-// GemiX main read_file always uses the URL path above (input_file).
+// The main brain has no read_file: every supported file is attached natively
+// (input_file/input_image) on the turn it appears, current or in history.
 
 const fs = require('fs');
 const path = require('path');
@@ -77,8 +78,13 @@ const TEXT_MIME_EXTRA = new Set([
   'application/x-shellscript',
 ]);
 
-// Size caps for xAI ingestion.
+// Per-call caps on history files re-attached natively to the turn.
+//   - images: vision-processed every call (expensive)
+//   - files:  documents/audio/video (input_file). GemiX voice-note transcripts
+//             are exempt (attached to the current turn, not history).
 const MAX_IMAGE_READS = 10;
+const MAX_FILE_READS = 10;
+// Size caps for xAI ingestion.
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 const MAX_PDF_BYTES = 48 * 1024 * 1024;   // xAI PDF limit
@@ -503,8 +509,8 @@ async function deliverSyncedAttachment(opts) {
 // -- read_file delivery (history + build workspace/skills) ------------------------
 
 /**
- * Unified read_file delivery.
- * Main: always upload + native parts (input_file / input_image).
+ * Unified read_file delivery (build sub-agent + history native attachment).
+ * URL path: upload + native parts (input_file / input_image).
  * Build (inlineTextCode): text/code -> inline numbered content for edit_file.
  *
  * @returns {Promise<{ kind: 'parts', parts: object[], bumpImageCount?: boolean }
@@ -550,6 +556,7 @@ module.exports = {
   DELIVERY_MODE,
   XAI_IMAGE_EXTS,
   MAX_IMAGE_READS,
+  MAX_FILE_READS,
   classifyAiFileDelivery,
   buildXaiFileParts,
   exposeXaiUrlFromAbsPath,

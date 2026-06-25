@@ -8,13 +8,14 @@
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
+const { isSpecialNonMediaType, formatSpecialMessageText, formatWhatsAppContactText } = require('../../utils/waSpecialMessages');
 const { formatTimestamp } = require('../../utils/time');
 const { hasScheduledFooter } = require('../../utils/footer');
 const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
 const { isSystemMessage } = require('../../config/systemMessages');
 
 const { buildAttachmentTag } = require('../../utils/media');
-const { MAX_IMAGE_READS } = require('../../utils/aiFileDelivery');
+const { MAX_IMAGE_READS, MAX_FILE_READS } = require('../../utils/aiFileDelivery');
 const { resolveGemixVoiceTranscription, storeRecentVoiceText } = require('../../utils/historySync');
 const { ingressWaMessageMedia, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 const {
@@ -49,6 +50,7 @@ function _waMessageKey(msg) {
 const {
   replaceMentionsInBody: _replaceMentionsInBody,
   resolveMentionsForMessage: _resolveMentionsForMessage,
+  resolveLidTagsInBody: _resolveLidTagsInBody,
   stripDisallowedOutgoingMentions,
   normalizeOutgoingMentionTags,
   collectMentionJids,
@@ -90,6 +92,21 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
   }
 
   const isGroup = Boolean(chat?.isGroup);
+
+  // Fast first level for LID tag resolution: phone numbers of the group's
+  // current participants. Long @<digits> tags already matching one of these
+  // are real phone tags; the rest are LIDs resolved via getContactLidAndPhone
+  // (resolveLidTagsInBody), with a per-pass cache to avoid duplicate lookups.
+  const knownGroupPhones = new Set();
+  const lidTagCache = new Map();
+  if (isGroup && Array.isArray(chat?.participants)) {
+    for (const p of chat.participants) {
+      if (p?.id?.server === 'c.us' && p.id.user) {
+        const digits = p.id.user.toString().replace(/\D/g, '');
+        if (digits) knownGroupPhones.add(digits);
+      }
+    }
+  }
 
   const historyMessages = [];
   const personalGemixFlags = platform === PLATFORM_WA_PERSONAL
@@ -149,30 +166,42 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 
     const ts = formatTimestamp(msg.timestamp * 1000);
     const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
-    const rawBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
+    let rawBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
+    if (isGroup) {
+      rawBody = await _resolveLidTagsInBody(rawBody, knownGroupPhones, lidTagCache);
+    }
     let textContent = cleanIncomingText(rawBody);
 
-    if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
-      textContent = `[Shared contact] ${textContent || ''}`;
+    const specialText = formatSpecialMessageText(msg);
+    if (specialText !== null) {
+      // Location / scheduled event: data-only messages. Use the parsed text and
+      // never ingest the raw payload (e.g. a location's base64 map thumbnail).
+      textContent = specialText;
+    } else if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
+      textContent = formatWhatsAppContactText(msg.body || textContent || '');
     } else if (msg.type === 'poll_creation') {
       try {
-        textContent = formatWhatsAppPollText(msg, `[Poll] ${msg.body || ''}`);
+        // Use the LID-resolved body as the question base (mentions in a poll
+        // question are rare but must not regress to raw @lid).
+        textContent = formatWhatsAppPollText(msg, `[Poll] ${textContent || ''}`);
       } catch {
         textContent = '[Poll]';
       }
     }
 
     let mediaParts = [];
-    if (msg.hasMedia) {
+    if (msg.hasMedia && specialText === null) {
       const waFilename = msg._data?.filename;
       const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
       const allFilenameHints = _attachmentFilenameHints(waFilename, resolvedName, null);
       textContent = _stripRedundantAttachmentCaption(textContent, allFilenameHints);
 
-      // History: [Attachment] tags only (no native re-upload). Native parts are
-      // reserved for the current user turn and GemiX voice transcript files.
+      // Main brain sees every recent history file directly: user-role entries
+      // carry native parts (input_file/input_image via public URL). Assistant
+      // entries (GemiX's own) stay tag-only — that role cannot carry input
+      // parts; GemiX voice notes are re-attached as transcripts on the turn.
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
-        tagOnly: true,
+        tagOnly: isFromBot,
       });
       // GemiX voice messages: persist the transcription into history meta so
       // the handler can attach the transcript file to the current turn.
@@ -209,8 +238,8 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     });
   }
 
-  // Bound the vision cost of re-attached history images (newest kept).
-  capHistoryImageParts(historyMessages, MAX_IMAGE_READS);
+  // Bound the cost of re-attached history media: newest images + newest files.
+  capHistoryImageParts(historyMessages, MAX_IMAGE_READS, MAX_FILE_READS);
 
   return historyMessages;
 }
@@ -410,14 +439,34 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
   const contentParts = [];
   const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
   let textBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
+  if (isGroup) {
+    // Second-level LID resolution for any @<digits> tag getMentions missed.
+    // knownPhones (group roster) skips redundant lookups for real phone tags.
+    const knownPhones = new Set();
+    try {
+      const chat = await msg.getChat();
+      if (Array.isArray(chat?.participants)) {
+        for (const p of chat.participants) {
+          if (p?.id?.server === 'c.us' && p.id.user) {
+            const d = p.id.user.toString().replace(/\D/g, '');
+            if (d) knownPhones.add(d);
+          }
+        }
+      }
+    } catch { /* best effort: resolve all tags */ }
+    textBody = await _resolveLidTagsInBody(textBody, knownPhones);
+  }
 
   const waFilename = msg._data?.filename;
   if (waFilename) {
     textBody = _stripRedundantAttachmentCaption(textBody, [waFilename]);
   }
 
-  if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
-    textBody = `[Shared contact] ${textBody}`;
+  const specialText = formatSpecialMessageText(msg);
+  if (specialText !== null) {
+    textBody = specialText;
+  } else if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
+    textBody = formatWhatsAppContactText(msg.body || textBody || '');
   } else if (msg.type === 'poll_creation') {
     textBody = formatWhatsAppPollText(msg, `[Poll] ${textBody}`);
   }
@@ -431,7 +480,9 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
     contentParts.push(...quotedContent.mediaParts);
   }
 
-  const mediaResult = await processCurrentMedia(msg, userId);
+  // Special data-only messages (location, event) never ingest their raw
+  // payload (e.g. a location's base64 map thumbnail).
+  const mediaResult = specialText === null ? await processCurrentMedia(msg, userId) : null;
   if (mediaResult) {
     if (mediaResult.skipped) {
       textBody = `${mediaResult.fragment || mediaResult.tag} ${textBody}`.trim();
@@ -439,7 +490,7 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
       contentParts.push(...mediaResult.contentParts);
       textBody = `${mediaResult.tag} ${textBody}`.trim();
     }
-  } else if (msg.hasMedia) {
+  } else if (msg.hasMedia && specialText === null) {
     const tag = buildAttachmentTag(null, msg._data?.filename || 'file');
     textBody = `${tag} (file unavailable) ${textBody}`.trim();
   }
@@ -471,6 +522,7 @@ function waMessageHasUsableContent(msg) {
   if (msg.hasQuotedMsg) return true;
   if (msg.body && String(msg.body).trim()) return true;
   if (msg.type === 'vcard' || msg.type === 'multi_vcard' || msg.type === 'poll_creation') return true;
+  if (isSpecialNonMediaType(msg.type)) return true;
   return false;
 }
 

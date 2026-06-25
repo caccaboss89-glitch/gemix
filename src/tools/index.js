@@ -9,12 +9,11 @@
 const { getToolAccessError, validateToolArgs } = require('../ai/tools');
 const { generateImage, generateVideo } = require('./imagineGenerator');
 const { generateVoice } = require('./voiceMessage');
-const { stripOutgoingDeliveryArtifacts } = require('../utils/text');
+const { stripOutgoingDeliveryArtifacts, sanitizeVoiceMessageText } = require('../utils/text');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
 const { readServerRules } = require('./serverRules');
-const { readFileTool } = require('./readFile');
 const { generateFormalRequestPdf } = require('./formalRequestPdf');
 const { sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppDirect } = require('./whatsappSender');
@@ -242,11 +241,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         break;
       }
 
-      case 'read_file': {
-        result = await readFileTool(args.path, userCtx, responseCtx);
-        break;
-      }
-
       case 'build': {
         // Fire the "delegating to build team" banner once per AI call.
         if (typeof userCtx.sendIntermediateNotification === 'function') {
@@ -262,9 +256,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           result = { success: false, error: 'Missing "text" parameter. You must provide the text to convert to speech.' };
           break;
         }
-        let cleanText = stripOutgoingDeliveryArtifacts(
-          (args.text || '').replace(/<a?:[\w]+:\d+>/g, '')
-            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]/gu, ''),
+        // Keep only spoken words, voice tags, and readable punctuation. Emoji
+        // and non-readable symbols (_, ", \, *, …) are stripped so TTS never
+        // voices them and the saved transcript matches what was spoken.
+        let cleanText = sanitizeVoiceMessageText(
+          stripOutgoingDeliveryArtifacts(args.text || ''),
         );
 
         const currentCount = await getVoiceCount(userCtx, chatKey);
@@ -282,7 +278,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
         // Files explicitly selected by the model (delivery-buffer names or
         // public URLs). The parameter only exists while deliverables exist.
-        const voiceSelection = await resolveDeliverySelection(args.attachments, responseCtx);
+        const voiceSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
         const voiceMissingNote = voiceSelection.missing.length > 0
           ? ` Attachment(s) not resolved and NOT sent: ${voiceSelection.missing.join(', ')}.`
           : '';
@@ -394,7 +390,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         deliveryCtx.contactedEmail.add(targetEmail.email);
         // Files explicitly selected by the model (delivery-buffer names or
         // public URLs). The parameter only exists while deliverables exist.
-        const emailSelection = await resolveDeliverySelection(args.attachments, responseCtx);
+        const emailSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
         const emailMissingNote = emailSelection.missing.length > 0
           ? ` Attachment(s) not resolved and NOT sent: ${emailSelection.missing.join(', ')}.`
           : '';
@@ -483,7 +479,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         deliveryCtx.contactedWA.add(targetJid.jid);
         // Files explicitly selected by the model (delivery-buffer names or
         // public URLs). The parameter only exists while deliverables exist.
-        const waSelection = await resolveDeliverySelection(args.attachments, responseCtx);
+        const waSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
         const waMissingNote = waSelection.missing.length > 0
           ? ` Attachment(s) not resolved and NOT sent: ${waSelection.missing.join(', ')}.`
           : '';

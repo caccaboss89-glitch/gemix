@@ -4,9 +4,10 @@
 // (assistant-side entries cannot carry native file parts). To keep their
 // content visible to the model, each stored transcription is materialized
 // as "<voice-file>.transcript.txt" and attached to the CURRENT user turn as
-// an input_file part on every call. The transcript text comes from
-// history_meta (persisted when the voice message was generated - see
-// historySync.js).
+// an input_file part on every call, led by a short [System] note clarifying
+// these are transcripts of GemiX's own past voice notes (not new user uploads).
+// The transcript text comes from history_meta (persisted when the voice
+// message was generated - see historySync.js).
 //
 // These files live alongside the chat history under
 // data/users/<storageId>/voice_transcripts/. They persist as long as their
@@ -48,16 +49,19 @@ function _transcriptFileFor(storageId, voiceName, text) {
 
 /**
  * Scan assistant history messages for GemiX voice attachments with a stored
- * transcription and return input_file parts for their transcript files.
+ * transcription and return content parts for their transcript files, led by a
+ * short [System] note so the model understands these are system-attached
+ * transcripts of its OWN past voice notes (not files the user just sent).
  *
  * @param {Array} history - chat-completion history messages.
  * @param {string|null} storageId - history storage id for this conversation.
- * @returns {Promise<object[]>} input_file parts (possibly empty).
+ * @returns {Promise<object[]>} parts (a [System] text part + input_file parts), possibly empty.
  */
 async function collectGemixVoiceTranscriptParts(history, storageId) {
   if (!storageId || !Array.isArray(history) || history.length === 0) return [];
 
-  const parts = [];
+  const fileParts = [];
+  const labels = [];
   const seen = new Set();
 
   for (const msg of history) {
@@ -74,14 +78,21 @@ async function collectGemixVoiceTranscriptParts(history, storageId) {
       try {
         const filePath = _transcriptFileFor(storageId, name, text);
         const url = await uploadFileForXai(filePath, `${name}.transcript.txt`, 'text/plain');
-        parts.push({ type: 'input_file', file_url: url });
+        fileParts.push({ type: 'input_file', file_url: url });
+        labels.push(name);
       } catch (err) {
         log.warn(`transcript attach failed for ${name}: ${err.message}`);
       }
     }
   }
 
-  return parts;
+  if (fileParts.length === 0) return [];
+
+  const note = {
+    type: 'text',
+    text: `[System] Attached (${labels.join(', ')}) are the system-generated transcripts of your own past voice messages in this chat.`,
+  };
+  return [note, ...fileParts];
 }
 
 function pruneOrphanVoiceTranscripts(storageId, historyDir) {

@@ -15,7 +15,7 @@ function isNonReadableExt(ext) {
   return NON_READABLE_EXTS.has(e.startsWith('.') ? e : `.${e}`);
 }
 
-/** Error text for the main handler read_file tool (history attachments). */
+/** Error text when a raw binary cannot be shown to the model (native ingestion). */
 function mainReadFileBlockedMessage(ext) {
   return `Files with extension "${ext}" are raw binaries and cannot be read. Tell the user this file type is not supported.`;
 }

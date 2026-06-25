@@ -1,5 +1,6 @@
 # IDE
 .cursor/
+.kiro/
 graphify-out/
 
 # Dependency and cache

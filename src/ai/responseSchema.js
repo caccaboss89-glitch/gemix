@@ -17,10 +17,11 @@ const RESPONSE_FIELD_DESC =
   'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax.';
 
 const GEMIX_ATTACHMENTS_FIELD_DESC =
-  'OPTIONAL. Include this field only when you want to send files in the current chat with your reply. '
-  + 'Each entry is a delivery-buffer filename (exactly as reported by the tool that produced it) or a '
-  + 'public https URL to fetch (e.g. an image from web/X search). If you have nothing to send, omit '
-  + 'this field entirely — do not pass an empty array.';
+  'OPTIONAL. The ONLY way to send files/images in this chat. Include this field only when you want to '
+  + 'send files with your reply. Each entry is a delivery-buffer filename (exactly as reported by the tool '
+  + 'that produced it) or a public https URL to fetch (e.g. an image from web/X search). If you have nothing '
+  + 'to send, omit this field entirely — do not pass an empty array. Never use any other file/image syntax '
+  + '(e.g. render_components, render image/render_searched_image with an image_id): it is not supported and will not be sent.';
 
 const TITLE_FIELD_DESC =
   'Concise topic title for this new conversation (max ~80 chars), no emojis, in the user\'s language.';
@@ -82,7 +83,8 @@ const BUILD_RESPONSE_FORMAT = {
           'OPTIONAL. Include only when you want to deliver files to the user with this answer. '
           + 'Each entry is a workspace path exactly as listed in WorkspaceState (basename or /workspace/…) '
           + 'and/or a public https URL to fetch (e.g. images from web/X search). '
-          + 'If you have nothing to send, omit this field — do not pass an empty array.',
+          + 'If you have nothing to send, omit this field — do not pass an empty array. '
+          + 'Never use any other file/image syntax (e.g. render_components, render image/render_searched_image with an image_id): it is not supported.',
       },
     },
     required: ['message'],

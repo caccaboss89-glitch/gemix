@@ -30,8 +30,22 @@ const {
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
 const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
-const { normalizeReadFilePaths } = require('../tools/readFile');
 const { getRomeTime } = require('../utils/time');
+
+/** Validate the `path` array arg for the build sub-agent read_file tool. */
+function normalizeReadFilePaths(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, error: 'path must be a non-empty array of strings.' };
+  }
+  const paths = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || !item.trim()) {
+      return { ok: false, error: 'Each path must be a non-empty string.' };
+    }
+    paths.push(item.trim());
+  }
+  return { ok: true, paths };
+}
 const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
 const { SKILLS_DIR } = require('../utils/userPaths');
 const {
@@ -234,7 +248,7 @@ function _buildSystemPrompt(workspaceId, renamedAttachments) {
     '<Delivery>',
     '  Final JSON: `message` (required) + optional `attachments` (workspace paths and/or https URLs). Unlisted files are not delivered.',
     '  Attach only what the brief asks for — skip scratch files (sources, logs, .tex, intermediates) unless requested.',
-    '  `attachments` paths must match &lt;WorkspaceState&gt; exactly.',
+    '  Every `attachments` path must appear in &lt;WorkspaceState&gt; exactly; never invent paths.',
     '  Resend-only brief: attach only paths listed in &lt;WorkspaceState&gt;.',
     '  Many deliverables: zip first.',
     '</Delivery>',

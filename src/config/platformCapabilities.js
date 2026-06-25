@@ -20,7 +20,6 @@ const PROFILE = {
 const TOOL = {
   WEB_SEARCH: 'web_search',
   X_SEARCH: 'x_search',
-  READ_FILE: 'read_file',
   MUSIC_CREATOR: 'music_creator',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
@@ -52,7 +51,7 @@ const CAPS = {
     systemHistoryLabel: false,
     accountOwnerInHistory: true,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
@@ -71,7 +70,7 @@ const CAPS = {
     systemHistoryLabel: true,
     accountOwnerInHistory: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SEND_VOICE, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
@@ -90,7 +89,7 @@ const CAPS = {
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SEND_VOICE, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
@@ -109,7 +108,7 @@ const CAPS = {
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.READ_FILE,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH,
       TOOL.FORMAL_PDF, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
@@ -205,9 +204,8 @@ function _buildDeliveryLines(delivery) {
   const includeTitle = Boolean(d.includeTitle);
   const lines = [];
 
-  let line = '- Your final reply is structured JSON: put the user-facing text in `response`. '
-    + 'To send files in THIS chat, list them in `attachments` (delivery-buffer filenames and/or public https URLs, e.g. images from web/X search). '
-    + 'Omit `attachments` entirely if you have nothing to send.';
+  let line = '- Your final reply is structured JSON: user-facing text in `response`, files to send in this chat '
+    + 'in `attachments` (see the response schema for the exact rules).';
   const bufferFiles = Array.isArray(d.bufferFiles) ? d.bufferFiles : [];
   if (bufferFiles.length > 0) {
     line += ` Delivery buffer now: ${bufferFiles.join(', ')}.`;
@@ -275,14 +273,14 @@ function buildCapabilitiesLines(profile, opts = {}) {
 function buildLimitsLines(profile) {
   const cap = CAPS[profile];
   let historyLine =
-    '- Chat history shows past files as [Attachment: filename] tags — names only, not their content.';
+    '- Recent chat-history files are attached natively this turn — you see their content directly; each keeps an [Attachment: filename] label. '
+    + 'Only the newest 10 images + 10 files are loaded.';
   if (cap.historyTranscriptionNote) {
-    historyLine += ' Your past voice notes also carry a native transcript on the current turn.';
+    historyLine += ' Your past voice notes also carry a native transcript.';
   }
   const lines = [
-    `- Incoming media: audio > ${MAX_AUDIO_DURATION_S}s and video > ${MAX_VIDEO_DURATION_S}s are dropped and replaced inline with a "(too long, max Ns)" note. If the file is still attached, it passed the check - read it.`,
+    `- Incoming media: audio > ${MAX_AUDIO_DURATION_S}s and video > ${MAX_VIDEO_DURATION_S}s are dropped and replaced inline with a "(too long, max Ns)" note. If a file is still attached, it passed the check - read it.`,
     historyLine,
-    '- Files in the CURRENT user message arrive natively; history does not re-upload them.',
   ];
   if (!cap.isDiscord) {
     lines.push('- Stickers and meme images are emotional reactions: reply lightly, acknowledge only the tone, without describing the image or asking for explanations.');
@@ -306,7 +304,7 @@ function buildRulesBlock(profile, opts = {}) {
   if (has(TOOL.SEND_EMAIL)) deliveryTools.push('send_email');
   const proseRule =
     '- Write natural prose. Never quote raw tool syntax, JSON fragments, backend tags, error messages, stack traces, '
-    + 'or [Attachment: ...] tags (those appear only in history for past media; your files ship only when you list them for delivery).';
+    + 'or [Attachment: ...] labels (those mark attached files; your files ship only when you list them for delivery).';
   const style = [
     deliveryTools.length
       ? `- These rules apply to your final reply AND to any text you pass to delivery tools (${deliveryTools.join(', ')}).`
@@ -325,7 +323,7 @@ function buildRulesBlock(profile, opts = {}) {
   if (cap.isDiscord) sources.push('&lt;RulesContext&gt; in Conversation');
   sources.push('tool results');
 
-  let verifyTools = 'read_file for past files, web/X search for facts';
+  let verifyTools = 'web/X search for facts';
   if (cap.isDiscord) {
     verifyTools += ', RulesContext in this prompt for statute text';
   } else if (has(TOOL.READ_TASKS)) {
@@ -340,7 +338,7 @@ function buildRulesBlock(profile, opts = {}) {
   const groundingLines = [
     `- Use only verifiable info: ${sources.join(', ')}.`,
     '- Never invent or assume facts, names, dates, numbers, links, file paths, citations, quoted text, '
-      + 'or unverified content from an [Attachment] tag.',
+      + 'or content of a file you were not actually shown.',
     `- When unsure, slow down: verify with a tool (${verifyTools}) or ask the user, and if something stays unconfirmed say so plainly — never guess or rush.`,
     '- Before sending, silently confirm your reply follows every rule above, states only verified facts, and makes no unstated promises.',
   ];

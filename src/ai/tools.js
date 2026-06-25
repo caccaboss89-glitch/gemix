@@ -127,21 +127,6 @@ const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 
 // -- Static tool definitions (schema never varies) -------------------------
 
-const TOOL_READ_FILE = makeTool({
-  name: 'read_file',
-  description:
-    'Load past files from chat history (text/code, images, audio, video, PDF, Office, archives). '
-    + 'History shows only [Attachment: filename] tags.',
-  properties: {
-    path: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Filenames from [Attachment: …] tags, e.g. ["photo.jpg", "clip.mp4"].',
-    },
-  },
-  required: ['path'],
-});
-
 const BUILD_TOOL_READ_FILE = makeTool({
   name: 'read_file',
   description: 'Load files from /workspace/ or /skills/.',
@@ -281,7 +266,10 @@ const TOOL_GENERATE_VIDEO = makeTool({
 // Speech tags interpreted natively by xAI TTS. GemiX writes them directly
 // in the voice text (woven in, never narrated).
 const VOICE_TEXT_DESC =
-  'Text to speak (max 1000 chars), in the language you want. No emoji. Always use tags for a better and more human result. '
+  'Text to speak (max 1000 chars), in the language you want. Write ONLY spoken words plus the tags below — '
+  + 'no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only (the system strips the rest). '
+  + 'ALWAYS weave in tags for a human result (never read them aloud); even if your recent history is full of '
+  + 'plain text replies, a voice message still needs tags. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
 
@@ -290,9 +278,8 @@ const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string' },
   description:
-    'OPTIONAL. Include only when you want to attach files to this delivery. Each entry is a '
-    + 'delivery-buffer filename (exactly as reported by the tool that produced it) and/or a public '
-    + 'https URL to fetch. If you have nothing to attach, omit this field — do not pass an empty array.',
+    'OPTIONAL. Files to attach to THIS delivery: delivery-buffer filenames (exactly as reported by the tool '
+    + 'that produced them) and/or public https URLs. Omit when nothing to attach — never pass an empty array.',
 };
 
 function buildVoiceTool() {
@@ -313,17 +300,19 @@ function buildVoiceTool() {
 }
 
 function buildWhatsAppTool(isAdmin) {
-  const recipientProps = {
-    name: {
-      type: 'string',
-      description: 'Recipient member name',
-    },
-  };
-
+  // Admin: address members directly by phone (roster in <ActiveMembers>), so a
+  // reminder/message never silently defaults to the current chat/caller.
+  // Active non-admin: name only (the backend resolves it to the member).
+  const recipientProps = {};
   if (isAdmin) {
     recipientProps.phone = {
       type: 'string',
-      description: 'Phone number with country code (e.g. +393XXXXXXXXX)',
+      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user.',
+    };
+  } else {
+    recipientProps.name = {
+      type: 'string',
+      description: 'Recipient member name',
     };
   }
 
@@ -331,7 +320,9 @@ function buildWhatsAppTool(isAdmin) {
     message: { type: 'string', description: 'Message text' },
     recipient: {
       type: 'object',
-      description: 'Recipient',
+      description: isAdmin
+        ? 'Target recipient (phone). Omit to reply in the current chat.'
+        : 'Recipient',
       properties: recipientProps,
       required: isAdmin ? [] : ['name'],
     },
@@ -347,17 +338,16 @@ function buildWhatsAppTool(isAdmin) {
 }
 
 function buildEmailTool(isAdmin) {
-  const recipientProps = {
-    name: {
-      type: 'string',
-      description: 'Member name (email resolved from name)',
-    },
-  };
-
+  const recipientProps = {};
   if (isAdmin) {
     recipientProps.email = {
       type: 'string',
-      description: 'Direct recipient email address',
+      description: 'Recipient email address, from the &lt;ActiveMembers&gt; roster or given by the user.',
+    };
+  } else {
+    recipientProps.name = {
+      type: 'string',
+      description: 'Member name (email resolved from name)',
     };
   }
 
@@ -366,7 +356,7 @@ function buildEmailTool(isAdmin) {
     body: { type: 'string', description: 'HTML body (no markdown)' },
     recipient: {
       type: 'object',
-      description: 'Recipient',
+      description: isAdmin ? 'Target recipient (email).' : 'Recipient',
       properties: recipientProps,
       required: isAdmin ? [] : ['name'],
     },
@@ -393,20 +383,21 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
 
   waProps.toPrivate = {
     type: 'boolean',
-    description: 'Send this reminder as a private message.',
+    description: 'Send this reminder as a private message (to recipient if set, otherwise to the current user).',
   };
 
+  // Admin targets a recipient by phone (roster in <ActiveMembers>); active
+  // non-admin members by name. Omitting recipient = the current chat/user.
   const recipientWaProps = {};
-  if (isActiveMember) {
-    recipientWaProps.name = {
-      type: 'string',
-      description: 'Active member name.',
-    };
-  }
   if (isAdmin) {
     recipientWaProps.phone = {
       type: 'string',
-      description: 'Phone number with country code (e.g. +393XXXXXXXXX).',
+      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user.',
+    };
+  } else if (isActiveMember) {
+    recipientWaProps.name = {
+      type: 'string',
+      description: 'Active member name to remind.',
     };
   }
 
@@ -414,8 +405,8 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     waProps.recipient = {
       type: 'object',
       description: isAdmin
-        ? 'Recipient (name for active members or phone for external).'
-        : 'Active member name to remind.',
+        ? 'Who to remind (phone). REQUIRED with toPrivate when the reminder is for someone other than the current chat — e.g. "remind X" means X is the recipient, not you.'
+        : 'Active member to remind. REQUIRED with toPrivate when reminding someone other than the current chat.',
       properties: recipientWaProps,
     };
   }
@@ -423,7 +414,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   const taskItemProps = {
     content: {
       type: 'string',
-      description: 'The reminder message to deliver.',
+      description: 'The reminder message, addressed to the recipient (e.g. "Niky, entra su Discord"), not to the current user.',
     },
     scheduledAt: {
       type: 'string',
@@ -432,8 +423,8 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     whatsapp: {
       type: 'object',
       description: isWhatsAppGroup
-        ? 'Where to send. Omit = current group. Use toPrivate + recipient to send privately.'
-        : 'Where to send. Omit = current user. Use toPrivate + recipient to send to someone else.',
+        ? 'Destination. Omit = current group. For a private reminder set toPrivate; add recipient to send it to someone else (without recipient it goes to the current user).'
+        : 'Destination. Omit = current chat. To remind someone else, set toPrivate AND recipient; without recipient it goes to the current user.',
       properties: waProps,
     },
     recurrence: {
@@ -450,10 +441,10 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Schedule reminders for current chat, other active members or external contacts. To remind multiple people: one task per person with its own whatsapp.recipient.'
+      ? 'Schedule reminders for the current chat, other active members or external contacts. The reminder is DELIVERED at the scheduled time to whoever you set as recipient — set it whenever the target is not the current chat. One task per person.'
       : isActiveMember
-        ? 'Schedule reminders for current chat or other active members. To remind multiple people: one task per person with its own whatsapp.recipient.'
-        : 'Schedule personal reminders for current chat.',
+        ? 'Schedule reminders for the current chat or other active members. The reminder is DELIVERED to the recipient you set — set it whenever the target is not the current chat. One task per person.'
+        : 'Schedule personal reminders for the current chat.',
     properties: {
       tasks: {
         type: 'array',
@@ -558,9 +549,10 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 1. Search & Information Retrieval. web_search and x_search are native
   // xAI server-side tools (zero round cost), available on every platform.
+  // History files are always attached natively to the turn (no read_file on
+  // the main brain): GemiX sees every past file directly.
   tools.push(
     ...NATIVE_SEARCH_TOOLS,
-    TOOL_READ_FILE,
   );
   if (isWhatsApp) {
     tools.push(TOOL_MUSIC_CREATOR);

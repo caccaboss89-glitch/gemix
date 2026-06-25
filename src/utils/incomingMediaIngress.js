@@ -146,29 +146,51 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
 }
 
 /**
- * Cap the number of input_image parts across rebuilt history messages.
- * Walks from the NEWEST message backwards keeping up to `max` images; older
- * image parts are dropped (their [Attachment] tag text remains, so the model
- * can still read_file them on demand). Documents (input_file) are not capped:
- * xAI handles them with server-side retrieval at negligible token cost,
- * while every attached image is processed by vision on each call.
+ * Cap the native file parts re-attached from history, independently per kind:
+ *   - input_image: vision-processed on every call (expensive) → keep newest `maxImages`
+ *   - input_file:  documents/audio/video → keep newest `maxFiles`
+ * Walks from the NEWEST message backwards. Dropped parts leave their
+ * [Attachment] tag text (plus a marker) so the model knows the file exists but
+ * was not loaded this turn. GemiX voice-note transcripts are NOT affected: they
+ * are attached to the current user turn (not history) and always ship.
  *
  * @param {Array} historyMessages - chat-completion messages (content string or parts array).
- * @param {number} max
+ * @param {number} maxImages
+ * @param {number} [maxFiles] - defaults to maxImages when omitted.
  */
-function capHistoryImageParts(historyMessages, max) {
+function capHistoryImageParts(historyMessages, maxImages, maxFiles) {
   if (!Array.isArray(historyMessages)) return;
-  let kept = 0;
+  const imageCap = Number.isFinite(maxImages) ? maxImages : 0;
+  const fileCap = Number.isFinite(maxFiles) ? maxFiles : imageCap;
+  let keptImages = 0;
+  let keptFiles = 0;
   for (let i = historyMessages.length - 1; i >= 0; i--) {
     const msg = historyMessages[i];
     if (!msg || !Array.isArray(msg.content)) continue;
     const content = [];
+    let droppedImages = 0;
+    let droppedFiles = 0;
     for (const part of msg.content) {
       if (part && part.type === 'input_image') {
-        if (kept >= max) continue;
-        kept++;
+        if (keptImages >= imageCap) { droppedImages++; continue; }
+        keptImages++;
+      } else if (part && part.type === 'input_file') {
+        if (keptFiles >= fileCap) { droppedFiles++; continue; }
+        keptFiles++;
       }
       content.push(part);
+    }
+    // Mark the text part when older media was dropped, so the model knows the
+    // file exists but was not loaded this turn (the main brain has no read_file
+    // to fetch it on demand).
+    if (droppedImages > 0 || droppedFiles > 0) {
+      const textPart = content.find(p => p && p.type === 'text');
+      if (textPart && typeof textPart.text === 'string' && !textPart.text.includes('not shown this turn')) {
+        const kinds = [];
+        if (droppedImages > 0) kinds.push('image(s)');
+        if (droppedFiles > 0) kinds.push('file(s)');
+        textPart.text += ` (older ${kinds.join(' and ')} not shown this turn — newest ${imageCap} images / ${fileCap} files per call; ask to resend or reply to it to view)`;
+      }
     }
     if (content.length === 1 && content[0].type === 'text') {
       msg.content = content[0].text;

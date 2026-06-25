@@ -38,6 +38,43 @@ function stripVoiceTags(text) {
   return text.replace(VOICE_TAGS_INLINE_RE, '').replace(VOICE_TAGS_WRAP_RE, '');
 }
 
+// Characters that are not read aloud cleanly by TTS and must be removed from
+// voice text (emoji, underscores, quotes, backslashes, markdown symbols, …).
+// Allowed: letters (incl. accented), digits, whitespace, and the readable
+// punctuation . , ! ? ' — everything else is dropped. Voice effect tags
+// ([pause], <soft>, …) are protected and restored around the cleanup.
+const VOICE_ALLOWED_RE = /[^\p{L}\p{N}\s.,!?'’-]/gu;
+
+/**
+ * Sanitize the text of a voice message before TTS (and before it is stored as
+ * the history transcript, so both stay in sync). Keeps spoken words, the
+ * supported voice effect tags, and basic readable punctuation; strips emoji
+ * and non-readable symbols (_, ", \, *, ~, `, #, …).
+ * @param {string} text
+ * @returns {string}
+ */
+function sanitizeVoiceMessageText(text) {
+  if (!text || typeof text !== 'string') return '';
+  // Protect voice tags so their brackets/dashes survive the symbol cleanup.
+  // The placeholder uses only letters/digits (kept by VOICE_ALLOWED_RE).
+  const tags = [];
+  const mark = (i) => `zZvoicetagZz${i}zZ`;
+  const protectedText = text
+    .replace(VOICE_TAGS_INLINE_RE, (m) => { tags.push(m); return mark(tags.length - 1); })
+    .replace(VOICE_TAGS_WRAP_RE, (m) => { tags.push(m); return mark(tags.length - 1); });
+
+  let cleaned = protectedText.replace(VOICE_ALLOWED_RE, ' ');
+
+  // Restore the protected tags.
+  cleaned = cleaned.replace(/zZvoicetagZz(\d+)zZ/g, (_, i) => tags[Number(i)] || '');
+
+  return cleaned
+    .replace(/[^\S\r\n]{2,}/g, ' ')
+    .replace(/[^\S\r\n]+([.,!?])/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 // Matches markdown inline links (not images): [text](url) and footnote-style [[n]](url).
 const MD_FOOTNOTE_LINK_RE = /\[\[[^\]]*\]\]\([^)]*\)/g;
 const MD_INLINE_LINK_RE = /(?<!!)\[[^\]]+\]\([^)]*\)/g;
@@ -243,6 +280,7 @@ const REPLY_OUTSIDE_HISTORY_PREFIX = '[In reply to: (message outside recent hist
 module.exports = {
   sanitizeFilename,
   stripVoiceTags,
+  sanitizeVoiceMessageText,
   normalizeMarkdown,
   stripMarkdownLinks,
   stripHistoryPrefixes,

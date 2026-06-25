@@ -88,6 +88,70 @@ async function resolveMentionsForMessage(msg, isGroup) {
   return mentions;
 }
 
+// Any @<8-20 digits> tag still in the body after replaceMentionsInBody. These
+// are LID tags that msg.getMentions() missed (common on fetchMessages history),
+// which would otherwise reach the model as opaque @<lid> ids.
+const LEFTOVER_TAG_RE = /(?<!\d)@(\d{8,20})(?!\d)/g;
+
+/**
+ * Second-level LID resolution for a group message body. Scans for @<digits>
+ * tags left unresolved by replaceMentionsInBody and rewrites each LID to the
+ * real phone number via getContactLidAndPhone. Tags whose digits already match
+ * a roster phone number are left untouched (they are real phone tags).
+ *
+ * @param {string} body - body already processed by replaceMentionsInBody
+ * @param {Set<string>} knownPhones - roster phone numbers (bare digits)
+ * @param {Map<string,string|null>} [lidCache] - shared cache across a history pass
+ * @returns {Promise<string>}
+ */
+async function resolveLidTagsInBody(body, knownPhones, lidCache) {
+  if (typeof body !== 'string' || !body) return body || '';
+  const matches = [...body.matchAll(LEFTOVER_TAG_RE)];
+  if (matches.length === 0) return body;
+
+  const phones = knownPhones instanceof Set ? knownPhones : new Set();
+  const cache = lidCache instanceof Map ? lidCache : new Map();
+
+  // Digits to resolve: not a known phone and not already cached.
+  const toResolve = [];
+  for (const m of matches) {
+    const digits = m[1];
+    if (phones.has(digits) || cache.has(digits)) continue;
+    toResolve.push(digits);
+  }
+
+  if (toResolve.length > 0) {
+    try {
+      const { getDedicatedClient } = require('../platforms/whatsapp/dedicated');
+      const client = getDedicatedClient();
+      if (client && typeof client.getContactLidAndPhone === 'function') {
+        const mappings = await client.getContactLidAndPhone(toResolve.map(d => `${d}@lid`));
+        const byLidUser = new Map();
+        for (const mp of (Array.isArray(mappings) ? mappings : [])) {
+          if (mp && mp.lid) {
+            const lidUser = mp.lid.toString().replace(/\D/g, '');
+            const pn = mp.pn ? mp.pn.toString().replace(/\D/g, '') : null;
+            if (lidUser) byLidUser.set(lidUser, pn || null);
+          }
+        }
+        for (const digits of toResolve) {
+          cache.set(digits, byLidUser.get(digits) || null);
+        }
+      } else {
+        for (const digits of toResolve) cache.set(digits, null);
+      }
+    } catch {
+      for (const digits of toResolve) if (!cache.has(digits)) cache.set(digits, null);
+    }
+  }
+
+  return body.replace(LEFTOVER_TAG_RE, (full, digits) => {
+    if (phones.has(digits)) return full;
+    const pn = cache.get(digits);
+    return pn ? `@${pn}` : full;
+  });
+}
+
 const META_TAG_RE = new RegExp(`(?<!\\d)@${META_AI_NUMBER}(?!\\d)`, 'g');
 const META_TAG_TEST_RE = new RegExp(`(?<!\\d)@${META_AI_NUMBER}(?!\\d)`);
 const GEMIX_TAG_RE = /@gemix\b/gi;
@@ -157,6 +221,7 @@ function collectMentionJids(text) {
 module.exports = {
   replaceMentionsInBody,
   resolveMentionsForMessage,
+  resolveLidTagsInBody,
   stripDisallowedOutgoingMentions,
   normalizeOutgoingMentionTags,
   containsMetaAiTag,

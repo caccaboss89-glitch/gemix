@@ -11,7 +11,7 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { MAX_IMAGE_READS } = require('../../utils/aiFileDelivery');
+const { MAX_IMAGE_READS, MAX_FILE_READS } = require('../../utils/aiFileDelivery');
 const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
@@ -448,9 +448,11 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     const mediaParts = [];
 
     for (const att of m.attachments.values()) {
-      // History: tag-only. Native parts belong on the current turn only.
+      // Main brain sees recent history files directly: user-role entries carry
+      // native parts. GemiX's own (assistant) entries stay tag-only — that role
+      // cannot carry input parts.
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
-        tagOnly: true,
+        tagOnly: isBot,
         metadataDurationSec: Number(att.duration || 0),
       });
       if (ingress.oversize) {
@@ -482,8 +484,8 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     });
   }
 
-  // Bound the vision cost of re-attached history images (newest kept).
-  capHistoryImageParts(history, MAX_IMAGE_READS);
+  // Bound the cost of re-attached history media: newest images + newest files.
+  capHistoryImageParts(history, MAX_IMAGE_READS, MAX_FILE_READS);
 
   return { history, recentMessageIds };
 }

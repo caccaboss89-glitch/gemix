@@ -30,7 +30,7 @@ const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
  * @param {object[]} toolCalls - assistant tool_calls in model order
  * @param {object} userCtx
  * @returns {{ phase1: object[], phase2: object[], phase3: object[] }}
- *   phase1: standard tools (parallel) — build, generate_*, read_file, …
+ *   phase1: standard tools (parallel) — build, generate_*, …
  *   phase2: outbound delivery (parallel) — send_email, send_whatsapp_message
  *   phase3: send_voice_message (current chat only; sequential; can end the turn)
  */

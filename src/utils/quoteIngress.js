@@ -5,7 +5,9 @@ const {
   REPLY_OUTSIDE_HISTORY_PREFIX,
   cleanIncomingText,
 } = require('./text');
-const { replaceMentionsInBody, resolveMentionsForMessage } = require('./waMentions');
+const { replaceMentionsInBody, resolveMentionsForMessage, resolveLidTagsInBody } = require('./waMentions');
+const { formatSpecialMessageText, formatWhatsAppContactText } = require('./waSpecialMessages');
+const { formatWhatsAppPollText } = require('./pollParser');
 const {
   ingressWaMessageMedia,
   ingressDiscordAttachment,
@@ -37,11 +39,34 @@ async function processWhatsAppQuotedReply(msg, chatId, historyStorageId, recentM
       return { prefix: REPLY_OUTSIDE_HISTORY_PREFIX, mediaParts: [] };
     }
 
+    // Location / scheduled event: quote the parsed data, never the raw payload.
+    const quotedSpecial = formatSpecialMessageText(quoted);
+    if (quotedSpecial !== null) {
+      return { prefix: `[In reply to: ${quotedSpecial}]\n`, mediaParts: [] };
+    }
+    // Shared contact: parse the vCard rather than quoting the raw payload.
+    if (quoted.type === 'vcard' || quoted.type === 'multi_vcard') {
+      return { prefix: `[In reply to: ${formatWhatsAppContactText(quoted.body || '')}]\n`, mediaParts: [] };
+    }
+    // Poll: quote question + options. Resolve mentions/LID tags in the
+    // question first so a tagged user never appears as a raw @lid id.
+    if (quoted.type === 'poll_creation') {
+      let questionBase = quoted.body || '';
+      if (questionBase) {
+        const mentionContacts = await resolveMentionsForMessage(quoted, isGroup);
+        questionBase = replaceMentionsInBody(questionBase, mentionContacts);
+        if (isGroup) questionBase = await resolveLidTagsInBody(questionBase, new Set());
+      }
+      const pollText = formatWhatsAppPollText(quoted, `[Poll] ${questionBase}`);
+      return { prefix: `[In reply to: ${pollText}]\n`, mediaParts: [] };
+    }
+
     if (quoted.hasMedia) {
       const mediaResult = await _processWhatsAppQuotedMedia(quoted, historyStorageId);
       if (quoted.body) {
         const mentionContacts = await resolveMentionsForMessage(quoted, isGroup);
-        const rawQuoted = replaceMentionsInBody(quoted.body, mentionContacts);
+        let rawQuoted = replaceMentionsInBody(quoted.body, mentionContacts);
+        if (isGroup) rawQuoted = await resolveLidTagsInBody(rawQuoted, new Set());
         const quotedText = cleanIncomingText(rawQuoted);
         return {
           prefix: `${mediaResult.prefix}[In reply to text: ${quotedText}]\n`,
@@ -53,7 +78,8 @@ async function processWhatsAppQuotedReply(msg, chatId, historyStorageId, recentM
 
     if (quoted.body) {
       const mentionContacts = await resolveMentionsForMessage(quoted, isGroup);
-      const rawQuoted = replaceMentionsInBody(quoted.body, mentionContacts);
+      let rawQuoted = replaceMentionsInBody(quoted.body, mentionContacts);
+      if (isGroup) rawQuoted = await resolveLidTagsInBody(rawQuoted, new Set());
       const quotedText = cleanIncomingText(rawQuoted);
       return { prefix: `[In reply to: ${quotedText}]\n`, mediaParts: [] };
     }

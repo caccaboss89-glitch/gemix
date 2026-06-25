@@ -8,7 +8,8 @@
 //   3. Build the messages array: system prompt + chat history + the current
 //      user content. Media uses utils/incomingMediaIngress.js →
 //      aiFileDelivery.js: native `input_image` / `input_file` parts via
-//      public URLs, or [Attachment] tags only (raw binaries).
+//      public URLs (recent history files are attached too, so the model sees
+//      them directly), or [Attachment] tags only for raw binaries.
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in three phases:
 //      (1) standard tools parallel, (2) delivery parallel, (3) voice last - repeat
 //      until the model returns the final response or the round budget is
@@ -25,7 +26,6 @@ const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/respons
 const { resolveDeliverySelection } = require('./utils/deliverySelection');
 const { collectGemixVoiceTranscriptParts } = require('./utils/voiceTranscripts');
 const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
-const { isAdmin } = require('./config/members');
 const {
   MAX_TOOL_ROUNDS,
   PLATFORM_DISCORD,
@@ -134,7 +134,7 @@ async function handleMessage(ctx) {
   try {
     const ui = ctx.userIdentity;
     const isActiveMember = ui.isActiveMember;
-    const userIsAdmin = ui.member ? isAdmin(ui.member) : false;
+    const userIsAdmin = Boolean(ui.isAdmin);
     let maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
     
     // Extract command from formatted message: [DATE, TIME] UserName: /command ...
@@ -295,7 +295,8 @@ async function handleMessage(ctx) {
           ? [{ type: 'text', text: currentContent }]
           : [...(Array.isArray(currentContent) ? currentContent : [])];
         currentContent = [...baseParts, ...transcriptParts];
-        log.info(`   Attached ${transcriptParts.length} voice transcript file(s) to the current turn`);
+        const transcriptFileCount = transcriptParts.filter(p => p.type === 'input_file').length;
+        log.info(`   Attached ${transcriptFileCount} voice transcript file(s) to the current turn`);
       }
     } catch (txErr) {
       log.warn(`voice transcript attach failed: ${txErr.message}`);
@@ -361,7 +362,7 @@ async function handleMessage(ctx) {
     // (delivery-buffer filenames and/or public URLs). Only listed files ship.
     const resolveFinalAttachments = async (parsed) => {
       if (!parsed.structured) return [];
-      const { attachments, missing } = await resolveDeliverySelection(parsed.attachments, responseCtx);
+      const { attachments, missing } = await resolveDeliverySelection(parsed.attachments, responseCtx, userCtx);
       if (missing.length > 0) {
         log.warn(`   Final reply attachments not resolved: ${missing.join(', ')}`);
       }

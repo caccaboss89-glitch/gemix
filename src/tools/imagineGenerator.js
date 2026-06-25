@@ -77,8 +77,8 @@ function _cleanPrompt(prompt) {
 }
 
 /**
- * Locate a reference-image file by filename, mirroring the resolution policy
- * of read_file / the build tool:
+ * Locate a reference-image file by filename, mirroring the build tool's
+ * resolution policy:
  *   1. current-turn delivery buffer (responseCtx.attachments[]) by name
  *   2. chat history for this user
  *

@@ -151,10 +151,14 @@ async function onPersonalMessage(msg) {
   let userName = senderJid;
   let phoneJid = senderJid;
 
-  // When message is from us in personal chat, use our own info from client
-  if (msg.fromMe && client.info && client.info.wid) {
-    phoneJid = client.info.wid._serialized;
-    userName = client.info.pushname || client.info.name || senderJid;
+  // When the message is from us (the admin account) in this personal chat, it
+  // is always the Account Owner — match the label history uses, regardless of
+  // whether client.info.wid is populated yet.
+  if (msg.fromMe) {
+    userName = 'Account Owner';
+    if (client.info && client.info.wid) {
+      phoneJid = client.info.wid._serialized;
+    }
   } else {
     // For messages from other users, extract from contact
     try {

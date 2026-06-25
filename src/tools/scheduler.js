@@ -99,13 +99,26 @@ async function scheduleTasks(tasks, ctx) {
 
     // Extract recipient info (support both nested and flat structure)
     const waRecipient = task.whatsapp?.recipient || { name: task.whatsapp?.recipientName, phone: task.whatsapp?.recipientPhone };
+    const hasExplicitRecipient = Boolean(waRecipient.phone || waRecipient.name);
 
-    if (task.whatsapp && task.whatsapp.toPrivate && (waRecipient.phone || waRecipient.name) && !ctx.isAdmin && !ctx.isActiveMember) {
+    if (task.whatsapp && task.whatsapp.toPrivate && hasExplicitRecipient && !ctx.isAdmin && !ctx.isActiveMember) {
       results.push({ success: false, error: 'Specific WhatsApp recipient only available for active members or admin.' });
       continue;
     }
 
-    const fileId = isGroupTask ? ctx.groupTaskFileId : ctx.taskFileId;
+    // A private reminder for someone other than the current chat requires a
+    // recipient: never silently fall back to the caller when the intent was to
+    // remind a specific person in a group.
+    if (task.whatsapp && task.whatsapp.toPrivate && !hasExplicitRecipient
+        && (ctx.isAdmin || ctx.isActiveMember) && ctx.isGroup && !task.whatsapp.toGroup) {
+      results.push({
+        success: false,
+        error: 'toPrivate without a recipient: set whatsapp.recipient to remind a specific person, or whatsapp.toGroup to remind the current group.',
+      });
+      continue;
+    }
+
+    let fileId = isGroupTask ? ctx.groupTaskFileId : ctx.taskFileId;
 
     const destinations = {};
     if (task.whatsapp && task.whatsapp.toPrivate) {
@@ -136,7 +149,12 @@ async function scheduleTasks(tasks, ctx) {
     }
 
     if (Object.keys(destinations).length === 0) {
-      if (ctx.waJid) {
+      // No explicit destination → "current chat": the group itself when in a
+      // group (matches the tool's "omit = current group"), else the current user.
+      if (ctx.isGroup && ctx.groupId && ctx.groupTaskFileId) {
+        destinations.whatsappGroup = ctx.groupId;
+        fileId = ctx.groupTaskFileId;
+      } else if (ctx.waJid) {
         destinations.whatsapp = ctx.waJid;
       } else {
         results.push({ success: false, error: `No valid destination for this task.` });
