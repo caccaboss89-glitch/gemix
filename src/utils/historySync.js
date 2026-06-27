@@ -3,7 +3,7 @@
 // Handles persistent storage of user/group chat history files, deterministic
 // pruning of unreferenced attachments, and metadata for GemiX voice
 // transcriptions. Also manages the short-lived voice text cache written when
-// send_voice_message runs (matched to bot voice files in history).
+// a voice reply is generated (matched to bot voice files in history).
 
 const fs = require('fs');
 const path = require('path');
@@ -202,7 +202,7 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
 /**
  * Transcription for GemiX (bot) voice attachments in chat history only.
  * Reads history_meta first; otherwise matches the short cache written when
- * send_voice_message runs, then persists into history_meta.
+ * a voice reply is generated, then persists into history_meta.
  * Never used for end-user voice notes.
  */
 function resolveGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestampMs) {

@@ -11,8 +11,9 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { MAX_IMAGE_READS, MAX_FILE_READS } = require('../../utils/aiFileDelivery');
+const { MAX_IMAGE_READS, MAX_FILE_READS, classifyAiFileDelivery, DELIVERY_MODE } = require('../../utils/aiFileDelivery');
 const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
+const { mapWithConcurrency } = require('../../utils/concurrency');
 
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
@@ -35,6 +36,9 @@ const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPip
 const { processDiscordQuotedReply } = require('../../utils/quoteIngress');
 
 const log = createLogger('DISCORD');
+
+// Max parallel xAI uploads while building one history window (see WA shared.js).
+const HISTORY_UPLOAD_CONCURRENCY = 15;
 
 let discordClient;
 
@@ -441,7 +445,29 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
   const history = [];
 
-  for (const m of messages) {
+  // Pre-upload budget pass (newest→oldest, per attachment): only the newest
+  // MAX_IMAGE_READS images and MAX_FILE_READS files are uploaded to xAI; the
+  // rest stay tag-only and are never uploaded. Bounds uploads to <=20 regardless
+  // of history size. Bot (assistant) attachments are tag-only anyway.
+  const uploadAllowedAtt = new Set();
+  {
+    let imgBudget = MAX_IMAGE_READS;
+    let fileBudget = MAX_FILE_READS;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.author.id === discordClient.user.id) continue;
+      for (const att of m.attachments.values()) {
+        const mode = classifyAiFileDelivery(att.name || 'file', att.contentType || '');
+        if (mode === DELIVERY_MODE.IMAGE) {
+          if (imgBudget > 0) { imgBudget--; uploadAllowedAtt.add(att.id); }
+        } else if (mode === DELIVERY_MODE.FILE) {
+          if (fileBudget > 0) { fileBudget--; uploadAllowedAtt.add(att.id); }
+        }
+      }
+    }
+  }
+
+  async function processDiscordHistoryMessage(m) {
     const ts = formatTimestamp(m.createdAt);
     const isBot = m.author.id === discordClient.user.id;
     let textContent = cleanIncomingText(m.content || '');
@@ -450,9 +476,11 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     for (const att of m.attachments.values()) {
       // Main brain sees recent history files directly: user-role entries carry
       // native parts. GemiX's own (assistant) entries stay tag-only — that role
-      // cannot carry input parts.
+      // cannot carry input parts. Over the per-call media budget we also force
+      // tag-only so the file is never uploaded to xAI.
+      const overBudget = !isBot && !uploadAllowedAtt.has(att.id);
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
-        tagOnly: isBot,
+        tagOnly: isBot || overBudget,
         metadataDurationSec: Number(att.duration || 0),
       });
       if (ingress.oversize) {
@@ -467,22 +495,29 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
         captionHints,
       );
       textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
+      if (overBudget && !textContent.includes('not shown this turn')) {
+        textContent = `${textContent} (older file, not shown this turn — newest ${MAX_IMAGE_READS} images / ${MAX_FILE_READS} files per call; ask to resend or reply to it to view)`.trim();
+      }
       mediaParts.push(...ingress.contentParts);
     }
 
-    if (!textContent) continue;
+    if (!textContent) return null;
 
     const senderName = isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username);
     const prefix = `[${ts}] ${senderName}: `;
     const finalText = isBot ? textContent : `${prefix}${textContent}`;
 
-    history.push({
+    return {
       role: isBot ? 'assistant' : 'user',
       content: mediaParts.length > 0
         ? [{ type: 'text', text: finalText }, ...mediaParts]
         : finalText,
-    });
+    };
   }
+
+  // Build entries (incl. their xAI uploads) in parallel, preserving order.
+  const built = await mapWithConcurrency(messages, HISTORY_UPLOAD_CONCURRENCY, processDiscordHistoryMessage);
+  history.push(...built.filter(Boolean));
 
   // Bound the cost of re-attached history media: newest images + newest files.
   capHistoryImageParts(history, MAX_IMAGE_READS, MAX_FILE_READS);

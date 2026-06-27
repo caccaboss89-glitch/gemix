@@ -25,7 +25,6 @@ const TOOL = {
   GENERATE_VIDEO: 'generate_video',
   CODE_INTERPRETER: 'code_interpreter',
   BUILD: 'build',
-  SEND_VOICE: 'send_voice_message',
   SEND_WHATSAPP: 'send_whatsapp_message',
   SEND_EMAIL: 'send_email',
   SCHEDULE: 'schedule_tasks',
@@ -50,6 +49,7 @@ const CAPS = {
     historyTranscriptionNote: false,
     systemHistoryLabel: false,
     accountOwnerInHistory: true,
+    voiceReply: false,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
@@ -69,10 +69,11 @@ const CAPS = {
     historyTranscriptionNote: true,
     systemHistoryLabel: true,
     accountOwnerInHistory: false,
+    voiceReply: true,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
-      TOOL.BUILD, TOOL.SEND_VOICE, TOOL.SCHEDULE, TOOL.READ_TASKS,
+      TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
@@ -88,10 +89,11 @@ const CAPS = {
     historyTranscriptionNote: true,
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
+    voiceReply: true,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
-      TOOL.BUILD, TOOL.SEND_VOICE, TOOL.SCHEDULE, TOOL.READ_TASKS,
+      TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
@@ -107,6 +109,7 @@ const CAPS = {
     historyTranscriptionNote: false,
     systemHistoryLabel: false,
     accountOwnerInHistory: false,
+    voiceReply: false,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH,
       TOOL.FORMAL_PDF, TOOL.BUG_REPORT,
@@ -145,12 +148,6 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   }
   if ((toolName === TOOL.SCHEDULE || toolName === TOOL.READ_TASKS || toolName === TOOL.REMOVE_TASKS) && cap.isDiscord) {
     return `"${toolName}" is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for scheduled tasks.`;
-  }
-  if (toolName === TOOL.SEND_VOICE && profile === PROFILE.WA_PERSONAL) {
-    return 'send_voice_message is not available in this personal admin chat. Reply with text and optional file attachments. If the user wants voice, tell them to use the dedicated GemiX WhatsApp account.';
-  }
-  if (toolName === TOOL.SEND_VOICE && cap.isDiscord) {
-    return 'Voice messages are not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for voice.';
   }
   const waOnly = [
     TOOL.MUSIC_CREATOR, TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
@@ -231,6 +228,9 @@ function buildToolUsageLines(profile, opts = {}) {
     '- Execute tools silently. Reply once, after all of them complete.',
   ];
   lines.push(..._buildDeliveryLines(opts.delivery));
+  if (cap.voiceReply) {
+    lines.push('- Voice replies: set `voice:true` in your reply for the current chat (short/casual/non-technical only). You cannot send a voice message to anyone else — only here.');
+  }
   lines.push('- Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.');
   if (has(TOOL.UPDATE_MEMORY)) {
     lines.push('- Use update_memory for long-term preferences. Never store transient context (current task, session state, temporary data).');
@@ -299,7 +299,6 @@ function buildRulesBlock(profile, opts = {}) {
   const cap = CAPS[profile];
   const has = (name) => _hasTool(toolNames, cap, name);
   const deliveryTools = [];
-  if (has(TOOL.SEND_VOICE)) deliveryTools.push('send_voice_message');
   if (has(TOOL.SEND_WHATSAPP)) deliveryTools.push('send_whatsapp_message');
   if (has(TOOL.SEND_EMAIL)) deliveryTools.push('send_email');
   const proseRule =
@@ -340,7 +339,6 @@ function buildRulesBlock(profile, opts = {}) {
     '- Never invent or assume facts, names, dates, numbers, links, file paths, citations, quoted text, '
       + 'or content of a file you were not actually shown.',
     `- When unsure, slow down: verify with a tool (${verifyTools}) or ask the user, and if something stays unconfirmed say so plainly — never guess or rush.`,
-    '- Before sending, silently confirm your reply follows every rule above, states only verified facts, and makes no unstated promises.',
   ];
 
   const visibilityText =

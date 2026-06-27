@@ -4,7 +4,7 @@
 // voice messages. Uses the direct xAI TTS endpoint (`POST /v1/tts`) when
 // enabled (primary), with Google Translate TTS fallback. Always applies
 // MP3-to-Opus transcode. Strips vocal tags for Google TTS input (speech
-// tags are written by GemiX itself in the send_voice_message text).
+// tags are written by GemiX itself in the voice reply `response` text).
 
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');

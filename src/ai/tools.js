@@ -263,16 +263,6 @@ const TOOL_GENERATE_VIDEO = makeTool({
 
 // -- Dynamic tool builders (schema varies by grade/platform) -------------
 
-// Speech tags interpreted natively by xAI TTS. GemiX writes them directly
-// in the voice text (woven in, never narrated).
-const VOICE_TEXT_DESC =
-  'Text to speak (max 1000 chars), in the language you want. Write ONLY spoken words plus the tags below — '
-  + 'no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only (the system strips the rest). '
-  + 'ALWAYS weave in tags for a human result (never read them aloud); even if your recent history is full of '
-  + 'plain text replies, a voice message still needs tags. '
-  + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
-  + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
-
 // Optional attachments on delivery tools and on the fixed JSON reply schema.
 const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
@@ -281,23 +271,6 @@ const DELIVERY_ATTACHMENTS_PROP = {
     'OPTIONAL. Files to attach to THIS delivery: delivery-buffer filenames (exactly as reported by the tool '
     + 'that produced them) and/or public https URLs. Omit when nothing to attach — never pass an empty array.',
 };
-
-function buildVoiceTool() {
-  const properties = {
-    text: {
-      type: 'string',
-      description: VOICE_TEXT_DESC,
-    },
-    attachments: DELIVERY_ATTACHMENTS_PROP,
-  };
-
-  return makeTool({
-    name: 'send_voice_message',
-    description: 'Delivery tool - send a voice message in the current chat for short/casual replies.',
-    properties,
-    required: ['text'],
-  });
-}
 
 function buildWhatsAppTool(isAdmin) {
   // Admin: address members directly by phone (roster in <ActiveMembers>), so a
@@ -580,10 +553,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildBuildTool(isWhatsAppGroup));
   }
 
-  // 3. Communication & Delivery (no voice on personal WA: replies are text + attachments only)
-  if (!isDiscord && userCtx.platform !== PLATFORM_WA_PERSONAL) {
-    tools.push(buildVoiceTool());
-  }
+  // 3. Communication & Delivery. Voice replies are NOT a tool: GemiX sets the
+  // `voice` flag in its structured reply (WhatsApp only — see responseSchema).
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   }

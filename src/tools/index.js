@@ -8,8 +8,7 @@
 
 const { getToolAccessError, validateToolArgs } = require('../ai/tools');
 const { generateImage, generateVideo } = require('./imagineGenerator');
-const { generateVoice } = require('./voiceMessage');
-const { stripOutgoingDeliveryArtifacts, sanitizeVoiceMessageText } = require('../utils/text');
+const { stripOutgoingDeliveryArtifacts } = require('../utils/text');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
@@ -28,7 +27,6 @@ const { pushBufferAttachment } = require('../utils/attachments');
 const { musicCreator } = require('./musicCreator');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
-const { MAX_TTS_CHARS } = require('../config/constants');
 const { resolveProfile, toolUnavailableMessage } = require('../config/platformCapabilities');
 const { createLogger } = require('../utils/logger');
 const { toWhatsAppMediaArgs, toEmailAttachment, attachmentSize } = require('../utils/attachments');
@@ -36,7 +34,7 @@ const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require(
 
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { resolveDeliverySelection } = require('../utils/deliverySelection');
-const { getVoiceCount, incrementVoiceCount, resetVoiceCount } = require('../utils/voiceCounter');
+const { resetVoiceCount } = require('../utils/voiceCounter');
 const {
   PER_ROUND_TOOL_LIMITS,
   perRoundCapErrorPayload,
@@ -152,7 +150,6 @@ function platformToolBlockReason(toolName, userCtx) {
  */
 async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs = null) {
   const name = toolCall.function.name;
-  const chatKey = _getVoiceLimitChatKey(userCtx);
 
   // Voice limits are reset centrally in handler.js when a text message is sent,
   // preventing the AI from bypassing limits by calling intermediate tools.
@@ -212,7 +209,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
   try {
     // Switch to recording state if the tool generates audio
-    if (name === 'send_voice_message' || name === 'music_creator') {
+    if (name === 'music_creator') {
       if (userCtx.presence && typeof userCtx.presence.setRecording === 'function') {
         await userCtx.presence.setRecording();
       }
@@ -248,63 +245,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           await userCtx.sendIntermediateNotification('build', buildEngineeringNotificationMessage());
         }
         result = await buildTool(args, userCtx, responseCtx);
-        break;
-      }
-
-      case 'send_voice_message': {
-        if (!args.text || typeof args.text !== 'string' || args.text.trim().length === 0) {
-          result = { success: false, error: 'Missing "text" parameter. You must provide the text to convert to speech.' };
-          break;
-        }
-        // Keep only spoken words, voice tags, and readable punctuation. Emoji
-        // and non-readable symbols (_, ", \, *, …) are stripped so TTS never
-        // voices them and the saved transcript matches what was spoken.
-        let cleanText = sanitizeVoiceMessageText(
-          stripOutgoingDeliveryArtifacts(args.text || ''),
-        );
-
-        const currentCount = await getVoiceCount(userCtx, chatKey);
-        if (currentCount >= 3) {
-          log.warn(`Voice limit exceeded in chat ${chatKey}: counter=${currentCount}`);
-          await resetVoiceCount(userCtx, chatKey);
-          result = { success: false, error: 'Voice limit exceeded: you have already sent 3 consecutive voice messages in this chat. Reply with a normal text message instead, no voice.' };
-          break;
-        }
-
-        if (cleanText.length > MAX_TTS_CHARS) {
-          result = { success: false, error: `Text exceeds the ${MAX_TTS_CHARS} character limit (${cleanText.length} chars). Cannot generate a voice message. Reply with a normal text message instead.` };
-          break;
-        }
-
-        // Files explicitly selected by the model (delivery-buffer names or
-        // public URLs). The parameter only exists while deliverables exist.
-        const voiceSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
-        const voiceMissingNote = voiceSelection.missing.length > 0
-          ? ` Attachment(s) not resolved and NOT sent: ${voiceSelection.missing.join(', ')}.`
-          : '';
-
-        // Send as reply in the current chat
-        if (responseCtx.voiceBuffer) {
-          return {
-            toolCallId: toolCall.id,
-            result: JSON.stringify({ success: false, error: 'A voice message has already been generated. You cannot generate another one in the same request.' }),
-          };
-        }
-        const voiceBuffer = await generateVoice(cleanText);
-        responseCtx.voiceBuffer = voiceBuffer;
-        responseCtx.isVoiceOnly = true;
-        // Voice to the current chat ends the turn: only the files selected in
-        // `attachments` ship after the voice note.
-        responseCtx.attachments = voiceSelection.attachments;
-        responseCtx.pendingVoiceTranscript = {
-          chatId: userCtx.chatId || chatKey,
-          text: cleanText,
-        };
-        result = {
-          success: true,
-          message: `Voice message generated successfully${voiceSelection.attachments.length > 0 ? ` with ${voiceSelection.attachments.length} attachment(s)` : ''}. Do not send any text message.${voiceMissingNote}`,
-        };
-        await incrementVoiceCount(userCtx, chatKey);
         break;
       }
 

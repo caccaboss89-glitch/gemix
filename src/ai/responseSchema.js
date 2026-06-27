@@ -16,6 +16,24 @@
 const RESPONSE_FIELD_DESC =
   'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax.';
 
+// Voice-reply fields (WhatsApp only). `voice` is placed BEFORE `response` so the
+// model decides the channel first and writes `response` accordingly.
+const VOICE_FLAG_DESC =
+  'WhatsApp only. Set true to send THIS reply as a voice message in the current chat instead of text. '
+  + 'Use true only for short, casual, non-technical replies; keep long or technical answers as text. '
+  + 'At most 3 voice messages in a row per chat, then reply as text. '
+  + 'Vary voice vs text across your recent history so you are not repetitive. Voice is only for the current '
+  + 'chat — you cannot send a voice message to anyone else.';
+
+const VOICE_RESPONSE_FIELD_DESC =
+  'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY spoken words plus '
+  + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
+  + 'Keep it under 1000 characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags '
+  + 'for a human result (never read them aloud), even if your recent text replies had none. When `voice` is '
+  + 'false write plain text and DO NOT use any voice tag. '
+  + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
+  + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
+
 const GEMIX_ATTACHMENTS_FIELD_DESC =
   'OPTIONAL. The ONLY way to send files/images in this chat. Include this field only when you want to '
   + 'send files with your reply. Each entry is a delivery-buffer filename (exactly as reported by the tool '
@@ -29,22 +47,35 @@ const TITLE_FIELD_DESC =
 /**
  * Build the fixed main-brain text.format schema for the current round:
  * `response` (required) + optional `attachments`, plus `conversation_title`
- * (required) on the first Discord thread turn.
+ * (required) on the first Discord thread turn, plus a leading `voice` boolean
+ * on WhatsApp (decides voice vs text for the current-chat reply).
  *
  * @param {object} opts
  * @param {boolean} [opts.includeTitle] - First Discord thread turn (title not set yet).
+ * @param {boolean} [opts.allowVoice] - WhatsApp (dedicated): expose the `voice` flag.
  * @returns {object}
  */
-function buildGemixResponseFormat({ includeTitle = false } = {}) {
-  const properties = {
-    response: { type: 'string', description: RESPONSE_FIELD_DESC },
-    attachments: {
-      type: 'array',
-      items: { type: 'string' },
-      description: GEMIX_ATTACHMENTS_FIELD_DESC,
-    },
+function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } = {}) {
+  const properties = {};
+  const required = [];
+
+  // `voice` first so the model commits to the channel before writing `response`.
+  if (allowVoice) {
+    properties.voice = { type: 'boolean', description: VOICE_FLAG_DESC };
+    required.push('voice');
+  }
+
+  properties.response = {
+    type: 'string',
+    description: allowVoice ? VOICE_RESPONSE_FIELD_DESC : RESPONSE_FIELD_DESC,
   };
-  const required = ['response'];
+  required.push('response');
+
+  properties.attachments = {
+    type: 'array',
+    items: { type: 'string' },
+    description: GEMIX_ATTACHMENTS_FIELD_DESC,
+  };
 
   if (includeTitle) {
     properties.conversation_title = { type: 'string', description: TITLE_FIELD_DESC };
@@ -106,10 +137,10 @@ function applyResponsesTextFormat(body, format) {
  * text when no valid JSON object is found.
  *
  * @param {string} raw - Assistant message content.
- * @returns {{ structured: boolean, text: string, title: string|null, attachments: string[] }}
+ * @returns {{ structured: boolean, text: string, title: string|null, attachments: string[], voice: boolean }}
  */
 function parseStructuredReply(raw) {
-  const fallback = { structured: false, text: typeof raw === 'string' ? raw : '', title: null, attachments: [] };
+  const fallback = { structured: false, text: typeof raw === 'string' ? raw : '', title: null, attachments: [], voice: false };
   if (typeof raw !== 'string' || !raw.trim()) return fallback;
 
   let candidate = raw.trim();
@@ -140,8 +171,9 @@ function parseStructuredReply(raw) {
   const attachments = Array.isArray(parsed.attachments)
     ? parsed.attachments.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim())
     : [];
+  const voice = parsed.voice === true;
 
-  return { structured: true, text, title, attachments };
+  return { structured: true, text, title, attachments, voice };
 }
 
 module.exports = {

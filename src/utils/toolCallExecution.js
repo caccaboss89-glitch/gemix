@@ -16,39 +16,26 @@ function parseToolCallArgs(tc) {
   return args;
 }
 
-/**
- * Voice message to the current chat ends the turn; it must run after all other
- * tools in the same round so preceding tools still execute.
- */
-function isSendVoiceMessageToCurrentUser(tc) {
-  return tc?.function?.name === 'send_voice_message';
-}
-
 const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
 
 /**
  * @param {object[]} toolCalls - assistant tool_calls in model order
- * @param {object} userCtx
- * @returns {{ phase1: object[], phase2: object[], phase3: object[] }}
+ * @returns {{ phase1: object[], phase2: object[] }}
  *   phase1: standard tools (parallel) — build, generate_*, …
  *   phase2: outbound delivery (parallel) — send_email, send_whatsapp_message
- *   phase3: send_voice_message (current chat only; sequential; can end the turn)
  */
 function partitionHandlerToolCalls(toolCalls) {
   const phase1 = [];
   const phase2 = [];
-  const phase3 = [];
   for (const tc of toolCalls) {
     const name = tc.function?.name;
-    if (isSendVoiceMessageToCurrentUser(tc)) {
-      phase3.push(tc);
-    } else if (HANDLER_DELIVERY_TOOLS.has(name)) {
+    if (HANDLER_DELIVERY_TOOLS.has(name)) {
       phase2.push(tc);
     } else {
       phase1.push(tc);
     }
   }
-  return { phase1, phase2, phase3 };
+  return { phase1, phase2 };
 }
 
 const BUILD_MUTATING_TOOLS = new Set(['write_file', 'edit_file']);
@@ -140,7 +127,6 @@ async function executeBuildToolCallsOrdered(toolCalls, runOne) {
 
 module.exports = {
   parseToolCallArgs,
-  isSendVoiceMessageToCurrentUser,
   partitionHandlerToolCalls,
   executeBuildToolCallsOrdered,
   BUILD_MUTATING_TOOLS,

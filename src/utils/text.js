@@ -29,7 +29,7 @@ const VOICE_TAGS_WRAP_RE = /<\/?(?:soft|whisper|loud|build-intensity|decrease-in
 /**
  * Strip voice effect tags from a string.
  * Removes inline tags like [pause] and wrapping tags like <soft>...</soft>
- * that are only valid inside send_voice_message TTS text.
+ * that are only valid in a voice reply (response with `voice:true`).
  * @param {string} text
  * @returns {string}
  */

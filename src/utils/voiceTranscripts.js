@@ -20,6 +20,7 @@ const { DATA_DIR } = require('../config/constants');
 const { extractAttachmentTagPaths } = require('./media');
 const { getStoredHistoryVoiceTranscription } = require('./historySync');
 const { uploadFileForXai } = require('./xaiUpload');
+const { mapWithConcurrency } = require('./concurrency');
 const { createLogger } = require('./logger');
 
 const log = createLogger('VoiceTranscripts');
@@ -60,10 +61,9 @@ function _transcriptFileFor(storageId, voiceName, text) {
 async function collectGemixVoiceTranscriptParts(history, storageId) {
   if (!storageId || !Array.isArray(history) || history.length === 0) return [];
 
-  const fileParts = [];
-  const labels = [];
+  // Collect candidate transcripts first (cheap), then upload them in parallel.
+  const candidates = [];
   const seen = new Set();
-
   for (const msg of history) {
     if (!msg || msg.role !== 'assistant' || typeof msg.content !== 'string') continue;
     for (const tagPath of extractAttachmentTagPaths(msg.content)) {
@@ -71,19 +71,29 @@ async function collectGemixVoiceTranscriptParts(history, storageId) {
       if (!name || seen.has(name)) continue;
       if (!VOICE_AUDIO_EXTS.has(path.extname(name).toLowerCase())) continue;
       seen.add(name);
-
       const text = getStoredHistoryVoiceTranscription(storageId, name);
-      if (!text) continue;
-
-      try {
-        const filePath = _transcriptFileFor(storageId, name, text);
-        const url = await uploadFileForXai(filePath, `${name}.transcript.txt`, 'text/plain');
-        fileParts.push({ type: 'input_file', file_url: url });
-        labels.push(name);
-      } catch (err) {
-        log.warn(`transcript attach failed for ${name}: ${err.message}`);
-      }
+      if (text) candidates.push({ name, text });
     }
+  }
+  if (candidates.length === 0) return [];
+
+  const uploaded = await mapWithConcurrency(candidates, 6, async ({ name, text }) => {
+    try {
+      const filePath = _transcriptFileFor(storageId, name, text);
+      const url = await uploadFileForXai(filePath, `${name}.transcript.txt`, 'text/plain');
+      return { name, part: { type: 'input_file', file_url: url } };
+    } catch (err) {
+      log.warn(`transcript attach failed for ${name}: ${err.message}`);
+      return null;
+    }
+  });
+
+  const fileParts = [];
+  const labels = [];
+  for (const u of uploaded) {
+    if (!u) continue;
+    fileParts.push(u.part);
+    labels.push(u.name);
   }
 
   if (fileParts.length === 0) return [];

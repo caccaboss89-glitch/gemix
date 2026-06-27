@@ -15,7 +15,7 @@ const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
 const { isSystemMessage } = require('../../config/systemMessages');
 
 const { buildAttachmentTag } = require('../../utils/media');
-const { MAX_IMAGE_READS, MAX_FILE_READS } = require('../../utils/aiFileDelivery');
+const { MAX_IMAGE_READS, MAX_FILE_READS, classifyAiFileDelivery, DELIVERY_MODE } = require('../../utils/aiFileDelivery');
 const { resolveGemixVoiceTranscription, storeRecentVoiceText } = require('../../utils/historySync');
 const { ingressWaMessageMedia, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 const {
@@ -32,9 +32,15 @@ const {
 
 const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
+const { mapWithConcurrency } = require('../../utils/concurrency');
 const { createLogger } = require('../../utils/logger');
 
 const log = createLogger('WhatsAppResponse');
+
+// Max parallel xAI uploads while building one history window. Uploads are
+// already bounded to <=20 per turn by the pre-upload budget pass (newest 10
+// images + 10 files), so this just keeps that bounded set fast.
+const HISTORY_UPLOAD_CONCURRENCY = 15;
 
 const { resolveIngressFilename: _resolveWaFilename } = require('../../utils/attachmentFilenames');
 
@@ -108,13 +114,48 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     }
   }
 
-  const historyMessages = [];
   const personalGemixFlags = platform === PLATFORM_WA_PERSONAL
     ? buildPersonalGemixFlags(messages)
     : null;
 
-  for (let mi = 0; mi < messages.length; mi++) {
-    const msg = messages[mi];
+  // True when a history message is GemiX/system/scheduled (assistant role, which
+  // cannot carry native parts → always tag-only). On dedicated every fromMe is
+  // bot; on personal only the GemiX-flagged fromMe is (Account Owner is a user).
+  const isHistoryBotMessage = (msg, mi) => (platform === PLATFORM_WA_PERSONAL
+    ? Boolean(msg.fromMe && personalGemixFlags && personalGemixFlags[mi])
+    : Boolean(msg.fromMe));
+
+  // Pre-upload budget pass: decide which messages may upload media to xAI BEFORE
+  // doing any upload. Walking newest→oldest, only the newest MAX_IMAGE_READS
+  // images and MAX_FILE_READS files are allowed; the rest stay tag-only and are
+  // never uploaded. This bounds xAI uploads to <=20 regardless of how many files
+  // the history holds (classifyAiFileDelivery is cheap — no download).
+  const uploadAllowed = new Array(messages.length).fill(false);
+  {
+    let imgBudget = MAX_IMAGE_READS;
+    let fileBudget = MAX_FILE_READS;
+    for (let mi = messages.length - 1; mi >= 0; mi--) {
+      const msg = messages[mi];
+      if (!msg.hasMedia) continue;
+      if (formatSpecialMessageText(msg) !== null) continue; // location/event: no upload
+      if (isHistoryBotMessage(msg, mi)) continue; // assistant entries are tag-only anyway
+      const waFilename = msg._data?.filename;
+      const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
+      const mode = classifyAiFileDelivery(resolvedName || waFilename || 'file', msg._data?.mimetype || '');
+      if (mode === DELIVERY_MODE.IMAGE) {
+        if (imgBudget > 0) { imgBudget--; uploadAllowed[mi] = true; }
+      } else if (mode === DELIVERY_MODE.FILE) {
+        if (fileBudget > 0) { fileBudget--; uploadAllowed[mi] = true; }
+      }
+      // TAG_ONLY (raw binaries): never uploaded, no budget consumed.
+    }
+  }
+
+  // Build each history entry (including its xAI upload) in parallel with
+  // bounded concurrency, preserving chronological order in the result. Serial
+  // uploads here used to dominate turn latency and could blow the history
+  // fetch timeout when many recent messages carried media.
+  async function processHistoryMessage(msg, mi) {
     let senderName;
     let isGemiX = false;
     let isScheduled = false;
@@ -200,8 +241,11 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       // carry native parts (input_file/input_image via public URL). Assistant
       // entries (GemiX's own) stay tag-only — that role cannot carry input
       // parts; GemiX voice notes are re-attached as transcripts on the turn.
+      // Over the per-call media budget (uploadAllowed[mi] === false) we also
+      // force tag-only so the file is never uploaded to xAI.
+      const overBudget = !isFromBot && !uploadAllowed[mi];
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
-        tagOnly: isFromBot,
+        tagOnly: isFromBot || overBudget,
       });
       // GemiX voice messages: persist the transcription into history meta so
       // the handler can attach the transcript file to the current turn.
@@ -215,13 +259,16 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
         textContent, mediaIngress.tag, allFilenameHints,
       );
       textContent = `${textContent} ${mediaIngress.textFragment.trim()}`.trim();
+      if (overBudget && !textContent.includes('not shown this turn')) {
+        textContent = `${textContent} (older file, not shown this turn — newest ${MAX_IMAGE_READS} images / ${MAX_FILE_READS} files per call; ask to resend or reply to it to view)`.trim();
+      }
       if (!textContent) {
         textContent = (mediaIngress.tag || buildAttachmentTag(null, resolvedName || msg._data?.filename || 'file')).trim();
       }
       mediaParts = mediaIngress.contentParts || [];
     }
 
-    if (!textContent) continue;
+    if (!textContent) return null;
 
     const prefix = `[${ts}] ${senderName}: `;
 
@@ -230,13 +277,16 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     // For system events: labeled prefix including [System] tag (role assistant)
     const useLabeledContent = !isFromBot || isSystemEvent;
     const finalText = useLabeledContent ? `${prefix}${textContent}` : textContent;
-    historyMessages.push({
+    return {
       role: isFromBot ? 'assistant' : 'user',
       content: mediaParts.length > 0
         ? [{ type: 'text', text: finalText }, ...mediaParts]
         : finalText,
-    });
+    };
   }
+
+  const built = await mapWithConcurrency(messages, HISTORY_UPLOAD_CONCURRENCY, processHistoryMessage);
+  const historyMessages = built.filter(Boolean);
 
   // Bound the cost of re-attached history media: newest images + newest files.
   capHistoryImageParts(historyMessages, MAX_IMAGE_READS, MAX_FILE_READS);

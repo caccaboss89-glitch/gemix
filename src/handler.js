@@ -10,12 +10,13 @@
 //      aiFileDelivery.js: native `input_image` / `input_file` parts via
 //      public URLs (recent history files are attached too, so the model sees
 //      them directly), or [Attachment] tags only for raw binaries.
-//   4. Loop: call Grok (`/v1/responses`) - tool calls per round in three phases:
-//      (1) standard tools parallel, (2) delivery parallel, (3) voice last - repeat
-//      until the model returns the final response or the round budget is
-//      reached. The final reply is always structured JSON (response /
-//      optional attachments, plus conversation_title on the first Discord
-//      thread turn) enforced via a fixed text.format schema.
+//   4. Loop: call Grok (`/v1/responses`) - tool calls per round in two phases:
+//      (1) standard tools parallel, (2) delivery parallel - repeat until the
+//      model returns the final response or the round budget is reached. The
+//      final reply is always structured JSON (response / optional attachments,
+//      plus conversation_title on the first Discord thread turn, plus a `voice`
+//      flag on WhatsApp) enforced via a fixed text.format schema. When
+//      `voice:true` (WhatsApp), `response` is spoken via TTS instead of text.
 //   5. Apply the research badge (real web/X search counts) and ship the
 //      reply back to the platform.
 
@@ -25,9 +26,14 @@ const { getToolsForUser, getToolAccessError } = require('./ai/tools');
 const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/responseSchema');
 const { resolveDeliverySelection } = require('./utils/deliverySelection');
 const { collectGemixVoiceTranscriptParts } = require('./utils/voiceTranscripts');
+const { generateVoice } = require('./tools/voiceMessage');
+const { sanitizeVoiceMessageText } = require('./utils/text');
+const { getCapabilities } = require('./config/platformCapabilities');
 const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
+const { getVoiceCount, incrementVoiceCount } = require('./utils/voiceCounter');
 const {
   MAX_TOOL_ROUNDS,
+  MAX_TTS_CHARS,
   PLATFORM_DISCORD,
   PLATFORM_WA_DEDICATED,
   PLATFORM_WA_PERSONAL,
@@ -123,8 +129,6 @@ function _toolNotAvailableMessage(toolName, ctx) {
 async function handleMessage(ctx) {
   const responseCtx = {
     attachments: [],
-    voiceBuffer: null,
-    isVoiceOnly: false,
     discordTitle: '',
     // Accumulated stats from native server-side web/X searches (main brain
     // and build sub-agent) - used for the badge appended to the reply.
@@ -193,6 +197,9 @@ async function handleMessage(ctx) {
     const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
     const isPersonalWa = ctx.platform === PLATFORM_WA_PERSONAL;
     const isDiscord = ctx.platform === PLATFORM_DISCORD;
+    // Voice replies are a structured-reply flag (WhatsApp dedicated only),
+    // never a tool. The model sets `voice:true` and writes `response` with TTS tags.
+    const allowVoice = Boolean(getCapabilities(ctx).voiceReply);
     const memoryFileId = isDiscord ? null : ('memory_' + ui.taskFileId);
     const sharedMemoryFileId = isPersonalWa && ctx.chatId
       ? resolvePersonalMemoryFileId(ctx.chatId)
@@ -402,22 +409,49 @@ async function handleMessage(ctx) {
       }
     };
 
-    const buildVoiceReturn = async () => {
-      log.info(`   Voice ready (${responseCtx.voiceBuffer.length} bytes)`);
-      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
+    // Generate a voice reply from the model's final `response` text when it set
+    // `voice:true` (WhatsApp dedicated only). Returns a voice response object,
+    // or null to fall back to a normal text reply (limit hit, too long, error).
+    const buildVoiceReply = async (rawResponseText, finalAttachments) => {
+      const chatKey = getVoiceLimitChatKey(ctx);
+      const spoken = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
+      if (!spoken.trim()) return null;
+
+      const count = await getVoiceCount(userCtx, chatKey);
+      if (count >= 3) {
+        log.warn(`   Voice requested but limit reached in ${chatKey}; replying as text`);
+        return null;
+      }
+      if (spoken.length > MAX_TTS_CHARS) {
+        log.warn(`   Voice text too long (${spoken.length} > ${MAX_TTS_CHARS}); replying as text`);
+        return null;
+      }
+
+      let voiceBuffer;
+      try {
+        if (ctx.presence && typeof ctx.presence.setRecording === 'function') {
+          try { await ctx.presence.setRecording(); } catch { /* best effort */ }
+        }
+        voiceBuffer = await generateVoice(spoken);
+      } catch (err) {
+        log.error(`   Voice generation failed (${err.message}); replying as text`);
+        return null;
+      }
+
+      await incrementVoiceCount(userCtx, chatKey);
       const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
         ? buildResearchBadgeText(responseCtx.researchStats)
         : null;
-      if (researchFooter) log.info(`   Research badge (voice follow-up): ${researchFooter}`);
+      log.info(`   Voice reply ready (${voiceBuffer.length} bytes)`);
       return {
         text: null,
-        voiceBuffer: responseCtx.voiceBuffer,
+        voiceBuffer,
         isVoiceOnly: true,
-        attachments: responseCtx.attachments,
+        attachments: finalAttachments,
         discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
-        voiceTranscriptText: responseCtx.pendingVoiceTranscript?.text ?? null,
-        voiceTranscriptChatId: responseCtx.pendingVoiceTranscript?.chatId ?? null,
+        voiceTranscriptText: spoken,
+        voiceTranscriptChatId: ctx.chatId || chatKey,
         researchFooter,
       };
     };
@@ -428,11 +462,6 @@ async function handleMessage(ctx) {
       if (Date.now() - sessionStartTime > SESSION_MAX_DURATION_MS) {
         log.warn('   Session duration limit reached (10 minutes), forcing wrap up');
         sessionDurationLimitReached = true;
-        break;
-      }
-
-      if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        log.warn(`   Voice already generated, skipping round`);
         break;
       }
 
@@ -454,7 +483,7 @@ async function handleMessage(ctx) {
 
       const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       currentRoundTools = roundTools;
-      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle });
+      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
       const callOpts = { maxTurns: MAX_TOOL_ROUNDS, requestId: ctx.requestId, responseFormat };
 
       const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
@@ -503,16 +532,6 @@ async function handleMessage(ctx) {
               content: perRoundCapErrorPayload(name, cap),
             };
           }
-          if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-            return {
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: JSON.stringify({
-                success: false,
-                error: 'Turn already completed via voice message; further tools were not run.',
-              }),
-            };
-          }
           const toolBlock = getToolAccessError(tc.function.name, userCtx, {
             allowedRoundNames: allowedToolNames,
             unavailableMessage: (name) => _toolNotAvailableMessage(name, ctx),
@@ -530,7 +549,6 @@ async function handleMessage(ctx) {
 
         await runPhase(phases.phase1, true);
         await runPhase(phases.phase2, true);
-        await runPhase(phases.phase3, false);
 
         for (const tc of orderedCalls) {
           const msg = resultsById.get(tc.id);
@@ -558,36 +576,40 @@ async function handleMessage(ctx) {
       }
 
       // The fixed structured reply carries the user-facing text in `response`,
-      // plus optional attachments and the Discord title.
+      // plus optional attachments, the Discord title, and (WhatsApp) the voice flag.
       const parsed = parseStructuredReply(assistantMsg.content || '');
       if (!parsed.structured) {
         log.warn('   Structured reply expected but content was not valid JSON; using raw text');
       }
       applyParsedTitle(parsed);
       const finalAttachments = await resolveFinalAttachments(parsed);
+
+      // Voice reply (WhatsApp dedicated only): speak `response` (with TTS tags)
+      // instead of sending text. Falls back to text on limit/length/TTS failure.
+      if (allowVoice && parsed.voice) {
+        const voiceReply = await buildVoiceReply(parsed.text || '', finalAttachments);
+        if (voiceReply) return voiceReply;
+        log.info('   Voice reply not produced; falling back to text');
+      }
+
       let text = cleanAssistantResponse(parsed.text || '');
       log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
-      if (!text.trim() && !responseCtx.isVoiceOnly && finalAttachments.length === 0) {
+      if (!text.trim() && finalAttachments.length === 0) {
         log.warn('   Empty AI response, sending fallback');
         text = FALLBACK_ERROR_PREFIX;
       }
 
       // ── Research badge ──────────────────────────────────────────────────
-      // Append "🌐: N sources. 𝕏: N posts." when server-side web/X search
-      // ran (real counts from the API payloads). Only shown on text replies
-      // (not voice-only). Omit a section when its count is zero so the badge
-      // stays minimal.
-      if (text.trim() && !responseCtx.isVoiceOnly && responseCtx.researchStats) {
+      // Append "🌐: N sources. 𝕏: N posts." when server-side web/X search ran
+      // (real counts from the API payloads). Omit a section when its count is
+      // zero so the badge stays minimal.
+      if (text.trim() && responseCtx.researchStats) {
         const badge = buildResearchBadgeText(responseCtx.researchStats);
         if (badge) {
           text = appendResearchBadge(text, responseCtx.researchStats);
           log.info(`   Research badge: ${badge}`);
         }
-      }
-
-      if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-        return await buildVoiceReturn();
       }
 
       await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
@@ -601,10 +623,6 @@ async function handleMessage(ctx) {
       };
     }
 
-    if (responseCtx.isVoiceOnly && responseCtx.voiceBuffer) {
-      return await buildVoiceReturn();
-    }
-
     // ── Forced text wrap-up (session wall clock or tool-round budget) ───
     const wrapUpReason = sessionDurationLimitReached
       ? 'session time limit (10 minutes)'
@@ -612,6 +630,7 @@ async function handleMessage(ctx) {
     log.warn(`   Forcing final answer (${wrapUpReason}, tool_choice:none)`);
     let wrapUpText = '';
     let wrapUpAttachments = [];
+    let wrapUpVoice = false;
     try {
       reloadLongTermMemory(ctx, ui);
       const deliveryState = computeDeliveryState();
@@ -620,7 +639,7 @@ async function handleMessage(ctx) {
       userCtx.isFirstTurn = deliveryState.includeTitle;
       messages[0].content = buildSystemPrompt(ctx);
       const wrapUpTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
-      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle });
+      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
       const wrapUpNote = sessionDurationLimitReached
         ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'SYSTEM: You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
@@ -638,9 +657,17 @@ async function handleMessage(ctx) {
       const parsed = parseStructuredReply(finalMsg.content || '');
       applyParsedTitle(parsed);
       wrapUpAttachments = await resolveFinalAttachments(parsed);
-      wrapUpText = cleanAssistantResponse(parsed.text || '');
+      wrapUpVoice = Boolean(allowVoice && parsed.voice);
+      wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanAssistantResponse(parsed.text || '');
     } catch (wrapErr) {
       log.error(`   Forced wrap-up call failed: ${wrapErr.message}`);
+    }
+
+    // Voice wrap-up reply (WhatsApp dedicated): speak it; fall back to text.
+    if (wrapUpVoice && wrapUpText.trim()) {
+      const voiceReply = await buildVoiceReply(wrapUpText, wrapUpAttachments);
+      if (voiceReply) return voiceReply;
+      wrapUpText = cleanAssistantResponse(wrapUpText);
     }
 
     if (wrapUpText.trim() && responseCtx.researchStats) {
