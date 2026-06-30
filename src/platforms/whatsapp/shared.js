@@ -9,7 +9,7 @@
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = require('../../config/constants');
 const { formatWhatsAppPollText } = require('../../utils/pollParser');
-const { isSpecialNonMediaType, formatSpecialMessageText, formatWhatsAppContactText } = require('../../utils/waSpecialMessages');
+const { isSpecialNonMediaMessage, formatSpecialMessageText, formatWhatsAppContactText } = require('../../utils/waSpecialMessages');
 const { formatTimestamp } = require('../../utils/time');
 const { hasScheduledFooter } = require('../../utils/footer');
 const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
@@ -573,7 +573,7 @@ function waMessageHasUsableContent(msg) {
   if (msg.hasQuotedMsg) return true;
   if (msg.body && String(msg.body).trim()) return true;
   if (msg.type === 'vcard' || msg.type === 'multi_vcard' || msg.type === 'poll_creation') return true;
-  if (isSpecialNonMediaType(msg.type)) return true;
+  if (isSpecialNonMediaMessage(msg)) return true;
   return false;
 }
 

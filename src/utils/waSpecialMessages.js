@@ -5,16 +5,65 @@
 //   - location               -> coordinates (+ optional place name/address).
 //                               The raw map-thumbnail JPEG that WhatsApp puts
 //                               in msg.body is never exposed to the model.
-//   - scheduled_event_creation -> the event name (start/end/description are not
-//                               reliably parsed by the library, so name only).
+//   - scheduled_event_creation / event_creation -> event title (and optional
+//                               start time when present in the serialized payload).
 // Contacts (vcard) and polls are handled elsewhere (inline / pollParser.js).
 
+const { formatTimestamp } = require('./time');
+
 /** Message types whose payload is data, not media or plain text. */
-const SPECIAL_NON_MEDIA_TYPES = new Set(['location', 'scheduled_event_creation']);
+const SPECIAL_NON_MEDIA_TYPES = new Set([
+  'location',
+  'scheduled_event_creation',
+  'event_creation',
+]);
+
+/** WA may emit either type string for group events. */
+const EVENT_MESSAGE_TYPES = new Set(['scheduled_event_creation', 'event_creation']);
+
+const EVENT_DATA_KEYS = [
+  'eventName',
+  'eventStartTime',
+  'eventStartTimeTs',
+  'eventEndTime',
+  'eventEndTimeTs',
+  'eventDescription',
+  'eventLocation',
+  'eventJoinLink',
+];
+
+function _messageType(msg) {
+  return msg?.type || msg?._data?.type || '';
+}
+
+function _hasEventPayload(data) {
+  if (!data || typeof data !== 'object') return false;
+  for (const key of EVENT_DATA_KEYS) {
+    const value = data[key];
+    if (value == null) continue;
+    if (typeof value === 'string' && !value.trim()) continue;
+    return true;
+  }
+  return data.isEventCanceled === true || data.isEventCaneled === true;
+}
+
+/** True when the message is a WhatsApp group/community event. */
+function isWhatsAppEventMessage(msg) {
+  if (!msg) return false;
+  if (EVENT_MESSAGE_TYPES.has(_messageType(msg))) return true;
+  return _hasEventPayload(msg._data);
+}
 
 /** True when the message is a special type with no real media to ingest. */
 function isSpecialNonMediaType(type) {
   return SPECIAL_NON_MEDIA_TYPES.has(type);
+}
+
+/** True when the message object is a special non-media payload (location/event). */
+function isSpecialNonMediaMessage(msg) {
+  if (!msg) return false;
+  if (_messageType(msg) === 'location') return true;
+  return isWhatsAppEventMessage(msg);
 }
 
 /**
@@ -42,15 +91,38 @@ function formatWhatsAppLocationText(msg) {
   return parts.length ? `[Location] ${parts.join(' — ')}` : '[Location] (coordinates unavailable)';
 }
 
+function _eventTitle(msg) {
+  const data = msg?._data || {};
+  return (
+    (typeof data.eventName === 'string' ? data.eventName : '') ||
+    (typeof msg?.body === 'string' ? msg.body : '') ||
+    (typeof data.body === 'string' ? data.body : '') ||
+    (typeof data.caption === 'string' ? data.caption : '')
+  ).trim();
+}
+
 /**
- * Format a scheduled-event message for the model. Only the event name is
- * reliably available; it normally arrives in msg.body.
- * @param {object} msg - whatsapp-web.js message (type "scheduled_event_creation")
+ * Format a scheduled-event message for the model. Title is always shown;
+ * start time is appended only when the serialized payload exposes it.
+ * @param {object} msg
  * @returns {string}
  */
 function formatWhatsAppEventText(msg) {
-  const name = (msg && typeof msg.body === 'string' ? msg.body : '').trim();
-  return name ? `[Event] ${name}` : '[Event]';
+  const data = msg?._data || {};
+  const title = _eventTitle(msg);
+  const parts = [];
+  if (title) parts.push(title);
+
+  const startTs = Number(data.eventStartTime ?? data.eventStartTimeTs ?? msg?.eventStartTime);
+  if (Number.isFinite(startTs) && startTs > 0) {
+    parts.push(formatTimestamp(startTs * 1000));
+  }
+
+  if (data.isEventCanceled === true || data.isEventCaneled === true) {
+    parts.push('(canceled)');
+  }
+
+  return parts.length ? `[Event] ${parts.join(' — ')}` : '[Event]';
 }
 
 /**
@@ -103,13 +175,15 @@ function formatWhatsAppContactText(raw) {
  */
 function formatSpecialMessageText(msg) {
   if (!msg) return null;
-  if (msg.type === 'location') return formatWhatsAppLocationText(msg);
-  if (msg.type === 'scheduled_event_creation') return formatWhatsAppEventText(msg);
+  if (_messageType(msg) === 'location') return formatWhatsAppLocationText(msg);
+  if (isWhatsAppEventMessage(msg)) return formatWhatsAppEventText(msg);
   return null;
 }
 
 module.exports = {
   isSpecialNonMediaType,
+  isSpecialNonMediaMessage,
+  isWhatsAppEventMessage,
   formatWhatsAppLocationText,
   formatWhatsAppEventText,
   formatWhatsAppContactText,
