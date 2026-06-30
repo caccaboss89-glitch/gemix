@@ -1,8 +1,7 @@
 // src/utils/voiceCounter.js
 //
-// Persistent per-chat voice-message counter. Used to enforce the "max 3
-// consecutive voice replies" UX rule: the AI is forbidden from sending a
-// 4th voice in the same chat without a text turn in between.
+// Persistent per-chat voice-reply streak counter (structured `voice:true` replies).
+// Enforces max 3 consecutive voice replies before a text turn is required.
 //
 // Storage:
 //   - Per-user file at  data/users/<storageId>/voice_counts.json.

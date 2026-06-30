@@ -15,12 +15,21 @@ if (!fs.existsSync(MEMORIES_DIR)) {
   fs.mkdirSync(MEMORIES_DIR, { recursive: true });
 }
 
-/**
- * Read the memory content for a given file ID.
- * @param {string} fileId - Memory file ID
- * @returns {string|null} Memory text or null if not found
- */
-function readMemory(fileId) {
+// Per-file async lock to prevent concurrent read-modify-write race conditions.
+const _locks = new Map();
+
+function _withLock(fileId, fn) {
+  const prev = _locks.get(fileId) || Promise.resolve();
+  let release;
+  const current = new Promise(r => { release = r; });
+  _locks.set(fileId, current);
+  return prev.then(fn).finally(() => {
+    release();
+    if (_locks.get(fileId) === current) _locks.delete(fileId);
+  });
+}
+
+function _readMemoryUnlocked(fileId) {
   const filePath = path.join(MEMORIES_DIR, `${fileId}.json`);
   if (!fs.existsSync(filePath)) return null;
   try {
@@ -31,13 +40,7 @@ function readMemory(fileId) {
   }
 }
 
-/**
- * Write memory content for a given file ID. Deletes file if content is empty.
- * @param {string} fileId - Memory file ID
- * @param {string} content - Memory text (max 500 chars)
- * @returns {{ success: boolean, error?: string }}
- */
-function writeMemory(fileId, content) {
+function _writeMemoryUnlocked(fileId, content) {
   const filePath = path.join(MEMORIES_DIR, `${fileId}.json`);
 
   if (!content || content.trim().length === 0) {
@@ -62,4 +65,71 @@ function writeMemory(fileId, content) {
   return { success: true };
 }
 
-module.exports = { readMemory, writeMemory, MAX_MEMORY_CHARS };
+/**
+ * Read the memory content for a given file ID.
+ * @param {string} fileId - Memory file ID
+ * @returns {string|null} Memory text or null if not found
+ */
+function readMemory(fileId) {
+  return _readMemoryUnlocked(fileId);
+}
+
+/**
+ * Write memory content for a given file ID. Deletes file if content is empty.
+ * Serialized via per-file lock to prevent concurrent write conflicts.
+ * @param {string} fileId - Memory file ID
+ * @param {string} content - Memory text (max 1000 chars)
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+async function writeMemory(fileId, content) {
+  return _withLock(fileId, async () => _writeMemoryUnlocked(fileId, content));
+}
+
+/**
+ * Atomically read, modify, and write a memory file under a per-file lock.
+ * @param {string} fileId - Memory file ID
+ * @param {function(existing: string|null): Promise<{ content: string, cleared?: boolean }|{ success: false, error: string }>} fn
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+async function modifyMemory(fileId, fn) {
+  return _withLock(fileId, async () => {
+    const existing = _readMemoryUnlocked(fileId);
+    const result = await fn(existing);
+    if (result && result.success === false) return result;
+    const { content, cleared } = result;
+    if (cleared && (!content || !content.trim())) {
+      return _writeMemoryUnlocked(fileId, '');
+    }
+    return _writeMemoryUnlocked(fileId, content);
+  });
+}
+
+/**
+ * Combine incoming memory text with existing stored memory.
+ * @param {string|null} existing
+ * @param {string} content
+ * @param {boolean} replace - true = overwrite; false = append
+ * @returns {{ content: string, cleared: boolean }}
+ */
+function resolveMemoryContent(existing, content, replace) {
+  const incoming = typeof content === 'string' ? content : '';
+  if (!incoming.trim()) {
+    return { content: '', cleared: true };
+  }
+  if (replace) {
+    return { content: incoming, cleared: false };
+  }
+  const prior = typeof existing === 'string' ? existing.trim() : '';
+  if (!prior) {
+    return { content: incoming, cleared: false };
+  }
+  return { content: `${prior}\n${incoming.trim()}`, cleared: false };
+}
+
+module.exports = {
+  readMemory,
+  writeMemory,
+  modifyMemory,
+  resolveMemoryContent,
+  MAX_MEMORY_CHARS,
+};

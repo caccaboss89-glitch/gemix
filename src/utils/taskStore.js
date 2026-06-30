@@ -1,6 +1,6 @@
 // src/utils/taskStore.js
 //
-// Persistent storage layer for scheduled tasks (reminders).
+// Persistent storage layer for scheduled reminders (reminders).
 // Handles read/write/modify operations on per-user/group task files
 // with per-file async locking to prevent race conditions.
 

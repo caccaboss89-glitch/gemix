@@ -3,8 +3,8 @@
 // Per-call intermediate notification dedup.
 //
 // GemiX can run multiple tool rounds within a single AI call. Without dedup,
-// each round that triggers a slow operation (PDF transcription, video analysis,
-// web research) would fire the same "please wait" banner repeatedly.
+// each round that triggers a slow operation (image_gen, video_gen, build)
+// would fire the same "please wait" banner repeatedly.
 //
 // This module tracks which (call, kind) pairs have already been notified and
 // exposes the message builders for every notification kind.
@@ -50,7 +50,7 @@ function getChatKey(ctx) {
  * invocation - the caller should stay silent.
  *
  * @param {object} ctx  - Handler context; must have `requestId` set.
- * @param {string} kind - Notification kind: 'image_gen' | 'video_gen' | 'build' | etc.
+ * @param {string} kind - Notification kind: 'image_gen' | 'video_gen' | 'build'
  * @returns {boolean}
  */
 function markNotifiedInCall(ctx, kind) {

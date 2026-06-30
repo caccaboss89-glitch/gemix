@@ -4,9 +4,10 @@
 //
 // Main brain (GemiX): fixed schema on every round — `response` (required) plus
 // optional `attachments`, with `conversation_title` added on the first Discord
-// thread turn. Keeping it fixed means `attachments` is always available, even on
-// a single-round turn where xAI runs web/X search server-side (so found image
-// URLs can still be delivered). The schema rides on the same HTTP call as tools
+// thread turn, and a leading `voice` boolean on WA dedicated only. Keeping it
+// fixed means `attachments` is always available, even on a single-round turn
+// where xAI runs web/X search server-side (so found image URLs can still be
+// delivered). The schema rides on the same HTTP call as tools
 // (no extra round). Per xAI docs, json_schema applies only to the final
 // output_text, not to tool calls.
 //
@@ -14,32 +15,30 @@
 // `attachments` optional) on every round of its inner loop.
 
 const RESPONSE_FIELD_DESC =
-  'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax.';
+  'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax. '
+  + 'Use only the formatting declared in the system prompt Format line.';
 
-// Voice-reply fields (WhatsApp only). `voice` is placed BEFORE `response` so the
-// model decides the channel first and writes `response` accordingly.
+// Voice-reply fields (WA dedicated only). `voice` is placed BEFORE `response` so
+// the model decides the channel first and writes `response` accordingly.
 const VOICE_FLAG_DESC =
-  'WhatsApp only. Set true to send THIS reply as a voice message in the current chat instead of text. '
-  + 'Use true only for short, casual, non-technical replies; keep long or technical answers as text. '
+  'Set true to send THIS reply as a voice message in the current chat instead of text. '
+  + 'Keep long or technical answers as text. '
   + 'At most 3 voice messages in a row per chat, then reply as text. '
-  + 'Vary voice vs text across your recent history so you are not repetitive. Voice is only for the current '
-  + 'chat — you cannot send a voice message to anyone else.';
+  + 'Voice is only for the current chat — you cannot send a voice message to anyone else.';
 
 const VOICE_RESPONSE_FIELD_DESC =
   'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY spoken words plus '
   + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
   + 'Keep it under 1000 characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags '
   + 'for a human result (never read them aloud), even if your recent text replies had none. When `voice` is '
-  + 'false write plain text and DO NOT use any voice tag. '
+  + 'false write plain text using only the formatting declared in the system prompt Format line, and DO NOT use any voice tag. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
 
 const GEMIX_ATTACHMENTS_FIELD_DESC =
-  'OPTIONAL. The ONLY way to send files/images in this chat. Include this field only when you want to '
-  + 'send files with your reply. Each entry is a delivery-buffer filename (exactly as reported by the tool '
-  + 'that produced it) or a public https URL to fetch (e.g. an image from web/X search). If you have nothing '
-  + 'to send, omit this field entirely — do not pass an empty array. Never use any other file/image syntax '
-  + '(e.g. render_components, render image/render_searched_image with an image_id): it is not supported and will not be sent.';
+  'OPTIONAL. The ONLY way to send files/images in this chat. Include only when sending files with your reply. '
+  + 'Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. '
+  + 'If nothing to send, omit this field. Never use other file/image syntax (e.g. render_components): it will not be sent.';
 
 const TITLE_FIELD_DESC =
   'Concise topic title for this new conversation (max ~80 chars), no emojis, in the user\'s language.';
@@ -48,11 +47,11 @@ const TITLE_FIELD_DESC =
  * Build the fixed main-brain text.format schema for the current round:
  * `response` (required) + optional `attachments`, plus `conversation_title`
  * (required) on the first Discord thread turn, plus a leading `voice` boolean
- * on WhatsApp (decides voice vs text for the current-chat reply).
+ * on WA dedicated (decides voice vs text for the current-chat reply).
  *
  * @param {object} opts
  * @param {boolean} [opts.includeTitle] - First Discord thread turn (title not set yet).
- * @param {boolean} [opts.allowVoice] - WhatsApp (dedicated): expose the `voice` flag.
+ * @param {boolean} [opts.allowVoice] - WA dedicated: expose the `voice` flag.
  * @returns {object}
  */
 function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } = {}) {
@@ -111,11 +110,9 @@ const BUILD_RESPONSE_FORMAT = {
         type: 'array',
         items: { type: 'string' },
         description:
-          'OPTIONAL. Include only when you want to deliver files to the user with this answer. '
-          + 'Each entry is a workspace path exactly as listed in WorkspaceState (basename or /workspace/…) '
-          + 'and/or a public https URL to fetch (e.g. images from web/X search). '
-          + 'If you have nothing to send, omit this field — do not pass an empty array. '
-          + 'Never use any other file/image syntax (e.g. render_components, render image/render_searched_image with an image_id): it is not supported.',
+          'OPTIONAL. Deliver files with this answer. Each entry: workspace path (basename or /workspace/… as in WorkspaceState) '
+          + 'or a public https URL. Omit if nothing to send. '
+          + 'Never use other file/image syntax (e.g. render_components): it will not be sent.',
       },
     },
     required: ['message'],
@@ -171,6 +168,7 @@ function parseStructuredReply(raw) {
   const attachments = Array.isArray(parsed.attachments)
     ? parsed.attachments.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim())
     : [];
+  // attachments: [] is treated as omitted (no files to send).
   const voice = parsed.voice === true;
 
   return { structured: true, text, title, attachments, voice };

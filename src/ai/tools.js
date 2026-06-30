@@ -7,6 +7,7 @@
 
 const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
 const { LEGAL_NAME } = require('../config/env');
+const { formatSkillNamesList } = require('../utils/skills');
 
 // -- Helpers -------------------------------------------------------------
 
@@ -55,18 +56,36 @@ function _matchesType(value, schemaType) {
  *
  * Checks:
  *   - args is an object
- *   - all `required` properties are present and non-null
+ *   - all `required` properties are present and non-null (empty string allowed when `allowEmpty: true`)
  *   - top-level property types match the declared `type` (string/array/etc.)
  *   - enum constraints on top-level string properties
  *
- * Intentionally NOT recursive: nested objects (e.g. recipient { name, phone })
- * are validated by the individual tool handlers, which already have richer
- * domain rules. The point here is the cheap top-level guard.
+ *   - one level of nested `required` fields on object properties (e.g. recipient)
+ *   - shallow `required` on array items when items.type === 'object', plus one
+ *     level of nested object `required` on those item fields (e.g. recurrence)
+ *
+ * Intentionally not fully recursive: deeper nesting inside array items is
+ * validated by individual tool handlers.
  *
  * @param {object} args - Parsed tool-call arguments.
  * @param {object} toolDef - Tool definition (as returned by makeTool).
  * @returns {string|null}
  */
+function _validateObjectRequired(value, propSchema, pathPrefix) {
+  if (propSchema.type !== 'object' || typeof value !== 'object' || Array.isArray(value)) return null;
+  const nestedRequired = Array.isArray(propSchema.required) ? propSchema.required : [];
+  const nestedProps = propSchema.properties || {};
+  for (const nestedKey of nestedRequired) {
+    const nestedSchema = nestedProps[nestedKey];
+    const allowEmpty = Boolean(nestedSchema && nestedSchema.allowEmpty);
+    const nestedVal = value[nestedKey];
+    if (nestedVal === undefined || nestedVal === null || (nestedVal === '' && !allowEmpty)) {
+      return `Missing required argument "${pathPrefix}.${nestedKey}".`;
+    }
+  }
+  return null;
+}
+
 function validateToolArgs(args, toolDef) {
   if (!toolDef || !toolDef.function || !toolDef.function.parameters) return null;
   const params = toolDef.function.parameters;
@@ -74,12 +93,15 @@ function validateToolArgs(args, toolDef) {
     return 'Tool arguments must be a JSON object.';
   }
   const required = Array.isArray(params.required) ? params.required : [];
+  const props = params.properties || {};
   for (const key of required) {
-    if (args[key] === undefined || args[key] === null || args[key] === '') {
+    const propSchema = props[key];
+    const allowEmpty = Boolean(propSchema && propSchema.allowEmpty);
+    const val = args[key];
+    if (val === undefined || val === null || (val === '' && !allowEmpty)) {
       return `Missing required argument "${key}".`;
     }
   }
-  const props = params.properties || {};
   for (const [key, value] of Object.entries(args)) {
     const propSchema = props[key];
     if (!propSchema) continue; // unknown extra props are tolerated
@@ -89,6 +111,30 @@ function validateToolArgs(args, toolDef) {
     }
     if (!_matchesType(value, propSchema.type)) {
       return `Argument "${key}" has wrong type (expected ${propSchema.type}).`;
+    }
+    if (propSchema.type === 'object' && typeof value === 'object' && !Array.isArray(value)) {
+      const nestedErr = _validateObjectRequired(value, propSchema, key);
+      if (nestedErr) return nestedErr;
+    }
+    if (propSchema.type === 'array' && Array.isArray(value) && propSchema.items?.type === 'object') {
+      const itemSchema = propSchema.items;
+      const itemProps = itemSchema.properties || {};
+      for (let i = 0; i < value.length; i++) {
+        const item = value[i];
+        if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+          return `Argument "${key}[${i}]" must be an object.`;
+        }
+        const itemErr = _validateObjectRequired(item, itemSchema, `${key}[${i}]`);
+        if (itemErr) return itemErr;
+        for (const [itemKey, itemVal] of Object.entries(item)) {
+          const fieldSchema = itemProps[itemKey];
+          if (!fieldSchema || itemVal === undefined || itemVal === null) continue;
+          if (fieldSchema.type === 'object' && typeof itemVal === 'object' && !Array.isArray(itemVal)) {
+            const nestedErr = _validateObjectRequired(itemVal, fieldSchema, `${key}[${i}].${itemKey}`);
+            if (nestedErr) return nestedErr;
+          }
+        }
+      }
     }
     if (Array.isArray(propSchema.enum) && propSchema.enum.length > 0 && typeof value === 'string') {
       if (!propSchema.enum.includes(value)) {
@@ -158,14 +204,19 @@ function buildUpdateMemoryTool(isGroup, isPersonalChat = false) {
     : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
   return makeTool({
     name: 'update_memory',
-    description: `Update personalized memory for ${scope}, for long-term preferences only. Do NOT store transient context. If memory already contains information, rewrite existing entries and append new ones.`,
+    description: `Update personalized memory for ${scope}, for long-term preferences only. Do NOT store transient context.`,
     properties: {
+      replace: {
+        type: 'boolean',
+        description: 'true = content replaces the full memory (rewrite/reorganize). false = append content to existing memory. Empty content always clears memory.',
+      },
       content: {
         type: 'string',
-        description: 'Full memory text (max 1000 chars, empty=clear). Always write in English. Keep it tidy and well-organised - it is a system component. If the current memory is disorganised, rewrite it in order even if not asked, without removing any information.',
+        allowEmpty: true,
+        description: 'Memory text (max 1000 chars total after save, empty=clear). Always write in English.',
       },
     },
-    required: ['content'],
+    required: ['replace', 'content'],
   });
 }
 
@@ -210,12 +261,9 @@ const TOOL_MUSIC_CREATOR = makeTool({
 //
 // Available to all users (active or not) on every platform except Discord.
 //
-// Reference images: each entry is a filename already visible to the model
-// (a file the user just sent, a chat-history file, or a previously generated
-// image - its filename is reported in the tool result) OR a public https URL
-// (e.g. an image found via web/X search). The backend resolves filenames
-// (current-turn delivery buffer first, then chat history), exposes them as
-// public URLs, and xAI fetches everything server-side.
+// Reference images: each entry is a filename with extension from the delivery
+// buffer or chat history, or a public https URL. Filenames resolve buffer-first,
+// then history; local files are exposed as public URLs for xAI.
 
 const TOOL_GENERATE_IMAGE = makeTool({
   name: 'generate_image',
@@ -228,7 +276,7 @@ const TOOL_GENERATE_IMAGE = makeTool({
     reference_images: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Up to 3 images: filenames WITH extension from the delivery buffer or chat history, or public https URLs. Order matters (<IMAGE_0> = first entry). 1 image = edit/transform it; 2-3 = combine subjects, transfer styles, or create a new image from the references. Omit for pure text-to-image.',
+      description: 'Up to 3. Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. Order matters (<IMAGE_0> = first). 1 = edit/transform; 2-3 = combine or style transfer. Omit for pure text-to-image.',
     },
     aspect_ratio: {
       type: 'string',
@@ -250,7 +298,7 @@ const TOOL_GENERATE_VIDEO = makeTool({
     reference_images: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Up to 7 images: filenames WITH extension from the delivery buffer or chat history, or public https URLs. 1 image = that exact image becomes the first frame and is animated (image-to-video); 2-7 = the images guide subjects/characters/style consistency (reference-to-video). Omit for pure text-to-video.',
+      description: 'Up to 7. Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. 1 = animate as first frame; 2-7 = style/subject guides. Omit for pure text-to-video.',
     },
     aspect_ratio: {
       type: 'string',
@@ -268,45 +316,45 @@ const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string' },
   description:
-    'OPTIONAL. Files to attach to THIS delivery: delivery-buffer filenames (exactly as reported by the tool '
-    + 'that produced them) and/or public https URLs. Omit when nothing to attach — never pass an empty array.',
+    'OPTIONAL. Files for this delivery. Each entry: filename with extension from the delivery buffer or chat history, '
+    + 'or a public https URL. Omit when nothing to attach.',
 };
 
 function buildWhatsAppTool(isAdmin) {
-  // Admin: address members directly by phone (roster in <ActiveMembers>), so a
-  // reminder/message never silently defaults to the current chat/caller.
+  // Admin: address members directly by phone (roster in <ActiveMembers>).
   // Active non-admin: name only (the backend resolves it to the member).
+  // This tool never targets the current chat — replies there use structured output.
   const recipientProps = {};
   if (isAdmin) {
     recipientProps.phone = {
       type: 'string',
-      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user.',
+      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user. Required — external number only.',
     };
   } else {
     recipientProps.name = {
       type: 'string',
-      description: 'Recipient member name',
+      description: 'Recipient active member name (not yourself).',
     };
   }
 
   const properties = {
-    message: { type: 'string', description: 'Message text' },
+    message: { type: 'string', description: 'Message text. Use only the formatting declared in the system prompt Format line.' },
     recipient: {
       type: 'object',
       description: isAdmin
-        ? 'Target recipient (phone). Omit to reply in the current chat.'
-        : 'Recipient',
+        ? 'Target recipient (phone). Required — external number only; never the current chat.'
+        : 'Target active member. Required — never the current chat.',
       properties: recipientProps,
-      required: isAdmin ? [] : ['name'],
+      required: isAdmin ? ['phone'] : ['name'],
     },
     attachments: DELIVERY_ATTACHMENTS_PROP,
   };
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool - send a WhatsApp message to a specific recipient (never the current chat; never use for intermediate updates).',
+    description: 'Delivery tool — send a message to a specific phone number. Never the current chat (use structured reply for that). Never for intermediate updates.',
     properties,
-    required: isAdmin ? ['message'] : ['recipient', 'message'],
+    required: ['recipient', 'message'],
   });
 }
 
@@ -331,7 +379,7 @@ function buildEmailTool(isAdmin) {
       type: 'object',
       description: isAdmin ? 'Target recipient (email).' : 'Recipient',
       properties: recipientProps,
-      required: isAdmin ? [] : ['name'],
+      required: isAdmin ? ['email'] : ['name'],
     },
     attachments: DELIVERY_ATTACHMENTS_PROP,
   };
@@ -340,65 +388,82 @@ function buildEmailTool(isAdmin) {
     name: 'send_email',
     description: 'Delivery tool - send an email.',
     properties,
-    required: isAdmin ? ['subject', 'body'] : ['recipient', 'subject', 'body'],
+    required: ['recipient', 'subject', 'body'],
   });
 }
 
 function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
+  const canTargetOthers = isAdmin || isActiveMember;
+  const here = isWhatsAppGroup ? 'group' : 'chat';
   const waProps = {};
 
-  if (isWhatsAppGroup) {
-    waProps.toGroup = {
-      type: 'boolean',
-      description: 'Send this reminder to the current group.',
-    };
-  }
-
-  waProps.toPrivate = {
-    type: 'boolean',
-    description: 'Send this reminder as a private message (to recipient if set, otherwise to the current user).',
-  };
-
-  // Admin targets a recipient by phone (roster in <ActiveMembers>); active
-  // non-admin members by name. Omitting recipient = the current chat/user.
-  const recipientWaProps = {};
   if (isAdmin) {
-    recipientWaProps.phone = {
-      type: 'string',
-      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user.',
-    };
-  } else if (isActiveMember) {
-    recipientWaProps.name = {
-      type: 'string',
-      description: 'Active member name to remind.',
-    };
-  }
-
-  if (Object.keys(recipientWaProps).length > 0) {
+    // Mirror send_whatsapp_message/send_email: the admin only associates a
+    // phone (from the <ActiveMembers> roster or given by the user). No
+    // toPrivate/toGroup flags — omit recipient = current chat/group; set
+    // recipient = the scheduler delivers privately to that number (it treats a
+    // bare recipient as a private reminder).
     waProps.recipient = {
       type: 'object',
-      description: isAdmin
-        ? 'Who to remind (phone). REQUIRED with toPrivate when the reminder is for someone other than the current chat — e.g. "remind X" means X is the recipient, not you.'
-        : 'Active member to remind. REQUIRED with toPrivate when reminding someone other than the current chat.',
-      properties: recipientWaProps,
+      description: `Target recipient (phone) — someone other than the current ${here}.`,
+      properties: {
+        phone: {
+          type: 'string',
+          description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user.',
+        },
+      },
     };
+  } else {
+    if (isWhatsAppGroup) {
+      waProps.toGroup = {
+        type: 'boolean',
+        description: 'Send this reminder to the current group.',
+      };
+    }
+
+    if (isActiveMember) {
+      waProps.toPrivate = {
+        type: 'boolean',
+        description: 'Send this reminder as a private message (to recipient if set, otherwise to the current user).',
+      };
+    } else if (isWhatsAppGroup) {
+      waProps.toPrivate = {
+        type: 'boolean',
+        description: 'Deliver as a private DM to you instead of in the group.',
+      };
+    }
+
+    // Active non-admin members target a recipient by name only (the backend
+    // resolves it to the member). Active members never address raw phone
+    // numbers — a safety mechanism against unwanted sends to anyone.
+    if (isActiveMember) {
+      waProps.recipient = {
+        type: 'object',
+        description: 'Active member to remind. REQUIRED with toPrivate when reminding someone other than the current chat.',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Active member name to remind.',
+          },
+        },
+      };
+    }
   }
+
+  const contentDesc = canTargetOthers
+    ? 'Reminder text for the recipient at delivery time (not instructions to yourself). Use only the formatting declared in the system prompt Format line.'
+    : (isWhatsAppGroup
+      ? 'Reminder text for the group or for you in DM, per whatsapp settings. Use only the formatting declared in the system prompt Format line.'
+      : 'Reminder text delivered to you at the scheduled time. Use only the formatting declared in the system prompt Format line.');
 
   const taskItemProps = {
     content: {
       type: 'string',
-      description: 'The reminder message, addressed to the recipient (e.g. "Niky, entra su Discord"), not to the current user.',
+      description: contentDesc,
     },
     scheduledAt: {
       type: 'string',
       description: 'Execution time in ISO 8601 (e.g. 2026-06-05T14:30:00). System uses the correct timezone.',
-    },
-    whatsapp: {
-      type: 'object',
-      description: isWhatsAppGroup
-        ? 'Destination. Omit = current group. For a private reminder set toPrivate; add recipient to send it to someone else (without recipient it goes to the current user).'
-        : 'Destination. Omit = current chat. To remind someone else, set toPrivate AND recipient; without recipient it goes to the current user.',
-      properties: waProps,
     },
     recurrence: {
       type: 'object',
@@ -410,6 +475,20 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       required: ['freq', 'endAt'],
     },
   };
+
+  if (canTargetOthers || isWhatsAppGroup) {
+    taskItemProps.whatsapp = {
+      type: 'object',
+      description: isAdmin
+        ? `Delivery destination. Omit = current ${here}. Set recipient = private reminder to that phone.`
+        : (canTargetOthers
+          ? (isWhatsAppGroup
+            ? 'Destination. Omit = current group. For a private reminder set toPrivate; add recipient to send it to someone else (without recipient it goes to the current user).'
+            : 'Destination. Omit = current chat. To remind someone else, set toPrivate and add recipient.')
+          : 'Omit = current group. Set toPrivate for a reminder to you only (private DM).'),
+      properties: waProps,
+    };
+  }
 
   return makeTool({
     name: 'schedule_tasks',
@@ -442,7 +521,7 @@ function buildReadMyTasksTool(isWhatsAppGroup) {
   }
   return makeTool({
     name: 'read_my_tasks',
-    description: 'Show scheduled tasks.',
+    description: 'Show scheduled reminders.',
     properties,
   });
 }
@@ -463,7 +542,7 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
   }
   return makeTool({
     name: 'remove_my_tasks',
-    description: 'Remove scheduled tasks.',
+    description: 'Remove scheduled reminders.',
     properties,
     required: ['taskIds'],
   });
@@ -483,28 +562,31 @@ const TOOL_BUG_REPORT = makeTool({
 
 // -- Build sub-agent (build tool) ------------------------------------
 //
-// Delegates complex file write, shell, document or multi-step tasks to an
-// isolated build sub-agent with its own workspace. The sub-agent returns
-// structured JSON (message + optional attachments). Pass relevant assets via attachments[].
-// The sub-agent has its own isolated context (no chat history).
+// Isolated sub-agent (/workspace/, bash, yt-dlp, ffmpeg). No chat history —
+// stage inputs via attachments[]. Native web/X search on the sub-agent side.
 
 function buildBuildTool(isGroup) {
   const scope = isGroup ? 'the current group' : 'the current user';
+  const skillNames = formatSkillNamesList();
+  const skillsHint = skillNames ? ` Skills: ${skillNames}.` : '';
   return makeTool({
     name: 'build',
     description:
-      'Delegate to build sub-agent (work on files, bash, yt-dlp, ffmpeg, skills inside). Brief prompt only — it researches and builds. '
-      + `Workspace for ${scope} (4h TTL, 500 MB). At most once per round. `
-      + 'Generate image/video/song first if the build needs them, then attachments[].',
+      'Delegate file deliverables to an isolated build sub-agent (/workspace/, bash, yt-dlp, ffmpeg). '
+      + 'Isolated turn — no chat history; it sees only your prompt, &lt;BuildWorkspace&gt; files, and attachments[]. '
+      + 'Stage in attachments[] anything it must use that is not already in the workspace; generate image, video, or music first when needed. '
+      + 'Autonomous web/X search on the sub-agent. '
+      + `Workspace for ${scope}, 4h TTL, 500 MB, once per round.${skillsHint}`,
     properties: {
       prompt: {
         type: 'string',
-        description: 'What to deliver, format, constraints. Brief — sub-agent researches on its own.',
+        description: 'Brief for the sub-agent: deliverable, format, naming, and constraints.',
       },
       attachments: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Files to stage into the build workspace: filenames from the delivery buffer or chat history, or public https URLs. Empty/omit if none.',
+        description:
+          'Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. Omit if already in its workspace or not needed.',
       },
     },
     required: ['prompt'],
@@ -554,7 +636,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   }
 
   // 3. Communication & Delivery. Voice replies are NOT a tool: GemiX sets the
-  // `voice` flag in its structured reply (WhatsApp only — see responseSchema).
+  // `voice` flag in its structured reply (WA dedicated only — see responseSchema).
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   }

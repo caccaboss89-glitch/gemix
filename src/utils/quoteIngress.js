@@ -1,6 +1,6 @@
 // Quote/reply handling when the referenced message is inside or outside MAX_HISTORY.
 
-const { PLATFORM_WA_DEDICATED, MAX_HISTORY } = require('../config/constants');
+const { PLATFORM_WA_DEDICATED } = require('../config/constants');
 const {
   REPLY_OUTSIDE_HISTORY_PREFIX,
   cleanIncomingText,

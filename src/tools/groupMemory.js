@@ -2,35 +2,48 @@
 //
 // Thin wrapper for group-level persistent memory (WhatsApp groups only).
 // Derives a stable file key via getGroupTaskFileId (userIdentifier) and delegates
-// to the centralized memoryStore (writeMemory + MAX_MEMORY_CHARS enforcement).
+// to the centralized memoryStore (modifyMemory + MAX_MEMORY_CHARS enforcement).
 // Returns simple success/error or confirmation messages for the main brain.
 // Companion to userMemory.js.
 
-const { writeMemory, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
+const { modifyMemory, resolveMemoryContent, MAX_MEMORY_CHARS } = require('../utils/memoryStore');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 
 /**
  * Update the group memory for the current WhatsApp group.
- * @param {string} content - New memory content (max 1000 chars, empty to clear)
+ * @param {string} content - Memory text to write or append (max 1000 chars total, empty to clear)
  * @param {string} groupId - WhatsApp group ID
- * @returns {string} Result message
+ * @param {boolean} [replace=true] - true = overwrite; false = append to existing memory
+ * @returns {Promise<{ success: boolean, message?: string, error?: string }>}
  */
-function updateGroupMemory(content, groupId) {
+async function updateGroupMemory(content, groupId, replace = true) {
   if (!groupId) {
     return { success: false, error: 'Unable to identify the current group.' };
   }
 
   const memoryFileId = 'memory_' + getGroupTaskFileId(groupId);
-  const result = writeMemory(memoryFileId, content);
-  if (!result.success) {
-    return { success: false, error: result.error };
+  let cleared = false;
+  let resolved = '';
+  const writeResult = await modifyMemory(memoryFileId, async (existing) => {
+    const resolvedContent = resolveMemoryContent(existing, content, replace !== false);
+    cleared = resolvedContent.cleared;
+    resolved = resolvedContent.content;
+    if (!cleared && resolved.length > MAX_MEMORY_CHARS) {
+      return { success: false, error: `Content exceeds the ${MAX_MEMORY_CHARS} character limit (${resolved.length} chars).` };
+    }
+    return resolvedContent;
+  });
+
+  if (!writeResult.success) {
+    return { success: false, error: writeResult.error };
   }
 
-  if (!content || content.trim().length === 0) {
+  if (cleared) {
     return { success: true, message: 'Group memory cleared.' };
   }
 
-  return { success: true, message: `Group memory updated (${content.length}/${MAX_MEMORY_CHARS} chars).` };
+  const mode = replace === false ? 'appended to' : 'updated';
+  return { success: true, message: `Group memory ${mode} (${resolved.length}/${MAX_MEMORY_CHARS} chars).` };
 }
 
 module.exports = { updateGroupMemory };

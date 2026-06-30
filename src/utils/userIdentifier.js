@@ -2,7 +2,7 @@
 //
 // Resolves a user across platforms (WhatsApp / Discord) into a unified
 // identity object containing the member record (if active), active status,
-// and the canonical taskFileId (WhatsApp memory, scheduled tasks, etc.).
+// and the canonical taskFileId (WhatsApp memory, scheduled reminders, etc.).
 
 const { findMemberByWa, findMemberByDiscord, isAdmin } = require('../config/members');
 const { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_WA, TASK_PREFIX_GROUP } = require('../config/constants');

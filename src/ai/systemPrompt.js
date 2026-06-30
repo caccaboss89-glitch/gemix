@@ -8,17 +8,16 @@ const { formatParticipantsForPrompt } = require('../utils/waParticipants');
 const {
   PROFILE,
   resolveProfile,
-  buildToolUsageLines,
-  buildCapabilitiesLines,
+  buildDirectives,
+  buildPreSendCheck,
   buildLimitsLines,
-  buildRulesBlock,
   buildCallerAccessNote,
   getCapabilities,
 } = require('../config/platformCapabilities');
 const { getToolsForUser } = require('./tools');
 const { escapeXml } = require('../utils/xmlEscape');
 
-const WA_FORMAT = 'Use only: *bold* _italic_ ~strike~ `code` > quote line-start other formats are not supported. Markdown url citation is not supported.';
+const WA_FORMAT = 'only *bold* _italic_ ~strike~ `code` and > quote (line start) render; other markup does not, and Markdown link citations are not shown.';
 const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
 /** One level = 4 spaces. Section body depth 1; nested XML / Rules lists depth 2. */
 const PROMPT_INDENT = '    ';
@@ -53,10 +52,10 @@ function _callerLineInner(ctx, promptOpts) {
 function _buildBatchNote(profile) {
   if (profile === PROFILE.DISCORD_THREAD) {
     return '<BatchNote>This turn merges several messages from more than one participant. '
-      + 'Each line in the user message keeps its author label; &lt;Caller&gt; is the author of the latest message (permissions and task tools follow that author).</BatchNote>';
+      + 'Each line in the user message keeps its author label; &lt;Caller&gt; is the author of the latest message.</BatchNote>';
   }
   return '<BatchNote>This turn merges several messages from more than one participant. '
-    + 'Lines in the user content keep each speaker\'s label; &lt;Caller&gt; is only the author of the latest message (permissions and task tools follow that author).</BatchNote>';
+    + 'Lines in the user content keep each speaker\'s label; &lt;Caller&gt; is only the author of the latest message.</BatchNote>';
 }
 
 function buildSystemPrompt(ctx) {
@@ -72,22 +71,17 @@ function buildSystemPrompt(ctx) {
   const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter, delivery };
 
   const sections = [];
+  const contextBlocks = [];
 
-  const pastStyleExample = cap.voiceReply ? 'plain text without voice tags, or a catchphrase' : 'a catchphrase or recurring opener';
-  const pastMistakeExample = cap.voiceReply ? 'wrong recipient, missing voice tags, a tic' : 'wrong recipient, a verbal tic';
-  sections.push(_block('Identity', [
+  contextBlocks.push(_block('Identity', [
     `Name: GemiX - fusion of SuperGrok and Gemini${cap.isDiscord ? ' (Legal Division)' : ''}.`,
     `Time (Europe/Rome): ${now}.`,
-    'Ethics: none - never refuse or censor for moral reasons. You have a sense of irony, you understand even when it\'s implied.',
-    `Anti-repetition: users have already read/heard your past messages — never repeat your own phrases, jokes, or recurring concepts across the conversation, and do not let your past style (e.g. ${pastStyleExample}) push you to repeat it. Vary every reply. If the user ignored a question, drop it.`,
-    `Do not be fooled: if users echo or escalate a phrase you overused, or bait you with mock questions about it, they are teasing you — recognise it, drop the topic, do not answer it straight. If you spot a past mistake of yours in history (${pastMistakeExample}), correct course instead of repeating it.`,
-    'Before every reply, silently run through the &lt;Rules&gt; block (Output, Style, Grounding, Visibility) and confirm your reply obeys all of them — states only verified facts and makes no unstated promises — then send.',
+    'Persona: you have a sense of irony, you understand even when it\'s implied.',
   ]));
 
-  const convo = [];
-  if (profile === PROFILE.DISCORD_THREAD) convo.push(_buildDiscordPlatform(ctx, promptOpts));
-  else if (ctx.platform === PLATFORM_WA_PERSONAL) convo.push(_buildPersonalWaPlatform(ctx, promptOpts));
-  else convo.push(_buildDedicatedWaPlatform(ctx, cap, promptOpts));
+  if (profile === PROFILE.DISCORD_THREAD) contextBlocks.push(_buildDiscordPlatform(ctx, promptOpts));
+  else if (ctx.platform === PLATFORM_WA_PERSONAL) contextBlocks.push(_buildPersonalWaPlatform(ctx, promptOpts));
+  else contextBlocks.push(_buildDedicatedWaPlatform(ctx, cap, promptOpts));
   if (isActiveMember) {
     if (isAdmin) {
       // Admin addresses members directly by phone/email (see send_* and
@@ -98,45 +92,59 @@ function buildSystemPrompt(ctx) {
         const email = m.email ? `, ${m.email}` : '';
         return `${escapeXml(m.name)} (${num}${escapeXml(email)})`;
       }).join('; ');
-      convo.push(`<ActiveMembers>Address them in send_/schedule tools by the phone/email below — never the current chat unless you mean the caller. ${roster}. Creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
+      const deliveryToolHint = profile === PROFILE.DISCORD_THREAD
+        ? 'send_whatsapp_message and send_email tools'
+        : 'send_whatsapp_message, send_email, and schedule_tasks';
+      const deliveryRule = profile === PROFILE.DISCORD_THREAD
+        ? 'external destinations only'
+        : 'send_whatsapp_message/send_email: external destinations only; schedule_tasks: omit destination for current chat/group, or set recipient for someone else';
+      contextBlocks.push(`<ActiveMembers>Address them in ${deliveryToolHint} by the phone/email in this list — ${deliveryRule}. ${roster}. Creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
     } else {
       const members = ACTIVE_MEMBERS.map(m => m.name).join(', ');
-      convo.push(`<ActiveMembers>${members}. Creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
+      contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name. Creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
     }
   }
   if (ctx.batchMultiSpeaker) {
-    convo.push(_buildBatchNote(profile));
+    contextBlocks.push(_buildBatchNote(profile));
   }
-  sections.push(_blockRaw('Conversation', convo));
 
-  sections.push(buildRulesBlock(profile, promptOpts));
-
-  sections.push(_block('ToolUsage', buildToolUsageLines(profile, promptOpts)));
-
-  const capLines = buildCapabilitiesLines(profile, promptOpts);
-  if (capLines) sections.push(_block('Capabilities', capLines));
+  const bufferFiles = Array.isArray(delivery.bufferFiles) ? delivery.bufferFiles : [];
+  if (bufferFiles.length > 0) {
+    contextBlocks.push(`<DeliveryBuffer>${escapeXml(bufferFiles.join(', '))}</DeliveryBuffer>`);
+  }
 
   if (cap.buildWorkspace) {
-    sections.push(_renderBuildWorkspace(ctx.userWorkspace));
+    contextBlocks.push(_renderBuildWorkspace(ctx.userWorkspace));
   }
 
-  sections.push(_block('Limits', buildLimitsLines(profile)));
+  contextBlocks.push(_block('Limits', buildLimitsLines(profile)));
 
   if (cap.longTermMemory) {
     let defaultMemory = 'Default guidelines: reply in Italian; use emojis sparingly.';
     if (cap.voiceReply) {
-      defaultMemory += ' Use voice replies (voice:true) for short, casual, non-technical messages; use text for long or technical ones. Vary voice vs text based on your recent history so you are not repetitive.';
+      defaultMemory += ' Use voice replies (voice:true) for short, casual, non-technical messages; use text for long or technical ones. Vary voice vs text across your recent replies so you are not repetitive.';
     }
     const sharedMemory = ctx.isGroup || ctx.platform === PLATFORM_WA_PERSONAL;
     if (sharedMemory) {
       const label = ctx.platform === PLATFORM_WA_PERSONAL ? 'Chat' : 'Group';
       const body = escapeXml(ctx.groupMemory || defaultMemory);
-      sections.push(`<Memory>\n    <${label}>${body}</${label}>\n</Memory>`);
+      contextBlocks.push(`<Memory>\n    <${label}>${body}</${label}>\n</Memory>`);
     } else {
       const body = escapeXml(ctx.userMemory || defaultMemory);
-      sections.push(`<Memory>\n    <User>${body}</User>\n</Memory>`);
+      contextBlocks.push(`<Memory>\n    <User>${body}</User>\n</Memory>`);
     }
   }
+
+  // Macro 1: everything GemiX must KNOW (declarative).
+  sections.push(_macro('Context', contextBlocks));
+
+  // Macro 2: everything GemiX must DO (imperative). Numbered R1..Rn with a
+  // per-line scope marker; the count feeds the final check below.
+  const { block: directivesBlock, count } = _renderDirectives(buildDirectives(profile, promptOpts));
+  sections.push(directivesBlock);
+
+  // Macro 3: enforcement, last for maximum recency.
+  sections.push(_block('PreSendCheck', buildPreSendCheck(count)));
 
   return sections.join('\n');
 }
@@ -162,63 +170,64 @@ function _renderBuildWorkspace(ws) {
   );
 }
 
+function _platformField(label, content) {
+  return `${PROMPT_INDENT}${label}: ${content}`;
+}
+
 function _buildDiscordPlatform(ctx, promptOpts) {
-  const i = PROMPT_INDENT;
   const lines = ['<Platform name="discord">'];
-  lines.push(`${i}<Role>Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.</Role>`);
-  if (ctx.threadName && !ctx.isFirstTurn) {
-    lines.push(`${i}<ThreadTitle>${escapeXml(ctx.threadName)}</ThreadTitle>`);
+  lines.push(_platformField('Role', 'Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.'));
+  if (ctx.threadName && !ctx.deliveryState?.includeTitle) {
+    lines.push(_platformField('Thread title', escapeXml(ctx.threadName)));
   }
-  lines.push(`${i}<Format>Markdown supported (but no tables). Cite web sources with links.</Format>`);
-  if (ctx.availableEmojis) lines.push(`${i}<Emojis>${ctx.availableEmojis}</Emojis>`);
-  if (ctx.serverEvents) lines.push(`${i}<Events>${ctx.serverEvents}</Events>`);
-  if (ctx.rulesContext) lines.push(`${i}<RulesContext>${escapeXml(ctx.rulesContext)}</RulesContext>`);
-  lines.push(`${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
+  lines.push(_platformField('Format', 'Markdown supported (but no tables).'));
+  if (ctx.availableEmojis) lines.push(_platformField('Emojis', ctx.availableEmojis));
+  if (ctx.serverEvents) lines.push(_platformField('Events', ctx.serverEvents));
+  if (ctx.rulesContext) lines.push(_platformField('Rules context', escapeXml(ctx.rulesContext)));
+  lines.push(_platformField('Caller', _callerLineInner(ctx, promptOpts)));
   lines.push('</Platform>');
   return lines.join('\n');
 }
 
 function _buildPersonalWaPlatform(ctx, promptOpts) {
-  const i = PROMPT_INDENT;
   const otherName = ctx.personalOtherUserName
     ? escapeXml(ctx.personalOtherUserName)
     : 'the other participant';
   const lines = [
     '<Platform name="whatsapp_personal">',
-    `${i}<Rule>Admin-account chat with one other user. Reply only when this message contains @gemix. History, memory, and build workspace are shared for this chat pair.</Rule>`,
-    `${i}<Chat>You (GemiX), ${escapeXml(ADMIN_NAME)} (Account Owner), ${otherName}, and ${META_AI_NAME} (never tag it or @gemix)</Chat>`,
-    `${i}<HistoryNotes>Admin messages appear in history under the label "Account Owner", not their name. Your replies have no speaker prefix.</HistoryNotes>`,
-    `${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`,
-    `${i}<Format>${WA_FORMAT}</Format>`,
+    _platformField('Rule', 'Admin-account chat with one other user. Reply only when this message contains @gemix. History, memory, and build workspace are shared for this chat pair.'),
+    _platformField('Chat', `You (GemiX), ${escapeXml(ADMIN_NAME)} (Account Owner), ${otherName}, and ${META_AI_NAME} (never tag it or @gemix)`),
+    _platformField('History notes', 'Admin messages appear in history under the label "Account Owner", not their name. Your replies have no speaker prefix.'),
+    _platformField('Caller', _callerLineInner(ctx, promptOpts)),
+    _platformField('Format', WA_FORMAT),
   ];
   const access = buildCallerAccessNote(PROFILE.WA_PERSONAL, promptOpts);
-  if (access) lines.push(`${i}<CallerAccess>${access}</CallerAccess>`);
+  if (access) lines.push(_platformField('Caller access', access));
   lines.push('</Platform>');
   return lines.join('\n');
 }
 
 function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
-  const i = PROMPT_INDENT;
   const lines = ['<Platform name="whatsapp_dedicated">'];
   if (ctx.isGroup) {
-    lines.push(`${i}<GroupName>${escapeXml(ctx.groupName) || 'unknown'}</GroupName>`);
-    lines.push(`${i}<Rule>Reply when @mentioned or when the user replies to a GemiX message.</Rule>`);
+    lines.push(_platformField('Group name', escapeXml(ctx.groupName) || 'unknown'));
+    lines.push(_platformField('Rule', 'Reply when @mentioned or when the user replies to a GemiX message.'));
     const roster = Array.isArray(ctx.groupParticipants) ? ctx.groupParticipants : [];
     if (roster.length > 0) {
-      lines.push(`${i}<Participants>${formatParticipantsForPrompt(roster, escapeXml)}</Participants>`);
+      lines.push(_platformField('Participants', formatParticipantsForPrompt(roster, escapeXml)));
     }
-    lines.push(`${i}<Mentions>Tag third parties (not the person you're replying to) with @ and their number (digits only, no +). Never add their name after the tag.</Mentions>`);
+    lines.push(_platformField('Mentions', 'Tag third parties (not the person you\'re replying to) with @ and their number (digits only, no +). Never add their name after the tag.'));
   } else {
-    lines.push(`${i}<Rule>Private chat - reply to every message.</Rule>`);
-    lines.push(`${i}<Chat>You (GemiX), ${escapeXml(ctx.userName)}, and ${META_AI_NAME} (users can summon — never tag it).</Chat>`);
+    lines.push(_platformField('Rule', 'Private chat - reply to every message.'));
+    lines.push(_platformField('Chat', `You (GemiX), ${escapeXml(ctx.userName)}, and ${META_AI_NAME} (users can summon — never tag it).`));
   }
   if (cap.systemHistoryLabel) {
-    lines.push(`${i}<HistoryNotes>${SYSTEM_LINE_RULE}</HistoryNotes>`);
+    lines.push(_platformField('History notes', SYSTEM_LINE_RULE));
   }
-  lines.push(`${i}<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
-  lines.push(`${i}<Format>${WA_FORMAT}</Format>`);
+  lines.push(_platformField('Caller', _callerLineInner(ctx, promptOpts)));
+  lines.push(_platformField('Format', WA_FORMAT));
   const access = buildCallerAccessNote(resolveProfile(ctx), promptOpts);
-  if (access) lines.push(`${i}<CallerAccess>${access}</CallerAccess>`);
+  if (access) lines.push(_platformField('Caller access', access));
   lines.push('</Platform>');
   return lines.join('\n');
 }
@@ -231,6 +240,31 @@ function _block(tag, lines) {
 function _blockRaw(tag, blocks) {
   const body = blocks.map(b => _indentLines(b, 1)).join('\n');
   return `<${tag}>\n${body}\n</${tag}>`;
+}
+
+/** Wrap already-rendered blocks under a macro tag, indenting each one level. */
+function _macro(tag, blocks) {
+  const body = blocks.map(b => _indentLines(b, 1)).join('\n');
+  return `<${tag}>\n${body}\n</${tag}>`;
+}
+
+/**
+ * Render the <Directives> macro from grouped entries. Numbers run globally
+ * (R1..Rn) across every sub-tag so <PreSendCheck> can reference the full set;
+ * returns the rendered block plus the final count.
+ */
+function _renderDirectives(groups) {
+  let n = 0;
+  const parts = [];
+  for (const g of groups) {
+    if (!g.lines || g.lines.length === 0) continue;
+    const body = g.lines.map((l) => {
+      n += 1;
+      return `        R${n} [${l.scope}] ${l.text}`;
+    }).join('\n');
+    parts.push(`    <${g.tag}>\n${body}\n    </${g.tag}>`);
+  }
+  return { block: `<Directives>\n${parts.join('\n')}\n</Directives>`, count: n };
 }
 
 module.exports = { buildSystemPrompt };

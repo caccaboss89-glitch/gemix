@@ -1,6 +1,6 @@
 // src/tools/taskReader.js
 //
-// Reads scheduled tasks (personal and optionally group) from taskStore.
+// Reads scheduled reminders (personal and optionally group) from taskStore.
 // Formats them with timestamps and IDs into an XML-wrapped <ScheduledTasks> message
 // for the main brain. Companion to taskRemover and scheduler.
 

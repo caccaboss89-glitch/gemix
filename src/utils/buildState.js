@@ -3,9 +3,9 @@
 // Per-workspace activity tracking and locking for the `build` sub-agent.
 //
 // What's stored:
-//   - lastActivityAt: ms timestamp updated by handler.js on every main
-//     turn. The workspace TTL counts inactivity from the user's last
-//     interaction with GemiX (across any platform).
+//   - lastActivityAt: ms timestamp updated by handler.js on each WhatsApp main
+//     turn (Discord does not touch build workspaces). The workspace TTL counts
+//     inactivity from the user's last WhatsApp interaction with GemiX.
 //   - lock: { ownerId, acquiredAt, expiresAt } - a per-workspace mutex used
 //     by the build tool to serialize concurrent invocations. The lock has
 //     a hard expiry.

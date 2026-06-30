@@ -3,7 +3,7 @@
 // `build` tool: hand a task to the build sub-agent (GemiX-Build).
 //
 // Responsibilities (host side):
-//   1. Resolve the workspaceId (group:<id> or user:<storageId>).
+//   1. Resolve the workspaceId (group:<id>, group:personal:<chatId>, or user:<storageId>).
 //   2. Acquire the per-workspace build lock with a 30s wait.
 //   3. Resolve every entry in `attachments[]` to a real file:
 //        - public https URLs are downloaded,
@@ -67,7 +67,7 @@ function _historyDirFor(userCtx) {
 /**
  * Try to resolve an attachment entry:
  *   1. Public https URLs are downloaded into memory.
- *   2. The current-turn delivery buffer (responseCtx.attachments[]) by `name` match.
+ *   2. The delivery buffer (responseCtx.attachments[]) by `name` match.
  *   3. Chat history for this user.
  * Does not resolve paths under the build workspace (see file header).
  *

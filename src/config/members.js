@@ -45,7 +45,7 @@ function _loadMembers() {
   }
 
   log.error(
-    `No members file found at ${candidate}.\n` +
+    `No members file found at ${MEMBERS_FILE}.\n` +
     `The active members list must be provided in a JSON file (see src/data/members.json).`
   );
 

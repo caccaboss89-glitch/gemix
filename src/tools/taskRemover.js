@@ -11,7 +11,7 @@ const { modifyTaskFile } = require('../utils/taskStore');
  * @returns {Promise<object>} Result message
  */
 async function removeTasks(taskIds, fileId) {
-  let result = { success: false, error: 'No task file found. You have no scheduled tasks.' };
+  let result = { success: false, error: 'No task file found. You have no scheduled reminders.' };
 
   await modifyTaskFile(fileId, async (data) => {
     if (!data || !Array.isArray(data.tasks) || data.tasks.length === 0) {

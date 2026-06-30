@@ -2,8 +2,9 @@
 //
 // Shared WhatsApp logic used by both dedicated.js and personal.js.
 // Builds history, handles incoming media/quoted messages, processes
-// current message attachments, and sends responses (text + voice + files).
-// Central place for WhatsApp-specific formatting and media handling.
+// current message attachments, and sends responses (text and/or voice on
+// WA dedicated, plus file attachments). Central place for WhatsApp-specific
+// formatting and media handling.
 
 const { MessageMedia } = require('whatsapp-web.js');
 const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = require('../../config/constants');
@@ -125,11 +126,10 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     ? Boolean(msg.fromMe && personalGemixFlags && personalGemixFlags[mi])
     : Boolean(msg.fromMe));
 
-  // Pre-upload budget pass: decide which messages may upload media to xAI BEFORE
-  // doing any upload. Walking newest→oldest, only the newest MAX_IMAGE_READS
-  // images and MAX_FILE_READS files are allowed; the rest stay tag-only and are
-  // never uploaded. This bounds xAI uploads to <=20 regardless of how many files
-  // the history holds (classifyAiFileDelivery is cheap — no download).
+  // Pre-upload budget pass (newest→oldest, per message with media on WA):
+  // only the newest MAX_IMAGE_READS image messages and MAX_FILE_READS file
+  // messages may upload to xAI; the rest stay tag-only and are never uploaded.
+  // (Discord allocates budget per attachment — see discord/client.js.)
   const uploadAllowed = new Array(messages.length).fill(false);
   {
     let imgBudget = MAX_IMAGE_READS;
@@ -260,7 +260,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       );
       textContent = `${textContent} ${mediaIngress.textFragment.trim()}`.trim();
       if (overBudget && !textContent.includes('not shown this turn')) {
-        textContent = `${textContent} (older file, not shown this turn — newest ${MAX_IMAGE_READS} images / ${MAX_FILE_READS} files per call; ask to resend or reply to it to view)`.trim();
+        textContent = `${textContent} (older media, not shown this turn — newest ${MAX_IMAGE_READS} image messages + ${MAX_FILE_READS} file messages on WhatsApp; ask to resend or reply to view)`.trim();
       }
       if (!textContent) {
         textContent = (mediaIngress.tag || buildAttachmentTag(null, resolvedName || msg._data?.filename || 'file')).trim();
@@ -297,7 +297,8 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 /**
  * Extract quoted message content if this message is a reply.
  * Handles media (images, video, audio with duration limits, documents).
- * and plain quoted text. Uses recentMessageIds to decide PDF media inclusion.
+ * and plain quoted text. Uses recentMessageIds to decide whether the quoted
+ * message is still inside the loaded history window.
  * @param {object} msg - The whatsapp-web.js message object
  * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
  * @param {string} userId - storage id for media sync
@@ -344,7 +345,7 @@ async function _sendTextWithRetry(chat, text, mentions = []) {
  * Handles text messages, voice messages, and file attachments.
  * Build audio/video and oversized files use temp download links; other media try direct send first, then temp links on failure.
  * @param {object} chat - The whatsapp-web.js Chat object
- * @param {object} responseData - Response data { text, voiceBuffer, isVoiceOnly, attachments, researchFooter? }
+ * @param {object} responseData - { text, voiceBuffer, isVoiceOnly, attachments, researchFooter?, voiceTranscriptText?, voiceTranscriptChatId? }
  * @param {{ platform?: string }} [opts] - delivery context (platform drives mention filtering)
  * @returns {Promise<void>}
  */

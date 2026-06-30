@@ -313,7 +313,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
  * Discord re-fetches missing files from the thread when history is rebuilt.
  *
  * @param {string} userId
- * @param {Set<string>|Iterable<string>} referencedFilenames - bare filenames present in the chat buffer (no "history/" prefix)
+ * @param {Set<string>|Iterable<string>} referencedFilenames - bare filenames referenced in chat history or the current turn (no "history/" prefix)
  * @param {object} [opts]
  * @param {number} [opts.maxAgeMs] - extra age cap (Discord: 4h via DISCORD_MAX_AGE_MS; WA: none)
  * @param {boolean} [opts.ageOnly] - when true, delete only files older than maxAgeMs (safe if history load failed)
@@ -416,8 +416,8 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
 }
 
 /**
- * Collect on-disk history filenames still referenced by the chat buffer
- * (attachment tags, multimodal _historyPath hints).
+ * Collect on-disk history filenames still referenced by chat history or the
+ * current turn (attachment tags, multimodal _historyPath hints).
  *
  * @param {Array<{content: any}>} historyMsgs
  * @param {any} [currentContent] - current turn user content

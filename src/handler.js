@@ -15,8 +15,8 @@
 //      model returns the final response or the round budget is reached. The
 //      final reply is always structured JSON (response / optional attachments,
 //      plus conversation_title on the first Discord thread turn, plus a `voice`
-//      flag on WhatsApp) enforced via a fixed text.format schema. When
-//      `voice:true` (WhatsApp), `response` is spoken via TTS instead of text.
+//      flag on WA dedicated) enforced via a fixed text.format schema. When
+//      `voice:true` (WA dedicated only), `response` is spoken via TTS instead of text.
 //   5. Apply the research badge (real web/X search counts) and ship the
 //      reply back to the platform.
 
@@ -64,7 +64,7 @@ const {
 } = require('./utils/toolCallExecution');
 const { sendIntermediateNotification } = require('./utils/intermediateNotification');
 const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
-const { markNotifiedInCall, clearCallNotifications } = require('./utils/notificationDedup');
+const { clearCallNotifications } = require('./utils/notificationDedup');
 
 const log = createLogger('Handler');
 
@@ -117,14 +117,13 @@ const { resolveProfile, toolUnavailableMessage } = require('./config/platformCap
 function _toolNotAvailableMessage(toolName, ctx) {
   return toolUnavailableMessage(toolName, resolveProfile(ctx), {
     isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
-    isFirstTurn: Boolean(ctx.isFirstTurn),
   });
 }
 
 /**
  * Main message handler. Takes a normalized context and returns a response object.
  * @param {object} ctx
- * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, researchFooter? }
+ * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, researchFooter?, voiceTranscriptText?, voiceTranscriptChatId?, systemMessage? }
  */
 async function handleMessage(ctx) {
   const responseCtx = {
@@ -233,7 +232,6 @@ async function handleMessage(ctx) {
       memoryFileId: sharedMemoryFileId || memoryFileId,
       userId: ctx.userId,
       userName: ctx.userName,
-      userPhone: ctx.userPhone || null,
       waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
       email: ui.member ? ui.member.email : null,
       isGroup: ctx.isGroup,
@@ -310,9 +308,9 @@ async function handleMessage(ctx) {
     }
     messages.push({ role: 'user', content: currentContent });
 
-    // Drop history files no longer referenced in the chat buffer (tags,
-    // _historyPath on media parts). Runs first so public-URL uploads only
-    // expose files still on disk.
+    // Drop on-disk history files no longer referenced in chat history or the
+    // current turn (attachment tags, _historyPath on media parts). Runs first
+    // so public-URL uploads only expose files still on disk.
     try {
       const historyUserId = resolveStorageId(ctx);
       if (historyUserId) {
@@ -382,8 +380,8 @@ async function handleMessage(ctx) {
       if (title) responseCtx.discordTitle = title;
     };
 
-    // Tool defs of the round in flight (rebuilt per round: the delivery
-    // attachments parameter appears only while deliverable files exist).
+    // Tool defs for the round in flight (platform/membership-gated; delivery
+    // buffer state is injected into the system prompt, not into tool schemas).
     let currentRoundTools = [];
 
     const runToolCall = async (tc) => {
@@ -548,7 +546,7 @@ async function handleMessage(ctx) {
         };
 
         await runPhase(phases.phase1, true);
-        await runPhase(phases.phase2, true);
+        await runPhase(phases.phase2, false);
 
         for (const tc of orderedCalls) {
           const msg = resultsById.get(tc.id);

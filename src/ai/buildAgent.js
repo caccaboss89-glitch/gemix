@@ -210,53 +210,106 @@ function _maybeInjectFinishNudge(messages, workspaceId, rounds) {
   messages.push({ role: 'user', content: FINISH_NUDGE });
 }
 
+function _indentText(text, pad) {
+  return text.split('\n').map(l => (l.length ? pad + l : l)).join('\n');
+}
+
+/**
+ * Operational directives for the sub-agent, numbered R1..Rn with a scope:
+ *   tool   — while emitting tool calls during a round
+ *   final  — when emitting the final structured JSON answer
+ *   always — any time
+ * Folds the rules that used to live inside Identity/Workspace/Sandbox/ToolUsage/
+ * Pitfalls into one checkable list.
+ */
+function _buildDirectivesBlock() {
+  const groups = [
+    { tag: 'Execution', lines: [
+      { s: 'tool', t: 'Batch independent tool calls in one round; bash always runs LAST, so write or edit a file and run the bash that uses it in the SAME round to save rounds and tokens.' },
+      { s: 'tool', t: 'When WorkspaceState shows files="0" the workspace is empty — never ls/find/bash to probe it; trust WorkspaceState over discovery commands.' },
+      { s: 'tool', t: 'Run yt-dlp immediately, with no pre-checks (version, ls, ffprobe, metadata) and no --proxy; on a content failure, one simpler retry at most.' },
+      { s: 'tool', t: 'Stop as soon as the deliverable is in WorkspaceState and reply once with the final JSON — do not spend extra rounds on probes, re-verification, or metadata.' },
+    ] },
+    { tag: 'Output', lines: [
+      { s: 'final', t: 'Write the final `message` in the user\'s language (Italian default).' },
+      { s: 'always', t: 'No emojis — neither in the final message nor in any file you generate — unless the brief asks for them.' },
+    ] },
+    { tag: 'Grounding', lines: [
+      { s: 'always', t: 'Use only real, verified paths, names, and contents; never invent file paths or describe file contents you did not create or read.' },
+    ] },
+    { tag: 'Delivery', lines: [
+      { s: 'final', t: 'Final JSON: `message` (required) + optional `attachments`. Each attachments entry: a workspace path (as in WorkspaceState) or a public https URL; unlisted files are not delivered.' },
+      { s: 'final', t: 'Every `attachments` path must appear in &lt;WorkspaceState&gt; exactly — never invent paths.' },
+      { s: 'final', t: 'Attach only what the brief asks for; skip scratch files (sources, logs, .tex, intermediates) unless requested.' },
+      { s: 'final', t: 'Resend-only brief: attach only paths already listed in &lt;WorkspaceState&gt;.' },
+      { s: 'final', t: 'Many deliverables: zip them first.' },
+    ] },
+    { tag: 'Failure', lines: [
+      { s: 'always', t: 'Network/proxy failure (502, CONNECT error, timeout, could not resolve): internet is down — stop, no retries, tell GemiX-Main for bug_report.' },
+      { s: 'always', t: 'Same infrastructure error twice: stop, no workarounds, bug_report.' },
+    ] },
+  ];
+  let n = 0;
+  const parts = [];
+  for (const g of groups) {
+    const body = g.lines.map((l) => { n += 1; return `    R${n} [${l.s}] ${l.t}`; }).join('\n');
+    parts.push(`  <${g.tag}>\n${body}\n  </${g.tag}>`);
+  }
+  return { block: `<Directives>\n${parts.join('\n')}\n</Directives>`, count: n };
+}
+
+function _buildPreSendCheckBlock(count) {
+  return [
+    '<PreSendCheck>',
+    `  Before any action, silently check it against every applicable Directive (R1–R${count}), one by one, skipping none. Scopes: [tool] = while emitting tool calls; [final] = the final JSON; [always] = throughout.`,
+    '  Before the final JSON, confirm: every `attachments` entry appears verbatim in &lt;WorkspaceState&gt; (never invented); only brief-requested deliverables are included (no scratch files); `message` is in the user\'s language with no emojis (in it or in generated files) unless the brief asked.',
+    '  During tool rounds: batch independent calls (bash runs last) and never probe an empty workspace.',
+    '  Do not output this check.',
+    '</PreSendCheck>',
+  ].join('\n');
+}
+
 function _buildSystemPrompt(workspaceId, renamedAttachments) {
   const stateBlock = _renderWorkspaceState(workspaceId);
   const notesBlock = _renderAttachmentNotes(renamedAttachments);
   const skillsBlock = _renderSkills();
 
   // No outer <SystemPrompt> envelope: this string is delivered in the
-  // dedicated system `instructions` field (the dedicated system channel), so a
-  // root tag adds nothing. The structured sub-tags sit flush at the top level.
-  return [
+  // dedicated system `instructions` field. Two macros mirror GemiX-Main:
+  // <Context> = what to know, <Directives> = what to do, <PreSendCheck> last.
+  const identity = [
     '<Identity>',
-    '  GemiX-Build sub-agent. Final reply text in the user\'s language (Italian default), no emojis unless asked.',
+    '  GemiX-Build sub-agent: execute the task brief from GemiX-Main inside /workspace/.',
     `  Time (Europe/Rome): ${getRomeTime()}.`,
     '</Identity>',
-    '<Mission>',
-    '  Execute the task brief from GemiX-Main inside /workspace/.',
-    '  Reply once with structured JSON when done (see &lt;Delivery&gt;).',
-    '</Mission>',
+  ].join('\n');
+
+  const workspace = [
     '<Workspace>',
     '  /workspace/ (writable), /skills/ (read-only). Operate only under these paths.',
     `  ${BUILD_WORKSPACE_QUOTA_MB} MB quota; files persist for the session.`,
-    '  &lt;WorkspaceState&gt; is the authoritative on-disk file list (refreshed each round). When files="0", the workspace is empty — do not ls/find/bash to probe.',
+    '  &lt;WorkspaceState&gt; is the authoritative on-disk file list, refreshed each round.',
     stateBlock,
     ...(notesBlock ? [notesBlock] : []),
     '</Workspace>',
-    '<ToolUsage>',
-    '  Batch independent tool calls in one round. The system runs tools in parallel when possible; bash runs last.',
-    '  You can write and run files in the same round.',
-    '</ToolUsage>',
+  ].join('\n');
+
+  const sandbox = [
     '<Sandbox>',
     '  bash / write_file / edit_file / read_file run here. code_interpreter is separate (no /workspace/).',
     '  Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, poppler, curl/wget. No pip/npm/apt.',
     '  Downloads via bash: yt-dlp (video/audio), curl -L -o (files/images). Save under /workspace/.',
-    '  yt-dlp: run immediately — no extra checks (e.g. yt-dlp version/ls/ffprobe/metadata probes) unless the brief asks for verification or fixes, no --proxy. On content failure, one simpler retry max.',
     '</Sandbox>',
-    ...(skillsBlock ? [skillsBlock] : []),
-    '<Delivery>',
-    '  Final JSON: `message` (required) + optional `attachments` (workspace paths and/or https URLs). Unlisted files are not delivered.',
-    '  Attach only what the brief asks for — skip scratch files (sources, logs, .tex, intermediates) unless requested.',
-    '  Every `attachments` path must appear in &lt;WorkspaceState&gt; exactly; never invent paths.',
-    '  Resend-only brief: attach only paths listed in &lt;WorkspaceState&gt;.',
-    '  Many deliverables: zip first.',
-    '</Delivery>',
-    '<Pitfalls>',
-    '  Network/proxy failure (502, CONNECT error, timeout, could not resolve): internet is down — stop, no retries, tell GemiX-Main for bug_report.',
-    '  Same infrastructure error twice: stop, no workarounds, bug_report.',
-    '</Pitfalls>',
   ].join('\n');
+
+  const contextChildren = [identity, workspace, sandbox];
+  if (skillsBlock) contextChildren.push(skillsBlock);
+  const context = `<Context>\n${contextChildren.map(b => _indentText(b, '  ')).join('\n')}\n</Context>`;
+
+  const { block: directives, count } = _buildDirectivesBlock();
+  const preSend = _buildPreSendCheckBlock(count);
+
+  return [context, directives, preSend].join('\n');
 }
 
 // -- Tool execution dispatcher (sub-agent side) ----------------------------
@@ -695,7 +748,6 @@ function _buildUserContent(prompt, attachmentParts) {
 
 module.exports = {
   runBuildAgent,
-  // Exported for the offline prompt-dump script (scripts/regenerate-prompt-dumps.js).
   _buildSystemPrompt,
   _buildAgentTools,
 };

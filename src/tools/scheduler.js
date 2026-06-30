@@ -97,9 +97,13 @@ async function scheduleTasks(tasks, ctx) {
       continue;
     }
 
-    // Extract recipient info (support both nested and flat structure)
-    const waRecipient = task.whatsapp?.recipient || { name: task.whatsapp?.recipientName, phone: task.whatsapp?.recipientPhone };
+    const waRecipient = task.whatsapp?.recipient || {};
     const hasExplicitRecipient = Boolean(waRecipient.phone || waRecipient.name);
+
+    // Recipient without toPrivate/toGroup → treat as a private reminder to that person.
+    if (task.whatsapp && hasExplicitRecipient && !task.whatsapp.toGroup && !task.whatsapp.toPrivate) {
+      task.whatsapp.toPrivate = true;
+    }
 
     if (task.whatsapp && task.whatsapp.toPrivate && hasExplicitRecipient && !ctx.isAdmin && !ctx.isActiveMember) {
       results.push({ success: false, error: 'Specific WhatsApp recipient only available for active members or admin.' });
@@ -122,26 +126,29 @@ async function scheduleTasks(tasks, ctx) {
 
     const destinations = {};
     if (task.whatsapp && task.whatsapp.toPrivate) {
-      if (ctx.isAdmin && waRecipient.phone) {
-        destinations.whatsapp = normalizePhoneToJid(waRecipient.phone);
-      } else if (ctx.isAdmin && waRecipient.name) {
-        const resolved = resolveActiveMemberByName(waRecipient.name);
-        if (!resolved.ok) {
-          results.push({ success: false, error: resolved.error });
-          continue;
+      try {
+        if (ctx.isAdmin && waRecipient.phone) {
+          destinations.whatsapp = normalizePhoneToJid(waRecipient.phone);
+        } else if (ctx.isAdmin && waRecipient.name) {
+          const resolved = resolveActiveMemberByName(waRecipient.name);
+          if (!resolved.ok) {
+            results.push({ success: false, error: resolved.error });
+            continue;
+          }
+          destinations.whatsapp = resolved.member.wa;
+        } else if (ctx.isActiveMember && waRecipient.name) {
+          const resolved = resolveActiveMemberByName(waRecipient.name);
+          if (!resolved.ok) {
+            results.push({ success: false, error: resolved.error });
+            continue;
+          }
+          destinations.whatsapp = resolved.member.wa;
+        } else {
+          destinations.whatsapp = ctx.waJid || null;
         }
-        destinations.whatsapp = resolved.member.wa;
-      } else if (ctx.isActiveMember && waRecipient.name) {
-        const resolved = resolveActiveMemberByName(waRecipient.name);
-        if (!resolved.ok) {
-          results.push({ success: false, error: resolved.error });
-          continue;
-        }
-        destinations.whatsapp = resolved.member.wa;
-      } else if (ctx.userPhone) {
-        destinations.whatsapp = normalizePhoneToJid(ctx.userPhone);
-      } else {
-        destinations.whatsapp = ctx.waJid || null;
+      } catch (err) {
+        results.push({ success: false, error: err.message });
+        continue;
       }
     }
     if (isGroupTask) {

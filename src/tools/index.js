@@ -2,7 +2,7 @@
 //
 // Central dispatcher for all tool calls from the main brain.
 // Responsibilities: permission checks, schema validation via validateToolArgs,
-// Per-round tool caps (build/imagine/etc.), recipient resolution
+// Per-round tool caps (generate_image/video, build, etc.), recipient resolution
 // (for email/wa), the main execution switch, and unified error handling with
 // admin notification on uncaught failures. All individual tools are required here.
 
@@ -59,35 +59,39 @@ function _escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+const WA_MISSING_RECIPIENT_ERROR =
+  'Missing recipient. send_whatsapp_message targets a specific phone number; use your structured reply for the current chat, not this tool.';
+
 /**
  * Resolve the target WhatsApp JID for delivery.
- * Admin: can target anyone. Active member: can target other members. Otherwise: self.
+ * Admin: external phone/name only. Active member: other members by name. Never the current chat.
  */
 function _resolveTargetWaJid(args, userCtx) {
-  // Extract recipient info (supports nested recipient object or top-level fields)
-  const recipientPhone = args.recipient?.phone || args.recipientPhone;
-  const recipientName = args.recipient?.name || args.recipientName;
+  const recipientPhone = args.recipient?.phone;
+  const recipientName = args.recipient?.name;
 
   if (userCtx.isAdmin) {
     if (recipientPhone) {
-      const jid = normalizePhoneToJid(recipientPhone);
-      return { jid, display: recipientPhone };
+      try {
+        const jid = normalizePhoneToJid(recipientPhone);
+        return { jid, display: recipientPhone };
+      } catch (err) {
+        return { error: { success: false, error: err.message } };
+      }
     }
     if (recipientName) {
       const resolved = resolveActiveMemberByName(recipientName);
       if (!resolved.ok) return { error: { success: false, error: resolved.error } };
       return { jid: resolved.member.wa, display: resolved.member.name };
     }
-    if (userCtx.waJid) {
-      return { jid: userCtx.waJid, display: userCtx.userName || 'yourself' };
-    }
-  } else if (userCtx.isActiveMember && recipientName) {
+    return { error: { success: false, error: WA_MISSING_RECIPIENT_ERROR } };
+  }
+  if (userCtx.isActiveMember && recipientName) {
     const resolved = resolveActiveMemberByName(recipientName);
     if (!resolved.ok) return { error: { success: false, error: resolved.error } };
     return { jid: resolved.member.wa, display: resolved.member.name };
   }
-  if (!userCtx.waJid) return { error: { success: false, error: 'No WhatsApp number available.' } };
-  return { jid: userCtx.waJid, display: 'yourself' };
+  return { error: { success: false, error: WA_MISSING_RECIPIENT_ERROR } };
 }
 
 /**
@@ -98,9 +102,8 @@ function _resolveTargetEmail(args, userCtx) {
   if (!userCtx.isActiveMember) {
     return { error: { success: false, error: 'Only active members can send emails.' } };
   }
-  // Extract recipient info (supports nested recipient object or top-level fields)
-  const recipientEmail = args.recipient?.email || args.recipientEmail;
-  const recipientName = args.recipient?.name || args.recipientName;
+  const recipientEmail = args.recipient?.email;
+  const recipientName = args.recipient?.name;
 
   if (userCtx.isAdmin) {
     if (recipientEmail) {
@@ -133,7 +136,6 @@ function platformToolBlockReason(toolName, userCtx) {
   return getToolAccessError(toolName, userCtx, {
     unavailableMessage: (name) => toolUnavailableMessage(name, resolveProfile(userCtx), {
       isActiveMember: Boolean(userCtx.isActiveMember),
-      isFirstTurn: Boolean(userCtx.isFirstTurn),
     }),
   });
 }
@@ -143,7 +145,7 @@ function platformToolBlockReason(toolName, userCtx) {
  * Validates permissions, executes the tool, and collects responses/attachments.
  * @param {object} toolCall - The tool call from the AI model { id, function: { name, arguments } }
  * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, isGroup, groupId }
- * @param {object} responseCtx - Mutable context for attachments/voice { attachments: [], voiceBuffer: null, isVoiceOnly: false }
+ * @param {object} responseCtx - Mutable per-turn context { attachments, discordTitle, researchStats }
  * @param {object} deliveryCtx - Delivery tracking context { contactedWA: Set, contactedEmail: Set, roundToolCounts: Map }
  * @param {Array} [toolDefs] - Optional list of currently-allowed tool definitions, used for early arg validation.
  * @returns {Promise<object>} { toolCallId: string, result: string }
@@ -151,8 +153,8 @@ function platformToolBlockReason(toolName, userCtx) {
 async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs = null) {
   const name = toolCall.function.name;
 
-  // Voice limits are reset centrally in handler.js when a text message is sent,
-  // preventing the AI from bypassing limits by calling intermediate tools.
+  // Voice streak counter resets when GemiX sends a text reply (handler.js), so
+  // consecutive voice:true replies cannot exceed the per-chat limit.
 
   let args;
   try {
@@ -254,7 +256,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           groupTaskFileId: userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null,
           userId: userCtx.userId,
           userName: userCtx.userName,
-          userPhone: userCtx.userPhone,
           waJid: userCtx.waJid,
           isActiveMember: userCtx.isActiveMember,
           isAdmin: userCtx.isAdmin,
@@ -328,8 +329,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           break;
         }
         deliveryCtx.contactedEmail.add(targetEmail.email);
-        // Files explicitly selected by the model (delivery-buffer names or
-        // public URLs). The parameter only exists while deliverables exist.
+        // Files explicitly selected by the model (delivery-buffer names or public URLs).
         const emailSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
         const emailMissingNote = emailSelection.missing.length > 0
           ? ` Attachment(s) not resolved and NOT sent: ${emailSelection.missing.join(', ')}.`
@@ -401,24 +401,18 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           break;
         }
 
-        const waRecipientName = args.recipient?.name || args.recipientName;
-        if (waRecipientName) {
-          const resolved = resolveActiveMemberByName(waRecipientName);
-          if (resolved.ok && resolved.member.wa === userCtx.waJid) {
-            result = { success: false, error: 'You cannot send to yourself. To reply in the current chat, omit the recipient.' };
-            break;
-          }
-        }
-
         const targetJid = _resolveTargetWaJid(args, userCtx);
         if (targetJid.error) { result = targetJid.error; break; }
+        if (userCtx.waJid && targetJid.jid === userCtx.waJid) {
+          result = { success: false, error: 'You cannot send to the current chat with this tool. Use your structured reply instead.' };
+          break;
+        }
         if (deliveryCtx.contactedWA.has(targetJid.jid)) {
           result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
           break;
         }
         deliveryCtx.contactedWA.add(targetJid.jid);
-        // Files explicitly selected by the model (delivery-buffer names or
-        // public URLs). The parameter only exists while deliverables exist.
+        // Files explicitly selected by the model (delivery-buffer names or public URLs).
         const waSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
         const waMissingNote = waSelection.missing.length > 0
           ? ` Attachment(s) not resolved and NOT sent: ${waSelection.missing.join(', ')}.`
@@ -476,10 +470,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       }
 
       case 'update_memory': {
+        const replace = args.replace === true;
         if (userCtx.isGroup) {
-          result = updateGroupMemory(args.content, userCtx.groupId);
+          result = await updateGroupMemory(args.content, userCtx.groupId, replace);
         } else {
-          result = updatePrivateMemory(args.content, userCtx.memoryFileId);
+          result = await updatePrivateMemory(args.content, userCtx.memoryFileId, replace);
         }
         break;
       }
@@ -543,5 +538,4 @@ module.exports = {
   executeTool,
   resetVoiceCount,
   getVoiceLimitChatKey: _getVoiceLimitChatKey,
-  PER_ROUND_TOOL_LIMITS,
 };

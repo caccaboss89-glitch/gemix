@@ -12,6 +12,7 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
 const { MAX_IMAGE_READS, MAX_FILE_READS, classifyAiFileDelivery, DELIVERY_MODE } = require('../../utils/aiFileDelivery');
+const { isDiscordAttachmentOversize } = require('../../utils/discordAttachmentFetch');
 const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 const { mapWithConcurrency } = require('../../utils/concurrency');
 
@@ -60,7 +61,7 @@ function initDiscord() {
     partials: [Partials.Message, Partials.Channel],
   });
 
-  discordClient.on('clientReady', () => {
+  discordClient.on('ready', () => {
     log.info(`Bot ready: ${discordClient.user.tag}`);
   });
 
@@ -457,6 +458,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
       const m = messages[i];
       if (m.author.id === discordClient.user.id) continue;
       for (const att of m.attachments.values()) {
+        if (isDiscordAttachmentOversize(att)) continue;
         const mode = classifyAiFileDelivery(att.name || 'file', att.contentType || '');
         if (mode === DELIVERY_MODE.IMAGE) {
           if (imgBudget > 0) { imgBudget--; uploadAllowedAtt.add(att.id); }
@@ -495,7 +497,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
         captionHints,
       );
       textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
-      if (overBudget && !textContent.includes('not shown this turn')) {
+      if (overBudget && !ingress.oversize && !textContent.includes('not shown this turn')) {
         textContent = `${textContent} (older file, not shown this turn — newest ${MAX_IMAGE_READS} images / ${MAX_FILE_READS} files per call; ask to resend or reply to it to view)`.trim();
       }
       mediaParts.push(...ingress.contentParts);

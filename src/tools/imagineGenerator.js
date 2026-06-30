@@ -79,7 +79,7 @@ function _cleanPrompt(prompt) {
 /**
  * Locate a reference-image file by filename, mirroring the build tool's
  * resolution policy:
- *   1. current-turn delivery buffer (responseCtx.attachments[]) by name
+ *   1. delivery buffer (responseCtx.attachments[]) by name
  *   2. chat history for this user
  *
  * Returns { filePath } | { buffer, name } on hit, null on miss. Only the
@@ -155,7 +155,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
 
     const found = _findReferenceFile(entry, userCtx, responseCtx);
     if (!found) {
-      return { ok: false, reason: `Reference image "${entry}" not found in the current attachments or chat history.` };
+      return { ok: false, reason: `Reference image "${entry}" not found in the delivery buffer or chat history.` };
     }
 
     const ext = path.extname(found.name || entry).toLowerCase();
@@ -244,6 +244,7 @@ async function _xaiJsonRequest(label, endpointPath, body, timeoutMs) {
  * @param {string} [args.aspect_ratio] - pure text-to-image only (edits respect the input image).
  * @param {object} userCtx
  * @param {object} responseCtx
+ * @returns {Promise<{ success: boolean, message?: string, filename?: string, error?: string }>}
  */
 async function generateImage(args, userCtx, responseCtx) {
   if (!IMAGE_GEN_MODEL) return { success: false, error: 'IMAGE_GEN_MODEL is not configured.' };
@@ -339,6 +340,7 @@ async function generateImage(args, userCtx, responseCtx) {
  * @param {string} [args.aspect_ratio]
  * @param {object} userCtx
  * @param {object} responseCtx
+ * @returns {Promise<{ success: boolean, message?: string, filename?: string, error?: string }>}
  */
 async function generateVideo(args, userCtx, responseCtx) {
   if (!VIDEO_GEN_MODEL) return { success: false, error: 'VIDEO_GEN_MODEL is not configured.' };
@@ -346,14 +348,6 @@ async function generateVideo(args, userCtx, responseCtx) {
   const { prompt, truncated } = _cleanPrompt(args && args.prompt);
   if (!prompt || prompt.length < 3) {
     return { success: false, error: 'Missing or too short "prompt": describe the video to generate.' };
-  }
-
-  const aspect = (args && typeof args.aspect_ratio === 'string') ? args.aspect_ratio.trim() : '16:9';
-  if (!ALLOWED_VIDEO_ASPECT_RATIOS.has(aspect)) {
-    return {
-      success: false,
-      error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_VIDEO_ASPECT_RATIOS].join(', ')}.`,
-    };
   }
 
   if (!resolveStorageId(userCtx)) {
@@ -366,6 +360,16 @@ async function generateVideo(args, userCtx, responseCtx) {
     return { success: false, error: refs.reason };
   }
 
+  const aspect = (args && typeof args.aspect_ratio === 'string' && args.aspect_ratio.trim())
+    ? args.aspect_ratio.trim()
+    : '16:9';
+  if (refs.urls.length === 0 && !ALLOWED_VIDEO_ASPECT_RATIOS.has(aspect)) {
+    return {
+      success: false,
+      error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_VIDEO_ASPECT_RATIOS].join(', ')}.`,
+    };
+  }
+
   // 1 reference  -> image-to-video (`image` is the starting frame).
   // 2-7 references -> reference-to-video (`reference_images` guide the clip).
   // The two fields are mutually exclusive per xAI docs.
@@ -373,16 +377,18 @@ async function generateVideo(args, userCtx, responseCtx) {
     model: VIDEO_GEN_MODEL,
     prompt,
     duration: VIDEO_DURATION_S,
-    aspect_ratio: aspect,
     resolution: VIDEO_RESOLUTION,
   };
+  if (refs.urls.length === 0) {
+    body.aspect_ratio = aspect;
+  }
   if (refs.urls.length === 1) {
     body.image = { url: refs.urls[0], type: 'image_url' };
   } else if (refs.urls.length > 1) {
     body.reference_images = refs.urls.map(url => ({ type: 'image_url', url }));
   }
 
-  log.info(`generate_video: aspect=${aspect}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
+  log.info(`generate_video: aspect=${refs.urls.length === 0 ? aspect : 'auto'}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
   let submit;
   try {
