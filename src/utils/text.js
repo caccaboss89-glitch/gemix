@@ -7,6 +7,8 @@
 // - Cleaning history prefixes, system messages, research badges, footers, etc.
 // - High-level clean functions for incoming and outgoing messages
 
+const { stripPhoneMentionTags } = require('./waMentions');
+
 /**
  * Sanitize a string for use as a filename.
  * Removes special chars, collapses whitespace to underscores, trims length.
@@ -48,13 +50,14 @@ const VOICE_ALLOWED_RE = /[^\p{L}\p{N}\s.,!?'’-]/gu;
 /**
  * Sanitize the text of a voice message before TTS (and before it is stored as
  * the history transcript, so both stay in sync). Keeps spoken words, the
- * supported voice effect tags, and basic readable punctuation; strips emoji
- * and non-readable symbols (_, ", \, *, ~, `, #, …).
+ * supported voice effect tags, and basic readable punctuation; strips emoji,
+ * @phone mention tags, and non-readable symbols (_, ", \, *, ~, `, #, …).
  * @param {string} text
  * @returns {string}
  */
 function sanitizeVoiceMessageText(text) {
   if (!text || typeof text !== 'string') return '';
+  text = stripPhoneMentionTags(text);
   // Protect voice tags so their brackets/dashes survive the symbol cleanup.
   // The placeholder uses only letters/digits (kept by VOICE_ALLOWED_RE).
   const tags = [];

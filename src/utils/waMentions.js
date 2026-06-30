@@ -218,11 +218,18 @@ function collectMentionJids(text) {
   return [...jids];
 }
 
+/** Remove @<phone> mention tags (for TTS / voice transcripts). */
+function stripPhoneMentionTags(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(LOOSE_OUT_MENTION_RE, '');
+}
+
 module.exports = {
   replaceMentionsInBody,
   resolveMentionsForMessage,
   resolveLidTagsInBody,
   stripDisallowedOutgoingMentions,
+  stripPhoneMentionTags,
   normalizeOutgoingMentionTags,
   containsMetaAiTag,
   collectMentionJids,

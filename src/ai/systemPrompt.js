@@ -216,7 +216,7 @@ function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
     if (roster.length > 0) {
       lines.push(_platformField('Participants', formatParticipantsForPrompt(roster, escapeXml)));
     }
-    lines.push(_platformField('Mentions', 'Tag third parties (not the person you\'re replying to) with @ and their number (digits only, no +). Never add their name after the tag.'));
+    lines.push(_platformField('Mentions', 'To name another group member (not whoever you\'re replying to): @<phone digits> only — no +, no name after the tag.'));
   } else {
     lines.push(_platformField('Rule', 'Private chat - reply to every message.'));
     lines.push(_platformField('Chat', `You (GemiX), ${escapeXml(ctx.userName)}, and ${META_AI_NAME} (users can summon — never tag it).`));

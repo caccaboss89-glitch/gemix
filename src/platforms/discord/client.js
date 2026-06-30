@@ -5,7 +5,7 @@
 // and sends responses (text + attachments) back to Discord.
 // Only activates inside the configured DISCORD_THREAD_NAME category.
 
-const { Client, GatewayIntentBits, Partials, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, AttachmentBuilder, Events } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
 const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 
@@ -61,7 +61,7 @@ function initDiscord() {
     partials: [Partials.Message, Partials.Channel],
   });
 
-  discordClient.on('ready', () => {
+  discordClient.on(Events.ClientReady, () => {
     log.info(`Bot ready: ${discordClient.user.tag}`);
   });
 
