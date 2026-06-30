@@ -30,7 +30,7 @@ const VOICE_RESPONSE_FIELD_DESC =
   'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY spoken words plus '
   + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
   + 'Keep it under 1000 characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags '
-  + 'for a human result (never read them aloud), even if your recent text replies had none. When `voice` is '
+  + 'for a human result, even if your recent text replies had none. When `voice` is '
   + 'false write plain text using only the formatting declared in the system prompt Format line, and DO NOT use any voice tag. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';

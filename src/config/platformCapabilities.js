@@ -275,7 +275,7 @@ function buildDirectives(profile, opts = {}) {
     tooling.push({ scope: 'tool', text: 'Use code_interpreter for ad-hoc Python (math, analysis, quick scripts) — isolated, with no build sub-agent filesystem.' });
   }
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
-    tooling.push({ scope: 'tool', text: 'Use web/X search proactively on your own when real-time or external context would improve the answer (live events, social posts/screenshots, unfamiliar references) — don\'t guess when a quick search settles it.' });
+    tooling.push({ scope: 'always', text: 'Proactively use web/X search before factual replies when the fact is not already in chat history or memory (news, people, products, events, social posts/screenshots, unfamiliar refs) — search first, never guess.' });
     if (has(TOOL.WEB_SEARCH)) {
       tooling.push({ scope: 'tool', text: 'Image URLs from web/X search: use in your final `attachments` or in tool fields that accept files/images — each entry: filename with extension from the delivery buffer or chat history, or a public https URL.' });
     }
