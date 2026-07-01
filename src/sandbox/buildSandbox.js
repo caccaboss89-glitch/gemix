@@ -42,7 +42,7 @@ const {
 
 const { SKILLS_DIR } = require('../utils/userPaths');
 const { workspaceIdToSlug } = require('../utils/workspaceId');
-const { ensureWorkspace, ensureWorkspaceWritable } = require('./buildWorkspace');
+const { ensureWorkspace, ensureWorkspaceWritable, sandboxUserString } = require('./buildWorkspace');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('BuildSandbox');
@@ -130,7 +130,7 @@ async function _spawnContainer(workspaceId) {
     // both Entrypoint and Cmd so the container becomes a quiet idle process.
     Entrypoint: [],
     Cmd: ['sleep', 'infinity'],
-    User: '1000:1000',
+    User: sandboxUserString(),
     Env: env,
     HostConfig: hostConfig,
     Labels: {
@@ -216,7 +216,7 @@ async function execBash(workspaceId, command, opts = {}) {
     Cmd: ['/bin/bash', '-lc', command],
     AttachStdout: true,
     AttachStderr: true,
-    User: '1000:1000',
+    User: sandboxUserString(),
     WorkingDir: '/workspace',
   });
 

@@ -35,29 +35,60 @@ function ensureWorkspace(workspaceId) {
 }
 
 /**
- * Make the workspace tree writable on the host. Bash runs in Docker as UID
- * 1000; without this, host-side write_file/edit_file can hit EACCES on files
- * the container just created (e.g. cp from /skills/).
+ * UID/GID the build sandbox container should use so bind-mounted files are
+ * owned by the same user as the Node process (write_file/edit_file on host).
+ */
+function hostSandboxIds() {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  const gid = typeof process.getgid === 'function' ? process.getgid() : null;
+  return { uid, gid };
+}
+
+/** Docker `User` string for container create / exec (fallback 1000:1000 off Linux). */
+function sandboxUserString() {
+  const { uid, gid } = hostSandboxIds();
+  if (uid == null || gid == null) return '1000:1000';
+  return `${uid}:${gid}`;
+}
+
+/**
+ * Make the workspace tree writable on the host. The sandbox container runs as
+ * the same UID/GID as Node; this fixes legacy files from older containers and
+ * normalizes permissions on directories.
  */
 function ensureWorkspaceWritable(workspaceId) {
   const root = getBuildWorkspacePath(workspaceId);
   if (!root || !fs.existsSync(root)) return;
   if (process.platform !== 'linux') return;
 
-  if (process.getuid && process.getuid() === 0) {
-    try { fs.chownSync(root, 1000, 1000); }
-    catch (err) { log.warn(`chown ${root} -> 1000:1000 failed: ${err.message}`); }
-    return;
-  }
+  const { uid, gid } = hostSandboxIds();
+  if (uid == null || gid == null) return;
+
+  const isRoot = process.getuid && process.getuid() === 0;
 
   const walk = (p) => {
+    let st;
+    try { st = fs.statSync(p); }
+    catch { return; }
+
     try {
-      const st = fs.statSync(p);
-      fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
-      if (st.isDirectory()) {
-        for (const entry of fs.readdirSync(p)) walk(path.join(p, entry));
+      if (isRoot) {
+        if (st.uid !== uid || st.gid !== gid) fs.chownSync(p, uid, gid);
+        fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
+      } else if (st.uid === uid) {
+        fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
       }
-    } catch (err) { log.warn(`chmod ${p} failed: ${err.message}`); }
+      // Foreign-owned entries (legacy sandbox uid): skip — container recreate fixes new files.
+    } catch (err) {
+      log.warn(`ensureWorkspaceWritable ${p}: ${err.message}`);
+    }
+
+    if (st.isDirectory()) {
+      let entries;
+      try { entries = fs.readdirSync(p); }
+      catch { return; }
+      for (const entry of entries) walk(path.join(p, entry));
+    }
   };
   walk(root);
 }
@@ -362,6 +393,8 @@ function resolveInsideWorkspace(workspaceId, relPath) {
 module.exports = {
   ensureWorkspace,
   ensureWorkspaceWritable,
+  hostSandboxIds,
+  sandboxUserString,
   workspaceSizeBytes,
   listWorkspaceFiles,
   stageAttachmentBuffer,
