@@ -42,7 +42,7 @@ const {
 
 const { SKILLS_DIR } = require('../utils/userPaths');
 const { workspaceIdToSlug } = require('../utils/workspaceId');
-const { ensureWorkspace } = require('./buildWorkspace');
+const { ensureWorkspace, ensureWorkspaceWritable } = require('./buildWorkspace');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('BuildSandbox');
@@ -67,29 +67,6 @@ function _getDocker() {
   return _docker;
 }
 
-function _ensureWorkspaceWritable(workspaceDir) {
-  if (process.platform !== 'linux') return;
-  // When Node runs as root we just chown to the in-container UID 1000.
-  if (process.getuid && process.getuid() === 0) {
-    try { fs.chownSync(workspaceDir, 1000, 1000); }
-    catch (err) { log.warn(`chown ${workspaceDir} -> 1000:1000 failed: ${err.message}`); }
-    return;
-  }
-  // Non-root path: chmod 0777 / 0666 on the tree so UID 1000 can write.
-  // Safe given the container is cap-dropped, network-isolated and
-  // memory-capped.
-  const walk = (p) => {
-    try {
-      const st = fs.statSync(p);
-      fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
-      if (st.isDirectory()) {
-        for (const entry of fs.readdirSync(p)) walk(path.join(p, entry));
-      }
-    } catch (err) { log.warn(`chmod ${p} failed: ${err.message}`); }
-  };
-  walk(workspaceDir);
-}
-
 /**
  * Spawn a fresh container for `workspaceId`. The container runs an idle
  * sleep loop as PID 1 so we can attach via `docker exec` for individual
@@ -102,7 +79,7 @@ async function _spawnContainer(workspaceId) {
 
   const workspaceDir = ensureWorkspace(workspaceId);
   if (!workspaceDir) throw new Error('Cannot ensure workspace directory');
-  _ensureWorkspaceWritable(workspaceDir);
+  ensureWorkspaceWritable(workspaceId);
 
   const containerName = `gemix-bw-${slug}-${crypto.randomBytes(3).toString('hex')}`
     .toLowerCase().replace(/[^a-z0-9_.-]/g, '-').slice(0, 63);
@@ -284,6 +261,8 @@ async function execBash(workspaceId, command, opts = {}) {
   }
 
   const durationMs = Date.now() - startedAt;
+  // Files created in-container may not be host-writable for write_file/edit_file.
+  ensureWorkspaceWritable(workspaceId);
   return {
     rc,
     stdout: Buffer.concat(stdoutBuf).toString('utf-8'),

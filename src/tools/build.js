@@ -344,6 +344,10 @@ async function buildTool(args, userCtx, responseCtx) {
 
     // -- Deliver files to the main brain's delivery buffer -----------------
     const { attached, missing } = await _attachDelivered(workspaceId, agentResult.delivered || [], responseCtx);
+    const rejected = [
+      ...(agentResult.delivered_rejected || []),
+      ...missing.filter(m => !(agentResult.delivered_rejected || []).includes(m)),
+    ];
 
     // Bubble the agent's research stats up to the main brain so the badge
     // (web/X sources) remains accurate when the agent does its own searches.
@@ -351,6 +355,25 @@ async function buildTool(args, userCtx, responseCtx) {
       if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xPosts: 0 };
       responseCtx.researchStats.webSources += agentResult.research_stats.webSources || 0;
       responseCtx.researchStats.xPosts += agentResult.research_stats.xPosts || 0;
+    }
+
+    const claimedWorkspaceFiles = (agentResult.delivered || []).filter(
+      d => typeof d === 'string' && d.trim() && !/^https?:\/\//i.test(d.trim()),
+    );
+    if (claimedWorkspaceFiles.length > 0 && attached.length === 0) {
+      return {
+        success: false,
+        error:
+          `Build agent reported file(s) [${rejected.join(', ')}] but none exist in the workspace. `
+          + 'The deliverable was not generated (e.g. node/bash step missing or write failed).',
+        message: agentResult.message || '',
+        delivered: attached,
+        delivered_missing: rejected,
+        attachments_not_found: notFound,
+        attachments_renamed: renamedAttachments.map(r => `${r.requested} -> ${r.actual}`),
+        rounds_used: agentResult.roundsUsed,
+        research_stats: agentResult.research_stats || null,
+      };
     }
 
     return {

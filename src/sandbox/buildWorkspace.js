@@ -35,6 +35,34 @@ function ensureWorkspace(workspaceId) {
 }
 
 /**
+ * Make the workspace tree writable on the host. Bash runs in Docker as UID
+ * 1000; without this, host-side write_file/edit_file can hit EACCES on files
+ * the container just created (e.g. cp from /skills/).
+ */
+function ensureWorkspaceWritable(workspaceId) {
+  const root = getBuildWorkspacePath(workspaceId);
+  if (!root || !fs.existsSync(root)) return;
+  if (process.platform !== 'linux') return;
+
+  if (process.getuid && process.getuid() === 0) {
+    try { fs.chownSync(root, 1000, 1000); }
+    catch (err) { log.warn(`chown ${root} -> 1000:1000 failed: ${err.message}`); }
+    return;
+  }
+
+  const walk = (p) => {
+    try {
+      const st = fs.statSync(p);
+      fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
+      if (st.isDirectory()) {
+        for (const entry of fs.readdirSync(p)) walk(path.join(p, entry));
+      }
+    } catch (err) { log.warn(`chmod ${p} failed: ${err.message}`); }
+  };
+  walk(root);
+}
+
+/**
  * Recursive size in bytes of the workspace tree. Symlinks are NOT followed
  * to avoid escapes via crafted links from inside the container.
  */
@@ -333,6 +361,7 @@ function resolveInsideWorkspace(workspaceId, relPath) {
 
 module.exports = {
   ensureWorkspace,
+  ensureWorkspaceWritable,
   workspaceSizeBytes,
   listWorkspaceFiles,
   stageAttachmentBuffer,

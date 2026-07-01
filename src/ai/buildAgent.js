@@ -26,6 +26,8 @@ const {
   workspaceSizeBytes,
   resolveInsideWorkspace,
   normalizeWorkspaceRelPath,
+  resolveWorkspaceDeliveryFile,
+  ensureWorkspaceWritable,
   QUOTA_BYTES,
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
@@ -167,47 +169,27 @@ function _renderSkills() {
   return formatSkillsForPrompt(loadSkills());
 }
 
-const FINISH_NUDGE =
-  'SYSTEM: WorkspaceState already contains the deliverable. Stop verification, discovery, and metadata commands. Reply now with final JSON (message + attachments copied from WorkspaceState).';
-
-function _bashCommandFromToolCall(tc) {
-  if (tc?.function?.name !== 'bash') return '';
-  try {
-    const args = typeof tc.function.arguments === 'string'
-      ? JSON.parse(tc.function.arguments)
-      : tc.function.arguments;
-    return args?.command || '';
-  } catch {
-    return '';
+function _filterDeliveredAttachments(workspaceId, attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return { verified: [], rejected: [] };
   }
-}
-
-function _isProbeBash(cmd) {
-  return /\b(which|ffprobe|ls\s+-|ytsearch[2-9]|ytsearch[1-9]\d|--version|write-info-json|embed-chapter|add-metadata)\b/i.test(cmd);
-}
-
-function _maybeInjectFinishNudge(messages, workspaceId, rounds) {
-  const { total } = listWorkspaceFiles(workspaceId, 1);
-  if (total === 0) return;
-
-  let probeCount = 0;
-  let downloadCount = 0;
-  for (const m of messages) {
-    if (m.role !== 'assistant' || !Array.isArray(m.tool_calls)) continue;
-    for (const tc of m.tool_calls) {
-      const cmd = _bashCommandFromToolCall(tc);
-      if (!cmd) continue;
-      if (_isProbeBash(cmd)) probeCount++;
-      if (/\byt-dlp\b/i.test(cmd)) downloadCount++;
+  const verified = [];
+  const rejected = [];
+  for (const raw of attachments) {
+    const entry = String(raw || '').trim();
+    if (!entry) continue;
+    if (/^https?:\/\//i.test(entry)) {
+      verified.push(entry);
+      continue;
     }
+    const wsRel = normalizeWorkspaceRelPath(entry);
+    if (!wsRel || !resolveWorkspaceDeliveryFile(workspaceId, wsRel)) {
+      rejected.push(entry);
+      continue;
+    }
+    verified.push(entry);
   }
-
-  const wasteful = rounds >= 2 && probeCount >= 1 && downloadCount >= 1;
-  const tooManyRounds = rounds >= 4;
-  if (!wasteful && !tooManyRounds) return;
-  const last = messages[messages.length - 1];
-  if (last?.role === 'user' && last.content === FINISH_NUDGE) return;
-  messages.push({ role: 'user', content: FINISH_NUDGE });
+  return { verified, rejected };
 }
 
 function _indentText(text, pad) {
@@ -443,7 +425,22 @@ function _executeWriteFile(workspaceId, args) {
     } else {
       fs.writeFileSync(c.abs, buf);
     }
-  } catch (err) { return _toolErr(`Write failed: ${err.message}`); }
+  } catch (err) {
+    if (err.code === 'EACCES') {
+      ensureWorkspaceWritable(workspaceId);
+      try {
+        if (mode === 'append' && fs.existsSync(c.abs)) {
+          fs.appendFileSync(c.abs, buf);
+        } else {
+          fs.writeFileSync(c.abs, buf);
+        }
+      } catch (retryErr) {
+        return _toolErr(`Write failed: ${retryErr.message}`);
+      }
+    } else {
+      return _toolErr(`Write failed: ${err.message}`);
+    }
+  }
   return JSON.stringify({ success: true, path: a.path, size: buf.length, mode });
 }
 
@@ -474,7 +471,15 @@ function _executeEditFile(workspaceId, args) {
     return _toolErr(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
   }
   try { fs.writeFileSync(c.abs, updated, 'utf-8'); }
-  catch (err) { return _toolErr(`Write failed: ${err.message}`); }
+  catch (err) {
+    if (err.code === 'EACCES') {
+      ensureWorkspaceWritable(workspaceId);
+      try { fs.writeFileSync(c.abs, updated, 'utf-8'); }
+      catch (retryErr) { return _toolErr(`Write failed: ${retryErr.message}`); }
+    } else {
+      return _toolErr(`Write failed: ${err.message}`);
+    }
+  }
   return JSON.stringify({ success: true, path: a.path, occurrences, replaced: a.replace_all ? occurrences : 1 });
 }
 
@@ -490,6 +495,7 @@ async function _executeBash(workspaceId, args) {
   let res;
   try { res = await buildSandbox.execBash(workspaceId, cmd, { timeoutMs }); }
   catch (err) { return _toolErr(`Sandbox failure: ${err.message}`); }
+  ensureWorkspaceWritable(workspaceId);
   return JSON.stringify({
     success: res.rc === 0,
     rc: res.rc,
@@ -573,9 +579,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
 
     // Refresh the system prompt with the latest workspace state at every
     // round (the agent just wrote new files, the state must reflect them).
-    // The agent is never told which round it is on or how many remain - the
-    // budget is enforced host-side. When the budget is exhausted, one clean
-    // tool-less answer is forced below.
+    ensureWorkspaceWritable(workspaceId);
     messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
 
     // Renew the lock so a long agent run keeps the workspace held.
@@ -648,7 +652,6 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
           }
         }
       }
-      _maybeInjectFinishNudge(messages, workspaceId, rounds);
       if (rounds >= BUILD_MAX_ROUNDS) budgetExhausted = true;
       continue;
     }
@@ -717,12 +720,16 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
   if (!parsed.structured) {
     log.warn('build agent final answer was not valid JSON; treating it as plain text.');
   }
-  const files = parsed.attachments;
+  const { verified: files, rejected } = _filterDeliveredAttachments(workspaceId, parsed.attachments);
+  if (rejected.length > 0) {
+    log.warn(`build agent listed missing attachments: ${rejected.join(', ')}`);
+  }
   log.info(`build agent finished: rounds=${rounds}, deliver=${files.length}`);
   return {
     success: true,
     message: parsed.text || '',
     delivered: files,
+    delivered_rejected: rejected,
     roundsUsed: rounds,
     research_stats: researchStats,
   };
