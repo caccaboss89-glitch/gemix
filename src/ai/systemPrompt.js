@@ -98,10 +98,10 @@ function buildSystemPrompt(ctx) {
       const deliveryRule = profile === PROFILE.DISCORD_THREAD
         ? 'external destinations only'
         : 'send_whatsapp_message/send_email: external destinations only; schedule_tasks: omit destination for current chat/group, or set recipient for someone else';
-      contextBlocks.push(`<ActiveMembers>Address them in ${deliveryToolHint} by the phone/email in this list — ${deliveryRule}. ${roster}. Creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
+      contextBlocks.push(`<ActiveMembers>Address them in ${deliveryToolHint} by the phone/email in this list — ${deliveryRule}. ${roster}. GemiX creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
     } else {
       const members = ACTIVE_MEMBERS.map(m => m.name).join(', ');
-      contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name. Creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
+      contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name. GemiX creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
     }
   }
   if (ctx.batchMultiSpeaker) {
