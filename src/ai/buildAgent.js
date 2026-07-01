@@ -79,7 +79,7 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'write_file',
-        description: 'Create or overwrite a file inside /workspace/. Path must be relative to /workspace/ (e.g. "report.pdf" or "out/chart.png"). UTF-8 text or base64 binary.',
+        description: 'Create or overwrite a file inside /workspace/. Path must be relative to /workspace/ (e.g. "presentation.js"). UTF-8 text or base64 binary. Prefer this for new scripts or full rewrites instead of many edit_file.',
         parameters: {
           type: 'object',
           properties: {
@@ -96,7 +96,7 @@ function _buildAgentTools() {
       type: 'function',
       function: {
         name: 'edit_file',
-        description: 'In-place edit of a UTF-8 text file inside /workspace/. Replaces old_string with new_string. Use replace_all=true for multiple occurrences.',
+        description: 'Small in-place patch of a UTF-8 text file inside /workspace/: replace old_string with new_string (replace_all=true for every occurrence). Not for rewriting most of a copied skill template — use write_file for that.',
         parameters: {
           type: 'object',
           properties: {

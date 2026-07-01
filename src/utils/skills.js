@@ -85,6 +85,7 @@ function formatSkillsForPrompt(skills) {
   }
   const lines = ['<Skills>'];
   lines.push('  Each skill below is a guided workflow with helper scripts. When a task matches a skill\'s purpose, read its SKILL.md and any companion guides you need before writing your own code, then follow it.');
+  lines.push('  Templates under /skills/ are starting points: if the deliverable content differs heavily from the template (topic, language, slide text), write_file a fresh script using the skill\'s patterns — do not cp then many edit_file calls.');
   for (const s of skills) {
     lines.push(`  <Skill name="${escapeXml(s.name)}" doc="/skills/${escapeXml(s.filename)}">${escapeXml(s.description)}</Skill>`);
   }

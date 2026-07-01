@@ -573,6 +573,7 @@ function buildBuildTool(isGroup) {
     name: 'build',
     description:
       'Delegate file deliverables to an isolated build sub-agent (/workspace/, bash, yt-dlp, ffmpeg). '
+      + 'NOT for downloading X post media or web images — use x_search/web_search and put public https URLs in your final attachments instead. '
       + 'Isolated turn — no chat history; it sees only your prompt, &lt;BuildWorkspace&gt; files, and attachments[]. '
       + 'Stage in attachments[] anything it must use that is not already in the workspace; generate image, video, or music first when needed. '
       + 'Autonomous web/X search on the sub-agent. '

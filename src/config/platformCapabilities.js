@@ -276,9 +276,19 @@ function buildDirectives(profile, opts = {}) {
   }
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
     tooling.push({ scope: 'always', text: 'Proactively use web/X search before factual replies when the fact is not already in chat history or memory (news, people, products, events, social posts/screenshots, unfamiliar refs) — search first, never guess.' });
-    if (has(TOOL.WEB_SEARCH)) {
-      tooling.push({ scope: 'tool', text: 'Image URLs from web/X search: use in your final `attachments` or in tool fields that accept files/images — each entry: filename with extension from the delivery buffer or chat history, or a public https URL.' });
-    }
+    tooling.push({
+      scope: 'tool',
+      text: 'Media from X or the web: x_search returns post attachment URLs; web_search finds image URLs. '
+        + 'Deliver them directly in your final `attachments` (public https URL per entry) with context in `response`. '
+        + 'Do not call build just to download, mirror, or re-send that media.',
+    });
+  }
+  if (has(TOOL.BUILD)) {
+    tooling.push({
+      scope: 'tool',
+      text: 'Use build only to create, edit, convert, or assemble files on disk (PDF, PPTX, ffmpeg, yt-dlp pipelines, multi-step deliverables). '
+        + 'Never use build only to fetch media or images you can link from x_search or web_search.',
+    });
   }
 
   return [

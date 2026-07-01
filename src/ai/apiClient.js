@@ -9,8 +9,10 @@ const fs = require('fs');
 const path = require('path');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
+const { XAI_USE_API_KEY } = require('../config/env');
 const { getXaiAuth } = require('../config/xaiAuth');
 const { createLogger } = require('../utils/logger');
+const { refreshHermesOAuth } = require('../utils/hermesAuthRefresh');
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
@@ -164,6 +166,16 @@ function _formatRateLimitLog(status, errBody, headers) {
   return parts.join(' — ');
 }
 
+function _isOAuthCredentialError(errMsg) {
+  if (!errMsg || typeof errMsg !== 'string') return false;
+  if (/^HTTP 401\b/.test(errMsg)) return true;
+  if (/^HTTP 403\b/.test(errMsg)
+    && /bad-credentials|unauthenticated|could not be validated/i.test(errMsg)) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Unified xAI API client with retry and timeout logic.
  * The bearer token is resolved per attempt from the auth file; a 401 forces
@@ -178,6 +190,7 @@ function _formatRateLimitLog(status, errBody, headers) {
 async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutMs = API_TIMEOUT_MS) {
   logApiRequest(modelName, apiUrl, body, logExtra);
   let forceTokenReload = false;
+  let hermesRefreshAttempted = false;
   for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
     let timer;
     const attemptStarted = Date.now();
@@ -224,6 +237,18 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       const errMsg = err.name === 'AbortError'
         ? `Timeout (request aborted after ${timeoutMs / 1000}s)`
         : err.message;
+
+      if (!XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
+        hermesRefreshAttempted = true;
+        try {
+          await refreshHermesOAuth();
+          forceTokenReload = true;
+          log.info('   Retrying API call with refreshed OAuth credentials...');
+          continue;
+        } catch (refreshErr) {
+          log.error(`   Hermes OAuth refresh failed: ${refreshErr.message}`);
+        }
+      }
 
       if (isRetryable && attempt < MAX_API_RETRIES) {
         const delay = attempt * 3000;

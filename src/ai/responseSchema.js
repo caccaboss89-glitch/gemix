@@ -37,7 +37,7 @@ const VOICE_RESPONSE_FIELD_DESC =
 
 const GEMIX_ATTACHMENTS_FIELD_DESC =
   'OPTIONAL. The ONLY way to send files/images in this chat. Include only when sending files with your reply. '
-  + 'Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. '
+  + 'Each entry: filename with extension from the delivery buffer or chat history, or a public https URL (e.g. X post media or images from web search — prefer URLs over build for those). '
   + 'If nothing to send, omit this field. Never use other file/image syntax (e.g. render_components): it will not be sent.';
 
 const TITLE_FIELD_DESC =
