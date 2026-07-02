@@ -90,6 +90,8 @@ module.exports = {
   // Main brain: max generate_image / generate_video tool calls in one model turn.
   MAX_GENERATE_IMAGE_PER_ROUND: 5,
   MAX_GENERATE_VIDEO_PER_ROUND: 3,
+  VIDEO_GEN_DURATION_S: 6,
+  VIDEO_GEN_RESOLUTION: '480p',
   MAX_TTS_CHARS: 1000,
   MAX_AUDIO_DURATION_S: 600,
   MAX_VIDEO_DURATION_S: 120,

@@ -17,6 +17,7 @@ const {
   IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL,
 } = require('../config/env');
+const { VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION } = require('../config/constants');
 const { getXaiAuth } = require('../config/xaiAuth');
 const { callApiWithRetry, logApiResponse } = require('../ai/apiClient');
 const { tempDirForOwner } = require('../utils/tempFileServer');
@@ -36,7 +37,7 @@ const log = createLogger('ImagineGenerator');
 const IMAGE_TIMEOUT_MS = 3 * 60 * 1000;
 // Video generation is async: POST returns a request_id, then we poll.
 const VIDEO_POLL_INTERVAL_MS = 5_000;
-const VIDEO_POLL_TIMEOUT_MS = 8 * 60 * 1000;
+const VIDEO_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 
 // Cap on the prompt to keep request payloads reasonable.
 const MAX_PROMPT_LEN = 2000;
@@ -49,9 +50,7 @@ const ALLOWED_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4'
 const MAX_REF_IMAGES_FOR_IMAGE = 3;
 const MAX_REF_IMAGES_FOR_VIDEO = 7;
 
-// Fixed video parameters.
-const VIDEO_DURATION_S = 10;
-const VIDEO_RESOLUTION = '720p';
+// Fixed video parameters (resolution/duration live in config/constants.js).
 
 // Single reference image size cap (guards the upload, not a base64 payload).
 const MAX_REF_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -376,8 +375,8 @@ async function generateVideo(args, userCtx, responseCtx) {
   const body = {
     model: VIDEO_GEN_MODEL,
     prompt,
-    duration: VIDEO_DURATION_S,
-    resolution: VIDEO_RESOLUTION,
+    duration: VIDEO_GEN_DURATION_S,
+    resolution: VIDEO_GEN_RESOLUTION,
   };
   if (refs.urls.length === 0) {
     body.aspect_ratio = aspect;
@@ -429,7 +428,7 @@ async function generateVideo(args, userCtx, responseCtx) {
   return {
     success: true,
     filename,
-    message: `Video generated successfully (${VIDEO_DURATION_S}s, ${VIDEO_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`,
+    message: `Video generated successfully (${VIDEO_GEN_DURATION_S}s, ${VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`,
   };
 }
 

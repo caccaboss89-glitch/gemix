@@ -5,7 +5,7 @@
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
 // The build tool description is generic and does not expose sub-agent internals.
 
-const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
+const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION } = require('../config/constants');
 const { LEGAL_NAME } = require('../config/env');
 const { formatSkillNamesList } = require('../utils/skills');
 
@@ -289,7 +289,7 @@ const TOOL_GENERATE_IMAGE = makeTool({
 
 const TOOL_GENERATE_VIDEO = makeTool({
   name: 'generate_video',
-  description: 'Generate a 10-second 720p video from a textual prompt, optionally guided by reference images. It can NOT modify or extend an existing video - only reference IMAGES are accepted. Result is pushed to the delivery buffer.',
+  description: `Generate a ${VIDEO_GEN_DURATION_S}-second ${VIDEO_GEN_RESOLUTION} video from a textual prompt, optionally guided by reference images. It can NOT modify or extend an existing video - only reference IMAGES are accepted. Result is pushed to the delivery buffer.`,
   properties: {
     prompt: {
       type: 'string',
