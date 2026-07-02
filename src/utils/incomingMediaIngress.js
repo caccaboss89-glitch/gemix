@@ -86,13 +86,14 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     metadataDurationSec: duration,
     ownerKey: historyStorageId,
     tagOnly: options.tagOnly === true,
+    platformAttachmentId: msgId,
   });
 
   return {
     tag: ingress.tag,
     textFragment: ingress.textFragment,
     contentParts: ingress.contentParts,
-    syncedPath,
+    syncedPath: ingress.syncedPath ?? syncedPath,
     mimetype,
     filename,
     overDurationLimit: ingress.overDurationLimit || null,
@@ -134,13 +135,14 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     metadataDurationSec,
     ownerKey: historyStorageId,
     tagOnly,
+    platformAttachmentId: att.id,
   });
 
   return {
     tag: ingress.tag,
     textFragment: ingress.textFragment,
     contentParts: ingress.contentParts,
-    syncedPath,
+    syncedPath: ingress.syncedPath ?? syncedPath,
     name: ingressName,
   };
 }

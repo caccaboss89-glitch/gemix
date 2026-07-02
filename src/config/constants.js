@@ -37,6 +37,9 @@ module.exports = {
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
   MAX_HISTORY: 30,
+  // Max native history media parts re-attached per turn (matches MAX_HISTORY).
+  MAX_HISTORY_MEDIA_IMAGES: 30,
+  MAX_HISTORY_MEDIA_FILES: 30,
   MAX_TASK_DAYS: 365,
   SCHEDULER_INTERVAL_MS: 60_000,
   // responseLock TTL while a debounced batch waits or a turn pipeline runs
@@ -86,7 +89,7 @@ module.exports = {
   BUILD_LOCK_WAIT_MS: 30 * 1000,
 
   // Media
-  MAX_IMAGE_BYTES: 7_500_000,
+  MAX_IMAGE_BYTES: 8 * 1024 * 1024,
   // Main brain: max generate_image / generate_video tool calls in one model turn.
   MAX_GENERATE_IMAGE_PER_ROUND: 5,
   MAX_GENERATE_VIDEO_PER_ROUND: 3,

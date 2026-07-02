@@ -259,7 +259,7 @@ const TOOL_MUSIC_CREATOR = makeTool({
 
 // -- Grok Imagine - image and video generation ---------------------------
 //
-// Available to all users (active or not) on every platform except Discord.
+// Available on WhatsApp (dedicated + personal); image/video generation likewise.
 //
 // Reference images: each entry is a filename with extension from the delivery
 // buffer or chat history, or a public https URL. Filenames resolve buffer-first,
@@ -550,7 +550,7 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
 
 const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
-  description: 'Report a bug/failure. Use ONLY if the tool error DOES NOT state the Admin was already notified, or for general logical bugs. Inform the user in your final response.',
+  description: 'Report a bug/failure. Use for tool error DOES NOT state the Admin was already notified, general logical bugs or issues with system components e.g. unclear instructions, unexpected behaviors, bugs noted in the history... Inform the user in your final response.',
   properties: {
     description: {
       type: 'string',
@@ -614,10 +614,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(TOOL_MUSIC_CREATOR);
   }
 
-  // 1b. Grok Imagine - image and video generation. Available only on
-  // WhatsApp since both produce binary media that is delivered through
-  // the WA attachment pipeline. Per-round caps (5 images, 3 videos) live in
-  // PER_ROUND_TOOL_LIMITS (toolCallExecution.js).
+  // 1b. Grok Imagine - image and video generation (WhatsApp only).
+  // Per-round caps live in PER_ROUND_TOOL_LIMITS (toolCallExecution.js).
   if (isWhatsApp) {
     tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO);
   }

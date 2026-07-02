@@ -17,9 +17,10 @@ const {
   IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL,
 } = require('../config/env');
-const { VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION } = require('../config/constants');
+const { VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION, MAX_IMAGE_BYTES } = require('../config/constants');
 const { getXaiAuth } = require('../config/xaiAuth');
-const { callApiWithRetry, logApiResponse } = require('../ai/apiClient');
+const { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry } = require('../ai/apiClient');
+const { fetchWithTimeout, readResponseBodyWithTimeout } = require('../utils/fetch');
 const { tempDirForOwner } = require('../utils/tempFileServer');
 const { getHistoryDir, resolveStorageId } = require('../utils/userPaths');
 const { resolveWorkspaceId, workspaceIdToSlug } = require('../utils/workspaceId');
@@ -28,7 +29,9 @@ const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier')
 const { sanitizeFilename } = require('../utils/text');
 const { createLogger } = require('../utils/logger');
 const { mimeForExtension } = require('../config/mimeExtensions');
-const { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath } = require('../utils/aiFileDelivery');
+const { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath, MAX_VIDEO_BYTES } = require('../utils/aiFileDelivery');
+const { clearXaiUploadCache } = require('../utils/xaiUpload');
+const { isXaiFileDownloadError } = require('../utils/refreshXaiMessageUrls');
 
 const log = createLogger('ImagineGenerator');
 
@@ -38,6 +41,15 @@ const IMAGE_TIMEOUT_MS = 3 * 60 * 1000;
 // Video generation is async: POST returns a request_id, then we poll.
 const VIDEO_POLL_INTERVAL_MS = 5_000;
 const VIDEO_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+const VIDEO_POLL_FETCH_TIMEOUT_MS = 60_000;
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 120_000;
+const MAX_CONSECUTIVE_429_POLLS = 5;
+const VIDEO_IN_PROGRESS_STATUSES = new Set([
+  '', 'pending', 'processing', 'queued', 'running', 'in_progress', 'in progress',
+]);
+const VIDEO_TERMINAL_FAILURE_STATUSES = new Set([
+  'failed', 'error', 'rejected', 'cancelled', 'canceled',
+]);
 
 // Cap on the prompt to keep request payloads reasonable.
 const MAX_PROMPT_LEN = 2000;
@@ -52,8 +64,8 @@ const MAX_REF_IMAGES_FOR_VIDEO = 7;
 
 // Fixed video parameters (resolution/duration live in config/constants.js).
 
-// Single reference image size cap (guards the upload, not a base64 payload).
-const MAX_REF_IMAGE_BYTES = 8 * 1024 * 1024;
+// Generated image/video download cap (same as ingress video limit).
+const GENERATED_MEDIA_MAX_BYTES = MAX_VIDEO_BYTES;
 
 // -- Helpers -----------------------------------------------------------------
 
@@ -133,7 +145,7 @@ function _materializeRefToTemp(buffer, name, ownerKey) {
  *
  * Returns { ok:true, urls:[] } or { ok:false, reason }.
  */
-async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
+async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, opts = {}) {
   if (refList.length > max) {
     return { ok: false, reason: `Too many reference images (${refList.length}). Max allowed: ${max}.` };
   }
@@ -168,8 +180,8 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
     let diskPath = found.filePath || null;
     if (!diskPath) {
       if (found.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-      if (found.buffer.length > MAX_REF_IMAGE_BYTES) {
-        return { ok: false, reason: `Reference "${entry}" exceeds the 8 MB limit.` };
+      if (found.buffer.length > MAX_IMAGE_BYTES) {
+        return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
       }
       try {
         diskPath = _materializeRefToTemp(found.buffer, found.name, ownerKey);
@@ -180,7 +192,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
       try {
         const sz = fs.statSync(diskPath).size;
         if (sz === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-        if (sz > MAX_REF_IMAGE_BYTES) return { ok: false, reason: `Reference "${entry}" exceeds the 8 MB limit.` };
+        if (sz > MAX_IMAGE_BYTES) return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
       } catch (err) {
         return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
       }
@@ -188,6 +200,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
 
     const exposed = await exposeXaiUrlFromAbsPath(diskPath, found.name || `ref${ext}`, {
       mimetype: mimeForExtension(ext),
+      forceRefresh: opts.forceRefresh === true,
     });
     if (!exposed.success) {
       return { ok: false, reason: exposed.error || `Cannot expose reference "${entry}" publicly.` };
@@ -198,15 +211,49 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx) {
 }
 
 async function _downloadMedia(url) {
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, VIDEO_DOWNLOAD_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`Download failed: HTTP ${res.status}`);
   }
-  const arrBuf = await res.arrayBuffer();
+  const arrBuf = await readResponseBodyWithTimeout(res.arrayBuffer(), VIDEO_DOWNLOAD_TIMEOUT_MS);
   if (!arrBuf || arrBuf.byteLength === 0) {
     throw new Error('Download returned an empty body.');
   }
+  if (arrBuf.byteLength > GENERATED_MEDIA_MAX_BYTES) {
+    throw new Error(`Download too large (${arrBuf.byteLength} bytes, max ${GENERATED_MEDIA_MAX_BYTES}).`);
+  }
   return Buffer.from(arrBuf);
+}
+
+function _hasLocalRefEntries(refList) {
+  return refList.some((e) => typeof e === 'string' && e.trim() && !/^https?:\/\//i.test(e.trim()));
+}
+
+/**
+ * POST to Imagine image/video endpoints; on stale local ref URLs, refresh upload once.
+ */
+async function _xaiImagineSubmitWithRefRefresh({
+  label, timeoutMs, refList, maxRefs, userCtx, responseCtx, buildRequest,
+}) {
+  let refs = await _resolveReferenceImageUrls(refList, maxRefs, userCtx, responseCtx);
+  if (!refs.ok) return { ok: false, reason: refs.reason };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { endpointPath, body } = buildRequest(refs.urls);
+      const data = await _xaiJsonRequest(label, endpointPath, body, timeoutMs);
+      return { ok: true, data, refs };
+    } catch (err) {
+      const canRefresh = attempt === 0 && refList.length > 0 && _hasLocalRefEntries(refList)
+        && isXaiFileDownloadError(err.message);
+      if (!canRefresh) return { ok: false, reason: err.message };
+      clearXaiUploadCache();
+      refs = await _resolveReferenceImageUrls(refList, maxRefs, userCtx, responseCtx, { forceRefresh: true });
+      if (!refs.ok) return { ok: false, reason: refs.reason };
+      log.info(`   ${label}: stale ref URL(s), re-uploaded and retrying...`);
+    }
+  }
+  return { ok: false, reason: 'Imagine submit failed after stale ref refresh' };
 }
 
 function _extFromGeneratedMedia(url, mimeType, fallbackExt) {
@@ -291,51 +338,51 @@ async function generateImage(args, userCtx, responseCtx) {
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
-  const refs = await _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_IMAGE, userCtx, responseCtx);
-  if (!refs.ok) {
-    return { success: false, error: refs.reason };
-  }
 
   const aspect = (args && typeof args.aspect_ratio === 'string' && args.aspect_ratio.trim())
     ? args.aspect_ratio.trim()
     : null;
-  if (refs.urls.length === 0 && aspect !== null && !ALLOWED_IMAGE_ASPECT_RATIOS.has(aspect)) {
+  if (refList.length === 0 && aspect !== null && !ALLOWED_IMAGE_ASPECT_RATIOS.has(aspect)) {
     return {
       success: false,
       error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_IMAGE_ASPECT_RATIOS].join(', ')}.`,
     };
   }
 
-  // No references -> text-to-image on /images/generations.
-  // 1 reference   -> /images/edits with the single `image` field.
-  // 2-3 references -> /images/edits with the `images` array (order matters:
-  //                  the model addresses them as <IMAGE_0>, <IMAGE_1>, ...).
-  let endpointPath;
-  const body = {
-    model: IMAGE_GEN_MODEL,
-    prompt,
-    response_format: 'url',
-  };
-  if (refs.urls.length === 0) {
-    endpointPath = '/images/generations';
-    if (aspect !== null) body.aspect_ratio = aspect;
-  } else {
-    endpointPath = '/images/edits';
-    if (refs.urls.length === 1) {
-      body.image = { url: refs.urls[0], type: 'image_url' };
-    } else {
-      body.images = refs.urls.map(url => ({ type: 'image_url', url }));
-    }
-  }
+  // No references -> /images/generations; 1–3 references -> /images/edits.
 
-  log.info(`generate_image: refs=${refs.urls.length}, aspect=${aspect || 'auto'}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
+  log.info(`generate_image: refs=${refList.length}, aspect=${aspect || 'auto'}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
-  let data;
-  try {
-    data = await _xaiJsonRequest('Grok-Imagine-Image', endpointPath, body, IMAGE_TIMEOUT_MS);
-  } catch (err) {
-    return { success: false, error: `Image generation failed: ${err.message}` };
+  const submit = await _xaiImagineSubmitWithRefRefresh({
+    label: 'Grok-Imagine-Image',
+    timeoutMs: IMAGE_TIMEOUT_MS,
+    refList,
+    maxRefs: MAX_REF_IMAGES_FOR_IMAGE,
+    userCtx,
+    responseCtx,
+    buildRequest: (urls) => {
+      const body = {
+        model: IMAGE_GEN_MODEL,
+        prompt,
+        response_format: 'url',
+      };
+      if (urls.length === 0) {
+        if (aspect !== null) body.aspect_ratio = aspect;
+        return { endpointPath: '/images/generations', body };
+      }
+      if (urls.length === 1) {
+        body.image = { url: urls[0], type: 'image_url' };
+      } else {
+        body.images = urls.map(url => ({ type: 'image_url', url }));
+      }
+      return { endpointPath: '/images/edits', body };
+    },
+  });
+  if (!submit.ok) {
+    return { success: false, error: `Image generation failed: ${submit.reason}` };
   }
+  const data = submit.data;
+  const refsForNote = submit.refs;
 
   const item = Array.isArray(data?.data) ? data.data[0] : null;
   if (!item || typeof item.url !== 'string') {
@@ -355,10 +402,13 @@ async function generateImage(args, userCtx, responseCtx) {
   const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'image');
 
   const truncNote = truncated ? ' (prompt was truncated)' : '';
+  const refNote = refsForNote.urls.length > 0
+    ? ` Used ${refsForNote.urls.length} reference image(s).`
+    : '';
   return {
     success: true,
     filename,
-    message: `Image generated successfully and pushed to the delivery buffer as "${filename}". `
+    message: `Image generated successfully and pushed to the delivery buffer as "${filename}".${refNote} `
       + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`,
   };
 }
@@ -387,47 +437,48 @@ async function generateVideo(args, userCtx, responseCtx) {
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
-  const refs = await _resolveReferenceImageUrls(refList, MAX_REF_IMAGES_FOR_VIDEO, userCtx, responseCtx);
-  if (!refs.ok) {
-    return { success: false, error: refs.reason };
-  }
 
   const aspect = (args && typeof args.aspect_ratio === 'string' && args.aspect_ratio.trim())
     ? args.aspect_ratio.trim()
     : '16:9';
-  if (refs.urls.length === 0 && !ALLOWED_VIDEO_ASPECT_RATIOS.has(aspect)) {
+  if (refList.length === 0 && !ALLOWED_VIDEO_ASPECT_RATIOS.has(aspect)) {
     return {
       success: false,
       error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_VIDEO_ASPECT_RATIOS].join(', ')}.`,
     };
   }
 
-  // 1 reference  -> image-to-video (`image` is the starting frame).
-  // 2-7 references -> reference-to-video (`reference_images` guide the clip).
-  // The two fields are mutually exclusive per xAI docs.
-  const body = {
-    model: VIDEO_GEN_MODEL,
-    prompt,
-    duration: VIDEO_GEN_DURATION_S,
-    resolution: VIDEO_GEN_RESOLUTION,
-  };
-  if (refs.urls.length === 0) {
-    body.aspect_ratio = aspect;
-  }
-  if (refs.urls.length === 1) {
-    body.image = { url: refs.urls[0], type: 'image_url' };
-  } else if (refs.urls.length > 1) {
-    body.reference_images = refs.urls.map(url => ({ type: 'image_url', url }));
-  }
+  log.info(`generate_video: aspect=${refList.length === 0 ? aspect : 'auto'}, refs=${refList.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
-  log.info(`generate_video: aspect=${refs.urls.length === 0 ? aspect : 'auto'}, refs=${refs.urls.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
-
-  let submit;
-  try {
-    submit = await _xaiJsonRequest('Grok-Imagine-Video', '/videos/generations', body, IMAGE_TIMEOUT_MS);
-  } catch (err) {
-    return { success: false, error: `Video generation failed: ${err.message}` };
+  const submitResult = await _xaiImagineSubmitWithRefRefresh({
+    label: 'Grok-Imagine-Video',
+    timeoutMs: IMAGE_TIMEOUT_MS,
+    refList,
+    maxRefs: MAX_REF_IMAGES_FOR_VIDEO,
+    userCtx,
+    responseCtx,
+    buildRequest: (urls) => {
+      const body = {
+        model: VIDEO_GEN_MODEL,
+        prompt,
+        duration: VIDEO_GEN_DURATION_S,
+        resolution: VIDEO_GEN_RESOLUTION,
+      };
+      if (urls.length === 0) {
+        body.aspect_ratio = aspect;
+      } else if (urls.length === 1) {
+        body.image = { url: urls[0], type: 'image_url' };
+      } else {
+        body.reference_images = urls.map(url => ({ type: 'image_url', url }));
+      }
+      return { endpointPath: '/videos/generations', body };
+    },
+  });
+  if (!submitResult.ok) {
+    return { success: false, error: `Video generation failed: ${submitResult.reason}` };
   }
+  const submit = submitResult.data;
+  const refsForNote = submitResult.refs;
 
   const requestId = submit?.request_id;
   if (!requestId || typeof requestId !== 'string') {
@@ -455,8 +506,8 @@ async function generateVideo(args, userCtx, responseCtx) {
   const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'video');
 
   const truncNote = truncated ? ' (prompt was truncated)' : '';
-  const refNote = refs.urls.length > 0
-    ? ` Used ${refs.urls.length} reference image(s).`
+  const refNote = refsForNote.urls.length > 0
+    ? ` Used ${refsForNote.urls.length} reference image(s).`
     : '';
   return {
     success: true,
@@ -472,31 +523,31 @@ async function generateVideo(args, userCtx, responseCtx) {
 async function _pollVideoResult(requestId) {
   const deadline = Date.now() + VIDEO_POLL_TIMEOUT_MS;
   const label = 'Grok-Imagine-Video-Poll';
+  let consecutive429 = 0;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, VIDEO_POLL_INTERVAL_MS));
 
-    const { baseUrl, token } = getXaiAuth();
+    const { baseUrl } = getXaiAuth();
     const url = `${baseUrl}/videos/${encodeURIComponent(requestId)}`;
     let data;
     try {
-      const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` },
+      const res = await fetchXaiWithOAuthRetry(url, { method: 'GET' }, {
+        timeoutMs: VIDEO_POLL_FETCH_TIMEOUT_MS,
       });
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '');
-        const detail = _parseApiErrorBody(errBody) || `HTTP ${res.status}`;
-        if (!_isRetryablePollHttpStatus(res.status)) {
-          logApiResponse(label, url, { httpStatus: res.status, error: detail, body: errBody.slice(0, 500) });
-          throw new Error(detail);
-        }
-        throw new Error(`HTTP ${res.status}: ${detail}`);
-      }
+      consecutive429 = 0;
       data = await res.json();
     } catch (err) {
+      const msg = err?.message || '';
+      if (/^HTTP 429\b/.test(msg)) {
+        consecutive429 += 1;
+        if (consecutive429 >= MAX_CONSECUTIVE_429_POLLS) {
+          throw new Error(`Rate limited too many times (${MAX_CONSECUTIVE_429_POLLS} consecutive 429s): ${msg}`);
+        }
+      }
       if (!_isRetryablePollException(err)) {
         throw err;
       }
-      log.warn(`   video poll retry (${requestId}): ${err.message}`);
+      log.warn(`   video poll retry (${requestId}): ${msg}`);
       continue;
     }
 
@@ -509,9 +560,13 @@ async function _pollVideoResult(requestId) {
       }
       return videoUrl;
     }
-    if (status === 'failed' || status === 'error' || status === 'rejected' || data?.error) {
+    if (VIDEO_TERMINAL_FAILURE_STATUSES.has(status) || data?.error) {
       logApiResponse(label, url, data);
       throw new Error(_videoPollFailureMessage(data, status));
+    }
+    if (!VIDEO_IN_PROGRESS_STATUSES.has(status)) {
+      logApiResponse(label, url, data);
+      throw new Error(_videoPollFailureMessage(data, status || 'unknown'));
     }
     log.debug(`   video ${requestId}: status=${status || 'pending'}`);
   }

@@ -10,13 +10,15 @@ function isSupportedMedia(type) {
 
 /**
  * Build a standardized attachment tag for AI context (always English).
+ * Uses the on-disk history filename when synced; otherwise the resolved display name.
+ * "(expired)" is never used — missing sync only means the file was not persisted yet;
+ * ingress still uploads via fetchBuffer when possible.
  */
 function buildAttachmentTag(syncedPath, fallbackName) {
-  if (syncedPath) {
-    const clean = syncedPath.startsWith('history/') ? syncedPath.slice('history/'.length) : syncedPath;
-    return `[Attachment: ${clean}]`;
-  }
-  return `[Attachment (expired): ${fallbackName || 'file'}]`;
+  const name = syncedPath
+    ? (syncedPath.startsWith('history/') ? syncedPath.slice('history/'.length) : syncedPath)
+    : (fallbackName || 'file');
+  return `[Attachment: ${name}]`;
 }
 
 function extractAttachmentTagPaths(text) {

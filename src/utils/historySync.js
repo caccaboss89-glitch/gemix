@@ -303,8 +303,8 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
 }
 
 /**
- * Deterministic prune. Called by the handler at the start of EVERY user
- * message, before the AI call. Removes from chat history every file
+ * Deterministic prune. Called by the handler after each user turn completes.
+ * Removes from disk every file that is no longer reachable from the chat
  * that is no longer reachable from the current chat history (i.e. its
  * filename does not appear in the set of `[Attachment: <name>]`
  * tags the AI is about to see).
@@ -439,6 +439,10 @@ function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
     if (!part || typeof part !== 'object') return;
     if (typeof part.text === 'string') _scanText(part.text);
     if (typeof part._historyPath === 'string') _addName(part._historyPath);
+    if (typeof part._xaiSourcePath === 'string') {
+      const base = path.basename(part._xaiSourcePath);
+      if (base) _addName(base);
+    }
   };
   const _scanContent = (c) => {
     if (!c) return;

@@ -313,7 +313,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             buffer: formalPdfBuffer,
             mimetype: 'application/pdf',
           });
-          result = { success: true, message: `Formal request PDF "${formalFinalName}" generated successfully.` };
+          result = {
+            success: true,
+            filename: formalFinalName,
+            message: `Formal request PDF generated successfully and pushed to the delivery buffer as "${formalFinalName}".`,
+          };
         } catch (err) {
           await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
           result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -486,11 +490,19 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         }
         const musicResult = await musicCreator(args.prompt, userCtx);
         if (musicResult.attachments && musicResult.attachments.length > 0) {
+          const pushedNames = [];
           for (const att of musicResult.attachments) {
-            pushBufferAttachment(responseCtx, att);
+            pushedNames.push(pushBufferAttachment(responseCtx, att));
           }
+          const filename = pushedNames[0];
+          result = {
+            success: true,
+            filename,
+            message: `Song generated successfully and pushed to the delivery buffer as "${filename}".`,
+          };
+        } else {
+          result = musicResult.toolResult;
         }
-        result = musicResult.toolResult;
         break;
       }
 

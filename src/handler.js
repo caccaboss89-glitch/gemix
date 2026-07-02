@@ -134,6 +134,7 @@ async function handleMessage(ctx) {
     researchStats: null,
   };
 
+  let pruneAfterTurn = null;
   try {
     const ui = ctx.userIdentity;
     const isActiveMember = ui.isActiveMember;
@@ -308,26 +309,23 @@ async function handleMessage(ctx) {
     }
     messages.push({ role: 'user', content: currentContent });
 
-    // Drop on-disk history files no longer referenced in chat history or the
-    // current turn (attachment tags, _historyPath on media parts). Runs first
-    // so public-URL uploads only expose files still on disk.
     try {
       const historyUserId = resolveStorageId(ctx);
       if (historyUserId) {
         if (ctx.historyLoadIncomplete) {
-          log.warn('History load incomplete: reference-based prune skipped (age-only disk sweep)');
-          pruneHistory(historyUserId, new Set(), {
-            maxAgeMs: DISCORD_MAX_AGE_MS,
-            ageOnly: true,
-          });
+          pruneAfterTurn = {
+            historyUserId,
+            referenced: new Set(),
+            opts: { maxAgeMs: DISCORD_MAX_AGE_MS, ageOnly: true },
+          };
         } else {
           const referenced = collectReferencedHistoryFilenames(ctx.history, ctx.content);
           const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};
-          pruneHistory(historyUserId, referenced, opts);
+          pruneAfterTurn = { historyUserId, referenced, opts };
         }
       }
     } catch (pruneErr) {
-      log.warn(`pruneHistory failed: ${pruneErr.message}`);
+      log.warn(`pruneHistory setup failed: ${pruneErr.message}`);
     }
 
     const deliveryCtx = {
@@ -482,7 +480,12 @@ async function handleMessage(ctx) {
       const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       currentRoundTools = roundTools;
       const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
-      const callOpts = { maxTurns: MAX_TOOL_ROUNDS, requestId: ctx.requestId, responseFormat };
+      const callOpts = {
+        maxTurns: MAX_TOOL_ROUNDS,
+        requestId: ctx.requestId,
+        responseFormat,
+        historyStorageId: resolveStorageId(ctx) || null,
+      };
 
       const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
       lastModelUsed = model;
@@ -649,6 +652,7 @@ async function handleMessage(ctx) {
         toolChoice: 'none',
         requestId: ctx.requestId,
         responseFormat,
+        historyStorageId: resolveStorageId(ctx) || null,
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
@@ -699,6 +703,16 @@ async function handleMessage(ctx) {
       modelUsed: null,
     };
   } finally {
+    if (pruneAfterTurn) {
+      try {
+        if (ctx.historyLoadIncomplete) {
+          log.warn('History load incomplete: reference-based prune skipped (age-only disk sweep)');
+        }
+        pruneHistory(pruneAfterTurn.historyUserId, pruneAfterTurn.referenced, pruneAfterTurn.opts);
+      } catch (pruneErr) {
+        log.warn(`pruneHistory failed: ${pruneErr.message}`);
+      }
+    }
     // Drop per-call notification dedup entries so subsequent AI calls can
     // fire intermediate notifications.
     try { clearCallNotifications(ctx); } catch { /* best effort */ }

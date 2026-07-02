@@ -81,7 +81,7 @@ async function collectGemixVoiceTranscriptParts(history, storageId) {
     try {
       const filePath = _transcriptFileFor(storageId, name, text);
       const url = await uploadFileForXai(filePath, `${name}.transcript.txt`, 'text/plain');
-      return { name, part: { type: 'input_file', file_url: url } };
+      return { name, part: { type: 'input_file', file_url: url, _xaiSourcePath: filePath } };
     } catch (err) {
       log.warn(`transcript attach failed for ${name}: ${err.message}`);
       return null;

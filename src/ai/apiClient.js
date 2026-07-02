@@ -13,6 +13,7 @@ const { XAI_USE_API_KEY } = require('../config/env');
 const { getXaiAuth } = require('../config/xaiAuth');
 const { createLogger } = require('../utils/logger');
 const { refreshHermesOAuth } = require('../utils/hermesAuthRefresh');
+const { isXaiFileDownloadError } = require('../utils/refreshXaiMessageUrls');
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
@@ -264,6 +265,11 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       }
 
       log.error(`   API error after ${attempt} attempt(s), last try ${Math.round(attemptMs / 1000)}s: ${errMsg}`);
+      if (isXaiFileDownloadError(errMsg) && logExtra.deferStaleFileUrlError) {
+        const staleErr = new Error(errMsg);
+        staleErr.code = 'XAI_STALE_FILE_URL';
+        throw staleErr;
+      }
       await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
       throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
     }
@@ -317,4 +323,69 @@ async function callResponsesModel(modelName, body, logExtra = {}) {
   return data;
 }
 
-module.exports = { callResponsesModel, callApiWithRetry, logApiRequest, logApiResponse };
+/**
+ * Authenticated fetch to xAI with OAuth reload + optional Hermes refresh (GET/POST).
+ * Used by TTS, video poll, and other non-Responses endpoints.
+ */
+async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : API_TIMEOUT_MS;
+  const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : MAX_API_RETRIES;
+  let forceTokenReload = false;
+  let hermesRefreshAttempted = false;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let timer;
+    try {
+      const { token } = getXaiAuth(forceTokenReload);
+      forceTokenReload = false;
+      const controller = new AbortController();
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
+        const errMsg = `HTTP ${res.status}: ${shortErr}`;
+        if (res.status === 401) forceTokenReload = true;
+
+        if (!XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
+          hermesRefreshAttempted = true;
+          try {
+            await refreshHermesOAuth();
+            forceTokenReload = true;
+            continue;
+          } catch (refreshErr) {
+            log.error(`   Hermes OAuth refresh failed: ${refreshErr.message}`);
+          }
+        }
+
+        throw new Error(errMsg);
+      }
+
+      return res;
+    } catch (err) {
+      if (timer) clearTimeout(timer);
+      const isTimeout = err.name === 'AbortError';
+      const isRetryable = isTimeout
+        || (err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message))
+        || (err.message && /^HTTP (401|429|500|502|503|504)/.test(err.message));
+      if (isRetryable && attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, attempt * 2000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('xAI authenticated fetch failed');
+}
+
+module.exports = { callResponsesModel, callApiWithRetry, logApiRequest, logApiResponse, fetchXaiWithOAuthRetry };

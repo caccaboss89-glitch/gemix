@@ -8,7 +8,8 @@
 
 const googleTTS = require('google-tts-api');
 const { spawn } = require('child_process');
-const { fetchWithTimeout } = require('../utils/fetch');
+const { fetchWithTimeout, readResponseBodyWithTimeout } = require('../utils/fetch');
+const { fetchXaiWithOAuthRetry } = require('../ai/apiClient');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
 const { XAI_TTS_ENABLED } = require('../config/constants');
@@ -156,48 +157,27 @@ async function _generateVoice(text) {
 // -- xAI TTS (direct endpoint) ----------------------------------------------
 
 /**
- * Call `POST /v1/tts` and return the MP3 buffer. The response body is the
- * raw audio binary (not JSON). Speech tags in the text are interpreted
- * natively by the endpoint. On HTTP 401, reloads the auth file once and
- * retries before surfacing the error (token may have rotated on disk).
+ * Call `POST /v1/tts` and return the MP3 buffer. Uses shared xAI OAuth refresh
+ * (disk reload + Hermes when XAI_USE_API_KEY=false).
  */
 async function xaiTTS(text) {
-  let forceTokenReload = false;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const { baseUrl, token } = getXaiAuth(forceTokenReload);
-    forceTokenReload = false;
+  const { baseUrl } = getXaiAuth();
+  const res = await fetchXaiWithOAuthRetry(`${baseUrl}/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      voice_id: TTS_VOICE_ID,
+      language: 'auto',
+      output_format: TTS_OUTPUT_FORMAT,
+    }),
+  }, { timeoutMs: TTS_REQUEST_TIMEOUT_MS, maxAttempts: 2 });
 
-    const res = await fetchWithTimeout(`${baseUrl}/tts`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        text,
-        voice_id: TTS_VOICE_ID,
-        language: 'auto',
-        output_format: TTS_OUTPUT_FORMAT,
-      }),
-    }, TTS_REQUEST_TIMEOUT_MS);
-
-    if (res.status === 401 && attempt < 2) {
-      forceTokenReload = true;
-      continue;
-    }
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`xAI TTS HTTP ${res.status}: ${errBody.slice(0, 200)}`);
-    }
-
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length === 0) {
-      throw new Error('xAI TTS returned an empty audio body.');
-    }
-    return buffer;
+  const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), TTS_REQUEST_TIMEOUT_MS));
+  if (buffer.length === 0) {
+    throw new Error('xAI TTS returned an empty audio body.');
   }
-  throw new Error('xAI TTS failed after auth retry.');
+  return buffer;
 }
 
 // -- Google Translate TTS (fallback) --------------------------------------

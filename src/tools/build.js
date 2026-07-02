@@ -149,6 +149,7 @@ async function _makeRound1FilePart(workspaceId, finalName, mimetypeHint) {
   return {
     name: finalName,
     url: exposed.url,
+    sourcePath: abs,
     isImage: classifyAiFileDelivery(finalName, mimetypeHint) === DELIVERY_MODE.IMAGE,
   };
 }

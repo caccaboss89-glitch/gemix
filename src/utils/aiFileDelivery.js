@@ -17,10 +17,16 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { DATA_DIR, MAX_IMAGE_BYTES } = require('../config/constants');
+const {
+  DATA_DIR,
+  MAX_IMAGE_BYTES,
+  MAX_HISTORY_MEDIA_IMAGES,
+  MAX_HISTORY_MEDIA_FILES,
+} = require('../config/constants');
 const { mimeForExtension, mimeBase } = require('../config/mimeExtensions');
 const { isNonReadableExt, mainReadFileBlockedMessage } = require('../config/nonReadableExts');
 const { tempDirForOwner } = require('./tempFileServer');
+const { syncFileToHistory } = require('./historySync');
 const { uploadFileForXai } = require('./xaiUpload');
 const { buildAttachmentTag } = require('./media');
 const {
@@ -82,8 +88,8 @@ const TEXT_MIME_EXTRA = new Set([
 //   - images: vision-processed every call (expensive)
 //   - files:  documents/audio/video (input_file). GemiX voice-note transcripts
 //             are exempt (attached to the current turn, not history).
-const MAX_IMAGE_READS = 10;
-const MAX_FILE_READS = 10;
+const MAX_IMAGE_READS = MAX_HISTORY_MEDIA_IMAGES;
+const MAX_FILE_READS = MAX_HISTORY_MEDIA_FILES;
 // Size caps for xAI ingestion.
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
@@ -259,18 +265,23 @@ async function buildXaiFileParts(absPath, displayPath, opts = {}) {
 
   let url;
   try {
-    url = await uploadFileForXai(absPath, path.basename(displayPath || absPath), mimetype);
+    url = await uploadFileForXai(absPath, path.basename(displayPath || absPath), mimetype, {
+      forceRefresh: opts.forceRefresh === true,
+    });
   } catch (err) {
     log.warn(`Upload failed for ${displayPath}: ${err.message}`);
     return { success: false, error: `Cannot expose "${displayPath}" to xAI: ${err.message}` };
   }
+
+  const nativePart = _filePartFor(mode, url);
+  nativePart._xaiSourcePath = absPath;
 
   return {
     success: true,
     url,
     parts: [
       { type: 'text', text: `[Attachment: ${displayPath}]` },
-      _filePartFor(mode, url),
+      nativePart,
     ],
     bumpImageCount: gate.bumpImageCount,
   };
@@ -283,7 +294,7 @@ async function buildXaiFileParts(absPath, displayPath, opts = {}) {
 async function exposeXaiUrlFromAbsPath(absPath, displayPath, opts = {}) {
   const built = await buildXaiFileParts(absPath, displayPath, opts);
   if (!built.success) return built;
-  return { success: true, url: built.url, bumpImageCount: built.bumpImageCount };
+  return { success: true, url: built.url, bumpImageCount: built.bumpImageCount, sourcePath: absPath };
 }
 
 // -- Build read_file: inline numbered text ------------------------------------
@@ -448,7 +459,7 @@ async function deliverSyncedAttachment(opts) {
   const kind = _mediaKindFor(name, contentType);
 
   if (mode === DELIVERY_MODE.TAG_ONLY) {
-    return { tag, contentParts: [], textFragment: `${tag} ` };
+    return { tag, syncedPath: syncedPath || null, contentParts: [], textFragment: `${tag} ` };
   }
 
   // Duration gates run before any upload so over-limit clips are skipped with
@@ -470,21 +481,21 @@ async function deliverSyncedAttachment(opts) {
         historyAbsPath,
       });
       if (kind === 'audio' && isAudioOverDurationLimit(dur)) {
-        return _durationSkipResult(tag, 'audio', dur);
+        return { ..._durationSkipResult(tag, 'audio', dur), syncedPath: syncedPath || null };
       }
       if (kind === 'video' && isVideoOverDurationLimit(dur)) {
-        return _durationSkipResult(tag, 'video', dur);
+        return { ..._durationSkipResult(tag, 'video', dur), syncedPath: syncedPath || null };
       }
     } catch { /* continue to upload */ }
   }
 
   if (tagOnly) {
-    return { tag, contentParts: [], textFragment: `${tag} ` };
+    return { tag, syncedPath: syncedPath || null, contentParts: [], textFragment: `${tag} ` };
   }
 
   const resolved = await _resolveIngressTarget(opts);
   if (resolved.error) {
-    return { tag, contentParts: [], textFragment: `${tag} (${resolved.error}) ` };
+    return { tag, syncedPath: syncedPath || null, contentParts: [], textFragment: `${tag} (${resolved.error}) ` };
   }
 
   const built = await buildXaiFileParts(resolved.absPath, resolved.displayName, {
@@ -493,15 +504,40 @@ async function deliverSyncedAttachment(opts) {
   });
   if (!built.success) {
     log.warn(`xAI ingestion skipped for ${resolved.displayName}: ${built.error}`);
-    return { tag, contentParts: [], textFragment: `${tag} (${built.error}) ` };
+    const failTag = buildAttachmentTag(syncedPath, name);
+    return { tag: failTag, syncedPath: syncedPath || null, contentParts: [], textFragment: `${failTag} (${built.error}) ` };
   }
 
-  // Tag travels in the text fragment; only the native part goes in contentParts.
+  let finalSyncedPath = syncedPath;
+  if (!finalSyncedPath && opts.historyStorageId && opts.platformAttachmentId) {
+    try {
+      const saved = await syncFileToHistory(
+        opts.historyStorageId,
+        opts.platformAttachmentId,
+        async () => fs.readFileSync(resolved.absPath),
+        resolved.displayName,
+      );
+      if (saved) finalSyncedPath = saved;
+    } catch (err) {
+      log.warn(`Post-upload history sync failed for ${resolved.displayName}: ${err.message}`);
+    }
+  }
+
+  const finalTag = buildAttachmentTag(finalSyncedPath, name);
   const filePart = built.parts.find(p => p.type === 'input_file' || p.type === 'input_image');
+  if (filePart) {
+    if (finalSyncedPath && opts.historyStorageId) {
+      const histAbs = resolveHistoryAbsPath(opts.historyStorageId, finalSyncedPath);
+      if (histAbs) filePart._xaiSourcePath = histAbs;
+    } else if (resolved.absPath) {
+      filePart._xaiSourcePath = resolved.absPath;
+    }
+  }
   return {
-    tag,
+    tag: finalTag,
+    syncedPath: finalSyncedPath || null,
     contentParts: filePart ? [filePart] : [],
-    textFragment: `${tag} `,
+    textFragment: `${finalTag} `,
     bumpImageCount: built.bumpImageCount,
   };
 }
@@ -557,9 +593,11 @@ module.exports = {
   XAI_IMAGE_EXTS,
   MAX_IMAGE_READS,
   MAX_FILE_READS,
+  MAX_VIDEO_BYTES,
   classifyAiFileDelivery,
   buildXaiFileParts,
   exposeXaiUrlFromAbsPath,
   deliverReadFileFromPath,
   deliverSyncedAttachment,
+  resolveHistoryAbsPath,
 };

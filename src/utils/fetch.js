@@ -7,6 +7,21 @@
 const { FETCH_TIMEOUT_MS } = require('../config/constants');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
 
+async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Body read timeout (${timeoutMs / 1000}s)`)),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([readPromise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Fetch with automatic timeout via AbortController.
  * Wraps native fetch with a configurable timeout (default: FETCH_TIMEOUT_MS from constants).
@@ -92,7 +107,7 @@ async function downloadPublicFile(url, opts = {}) {
   if (declared > maxBytes) {
     throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
   }
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), opts.timeoutMs ?? FETCH_TIMEOUT_MS));
   if (buffer.length === 0) throw new Error('Download returned an empty body.');
   if (buffer.length > maxBytes) {
     throw new Error(`File too large (${buffer.length} bytes, max ${maxBytes})`);
@@ -106,4 +121,4 @@ async function downloadPublicFile(url, opts = {}) {
   return { buffer, mimetype, filename };
 }
 
-module.exports = { fetchWithTimeout, fetchExternal, downloadPublicFile };
+module.exports = { fetchWithTimeout, fetchExternal, downloadPublicFile, readResponseBodyWithTimeout };

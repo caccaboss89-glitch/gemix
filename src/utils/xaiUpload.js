@@ -75,19 +75,29 @@ async function _uploadBuffer(buffer, displayName, mimetype) {
  * @param {string} [mimetype]
  * @returns {Promise<string>} Public HTTPS URL.
  */
-async function uploadFileForXai(absPath, displayName, mimetype) {
+async function uploadFileForXai(absPath, displayName, mimetype, opts = {}) {
   const stat = fs.statSync(absPath);
   if (!stat.isFile() || stat.size === 0) {
     throw new Error(`cannot upload "${displayName}": empty file or not a file`);
   }
-  const cached = _cacheGet(absPath, stat);
-  if (cached) return cached;
+  const forceRefresh = opts.forceRefresh === true;
+  if (!forceRefresh) {
+    const cached = _cacheGet(absPath, stat);
+    if (cached) return cached;
+  } else {
+    _urlCache.delete(absPath);
+  }
 
   const buffer = fs.readFileSync(absPath);
   const url = await _uploadBuffer(buffer, displayName, mimetype);
   _urlCache.set(absPath, { mtimeMs: stat.mtimeMs, size: stat.size, url, uploadedAt: Date.now() });
-  log.info(`Uploaded for xAI: ${path.basename(displayName)} (${stat.size} bytes)`);
+  log.info(`Uploaded for xAI: ${path.basename(displayName)} (${stat.size} bytes)${forceRefresh ? ' (refreshed)' : ''}`);
   return url;
 }
 
-module.exports = { uploadFileForXai };
+/** Drop all cached tmpfile.link URLs (e.g. before re-uploading after xAI fetch failure). */
+function clearXaiUploadCache() {
+  _urlCache.clear();
+}
+
+module.exports = { uploadFileForXai, clearXaiUploadCache };

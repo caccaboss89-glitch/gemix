@@ -173,12 +173,12 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
     });
     if (ingress.oversize) {
       attachmentTags.push({ tag: ingress.tag, name: att.name, syncedPath: null });
-      textBody = `${ingress.textFragment.trim()} ${textBody}`.trim();
+      textBody = `${textBody} ${ingress.textFragment.trim()}`.trim();
       continue;
     }
     contentParts.push(...ingress.contentParts);
     attachmentTags.push({ tag: ingress.tag, name: ingress.name, syncedPath: ingress.syncedPath });
-    textBody = `${ingress.textFragment.trim()} ${textBody}`.trim();
+    textBody = `${textBody} ${ingress.textFragment.trim()}`.trim();
   }
 
   if (attachmentTags.length > 0 && textBody) {
@@ -446,10 +446,8 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
   const history = [];
 
-  // Pre-upload budget pass (newest→oldest, per attachment): only the newest
-  // MAX_IMAGE_READS images and MAX_FILE_READS files are uploaded to xAI; the
-  // rest stay tag-only and are never uploaded. Bounds uploads to <=20 regardless
-  // of history size. Bot (assistant) attachments are tag-only anyway.
+  // Pre-upload budget pass (newest→oldest, per attachment): up to
+  // MAX_IMAGE_READS images and MAX_FILE_READS files uploaded to xAI per turn.
   const uploadAllowedAtt = new Set();
   {
     let imgBudget = MAX_IMAGE_READS;

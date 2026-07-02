@@ -7,6 +7,24 @@
 
 const { XAI_REASONING_REPLAY } = require('../config/env');
 
+/** Strip internal-only fields before sending parts to xAI. */
+function _toWireUserPart(part) {
+  if (!part || typeof part !== 'object') return null;
+  if (part.type === 'input_text' && typeof part.text === 'string' && part.text.length > 0) {
+    return { type: 'input_text', text: part.text };
+  }
+  if (part.type === 'input_file' && typeof part.file_url === 'string') {
+    return { type: 'input_file', file_url: part.file_url };
+  }
+  if (part.type === 'input_image' && typeof part.image_url === 'string') {
+    return { type: 'input_image', image_url: part.image_url };
+  }
+  if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
+    return { type: 'input_image', image_url: part.image_url.url };
+  }
+  return null;
+}
+
 /**
  * Convert a single chat-style content payload (string OR array of parts) to
  * an array of Responses-API input parts for a `user` role message.
@@ -29,15 +47,14 @@ function _userContentToInputParts(content) {
     }
 
     if (part.type === 'image_url') {
-      const url = part.image_url?.url;
-      if (typeof url === 'string' && url.length > 0) {
-        out.push({ type: 'input_image', image_url: url });
-      }
+      const wire = _toWireUserPart(part);
+      if (wire) out.push(wire);
       continue;
     }
 
     if (part.type === 'input_text' || part.type === 'input_image' || part.type === 'input_file') {
-      out.push(part);
+      const wire = _toWireUserPart(part);
+      if (wire) out.push(wire);
     }
   }
   return out;
@@ -77,6 +94,10 @@ function _toolContentToResponsesOutput(content) {
     }
     if (part.type === 'input_file' && typeof part.file_url === 'string') {
       extraUserParts.push({ type: 'input_file', file_url: part.file_url });
+      continue;
+    }
+    if (part.type === 'input_image' && typeof part.image_url === 'string') {
+      extraUserParts.push({ type: 'input_image', image_url: part.image_url });
       continue;
     }
     if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {

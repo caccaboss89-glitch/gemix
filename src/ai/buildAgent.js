@@ -11,9 +11,8 @@
 const fs = require('fs');
 const path = require('path');
 const { BUILD_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
-const { callResponsesModel } = require('./apiClient');
+const { callResponsesWithStaleUrlRetry } = require('./responsesWithUrlRefresh');
 const {
-  chatMessagesToResponsesInput,
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
   extractServerSearchStats,
@@ -585,11 +584,9 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
     // Renew the lock so a long agent run keeps the workspace held.
     renewBuildLock(workspaceId, lockOwnerId);
 
-    const { instructions, input } = chatMessagesToResponsesInput(messages);
     const adaptedTools = chatToolsToResponsesTools(tools);
     const body = {
       model: BUILD_MODEL,
-      input,
       max_output_tokens: 64_000,
       tool_choice: 'auto',
       // Server-side cap per HTTP call (web_search/x_search/code_interpreter).
@@ -604,14 +601,16 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
     if (XAI_REASONING_REPLAY) {
       body.include = ['reasoning.encrypted_content'];
     }
-    if (instructions) body.instructions = instructions;
     if (adaptedTools) body.tools = adaptedTools;
 
     let data;
     try {
-      data = await callResponsesModel('Grok-Build', body, {
-        timeoutMs: BUILD_API_TIMEOUT_MS,
-        buildRound: rounds,
+      data = await callResponsesWithStaleUrlRetry({
+        modelName: 'Grok-Build',
+        messages,
+        body,
+        logExtra: { timeoutMs: BUILD_API_TIMEOUT_MS, buildRound: rounds },
+        allowStaleUrlRefresh: true,
       });
     } catch (err) {
       log.error(`build agent API call failed at round ${rounds}: ${err.message}`);
@@ -680,24 +679,24 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
         'in the `attachments` field (omit it if none).',
     });
     try {
-      const { instructions, input } = chatMessagesToResponsesInput(messages);
       const adaptedTools = chatToolsToResponsesTools(tools);
       const body = {
         model: BUILD_MODEL,
-        input,
         max_output_tokens: 64_000,
         tool_choice: 'none',
         store: false,
       };
       applyResponsesTextFormat(body, BUILD_RESPONSE_FORMAT);
-      if (instructions) body.instructions = instructions;
       if (adaptedTools) body.tools = adaptedTools;
       if (XAI_REASONING_REPLAY) {
         body.include = ['reasoning.encrypted_content'];
       }
-      const data = await callResponsesModel('Grok-Build', body, {
-        timeoutMs: BUILD_API_TIMEOUT_MS,
-        buildRound: 'wrap-up',
+      const data = await callResponsesWithStaleUrlRetry({
+        modelName: 'Grok-Build',
+        messages,
+        body,
+        logExtra: { timeoutMs: BUILD_API_TIMEOUT_MS, buildRound: 'wrap-up' },
+        allowStaleUrlRefresh: true,
       });
       accumulateSearchStats(data);
       finalText = responsesToAssistantMessage(data).content || '';
@@ -744,9 +743,13 @@ function _buildUserContent(prompt, attachmentParts) {
     for (const att of attachmentParts) {
       if (att && typeof att.url === 'string') {
         if (att.name) parts.push({ type: 'text', text: `[Attachment: ${att.name}]` });
-        parts.push(att.isImage
+        const filePart = att.isImage
           ? { type: 'input_image', image_url: att.url }
-          : { type: 'input_file', file_url: att.url });
+          : { type: 'input_file', file_url: att.url };
+        if (typeof att.sourcePath === 'string') {
+          filePart._xaiSourcePath = att.sourcePath;
+        }
+        parts.push(filePart);
       }
     }
   }

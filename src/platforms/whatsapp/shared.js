@@ -39,8 +39,8 @@ const { createLogger } = require('../../utils/logger');
 const log = createLogger('WhatsAppResponse');
 
 // Max parallel xAI uploads while building one history window. Uploads are
-// already bounded to <=20 per turn by the pre-upload budget pass (newest 10
-// images + 10 files), so this just keeps that bounded set fast.
+// already bounded to MAX_HISTORY_MEDIA_IMAGES/FILES per turn by the pre-upload
+// budget pass (see constants.js).
 const HISTORY_UPLOAD_CONCURRENCY = 15;
 
 const { resolveIngressFilename: _resolveWaFilename } = require('../../utils/attachmentFilenames');
@@ -536,10 +536,10 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
   const mediaResult = specialText === null ? await processCurrentMedia(msg, userId) : null;
   if (mediaResult) {
     if (mediaResult.skipped) {
-      textBody = `${mediaResult.fragment || mediaResult.tag} ${textBody}`.trim();
+      textBody = `${textBody} ${mediaResult.fragment || mediaResult.tag}`.trim();
     } else {
       contentParts.push(...mediaResult.contentParts);
-      textBody = `${mediaResult.tag} ${textBody}`.trim();
+      textBody = `${textBody} ${mediaResult.tag}`.trim();
     }
   } else if (msg.hasMedia && specialText === null) {
     const tag = buildAttachmentTag(null, msg._data?.filename || 'file');

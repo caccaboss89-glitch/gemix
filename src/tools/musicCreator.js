@@ -8,7 +8,7 @@ const { MUSIC_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_HTTP_RE
 const systemState = require('../utils/systemState');
 const { findMemberByWa, isAdmin } = require('../config/members');
 const { getRomeISO } = require('../utils/time');
-const { fetchExternal } = require('../utils/fetch');
+const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 
 const log = createLogger('MusicCreator');
@@ -17,8 +17,6 @@ const pendingGenerations = new Set();
 
 async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   const timeoutMs = 180000;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let audioChunks = [];
   let buffer = '';
@@ -26,7 +24,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   try {
     log.info(`Lyria streaming call to ${model}`);
 
-    const res = await fetchExternal(apiUrl, {
+    const res = await fetchWithTimeout(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -35,8 +33,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
         'X-Title': 'GemiX Music Tool',
       },
       body: JSON.stringify({ ...body, stream: true }),
-      signal: controller.signal,
-    }, 'MusicCreator (OpenRouter)', timeoutMs);
+    }, timeoutMs);
 
     if (!res.ok) {
       const errText = await res.text();
@@ -83,8 +80,11 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
 
     return { audio: { data: fullAudioBase64 } };
 
-  } finally {
-    clearTimeout(timeout);
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Music generation timed out after ${timeoutMs / 1000}s`);
+    }
+    throw err;
   }
 }
 
@@ -115,16 +115,22 @@ async function musicCreator(prompt, userCtx) {
 
   try {
     if (!prompt || prompt.trim().length < 5) {
-      throw new Error('Prompt missing or too short.');
+      return { toolResult: { success: false, error: 'Prompt missing or too short.' }, attachments: [] };
     }
 
     const apiKey = OPENROUTER_API_KEY;
     const model = MUSIC_MODEL;
     const apiUrl = `${OPENROUTER_BASE_URL}/chat/completions`;
 
-    if (!apiKey) throw new Error('OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).');
-    if (!model) throw new Error('MUSIC_MODEL is missing in environment (required for Lyria music generation).');
-    if (!OPENROUTER_BASE_URL) throw new Error('OPENROUTER_BASE_URL is missing in environment.');
+    if (!apiKey) {
+      return { toolResult: { success: false, error: 'OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).' }, attachments: [] };
+    }
+    if (!model) {
+      return { toolResult: { success: false, error: 'MUSIC_MODEL is missing in environment (required for Lyria music generation).' }, attachments: [] };
+    }
+    if (!OPENROUTER_BASE_URL) {
+      return { toolResult: { success: false, error: 'OPENROUTER_BASE_URL is missing in environment.' }, attachments: [] };
+    }
 
     log.info(`Generating music for ${userId}`);
 
@@ -133,13 +139,13 @@ async function musicCreator(prompt, userCtx) {
       messages: [
         {
           role: 'user',
-          content: [{ type: 'text', text: prompt.trim() }]
-        }
+          content: [{ type: 'text', text: prompt.trim() }],
+        },
       ],
       modalities: ['audio'],
       ...(model.includes('lyria') ? {} : {
-        audio: { voice: 'alloy', format: 'mp3' }
-      })
+        audio: { voice: 'alloy', format: 'mp3' },
+      }),
     };
 
     const result = await callLyriaStreaming(model, apiUrl, body, apiKey);
@@ -168,7 +174,7 @@ async function musicCreator(prompt, userCtx) {
 
       return {
         toolResult: { success: true, message: '🎵 Song generated successfully!' },
-        attachments: [{ name: filename, buffer, mimetype: 'audio/mp3', sendAudioAsVoice: true }]
+        attachments: [{ name: filename, buffer, mimetype: 'audio/mp3', sendAudioAsVoice: true }],
       };
     }
 
@@ -178,14 +184,19 @@ async function musicCreator(prompt, userCtx) {
         success: false,
         error: 'Music generation did not return audio. Try again with a different prompt.',
       },
-      attachments: []
+      attachments: [],
     };
 
   } catch (err) {
     log.error(`Music generation failed: ${err.message}`);
     await notifyAdmin('MusicCreator', `Generation failed for ${userId}: ${err.message}`);
-    const musicErr = new Error(`Music generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}`);
-    throw musicErr;
+    return {
+      toolResult: {
+        success: false,
+        error: `Music generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}`,
+      },
+      attachments: [],
+    };
   } finally {
     if (!userIsAdmin) pendingGenerations.delete(userId);
   }
