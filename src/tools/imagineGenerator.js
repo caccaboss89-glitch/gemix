@@ -225,6 +225,39 @@ function _pushGeneratedMedia(responseCtx, prompt, buffer, ext, fallbackBase) {
   return pushBufferAttachment(responseCtx, { name: desiredName, buffer, mimetype });
 }
 
+function _parseApiErrorBody(errBody) {
+  if (!errBody || typeof errBody !== 'string') return '';
+  const trimmed = errBody.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed.error === 'string' && parsed.error) return parsed.error;
+    if (parsed.error?.message) return String(parsed.error.message);
+    if (parsed.message) return String(parsed.message);
+    if (parsed.detail) return String(parsed.detail);
+  } catch { /* not JSON */ }
+  return trimmed.slice(0, 300);
+}
+
+/** HTTP statuses worth retrying during async job polling (transient server / rate limit). */
+function _isRetryablePollHttpStatus(status) {
+  return status === 408 || status === 429 || (status >= 500 && status < 600);
+}
+
+function _isRetryablePollException(err) {
+  const msg = err?.message || '';
+  const m = /^HTTP (\d{3})\b/.exec(msg);
+  if (m) return _isRetryablePollHttpStatus(Number(m[1]));
+  return /ECONNRESET|ECONNREFUSED|ERR_NETWORK|fetch failed|network|socket hang up/i.test(msg);
+}
+
+function _videoPollFailureMessage(data, status) {
+  if (typeof data?.error === 'string' && data.error) return data.error;
+  if (data?.error?.message) return String(data.error.message);
+  if (data?.message) return String(data.message);
+  return `generation status "${status || 'failed'}"`;
+}
+
 async function _xaiJsonRequest(label, endpointPath, body, timeoutMs) {
   const { baseUrl } = getXaiAuth();
   const url = `${baseUrl}${endpointPath}`;
@@ -451,12 +484,19 @@ async function _pollVideoResult(requestId) {
       });
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+        const detail = _parseApiErrorBody(errBody) || `HTTP ${res.status}`;
+        if (!_isRetryablePollHttpStatus(res.status)) {
+          logApiResponse(label, url, { httpStatus: res.status, error: detail, body: errBody.slice(0, 500) });
+          throw new Error(detail);
+        }
+        throw new Error(`HTTP ${res.status}: ${detail}`);
       }
       data = await res.json();
     } catch (err) {
-      // Transient polling errors are retried until the deadline.
-      log.warn(`   video poll error (${requestId}): ${err.message}`);
+      if (!_isRetryablePollException(err)) {
+        throw err;
+      }
+      log.warn(`   video poll retry (${requestId}): ${err.message}`);
       continue;
     }
 
@@ -469,9 +509,9 @@ async function _pollVideoResult(requestId) {
       }
       return videoUrl;
     }
-    if (status === 'failed' || status === 'error' || data?.error) {
+    if (status === 'failed' || status === 'error' || status === 'rejected' || data?.error) {
       logApiResponse(label, url, data);
-      throw new Error(data?.error?.message || data?.error || `generation status "${status}"`);
+      throw new Error(_videoPollFailureMessage(data, status));
     }
     log.debug(`   video ${requestId}: status=${status || 'pending'}`);
   }
