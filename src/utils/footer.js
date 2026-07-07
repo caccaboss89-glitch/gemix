@@ -21,13 +21,10 @@ function appendBlock(body, suffix) {
  */
 function getModelDisplayName(modelId) {
   if (!modelId) return 'AI Model';
-  const map = {
-    'grok-4.3-latest': 'Grok 4.3',
-    'grok-4.3': 'Grok 4.3',
-  };
-  if (map[modelId]) return map[modelId];
-  const parts = modelId.split('/');
-  const name = parts[parts.length - 1].split(':')[0].replace(/[-_]/g, ' ');
+  const slug = modelId.split('/').pop().split(':')[0];
+  const grokVersion = slug.match(/^grok-(\d+(?:\.\d+)?)(?:-|$)/);
+  if (grokVersion) return `Grok ${grokVersion[1]}`;
+  const name = slug.replace(/[-_]/g, ' ');
   return name.replace(/\b\w/g, c => c.toUpperCase());
 }
 

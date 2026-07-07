@@ -86,6 +86,7 @@ module.exports = {
   XAI_REASONING_REPLAY: toBool(process.env.XAI_REASONING_REPLAY, true),
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),
   XAI_TTS_ENABLED: toBool(process.env.XAI_TTS_ENABLED, false),
+  XAI_TTS_VOICE: process.env.XAI_TTS_VOICE || 'leo',
   STARTUP_SYSTEM_CLEANUP: toBool(process.env.STARTUP_SYSTEM_CLEANUP, false),
 
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

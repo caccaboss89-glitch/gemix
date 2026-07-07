@@ -12,7 +12,7 @@ const { fetchWithTimeout, readResponseBodyWithTimeout } = require('../utils/fetc
 const { fetchXaiWithOAuthRetry } = require('../ai/apiClient');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
-const { XAI_TTS_ENABLED } = require('../config/constants');
+const { XAI_TTS_ENABLED, XAI_TTS_VOICE } = require('../config/constants');
 const { FFMPEG_PATH } = require('../config/env');
 const { getXaiAuth } = require('../config/xaiAuth');
 
@@ -24,9 +24,8 @@ const TTS_REQUEST_TIMEOUT_MS = 90 * 1000;
 // Overall voice generation timeout covering TTS and transcode. On expiry, the call fails rather than hanging.
 const VOICE_GENERATION_TIMEOUT_MS = 120 * 1000;
 
-// Fixed xAI TTS parameters: voice + auto language detection + MP3 output
-// (transcoded to OGG/Opus for WhatsApp below).
-const TTS_VOICE_ID = 'leo';
+// Fixed xAI TTS parameters: Italian language + MP3 output
+// (transcoded to OGG/Opus for WhatsApp below). Voice id from XAI_TTS_VOICE (.env).
 const TTS_OUTPUT_FORMAT = { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 };
 
 /**
@@ -167,8 +166,8 @@ async function xaiTTS(text) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       text,
-      voice_id: TTS_VOICE_ID,
-      language: 'auto',
+      voice_id: XAI_TTS_VOICE,
+      language: 'it',
       output_format: TTS_OUTPUT_FORMAT,
     }),
   }, { timeoutMs: TTS_REQUEST_TIMEOUT_MS, maxAttempts: 2 });

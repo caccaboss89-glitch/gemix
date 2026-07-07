@@ -16,7 +16,7 @@
 const path = require('path');
 const { MAINTENANCE_PREFIX } = require('./systemMessages');
 
-const { MAINTENANCE_MODE, XAI_TTS_ENABLED } = require('./env');
+const { MAINTENANCE_MODE, XAI_TTS_ENABLED, XAI_TTS_VOICE } = require('./env');
 const MAINTENANCE_RELEASE_NOTIFY_COMMAND = '/updates';
 
 module.exports = {
@@ -29,6 +29,7 @@ module.exports = {
 
   // TTS engine selection
   XAI_TTS_ENABLED,
+  XAI_TTS_VOICE,
   MAINTENANCE_USER_MESSAGE:
     MAINTENANCE_PREFIX +
     `Se vuoi essere avvisato non appena escono nuovi aggiornamenti, scrivi: \`${MAINTENANCE_RELEASE_NOTIFY_COMMAND}\`.\n\n` +
