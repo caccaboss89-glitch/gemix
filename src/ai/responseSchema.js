@@ -6,7 +6,7 @@
 // optional `attachments`, with `conversation_title` added on the first Discord
 // thread turn, and a leading `voice` boolean on WA dedicated only. Keeping it
 // fixed means `attachments` is always available, even on a single-round turn
-// where xAI runs web/X search server-side (so found image URLs can still be
+// where xAI runs web/X search server-side (so found media URLs can still be
 // delivered). The schema rides on the same HTTP call as tools
 // (no extra round). Per xAI docs, json_schema applies only to the final
 // output_text, not to tool calls.
@@ -36,9 +36,9 @@ const VOICE_RESPONSE_FIELD_DESC =
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
 
 const GEMIX_ATTACHMENTS_FIELD_DESC =
-  'OPTIONAL. The ONLY way to send files/images in this chat. Include only when sending files with your reply. '
-  + 'Each entry: filename with extension from the delivery buffer or chat history, or a public https URL (e.g. X post media or images from web search — prefer URLs over build for those). '
-  + 'If nothing to send, omit this field. Never use other file/image syntax (e.g. render_components): it will not be sent.';
+  'OPTIONAL. The ONLY way to send files in this chat. '
+  + 'Each entry: delivery-buffer or history filename, or a direct public https file URL (image/video/audio/PDF/etc. — never a page/article/post link; for X use x_search for the CDN URL). '
+  + 'Prefer search URLs over build. Omit if nothing to send. Never other file syntax (e.g. render_components).';
 
 const TITLE_FIELD_DESC =
   'Concise topic title for this new conversation (max ~80 chars), no emojis, in the user\'s language.';

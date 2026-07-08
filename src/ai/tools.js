@@ -316,8 +316,7 @@ const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string' },
   description:
-    'OPTIONAL. Files for this delivery. Each entry: filename with extension from the delivery buffer or chat history, '
-    + 'or a public https URL. Omit when nothing to attach.',
+    'OPTIONAL. Same entry types as reply attachments: buffer/history filename or direct https file URL. Omit if none.',
 };
 
 function buildWhatsAppTool(isAdmin) {
@@ -573,7 +572,7 @@ function buildBuildTool(isGroup) {
     name: 'build',
     description:
       'Delegate file deliverables to an isolated build sub-agent (/workspace/, bash, yt-dlp, ffmpeg). '
-      + 'NOT for downloading X post media or web images — use x_search/web_search and put public https URLs in your final attachments instead. '
+      + 'Not for fetchable X/web media — use search + final attachments. '
       + 'Isolated turn — no chat history; it sees only your prompt, &lt;BuildWorkspace&gt; files, and attachments[]. '
       + 'Stage in attachments[] anything it must use that is not already in the workspace; generate image, video, or music first when needed. '
       + 'Autonomous web/X search on the sub-agent. '
@@ -587,7 +586,7 @@ function buildBuildTool(isGroup) {
         type: 'array',
         items: { type: 'string' },
         description:
-          'Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. Omit if already in its workspace or not needed.',
+          'Each entry: buffer/history filename or public https URL. Omit if already in workspace or not needed.',
       },
     },
     required: ['prompt'],
