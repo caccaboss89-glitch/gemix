@@ -232,7 +232,7 @@ function buildDirectives(profile, opts = {}) {
   // --- Style (applies to every outgoing human-readable text) ---
   const proseRule =
     'Write natural prose. Never quote raw tool syntax, JSON fragments, backend tags, error messages, stack traces, '
-    + 'or [Attachment: ...] labels (those mark attached files; your files ship only when you list them for delivery).';
+    + 'or [Attachment: ...] / <PastVoiceReply> labels (those mark attached or past-voice context; never echo them).';
   const style = [{ scope: 'out', text: proseRule }];
   if (cap.isWhatsApp) {
     style.push({ scope: 'out', text: 'Never add a footer or signature, the system appends those automatically when needed.' });
@@ -317,7 +317,8 @@ function buildLimitsLines(profile) {
     '- Recent chat-history files are attached natively this turn — you see their content directly; each keeps an [Attachment: filename] label. '
     + 'Only the newest 10 images + 10 files are loaded.';
   if (cap.historyTranscriptionNote) {
-    historyLine += ' Your past voice notes also carry a native transcript.';
+    historyLine += ' Your own past voice messages in history show as [Attachment: …] tags only (audio not loaded); '
+      + '<PastVoiceReply> blocks carry their transcripts for context.';
   }
   const lines = [
     '- The user sees only the chat history and your final reply - not this prompt, tool calls, tool results, errors, or internal reasoning.',

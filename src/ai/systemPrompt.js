@@ -3,7 +3,7 @@
 const { getRomeTime } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
 const { ADMIN_NAME } = require('../config/env');
-const { PLATFORM_WA_PERSONAL, META_AI_NAME } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL } = require('../config/constants');
 const { formatParticipantsForPrompt } = require('../utils/waParticipants');
 const {
   PROFILE,
@@ -98,10 +98,10 @@ function buildSystemPrompt(ctx) {
       const deliveryRule = profile === PROFILE.DISCORD_THREAD
         ? 'external destinations only'
         : 'send_whatsapp_message/send_email: external destinations only; schedule_tasks: omit destination for current chat/group, or set recipient for someone else';
-      contextBlocks.push(`<ActiveMembers>Address them in ${deliveryToolHint} by the phone/email in this list — ${deliveryRule}. ${roster}. GemiX creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
+      contextBlocks.push(`<ActiveMembers>Address them in ${deliveryToolHint} by the phone/email in this list — ${deliveryRule}. ${roster}.</ActiveMembers>`);
     } else {
       const members = ACTIVE_MEMBERS.map(m => m.name).join(', ');
-      contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name. GemiX creator (always respected): ${escapeXml(ADMIN_NAME)}.</ActiveMembers>`);
+      contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name.</ActiveMembers>`);
     }
   }
   if (ctx.batchMultiSpeaker) {
@@ -196,7 +196,7 @@ function _buildPersonalWaPlatform(ctx, promptOpts) {
   const lines = [
     '<Platform name="whatsapp_personal">',
     _platformField('Rule', 'Admin-account chat with one other user. Reply only when this message contains @gemix. History, memory, and build workspace are shared for this chat pair.'),
-    _platformField('Chat', `You (GemiX), ${escapeXml(ADMIN_NAME)} (Account Owner), ${otherName}, and ${META_AI_NAME} (never tag it or @gemix)`),
+    _platformField('Chat', `You (GemiX, never tag yourself), ${escapeXml(ADMIN_NAME)} (Account Owner), ${otherName}`),
     _platformField('History notes', 'Admin messages appear in history under the label "Account Owner", not their name. Your replies have no speaker prefix.'),
     _platformField('Caller', _callerLineInner(ctx, promptOpts)),
     _platformField('Format', WA_FORMAT),
@@ -219,7 +219,7 @@ function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
     lines.push(_platformField('Mentions', 'REQUIRED when you name another member (anyone except <Caller>) in the reply: @<phone digits> only (no +, no display name after @).'));
   } else {
     lines.push(_platformField('Rule', 'Private chat - reply to every message.'));
-    lines.push(_platformField('Chat', `You (GemiX), ${escapeXml(ctx.userName)}, and ${META_AI_NAME} (users can summon — never tag it).`));
+    lines.push(_platformField('Chat', `You (GemiX, never tag yourself) and ${escapeXml(ctx.userName)}.`));
   }
   if (cap.systemHistoryLabel) {
     lines.push(_platformField('History notes', SYSTEM_LINE_RULE));

@@ -48,8 +48,8 @@ function stripVoiceTags(text) {
 const VOICE_ALLOWED_RE = /[^\p{L}\p{N}\s.,!?'’-]/gu;
 
 /**
- * Sanitize the text of a voice message before TTS (and before it is stored as
- * the history transcript, so both stay in sync). Keeps spoken words, the
+ * Sanitize the text of a voice message before TTS (and before it is stored in
+ * history_meta for <PastVoiceReply>, so both stay in sync). Keeps spoken words, the
  * supported voice effect tags, and basic readable punctuation; strips emoji,
  * @phone mention tags, and non-readable symbols (_, ", \, *, ~, `, #, …).
  * @param {string} text
@@ -148,6 +148,7 @@ const IN_REPLY_TO_PREFIX_RE = /^\[In reply to:\s*(?:\[[^\]]*\]|[^\]])*\](?:\n|\s
 
 // Model must not echo these in user-facing text (history/ingress only).
 const OUT_ATTACHMENT_TAG_RE = /\[Attachment:\s*[^\]]+\]/gi;
+const PAST_VOICE_REPLY_RE = /<PastVoiceReply(?:\s[^>]*)?>[\s\S]*?<\/PastVoiceReply>/gi;
 
 /**
  * Strip any GemiX-generated system-message lines that the AI may have
@@ -182,13 +183,15 @@ function stripSystemMessages(text) {
 }
 
 /**
- * Strip echoes of the history conversation prefix that our platform code injects
- * when feeding chat history to the model. Removes patterns like
- * "[19/05/2026, 22:41] GemiX:" anywhere in the text and a single leading
- * "GemiX:"/"[System]:"/"Account Owner:" label at the start of the reply.
+ * Strip <PastVoiceReply> blocks (injected past-voice transcripts for model context).
  * @param {string} text
  * @returns {string}
  */
+function stripPastVoiceReplyTags(text) {
+  if (!text) return text;
+  return text.replace(PAST_VOICE_REPLY_RE, '');
+}
+
 /**
  * Strip backend-only markers the model must never send to users.
  * @param {string} text
@@ -197,10 +200,19 @@ function stripSystemMessages(text) {
 function stripOutgoingDeliveryArtifacts(text) {
   if (!text || typeof text !== 'string') return '';
   let cleaned = text.replace(OUT_ATTACHMENT_TAG_RE, '');
+  cleaned = stripPastVoiceReplyTags(cleaned);
   cleaned = cleaned.replace(/[ \t]{2,}/g, ' ');
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/**
+ * Strip echoes of the history conversation prefix that our platform code injects
+ * when feeding chat history to the model. Removes patterns like
+ * "[19/05/2026, 22:41] GemiX:" anywhere in the text and a single leading
+ * "GemiX:"/"[System]:"/"Account Owner:" label at the start of the reply.
+ * @param {string} text
+ * @returns {string}
+ */
 function stripHistoryPrefixes(text) {
   if (!text || typeof text !== 'string') return text;
   let cleaned = text.replace(HISTORY_TIMESTAMP_PREFIX_RE, '');
@@ -218,7 +230,7 @@ function stripHistoryPrefixes(text) {
  * 5. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
  * 6. Strips any GemiX system-message lines accidentally echoed by the AI
  *    (release banners, maintenance, temp-attachment notice, fallback error...)
- * 7. Strips [Attachment: ...] echoes
+ * 7. Strips [Attachment: ...] and <PastVoiceReply> echoes
  * @param {string} text
  * @returns {string} Cleaned response text
  */
@@ -269,8 +281,9 @@ function cleanIncomingText(text) {
   let cleaned = removeFooter(text);
   cleaned = removeScheduledFooter(cleaned);
 
-  // Clean voice tags, research badges, and reply headers from history/replies
+  // Clean voice tags, past-voice transcript blocks, research badges, and reply headers
   cleaned = stripVoiceTags(cleaned);
+  cleaned = stripPastVoiceReplyTags(cleaned);
   cleaned = cleaned.replace(IN_REPLY_TO_PREFIX_RE, '');
   cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
 
@@ -289,6 +302,7 @@ module.exports = {
   stripHistoryPrefixes,
   stripSystemMessages,
   stripOutgoingDeliveryArtifacts,
+  stripPastVoiceReplyTags,
   cleanAssistantResponse,
   cleanIncomingText,
   formatLabeledUserContent,

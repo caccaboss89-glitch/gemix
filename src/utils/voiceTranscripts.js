@@ -2,67 +2,36 @@
 //
 // GemiX voice messages appear in chat history as plain [Attachment] tags
 // (assistant-side entries cannot carry native file parts). To keep their
-// content visible to the model, each stored transcription is materialized
-// as "<voice-file>.transcript.txt" and attached to the CURRENT user turn as
-// an input_file part on every call, led by a short [System] note clarifying
-// these are transcripts of GemiX's own past voice notes (not new user uploads).
-// The transcript text comes from history_meta (persisted when the voice
-// message was generated - see historySync.js).
-//
-// These files live alongside the chat history under
-// data/users/<storageId>/voice_transcripts/. They persist as long as their
-// voice file is in history and are pruned by pruneOrphanVoiceTranscripts when
-// it is dropped.
+// spoken content visible to the model, stored transcriptions (history_meta)
+// are injected on the CURRENT user turn as <PastVoiceReply> blocks — past
+// context only, not new user uploads or reply instructions.
 
-const fs = require('fs');
 const path = require('path');
-const { DATA_DIR } = require('../config/constants');
 const { extractAttachmentTagPaths } = require('./media');
 const { getStoredHistoryVoiceTranscription } = require('./historySync');
-const { uploadFileForXai } = require('./xaiUpload');
-const { mapWithConcurrency } = require('./concurrency');
-const { createLogger } = require('./logger');
-
-const log = createLogger('VoiceTranscripts');
+const { escapeXml } = require('./xmlEscape');
 
 const VOICE_AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a']);
 
-function _transcriptDirFor(storageId) {
-  return path.join(DATA_DIR, 'users', String(storageId), 'voice_transcripts');
-}
-
-function _transcriptPathFor(storageId, voiceName) {
-  const safe = path.basename(voiceName).replace(/[^a-zA-Z0-9._-]/g, '_');
-  return path.join(_transcriptDirFor(storageId), `${safe}.transcript.txt`);
-}
-
-function _transcriptFileFor(storageId, voiceName, text) {
-  const dir = _transcriptDirFor(storageId);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const filePath = _transcriptPathFor(storageId, voiceName);
-  // Only rewrite when the content changed, so the upload cache (keyed on
-  // mtime) keeps returning the same public URL across turns.
-  let current = null;
-  try { current = fs.readFileSync(filePath, 'utf-8'); } catch { /* missing */ }
-  if (current !== text) fs.writeFileSync(filePath, text, 'utf-8');
-  return filePath;
+function _formatPastVoiceReply(name, text) {
+  const safeName = escapeXml(name);
+  const safeText = escapeXml(text);
+  return `<PastVoiceReply file="${safeName}">${safeText}</PastVoiceReply>`;
 }
 
 /**
- * Scan assistant history messages for GemiX voice attachments with a stored
- * transcription and return content parts for their transcript files, led by a
- * short [System] note so the model understands these are system-attached
- * transcripts of its OWN past voice notes (not files the user just sent).
+ * Scan assistant history for GemiX voice [Attachment] tags with a stored
+ * transcription and return a single text content part with <PastVoiceReply>
+ * blocks. Caller should gate on voice-reply capability (WA dedicated only).
  *
  * @param {Array} history - chat-completion history messages.
  * @param {string|null} storageId - history storage id for this conversation.
- * @returns {Promise<object[]>} parts (a [System] text part + input_file parts), possibly empty.
+ * @returns {object[]} one `{ type: 'text', text }` part, or empty when none.
  */
-async function collectGemixVoiceTranscriptParts(history, storageId) {
+function buildPastVoiceReplyBlocks(history, storageId) {
   if (!storageId || !Array.isArray(history) || history.length === 0) return [];
 
-  // Collect candidate transcripts first (cheap), then upload them in parallel.
-  const candidates = [];
+  const blocks = [];
   const seen = new Set();
   for (const msg of history) {
     if (!msg || msg.role !== 'assistant' || typeof msg.content !== 'string') continue;
@@ -72,62 +41,14 @@ async function collectGemixVoiceTranscriptParts(history, storageId) {
       if (!VOICE_AUDIO_EXTS.has(path.extname(name).toLowerCase())) continue;
       seen.add(name);
       const text = getStoredHistoryVoiceTranscription(storageId, name);
-      if (text) candidates.push({ name, text });
+      if (text) blocks.push(_formatPastVoiceReply(name, text));
     }
   }
-  if (candidates.length === 0) return [];
+  if (blocks.length === 0) return [];
 
-  const uploaded = await mapWithConcurrency(candidates, 6, async ({ name, text }) => {
-    try {
-      const filePath = _transcriptFileFor(storageId, name, text);
-      const url = await uploadFileForXai(filePath, `${name}.transcript.txt`, 'text/plain');
-      return { name, part: { type: 'input_file', file_url: url, _xaiSourcePath: filePath } };
-    } catch (err) {
-      log.warn(`transcript attach failed for ${name}: ${err.message}`);
-      return null;
-    }
-  });
-
-  const fileParts = [];
-  const labels = [];
-  for (const u of uploaded) {
-    if (!u) continue;
-    fileParts.push(u.part);
-    labels.push(u.name);
-  }
-
-  if (fileParts.length === 0) return [];
-
-  const note = {
-    type: 'text',
-    text: `[System] Attached (${labels.join(', ')}) are the system-generated transcripts of your own past voice messages in this chat.`,
-  };
-  return [note, ...fileParts];
-}
-
-function pruneOrphanVoiceTranscripts(storageId, historyDir) {
-  if (!storageId || !historyDir || !fs.existsSync(historyDir)) return;
-  const transcriptDir = _transcriptDirFor(storageId);
-  if (!fs.existsSync(transcriptDir)) return;
-
-  let historyFiles;
-  try { historyFiles = fs.readdirSync(historyDir); }
-  catch { return; }
-
-  const historySafeNames = new Set(
-    historyFiles.map((name) => path.basename(name).replace(/[^a-zA-Z0-9._-]/g, '_')),
-  );
-
-  for (const f of fs.readdirSync(transcriptDir)) {
-    if (!f.endsWith('.transcript.txt')) continue;
-    const voiceSafe = f.slice(0, -'.transcript.txt'.length);
-    if (!historySafeNames.has(voiceSafe)) {
-      try { fs.unlinkSync(path.join(transcriptDir, f)); } catch { /* ignore */ }
-    }
-  }
+  return [{ type: 'text', text: blocks.join('\n') }];
 }
 
 module.exports = {
-  collectGemixVoiceTranscriptParts,
-  pruneOrphanVoiceTranscripts,
+  buildPastVoiceReplyBlocks,
 };

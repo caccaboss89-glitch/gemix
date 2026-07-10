@@ -97,7 +97,7 @@ async function _refreshFilePart(part, absPath, displayName) {
 }
 
 /**
- * Re-upload history / transcript files referenced in chat messages and patch
+ * Re-upload history files referenced in chat messages and patch
  * stale tmpfile.link URLs in place.
  *
  * @param {Array} messages - handler messages array (mutated in place).

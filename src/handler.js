@@ -8,8 +8,10 @@
 //   3. Build the messages array: system prompt + chat history + the current
 //      user content. Media uses utils/incomingMediaIngress.js →
 //      aiFileDelivery.js: native `input_image` / `input_file` parts via
-//      public URLs (recent history files are attached too, so the model sees
-//      them directly), or [Attachment] tags only for raw binaries.
+//      public URLs (user/history files attached natively; assistant-side
+//      entries including GemiX voice stay [Attachment] tags only), or tag-only
+//      for raw binaries. GemiX past voice transcripts are injected as
+//      <PastVoiceReply> blocks on the current turn (WA dedicated only).
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in two phases:
 //      (1) standard tools parallel, (2) delivery parallel - repeat until the
 //      model returns the final response or the round budget is reached. The
@@ -25,7 +27,7 @@ const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolAccessError } = require('./ai/tools');
 const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/responseSchema');
 const { resolveDeliverySelection } = require('./utils/deliverySelection');
-const { collectGemixVoiceTranscriptParts } = require('./utils/voiceTranscripts');
+const { buildPastVoiceReplyBlocks } = require('./utils/voiceTranscripts');
 const { generateVoice } = require('./tools/voiceMessage');
 const { sanitizeVoiceMessageText } = require('./utils/text');
 const { getCapabilities } = require('./config/platformCapabilities');
@@ -290,22 +292,23 @@ async function handleMessage(ctx) {
       messages.push(...ctx.history);
     }
 
-    // GemiX voice messages in history are tags only (assistant entries carry
-    // no file parts): attach their transcript .txt files to the current turn
-    // so the model always sees what was said.
+    // GemiX voice messages in history are [Attachment] tags only (assistant
+    // entries cannot carry file parts): inject <PastVoiceReply> on this turn.
     let currentContent = ctx.content;
-    try {
-      const transcriptParts = await collectGemixVoiceTranscriptParts(ctx.history, resolveStorageId(ctx));
-      if (transcriptParts.length > 0) {
-        const baseParts = typeof currentContent === 'string'
-          ? [{ type: 'text', text: currentContent }]
-          : [...(Array.isArray(currentContent) ? currentContent : [])];
-        currentContent = [...baseParts, ...transcriptParts];
-        const transcriptFileCount = transcriptParts.filter(p => p.type === 'input_file').length;
-        log.info(`   Attached ${transcriptFileCount} voice transcript file(s) to the current turn`);
+    if (allowVoice) {
+      try {
+        const pastVoiceBlocks = buildPastVoiceReplyBlocks(ctx.history, resolveStorageId(ctx));
+        if (pastVoiceBlocks.length > 0) {
+          const baseParts = typeof currentContent === 'string'
+            ? [{ type: 'text', text: currentContent }]
+            : [...(Array.isArray(currentContent) ? currentContent : [])];
+          currentContent = [...baseParts, ...pastVoiceBlocks];
+          const blockCount = (pastVoiceBlocks[0].text.match(/<PastVoiceReply/g) || []).length;
+          log.info(`   Injected ${blockCount} <PastVoiceReply> block(s) on the current turn`);
+        }
+      } catch (txErr) {
+        log.warn(`PastVoiceReply inject failed: ${txErr.message}`);
       }
-    } catch (txErr) {
-      log.warn(`voice transcript attach failed: ${txErr.message}`);
     }
     messages.push({ role: 'user', content: currentContent });
 

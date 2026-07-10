@@ -105,9 +105,9 @@ module.exports = {
   PLATFORM_WA_DEDICATED: 'whatsapp_dedicated',
   PLATFORM_WA_PERSONAL: 'whatsapp_personal',
 
-  // Meta AI: the built-in WhatsApp assistant. It is only ever a tool the users
-  // can summon (GemiX must never tag it). Listed in chat context so GemiX
-  // understands who users mean when they reference or tag it.
+  // Meta AI: WhatsApp's built-in assistant (@13135550002). Users may summon it;
+  // GemiX must never tag it (stripped on outgoing messages). Not listed in the
+  // system prompt — inferred from chat history when users reference it.
   META_AI_NUMBER: '13135550002',
   META_AI_NAME: 'Meta AI',
 

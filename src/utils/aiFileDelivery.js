@@ -11,8 +11,10 @@
 //
 // read_file in the build sub-agent returns plain text/code content inline
 // in the JSON tool result (numbered lines) — exact bytes matter for edit_file.
-// The main brain has no read_file: every supported file is attached natively
-// (input_file/input_image) on the turn it appears, current or in history.
+// The main brain has no read_file: user-side files are attached natively
+// (input_file/input_image) on the turn they appear, current or in history.
+// Assistant-side history entries (including GemiX voice) stay [Attachment]
+// tags only — that role cannot carry native file parts.
 
 const fs = require('fs');
 const path = require('path');
@@ -86,8 +88,7 @@ const TEXT_MIME_EXTRA = new Set([
 
 // Per-call caps on history files re-attached natively to the turn.
 //   - images: vision-processed every call (expensive)
-//   - files:  documents/audio/video (input_file). GemiX voice-note transcripts
-//             are exempt (attached to the current turn, not history).
+//   - files:  documents/audio/video (input_file).
 const MAX_IMAGE_READS = MAX_HISTORY_MEDIA_IMAGES;
 const MAX_FILE_READS = MAX_HISTORY_MEDIA_FILES;
 // Size caps for xAI ingestion.

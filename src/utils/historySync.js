@@ -200,8 +200,9 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
 }
 
 /**
- * Transcription for GemiX (bot) voice attachments in chat history only.
- * Reads history_meta first; otherwise matches the short cache written when
+ * Transcription for GemiX (bot) voice messages in chat history only.
+ * History shows them as [Attachment: …] tags (assistant role cannot load audio);
+ * reads history_meta first, otherwise matches the short cache written when
  * a voice reply is generated, then persists into history_meta.
  * Never used for end-user voice notes.
  */
@@ -411,7 +412,6 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
   if (deletedCount > 0) {
     log.info(`pruneHistory user=${userId} removed=${deletedCount} (age-based=${ageDeletedCount}) kept=${kept}`);
   }
-  require('./voiceTranscripts').pruneOrphanVoiceTranscripts(userId, historyDir);
   return { deletedCount, ageDeletedCount, kept };
 }
 

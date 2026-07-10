@@ -153,8 +153,7 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
  *   - input_file:  documents/audio/video → keep newest `maxFiles`
  * Walks from the NEWEST message backwards. Dropped parts leave their
  * [Attachment] tag text (plus a marker) so the model knows the file exists but
- * was not loaded this turn. GemiX voice-note transcripts are NOT affected: they
- * are attached to the current user turn (not history) and always ship.
+ * was not loaded this turn.
  *
  * @param {Array} historyMessages - chat-completion messages (content string or parts array).
  * @param {number} maxImages

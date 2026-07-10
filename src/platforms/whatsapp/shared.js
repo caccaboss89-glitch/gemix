@@ -239,16 +239,17 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 
       // Main brain sees every recent history file directly: user-role entries
       // carry native parts (input_file/input_image via public URL). Assistant
-      // entries (GemiX's own) stay tag-only — that role cannot carry input
-      // parts; GemiX voice notes are re-attached as transcripts on the turn.
+      // entries (GemiX's own) stay [Attachment] tags only — that role cannot
+      // carry input parts. Past voice transcript text is injected as
+      // <PastVoiceReply> on the current turn (handler.js).
       // Over the per-call media budget (uploadAllowed[mi] === false) we also
       // force tag-only so the file is never uploaded to xAI.
       const overBudget = !isFromBot && !uploadAllowed[mi];
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
         tagOnly: isFromBot || overBudget,
       });
-      // GemiX voice messages: persist the transcription into history meta so
-      // the handler can attach the transcript file to the current turn.
+      // GemiX voice messages: persist spoken text into history_meta so the
+      // handler can inject <PastVoiceReply> blocks on the current turn.
       if (platform !== PLATFORM_WA_PERSONAL && isGemiX
           && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {
         resolveGemixVoiceTranscription(

@@ -475,9 +475,9 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
     for (const att of m.attachments.values()) {
       // Main brain sees recent history files directly: user-role entries carry
-      // native parts. GemiX's own (assistant) entries stay tag-only — that role
-      // cannot carry input parts. Over the per-call media budget we also force
-      // tag-only so the file is never uploaded to xAI.
+      // native parts. GemiX's own (assistant) entries stay [Attachment] tags
+      // only — that role cannot carry input parts. Over the per-call media
+      // budget we also force tag-only so the file is never uploaded to xAI.
       const overBudget = !isBot && !uploadAllowedAtt.has(att.id);
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         tagOnly: isBot || overBudget,

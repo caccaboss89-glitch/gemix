@@ -604,8 +604,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 1. Search & Information Retrieval. web_search and x_search are native
   // xAI server-side tools (zero round cost), available on every platform.
-  // History files are always attached natively to the turn (no read_file on
-  // the main brain): GemiX sees every past file directly.
+  // History files are attached natively on user-side entries (no read_file on
+  // the main brain). Assistant-side entries stay [Attachment] tags only.
   tools.push(
     ...NATIVE_SEARCH_TOOLS,
   );

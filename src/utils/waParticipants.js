@@ -1,19 +1,18 @@
 // Build the roster of a WhatsApp group (name + phone number per member) so the
 // prompt can show GemiX who is in the chat and let it tag them with
-// @<phone-number>. Meta AI and GemiX itself are always included for context.
+// @<phone-number>. GemiX itself is always included for context.
 
-const { META_AI_NUMBER, META_AI_NAME } = require('../config/constants');
 const { createLogger } = require('./logger');
 
 const log = createLogger('WaParticipants');
 
 /**
- * Resolve the members of a group chat to { number, name, isGemix, isMeta }.
+ * Resolve the members of a group chat to { number, name, isGemix }.
  * Phone numbers are always returned as bare digits; members whose number
  * cannot be resolved are skipped (never leak a raw @lid into the prompt).
  *
  * @param {object} chat - whatsapp-web.js group Chat
- * @returns {Promise<Array<{number:string,name:string,isGemix:boolean,isMeta:boolean}>>}
+ * @returns {Promise<Array<{number:string,name:string,isGemix:boolean}>>}
  */
 async function buildGroupParticipants(chat) {
   // Lazy require avoids a circular dependency (dedicated.js → shared.js → here).
@@ -27,10 +26,9 @@ async function buildGroupParticipants(chat) {
   const upsert = (number, name, flags = {}) => {
     const digits = (number || '').toString().replace(/\D/g, '');
     if (!digits) return;
-    const existing = byNumber.get(digits) || { number: digits, name: '', isGemix: false, isMeta: false };
+    const existing = byNumber.get(digits) || { number: digits, name: '', isGemix: false };
     if (name && !existing.name) existing.name = name;
     if (flags.isGemix) existing.isGemix = true;
-    if (flags.isMeta) existing.isMeta = true;
     byNumber.set(digits, existing);
   };
 
@@ -65,10 +63,8 @@ async function buildGroupParticipants(chat) {
     if (number) upsert(number, name);
   }));
 
-  // Always present for context: GemiX (self) and Meta AI.
   const selfDigits = (client?.info?.wid?.user || '').toString().replace(/\D/g, '');
   if (selfDigits) upsert(selfDigits, 'GemiX', { isGemix: true });
-  upsert(META_AI_NUMBER, META_AI_NAME, { isMeta: true });
 
   return [...byNumber.values()];
 }
@@ -81,8 +77,7 @@ function formatParticipantsForPrompt(participants, esc) {
   return (participants || [])
     .map((p) => {
       const name = escape(p.name || p.number);
-      if (p.isGemix) return `${name} (you): ${p.number}`;
-      if (p.isMeta) return `${name} (never tag): ${p.number}`;
+      if (p.isGemix) return `${name} (you, never tag yourself): ${p.number}`;
       return `${name}: ${p.number}`;
     })
     .join(', ');
