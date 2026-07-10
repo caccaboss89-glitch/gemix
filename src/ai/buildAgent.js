@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { BUILD_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
 const { callResponsesWithStaleUrlRetry } = require('./responsesWithUrlRefresh');
+const { generateBuildPromptCacheKey } = require('../utils/promptCacheKey');
 const {
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
@@ -546,6 +547,7 @@ async function _runToolCall(toolCall, ctx) {
  */
 async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachmentParts, lockOwnerId }) {
   const startedAt = Date.now();
+  const promptCacheKey = generateBuildPromptCacheKey(workspaceId);
   const tools = _buildAgentTools();
   const messages = [
     { role: 'system', content: _buildSystemPrompt(workspaceId, renamedAttachments) },
@@ -597,6 +599,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
       // No reasoning.effort here: BUILD_MODEL (e.g. grok-build-0.1) rejects
       // that parameter ("does not support parameter reasoningEffort").
     };
+    if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
     applyResponsesTextFormat(body, BUILD_RESPONSE_FORMAT);
     if (XAI_REASONING_REPLAY) {
       body.include = ['reasoning.encrypted_content'];
@@ -686,6 +689,7 @@ async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachme
         tool_choice: 'none',
         store: false,
       };
+      if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
       applyResponsesTextFormat(body, BUILD_RESPONSE_FORMAT);
       if (adaptedTools) body.tools = adaptedTools;
       if (XAI_REASONING_REPLAY) {

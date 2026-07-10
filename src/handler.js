@@ -56,6 +56,7 @@ const { sanitizeDiscordThreadTitle } = require('./utils/discord');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
 const { resolveStorageId, resolvePersonalMemoryFileId } = require('./utils/userPaths');
+const { generatePromptCacheKey } = require('./utils/promptCacheKey');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
@@ -341,6 +342,7 @@ async function handleMessage(ctx) {
     let lastModelUsed = null;
     const sessionStartTime = Date.now();
     let sessionDurationLimitReached = false;
+    const promptCacheKey = generatePromptCacheKey(userCtx);
     const discordFirstTurn = Boolean(userCtx.isFirstTurn);
 
     // Structured-reply state, recomputed before every AI call: `bufferFiles`
@@ -488,6 +490,7 @@ async function handleMessage(ctx) {
         requestId: ctx.requestId,
         responseFormat,
         historyStorageId: resolveStorageId(ctx) || null,
+        promptCacheKey,
       };
 
       const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
@@ -656,6 +659,7 @@ async function handleMessage(ctx) {
         requestId: ctx.requestId,
         responseFormat,
         historyStorageId: resolveStorageId(ctx) || null,
+        promptCacheKey,
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);

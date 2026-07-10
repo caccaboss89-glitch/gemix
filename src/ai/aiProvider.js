@@ -16,12 +16,23 @@ const {
 const { callResponsesWithStaleUrlRetry } = require('./responsesWithUrlRefresh');
 
 /**
+ * @param {object} body
+ * @param {string|null|undefined} key
+ */
+function _applyPromptCacheKey(body, key) {
+  if (key && typeof key === 'string') {
+    body.prompt_cache_key = key;
+  }
+}
+
+/**
  * Call Grok on the direct xAI Responses endpoint.
  * @param {Array} messages
  * @param {Array|null} tools
  * @param {object} [opts]
  * @param {string|null} [opts.historyStorageId] - Enables automatic refresh of
  *   expired tmpfile.link URLs referenced in messages before failing.
+ * @param {string|null} [opts.promptCacheKey] - Stable per-conversation xAI cache id.
  */
 async function callAI(messages, tools = null, opts = {}) {
   const logExtra = opts.requestId ? { requestId: opts.requestId } : {};
@@ -32,6 +43,7 @@ async function callAI(messages, tools = null, opts = {}) {
     reasoning: { effort: 'high' },
     store: false,
   };
+  _applyPromptCacheKey(body, opts.promptCacheKey);
 
   if (XAI_REASONING_REPLAY) {
     body.include = ['reasoning.encrypted_content'];

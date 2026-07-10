@@ -59,7 +59,7 @@ function resolveStorageId(userCtx) {
   if (userCtx.platform === PLATFORM_WA_PERSONAL && userCtx.chatId) {
     return resolvePersonalChatStorageId(userCtx.chatId);
   }
-  if (userCtx.isGroup && userCtx.groupId) return String(userCtx.groupId);
+  if (userCtx.isGroup) return userCtx.groupId ? String(userCtx.groupId) : null;
   if (userCtx.waJid) return String(userCtx.waJid);
   return null;
 }
