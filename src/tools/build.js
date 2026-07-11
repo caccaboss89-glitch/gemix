@@ -48,11 +48,12 @@ const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
 const { runBuildAgent } = require('../ai/buildAgent');
 const { getUserHistoryPaths } = require('../utils/historySync');
 const { resolveStorageId } = require('../utils/userPaths');
-const { downloadPublicFile } = require('../utils/fetch');
+const { resolveUrlEntry } = require('../utils/deliverySelection');
+const { applyBuildAgentFlags } = require('../utils/attachmentDelivery');
 
 const { classifyAiFileDelivery, DELIVERY_MODE, exposeXaiUrlFromAbsPath } = require('../utils/aiFileDelivery');
 const { sanitizeFilename } = require('../utils/text');
-const { pushBufferAttachment, isWhatsAppAudioVideoAttachment } = require('../utils/attachments');
+const { pushBufferAttachment } = require('../utils/attachments');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('BuildTool');
@@ -66,7 +67,7 @@ function _historyDirFor(userCtx) {
 
 /**
  * Try to resolve an attachment entry:
- *   1. Public https URLs are downloaded into memory.
+ *   1. Public https URLs via resolveUrlEntry (60 MB memory, then disk up to 100 MB; >100 MB → source URL for round 1).
  *   2. The delivery buffer (responseCtx.attachments[]) by `name` match.
  *   3. Chat history for this user.
  * Does not resolve paths under the build workspace (see file header).
@@ -79,13 +80,20 @@ async function _resolveAttachment(entry, userCtx, responseCtx) {
   const trimmed = entry.trim();
 
   if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const dl = await downloadPublicFile(trimmed);
-      return { source: 'url', buffer: dl.buffer, name: sanitizeFilename(dl.filename) || 'file' };
-    } catch (err) {
-      log.warn(`build attachment URL download failed (${trimmed.slice(0, 100)}): ${err.message}`);
+    const resolved = await resolveUrlEntry(trimmed, []);
+    if (!resolved.att) {
+      log.warn(`build attachment URL download failed (${trimmed.slice(0, 100)}): ${resolved.error?.message || 'unknown'}`);
       return null;
     }
+    if (resolved.att.externalUrl) {
+      return { source: 'url', name: resolved.att.name, externalUrl: resolved.att.externalUrl };
+    }
+    return {
+      source: 'url',
+      name: resolved.att.name,
+      buffer: resolved.att.buffer,
+      filePath: resolved.att.filePath,
+    };
   }
 
   const target = path.basename(trimmed);
@@ -184,16 +192,15 @@ async function _attachDelivered(workspaceId, delivered, responseCtx) {
     if (/^https?:\/\//i.test(entry)) {
       if (seenSources.has(entry)) continue;
       seenSources.add(entry);
-      try {
-        const dl = await downloadPublicFile(entry);
-        const finalName = pushBufferAttachment(responseCtx, {
-          name: sanitizeFilename(dl.filename) || 'file',
-          buffer: dl.buffer,
-          mimetype: dl.mimetype,
-        });
+      const resolved = await resolveUrlEntry(entry, responseCtx.attachments, { forBuild: true });
+      if (resolved.att) {
+        const finalName = pushBufferAttachment(responseCtx, resolved.att);
         attached.push(finalName);
-      } catch (err) {
-        log.warn(`delivered URL download failed (${entry.slice(0, 100)}): ${err.message}`);
+        if (resolved.att.externalUrl) {
+          log.warn(`delivered URL too large to host; buffered source link (${entry.slice(0, 100)})`);
+        }
+      } else {
+        log.warn(`delivered URL download failed (${entry.slice(0, 100)}): ${resolved.error?.message || 'unknown'}`);
         missing.push(entry);
       }
       continue;
@@ -221,7 +228,7 @@ async function _attachDelivered(workspaceId, delivered, responseCtx) {
     // learns the final name via the returned `attached` list (build reports it
     // as `delivered`).
     const payload = { name: displayName, filePath: abs, mimetype };
-    if (isWhatsAppAudioVideoAttachment(payload)) payload.waTempLinkPreferred = true;
+    applyBuildAgentFlags(payload);
     const finalName = pushBufferAttachment(responseCtx, payload);
     attached.push(finalName);
   }
@@ -299,6 +306,16 @@ async function buildTool(args, userCtx, responseCtx) {
     const stagingErrors = [];
     for (const r of resolved) {
       try {
+        if (r.externalUrl) {
+          const ext = path.extname(r.name || '').toLowerCase();
+          const mimeHint = mimeForExtension(ext);
+          attachmentParts.push({
+            name: r.name,
+            url: r.externalUrl,
+            isImage: classifyAiFileDelivery(r.name, mimeHint) === DELIVERY_MODE.IMAGE,
+          });
+          continue;
+        }
         const staged = _stageOne(r, workspaceId);
         if (staged.renamed) {
           renamedAttachments.push({ requested: r.requested, actual: staged.finalName });

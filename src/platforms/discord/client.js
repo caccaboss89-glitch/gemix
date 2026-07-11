@@ -25,7 +25,8 @@ const {
 } = require('../../utils/attachmentCaption');
 const { createLogger } = require('../../utils/logger');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
-const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
+const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../../utils/attachmentFallback');
+const { partitionAttachments, PLATFORM } = require('../../utils/attachmentDelivery');
 const {
   stripOutgoingDeliveryArtifacts,
   cleanIncomingText,
@@ -290,18 +291,26 @@ async function _discordGuildExtras(guild) {
   return { availableEmojis, serverEvents };
 }
 
+async function _sendDiscordLinkFallback(channel, attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) return;
+  try {
+    const fallbackData = buildFallbackAttachmentMessage(attachments, { platform: 'discord' });
+    await channel.send({ content: fallbackData.message });
+    log.info(`   Sent Discord fallback links for ${attachments.length} attachment(s)`);
+  } catch (err) {
+    log.error(`   Failed to send Discord link fallback: ${err.message}`);
+  }
+}
+
 async function deliverDiscordResponse(channel, response) {
   let finalText = stripOutgoingDeliveryArtifacts(response.text || '');
   const newTitle = response.discordTitle || '';
 
-  const files = [];
-  if (response.attachments) {
-    for (const att of response.attachments) {
-      const a = toDiscordAttachmentArgs(att);
-      if (!a) continue;
-      files.push(new AttachmentBuilder(a.data, { name: a.name }));
-    }
-  }
+  const { direct: hostable, linkOnly } = partitionAttachments(response.attachments, PLATFORM.DISCORD);
+  const files = hostable.map((att) => {
+    const a = toDiscordAttachmentArgs(att);
+    return new AttachmentBuilder(a.data, { name: a.name });
+  });
 
   if (finalText) {
     const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
@@ -316,7 +325,7 @@ async function deliverDiscordResponse(channel, response) {
         } catch (err) {
           log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
           await channel.send({ content: chunks[i] });
-          const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
+          const result = await sendAttachmentsWithFallback(hostable, async (att) => {
             const a = toDiscordAttachmentArgs(att);
             if (!a) throw new Error('Invalid attachment');
             await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
@@ -335,7 +344,7 @@ async function deliverDiscordResponse(channel, response) {
       log.info('   Discord files sent');
     } catch (err) {
       log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
-      const result = await sendAttachmentsWithFallback(response.attachments, async (att) => {
+      const result = await sendAttachmentsWithFallback(hostable, async (att) => {
         const a = toDiscordAttachmentArgs(att);
         if (!a) throw new Error('Invalid attachment');
         await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
@@ -346,6 +355,10 @@ async function deliverDiscordResponse(channel, response) {
     }
   } else {
     log.warn('   No content or files to send');
+  }
+
+  if (linkOnly.length > 0) {
+    await _sendDiscordLinkFallback(channel, linkOnly);
   }
 
   if (newTitle && newTitle.length > 0) {

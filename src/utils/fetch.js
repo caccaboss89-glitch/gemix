@@ -4,8 +4,71 @@
 // optional automatic admin notification on failures. Used for external
 // service calls throughout the bot.
 
+const fs = require('fs');
+const path = require('path');
 const { FETCH_TIMEOUT_MS } = require('../config/constants');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
+
+function _downloadTimeoutMs(maxBytes, optsTimeout) {
+  if (Number.isFinite(optsTimeout)) return optsTimeout;
+  const minBytesPerSec = 256 * 1024;
+  return Math.max(FETCH_TIMEOUT_MS, Math.ceil(maxBytes / minBytesPerSec) * 1000);
+}
+
+/**
+ * Read a fetch response body with a running byte cap (safe when Content-Length is absent).
+ * @param {Response} res
+ * @param {number} maxBytes
+ * @param {number} timeoutMs
+ * @param {string|null} [destPath] - When set, write to disk instead of buffering.
+ * @returns {Promise<Buffer|number>} Buffer or byte count written.
+ */
+async function _consumeResponseBodyCapped(res, maxBytes, timeoutMs, destPath = null) {
+  if (!res.body) throw new Error('No response body');
+  const reader = res.body.getReader();
+  let received = 0;
+  const chunks = destPath ? null : [];
+  let stream = null;
+  if (destPath) {
+    const dir = path.dirname(destPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    stream = fs.createWriteStream(destPath);
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  try {
+    while (true) {
+      if (Date.now() > deadline) {
+        throw new Error(`Body read timeout (${timeoutMs / 1000}s)`);
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.length === 0) continue;
+      received += value.length;
+      if (received > maxBytes) {
+        throw new Error(`File too large (${received} bytes, max ${maxBytes})`);
+      }
+      const buf = Buffer.from(value);
+      if (stream) stream.write(buf);
+      else chunks.push(buf);
+    }
+  } catch (err) {
+    if (stream) {
+      stream.destroy();
+      try { if (destPath && fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch { /* ignore */ }
+    }
+    throw err;
+  } finally {
+    if (stream) {
+      await new Promise((resolve, reject) => {
+        stream.end((endErr) => (endErr ? reject(endErr) : resolve()));
+      });
+    }
+  }
+
+  if (received === 0) throw new Error('Download returned an empty body.');
+  return destPath ? received : Buffer.concat(chunks);
+}
 
 async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
   let timer;
@@ -94,12 +157,13 @@ async function downloadPublicFile(url, opts = {}) {
     throw new Error(`Invalid URL: "${String(url).slice(0, 120)}"`);
   }
   const clean = url.trim();
+  const timeoutMs = _downloadTimeoutMs(maxBytes, opts.timeoutMs);
   const res = await fetchWithTimeout(clean, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'Accept': '*/*',
     },
-  }, opts.timeoutMs);
+  }, timeoutMs);
   if (!res.ok) {
     throw new Error(`Download failed: HTTP ${res.status} (${clean.slice(0, 120)})`);
   }
@@ -107,11 +171,7 @@ async function downloadPublicFile(url, opts = {}) {
   if (declared > maxBytes) {
     throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
   }
-  const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), opts.timeoutMs ?? FETCH_TIMEOUT_MS));
-  if (buffer.length === 0) throw new Error('Download returned an empty body.');
-  if (buffer.length > maxBytes) {
-    throw new Error(`File too large (${buffer.length} bytes, max ${maxBytes})`);
-  }
+  const buffer = await _consumeResponseBodyCapped(res, maxBytes, timeoutMs);
   const mimetype = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
   let filename = 'file';
   try {
@@ -121,4 +181,69 @@ async function downloadPublicFile(url, opts = {}) {
   return { buffer, mimetype, filename };
 }
 
-module.exports = { fetchWithTimeout, fetchExternal, downloadPublicFile, readResponseBodyWithTimeout };
+function _filenameFromPublicUrl(url) {
+  try {
+    const segment = decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '');
+    return segment || 'file';
+  } catch {
+    return 'file';
+  }
+}
+
+/**
+ * Download a public HTTP(S) file to disk with a hard size cap (incremental read).
+ * Used when the in-memory cap is exceeded but the file should still be delivered
+ * via temp download link.
+ *
+ * @param {string} url
+ * @param {string} destPath - Absolute path to write.
+ * @param {object} [opts]
+ * @param {number} [opts.maxBytes=104857600] - 100 MB default cap.
+ * @param {number} [opts.timeoutMs]
+ * @returns {Promise<{ filePath: string, mimetype: string, filename: string, size: number }>}
+ */
+async function downloadPublicFileToDisk(url, destPath, opts = {}) {
+  const maxBytes = Number.isFinite(opts.maxBytes) ? opts.maxBytes : 100 * 1024 * 1024;
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url.trim())) {
+    throw new Error(`Invalid URL: "${String(url).slice(0, 120)}"`);
+  }
+  if (typeof destPath !== 'string' || !destPath.trim()) {
+    throw new Error('destPath is required');
+  }
+  const clean = url.trim();
+  const timeoutMs = _downloadTimeoutMs(maxBytes, opts.timeoutMs);
+  const res = await fetchWithTimeout(clean, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+      'Accept': '*/*',
+    },
+  }, timeoutMs);
+  if (!res.ok) {
+    throw new Error(`Download failed: HTTP ${res.status} (${clean.slice(0, 120)})`);
+  }
+  const declared = Number(res.headers.get('content-length') || 0);
+  if (declared > maxBytes) {
+    throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
+  }
+  const dir = path.dirname(destPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const size = await _consumeResponseBodyCapped(res, maxBytes, timeoutMs, destPath);
+
+  const mimetype = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
+  return {
+    filePath: destPath,
+    mimetype,
+    filename: _filenameFromPublicUrl(clean),
+    size,
+  };
+}
+
+module.exports = {
+  fetchWithTimeout,
+  fetchExternal,
+  downloadPublicFile,
+  downloadPublicFileToDisk,
+  readResponseBodyWithTimeout,
+  filenameFromPublicUrl: _filenameFromPublicUrl,
+};

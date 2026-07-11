@@ -31,8 +31,8 @@ const {
   stripRedundantFilenameBesideAttachmentTag: _stripRedundantFilenameBesideAttachmentTag,
 } = require('../../utils/attachmentCaption');
 
-const { toWhatsAppMediaArgs } = require('../../utils/attachments');
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
+const { sendWhatsAppAttachment } = require('../../utils/attachmentDelivery');
 const { mapWithConcurrency } = require('../../utils/concurrency');
 const { createLogger } = require('../../utils/logger');
 
@@ -344,7 +344,8 @@ async function _sendTextWithRetry(chat, text, mentions = []) {
 /**
  * Send response back to WhatsApp chat.
  * Handles text messages, voice messages, and file attachments.
- * Build audio/video and oversized files use temp download links; other media try direct send first, then temp links on failure.
+ * Build-agent audio/video and oversized files use temp download links (or source
+ * links when unhostable); all other media try direct send first, then temp links on failure.
  * @param {object} chat - The whatsapp-web.js Chat object
  * @param {object} responseData - { text, voiceBuffer, isVoiceOnly, attachments, researchFooter?, voiceTranscriptText?, voiceTranscriptChatId? }
  * @param {{ platform?: string }} [opts] - delivery context (platform drives mention filtering)
@@ -396,16 +397,7 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
   if (hasAttachments) {
     // Try to send attachments with fallback support
     const sendAttachment = async (att) => {
-      const m = toWhatsAppMediaArgs(att);
-      if (!m) {
-        throw new Error(`Cannot convert attachment to WhatsApp media: ${att.name || 'unknown'}`);
-      }
-      const media = new MessageMedia(m.mimetype, m.base64, m.name);
-      const options = {};
-      if (att.sendAudioAsVoice) {
-        options.sendAudioAsVoice = true;
-      }
-      await chat.sendMessage(media, options);
+      await sendWhatsAppAttachment(att, (media, options) => chat.sendMessage(media, options));
     };
 
     const result = await sendAttachmentsWithFallback(
@@ -414,13 +406,12 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
       { platform: 'whatsapp' }
     );
 
-    log.info(`Attachment delivery: ${result.sent.length} sent, ${result.failed.length} failed`);
+    log.info(`Attachment delivery: ${result.sent.length} direct, ${result.linkFallback.length} via link`);
 
-    // If there were fallback links, send the system message with download link
     if (result.fallbackMessage) {
       try {
         await chat.sendMessage(result.fallbackMessage);
-        log.info(`Sent fallback message with temp download links for ${result.failed.length} attachment(s)`);
+        log.info(`Sent link-fallback message for ${result.linkFallback.length} attachment(s)`);
       } catch (err) {
         log.error(`Failed to send fallback message: ${err.message}`);
       }

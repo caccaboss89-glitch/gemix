@@ -1,6 +1,7 @@
 // src/utils/attachmentFallback.js
-// Provides fallback delivery for attachments that cannot be sent directly:
-// uploads them to the temporary file server and includes download links in a system message.
+// Link-fallback delivery for attachments that cannot be sent directly on a platform,
+// or are routed to link delivery by platform policy (oversized, build audio/video,
+// externalUrl). Hosts files on the temp server and builds Italian download messages.
 
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +12,7 @@ const { registerTempFile, TEMP_DIR } = require('./tempFileServer');
 const { createLogger } = require('./logger');
 const { TEMP_ATTACHMENT_PREFIX } = require('../config/systemMessages');
 const { shouldWhatsAppUseTempLink, readAttachmentBuffer, uniqueAttachmentName } = require('./attachments');
+const { partitionAttachments, PLATFORM, hasExternalUrl } = require('./attachmentDelivery');
 
 const log = createLogger('AttachmentFallback');
 const execFileAsync = promisify(execFile);
@@ -36,26 +38,35 @@ function formatUrlForWhatsApp(url) {
 }
 
 /**
- * 
- * @param {Array<object>} failedAttachments - Array of attachment objects that failed to send
- * @param {object} options
- * @param {string} options.platform - 'whatsapp' or 'discord' or 'email'
- * @returns {object} { message: string, fallbackLinks: Array<{name: string, token: string, url: string, size: number, expiresInMinutes: number}>, totalSize: number }
- * @throws {Error} if temp file registration fails
+ * Build an Italian system message with temp hosted links and/or passthrough source URLs.
+ *
+ * @param {Array<object>} linkFallbackAttachments - Policy-routed or send-failed attachments
+ * @param {object} [options]
+ * @returns {{ message: string, fallbackLinks: Array<{name: string, url: string, size: number, expiresInMinutes: number|null, external?: boolean}>, totalSize: number }}
  */
-function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
-  if (!Array.isArray(failedAttachments) || failedAttachments.length === 0) {
-    throw new Error('No failed attachments provided');
+function buildFallbackAttachmentMessage(linkFallbackAttachments, options = {}) {
+  if (!Array.isArray(linkFallbackAttachments) || linkFallbackAttachments.length === 0) {
+    throw new Error('No link-fallback attachments provided');
   }
 
-  const platform = options.platform || 'whatsapp';
   const fallbackLinks = [];
   let totalSize = 0;
 
-  log.info(`Processing ${failedAttachments.length} failed attachment(s) for fallback...`);
+  log.info(`Processing ${linkFallbackAttachments.length} link-fallback attachment(s)...`);
 
-  for (const att of failedAttachments) {
+  for (const att of linkFallbackAttachments) {
     try {
+      if (hasExternalUrl(att)) {
+        fallbackLinks.push({
+          name: att.name || 'file',
+          url: att.externalUrl.trim(),
+          size: 0,
+          expiresInMinutes: null,
+          external: true,
+        });
+        continue;
+      }
+
       let filePath = att.filePath;
       const pathExists = typeof filePath === 'string' && fs.existsSync(filePath);
 
@@ -88,40 +99,50 @@ function buildFallbackAttachmentMessage(failedAttachments, options = {}) {
       totalSize += stat.size;
     } catch (err) {
       log.error(`Failed to register attachment "${att.name || 'unknown'}" as temp file: ${err.message}`);
-      // Log registration failure for this attachment
     }
   }
 
   if (fallbackLinks.length === 0) {
-    throw new Error('No attachments were successfully registered for fallback');
+    throw new Error('No attachments were successfully registered for link fallback');
   }
 
-  // Build the system message
-  // Use singular/plural based on count
   const isPlural = fallbackLinks.length > 1;
   const allegatiSuffix = isPlural ? 'i' : 'o';
   const disponibiliText = isPlural ? 'disponibili' : 'disponibile';
   const scaricaloText = isPlural ? 'Scaricali' : 'Scaricalo';
 
-  const expiryMin = fallbackLinks[0]?.expiresInMinutes ?? 60;
-  const expiryLabel = formatExpiryItalian(expiryMin);
+  const hasExternal = fallbackLinks.some(l => l.external);
+  const hasHosted = fallbackLinks.some(l => !l.external);
+  const expiryMin = hasHosted
+    ? (fallbackLinks.find(l => !l.external)?.expiresInMinutes ?? 60)
+    : null;
+  const expiryLabel = expiryMin != null ? formatExpiryItalian(expiryMin) : null;
 
   let messageText = `${TEMP_ATTACHMENT_PREFIX}${allegatiSuffix} non ${disponibiliText} sulla piattaforma.\n\n`;
-  messageText += `${scaricaloText} da questo link temporaneo (scade tra ${expiryLabel}):\n\n`;
+  if (hasHosted && !hasExternal) {
+    messageText += `${scaricaloText} da questo link temporaneo (scade tra ${expiryLabel}):\n\n`;
+  } else if (hasExternal && !hasHosted) {
+    messageText += `${scaricaloText} da questo link:\n\n`;
+  } else {
+    messageText += `${scaricaloText} dai link qui sotto:\n\n`;
+  }
 
-  // Add links
   if (fallbackLinks.length === 1) {
     const link = fallbackLinks[0];
-    const sizeMB = (link.size / 1048576).toFixed(2);
-    messageText += `📄 ${link.name} (${sizeMB} MB)\n${formatUrlForWhatsApp(link.url)}`;
+    const sizeMB = link.size > 0 ? (link.size / 1048576).toFixed(2) : null;
+    const sizeLabel = sizeMB ? ` (${sizeMB} MB)` : '';
+    messageText += `📄 ${link.name}${sizeLabel}\n${formatUrlForWhatsApp(link.url)}`;
   } else {
     messageText += fallbackLinks.map((link, idx) => {
-      const sizeMB = (link.size / 1048576).toFixed(2);
-      return `${idx + 1}. ${link.name} (${sizeMB} MB)\n${formatUrlForWhatsApp(link.url)}`;
+      const sizeMB = link.size > 0 ? (link.size / 1048576).toFixed(2) : null;
+      const sizeLabel = sizeMB ? ` (${sizeMB} MB)` : '';
+      return `${idx + 1}. ${link.name}${sizeLabel}\n${formatUrlForWhatsApp(link.url)}`;
     }).join('\n\n');
   }
 
-  messageText += `\n\nLink disponibile per ${expiryLabel}.`;
+  if (hasHosted && expiryLabel) {
+    messageText += `\n\nLink disponibile per ${expiryLabel}.`;
+  }
 
   return {
     message: messageText,
@@ -169,16 +190,14 @@ async function _createZipArchive(zipPath, entries) {
   return fs.existsSync(zipPath);
 }
 
-/**
- * Collapse multiple temp-link attachments into one zip when possible (single download URL).
- * Falls back to the original list if bundling fails.
- */
+/** Collapse multiple hostable WA temp-link files into one zip when possible. */
 async function bundleWhatsAppTempLinkAttachments(attachments) {
   if (!Array.isArray(attachments) || attachments.length <= 1) return attachments;
 
   const entries = [];
   const usedNames = [];
   for (const att of attachments) {
+    if (hasExternalUrl(att)) continue;
     const p = _materializeAttachmentPath(att);
     if (!p) continue;
     const name = uniqueAttachmentName(
@@ -208,25 +227,7 @@ async function bundleWhatsAppTempLinkAttachments(attachments) {
   return attachments;
 }
 
-function partitionWhatsAppAttachments(attachments) {
-  const direct = [];
-  const tempLink = [];
-  for (const att of attachments) {
-    if (shouldWhatsAppUseTempLink(att)) tempLink.push(att);
-    else direct.push(att);
-  }
-  return { direct, tempLink };
-}
-
-/**
- * Attempt to send an attachment via a given send function.
- * Returns { success: boolean, error?: string, attachment?: object }
- * 
- * @param {object} attachment - Attachment to send
- * @param {Function} sendFunction - Async function that sends the attachment
- * @returns {Promise<object>}
- */
-async function trySendAttachment(attachment, sendFunction) {
+async function _trySendAttachment(attachment, sendFunction) {
   try {
     await sendFunction(attachment);
     return { success: true, attachment };
@@ -236,38 +237,41 @@ async function trySendAttachment(attachment, sendFunction) {
 }
 
 /**
- * Send multiple attachments with fallback support.
- * Attempts to send each attachment. Failed ones are registered for temp download.
- * 
- * @param {Array<object>} attachments - Attachments to send
- * @param {Function} sendFunction - Async (attachment) => void function
- * @param {object} options
- * @param {string} options.platform - 'whatsapp', 'discord', 'email'
- * @returns {Promise<object>} { sent: Array, failed: Array, fallbackMessage: string|null, fallbackLinks: Array }
+ * Send attachments: direct bucket first, then link fallback for policy-routed
+ * items (WA) and send failures.
+ *
+ * @returns {Promise<{ sent: object[], linkFallback: object[], fallbackMessage: string|null, fallbackLinks: object[] }>}
  */
 async function sendAttachmentsWithFallback(attachments, sendFunction, options = {}) {
   if (!Array.isArray(attachments) || attachments.length === 0) {
-    return { sent: [], failed: [], fallbackMessage: null, fallbackLinks: [] };
+    return { sent: [], linkFallback: [], fallbackMessage: null, fallbackLinks: [] };
   }
 
   const results = {
     sent: [],
-    failed: [],
+    linkFallback: [],
     fallbackMessage: null,
     fallbackLinks: [],
   };
 
   let toTry = attachments;
-  let preFailed = [];
+  let linkRouted = [];
 
-  if (options.platform === 'whatsapp') {
-    const { direct, tempLink } = partitionWhatsAppAttachments(attachments);
+  if (options.platform === PLATFORM.WHATSAPP) {
+    const { direct, linkOnly } = partitionAttachments(attachments, PLATFORM.WHATSAPP);
     toTry = direct;
-    if (tempLink.length > 0) {
-      preFailed = await bundleWhatsAppTempLinkAttachments(tempLink);
-      for (const att of tempLink) {
+    if (linkOnly.length > 0) {
+      const external = linkOnly.filter(hasExternalUrl);
+      const hostable = linkOnly.filter(a => !hasExternalUrl(a));
+      linkRouted = [
+        ...external,
+        ...(await bundleWhatsAppTempLinkAttachments(hostable)),
+      ];
+      for (const att of linkOnly) {
         const label = att.name || 'unknown';
-        if (shouldWhatsAppUseTempLink(att)) {
+        if (hasExternalUrl(att)) {
+          log.info(`WhatsApp source link: ${label}`);
+        } else if (shouldWhatsAppUseTempLink(att)) {
           const reason = att.waTempLinkPreferred ? 'build media' : 'oversized';
           log.info(`WhatsApp temp link (${reason}): ${label}`);
         }
@@ -275,33 +279,33 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
     }
   }
 
+  const sendFailed = [];
   for (const att of toTry) {
-    const result = await trySendAttachment(att, sendFunction);
+    const result = await _trySendAttachment(att, sendFunction);
     if (result.success) {
       results.sent.push(result.attachment);
       log.info(`Attachment sent: ${result.attachment.name || 'unknown'}`);
     } else {
-      results.failed.push(result.attachment);
-      log.info(`Direct attachment sending failed (${result.attachment.name || 'unknown'}), falling back to temp link.`);
+      sendFailed.push(result.attachment);
+      log.info(`Direct send failed (${result.attachment.name || 'unknown'}), using link fallback.`);
     }
   }
 
-  if (preFailed.length > 0 || results.failed.length > 0) {
-    results.failed = await bundleWhatsAppTempLinkAttachments(
-      [...preFailed, ...results.failed],
-    );
+  let linkFallback = [...linkRouted, ...sendFailed];
+  if (options.platform === PLATFORM.WHATSAPP && linkFallback.length > 0) {
+    linkFallback = await bundleWhatsAppTempLinkAttachments(linkFallback);
   }
+  results.linkFallback = linkFallback;
 
-  if (results.failed.length > 0) {
+  if (linkFallback.length > 0) {
     try {
-      const fallbackData = buildFallbackAttachmentMessage(results.failed, options);
+      const fallbackData = buildFallbackAttachmentMessage(linkFallback, options);
       results.fallbackMessage = fallbackData.message;
       results.fallbackLinks = fallbackData.fallbackLinks;
-      log.info(`Generated fallback message for ${results.failed.length} attachment(s)`);
+      log.info(`Generated link-fallback message for ${linkFallback.length} attachment(s)`);
     } catch (err) {
-      log.error(`Failed to generate fallback message: ${err.message}`);
-      // Set default fallback message instead
-      results.fallbackMessage = `⚠️ I seguenti allegati non hanno potuto essere inviati e non è possibile creare un link di download temporaneo. Riprova più tardi.`;
+      log.error(`Failed to generate link-fallback message: ${err.message}`);
+      results.fallbackMessage = '⚠️ I seguenti allegati non hanno potuto essere inviati e non è possibile creare un link di download temporaneo. Riprova più tardi.';
     }
   }
 
@@ -310,9 +314,5 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
 
 module.exports = {
   buildFallbackAttachmentMessage,
-  trySendAttachment,
   sendAttachmentsWithFallback,
-  partitionWhatsAppAttachments,
-  bundleWhatsAppTempLinkAttachments,
-  formatUrlForWhatsApp,
 };
