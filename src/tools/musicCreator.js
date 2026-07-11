@@ -10,6 +10,7 @@ const { findMemberByWa, isAdmin } = require('../config/members');
 const { getRomeISO } = require('../utils/time');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
+const { convertMp3ToWhatsAppOpus } = require('./voiceMessage');
 
 const log = createLogger('MusicCreator');
 
@@ -154,8 +155,21 @@ async function musicCreator(prompt, userCtx) {
       let audioBase64 = result.audio.data;
       if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
 
-      const buffer = Buffer.from(audioBase64, 'base64');
-      const filename = `song_${Date.now()}.mp3`;
+      const rawBuffer = Buffer.from(audioBase64, 'base64');
+      let buffer;
+      try {
+        buffer = await convertMp3ToWhatsAppOpus(rawBuffer);
+      } catch (err) {
+        log.error(`Audio transcode failed: ${err.message}`);
+        return {
+          toolResult: {
+            success: false,
+            error: `Music generated but WhatsApp audio conversion failed: ${err.message}`,
+          },
+          attachments: [],
+        };
+      }
+      const filename = `song_${Date.now()}.ogg`;
 
       if (!userIsAdmin) {
         const today = getRomeISO().split('T')[0];
@@ -174,7 +188,7 @@ async function musicCreator(prompt, userCtx) {
 
       return {
         toolResult: { success: true, message: '🎵 Song generated successfully!' },
-        attachments: [{ name: filename, buffer, mimetype: 'audio/mp3', sendAudioAsVoice: true }],
+        attachments: [{ name: filename, buffer, mimetype: 'audio/ogg', sendAudioAsVoice: true }],
       };
     }
 
