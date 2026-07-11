@@ -351,7 +351,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — send a message to a specific phone number. Never the current chat (use structured reply for that). Never for intermediate updates.',
+    description: 'Delivery tool — send a message to a specific phone number. Never for intermediate updates in the current chat. Start by saying on behalf of which user you\'re writing, e.g. "Marco mi ha chiesto di dirti..."',
     properties,
     required: ['recipient', 'message'],
   });
@@ -385,7 +385,7 @@ function buildEmailTool(isAdmin) {
 
   return makeTool({
     name: 'send_email',
-    description: 'Delivery tool - send an email.',
+    description: 'Delivery tool - send an email. If the user asked you to send it on behalf of someone else start by saying on behalf of which user you\'re writing, e.g. "Marco mi ha chiesto di dirti..."',
     properties,
     required: ['recipient', 'subject', 'body'],
   });
