@@ -177,6 +177,18 @@ function _isOAuthCredentialError(errMsg) {
   return false;
 }
 
+function _isGrokCreditExhaustedError(errMsg) {
+  if (!errMsg || typeof errMsg !== 'string') return false;
+  const match = /^HTTP 403:\s*(\{.*\})$/.exec(errMsg);
+  if (!match) return false;
+  try {
+    const payload = JSON.parse(match[1]);
+    return payload?.code === 'personal-team-blocked:spending-limit';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Unified xAI API client with retry and timeout logic.
  * The bearer token is resolved per attempt from the auth file; a 401 forces
@@ -269,6 +281,9 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         const staleErr = new Error(errMsg);
         staleErr.code = 'XAI_STALE_FILE_URL';
         throw staleErr;
+      }
+      if (_isGrokCreditExhaustedError(errMsg)) {
+        throw new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
       }
       await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
       throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);

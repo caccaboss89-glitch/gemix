@@ -66,7 +66,7 @@ const {
   PER_ROUND_TOOL_LIMITS,
 } = require('./utils/toolCallExecution');
 const { sendIntermediateNotification } = require('./utils/intermediateNotification');
-const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX } = require('./config/systemMessages');
+const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX, ADMIN_ERROR_PREFIX } = require('./config/systemMessages');
 const { clearCallNotifications } = require('./utils/notificationDedup');
 
 const log = createLogger('Handler');
@@ -701,6 +701,22 @@ async function handleMessage(ctx) {
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
     try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed in catch: ${vcErr.message}`); }
+
+    const isGrokCreditExhaustedError = typeof err.message === 'string'
+      && (err.message.includes('API credit exhausted')
+        || err.message.includes('personal-team-blocked:spending-limit'));
+    if (isGrokCreditExhaustedError) {
+      return {
+        text: `${ADMIN_ERROR_PREFIX} API (Grok)*\n\nScusa ma i crediti sono finiti al momento, tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶`,
+        voiceBuffer: null,
+        isVoiceOnly: false,
+        attachments: [],
+        discordTitle: responseCtx.discordTitle || '',
+        modelUsed: null,
+        systemMessage: true,
+      };
+    }
+
     return {
       text: FALLBACK_ERROR_PREFIX,
       voiceBuffer: null,
