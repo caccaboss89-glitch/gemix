@@ -19,6 +19,11 @@ const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers, pickLatestBatchEntry } = require('../../utils/batchContext');
 const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
+const {
+  isWaPuppeteerTransientError,
+  withWaPuppeteerRetry,
+  formatWaError,
+} = require('../../utils/waPuppeteer');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
 const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
@@ -85,9 +90,13 @@ function initDedicatedWhatsApp() {
     try {
       await onDedicatedMessage(msg);
     } catch (err) {
+      if (isWaPuppeteerTransientError(err)) {
+        log.warn(`Transient Puppeteer/WA Web error (message dropped): ${formatWaError(err)}`);
+        return;
+      }
       log.error(`\nCritical error:`);
-      log.error(`   ${err.message}`);
-      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
+      log.error(`   ${formatWaError(err)}`);
+      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 5).join('\n   ') || '(no stack)'}`);
     }
   });
 
@@ -101,7 +110,7 @@ async function onDedicatedMessage(msg) {
     return;
   }
 
-  const chat = await msg.getChat();
+  const chat = await withWaPuppeteerRetry(() => msg.getChat(), { retries: 2, delayMs: 500 });
   const isGroup = chat.isGroup;
 
   const botJid = client.info.wid._serialized;

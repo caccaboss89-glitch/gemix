@@ -20,6 +20,11 @@ const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
 const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
+const {
+  isWaPuppeteerTransientError,
+  withWaPuppeteerRetry,
+  formatWaError,
+} = require('../../utils/waPuppeteer');
 
 const { resolvePersonalChatStorageId } = require('../../utils/userPaths');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
@@ -86,9 +91,15 @@ function initPersonalWhatsApp() {
     try {
       await onPersonalMessage(msg);
     } catch (err) {
+      // WA Web / Puppeteer often throws minified "r: r" when the page context
+      // reloads mid-evaluate (getChat). Transient — do not treat as fatal.
+      if (isWaPuppeteerTransientError(err)) {
+        log.warn(`Transient Puppeteer/WA Web error (message dropped): ${formatWaError(err)}`);
+        return;
+      }
       log.error(`\nCritical error:`);
-      log.error(`   ${err.message}`);
-      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
+      log.error(`   ${formatWaError(err)}`);
+      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 5).join('\n   ') || '(no stack)'}`);
     }
   });
 
@@ -97,7 +108,8 @@ function initPersonalWhatsApp() {
 }
 
 async function onPersonalMessage(msg) {
-  const chat = await msg.getChat();
+  // getChat() hits Puppeteer evaluate — retry on WA Web context blips.
+  const chat = await withWaPuppeteerRetry(() => msg.getChat(), { retries: 2, delayMs: 500 });
 
   if (chat.isGroup) return;
 
