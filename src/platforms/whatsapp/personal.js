@@ -9,7 +9,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } = require('./shared');
-const { rebuildWhatsAppBatchParts } = require('../../utils/batchContentRefresh');
+const { materializeWhatsAppBatchContent } = require('../../utils/batchContentRefresh');
 const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
 
 const { identifyUser } = require('../../utils/userIdentifier');
@@ -17,12 +17,13 @@ const { addFooter, removeFooter, getModelDisplayName, hasFooter } = require('../
 const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { CHROMIUM_PATH } = require('../../config/env');
 const { createLogger } = require('../../utils/logger');
-const { enqueueBatchedTurn } = require('../../utils/batchIngress');
+const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
 const { analyzeBatchSpeakers } = require('../../utils/batchContext');
+const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
 
 const { resolvePersonalChatStorageId } = require('../../utils/userPaths');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
-const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPipeline');
+const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
 
 const log = createLogger('WA-PERSONAL');
@@ -140,7 +141,14 @@ async function onPersonalMessage(msg) {
 
   // Personal account: GemiX runs only when @gemix appears in this message's body
   // (either participant). A reply/quote to a GemiX message alone is NOT enough.
-  if (!(msg.body || '').toLowerCase().includes('@gemix')) return;
+  // Exception: caption-less multi-attach siblings while a batch is already open
+  // for this chat (album items after the @gemix-bearing first photo).
+  const batchKey = `wa_personal:${chat.id._serialized}`;
+  const hasGemixTag = (msg.body || '').toLowerCase().includes('@gemix');
+  if (!hasGemixTag) {
+    if (!isPendingAlbumContinuation(msg, peekPendingBatchLastEntry(batchKey))) return;
+    log.info('   Accepting WA personal album continuation (no @gemix on sibling media)');
+  }
 
   if (msg.fromMe && hasFooter(msg.body || '')) return;
 
@@ -197,7 +205,6 @@ async function onPersonalMessage(msg) {
 
   const messageKey = _waMessageKey(msg);
   if (!messageKey) log.warn('   WA personal message without stable key — may duplicate in history');
-  const batchKey = `wa_personal:${chat.id._serialized}`;
 
   const status = enqueueBatchedTurn({
     batchKey,
@@ -222,7 +229,7 @@ async function resolvePersonalChatOtherName(chat) {
 
 /**
  * Batch handler: called by the batcher once the debounce window closes.
- * Merges all accumulated content parts and calls handleMessage once.
+ * Materializes units (album / distinct msgs) into historySuffix + last content.
  */
 async function _handlePersonalBatch(entries) {
   const first = entries[0];
@@ -256,15 +263,18 @@ async function _handlePersonalBatch(entries) {
     },
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
       const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);
-      await rebuildWhatsAppBatchParts(ents, {
+      const { content, historySuffix, latestEntry } = await materializeWhatsAppBatchContent(ents, {
         chat,
         historyStorageId,
         isGroup: false,
         platform: PLATFORM_WA_PERSONAL,
       });
-      const lat = latest || ents[0];
+      const lat = latestEntry || latest || ents[0];
       const { multiSpeaker } = analyzeBatchSpeakers(ents, PLATFORM_WA_PERSONAL);
       const personalOtherUserName = await resolvePersonalChatOtherName(chat);
+      const mergedHistory = Array.isArray(history)
+        ? history.concat(historySuffix)
+        : historySuffix;
       return {
         platform: PLATFORM_WA_PERSONAL,
         isGroup: false,
@@ -275,8 +285,8 @@ async function _handlePersonalBatch(entries) {
         userName: lat.userName,
         userIdentity: lat.userIdentity,
         personalOtherUserName,
-        content: mergeBatchContentParts(ents),
-        history,
+        content,
+        history: mergedHistory,
         historyLoadIncomplete,
         batchMultiSpeaker: multiSpeaker,
         waJid: lat.phoneJid,

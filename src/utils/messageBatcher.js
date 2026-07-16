@@ -69,7 +69,7 @@ function _fire(key) {
 
   const count = batch.messages.length;
   if (count > 1) {
-    log.info(`   Batch fired for ${key}: ${count} message(s) merged`);
+    log.info(`   Batch fired for ${key}: ${count} message(s) (debounce window)`);
   }
 
   // Invoke handler (fire-and-forget; errors are the caller's responsibility)
@@ -87,4 +87,16 @@ function hasPendingBatch(key) {
   return _batches.has(key);
 }
 
-module.exports = { pushMessage, hasPendingBatch };
+/**
+ * Last entry already queued for an open batch (oldest→newest array).
+ * Used to accept WA album continuations (caption-less media) without re-gating.
+ * @param {string} key
+ * @returns {object|null}
+ */
+function peekPendingBatchLastEntry(key) {
+  const batch = _batches.get(key);
+  if (!batch || !Array.isArray(batch.messages) || batch.messages.length === 0) return null;
+  return batch.messages[batch.messages.length - 1];
+}
+
+module.exports = { pushMessage, hasPendingBatch, peekPendingBatchLastEntry };

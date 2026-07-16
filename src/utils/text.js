@@ -293,6 +293,9 @@ function cleanIncomingText(text) {
 /** Prefix prepended when a quoted message is outside the MAX_HISTORY window. */
 const REPLY_OUTSIDE_HISTORY_PREFIX = '[In reply to: (message outside recent history)]\n';
 
+/** Prefix when a reply chain is deeper than MAX_REPLY_CHAIN_DEPTH. */
+const REPLY_CHAIN_TRUNCATED_PREFIX = '[In reply to: (reply chain truncated)]\n';
+
 module.exports = {
   sanitizeFilename,
   stripVoiceTags,
@@ -307,4 +310,5 @@ module.exports = {
   cleanIncomingText,
   formatLabeledUserContent,
   REPLY_OUTSIDE_HISTORY_PREFIX,
+  REPLY_CHAIN_TRUNCATED_PREFIX,
 };

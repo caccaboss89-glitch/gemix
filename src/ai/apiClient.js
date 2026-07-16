@@ -177,16 +177,55 @@ function _isOAuthCredentialError(errMsg) {
   return false;
 }
 
-function _isGrokCreditExhaustedError(errMsg) {
+/**
+ * True when errMsg is an xAI HTTP 403 spending-limit body
+ * (`personal-team-blocked:spending-limit`), either as a bare
+ * `HTTP 403: {...}` line or nested inside a longer error string.
+ * @param {string} errMsg
+ * @returns {boolean}
+ */
+function _isGrokCreditExhaustedHttpBody(errMsg) {
   if (!errMsg || typeof errMsg !== 'string') return false;
-  const match = /^HTTP 403:\s*(\{.*\})$/.exec(errMsg);
-  if (!match) return false;
-  try {
-    const payload = JSON.parse(match[1]);
-    return payload?.code === 'personal-team-blocked:spending-limit';
-  } catch {
-    return false;
+  const marker = 'HTTP 403:';
+  const idx = errMsg.indexOf(marker);
+  const candidate = (idx === -1 ? errMsg : errMsg.slice(idx + marker.length)).trim();
+  if (!candidate.startsWith('{')) return false;
+  const tryParse = (raw) => {
+    try {
+      return JSON.parse(raw)?.code === 'personal-team-blocked:spending-limit';
+    } catch {
+      return false;
+    }
+  };
+  if (tryParse(candidate)) return true;
+  // Trailing junk after JSON (e.g. wrapped rethrow suffixes)
+  const end = candidate.lastIndexOf('}');
+  return end > 0 && tryParse(candidate.slice(0, end + 1));
+}
+
+/** Stable error.code set by callApiWithRetry (English message kept for logs). */
+const GROK_CREDIT_EXHAUSTED_CODE = 'GROK_CREDIT_EXHAUSTED';
+
+/**
+ * Canonical detector for SuperGrok / xAI team spending-limit exhaustion.
+ * Accepts Error or string. True for:
+ *   - err.code === GROK_CREDIT_EXHAUSTED_CODE
+ *   - the rethrow from callApiWithRetry ("… API credit exhausted …")
+ *   - raw / nested `HTTP 403` JSON with code personal-team-blocked:spending-limit
+ * @param {Error|string|null|undefined} errOrMsg
+ * @returns {boolean}
+ */
+function isGrokCreditExhaustedError(errOrMsg) {
+  if (errOrMsg && typeof errOrMsg === 'object' && errOrMsg.code === GROK_CREDIT_EXHAUSTED_CODE) {
+    return true;
   }
+  const errMsg = typeof errOrMsg === 'string'
+    ? errOrMsg
+    : (errOrMsg && typeof errOrMsg.message === 'string' ? errOrMsg.message : null);
+  if (!errMsg) return false;
+  // English log marker written by callApiWithRetry (keep in sync with throw below)
+  if (errMsg.includes('API credit exhausted')) return true;
+  return _isGrokCreditExhaustedHttpBody(errMsg);
 }
 
 /**
@@ -282,8 +321,10 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         staleErr.code = 'XAI_STALE_FILE_URL';
         throw staleErr;
       }
-      if (_isGrokCreditExhaustedError(errMsg)) {
-        throw new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
+      if (isGrokCreditExhaustedError(errMsg)) {
+        const creditErr = new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
+        creditErr.code = GROK_CREDIT_EXHAUSTED_CODE;
+        throw creditErr;
       }
       await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
       throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
@@ -403,4 +444,12 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   throw new Error('xAI authenticated fetch failed');
 }
 
-module.exports = { callResponsesModel, callApiWithRetry, logApiRequest, logApiResponse, fetchXaiWithOAuthRetry };
+module.exports = {
+  callResponsesModel,
+  callApiWithRetry,
+  logApiRequest,
+  logApiResponse,
+  fetchXaiWithOAuthRetry,
+  isGrokCreditExhaustedError,
+  GROK_CREDIT_EXHAUSTED_CODE,
+};

@@ -4,7 +4,7 @@
 // they are discarded (intentional). Only messages that arrive during the short
 // debounce window before the lock is taken are merged into the same batch.
 
-const { pushMessage, hasPendingBatch } = require('./messageBatcher');
+const { pushMessage, hasPendingBatch, peekPendingBatchLastEntry } = require('./messageBatcher');
 const responseLock = require('./responseLock');
 
 const { BATCH_LOCK_TTL_MS } = require('../config/constants');
@@ -44,4 +44,8 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) 
   return 'started';
 }
 
-module.exports = { enqueueBatchedTurn };
+module.exports = {
+  enqueueBatchedTurn,
+  hasPendingBatch,
+  peekPendingBatchLastEntry,
+};

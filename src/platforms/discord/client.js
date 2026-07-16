@@ -17,7 +17,7 @@ const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/
 const { mapWithConcurrency } = require('../../utils/concurrency');
 
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
-const { analyzeBatchSpeakers } = require('../../utils/batchContext');
+const { analyzeBatchSpeakers, pickLatestBatchEntry } = require('../../utils/batchContext');
 const {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
@@ -34,8 +34,9 @@ const {
 } = require('../../utils/text');
 const { sanitizeDiscordThreadTitle } = require('../../utils/discord');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
-const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPipeline');
+const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { processDiscordQuotedReply } = require('../../utils/quoteIngress');
+const { materializeDiscordBatchContent } = require('../../utils/batchContentRefresh');
 
 const log = createLogger('DISCORD');
 
@@ -144,16 +145,6 @@ async function fetchDiscordMessageWindow(channel, starterMessageId) {
   return { raw, recentMessageIds };
 }
 
-async function rebuildDiscordBatchParts(entries, channel, starterMessageId, historyStorageId, recentMessageIds) {
-  const ids = recentMessageIds || (await fetchDiscordMessageWindow(channel, starterMessageId)).recentMessageIds;
-  for (const ent of entries) {
-    if (!ent.msg) continue;
-    ent.contentParts = await buildDiscordIncomingContentParts(
-      ent.msg, channel, historyStorageId, ids, ent.userName,
-    );
-  }
-}
-
 /**
  * Build content parts for the current Discord message (quoted media, inline
  * text files, attachment tags). History is supplied separately at batch fire.
@@ -161,7 +152,7 @@ async function rebuildDiscordBatchParts(entries, channel, starterMessageId, hist
 async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, recentMessageIds, senderName) {
   let textBody = msg.content || '';
   const { prefix, mediaParts: quotedMediaParts } = await processDiscordQuotedReply(
-    msg, channel, historyStorageId, recentMessageIds,
+    msg, channel, historyStorageId, recentMessageIds, { includeQuotedMedia: true },
   );
   textBody = prefix + textBody;
 
@@ -401,11 +392,24 @@ async function _handleDiscordBatch(entries) {
       return {};
     },
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest, first }) => {
-      const recentMessageIds = first?._discordWindow?.recentMessageIds;
-      await rebuildDiscordBatchParts(ents, channel, starterMessageId, historyStorageId, recentMessageIds);
-      const lat = latest || ents[0];
+      const recentMessageIds = first?._discordWindow?.recentMessageIds
+        || (await fetchDiscordMessageWindow(channel, starterMessageId)).recentMessageIds;
+      // Same contract as WhatsApp: distinct batch messages → separate role:user
+      // (historySuffix + last content). Multi-attach on one Discord message stays
+      // one unit natively (all attachments on that Message).
+      const { content, historySuffix, latestEntry } = await materializeDiscordBatchContent(
+        ents,
+        async (ent, ids) => buildDiscordIncomingContentParts(
+          ent.msg, channel, historyStorageId, ids, ent.userName || 'Unknown',
+        ),
+        { recentMessageIds, pickLatest: latest || pickLatestBatchEntry(ents) },
+      );
+      const lat = latestEntry || latest || ents[0];
       const { multiSpeaker } = analyzeBatchSpeakers(ents, 'discord');
       const extras = await _discordGuildExtras(guild);
+      const mergedHistory = Array.isArray(history)
+        ? history.concat(historySuffix)
+        : historySuffix;
       return {
         platform: 'discord',
         isGroup: false,
@@ -415,8 +419,8 @@ async function _handleDiscordBatch(entries) {
         userId: lat.authorUserId,
         userName: lat.userName,
         userIdentity: lat.userIdentity,
-        content: mergeBatchContentParts(ents),
-        history,
+        content,
+        history: mergedHistory,
         historyLoadIncomplete,
         batchMultiSpeaker: multiSpeaker,
         threadName: channel.name,
@@ -446,7 +450,14 @@ async function _handleDiscordBatch(entries) {
  *   (current batch); the merged user turn is passed separately as ctx.content.
  */
 async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds = null, prefetched = null) {
-  const raw = prefetched?.raw || (await fetchDiscordMessageWindow(channel, starterMessageId)).raw;
+  const window = prefetched || (await fetchDiscordMessageWindow(channel, starterMessageId));
+  const raw = window.raw;
+  // Quote window from fetchDiscordMessageWindow (starter id is excluded there so
+  // reply-to-starter is treated as outside recent model history). Fallback: all raw ids.
+  const recentMessageIds = window.recentMessageIds
+    || new Set([...raw.values()].map(m => m.id));
+  const messageById = new Map([...raw.values()].map(m => [m.id, m]));
+
   const exclude = excludeMessageIds instanceof Set
     ? excludeMessageIds
     : (excludeMessageIds ? new Set([excludeMessageIds]) : null);
@@ -455,7 +466,6 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     .filter(m => (!starterMessageId || m.id !== starterMessageId) && (!exclude || !exclude.has(m.id)))
     .reverse()
     .slice(-MAX_HISTORY);
-  const recentMessageIds = new Set(messages.map(m => m.id));
 
   const history = [];
 
@@ -512,6 +522,23 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
         textContent = `${textContent} (older file, not shown this turn — newest ${MAX_IMAGE_READS} images / ${MAX_FILE_READS} files per call; ask to resend or reply to it to view)`.trim();
       }
       mediaParts.push(...ingress.contentParts);
+    }
+
+    // Preserve reply chains in history (text-only; quoted media lives on its own entry).
+    if (m.reference?.messageId) {
+      try {
+        const quoted = await processDiscordQuotedReply(
+          m, channel, historyStorageId, recentMessageIds, {
+            includeQuotedMedia: false,
+            messageById,
+          },
+        );
+        if (quoted.prefix) {
+          textContent = `${quoted.prefix}${textContent || ''}`.trimEnd();
+        }
+      } catch (err) {
+        log.warn(`History quote expand failed: ${err.message}`);
+      }
     }
 
     if (!textContent) return null;

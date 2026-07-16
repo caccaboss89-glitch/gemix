@@ -66,7 +66,13 @@ const {
   PER_ROUND_TOOL_LIMITS,
 } = require('./utils/toolCallExecution');
 const { sendIntermediateNotification } = require('./utils/intermediateNotification');
-const { RELEASE_NOTIFY_ENABLED_PREFIX, RELEASE_NOTIFY_ALREADY_PREFIX, FALLBACK_ERROR_PREFIX, ADMIN_ERROR_PREFIX } = require('./config/systemMessages');
+const {
+  RELEASE_NOTIFY_ENABLED_PREFIX,
+  RELEASE_NOTIFY_ALREADY_PREFIX,
+  FALLBACK_ERROR_PREFIX,
+  GROK_CREDIT_EXHAUSTED_MESSAGE,
+} = require('./config/systemMessages');
+const { isGrokCreditExhaustedError } = require('./ai/apiClient');
 const { clearCallNotifications } = require('./utils/notificationDedup');
 
 const log = createLogger('Handler');
@@ -604,7 +610,16 @@ async function handleMessage(ctx) {
 
       if (!text.trim() && finalAttachments.length === 0) {
         log.warn('   Empty AI response, sending fallback');
-        text = FALLBACK_ERROR_PREFIX;
+        await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
+        return {
+          text: FALLBACK_ERROR_PREFIX,
+          voiceBuffer: null,
+          isVoiceOnly: false,
+          attachments: [],
+          discordTitle: responseCtx.discordTitle || '',
+          modelUsed: lastModelUsed,
+          systemMessage: true,
+        };
       }
 
       // ── Research badge ──────────────────────────────────────────────────
@@ -684,13 +699,15 @@ async function handleMessage(ctx) {
     }
 
     try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed: ${vcErr.message}`); }
+    const wrapText = wrapUpText.trim() ? wrapUpText : FALLBACK_ERROR_PREFIX;
     return {
-      text: wrapUpText.trim() ? wrapUpText : FALLBACK_ERROR_PREFIX,
+      text: wrapText,
       voiceBuffer: null,
       isVoiceOnly: false,
       attachments: wrapUpAttachments,
       discordTitle: responseCtx.discordTitle || '',
       modelUsed: lastModelUsed,
+      systemMessage: !wrapUpText.trim(),
     };
 
   } catch (err) {
@@ -702,12 +719,9 @@ async function handleMessage(ctx) {
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
     try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed in catch: ${vcErr.message}`); }
 
-    const isGrokCreditExhaustedError = typeof err.message === 'string'
-      && (err.message.includes('API credit exhausted')
-        || err.message.includes('personal-team-blocked:spending-limit'));
-    if (isGrokCreditExhaustedError) {
+    if (isGrokCreditExhaustedError(err)) {
       return {
-        text: `${ADMIN_ERROR_PREFIX} API (Grok)*\n\nScusa ma i crediti sono finiti al momento, tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶`,
+        text: GROK_CREDIT_EXHAUSTED_MESSAGE,
         voiceBuffer: null,
         isVoiceOnly: false,
         attachments: [],
@@ -724,6 +738,7 @@ async function handleMessage(ctx) {
       attachments: [],
       discordTitle: responseCtx.discordTitle || '',
       modelUsed: null,
+      systemMessage: true,
     };
   } finally {
     if (pruneAfterTurn) {

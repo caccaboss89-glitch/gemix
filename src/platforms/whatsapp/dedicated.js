@@ -8,7 +8,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } = require('./shared');
-const { rebuildWhatsAppBatchParts } = require('../../utils/batchContentRefresh');
+const { materializeWhatsAppBatchContent } = require('../../utils/batchContentRefresh');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
@@ -16,11 +16,11 @@ const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED, META_AI_NUMBER } =
 const { CHROMIUM_PATH } = require('../../config/env');
 const { containsMetaAiTag } = require('../../utils/waMentions');
 const { createLogger } = require('../../utils/logger');
-const { enqueueBatchedTurn } = require('../../utils/batchIngress');
-const { analyzeBatchSpeakers } = require('../../utils/batchContext');
-const { pickLatestBatchEntry } = require('../../utils/batchContext');
+const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
+const { analyzeBatchSpeakers, pickLatestBatchEntry } = require('../../utils/batchContext');
+const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
-const { runTurnPipeline, mergeBatchContentParts } = require('../../utils/turnPipeline');
+const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
 const { buildGroupParticipants } = require('../../utils/waParticipants');
 
@@ -106,6 +106,8 @@ async function onDedicatedMessage(msg) {
 
   const botJid = client.info.wid._serialized;
 
+  const batchKey = `wa_dedicated:${chat.id._serialized}`;
+
   if (isGroup) {
     let isMentioned = false;
     try {
@@ -113,15 +115,26 @@ async function onDedicatedMessage(msg) {
       isMentioned = mentions.some(contact => contact.id._serialized === botJid);
     } catch { }
 
+    // Reply to any bot fromMe (normal GemiX reply or [System] notices like
+    // release / music wrap / temp links) counts as addressing GemiX.
     let isReplyToBot = false;
     if (msg.hasQuotedMsg) {
       try {
         const quoted = await msg.getQuotedMessage();
-        isReplyToBot = quoted.fromMe;
+        isReplyToBot = Boolean(quoted?.fromMe);
       } catch { }
     }
 
-    if (!isMentioned && !isReplyToBot) return;
+    // Caption-less multi-attach siblings after a mentioned/reply head must join
+    // the open debounce batch (mention is only on the first album item).
+    const albumContinuation = isPendingAlbumContinuation(
+      msg,
+      peekPendingBatchLastEntry(batchKey),
+    );
+    if (!isMentioned && !isReplyToBot && !albumContinuation) return;
+    if (albumContinuation && !isMentioned && !isReplyToBot) {
+      log.info('   Accepting WA dedicated group album continuation (no mention on sibling media)');
+    }
   } else {
     // Private chat: every message would normally trigger GemiX. Stay silent
     // when the user is talking to Meta AI here (tags it) or when the incoming
@@ -167,7 +180,6 @@ async function onDedicatedMessage(msg) {
 
   const messageKey = _waMessageKey(msg);
   if (!messageKey) log.warn('   WA dedicated message without stable key — may duplicate in history');
-  const batchKey = `wa_dedicated:${chat.id._serialized}`;
 
   const status = enqueueBatchedTurn({
     batchKey,
@@ -185,7 +197,7 @@ async function onDedicatedMessage(msg) {
 
 /**
  * Batch handler: called by the batcher once the debounce window closes.
- * Merges all accumulated content parts and calls handleMessage once.
+ * Materializes units (album / distinct msgs) into historySuffix + last content.
  */
 async function _handleDedicatedBatch(entries) {
   const first = entries[0];
@@ -219,13 +231,13 @@ async function _handleDedicatedBatch(entries) {
     },
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
       const historyUserId = isGroup ? chat.id._serialized : (pickLatestBatchEntry(ents) || ents[0]).phoneJid;
-      await rebuildWhatsAppBatchParts(ents, {
+      const { content, historySuffix, latestEntry } = await materializeWhatsAppBatchContent(ents, {
         chat,
         historyStorageId: historyUserId,
         isGroup,
         platform: PLATFORM_WA_DEDICATED,
       });
-      const lat = latest || ents[0];
+      const lat = latestEntry || latest || ents[0];
       const { multiSpeaker } = analyzeBatchSpeakers(ents, PLATFORM_WA_DEDICATED);
       let groupParticipants = null;
       if (isGroup) {
@@ -235,6 +247,11 @@ async function _handleDedicatedBatch(entries) {
           log.warn(`   Failed to build group participant roster: ${err.message}`);
         }
       }
+      // Distinct non-album batch units (e.g. file, then file, then text) stay
+      // separate role:user turns: earlier ones are historySuffix, last is content.
+      const mergedHistory = Array.isArray(history)
+        ? history.concat(historySuffix)
+        : historySuffix;
       return {
         platform: PLATFORM_WA_DEDICATED,
         isGroup,
@@ -245,8 +262,8 @@ async function _handleDedicatedBatch(entries) {
         userId: isGroup ? lat.senderJid : lat.phoneJid,
         userName: lat.userName,
         userIdentity: lat.userIdentity,
-        content: mergeBatchContentParts(ents),
-        history,
+        content,
+        history: mergedHistory,
         historyLoadIncomplete,
         batchMultiSpeaker: multiSpeaker,
         waJid: lat.phoneJid,

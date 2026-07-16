@@ -109,18 +109,4 @@ async function runTurnPipeline(opts) {
   }
 }
 
-/** Merge multimodal parts from all batch entries into handler content. */
-function mergeBatchContentParts(entries) {
-  const allParts = [];
-  for (const entry of entries) {
-    if (Array.isArray(entry.contentParts)) {
-      allParts.push(...entry.contentParts);
-    }
-  }
-  if (allParts.length === 1 && allParts[0].type === 'text') {
-    return allParts[0].text;
-  }
-  return allParts;
-}
-
-module.exports = { runTurnPipeline, mergeBatchContentParts };
+module.exports = { runTurnPipeline };

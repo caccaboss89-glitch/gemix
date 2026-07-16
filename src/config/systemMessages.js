@@ -3,7 +3,8 @@
 // Central registry of all GemiX-generated WhatsApp system messages.
 // Every entry has two synced parts: the exact text sent + the regex used by
 // isSystemMessage() (called from whatsapp/shared.js buildWhatsAppHistory) to
-// tag matching fromMe messages with "[System]" label in history (dedicated private only).
+// tag matching fromMe messages with "[System]" (dedicated private/group + personal
+// when the body is admin-sent with a known system prefix).
 // Change one -> update the other. This is the single source of truth.
 
 // -- Release notification --------------------------------------------------
@@ -60,16 +61,39 @@ const RELEASE_NOTIFY_ALREADY_REGEX   = /^\u2139\uFE0F Le notifiche degli aggiorn
 const FALLBACK_ERROR_PREFIX = '⚠️ GemiX: Generazione della risposta fallita. Riprova tra poco.';
 const FALLBACK_ERROR_REGEX  = /^\u26A0\uFE0F GemiX: Generazione della risposta fallita\./;
 
+// -- Grok credit exhaustion (user-facing) -----------------------------------
+
+/**
+ * Shown to the user when xAI returns personal-team-blocked:spending-limit
+ * (SuperGrok weekly credit cap). Built as a full message (not only a prefix)
+ * so handler.js never hardcodes copy. Detection of the *error* is in
+ * apiClient.isGrokCreditExhaustedError; this entry is for send + history tag.
+ * Format mirrors adminNotifier admin-error lines for consistency.
+ */
+const GROK_CREDIT_EXHAUSTED_MESSAGE =
+  '⚠️ *ERRORE API — API (Grok)*\n\nScusa ma i crediti sono finiti al momento, tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶';
+const GROK_CREDIT_EXHAUSTED_REGEX =
+  /^\u26A0\uFE0F \*ERRORE API \u2014 API \(Grok\)\*\n\nScusa ma i crediti sono finiti al momento/;
+
 // -- Temporary attachment links --------------------------------------------
 
 /**
  * System message indicating that some attachments couldn't be sent directly
  * and are available via temporary download links instead.
- * Format: "📥 Allegat(o|i) non disponibil(e|i) sulla piattaforma. Scarical(o|i) da questo link temporaneo che scadrà tra un'ora"
+ * Dynamic expiry text is appended after this prefix (see attachmentFallback.js).
  * The regex matches on the fixed emoji prefix.
  */
 const TEMP_ATTACHMENT_PREFIX = '📥 Allegat';
 const TEMP_ATTACHMENT_REGEX  = /^\uD83D\uDCE5 Allegat/;
+
+/**
+ * Last-resort text when link fallback generation itself fails
+ * (sendAttachmentsWithFallback catch).
+ */
+const ATTACHMENT_FALLBACK_FAILED_MESSAGE =
+  '⚠️ I seguenti allegati non hanno potuto essere inviati e non è possibile creare un link di download temporaneo. Riprova più tardi.';
+const ATTACHMENT_FALLBACK_FAILED_REGEX =
+  /^\u26A0\uFE0F I seguenti allegati non hanno potuto essere inviati/;
 
 // -- Error / alert patterns ----------------------------------------------
 // These regexes detect error, avviso, and reminder messages.
@@ -87,7 +111,9 @@ const ALL_SYSTEM_MESSAGE_REGEXES = [
   RELEASE_NOTIFY_ENABLED_REGEX,
   RELEASE_NOTIFY_ALREADY_REGEX,
   FALLBACK_ERROR_REGEX,
+  GROK_CREDIT_EXHAUSTED_REGEX,
   TEMP_ATTACHMENT_REGEX,
+  ATTACHMENT_FALLBACK_FAILED_REGEX,
   LEGACY_ERROR_REGEX,
   LEGACY_AVVISO_REGEX,
   LEGACY_REMINDER_REGEX,
@@ -113,7 +139,9 @@ module.exports = {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
+  GROK_CREDIT_EXHAUSTED_MESSAGE,
   TEMP_ATTACHMENT_PREFIX,
+  ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   // individual regexes (for targeted checks)
   RELEASE_NOTIFICATION_REGEX,
   MUSIC_WRAP_REGEX,
@@ -122,7 +150,9 @@ module.exports = {
   RELEASE_NOTIFY_ENABLED_REGEX,
   RELEASE_NOTIFY_ALREADY_REGEX,
   FALLBACK_ERROR_REGEX,
+  GROK_CREDIT_EXHAUSTED_REGEX,
   TEMP_ATTACHMENT_REGEX,
+  ATTACHMENT_FALLBACK_FAILED_REGEX,
   LEGACY_ERROR_REGEX,
   LEGACY_AVVISO_REGEX,
   LEGACY_REMINDER_REGEX,

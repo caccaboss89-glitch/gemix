@@ -10,7 +10,10 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { registerTempFile, TEMP_DIR } = require('./tempFileServer');
 const { createLogger } = require('./logger');
-const { TEMP_ATTACHMENT_PREFIX } = require('../config/systemMessages');
+const {
+  TEMP_ATTACHMENT_PREFIX,
+  ATTACHMENT_FALLBACK_FAILED_MESSAGE,
+} = require('../config/systemMessages');
 const { shouldWhatsAppUseTempLink, readAttachmentBuffer, uniqueAttachmentName } = require('./attachments');
 const { partitionAttachments, PLATFORM, hasExternalUrl } = require('./attachmentDelivery');
 
@@ -305,7 +308,7 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
       log.info(`Generated link-fallback message for ${linkFallback.length} attachment(s)`);
     } catch (err) {
       log.error(`Failed to generate link-fallback message: ${err.message}`);
-      results.fallbackMessage = '⚠️ I seguenti allegati non hanno potuto essere inviati e non è possibile creare un link di download temporaneo. Riprova più tardi.';
+      results.fallbackMessage = ATTACHMENT_FALLBACK_FAILED_MESSAGE;
     }
   }
 

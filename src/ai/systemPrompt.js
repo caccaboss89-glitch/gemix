@@ -50,12 +50,12 @@ function _callerLineInner(ctx, promptOpts) {
 }
 
 function _buildBatchNote(profile) {
-  if (profile === PROFILE.DISCORD_THREAD) {
-    return '<BatchNote>This turn merges several messages from more than one participant. '
-      + 'Each line in the user message keeps its author label; &lt;Caller&gt; is the author of the latest message.</BatchNote>';
-  }
-  return '<BatchNote>This turn merges several messages from more than one participant. '
-    + 'Lines in the user content keep each speaker\'s label; &lt;Caller&gt; is only the author of the latest message.</BatchNote>';
+  void profile;
+  // Debounced multi-message turns keep distinct role:user units (earlier ones
+  // in history, last as content). Each unit keeps its author label.
+  return '<BatchNote>This turn includes several recent messages from more than one participant '
+    + '(each kept as its own user turn with an author label). '
+    + '&lt;Caller&gt; is only the author of the latest message.</BatchNote>';
 }
 
 function buildSystemPrompt(ctx) {

@@ -1,7 +1,7 @@
 # IDE
-.cursor/
-.kiro/
+.grok/
 graphify-out/
+AGENTS.md
 
 # Dependency and cache
 node_modules/
@@ -14,7 +14,6 @@ __pycache__/
 # Runtime files
 bin/
 src/logs/
-data/
 src/data/**
 !src/data/skills/
 !src/data/skills/**

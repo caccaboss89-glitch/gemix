@@ -78,17 +78,20 @@ function applyBuildAgentFlags(att) {
 
 /**
  * Send one attachment as WhatsApp MessageMedia via the provided poster.
+ * One media per sendMessage (wwebjs limit). Optional sendOptions are merged
+ * for flags such as sendAudioAsVoice (also set from att.sendAudioAsVoice).
  * @param {object} att
  * @param {(media: object, options: object) => Promise<void>} postMedia
+ * @param {object} [sendOptions]
  */
-async function sendWhatsAppAttachment(att, postMedia) {
+async function sendWhatsAppAttachment(att, postMedia, sendOptions = {}) {
   const { MessageMedia } = require('whatsapp-web.js');
   const m = toWhatsAppMediaArgs(att);
   if (!m) {
     throw new Error(`Cannot convert attachment to WhatsApp media: ${att.name || 'unknown'}`);
   }
   const media = new MessageMedia(m.mimetype, m.base64, m.name);
-  const options = {};
+  const options = { ...(sendOptions && typeof sendOptions === 'object' ? sendOptions : {}) };
   if (att.sendAudioAsVoice) options.sendAudioAsVoice = true;
   await postMedia(media, options);
 }

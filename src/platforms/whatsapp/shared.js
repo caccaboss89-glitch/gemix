@@ -63,6 +63,7 @@ const {
   collectMentionJids,
 } = require('../../utils/waMentions');
 const { processWhatsAppQuotedReply } = require('../../utils/quoteIngress');
+const { groupWhatsAppMessages } = require('../../utils/waAlbumGroup');
 
 async function getRecentWhatsAppMessageIds(msg) {
   try {
@@ -87,7 +88,11 @@ async function getRecentWhatsAppMessageIds(msg) {
  */
 async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) {
   const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
-  let messages = rawMessages.slice(-MAX_HISTORY);
+  const windowMessages = rawMessages.slice(-MAX_HISTORY);
+  // Quote window = full MAX_HISTORY slice (incl. current-batch keys later excluded
+  // from the history array). Matches getRecentWhatsAppMessageIds / current-turn logic.
+  const recentMessageIds = new Set(windowMessages.map(_waMessageKey).filter(Boolean));
+  let messages = windowMessages;
 
   // Exclude current message(s) being processed (they form the final user turn and are omitted from the history array)
   if (excludeKeys) {
@@ -151,11 +156,18 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     }
   }
 
+  // Album multi-attach (same sender, short time window, caption-less siblings)
+  // → one history user turn with every tag + native part. Separate sends stay
+  // separate role:user entries. Bot messages are never album-merged.
+  const historyGroups = groupWhatsAppMessages(messages, {
+    isBotAt: (m, mi) => isHistoryBotMessage(m, mi),
+  });
+
   // Build each history entry (including its xAI upload) in parallel with
   // bounded concurrency, preserving chronological order in the result. Serial
   // uploads here used to dominate turn latency and could blow the history
   // fetch timeout when many recent messages carried media.
-  async function processHistoryMessage(msg, mi) {
+  async function resolveHistorySenderMeta(msg, mi) {
     let senderName;
     let isGemiX = false;
     let isScheduled = false;
@@ -163,7 +175,15 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 
     if (platform === PLATFORM_WA_PERSONAL) {
       if (msg.fromMe) {
-        if (personalGemixFlags[mi]) {
+        // Admin-sent system prefixes (release, music wrap, temp links, errors, …)
+        // are always GemiX system — never Account Owner (admin will not type them).
+        if (hasScheduledFooter(msg.body)) {
+          senderName = '[System]';
+          isScheduled = true;
+        } else if (isSystemMessage(msg.body)) {
+          senderName = '[System]';
+          isSystem = true;
+        } else if (personalGemixFlags[mi]) {
           senderName = 'GemiX';
           isGemiX = true;
         } else {
@@ -178,14 +198,13 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
         }
       }
     } else {
-      // [System] tagging (for scheduled/system messages) is limited to the dedicated
-      // platform in private (non-group) chats; personal platform uses GemiX/Account Owner.
+      // Dedicated: every fromMe is bot. Scheduled + registry system messages get
+      // [System] in private and groups (music wrap, release, temp links, …).
       if (msg.fromMe) {
-        const isPrivateDedicated = !isGroup;
-        if (isPrivateDedicated && hasScheduledFooter(msg.body)) {
+        if (hasScheduledFooter(msg.body)) {
           senderName = '[System]';
           isScheduled = true;
-        } else if (isPrivateDedicated && isSystemMessage(msg.body)) {
+        } else if (isSystemMessage(msg.body)) {
           senderName = '[System]';
           isSystem = true;
         } else {
@@ -202,54 +221,73 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       }
     }
 
-    const isFromBot = isGemiX || isScheduled || isSystem;
-    const isSystemEvent = isScheduled || isSystem;
+    return {
+      senderName,
+      isGemiX,
+      isScheduled,
+      isSystem,
+      isFromBot: isGemiX || isScheduled || isSystem,
+      isSystemEvent: isScheduled || isSystem,
+    };
+  }
 
-    const ts = formatTimestamp(msg.timestamp * 1000);
-    const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
-    let rawBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
+  async function processHistoryGroup(group) {
+    const groupMsgs = group.messages;
+    const indices = [];
+    for (let k = group.start; k < group.end; k++) indices.push(k);
+    const primaryMi = indices[0];
+    const primaryMsg = groupMsgs[0];
+    const meta = await resolveHistorySenderMeta(primaryMsg, primaryMi);
+    const { senderName, isGemiX, isFromBot, isSystemEvent } = meta;
+
+    // Caption / special text only from the first non-empty body in the album
+    // (WA puts the shared caption on one item, usually the first).
+    let captionMsg = primaryMsg;
+    for (const m of groupMsgs) {
+      if ((m.body || '').trim()) { captionMsg = m; break; }
+    }
+
+    const ts = formatTimestamp(primaryMsg.timestamp * 1000);
+    const mentionContacts = await _resolveMentionsForMessage(captionMsg, isGroup);
+    let rawBody = _replaceMentionsInBody(captionMsg.body || '', mentionContacts);
     if (isGroup) {
       rawBody = await _resolveLidTagsInBody(rawBody, knownGroupPhones, lidTagCache);
     }
     let textContent = cleanIncomingText(rawBody);
 
-    const specialText = formatSpecialMessageText(msg);
+    const specialText = formatSpecialMessageText(captionMsg);
     if (specialText !== null) {
-      // Location / scheduled event: data-only messages. Use the parsed text and
-      // never ingest the raw payload (e.g. a location's base64 map thumbnail).
       textContent = specialText;
-    } else if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
-      textContent = formatWhatsAppContactText(msg.body || textContent || '');
-    } else if (msg.type === 'poll_creation') {
+    } else if (captionMsg.type === 'vcard' || captionMsg.type === 'multi_vcard') {
+      textContent = formatWhatsAppContactText(captionMsg.body || textContent || '');
+    } else if (captionMsg.type === 'poll_creation') {
       try {
-        // Use the LID-resolved body as the question base (mentions in a poll
-        // question are rare but must not regress to raw @lid).
-        textContent = formatWhatsAppPollText(msg, `[Poll] ${textContent || ''}`);
+        textContent = formatWhatsAppPollText(captionMsg, `[Poll] ${textContent || ''}`);
       } catch {
         textContent = '[Poll]';
       }
     }
 
     let mediaParts = [];
-    if (msg.hasMedia && specialText === null) {
+    let anyOverBudget = false;
+    // Multi-attach album: ingest every item's media into this single turn.
+    for (let gi = 0; gi < groupMsgs.length; gi++) {
+      const msg = groupMsgs[gi];
+      const mi = indices[gi];
+      if (!msg.hasMedia || formatSpecialMessageText(msg) !== null) continue;
+
       const waFilename = msg._data?.filename;
       const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
       const allFilenameHints = _attachmentFilenameHints(waFilename, resolvedName, null);
-      textContent = _stripRedundantAttachmentCaption(textContent, allFilenameHints);
+      if (gi === 0 || msg === captionMsg) {
+        textContent = _stripRedundantAttachmentCaption(textContent, allFilenameHints);
+      }
 
-      // Main brain sees every recent history file directly: user-role entries
-      // carry native parts (input_file/input_image via public URL). Assistant
-      // entries (GemiX's own) stay [Attachment] tags only — that role cannot
-      // carry input parts. Past voice transcript text is injected as
-      // <PastVoiceReply> on the current turn (handler.js).
-      // Over the per-call media budget (uploadAllowed[mi] === false) we also
-      // force tag-only so the file is never uploaded to xAI.
       const overBudget = !isFromBot && !uploadAllowed[mi];
+      if (overBudget) anyOverBudget = true;
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
         tagOnly: isFromBot || overBudget,
       });
-      // GemiX voice messages: persist spoken text into history_meta so the
-      // handler can inject <PastVoiceReply> blocks on the current turn.
       if (platform !== PLATFORM_WA_PERSONAL && isGemiX
           && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {
         resolveGemixVoiceTranscription(
@@ -260,22 +298,42 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
         textContent, mediaIngress.tag, allFilenameHints,
       );
       textContent = `${textContent} ${mediaIngress.textFragment.trim()}`.trim();
-      if (overBudget && !textContent.includes('not shown this turn')) {
-        textContent = `${textContent} (older media, not shown this turn — newest ${MAX_IMAGE_READS} image messages + ${MAX_FILE_READS} file messages on WhatsApp; ask to resend or reply to view)`.trim();
-      }
       if (!textContent) {
         textContent = (mediaIngress.tag || buildAttachmentTag(null, resolvedName || msg._data?.filename || 'file')).trim();
       }
-      mediaParts = mediaIngress.contentParts || [];
+      if (mediaIngress.contentParts?.length) {
+        mediaParts.push(...mediaIngress.contentParts);
+      }
+    }
+
+    if (anyOverBudget && !textContent.includes('not shown this turn')) {
+      textContent = `${textContent} (older media, not shown this turn — newest ${MAX_IMAGE_READS} image messages + ${MAX_FILE_READS} file messages on WhatsApp; ask to resend or reply to view)`.trim();
+    }
+
+    // Reply chain once per logical turn (first album item that quotes).
+    const quoteMsg = groupMsgs.find(m => m.hasQuotedMsg) || null;
+    if (quoteMsg) {
+      try {
+        const quoted = await processWhatsAppQuotedReply(
+          quoteMsg,
+          chat.id._serialized,
+          userId,
+          recentMessageIds,
+          isGroup,
+          platform,
+          { includeQuotedMedia: false },
+        );
+        if (quoted.prefix) {
+          textContent = `${quoted.prefix}${textContent || ''}`.trimEnd();
+        }
+      } catch (err) {
+        log.warn(`History quote expand failed: ${err.message}`);
+      }
     }
 
     if (!textContent) return null;
 
     const prefix = `[${ts}] ${senderName}: `;
-
-    // For normal GemiX assistant replies: bare textContent (role assistant)
-    // For real users: labeled prefix (role user)
-    // For system events: labeled prefix including [System] tag (role assistant)
     const useLabeledContent = !isFromBot || isSystemEvent;
     const finalText = useLabeledContent ? `${prefix}${textContent}` : textContent;
     return {
@@ -286,7 +344,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     };
   }
 
-  const built = await mapWithConcurrency(messages, HISTORY_UPLOAD_CONCURRENCY, processHistoryMessage);
+  const built = await mapWithConcurrency(historyGroups, HISTORY_UPLOAD_CONCURRENCY, processHistoryGroup);
   const historyMessages = built.filter(Boolean);
 
   // Bound the cost of re-attached history media: newest images + newest files.
@@ -297,18 +355,21 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 
 /**
  * Extract quoted message content if this message is a reply.
- * Handles media (images, video, audio with duration limits, documents).
- * and plain quoted text. Uses recentMessageIds to decide whether the quoted
- * message is still inside the loaded history window.
+ * Walks the reply chain (up to MAX_REPLY_CHAIN_DEPTH) and concatenates
+ * [In reply to: ...] prefixes root-first. Uses recentMessageIds to decide
+ * whether each hop is still inside the loaded history window (outside →
+ * REPLY_OUTSIDE_HISTORY_PREFIX).
  * @param {object} msg - The whatsapp-web.js message object
  * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
  * @param {string} userId - storage id for media sync
- * @param {Set<string>} recentMessageIds - keys of recent messages (to gate PDF content)
+ * @param {Set<string>} recentMessageIds - keys of recent messages (quote window)
  * @param {boolean} [isGroup=false] - whether the chat is a group (affects mention resolution)
+ * @param {string} [platform]
+ * @param {{ maxChainDepth?: number, includeQuotedMedia?: boolean }} [options]
  * @returns {Promise<object>} { prefix: string, mediaParts: array }
  */
-async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup = false, platform = PLATFORM_WA_DEDICATED) {
-  return processWhatsAppQuotedReply(msg, chatId, userId, recentMessageIds, isGroup, platform);
+async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup = false, platform = PLATFORM_WA_DEDICATED, options = {}) {
+  return processWhatsAppQuotedReply(msg, chatId, userId, recentMessageIds, isGroup, platform, options);
 }
 
 /**
@@ -344,8 +405,17 @@ async function _sendTextWithRetry(chat, text, mentions = []) {
 /**
  * Send response back to WhatsApp chat.
  * Handles text messages, voice messages, and file attachments.
- * Build-agent audio/video and oversized files use temp download links (or source
- * links when unhostable); all other media try direct send first, then temp links on failure.
+ *
+ * Outbound shape (whatsapp-web.js limits — one media per sendMessage):
+ *   1. optional voice
+ *   2. text (chunked if very long)
+ *   3. each direct attachment as its own message
+ *   4. optional link-fallback system message for oversized / failed / policy files
+ *
+ * Note: the mobile app can multi-select photos with caption(s); wwebjs cannot
+ * send an album or N media in one frame. Caption-on-first-file was tried and
+ * reverted: GemiX keeps text and files as separate messages (stable + clear).
+ *
  * @param {object} chat - The whatsapp-web.js Chat object
  * @param {object} responseData - { text, voiceBuffer, isVoiceOnly, attachments, researchFooter?, voiceTranscriptText?, voiceTranscriptChatId? }
  * @param {{ platform?: string }} [opts] - delivery context (platform drives mention filtering)
@@ -395,7 +465,6 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
   }
 
   if (hasAttachments) {
-    // Try to send attachments with fallback support
     const sendAttachment = async (att) => {
       await sendWhatsAppAttachment(att, (media, options) => chat.sendMessage(media, options));
     };
@@ -403,7 +472,7 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
     const result = await sendAttachmentsWithFallback(
       responseData.attachments,
       sendAttachment,
-      { platform: 'whatsapp' }
+      { platform: 'whatsapp' },
     );
 
     log.info(`Attachment delivery: ${result.sent.length} direct, ${result.linkFallback.length} via link`);
@@ -466,28 +535,50 @@ async function processCurrentMedia(msg, userId) {
 }
 
 /**
- * Build the contentParts array for an incoming WhatsApp message.
- * Handles vcard/poll text formatting, quoted message content, and current
- * message media (attached natively as input_image / input_file parts).
- * Pure-attachment sends (no caption) have redundant filename bodies cleaned.
+ * Build contentParts for one logical WA turn: a single message or a multi-
+ * attachment album (several protocol messages, one UI send).
+ * One labeled input_text (caption + all [Attachment] tags + reply chain once)
+ * plus native input_image/input_file parts for every item.
  *
- * @param {object} msg - The whatsapp-web.js message object
- * @param {string} chatId - The chat's serialized ID
+ * @param {object|object[]} msgOrMsgs - one Message or album Messages (oldest→newest)
+ * @param {string} chatId
  * @param {string} userId - storage id for media sync
- * @param {boolean} [isGroup=false] - whether chat is group (affects mentions)
- * @param {string} [senderName='Unknown'] - display name for the message author
- * @returns {Promise<Array>} contentParts array (may be empty if message has no usable content)
+ * @param {boolean} [isGroup=false]
+ * @param {string} [senderName='Unknown']
+ * @param {string} [platform]
+ * @param {Set<string>|null} [recentMessageIds]
+ * @param {{ includeQuotedMedia?: boolean }} [options]
+ * @returns {Promise<Array>}
  */
-async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, senderName = 'Unknown', platform = PLATFORM_WA_DEDICATED, recentMessageIds = null) {
+async function buildIncomingContentPartsFromMessages(
+  msgOrMsgs,
+  chatId,
+  userId,
+  isGroup = false,
+  senderName = 'Unknown',
+  platform = PLATFORM_WA_DEDICATED,
+  recentMessageIds = null,
+  options = {},
+) {
+  const messages = (Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs]).filter(Boolean);
+  if (messages.length === 0) return [];
+
+  const includeQuotedMedia = options.includeQuotedMedia !== false;
   const contentParts = [];
-  const mentionContacts = await _resolveMentionsForMessage(msg, isGroup);
-  let textBody = _replaceMentionsInBody(msg.body || '', mentionContacts);
+
+  // Shared caption lives on one album item (usually the first with body).
+  let captionMsg = messages[0];
+  for (const m of messages) {
+    if ((m.body || '').trim()) { captionMsg = m; break; }
+  }
+  const primaryMsg = messages[0];
+
+  const mentionContacts = await _resolveMentionsForMessage(captionMsg, isGroup);
+  let textBody = _replaceMentionsInBody(captionMsg.body || '', mentionContacts);
   if (isGroup) {
-    // Second-level LID resolution for any @<digits> tag getMentions missed.
-    // knownPhones (group roster) skips redundant lookups for real phone tags.
     const knownPhones = new Set();
     try {
-      const chat = await msg.getChat();
+      const chat = await captionMsg.getChat();
       if (Array.isArray(chat?.participants)) {
         for (const p of chat.participants) {
           if (p?.id?.server === 'c.us' && p.id.user) {
@@ -496,66 +587,86 @@ async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, s
           }
         }
       }
-    } catch { /* best effort: resolve all tags */ }
+    } catch { /* best effort */ }
     textBody = await _resolveLidTagsInBody(textBody, knownPhones);
   }
 
-  const waFilename = msg._data?.filename;
-  if (waFilename) {
-    textBody = _stripRedundantAttachmentCaption(textBody, [waFilename]);
-  }
-
-  const specialText = formatSpecialMessageText(msg);
+  const specialText = formatSpecialMessageText(captionMsg);
   if (specialText !== null) {
     textBody = specialText;
-  } else if (msg.type === 'vcard' || msg.type === 'multi_vcard') {
-    textBody = formatWhatsAppContactText(msg.body || textBody || '');
-  } else if (msg.type === 'poll_creation') {
-    textBody = formatWhatsAppPollText(msg, `[Poll] ${textBody}`);
+  } else if (captionMsg.type === 'vcard' || captionMsg.type === 'multi_vcard') {
+    textBody = formatWhatsAppContactText(captionMsg.body || textBody || '');
+  } else if (captionMsg.type === 'poll_creation') {
+    textBody = formatWhatsAppPollText(captionMsg, `[Poll] ${textBody}`);
   }
 
-  const recentIds = recentMessageIds || await getRecentWhatsAppMessageIds(msg);
-  const quotedContent = await extractQuotedMessageContent(msg, chatId, userId, recentIds, isGroup, platform);
-  if (quotedContent && quotedContent.prefix) {
-    textBody = quotedContent.prefix + textBody;
-  }
-  if (quotedContent && Array.isArray(quotedContent.mediaParts) && quotedContent.mediaParts.length > 0) {
-    contentParts.push(...quotedContent.mediaParts);
-  }
-
-  // Special data-only messages (location, event) never ingest their raw
-  // payload (e.g. a location's base64 map thumbnail).
-  const mediaResult = specialText === null ? await processCurrentMedia(msg, userId) : null;
-  if (mediaResult) {
-    if (mediaResult.skipped) {
-      textBody = `${textBody} ${mediaResult.fragment || mediaResult.tag}`.trim();
-    } else {
-      contentParts.push(...mediaResult.contentParts);
-      textBody = `${textBody} ${mediaResult.tag}`.trim();
+  // Reply chain once (first album item that is a reply).
+  const quoteMsg = messages.find(m => m.hasQuotedMsg) || null;
+  const recentIds = recentMessageIds
+    || await getRecentWhatsAppMessageIds(quoteMsg || primaryMsg);
+  if (quoteMsg) {
+    const quotedContent = await extractQuotedMessageContent(
+      quoteMsg, chatId, userId, recentIds, isGroup, platform,
+      { includeQuotedMedia },
+    );
+    if (quotedContent && quotedContent.prefix) {
+      textBody = quotedContent.prefix + textBody;
     }
-  } else if (msg.hasMedia && specialText === null) {
-    const tag = buildAttachmentTag(null, msg._data?.filename || 'file');
-    textBody = `${tag} (file unavailable) ${textBody}`.trim();
-  }
-
-  if (mediaResult && textBody) {
-    const hints = _attachmentFilenameHints(waFilename, mediaResult.filename, mediaResult.syncedPath);
-    textBody = _stripRedundantAttachmentCaption(textBody, hints);
-    if (mediaResult.tag) {
-      textBody = _stripRedundantFilenameBesideAttachmentTag(textBody, mediaResult.tag, hints);
+    if (quotedContent && Array.isArray(quotedContent.mediaParts) && quotedContent.mediaParts.length > 0) {
+      contentParts.push(...quotedContent.mediaParts);
     }
   }
 
-  if (!textBody.trim() && msg.hasQuotedMsg && contentParts.length === 0) {
+  // Every media item in the logical message (album or single).
+  for (const msg of messages) {
+    if (specialText !== null && msg === captionMsg) continue;
+    const mediaResult = specialText === null ? await processCurrentMedia(msg, userId) : null;
+    const waFilename = msg._data?.filename;
+    if (mediaResult) {
+      if (mediaResult.skipped) {
+        textBody = `${textBody} ${mediaResult.fragment || mediaResult.tag}`.trim();
+      } else {
+        contentParts.push(...mediaResult.contentParts);
+        textBody = `${textBody} ${mediaResult.tag}`.trim();
+      }
+      if (textBody) {
+        const hints = _attachmentFilenameHints(waFilename, mediaResult.filename, mediaResult.syncedPath);
+        textBody = _stripRedundantAttachmentCaption(textBody, hints);
+        if (mediaResult.tag) {
+          textBody = _stripRedundantFilenameBesideAttachmentTag(textBody, mediaResult.tag, hints);
+        }
+      }
+    } else if (msg.hasMedia && specialText === null) {
+      const tag = buildAttachmentTag(null, msg._data?.filename || 'file');
+      textBody = `${tag} (file unavailable) ${textBody}`.trim();
+    } else if (waFilename) {
+      textBody = _stripRedundantAttachmentCaption(textBody, [waFilename]);
+    }
+  }
+
+  if (!textBody.trim() && quoteMsg && contentParts.length === 0) {
     textBody = '[In reply to a message]\n';
   }
 
   if (textBody.trim()) {
-    const tsMs = (msg.timestamp || 0) * 1000;
-    contentParts.unshift({ type: 'text', text: formatLabeledUserContent(tsMs, senderName, textBody.trim()) });
+    const tsMs = (primaryMsg.timestamp || 0) * 1000;
+    contentParts.unshift({
+      type: 'text',
+      text: formatLabeledUserContent(tsMs, senderName, textBody.trim()),
+    });
   }
 
   return contentParts;
+}
+
+/**
+ * Build the contentParts array for an incoming WhatsApp message (single).
+ * @see buildIncomingContentPartsFromMessages for multi-attach albums.
+ */
+async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, senderName = 'Unknown', platform = PLATFORM_WA_DEDICATED, recentMessageIds = null) {
+  return buildIncomingContentPartsFromMessages(
+    msg, chatId, userId, isGroup, senderName, platform, recentMessageIds,
+  );
 }
 
 /** True when the message should enter the batch pipeline (incl. quote-only, like Discord). */
@@ -572,6 +683,7 @@ function waMessageHasUsableContent(msg) {
 module.exports = {
   buildWhatsAppHistory,
   buildIncomingContentParts,
+  buildIncomingContentPartsFromMessages,
   sendWhatsAppResponse,
   getRecentWhatsAppMessageIds,
   waMessageHasUsableContent,
