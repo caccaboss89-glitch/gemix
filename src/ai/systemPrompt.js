@@ -157,8 +157,8 @@ function _renderBuildWorkspace(ws) {
     const more = ws.more ? '\n    ... and more' : '';
     return (
       `<BuildWorkspace files="${total}">\n${items}${more}\n`
-      + '    On disk only (4h TTL) — not in the delivery buffer until build returns them.\n'
-      + '    To re-send: build with a resend-only prompt and attachments=[].\n'
+      + '    On disk only (4h TTL) until build runs — then new/modified workspace files are harvested into the delivery buffer (full tree if nothing changed); pick final user `attachments` from that buffer.\n'
+      + '    To re-send existing outputs: build with a resend-only prompt and attachments=[] (still a full Grok Build run).\n'
       + '</BuildWorkspace>'
     );
   }

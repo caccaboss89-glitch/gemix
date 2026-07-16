@@ -36,7 +36,7 @@ function ensureWorkspace(workspaceId) {
 
 /**
  * UID/GID the build sandbox container should use so bind-mounted files are
- * owned by the same user as the Node process (write_file/edit_file on host).
+ * owned by the same user as the Node process (host harvest / staging).
  */
 function hostSandboxIds() {
   const uid = typeof process.getuid === 'function' ? process.getuid() : null;
@@ -120,13 +120,12 @@ function workspaceSizeBytes(workspaceId) {
 }
 
 /**
- * Listing of workspace files for the <WorkspaceState> block injected in the
- * sub-agent's system prompt and the <UserWorkspace> block on the main brain.
+ * Listing of workspace files for main-brain <BuildWorkspace> and build harvest.
  * Returns: [{ relPath, size, mtimeMs }].
  *
  * `limit` caps the output size: if the workspace has more than `limit`
- * files, we return the first `limit` entries plus a sentinel `_more` count
- * (caller renders "... and N more").
+ * files, we return the first `limit` entries plus a sentinel more flag
+ * (caller renders "... and more").
  */
 function listWorkspaceFiles(workspaceId, limit = 200) {
   const root = getBuildWorkspacePath(workspaceId);
@@ -277,17 +276,9 @@ function wipeWorkspace(workspaceId) {
  * Used by the main brain's system prompt builder to decide whether to
  * inject a <UserWorkspace> block.
  */
-function workspaceIsEmpty(workspaceId) {
-  const root = getBuildWorkspacePath(workspaceId);
-  if (!root || !fs.existsSync(root)) return true;
-  try {
-    return fs.readdirSync(root).length === 0;
-  } catch { return true; }
-}
-
 /**
- * Normalize a workspace path from a build-agent `attachments` entry (or tool
- * path) to a relative path under the workspace root.
+ * Normalize a workspace path from a harvest entry or staged name
+ * to a relative path under the workspace root.
  *
  * Accepts common variants: "song.mp3", "/workspace/song.mp3", "workspace/song.mp3",
  * "out/song.mp3", "./song.mp3", backslashes, optional file:// prefix.
@@ -400,7 +391,6 @@ module.exports = {
   stageAttachmentBuffer,
   stageAttachmentFromPath,
   wipeWorkspace,
-  workspaceIsEmpty,
   resolveInsideWorkspace,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile,

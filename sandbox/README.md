@@ -1,7 +1,14 @@
 # GemiX sandbox
 
-Container Docker usato dal sub-agent `build`. Una sola immagine
-(`gemix-sandbox:latest`) + un proxy egress (`gemix-sandbox-proxy:latest`).
+Container Docker usato dal tool `build` (Grok Build CLI in-container). Una sola
+immagine (`gemix-sandbox:latest`) + un proxy egress (`gemix-sandbox-proxy:latest`).
+
+**Grok CLI** è installato **nell'immagine** (`npm i -g @xai-official/grok` in
+`Dockerfile`). Non va reinstallato a ogni `docker create`, e **non** è richiesto
+sul host per la produzione (solo Docker). Per aggiornare il CLI: rebuild
+immagine + `pm2 restart GemiX`. Auth: GemiX inietta `XAI_API_KEY` da
+`getXaiAuth()` (Hermes OAuth o API key) **solo** sull'`exec` di `grok`, senza
+montare `~/.hermes` / `~/.grok` host.
 
 In produzione i container **non** vengono avviati con `docker compose`. Sono
 creati on-demand da `src/sandbox/buildSandbox.js`, uno per `workspaceId`
@@ -143,14 +150,14 @@ ricordati di passare `--entrypoint ""` e un comando esplicito (vedi sezione
 
 ### UID nel container
 
-Il container gira come UID `1000` (`sandbox`).
+A runtime il container usa **UID/GID del processo Node host** (`sandboxUserString()`),
+non necessariamente l'utente `sandbox` (1000) del Dockerfile (che viene sovrascritto
+da `User` al create). Fallback `1000:1000` solo fuori da Linux.
 
 Per i bind mount writable (`/workspace`), la cartella host deve essere
-accessibile in scrittura da UID `1000`. Quando il bot gira come root il
-buildSandbox fa `chown 1000:1000` automaticamente; quando gira come utente
-non-root applica `chmod 0777` ricorsivo sull'albero del workspace. Il
-container è cap-dropped, network-isolated, memory-capped, quindi il chmod
-permissivo è limitato al solo subtree dell'utente/gruppo.
+scrivibile da quell'UID. Con bot root, `ensureWorkspaceWritable` allinea ownership;
+con bot non-root applica chmod dove possibile. Il container è cap-dropped,
+network-isolated, memory-capped.
 
 ### Override runtime
 
@@ -200,6 +207,7 @@ manuali:
 ```bash
 WORKSPACE=/abs/path/to/data/users/user_<sanitized>/build_workspace
 
+# Usa lo stesso UID del processo bot se non sei root (es. $(id -u):$(id -g)).
 docker run --rm -it \
   --network gemix_sandbox_net \
   --cap-drop ALL \
@@ -208,15 +216,18 @@ docker run --rm -it \
   --memory 1536m \
   --memory-swap 1536m \
   --cpus 1 \
-  --user 1000:1000 \
+  --user "$(id -u):$(id -g)" \
   --entrypoint '' \
   -e HTTP_PROXY=http://gemix-sandbox-proxy:8080 \
   -e HTTPS_PROXY=http://gemix-sandbox-proxy:8080 \
+  -e HOME=/tmp \
+  -e GROK_HOME=/tmp/gemix-grok \
   -v "$WORKSPACE":/workspace:rw \
-  -v "$(pwd)/src/data/skills":/skills:ro \
   gemix-sandbox:latest \
   /bin/bash
 ```
+
+(Nessun mount di skill pack GemiX: Grok Build usa le skill del CLI.)
 
 ## Costanti operative (host)
 

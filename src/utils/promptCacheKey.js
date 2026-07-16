@@ -35,29 +35,6 @@ function generatePromptCacheKey(ctx) {
   return _capKey(_mainKeyFromParts(ctx.platform, Boolean(ctx.isGroup), storageId));
 }
 
-/**
- * Build sub-agent prompt_cache_key from workspaceId (group:/user:/group:personal:).
- * Uses the same conversation slug as the main brain plus a `_build` suffix so
- * the build system prompt does not collide with the main-brain cache entry.
- * @param {string|null} workspaceId
- * @returns {string|null}
- */
-function generateBuildPromptCacheKey(workspaceId) {
-  if (!workspaceId || typeof workspaceId !== 'string') return null;
-  if (workspaceId.startsWith('group:personal:')) {
-    const chatId = workspaceId.slice('group:personal:'.length);
-    return _capKey(`${_mainKeyFromParts(PLATFORM_WA_PERSONAL, false, `personal_${chatId}`)}_build`);
-  }
-  if (workspaceId.startsWith('group:')) {
-    return _capKey(`${_mainKeyFromParts('whatsapp_dedicated', true, workspaceId.slice(6))}_build`);
-  }
-  if (workspaceId.startsWith('user:')) {
-    return _capKey(`${_mainKeyFromParts('whatsapp_dedicated', false, workspaceId.slice(5))}_build`);
-  }
-  return _capKey(`gemix_build_${_sanitize(workspaceId)}`);
-}
-
 module.exports = {
   generatePromptCacheKey,
-  generateBuildPromptCacheKey,
 };

@@ -1,767 +1,330 @@
 // src/ai/buildAgent.js
 //
-// Build sub-agent for the `build` tool.
-// Runs an isolated conversation with dedicated tools
-// (write_file/edit_file/bash/read_file + native xAI
-// web_search/x_search/code_interpreter). Host (tools/build.js) manages lock,
-// workspace staging and delivery of the files announced in the structured
-// final answer (fixed JSON schema: message + optional attachments).
-// See: sandbox/buildWorkspace.js, utils/buildState.js, utils/skills.js
+// Build sub-agent runner: Grok Build CLI inside the per-workspace Docker sandbox.
+// Host: immutable --rules, auth via getXaiAuth (token + baseUrl) as process env,
+// hard timeout, harvest new/changed workspace files into the delivery path.
+// No host-side write_file/edit_file/bash tool loop and no structured attachments JSON.
 
-const fs = require('fs');
-const path = require('path');
-const { BUILD_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
-const { callResponsesWithStaleUrlRetry } = require('./responsesWithUrlRefresh');
-const { generateBuildPromptCacheKey } = require('../utils/promptCacheKey');
+const { getXaiAuth } = require('../config/xaiAuth');
 const {
-  chatToolsToResponsesTools,
-  responsesToAssistantMessage,
-  extractServerSearchStats,
-} = require('./responsesAdapter');
-const { BUILD_RESPONSE_FORMAT, applyResponsesTextFormat, parseStructuredReply } = require('./responseSchema');
-const { NATIVE_SEARCH_TOOLS, BUILD_TOOL_READ_FILE } = require('./tools');
+  BUILD_HARD_TIMEOUT_MS,
+  BUILD_MAX_ROUNDS,
+  BUILD_WORKSPACE_QUOTA_MB,
+} = require('../config/constants');
 const { renewBuildLock } = require('../utils/buildState');
 const {
   listWorkspaceFiles,
-  workspaceSizeBytes,
-  resolveInsideWorkspace,
+  ensureWorkspaceWritable,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile,
-  ensureWorkspaceWritable,
-  QUOTA_BYTES,
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
-const { deliverReadFileFromPath } = require('../utils/aiFileDelivery');
 const { getRomeTime } = require('../utils/time');
-
-/** Validate the `path` array arg for the build sub-agent read_file tool. */
-function normalizeReadFilePaths(raw) {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return { ok: false, error: 'path must be a non-empty array of strings.' };
-  }
-  const paths = [];
-  for (const item of raw) {
-    if (typeof item !== 'string' || !item.trim()) {
-      return { ok: false, error: 'Each path must be a non-empty string.' };
-    }
-    paths.push(item.trim());
-  }
-  return { ok: true, paths };
-}
-const { loadSkills, formatSkillsForPrompt } = require('../utils/skills');
-const { SKILLS_DIR } = require('../utils/userPaths');
-const {
-  BUILD_MAX_ROUNDS,
-  BUILD_API_TIMEOUT_MS,
-  BUILD_HARD_TIMEOUT_MS,
-  BUILD_WORKSPACE_QUOTA_MB,
-  MAX_TOOL_ROUNDS,
-} = require('../config/constants');
 const { createLogger } = require('../utils/logger');
-const { isNonReadableExt, buildReadFileBlockedMessage } = require('../config/nonReadableExts');
-const { mimeForExtension } = require('../config/mimeExtensions');
-const { executeBuildToolCallsOrdered } = require('../utils/toolCallExecution');
 
 const log = createLogger('BuildAgent');
 
-const WRITE_FILE_MAX_BYTES = 5 * 1024 * 1024;
-const BASH_DEFAULT_TIMEOUT_MS = 30_000;
-const BASH_MAX_TIMEOUT_MS = 120_000;
+/** Cap free-text captured from Grok stdout/stderr (bytes). */
+const CAPTURE_MAX_BYTES = 200 * 1024;
 
-// -- Tool definitions exposed to the sub-agent -----------------------------
-//
-// Function tools run host-side; native xAI tools (web_search, x_search,
-// code_interpreter) run server-side inside the same request (zero round cost).
+/** Notice on every build tool result for GemiX-Main. */
+const DELIVERY_SELECTION_NOTICE =
+  'Workspace files harvested into the delivery buffer for this run are listed in `delivered` '
+  + '(new or modified under /workspace/; on a clean success with no delta, all workspace files). '
+  + 'Choose which to put in final `attachments` for the user: prefer final deliverables; skip '
+  + 'intermediates, sources, logs, and scratch files unless the user asked for them.';
 
-function _buildAgentTools() {
-  return [
-    {
-      type: 'function',
-      function: {
-        name: 'write_file',
-        description: 'Create or overwrite a file inside /workspace/. Path must be relative to /workspace/ (e.g. "presentation.js"). UTF-8 text or base64 binary. Prefer this for new scripts or full rewrites instead of many edit_file.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: { type: 'string', description: 'Relative path under /workspace/.' },
-            content: { type: 'string', description: 'File content (max 5 MB after decoding).' },
-            encoding: { type: 'string', enum: ['utf-8', 'base64'], description: 'Content encoding (default utf-8).' },
-            mode: { type: 'string', enum: ['overwrite', 'append'], description: 'Write mode (default overwrite).' },
-          },
-          required: ['path', 'content'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'edit_file',
-        description: 'Small in-place patch of a UTF-8 text file inside /workspace/: replace old_string with new_string (replace_all=true for every occurrence). Not for rewriting most of a copied skill template — use write_file for that.',
-        parameters: {
-          type: 'object',
-          properties: {
-            path: { type: 'string', description: 'Relative path under /workspace/.' },
-            old_string: { type: 'string' },
-            new_string: { type: 'string' },
-            replace_all: { type: 'boolean' },
-          },
-          required: ['path', 'old_string', 'new_string'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'bash',
-        description: 'Run a shell command in the /workspace/ sandbox. Full shell syntax is supported (pipes, &&, ||, ;, redirection, subshells). Skills in /skills/ are read-only.',
-        parameters: {
-          type: 'object',
-          properties: {
-            command: { type: 'string' },
-            timeout_ms: { type: 'integer', description: `Timeout in ms (default ${BASH_DEFAULT_TIMEOUT_MS}, max ${BASH_MAX_TIMEOUT_MS}).` },
-          },
-          required: ['command'],
-        },
-      },
-    },
-    BUILD_TOOL_READ_FILE,
-    // Native xAI server-side tools (web + X search with
-    // image/video understanding and web image search, plus the isolated
-    // Python sandbox.
-    ...NATIVE_SEARCH_TOOLS,
-    { type: 'code_interpreter' },
+/**
+ * Immutable operational rules for Grok Build (--rules).
+ * @param {object} [opts]
+ * @param {Array<{requested:string, actual:string}>} [opts.renamedAttachments]
+ * @param {string[]} [opts.stagedNames]
+ * @param {string[]} [opts.externalUrls]
+ * @returns {string}
+ */
+function buildGrokRules({ renamedAttachments, stagedNames, externalUrls } = {}) {
+  const lines = [
+    'You are GemiX-Build: complete the task brief inside this isolated container.',
+    `Time (Europe/Rome): ${getRomeTime()}.`,
+    'Filesystem: work only under /workspace/ (writable). Do not rely on host paths outside it.',
+    `Quota: keep the workspace under about ${BUILD_WORKSPACE_QUOTA_MB} MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~4h TTL managed by the host).`,
+    'Network: HTTP/HTTPS egress already uses HTTP_PROXY/HTTPS_PROXY (residential), including API calls to xAI. Do not pass --proxy to yt-dlp/curl. On proxy 502, CONNECT errors, timeouts, or DNS failures: internet is down — stop, do not retry loops, explain the system outage in your reply.',
+    'Toolchain: Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, zip/unzip, curl/wget. Runtime pip/npm/apt are disabled — do not attempt package installs.',
+    'Use your built-in Grok skills and tools as needed. Prefer final deliverables over leaving unnecessary scratch clutter.',
+    'IMPORTANT delivery contract: after you finish, the host harvests new/modified files under /workspace/ (and may harvest all files on a successful no-change run, e.g. resend). You do not emit JSON attachments lists. Write a clear free-text summary of what you did and what files matter; GemiX-Main will select what to send the user.',
+    'Language: reply in the user\'s language (Italian default). No emojis in your reply or generated files unless the brief asks for them.',
+    'Grounding: use only real paths and contents you created or read; never invent file paths.',
   ];
+
+  if (Array.isArray(stagedNames) && stagedNames.length > 0) {
+    lines.push(`Staged inputs already under /workspace/: ${stagedNames.join(', ')}.`);
+  }
+  if (Array.isArray(renamedAttachments) && renamedAttachments.length > 0) {
+    const renames = renamedAttachments
+      .map(a => `"${a.requested}" → on disk "${a.actual}"`)
+      .join('; ');
+    lines.push(`Upload filename collisions (use the on-disk name): ${renames}.`);
+  }
+  if (Array.isArray(externalUrls) && externalUrls.length > 0) {
+    lines.push(
+      'These inputs are only available as public URLs (too large to stage). Download them into /workspace/ if needed: '
+      + externalUrls.join(' | '),
+    );
+  }
+  return lines.join('\n');
 }
 
-// -- System prompt ---------------------------------------------------------
-
-function _renderWorkspaceState(workspaceId) {
-  const { files, total, more } = listWorkspaceFiles(workspaceId, 200);
-  const sizeBytes = workspaceSizeBytes(workspaceId);
-  const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
-  if (total === 0) {
-    return `  <WorkspaceState files="0" total_size_mb="${sizeMb}" quota_mb="${BUILD_WORKSPACE_QUOTA_MB}">\n    (empty)\n  </WorkspaceState>`;
-  }
-  const lines = files.map(f => {
-    const ageMin = Math.max(0, Math.floor((Date.now() - f.mtimeMs) / 60000));
-    const sizeKb = (f.size / 1024).toFixed(1);
-    return `    ${f.relPath}  (${sizeKb} KB, ${ageMin} min ago)`;
+function _listWorkspaceFileEntries(workspaceId) {
+  const { files } = listWorkspaceFiles(workspaceId, 50_000);
+  return (files || []).filter((f) => {
+    if (!f || typeof f.relPath !== 'string') return false;
+    const parts = f.relPath.split('/');
+    if (parts.some(p => p === '.grok' || p === '.gemix-grok' || p === 'node_modules')) return false;
+    return true;
   });
-  if (more) lines.push(`    ... and more (showing first ${files.length})`);
-  return `  <WorkspaceState files="${total}" total_size_mb="${sizeMb}" quota_mb="${BUILD_WORKSPACE_QUOTA_MB}">\n${lines.join('\n')}\n  </WorkspaceState>`;
 }
 
-/** Only when host staged an attachment and the filename collided (e.g. report.pdf → report(1).pdf). */
-function _renderAttachmentNotes(renamedAttachments) {
-  if (!Array.isArray(renamedAttachments) || renamedAttachments.length === 0) {
-    return '';
+/** Snapshot relPath → { size, mtimeMs } before a Grok run. */
+function snapshotWorkspaceFiles(workspaceId) {
+  const map = new Map();
+  for (const f of _listWorkspaceFileEntries(workspaceId)) {
+    map.set(f.relPath, { size: f.size, mtimeMs: f.mtimeMs });
   }
-  const items = renamedAttachments.map(a =>
-    `    - brief/staging name "${a.requested}" → on disk "${a.actual}" (use "${a.actual}")`
-  );
-  return `  <AttachmentNotes>\n    Upload filename collision — use the on-disk name below, not the name from the brief.\n${items.join('\n')}\n  </AttachmentNotes>`;
-}
-
-// Build the <Skills> block dynamically from the skill folders mounted at
-// /skills/ (each with a SKILL.md whose frontmatter carries name + description).
-// This keeps the prompt in sync with whatever skills exist on disk.
-function _renderSkills() {
-  return formatSkillsForPrompt(loadSkills());
-}
-
-function _filterDeliveredAttachments(workspaceId, attachments) {
-  if (!Array.isArray(attachments) || attachments.length === 0) {
-    return { verified: [], rejected: [] };
-  }
-  const verified = [];
-  const rejected = [];
-  for (const raw of attachments) {
-    const entry = String(raw || '').trim();
-    if (!entry) continue;
-    if (/^https?:\/\//i.test(entry)) {
-      verified.push(entry);
-      continue;
-    }
-    const wsRel = normalizeWorkspaceRelPath(entry);
-    if (!wsRel || !resolveWorkspaceDeliveryFile(workspaceId, wsRel)) {
-      rejected.push(entry);
-      continue;
-    }
-    verified.push(entry);
-  }
-  return { verified, rejected };
-}
-
-function _indentText(text, pad) {
-  return text.split('\n').map(l => (l.length ? pad + l : l)).join('\n');
+  return map;
 }
 
 /**
- * Operational directives for the sub-agent, numbered R1..Rn with a scope:
- *   tool   — while emitting tool calls during a round
- *   final  — when emitting the final structured JSON answer
- *   always — any time
- * Folds the rules that used to live inside Identity/Workspace/Sandbox/ToolUsage/
- * Pitfalls into one checkable list.
+ * Files new or modified vs a pre-run snapshot (verified on disk).
+ * @param {string} workspaceId
+ * @param {Map<string, {size:number, mtimeMs:number}>} before
+ * @returns {string[]}
  */
-function _buildDirectivesBlock() {
-  const groups = [
-    { tag: 'Execution', lines: [
-      { s: 'tool', t: 'Batch independent tool calls in one round; bash always runs LAST, so write or edit a file and run the bash that uses it in the SAME round to save rounds and tokens.' },
-      { s: 'tool', t: 'When WorkspaceState shows files="0" the workspace is empty — never ls/find/bash to probe it; trust WorkspaceState over discovery commands.' },
-      { s: 'tool', t: 'Run yt-dlp immediately, with no pre-checks (version, ls, ffprobe, metadata) and no --proxy; on a content failure, one simpler retry at most.' },
-      { s: 'tool', t: 'Stop as soon as the deliverable is in WorkspaceState and reply once with the final JSON — do not spend extra rounds on probes, re-verification, or metadata.' },
-    ] },
-    { tag: 'Output', lines: [
-      { s: 'final', t: 'Write the final `message` in the user\'s language (Italian default).' },
-      { s: 'always', t: 'No emojis — neither in the final message nor in any file you generate — unless the brief asks for them.' },
-    ] },
-    { tag: 'Grounding', lines: [
-      { s: 'always', t: 'Use only real, verified paths, names, and contents; never invent file paths or describe file contents you did not create or read.' },
-    ] },
-    { tag: 'Delivery', lines: [
-      { s: 'final', t: 'Final JSON: `message` (required) + optional `attachments`. Each attachments entry: a workspace path (as in WorkspaceState) or a public https URL; unlisted files are not delivered.' },
-      { s: 'final', t: 'Every `attachments` path must appear in &lt;WorkspaceState&gt; exactly — never invent paths.' },
-      { s: 'final', t: 'Attach only what the brief asks for; skip scratch files (sources, logs, .tex, intermediates) unless requested.' },
-      { s: 'final', t: 'Resend-only brief: attach only paths already listed in &lt;WorkspaceState&gt;.' },
-      { s: 'final', t: 'Many deliverables: zip them first.' },
-    ] },
-    { tag: 'Failure', lines: [
-      { s: 'always', t: 'Network/proxy failure (502, CONNECT error, timeout, could not resolve): internet is down — stop, no retries, tell GemiX-Main for bug_report.' },
-      { s: 'always', t: 'Same infrastructure error twice: stop, no workarounds, bug_report.' },
-    ] },
-  ];
-  let n = 0;
-  const parts = [];
-  for (const g of groups) {
-    const body = g.lines.map((l) => { n += 1; return `    R${n} [${l.s}] ${l.t}`; }).join('\n');
-    parts.push(`  <${g.tag}>\n${body}\n  </${g.tag}>`);
+function collectWorkspaceDeltaPaths(workspaceId, before) {
+  const prev = before instanceof Map ? before : new Map();
+  const out = [];
+  const seen = new Set();
+  for (const f of _listWorkspaceFileEntries(workspaceId)) {
+    const prior = prev.get(f.relPath);
+    const changed = !prior || prior.size !== f.size || f.mtimeMs > prior.mtimeMs;
+    if (!changed) continue;
+    const rel = normalizeWorkspaceRelPath(f.relPath);
+    if (!rel || seen.has(rel)) continue;
+    if (!resolveWorkspaceDeliveryFile(workspaceId, rel)) continue;
+    seen.add(rel);
+    out.push(rel);
   }
-  return { block: `<Directives>\n${parts.join('\n')}\n</Directives>`, count: n };
+  return out;
 }
 
-function _buildPreSendCheckBlock(count) {
-  return [
-    '<PreSendCheck>',
-    `  Before any action, silently check it against every applicable Directive (R1–R${count}), one by one, skipping none. Scopes: [tool] = while emitting tool calls; [final] = the final JSON; [always] = throughout.`,
-    '  Before the final JSON, confirm: every `attachments` entry appears verbatim in &lt;WorkspaceState&gt; (never invented); only brief-requested deliverables are included (no scratch files); `message` is in the user\'s language with no emojis (in it or in generated files) unless the brief asked.',
-    '  During tool rounds: batch independent calls (bash runs last) and never probe an empty workspace.',
-    '  Do not output this check.',
-    '</PreSendCheck>',
-  ].join('\n');
-}
-
-function _buildSystemPrompt(workspaceId, renamedAttachments) {
-  const stateBlock = _renderWorkspaceState(workspaceId);
-  const notesBlock = _renderAttachmentNotes(renamedAttachments);
-  const skillsBlock = _renderSkills();
-
-  // No outer <SystemPrompt> envelope: this string is delivered in the
-  // dedicated system `instructions` field. Two macros mirror GemiX-Main:
-  // <Context> = what to know, <Directives> = what to do, <PreSendCheck> last.
-  const identity = [
-    '<Identity>',
-    '  GemiX-Build sub-agent: execute the task brief from GemiX-Main inside /workspace/.',
-    `  Time (Europe/Rome): ${getRomeTime()}.`,
-    '</Identity>',
-  ].join('\n');
-
-  const workspace = [
-    '<Workspace>',
-    '  /workspace/ (writable), /skills/ (read-only). Operate only under these paths.',
-    `  ${BUILD_WORKSPACE_QUOTA_MB} MB quota; files persist for the session.`,
-    '  &lt;WorkspaceState&gt; is the authoritative on-disk file list, refreshed each round.',
-    stateBlock,
-    ...(notesBlock ? [notesBlock] : []),
-    '</Workspace>',
-  ].join('\n');
-
-  const sandbox = [
-    '<Sandbox>',
-    '  bash / write_file / edit_file / read_file run here. code_interpreter is separate (no /workspace/).',
-    '  Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, poppler, curl/wget. No pip/npm/apt.',
-    '  Downloads via bash: yt-dlp (video/audio), curl -L -o (files/images). Save under /workspace/.',
-    '</Sandbox>',
-  ].join('\n');
-
-  const contextChildren = [identity, workspace, sandbox];
-  if (skillsBlock) contextChildren.push(skillsBlock);
-  const context = `<Context>\n${contextChildren.map(b => _indentText(b, '  ')).join('\n')}\n</Context>`;
-
-  const { block: directives, count } = _buildDirectivesBlock();
-  const preSend = _buildPreSendCheckBlock(count);
-
-  return [context, directives, preSend].join('\n');
-}
-
-// -- Tool execution dispatcher (sub-agent side) ----------------------------
-
-function _toolErr(msg) {
-  return JSON.stringify({ success: false, error: msg });
-}
-
-function _classifyAgentPath(workspaceId, rawPath) {
-  if (typeof rawPath !== 'string' || !rawPath) return { ok: false, reason: 'Empty path.' };
-  if (rawPath.includes('\0')) return { ok: false, reason: 'Invalid path (null byte).' };
-  const trimmed = rawPath.trim();
-  if (trimmed.startsWith('/skills/')) {
-    const rel = trimmed.slice('/skills/'.length);
-    if (rel.includes('..') || path.isAbsolute(rel)) return { ok: false, reason: 'Skills path escapes /skills/.' };
-    const abs = path.resolve(SKILLS_DIR, rel);
-    if (!abs.startsWith(SKILLS_DIR)) return { ok: false, reason: 'Skills path escapes /skills/.' };
-    return { ok: true, abs, zone: 'skills' };
+/**
+ * Every regular harvestable workspace path (verified on disk).
+ * @param {string} workspaceId
+ * @returns {string[]}
+ */
+function collectAllWorkspaceDeliverablePaths(workspaceId) {
+  const out = [];
+  const seen = new Set();
+  for (const f of _listWorkspaceFileEntries(workspaceId)) {
+    const rel = normalizeWorkspaceRelPath(f.relPath);
+    if (!rel || seen.has(rel)) continue;
+    if (!resolveWorkspaceDeliveryFile(workspaceId, rel)) continue;
+    seen.add(rel);
+    out.push(rel);
   }
-  // Default: workspace
-  const wsRel = normalizeWorkspaceRelPath(trimmed);
-  if (!wsRel) return { ok: false, reason: 'Invalid workspace path.' };
-  const abs = resolveInsideWorkspace(workspaceId, wsRel);
-  if (!abs) return { ok: false, reason: 'Path escapes /workspace/.' };
-  return { ok: true, abs, zone: 'workspace' };
+  return out;
 }
 
-async function _readOneAgentFile(workspaceId, filePath, ctx) {
-  const c = _classifyAgentPath(workspaceId, filePath);
-  if (!c.ok) return { kind: 'error', path: filePath, error: c.reason };
-  if (!fs.existsSync(c.abs)) return { kind: 'error', path: filePath, error: `File not found: ${filePath}` };
+/** @deprecated use collectAllWorkspaceDeliverablePaths / collectWorkspaceDeltaPaths */
+function collectWorkspaceDeliverablePaths(workspaceId) {
+  return collectAllWorkspaceDeliverablePaths(workspaceId);
+}
 
-  let stat;
-  try { stat = fs.statSync(c.abs); }
-  catch (err) { return { kind: 'error', path: filePath, error: `Cannot stat: ${err.message}` }; }
-  if (stat.isDirectory()) return { kind: 'error', path: filePath, error: 'Path is a directory.' };
+function listAllWorkspaceFilesForHarvest(workspaceId) {
+  return _listWorkspaceFileEntries(workspaceId);
+}
 
-  const ext = path.extname(c.abs).toLowerCase();
-  if (isNonReadableExt(ext)) return { kind: 'error', path: filePath, error: buildReadFileBlockedMessage(ext) };
+function _clipCapture(text, maxBytes = CAPTURE_MAX_BYTES) {
+  if (typeof text !== 'string' || !text) return '';
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= maxBytes) return text;
+  return buf.slice(buf.length - maxBytes).toString('utf8');
+}
 
-  const delivery = await deliverReadFileFromPath({
-    absPath: c.abs,
-    displayPath: filePath,
-    contentType: mimeForExtension(ext),
-    imagesReadCount: ctx.imagesReadCount ?? 0,
-    blockedMessage: buildReadFileBlockedMessage(ext),
-    inlineTextCode: true,
-  });
-
-  if (delivery.kind === 'error') return { kind: 'error', path: filePath, error: delivery.error };
-  if (delivery.kind === 'parts') {
-    if (delivery.bumpImageCount) ctx.imagesReadCount = (ctx.imagesReadCount ?? 0) + 1;
-    return { kind: 'parts', displayPath: filePath, parts: delivery.parts };
-  }
+/**
+ * @param {object} opts
+ * @param {string} opts.agentMessage
+ * @param {string[]} opts.delivered
+ */
+function buildBuildToolPayload({ agentMessage, delivered }) {
+  const message = typeof agentMessage === 'string' ? agentMessage : '';
+  const list = Array.isArray(delivered) ? delivered.slice() : [];
   return {
-    kind: 'inline',
-    displayPath: filePath,
-    content: delivery.content,
-    truncated: delivery.truncated,
+    message,
+    delivery_note: DELIVERY_SELECTION_NOTICE,
+    delivered: list,
   };
 }
-
-async function _executeReadFile(workspaceId, args, ctx = {}) {
-  const norm = normalizeReadFilePaths(args && args.path);
-  if (!norm.ok) return _toolErr(norm.error);
-
-  const fileResults = [];
-  const mediaParts = [];
-  let hasMediaParts = false;
-
-  for (const filePath of norm.paths) {
-    const one = await _readOneAgentFile(workspaceId, filePath, ctx);
-    if (one.kind === 'error') {
-      fileResults.push({ path: one.path, success: false, error: one.error });
-      continue;
-    }
-    if (one.kind === 'parts') {
-      hasMediaParts = true;
-      fileResults.push({ path: one.displayPath, success: true });
-      mediaParts.push(...one.parts);
-      continue;
-    }
-    fileResults.push({
-      path: one.displayPath,
-      success: true,
-      content: one.content,
-      ...(one.truncated ? { truncated: true } : {}),
-    });
-  }
-
-  const payload = {
-    success: fileResults.every(f => f.success),
-    files: fileResults,
-  };
-
-  if (hasMediaParts) {
-    return [
-      { type: 'text', text: JSON.stringify(payload) },
-      ...mediaParts,
-    ];
-  }
-  return JSON.stringify(payload);
-}
-
-function _executeWriteFile(workspaceId, args) {
-  const a = args || {};
-  const encoding = a.encoding === 'base64' ? 'base64' : 'utf-8';
-  const mode = a.mode === 'append' ? 'append' : 'overwrite';
-  const c = _classifyAgentPath(workspaceId, a.path);
-  if (!c.ok || c.zone !== 'workspace') return _toolErr(c.reason || 'Writes are only allowed under /workspace/.');
-  let buf;
-  try {
-    if (typeof a.content !== 'string') return _toolErr('Missing or invalid content.');
-    buf = encoding === 'base64' ? Buffer.from(a.content, 'base64') : Buffer.from(a.content, 'utf-8');
-  } catch (err) { return _toolErr(`Decode failed: ${err.message}`); }
-  if (buf.length > WRITE_FILE_MAX_BYTES) {
-    return _toolErr(`Content too large (${buf.length} bytes, max ${WRITE_FILE_MAX_BYTES}).`);
-  }
-  // Quota check.
-  const sizeBefore = workspaceSizeBytes(workspaceId);
-  const existingSize = fs.existsSync(c.abs) && mode === 'overwrite' ? (fs.statSync(c.abs).size || 0) : 0;
-  const projectedSize = sizeBefore - existingSize + buf.length;
-  if (projectedSize > QUOTA_BYTES) {
-    return _toolErr(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap). Delete files before continuing.`);
-  }
-  try { fs.mkdirSync(path.dirname(c.abs), { recursive: true }); }
-  catch (err) { return _toolErr(`Cannot create parent dir: ${err.message}`); }
-  try {
-    if (mode === 'append' && fs.existsSync(c.abs)) {
-      fs.appendFileSync(c.abs, buf);
-    } else {
-      fs.writeFileSync(c.abs, buf);
-    }
-  } catch (err) {
-    if (err.code === 'EACCES') {
-      ensureWorkspaceWritable(workspaceId);
-      try {
-        if (mode === 'append' && fs.existsSync(c.abs)) {
-          fs.appendFileSync(c.abs, buf);
-        } else {
-          fs.writeFileSync(c.abs, buf);
-        }
-      } catch (retryErr) {
-        return _toolErr(`Write failed: ${retryErr.message}`);
-      }
-    } else {
-      return _toolErr(`Write failed: ${err.message}`);
-    }
-  }
-  return JSON.stringify({ success: true, path: a.path, size: buf.length, mode });
-}
-
-function _executeEditFile(workspaceId, args) {
-  const a = args || {};
-  const c = _classifyAgentPath(workspaceId, a.path);
-  if (!c.ok || c.zone !== 'workspace') return _toolErr(c.reason || 'Edits are only allowed under /workspace/.');
-  if (!fs.existsSync(c.abs)) return _toolErr('File does not exist.');
-  if (typeof a.old_string !== 'string' || typeof a.new_string !== 'string') {
-    return _toolErr('old_string and new_string must be strings.');
-  }
-  let text;
-  try { text = fs.readFileSync(c.abs, 'utf-8'); }
-  catch (err) { return _toolErr(`Read failed: ${err.message}`); }
-  const occurrences = text.split(a.old_string).length - 1;
-  if (occurrences === 0) return _toolErr('old_string not found in file.');
-  if (occurrences > 1 && !a.replace_all) {
-    return _toolErr(`old_string occurs ${occurrences} times; pass replace_all=true to apply to all.`);
-  }
-  const updated = a.replace_all
-    ? text.split(a.old_string).join(a.new_string)
-    : text.replace(a.old_string, a.new_string);
-  // Quota check.
-  const newBytes = Buffer.byteLength(updated, 'utf-8');
-  const sizeBefore = workspaceSizeBytes(workspaceId);
-  const existingSize = fs.statSync(c.abs).size || 0;
-  if (sizeBefore - existingSize + newBytes > QUOTA_BYTES) {
-    return _toolErr(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
-  }
-  try { fs.writeFileSync(c.abs, updated, 'utf-8'); }
-  catch (err) {
-    if (err.code === 'EACCES') {
-      ensureWorkspaceWritable(workspaceId);
-      try { fs.writeFileSync(c.abs, updated, 'utf-8'); }
-      catch (retryErr) { return _toolErr(`Write failed: ${retryErr.message}`); }
-    } else {
-      return _toolErr(`Write failed: ${err.message}`);
-    }
-  }
-  return JSON.stringify({ success: true, path: a.path, occurrences, replaced: a.replace_all ? occurrences : 1 });
-}
-
-const SHELL_COMMAND_MAX_LEN = 4000;
-async function _executeBash(workspaceId, args) {
-  const a = args || {};
-  const cmd = a.command;
-  if (typeof cmd !== 'string' || !cmd.trim()) return _toolErr('Missing command.');
-  if (cmd.length > SHELL_COMMAND_MAX_LEN) return _toolErr(`Command too long (max ${SHELL_COMMAND_MAX_LEN} chars).`);
-  let timeoutMs = Number(a.timeout_ms);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) timeoutMs = BASH_DEFAULT_TIMEOUT_MS;
-  if (timeoutMs > BASH_MAX_TIMEOUT_MS) timeoutMs = BASH_MAX_TIMEOUT_MS;
-  let res;
-  try { res = await buildSandbox.execBash(workspaceId, cmd, { timeoutMs }); }
-  catch (err) { return _toolErr(`Sandbox failure: ${err.message}`); }
-  ensureWorkspaceWritable(workspaceId);
-  return JSON.stringify({
-    success: res.rc === 0,
-    rc: res.rc,
-    stdout: res.stdout || '',
-    stderr: res.stderr || '',
-    timed_out: res.timedOut,
-    duration_ms: res.durationMs,
-  });
-}
-
-async function _runToolCall(toolCall, ctx) {
-  const name = toolCall.function && toolCall.function.name;
-  let parsedArgs = {};
-  try { parsedArgs = JSON.parse(toolCall.function.arguments || '{}'); }
-  catch { /* leave empty */ }
-
-  log.info(`   build tool: ${name} args=${JSON.stringify(parsedArgs)}`);
-  switch (name) {
-    case 'write_file':    return _executeWriteFile(ctx.workspaceId, parsedArgs);
-    case 'edit_file':     return _executeEditFile(ctx.workspaceId, parsedArgs);
-    case 'bash':          return await _executeBash(ctx.workspaceId, parsedArgs);
-    case 'read_file':     return await _executeReadFile(ctx.workspaceId, parsedArgs, ctx);
-    default:              return _toolErr(`Unknown tool "${name}".`);
-  }
-}
-
-// -- Main entry: run the build agent ---------------------------------------
 
 /**
  * @param {object} args
  * @param {string} args.workspaceId
- * @param {string} args.prompt - user-facing task brief from the main brain.
+ * @param {string} args.prompt
  * @param {Array<{requested:string, actual:string}>} [args.renamedAttachments]
- *   - List of rename-on-collision events to communicate to the agent.
- * @param {Array<{name:string, url:string}>} [args.attachmentParts]
- *   - File parts the host wants the agent to ingest immediately on round 1.
- *     Typically created when staging buffer-only attachments - for files
- *     that already live in /workspace/ on disk, the agent finds them in
- *     <WorkspaceState> and can read them itself.
- * @param {string} args.lockOwnerId - owner id for renewing the lock per round.
- * @returns {Promise<{
- *   success: boolean,
- *   message?: string,             // user-facing text from the structured answer
- *   delivered?: string[],         // workspace-relative paths and/or public URLs
- *   roundsUsed: number,
- *   research_stats?: { webSources:number, xPosts:number },
- *   error?: string,
- * }>}
+ * @param {string[]} [args.stagedNames]
+ * @param {string[]} [args.externalUrls]
+ * @param {string} args.lockOwnerId
+ * @param {function} [args.getToken]
+ * @param {function} [args.execGrok]
  */
-async function runBuildAgent({ workspaceId, prompt, renamedAttachments, attachmentParts, lockOwnerId }) {
+async function runBuildAgent({
+  workspaceId,
+  prompt,
+  renamedAttachments,
+  stagedNames,
+  externalUrls,
+  lockOwnerId,
+  getToken,
+  execGrok,
+} = {}) {
   const startedAt = Date.now();
-  const promptCacheKey = generateBuildPromptCacheKey(workspaceId);
-  const tools = _buildAgentTools();
-  const messages = [
-    { role: 'system', content: _buildSystemPrompt(workspaceId, renamedAttachments) },
-    {
-      role: 'user',
-      content: _buildUserContent(prompt, attachmentParts),
-    },
-  ];
+  ensureWorkspaceWritable(workspaceId);
 
-  const researchStats = { webSources: 0, xPosts: 0 };
-  const ctx = { workspaceId, imagesReadCount: 0 };
-
-  const accumulateSearchStats = (data) => {
-    const stats = extractServerSearchStats(data);
-    researchStats.webSources += stats.webSources;
-    researchStats.xPosts += stats.xPosts;
-  };
-
-  let rounds = 0;
-  let finalText = null;
-  let budgetExhausted = false;
-
-  while (rounds < BUILD_MAX_ROUNDS) {
-    rounds++;
-    if (Date.now() - startedAt > BUILD_HARD_TIMEOUT_MS) {
-      log.warn(`build agent: hard timeout reached at round ${rounds}`);
-      budgetExhausted = true;
-      break;
-    }
-
-    // Refresh the system prompt with the latest workspace state at every
-    // round (the agent just wrote new files, the state must reflect them).
-    ensureWorkspaceWritable(workspaceId);
-    messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
-
-    // Renew the lock so a long agent run keeps the workspace held.
-    renewBuildLock(workspaceId, lockOwnerId);
-
-    const adaptedTools = chatToolsToResponsesTools(tools);
-    const body = {
-      model: BUILD_MODEL,
-      max_output_tokens: 64_000,
-      tool_choice: 'auto',
-      // Server-side cap per HTTP call (web_search/x_search/code_interpreter).
-      // Client tool rounds are bounded by the outer loop below — not by max_turns.
-      max_turns: MAX_TOOL_ROUNDS,
-      store: false,
-      // Fixed structured final answer: message + optional attachments.
-      // No reasoning.effort here: BUILD_MODEL (e.g. grok-build-0.1) rejects
-      // that parameter ("does not support parameter reasoningEffort").
-    };
-    if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
-    applyResponsesTextFormat(body, BUILD_RESPONSE_FORMAT);
-    if (XAI_REASONING_REPLAY) {
-      body.include = ['reasoning.encrypted_content'];
-    }
-    if (adaptedTools) body.tools = adaptedTools;
-
-    let data;
-    try {
-      data = await callResponsesWithStaleUrlRetry({
-        modelName: 'Grok-Build',
-        messages,
-        body,
-        logExtra: { timeoutMs: BUILD_API_TIMEOUT_MS, buildRound: rounds },
-        allowStaleUrlRefresh: true,
-      });
-    } catch (err) {
-      log.error(`build agent API call failed at round ${rounds}: ${err.message}`);
-      return { success: false, error: err.message, roundsUsed: rounds };
-    }
-
-    accumulateSearchStats(data);
-    const assistant = responsesToAssistantMessage(data);
-
-    if (Array.isArray(assistant.tool_calls) && assistant.tool_calls.length > 0) {
-      // Push the assistant turn (with content if any) and then each tool result.
-      const assistantToPush = { ...assistant };
-      if (assistantToPush.content === null || assistantToPush.content === undefined) delete assistantToPush.content;
-      messages.push(assistantToPush);
-      const resultsById = await executeBuildToolCallsOrdered(
-        assistant.tool_calls,
-        (tc) => _runToolCall(tc, ctx),
-      );
-
-      for (const tc of assistant.tool_calls) {
-        messages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: resultsById.get(tc.id),
-        });
-      }
-      const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file', 'input_image']);
-      for (const msg of messages) {
-        if (msg.role === 'tool' && Array.isArray(msg.content)) {
-          if (msg._heavyMediaPreviewSeen) {
-            msg.content = msg.content.filter(p => !HEAVY_TOOL_PART_TYPES.has(p.type));
-            if (msg.content.length === 1 && msg.content[0].type === 'text') {
-              msg.content = msg.content[0].text;
-            }
-            delete msg._heavyMediaPreviewSeen;
-          } else if (msg.content.some(p => HEAVY_TOOL_PART_TYPES.has(p.type))) {
-            msg._heavyMediaPreviewSeen = true;
-          }
-        }
-      }
-      if (rounds >= BUILD_MAX_ROUNDS) budgetExhausted = true;
-      continue;
-    }
-
-    // No tool calls - final assistant message.
-    finalText = assistant.content || '';
-    break;
-  }
-
-  // -- Round budget / hard-timeout exhausted -------------------------------
-  // When no final text has been produced by the time the round budget or hard
-  // timeout is reached, a final request is issued with tool_choice:'none' to
-  // obtain a structured final answer. This lets the agent summarize completed
-  // work and list any usable files.
-  if (finalText === null && budgetExhausted) {
-    log.warn(`   build round budget (${BUILD_MAX_ROUNDS}) exhausted - forcing a final answer (tool_choice:none)`);
-    renewBuildLock(workspaceId, lockOwnerId);
-    messages[0].content = _buildSystemPrompt(workspaceId, renamedAttachments);
-    messages.push({
-      role: 'user',
-      content:
-        'SYSTEM: You have reached your work budget and can no longer run tools. ' +
-        'Write your final answer now: in `message`, explain to the user (in their language) ' +
-        'what you accomplished and that you had to stop before fully finishing, summarizing the ' +
-        'current state of the work. List any usable files you already produced in /workspace/ ' +
-        'in the `attachments` field (omit it if none).',
-    });
-    try {
-      const adaptedTools = chatToolsToResponsesTools(tools);
-      const body = {
-        model: BUILD_MODEL,
-        max_output_tokens: 64_000,
-        tool_choice: 'none',
-        store: false,
-      };
-      if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
-      applyResponsesTextFormat(body, BUILD_RESPONSE_FORMAT);
-      if (adaptedTools) body.tools = adaptedTools;
-      if (XAI_REASONING_REPLAY) {
-        body.include = ['reasoning.encrypted_content'];
-      }
-      const data = await callResponsesWithStaleUrlRetry({
-        modelName: 'Grok-Build',
-        messages,
-        body,
-        logExtra: { timeoutMs: BUILD_API_TIMEOUT_MS, buildRound: 'wrap-up' },
-        allowStaleUrlRefresh: true,
-      });
-      accumulateSearchStats(data);
-      finalText = responsesToAssistantMessage(data).content || '';
-    } catch (err) {
-      log.error(`   build forced wrap-up call failed: ${err.message}`);
-    }
-  }
-
-  if (finalText === null) {
-    log.warn(`build agent ended without a final response (rounds=${rounds}/${BUILD_MAX_ROUNDS}).`);
+  let token;
+  let baseUrl;
+  try {
+    const auth = typeof getToken === 'function' ? getToken() : getXaiAuth();
+    token = auth && auth.token;
+    baseUrl = auth && auth.baseUrl;
+  } catch (err) {
     return {
       success: false,
-      error: `build agent reached the round budget (${BUILD_MAX_ROUNDS}) without producing a final response.`,
-      roundsUsed: rounds,
-      research_stats: researchStats,
+      error: `Cannot load xAI credentials for build: ${err.message}`,
+      roundsUsed: 0,
+      delivered: [],
+      delivery_note: DELIVERY_SELECTION_NOTICE,
+    };
+  }
+  if (typeof token !== 'string' || !token.trim()) {
+    return {
+      success: false,
+      error: 'Cannot load xAI credentials for build: empty token.',
+      roundsUsed: 0,
+      delivered: [],
+      delivery_note: DELIVERY_SELECTION_NOTICE,
     };
   }
 
-  const parsed = parseStructuredReply(finalText);
-  if (!parsed.structured) {
-    log.warn('build agent final answer was not valid JSON; treating it as plain text.');
-  }
-  const { verified: files, rejected } = _filterDeliveredAttachments(workspaceId, parsed.attachments);
-  if (rejected.length > 0) {
-    log.warn(`build agent listed missing attachments: ${rejected.join(', ')}`);
-  }
-  log.info(`build agent finished: rounds=${rounds}, deliver=${files.length}`);
-  return {
-    success: true,
-    message: parsed.text || '',
-    delivered: files,
-    delivered_rejected: rejected,
-    roundsUsed: rounds,
-    research_stats: researchStats,
-  };
-}
+  const rules = buildGrokRules({ renamedAttachments, stagedNames, externalUrls });
+  const beforeSnapshot = snapshotWorkspaceFiles(workspaceId);
 
-function _buildUserContent(prompt, attachmentParts) {
-  const parts = [];
-  if (typeof prompt === 'string' && prompt.trim()) {
-    parts.push({ type: 'text', text: prompt });
+  const renewIv = setInterval(() => {
+    try {
+      const ok = renewBuildLock(workspaceId, lockOwnerId);
+      if (ok === false) log.warn(`build lock renew returned false workspace=${workspaceId}`);
+    } catch (err) {
+      log.warn(`build lock renew failed: ${err.message}`);
+    }
+  }, 30_000);
+  renewIv.unref?.();
+
+  const runExec = typeof execGrok === 'function' ? execGrok : buildSandbox.execGrokBuild.bind(buildSandbox);
+  let execResult;
+  try {
+    renewBuildLock(workspaceId, lockOwnerId);
+    execResult = await runExec(workspaceId, {
+      prompt,
+      rules,
+      token: token.trim(),
+      baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
+      timeoutMs: BUILD_HARD_TIMEOUT_MS,
+      maxTurns: BUILD_MAX_ROUNDS,
+    });
+  } catch (err) {
+    clearInterval(renewIv);
+    log.error(`Grok Build exec failed: ${err.message}`);
+    const partial = collectWorkspaceDeltaPaths(workspaceId, beforeSnapshot);
+    return {
+      success: false,
+      error: `Grok Build failed to start or run: ${err.message}`,
+      roundsUsed: 0,
+      delivered: partial,
+      delivery_note: DELIVERY_SELECTION_NOTICE,
+    };
+  } finally {
+    clearInterval(renewIv);
   }
-  if (Array.isArray(attachmentParts) && attachmentParts.length > 0) {
-    for (const att of attachmentParts) {
-      if (att && typeof att.url === 'string') {
-        if (att.name) parts.push({ type: 'text', text: `[Attachment: ${att.name}]` });
-        const filePart = att.isImage
-          ? { type: 'input_image', image_url: att.url }
-          : { type: 'input_file', file_url: att.url };
-        if (typeof att.sourcePath === 'string') {
-          filePart._xaiSourcePath = att.sourcePath;
-        }
-        parts.push(filePart);
-      }
+
+  ensureWorkspaceWritable(workspaceId);
+
+  // Success depends only on process outcome — never on "files exist".
+  const execOk = !execResult.timedOut && execResult.rc === 0;
+  let deliveredPaths = collectWorkspaceDeltaPaths(workspaceId, beforeSnapshot);
+  // Successful no-op / resend: agent may not rewrite files — fall back to full harvest.
+  if (execOk && deliveredPaths.length === 0) {
+    deliveredPaths = collectAllWorkspaceDeliverablePaths(workspaceId);
+  }
+
+  const stdout = _clipCapture((execResult.stdout || '').trim());
+  const stderr = _clipCapture((execResult.stderr || '').trim());
+  let agentMessage = stdout;
+  if (!agentMessage) {
+    if (execResult.timedOut) {
+      agentMessage = 'Build stopped: hard timeout reached before Grok Build finished.';
+    } else if (!execOk && stderr) {
+      agentMessage = `Grok Build ended without stdout. stderr: ${stderr.slice(0, 2000)}`;
     }
   }
-  return parts.length > 0 ? parts : (prompt || '');
+
+  const payload = buildBuildToolPayload({
+    agentMessage,
+    delivered: deliveredPaths,
+  });
+
+  const durationMs = Date.now() - startedAt;
+
+  if (!execOk) {
+    log.warn(
+      `build failed: rc=${execResult.rc} timedOut=${execResult.timedOut} `
+      + `files=${deliveredPaths.length} durationMs=${durationMs} stderr=${stderr.slice(0, 400)}`,
+    );
+    return {
+      success: false,
+      error: execResult.timedOut
+        ? `Build hard timeout (${BUILD_HARD_TIMEOUT_MS / 1000}s).`
+        : (stderr.slice(0, 1500) || `Grok Build exited with code ${execResult.rc}.`),
+      message: payload.message,
+      delivered: payload.delivered,
+      delivery_note: payload.delivery_note,
+      roundsUsed: 1,
+      timed_out: Boolean(execResult.timedOut),
+      exit_code: execResult.rc,
+      duration_ms: durationMs,
+    };
+  }
+
+  log.info(
+    `build finished: rc=${execResult.rc} files=${deliveredPaths.length} durationMs=${durationMs}`,
+  );
+  return {
+    success: true,
+    message: payload.message,
+    delivered: payload.delivered,
+    delivery_note: payload.delivery_note,
+    roundsUsed: 1,
+    timed_out: false,
+    exit_code: execResult.rc,
+    duration_ms: durationMs,
+  };
 }
 
 module.exports = {
   runBuildAgent,
-  _buildSystemPrompt,
-  _buildAgentTools,
+  buildGrokRules,
+  listAllWorkspaceFilesForHarvest,
+  collectWorkspaceDeliverablePaths,
+  collectAllWorkspaceDeliverablePaths,
+  collectWorkspaceDeltaPaths,
+  snapshotWorkspaceFiles,
+  buildBuildToolPayload,
+  DELIVERY_SELECTION_NOTICE,
 };

@@ -9,8 +9,6 @@
 // Office and archive parsing, semantic file search) without inlining the
 // content into the prompt. Only raw binaries (.exe, .iso, ...) stay tag-only.
 //
-// read_file in the build sub-agent returns plain text/code content inline
-// in the JSON tool result (numbered lines) — exact bytes matter for edit_file.
 // The main brain has no read_file: user-side files are attached natively
 // (input_file/input_image) on the turn they appear, current or in history.
 // Assistant-side history entries (including GemiX voice) stay [Attachment]
@@ -26,7 +24,7 @@ const {
   MAX_HISTORY_MEDIA_FILES,
 } = require('../config/constants');
 const { mimeForExtension, mimeBase } = require('../config/mimeExtensions');
-const { isNonReadableExt, mainReadFileBlockedMessage } = require('../config/nonReadableExts');
+const { isNonReadableExt } = require('../config/nonReadableExts');
 const { tempDirForOwner } = require('./tempFileServer');
 const { syncFileToHistory } = require('./historySync');
 const { uploadFileForXai } = require('./xaiUpload');
@@ -96,9 +94,6 @@ const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 const MAX_PDF_BYTES = 48 * 1024 * 1024;   // xAI PDF limit
 const MAX_DOC_BYTES = 48 * 1024 * 1024;   // generic documents/archives
-
-/** Max bytes for build read_file inline text/code reads. */
-const READ_FILE_TEXT_MAX_BYTES = 50 * 1024;
 
 function _extOf(name) {
   return path.extname(name || '').toLowerCase();
@@ -296,50 +291,6 @@ async function exposeXaiUrlFromAbsPath(absPath, displayPath, opts = {}) {
   const built = await buildXaiFileParts(absPath, displayPath, opts);
   if (!built.success) return built;
   return { success: true, url: built.url, bumpImageCount: built.bumpImageCount, sourcePath: absPath };
-}
-
-// -- Build read_file: inline numbered text ------------------------------------
-
-function _truncateUtf8Text(text, maxBytes) {
-  const buf = Buffer.from(text, 'utf-8');
-  if (buf.length <= maxBytes) return { text, truncated: false };
-  let end = maxBytes;
-  while (end > 0 && (buf[end] & 0xC0) === 0x80) end--;
-  return {
-    text: buf.slice(0, end).toString('utf-8') + '\n... (file truncated)',
-    truncated: true,
-  };
-}
-
-/**
- * Read a text/code file from disk as numbered lines ("1: ..."), capped at
- * READ_FILE_TEXT_MAX_BYTES. Returned as plain content for the JSON tool
- * result - exact bytes, no markup.
- * @returns {{ ok: true, content: string, truncated: boolean } | { ok: false, error: string }}
- */
-function readNumberedTextFromPath(absPath, displayPath, opts = {}) {
-  const maxBytes = opts.maxBytes ?? READ_FILE_TEXT_MAX_BYTES;
-  let stat;
-  try { stat = fs.statSync(absPath); }
-  catch (err) {
-    return { ok: false, error: `Cannot read file "${displayPath}": ${err.message}` };
-  }
-  if (stat.size > maxBytes * 4) {
-    return { ok: false, error: `File is too large to read as text (max ${maxBytes / 1024} KB).` };
-  }
-  try {
-    let text = fs.readFileSync(absPath).toString('utf-8');
-    let truncated = false;
-    if (Buffer.byteLength(text, 'utf-8') > maxBytes) {
-      const cut = _truncateUtf8Text(text, maxBytes);
-      text = cut.text;
-      truncated = cut.truncated;
-    }
-    const numbered = text.split(/\r?\n/).map((line, i) => `${i + 1}: ${line}`).join('\n');
-    return { ok: true, content: numbered, truncated };
-  } catch (err) {
-    return { ok: false, error: `Cannot read file "${displayPath}": ${err.message}` };
-  }
 }
 
 // -- Ingress (current turn, quotes, history) -------------------------------------
@@ -543,52 +494,6 @@ async function deliverSyncedAttachment(opts) {
   };
 }
 
-// -- read_file delivery (history + build workspace/skills) ------------------------
-
-/**
- * Unified read_file delivery (build sub-agent + history native attachment).
- * URL path: upload + native parts (input_file / input_image).
- * Build (inlineTextCode): text/code -> inline numbered content for edit_file.
- *
- * @returns {Promise<{ kind: 'parts', parts: object[], bumpImageCount?: boolean }
- *   | { kind: 'inline', content: string, truncated: boolean }
- *   | { kind: 'error', error: string }>}
- */
-async function deliverReadFileFromPath({
-  absPath,
-  displayPath,
-  contentType = '',
-  imagesReadCount = 0,
-  blockedMessage,
-  /** Build sub-agent only: inline numbered text for edit_file. Main always URL. */
-  inlineTextCode = false,
-}) {
-  const ext = _extOf(absPath);
-  const mimetype = contentType || mimeForExtension(ext, 'application/octet-stream', contentType);
-
-  if (isNonReadableExt(ext)) {
-    return { kind: 'error', error: blockedMessage || mainReadFileBlockedMessage(ext) };
-  }
-
-  if (inlineTextCode && isTextualFile(path.basename(absPath), mimetype)) {
-    const inline = readNumberedTextFromPath(absPath, displayPath);
-    if (!inline.ok) return { kind: 'error', error: inline.error };
-    return { kind: 'inline', content: inline.content, truncated: inline.truncated };
-  }
-
-  const mode = classifyAiFileDelivery(path.basename(absPath), mimetype);
-  if (mode === DELIVERY_MODE.TAG_ONLY) {
-    return { kind: 'error', error: `File type not supported for read_file: "${displayPath}".` };
-  }
-
-  const built = await buildXaiFileParts(absPath, displayPath, {
-    mimetype,
-    imagesReadCount,
-  });
-  if (!built.success) return { kind: 'error', error: built.error };
-  return { kind: 'parts', parts: built.parts, bumpImageCount: built.bumpImageCount };
-}
-
 module.exports = {
   DELIVERY_MODE,
   XAI_IMAGE_EXTS,
@@ -598,7 +503,6 @@ module.exports = {
   classifyAiFileDelivery,
   buildXaiFileParts,
   exposeXaiUrlFromAbsPath,
-  deliverReadFileFromPath,
   deliverSyncedAttachment,
   resolveHistoryAbsPath,
 };

@@ -4,34 +4,29 @@
 //
 // One container per `workspaceId`, lazily started on first use, reused as
 // long as the user keeps interacting (sandboxes that stay idle past
-// SANDBOX_IDLE_TTL_MS are reaped). The bind mounts are flat:
+// SANDBOX_IDLE_TTL_MS are reaped). Bind mounts:
 //
 //   /workspace/  -> host build_workspace dir for this workspaceId  (rw)
-//   /skills/     -> src/data/skills/                                (ro)
 //
-// No /readonly/history, no /readonly/searched_images. The agent only sees
-// files explicitly staged in the workspace by the `build` tool (attachments)
-// or written by itself.
+// Grok Build CLI is baked into the image. The host runs `docker exec grok …`
+// with cwd /workspace (see execGrokBuild). Auth is injected per-exec only
+// (XAI_API_KEY from getXaiAuth) — never host ~/.hermes or ~/.grok mounts.
 //
 // Notes:
-//   - No Python kernel attached: filesystem work runs via `docker exec`
-//     bash, ad-hoc Python is delegated to xAI's server-side
-//     code_interpreter (zero round cost).
-//   - The base image's ENTRYPOINT (Jupyter Server) is overridden with
+//   - The base image ENTRYPOINT is overridden with
 //     `Cmd:['sleep','infinity']` + `Entrypoint:[]` so the container is
 //     a quiet idle process we can attach to.
-//   - All egress (curl/wget/yt-dlp/requests) goes through the egress proxy,
-//     which forwards upstream via the residential SOCKS5 (Redmi). yt-dlp is
-//     installed in the image and runs in-container like any other command.
+//   - All egress (curl/wget/yt-dlp/requests/grok API) goes through the egress
+//     proxy, which forwards upstream via the residential SOCKS5 (Redmi).
 
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 const stream = require('stream');
 
 const {
   SANDBOX_MEMORY_MB,
   SANDBOX_IDLE_TTL_MS,
+  BUILD_HARD_TIMEOUT_MS,
+  BUILD_MAX_ROUNDS,
 } = require('../config/constants');
 const {
   GEMIX_SANDBOX_IMAGE,
@@ -40,7 +35,6 @@ const {
   GEMIX_SANDBOX_PROXY_PORT,
 } = require('../config/env');
 
-const { SKILLS_DIR } = require('../utils/userPaths');
 const { workspaceIdToSlug } = require('../utils/workspaceId');
 const { ensureWorkspace, ensureWorkspaceWritable, sandboxUserString } = require('./buildWorkspace');
 const { createLogger } = require('../utils/logger');
@@ -68,10 +62,8 @@ function _getDocker() {
 }
 
 /**
- * Spawn a fresh container for `workspaceId`. The container runs an idle
- * sleep loop as PID 1 so we can attach via `docker exec` for individual
- * bash calls. No Jupyter/Python kernel here - the build agent does its
- * Python work server-side via xAI's code_interpreter tool.
+ * Spawn a fresh container for `workspaceId`. Idle `sleep infinity` PID 1;
+ * Grok Build (and optional debug shells) attach via docker exec.
  */
 async function _spawnContainer(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);
@@ -89,15 +81,16 @@ async function _spawnContainer(workspaceId) {
 
   const binds = [
     `${workspaceDir}:/workspace:rw`,
-    `${SKILLS_DIR}:/skills:ro`,
   ];
 
   const env = [
     'HOME=/tmp',
+    // Grok CLI session/cache under tmpfs only — never under /workspace (harvest).
+    'GROK_HOME=/tmp/gemix-grok',
+    'GROK_DISABLE_AUTOUPDATER=1',
     'GEMIX_BUILD=1',
-    // All outbound traffic (curl/wget/yt-dlp/requests) goes through the egress
-    // proxy, which forwards upstream via the residential SOCKS5 (Redmi). See
-    // sandbox/proxy/proxy.py. No allowlist; fail-closed when the Redmi is off.
+    // All outbound traffic (curl/wget/yt-dlp/requests/grok) goes through the
+    // egress proxy → residential SOCKS5 (Redmi). Fail-closed when Redmi is off.
     `HTTP_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
     `HTTPS_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
     `http_proxy=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
@@ -124,10 +117,8 @@ async function _spawnContainer(workspaceId) {
     name: containerName,
     Image: SANDBOX_IMAGE,
     Hostname: 'build',
-    // The base sandbox image's ENTRYPOINT launches Jupyter Server, which we
-    // don't need here (build agent does file ops via `docker exec` and
-    // delegates Python work to xAI's server-side code_interpreter). Override
-    // both Entrypoint and Cmd so the container becomes a quiet idle process.
+    // Override image defaults so the container is a quiet idle process we
+    // attach to via docker exec (bash helpers + Grok Build CLI).
     Entrypoint: [],
     Cmd: ['sleep', 'infinity'],
     User: sandboxUserString(),
@@ -161,8 +152,12 @@ async function getOrCreate(workspaceId) {
   let entry = _pool.get(workspaceId);
   if (entry && entry._bootPromise) {
     await entry._bootPromise;
-    entry.lastUsedAt = Date.now();
-    return entry;
+    const ready = _pool.get(workspaceId);
+    if (!ready || !ready.container) {
+      throw new Error(`build sandbox boot failed for ${workspaceId}`);
+    }
+    ready.lastUsedAt = Date.now();
+    return ready;
   }
   if (entry) {
     // Validate the container is still alive on docker side.
@@ -176,6 +171,22 @@ async function getOrCreate(workspaceId) {
     log.warn(`Stale build sandbox for ${workspaceId}, recreating`);
     await _killEntry(entry).catch(err => log.warn(`stale purge: ${err.message}`));
     _pool.delete(workspaceId);
+  }
+
+  // Another concurrent caller may have started boot while we were checking.
+  entry = _pool.get(workspaceId);
+  if (entry && entry._bootPromise) {
+    await entry._bootPromise;
+    const ready = _pool.get(workspaceId);
+    if (!ready || !ready.container) {
+      throw new Error(`build sandbox boot failed for ${workspaceId}`);
+    }
+    ready.lastUsedAt = Date.now();
+    return ready;
+  }
+  if (entry && entry.container) {
+    entry.lastUsedAt = Date.now();
+    return entry;
   }
 
   const bootPromise = _spawnContainer(workspaceId);
@@ -194,30 +205,141 @@ async function getOrCreate(workspaceId) {
   }
 }
 
+const CAPTURE_MAX_BYTES = 200 * 1024;
+
+function _capBufferChunks(chunks, maxBytes = CAPTURE_MAX_BYTES) {
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  if (total <= maxBytes) return Buffer.concat(chunks).toString('utf-8');
+  // Keep the tail (most relevant for errors / final text).
+  const out = Buffer.alloc(maxBytes);
+  let remaining = maxBytes;
+  let offset = maxBytes;
+  for (let i = chunks.length - 1; i >= 0 && remaining > 0; i--) {
+    const chunk = chunks[i];
+    const take = Math.min(remaining, chunk.length);
+    offset -= take;
+    chunk.copy(out, offset, chunk.length - take);
+    remaining -= take;
+  }
+  return out.toString('utf-8');
+}
+
 /**
- * Run a shell command inside the container (one shot via `docker exec`).
- * The command is executed via `/bin/bash -lc`, so full shell syntax
- * (pipes, &&, ||, ;, redirection, subshells) is supported. Everything runs
- * in-container, including yt-dlp and other downloads (egress via the proxy).
+ * Best-effort kill leftover grok processes inside the sandbox after timeout.
+ */
+async function _killGrokProcesses(entry) {
+  if (!entry || !entry.container) return;
+  try {
+    const exec = await entry.container.exec({
+      Cmd: ['/bin/bash', '-lc', 'pkill -9 -f "[g]rok" 2>/dev/null || true'],
+      AttachStdout: false,
+      AttachStderr: false,
+      User: sandboxUserString(),
+      WorkingDir: '/tmp',
+    });
+    const s = await exec.start({ hijack: true, stdin: false });
+    await new Promise((resolve) => {
+      s.on('end', resolve);
+      s.on('close', resolve);
+      s.on('error', resolve);
+      setTimeout(resolve, 3000).unref?.();
+    });
+  } catch (err) {
+    log.debug(`pkill grok: ${err.message}`);
+  }
+}
+
+/**
+ * Build argv + env for an in-container Grok Build run (pure; testable without Docker).
+ *
+ * Docker ExecConfig.Env replaces the process environment entirely when set
+ * (does not inherit the container env), so proxy + HOME must be listed here.
+ *
+ * @param {object} opts
+ * @param {string} opts.prompt
+ * @param {string} opts.rules
+ * @param {string} opts.token - same live credential as GemiX (Hermes OAuth or API key)
+ * @param {string} [opts.baseUrl] - optional API base from getXaiAuth()
+ * @param {number} [opts.timeoutMs]
+ * @param {number} [opts.maxTurns]
+ * @returns {{ cmd: string[], env: string[], timeoutMs: number }}
+ */
+function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns } = {}) {
+  if (typeof token !== 'string' || !token.trim()) {
+    throw new Error('buildGrokExecSpec: missing xAI token');
+  }
+  if (typeof prompt !== 'string' || !prompt.trim()) {
+    throw new Error('buildGrokExecSpec: missing prompt');
+  }
+  const timeout = Math.max(
+    5_000,
+    Math.min(Number(timeoutMs) || BUILD_HARD_TIMEOUT_MS, BUILD_HARD_TIMEOUT_MS),
+  );
+  const turns = Math.max(1, Math.min(Number(maxTurns) || BUILD_MAX_ROUNDS, BUILD_MAX_ROUNDS));
+  const rulesText = typeof rules === 'string' ? rules : '';
+  // Free-text stdout (no --output-format json). timeout(1) enforces hard kill.
+  const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
+  const cmd = [
+    'timeout',
+    '--signal=KILL',
+    `${timeoutSec}s`,
+    'grok',
+    '-p', prompt.trim(),
+    '--cwd', '/workspace',
+    '--always-approve',
+    '--no-subagents',
+    '--no-auto-update',
+    '--max-turns', String(turns),
+  ];
+  if (rulesText.trim()) {
+    cmd.push('--rules', rulesText);
+  }
+  const proxyUrl = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
+  const env = [
+    `XAI_API_KEY=${token.trim()}`,
+    'HOME=/tmp',
+    'GROK_HOME=/tmp/gemix-grok',
+    'GROK_DISABLE_AUTOUPDATER=1',
+    'GEMIX_BUILD=1',
+    `HTTP_PROXY=${proxyUrl}`,
+    `HTTPS_PROXY=${proxyUrl}`,
+    `http_proxy=${proxyUrl}`,
+    `https_proxy=${proxyUrl}`,
+    'NO_PROXY=localhost,127.0.0.1',
+  ];
+  if (typeof baseUrl === 'string' && baseUrl.trim()) {
+    const base = baseUrl.trim().replace(/\/+$/, '');
+    env.push(`XAI_BASE_URL=${base}`);
+  }
+  return { cmd, env, timeoutMs: timeout };
+}
+
+/**
+ * Run Grok Build CLI inside the workspace sandbox (one-shot docker exec).
+ * Auth is process-env only for this exec — never host auth mounts.
  *
  * @param {string} workspaceId
- * @param {string} command
- * @param {object} [opts]
- * @param {number} [opts.timeoutMs=30000]
- * @returns {Promise<{rc:number,stdout:string,stderr:string,timedOut:boolean,durationMs:number}>}
+ * @param {object} opts
+ * @param {string} opts.prompt
+ * @param {string} opts.rules
+ * @param {string} opts.token
+ * @param {number} [opts.timeoutMs]
+ * @param {number} [opts.maxTurns]
+ * @returns {Promise<{rc:number,stdout:string,stderr:string,timedOut:boolean,durationMs:number,cmd:string[]}>}
  */
-async function execBash(workspaceId, command, opts = {}) {
-  const timeoutMs = Math.max(1000, Math.min(Number(opts.timeoutMs) || 30000, 120000));
-
+async function execGrokBuild(workspaceId, opts = {}) {
+  const { cmd, env, timeoutMs } = buildGrokExecSpec(opts);
   const entry = await getOrCreate(workspaceId);
   entry.lastUsedAt = Date.now();
 
   const exec = await entry.container.exec({
-    Cmd: ['/bin/bash', '-lc', command],
+    Cmd: cmd,
     AttachStdout: true,
     AttachStderr: true,
     User: sandboxUserString(),
     WorkingDir: '/workspace',
+    Env: env,
   });
 
   const startedAt = Date.now();
@@ -229,15 +351,15 @@ async function execBash(workspaceId, command, opts = {}) {
   const stderrStream = new stream.PassThrough();
   stdoutStream.on('data', (chunk) => stdoutBuf.push(chunk));
   stderrStream.on('data', (chunk) => stderrBuf.push(chunk));
-
-  // Demux Docker's multiplexed stream into stdout/stderr.
   entry.container.modem.demuxStream(execStream, stdoutStream, stderrStream);
 
   let timedOut = false;
+  // Host-side ceiling slightly above in-container `timeout` so stream teardown is a backstop.
+  const hostTimeoutMs = timeoutMs + 15_000;
   const timer = setTimeout(() => {
     timedOut = true;
     try { execStream.destroy(new Error('timeout')); } catch { /* ignore */ }
-  }, timeoutMs);
+  }, hostTimeoutMs);
 
   try {
     await new Promise((resolve, reject) => {
@@ -259,16 +381,23 @@ async function execBash(workspaceId, command, opts = {}) {
   } catch {
     rc = timedOut ? 124 : 1;
   }
+  // GNU timeout uses 124 on timeout; SIGKILL path is 137.
+  if (rc === 124 || rc === 137) timedOut = true;
+
+  if (timedOut) {
+    await _killGrokProcesses(entry);
+  }
 
   const durationMs = Date.now() - startedAt;
-  // Files created in-container may not be host-writable for write_file/edit_file.
   ensureWorkspaceWritable(workspaceId);
+  entry.lastUsedAt = Date.now();
   return {
     rc,
-    stdout: Buffer.concat(stdoutBuf).toString('utf-8'),
-    stderr: Buffer.concat(stderrBuf).toString('utf-8'),
+    stdout: _capBufferChunks(stdoutBuf),
+    stderr: _capBufferChunks(stderrBuf),
     timedOut,
     durationMs,
+    cmd: cmd.map((c, i) => (i > 0 && cmd[i - 1] === '--rules' ? '[rules]' : c)),
   };
 }
 
@@ -354,7 +483,8 @@ cleanupOrphanBuildSandboxes().catch(err => log.error(`Background orphan cleanup 
 
 module.exports = {
   getOrCreate,
-  execBash,
+  execGrokBuild,
+  buildGrokExecSpec,
   shutdown,
   shutdownAll,
   cleanupOrphanBuildSandboxes,

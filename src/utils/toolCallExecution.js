@@ -38,8 +38,6 @@ function partitionHandlerToolCalls(toolCalls) {
   return { phase1, phase2 };
 }
 
-const BUILD_MUTATING_TOOLS = new Set(['write_file', 'edit_file']);
-
 /** Per-round caps for main-brain tools (handler + tools/index.js). */
 const PER_ROUND_TOOL_LIMITS = {
   read_music_stats: 1,
@@ -90,46 +88,9 @@ function perRoundCapErrorPayload(toolName, limit) {
   });
 }
 
-/**
- * Run build sub-agent tools preserving assistant call order:
- *   - read_file / web_search / … run in parallel batches
- *   - write_file & edit_file run alone (sequential), flushing any pending batch first
- *   - bash runs when reached (after prior work), flushing any pending batch first
- *
- * @param {object[]} toolCalls - in model order
- * @param {function} runOne - async (tc) => tool result content
- * @returns {Promise<Map<string, unknown>>}
- */
-async function executeBuildToolCallsOrdered(toolCalls, runOne) {
-  const resultsById = new Map();
-  let parBatch = [];
-
-  const flushPar = async () => {
-    if (!parBatch.length) return;
-    await Promise.all(parBatch.map(async (tc) => {
-      resultsById.set(tc.id, await runOne(tc));
-    }));
-    parBatch = [];
-  };
-
-  for (const tc of toolCalls) {
-    const name = tc.function?.name;
-    if (name === 'bash' || BUILD_MUTATING_TOOLS.has(name)) {
-      await flushPar();
-      resultsById.set(tc.id, await runOne(tc));
-    } else {
-      parBatch.push(tc);
-    }
-  }
-  await flushPar();
-  return resultsById;
-}
-
 module.exports = {
   parseToolCallArgs,
   partitionHandlerToolCalls,
-  executeBuildToolCallsOrdered,
-  BUILD_MUTATING_TOOLS,
   HANDLER_DELIVERY_TOOLS,
   ONCE_PER_ROUND_ERROR,
   PER_ROUND_TOOL_LIMITS,

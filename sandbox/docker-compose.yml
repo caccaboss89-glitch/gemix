@@ -42,9 +42,8 @@ services:
     # from sandbox_net.
 
   sandbox_example:
-    # Example of how the Node manager will run a sandbox. The manager always
-    # overrides Entrypoint to skip the legacy Jupyter bootstrap and runs the
-    # container as a quiet `sleep infinity` process attached via `docker exec`.
+    # Example of how the Node manager will run a sandbox: quiet
+    # `sleep infinity` process, attach via `docker exec` (Grok Build).
     build:
       context: .
       dockerfile: Dockerfile
@@ -73,9 +72,9 @@ services:
     memswap_limit: 1536m
     cpus: 1.0
     volumes:
-      # Mount a real build workspace here in tests:
-      # Skills mount (read-only):
-      - ../src/data/skills:/skills:ro
+      # Mount a real build workspace here in tests, e.g.:
+      # - /path/to/build_workspace:/workspace:rw
+      # GemiX skill packs are not mounted; Grok Build uses its own skills.
 
 networks:
   # Internal-only network where sandboxes live; no direct internet.

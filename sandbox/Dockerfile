@@ -2,7 +2,8 @@
 # Build: docker build -t gemix-sandbox:latest -f sandbox/Dockerfile sandbox
 # Run: managed by src/sandbox/buildSandbox.js, which boots the container with
 #      Cmd: ['sleep', 'infinity'] and attaches per-call via `docker exec`.
-#      Bind mounts: /workspace (rw, per-workspaceId build dir) and /skills (ro).
+#      Bind mounts: /workspace (rw, per-workspaceId build dir).
+#      Grok Build CLI is baked into the image; GemiX skill packs are not mounted.
 
 FROM python:3.12-slim-bookworm
 
@@ -67,44 +68,38 @@ RUN pip install --no-cache-dir --retries 5 --timeout 120 unoserver
 # (residential IP), so anti-datacenter blocks are bypassed like any other host.
 RUN pip install --no-cache-dir --retries 5 --timeout 120 yt-dlp
 
-# -- Node.js + PptxGenJS (pptx skill: deck generation from templates) --------
-# Node is the engine the pptx templates run on. pptxgenjs is the only hard
-# dependency; the icon libraries (react-icons/react/react-dom/sharp) are used
-# by a handful of templates that rasterize SVG icons to PNG. Installed globally
-# and resolvable from /workspace via NODE_PATH below.
+# -- Node.js + Grok Build CLI + common JS tooling --------------------------
+# Grok Build (`grok`) is the in-container build sub-agent runtime (baked into
+# the image once — not reinstalled on each container create). Host GemiX only
+# needs Docker; operators rebuild this image to upgrade the CLI.
+# pptxgenjs / docx stack remain available for ad-hoc scripts under /workspace.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g --no-fund --no-audit \
+        @xai-official/grok \
         pptxgenjs \
         react-icons \
         react \
         react-dom \
         sharp \
-    && npm cache clean --force
-
-# Let `node /workspace/deck.js` resolve the globally-installed modules.
-ENV NODE_PATH=/usr/lib/node_modules
-
-# -- docx skill Node deps: docx-js (create) + docxtemplater (template filling) -
-# docx-js (https://docx.js.org) gives high-fidelity creation from scratch with
-# native TOC / footnotes / columns / hyperlinks. docxtemplater renders Word
-# templates with loops/conditionals/dynamic tables; pizzip is its zip backend
-# and angular-expressions is its recommended expression parser. Installed
-# globally and resolvable from /workspace via the NODE_PATH set above.
-RUN npm install -g --no-fund --no-audit \
         docx@9.7.1 \
         docxtemplater@3.68.7 \
         pizzip@3.2.0 \
         angular-expressions@1.5.5 \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && command -v grok >/dev/null \
+    && grok version
+
+# Let `node /workspace/*.js` resolve the globally-installed modules.
+ENV NODE_PATH=/usr/lib/node_modules
 
 # -- Preload heavy models at build time (offline runtime) ------------------
 RUN python /opt/sandbox/preload_models.py
 
 # -- Non-root sandbox user -----------------------------------------------
 RUN useradd --create-home --uid 1000 --shell /bin/bash sandbox \
-    && mkdir -p /workspace /skills \
+    && mkdir -p /workspace \
     && chown -R sandbox:sandbox /workspace /home/sandbox
 
 # rembg caches under $HOME/.u2net - move it to the sandbox user's home so it is

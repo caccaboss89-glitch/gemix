@@ -336,7 +336,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
  * Call an AI model on the xAI Responses API (`/v1/responses`) and return
  * the parsed raw payload (not yet adapted to chat-completion shape).
  *
- * Callers (aiProvider.callAI for the main brain, buildAgent for the build
+ * Callers (aiProvider.callAI for the main brain, and other
  * sub-agent) translate `output[]` via responsesToAssistantMessage into the
  * chat-style message shape the handler expects.
  *

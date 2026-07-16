@@ -7,7 +7,6 @@
 
 const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION } = require('../config/constants');
 const { LEGAL_NAME } = require('../config/env');
-const { formatSkillNamesList } = require('../utils/skills');
 
 // -- Helpers -------------------------------------------------------------
 
@@ -168,23 +167,10 @@ const TOOL_X_SEARCH_NATIVE = {
   enable_video_understanding: true,
 };
 
-/** Native server-side search tools (web + X), shared by main brain and build agent. */
+/** Native server-side search tools (web + X) for the main brain. */
 const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 
 // -- Static tool definitions (schema never varies) -------------------------
-
-const BUILD_TOOL_READ_FILE = makeTool({
-  name: 'read_file',
-  description: 'Load files from /workspace/ or /skills/.',
-  properties: {
-    path: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Paths under /workspace/ or /skills/, e.g. ["/skills/docx/SKILL.md", "/workspace/out/report.pdf"].',
-    },
-  },
-  required: ['path'],
-});
 
 const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
@@ -561,22 +547,22 @@ const TOOL_BUG_REPORT = makeTool({
 
 // -- Build sub-agent (build tool) ------------------------------------
 //
-// Isolated sub-agent (/workspace/, bash, yt-dlp, ffmpeg). No chat history —
-// stage inputs via attachments[]. Native web/X search on the sub-agent side.
+// Grok Build CLI inside Docker (/workspace/, proxy egress). No chat history —
+// stage inputs via attachments[]. After the run, every workspace file is loaded
+// into the delivery buffer; GemiX selects final user attachments.
 
 function buildBuildTool(isGroup) {
   const scope = isGroup ? 'the current group' : 'the current user';
-  const skillNames = formatSkillNamesList();
-  const skillsHint = skillNames ? ` Skills: ${skillNames}.` : '';
   return makeTool({
     name: 'build',
     description:
-      'Delegate file deliverables to an isolated build sub-agent (/workspace/, bash, yt-dlp, ffmpeg). '
+      'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
       + 'Not for fetchable X/web media — use search + final attachments. '
-      + 'Isolated turn — no chat history; it sees only your prompt, &lt;BuildWorkspace&gt; files, and attachments[]. '
+      + 'Isolated turn — no chat history; it sees only your prompt, <BuildWorkspace> files, and attachments[] you stage. '
       + 'Stage in attachments[] anything it must use that is not already in the workspace; generate image, video, or music first when needed. '
-      + 'Autonomous web/X search on the sub-agent. '
-      + `Workspace for ${scope}, 4h TTL, 500 MB, once per round.${skillsHint}`,
+      + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
+      + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
+      + `Workspace for ${scope}, 4h TTL, 500 MB, once per main-brain round.`,
     properties: {
       prompt: {
         type: 'string',
@@ -754,5 +740,4 @@ module.exports = {
   toolNamesToSet,
   validateToolArgs,
   NATIVE_SEARCH_TOOLS,
-  BUILD_TOOL_READ_FILE,
 };

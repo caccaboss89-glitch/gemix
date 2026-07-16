@@ -5,14 +5,13 @@
 // Layout:
 //
 //   data/
-//     skills/                         ← read-only skill scripts (PDF/DOCX/XLSX/PPTX)
 //     users/
 //       <storageId>/                  ← chat history (WA jid/group, Discord thread id)
 //         history/
 //         history_meta.json
 //         voice_counts.json
 //       user_<sanitized>/             ← build workspaces (workspaceId user:…)
-//       group_<sanitized>/             ← build workspaces (workspaceId group:…)
+//       group_<sanitized>/            ← build workspaces (workspaceId group:…)
 //
 // Build trees live under user_* / group_* (see workspaceId.js, buildWorkspace.js).
 // This module only manages <storageId>/ history and voice_counts.json.
@@ -21,7 +20,6 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
 
-const SKILLS_DIR = path.join(DATA_DIR, 'skills');
 /** Prefix for on-disk history of admin↔user personal-account chats (shared pair). */
 const PERSONAL_CHAT_STORAGE_PREFIX = 'personal_';
 
@@ -104,6 +102,5 @@ module.exports = {
   getUserRoot,
   getHistoryDir,
   ensureUserSkeleton,
-  SKILLS_DIR,
   PERSONAL_CHAT_STORAGE_PREFIX,
 };

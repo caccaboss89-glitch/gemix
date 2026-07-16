@@ -11,9 +11,6 @@
 // (no extra round). Per xAI docs, json_schema applies only to the final
 // output_text, not to tool calls.
 //
-// Build sub-agent: same pattern — fixed schema (`message` required,
-// `attachments` optional) on every round of its inner loop.
-
 const RESPONSE_FIELD_DESC =
   'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax. '
   + 'Use only the formatting declared in the system prompt Format line.';
@@ -94,32 +91,6 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
   };
 }
 
-/** Fixed text.format schema for the build sub-agent's final answer. */
-const BUILD_RESPONSE_FORMAT = {
-  type: 'json_schema',
-  name: 'build_result',
-  strict: true,
-  schema: {
-    type: 'object',
-    properties: {
-      message: {
-        type: 'string',
-        description: 'Final user-facing text (user\'s language). Plain text only.',
-      },
-      attachments: {
-        type: 'array',
-        items: { type: 'string' },
-        description:
-          'OPTIONAL. Deliver files with this answer. Each entry: workspace path (basename or /workspace/… as in WorkspaceState) '
-          + 'or a public https URL. Omit if nothing to send. '
-          + 'Never use other file/image syntax (e.g. render_components): it will not be sent.',
-      },
-    },
-    required: ['message'],
-    additionalProperties: false,
-  },
-};
-
 /** Attach structured output to a /v1/responses request body. */
 function applyResponsesTextFormat(body, format) {
   if (format) {
@@ -176,7 +147,6 @@ function parseStructuredReply(raw) {
 
 module.exports = {
   buildGemixResponseFormat,
-  BUILD_RESPONSE_FORMAT,
   applyResponsesTextFormat,
   parseStructuredReply,
 };

@@ -51,7 +51,6 @@ if (missing.length > 0) {
 
 module.exports = {
   GROK_MODEL: process.env.GROK_MODEL,
-  BUILD_MODEL: process.env.BUILD_MODEL || process.env.GROK_MODEL,
 
   // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.
   XAI_USE_API_KEY,

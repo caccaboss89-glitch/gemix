@@ -286,6 +286,10 @@ function buildDirectives(profile, opts = {}) {
       scope: 'tool',
       text: 'Use build only to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp pipelines, multi-step deliverables). Not for media deliverable via search + attachments.',
     });
+    tooling.push({
+      scope: 'tool',
+      text: 'After build returns, harvested workspace files (new/modified this run, or full tree if nothing changed) are in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources/logs unless the user asked for them). A failed build stays success:false even if some files appear in delivered.',
+    });
   }
 
   return [

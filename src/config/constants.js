@@ -51,8 +51,6 @@ module.exports = {
   // API
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 4 * 60 * 1000,
-  // Build sub-agent: longer xAI waits (reasoning + large tool context).
-  BUILD_API_TIMEOUT_MS: 180_000,
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 64_000,
   // Main brain outer loop (client-side tool rounds). When exhausted the
@@ -73,16 +71,13 @@ module.exports = {
   TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,
   TUNNEL_TOKEN_TTL_TEMP_MS: 60 * 60 * 1000,
 
-  // Build sub-agent (invoked via the `build` tool).
+  // Build tool (Grok Build CLI in Docker sandbox).
   // Workspace lifecycle is decoupled from the sandbox container's idle TTL:
-  //   - WORKSPACE_TTL_MS: time after the user's last interaction (any
-  //     platform) before we wipe the on-disk workspace and shut down the
-  //     associated container.
-  //   - QUOTA_MB: hard cap on the sum of bytes in the workspace tree;
-  //     write tools refuse new writes past this threshold.
-  //   - MAX_ROUNDS / HARD_TIMEOUT_MS: outer-loop safety nets per build call.
-  //   - LOCK_WAIT_MS: how long a concurrent build call waits to acquire the
-  //     per-workspace lock before giving up with "build busy".
+  //   - WORKSPACE_TTL_MS: time after the user's last interaction before wipe.
+  //   - QUOTA_MB: hard cap on host-side staging writes into the workspace.
+  //   - MAX_ROUNDS: passed to Grok as --max-turns.
+  //   - HARD_TIMEOUT_MS: in-container timeout + host stream backstop.
+  //   - LOCK_WAIT_MS: wait for per-workspace lock before "build busy".
   BUILD_WORKSPACE_TTL_MS: 4 * 60 * 60 * 1000,
   BUILD_WORKSPACE_QUOTA_MB: 500,
   BUILD_MAX_ROUNDS: 60,
