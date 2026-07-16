@@ -220,8 +220,8 @@ docker run --rm -it \
   --entrypoint '' \
   -e HTTP_PROXY=http://gemix-sandbox-proxy:8080 \
   -e HTTPS_PROXY=http://gemix-sandbox-proxy:8080 \
-  -e HOME=/tmp \
-  -e GROK_HOME=/tmp/gemix-grok \
+  -e HOME=/var/lib/gemix-grok \
+  -e GROK_HOME=/var/lib/gemix-grok \
   -v "$WORKSPACE":/workspace:rw \
   gemix-sandbox:latest \
   /bin/bash

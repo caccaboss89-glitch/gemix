@@ -91,8 +91,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && command -v grok >/dev/null \
     && grok version
 
-# Let `node /workspace/*.js` resolve the globally-installed modules.
-ENV NODE_PATH=/usr/lib/node_modules
+# Writable exec-capable home for the Grok CLI (downloads ~/.grok/bin/grok here).
+# Must NOT be a noexec tmpfs mount — see buildSandbox.js Tmpfs/HOME notes.
+RUN mkdir -p /var/lib/gemix-grok \
+    && chmod 1777 /var/lib/gemix-grok
+
+ENV HOME=/var/lib/gemix-grok \
+    GROK_HOME=/var/lib/gemix-grok \
+    GROK_DISABLE_AUTOUPDATER=1 \
+    NODE_PATH=/usr/lib/node_modules
 
 # -- Preload heavy models at build time (offline runtime) ------------------
 RUN python /opt/sandbox/preload_models.py

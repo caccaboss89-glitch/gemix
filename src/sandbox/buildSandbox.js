@@ -83,10 +83,11 @@ async function _spawnContainer(workspaceId) {
     `${workspaceDir}:/workspace:rw`,
   ];
 
+  // HOME/GROK_HOME on rootfs (not /tmp): Docker tmpfs defaults to noexec, which
+  // breaks the Grok CLI wrapper that spawns ~/.grok/bin/grok (EACCES).
   const env = [
-    'HOME=/tmp',
-    // Grok CLI session/cache under tmpfs only — never under /workspace (harvest).
-    'GROK_HOME=/tmp/gemix-grok',
+    'HOME=/var/lib/gemix-grok',
+    'GROK_HOME=/var/lib/gemix-grok',
     'GROK_DISABLE_AUTOUPDATER=1',
     'GEMIX_BUILD=1',
     // All outbound traffic (curl/wget/yt-dlp/requests/grok) goes through the
@@ -107,7 +108,8 @@ async function _spawnContainer(workspaceId) {
     Memory: memBytes,
     MemorySwap: memBytes,
     NanoCpus: 1_000_000_000, // 1 CPU
-    Tmpfs: { '/tmp': 'size=256m' },
+    // exec required if anything stages binaries under /tmp
+    Tmpfs: { '/tmp': 'size=256m,exec,mode=1777' },
     Binds: binds,
     RestartPolicy: { Name: 'no' },
   };
@@ -298,8 +300,8 @@ function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns 
   const proxyUrl = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
   const env = [
     `XAI_API_KEY=${token.trim()}`,
-    'HOME=/tmp',
-    'GROK_HOME=/tmp/gemix-grok',
+    'HOME=/var/lib/gemix-grok',
+    'GROK_HOME=/var/lib/gemix-grok',
     'GROK_DISABLE_AUTOUPDATER=1',
     'GEMIX_BUILD=1',
     `HTTP_PROXY=${proxyUrl}`,
