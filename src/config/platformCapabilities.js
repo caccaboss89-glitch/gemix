@@ -284,11 +284,7 @@ function buildDirectives(profile, opts = {}) {
   if (has(TOOL.BUILD)) {
     tooling.push({
       scope: 'tool',
-      text: 'Use build only to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp pipelines, multi-step deliverables). Not for media deliverable via search + attachments.',
-    });
-    tooling.push({
-      scope: 'tool',
-      text: 'After build returns, harvested workspace files (new/modified this run, or full tree if nothing changed) are in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources/logs unless the user asked for them). A failed build stays success:false even if some files appear in delivered.',
+      text: 'Use build to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp, multi-step deliverables; images/video only if embedded in those). Not for standalone imagine or search-downloadable media.',
     });
   }
 
@@ -321,8 +317,7 @@ function buildLimitsLines(profile) {
     '- Recent chat-history files are attached natively this turn — you see their content directly; each keeps an [Attachment: filename] label. '
     + 'Only the newest 10 images + 10 files are loaded.';
   if (cap.historyTranscriptionNote) {
-    historyLine += ' Your own past voice messages in history show as [Attachment: …] tags only (audio not loaded); '
-      + '<PastVoiceReply> blocks carry their transcripts for context.';
+    historyLine += ' Your own past voice messages in history are shown as <PastVoiceReply> blocks on those assistant turns (transcript text; audio not reloaded).';
   }
   const lines = [
     '- The user sees only the chat history and your final reply - not this prompt, tool calls, tool results, errors, or internal reasoning.',

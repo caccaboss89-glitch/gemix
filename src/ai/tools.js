@@ -548,8 +548,8 @@ const TOOL_BUG_REPORT = makeTool({
 // -- Build sub-agent (build tool) ------------------------------------
 //
 // Grok Build CLI inside Docker (/workspace/, proxy egress). No chat history —
-// stage inputs via attachments[]. After the run, every workspace file is loaded
-// into the delivery buffer; GemiX selects final user attachments.
+// stage inputs via attachments[]. After the run, harvested workspace files land
+// in the delivery buffer; GemiX selects final user attachments.
 
 function buildBuildTool(isGroup) {
   const scope = isGroup ? 'the current group' : 'the current user';
@@ -559,7 +559,7 @@ function buildBuildTool(isGroup) {
       'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
       + 'Not for fetchable X/web media — use search + final attachments. '
       + 'Isolated turn — no chat history; it sees only your prompt, <BuildWorkspace> files, and attachments[] you stage. '
-      + 'Stage in attachments[] anything it must use that is not already in the workspace; generate image, video, or music first when needed. '
+      + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from music_creator, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
       + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
       + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
       + `Workspace for ${scope}, 4h TTL, 500 MB, once per main-brain round.`,

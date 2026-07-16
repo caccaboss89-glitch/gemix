@@ -50,10 +50,10 @@ function buildGrokRules({ renamedAttachments, stagedNames, externalUrls } = {}) 
     `Quota: keep the workspace under about ${BUILD_WORKSPACE_QUOTA_MB} MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~4h TTL managed by the host).`,
     'Network: HTTP/HTTPS egress already uses HTTP_PROXY/HTTPS_PROXY (residential), including API calls to xAI. Do not pass --proxy to yt-dlp/curl. On proxy 502, CONNECT errors, timeouts, or DNS failures: internet is down — stop, do not retry loops, explain the system outage in your reply.',
     'Toolchain: Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, zip/unzip, curl/wget. Runtime pip/npm/apt are disabled — do not attempt package installs.',
-    'Use your built-in Grok skills and tools as needed. Prefer final deliverables over leaving unnecessary scratch clutter.',
-    'IMPORTANT delivery contract: after you finish, the host harvests new/modified files under /workspace/ (and may harvest all files on a successful no-change run, e.g. resend). You do not emit JSON attachments lists. Write a clear free-text summary of what you did and what files matter; GemiX-Main will select what to send the user.',
-    'Language: reply in the user\'s language (Italian default). No emojis in your reply or generated files unless the brief asks for them.',
-    'Grounding: use only real paths and contents you created or read; never invent file paths.',
+    'Use your built-in Grok skills and tools as needed.',
+    'IMPORTANT delivery contract: after you finish, the host harvests new/modified files under /workspace/ (and may harvest all files on a successful no-change run, e.g. resend). Write a clear free-text summary of what you did and what files matter; GemiX-Main will select what to send the user.',
+    'If GemiX-Main only asks to send/resend files already present: confirm they are under /workspace/ (do not recreate them unless missing) and reply briefly — the host harvests them and forwards to GemiX-Main automatically; you do not list JSON attachments.',
+    'Language: write documents in the user\'s language (Italian default). No emojis in your reply or generated files unless the brief asks for them.',
   ];
 
   if (Array.isArray(stagedNames) && stagedNames.length > 0) {

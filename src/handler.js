@@ -10,8 +10,8 @@
 //      aiFileDelivery.js: native `input_image` / `input_file` parts via
 //      public URLs (user/history files attached natively; assistant-side
 //      entries including GemiX voice stay [Attachment] tags only), or tag-only
-//      for raw binaries. GemiX past voice transcripts are injected as
-//      <PastVoiceReply> blocks on the current turn (WA dedicated only).
+//      for raw binaries. GemiX past voice transcripts replace assistant
+//      [Attachment: …] tags in history with <PastVoiceReply> (WA voice platforms).
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in two phases:
 //      (1) standard tools parallel, (2) delivery parallel - repeat until the
 //      model returns the final response or the round budget is reached. The
@@ -27,7 +27,7 @@ const { buildSystemPrompt } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolAccessError } = require('./ai/tools');
 const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/responseSchema');
 const { resolveDeliverySelection } = require('./utils/deliverySelection');
-const { buildPastVoiceReplyBlocks } = require('./utils/voiceTranscripts');
+const { applyPastVoiceRepliesToHistory } = require('./utils/voiceTranscripts');
 const { generateVoice } = require('./tools/voiceMessage');
 const { sanitizeVoiceMessageText } = require('./utils/text');
 const { getCapabilities } = require('./config/platformCapabilities');
@@ -295,29 +295,30 @@ async function handleMessage(ctx) {
     const messages = [
       { role: 'system', content: buildSystemPrompt(ctx) },
     ];
-    if (ctx.history && ctx.history.length > 0) {
-      messages.push(...ctx.history);
-    }
 
-    // GemiX voice messages in history are [Attachment] tags only (assistant
-    // entries cannot carry file parts): inject <PastVoiceReply> on this turn.
-    let currentContent = ctx.content;
-    if (allowVoice) {
+    // GemiX voice in history is [Attachment] on assistant (no native audio parts).
+    // Replace those tags in-place with <PastVoiceReply> on the assistant messages
+    // (not on the current user turn). Voice platforms only (WA dedicated + personal).
+    let historyForApi = Array.isArray(ctx.history) ? ctx.history : [];
+    if (allowVoice && historyForApi.length > 0) {
       try {
-        const pastVoiceBlocks = buildPastVoiceReplyBlocks(ctx.history, resolveStorageId(ctx));
-        if (pastVoiceBlocks.length > 0) {
-          const baseParts = typeof currentContent === 'string'
-            ? [{ type: 'text', text: currentContent }]
-            : [...(Array.isArray(currentContent) ? currentContent : [])];
-          currentContent = [...baseParts, ...pastVoiceBlocks];
-          const blockCount = (pastVoiceBlocks[0].text.match(/<PastVoiceReply/g) || []).length;
-          log.info(`   Injected ${blockCount} <PastVoiceReply> block(s) on the current turn`);
+        const { history: patched, replacedCount } = applyPastVoiceRepliesToHistory(
+          historyForApi,
+          resolveStorageId(ctx),
+        );
+        historyForApi = patched;
+        if (replacedCount > 0) {
+          log.info(`   Replaced ${replacedCount} assistant voice [Attachment] tag(s) with <PastVoiceReply>`);
         }
       } catch (txErr) {
-        log.warn(`PastVoiceReply inject failed: ${txErr.message}`);
+        log.warn(`PastVoiceReply history rewrite failed: ${txErr.message}`);
       }
     }
-    messages.push({ role: 'user', content: currentContent });
+    if (historyForApi.length > 0) {
+      messages.push(...historyForApi);
+    }
+
+    messages.push({ role: 'user', content: ctx.content });
 
     try {
       const historyUserId = resolveStorageId(ctx);
