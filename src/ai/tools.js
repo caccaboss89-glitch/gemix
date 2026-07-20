@@ -533,6 +533,31 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
   });
 }
 
+function buildReadSentMessagesTool(isAdmin) {
+  return makeTool({
+    name: 'read_sent_messages',
+    description:
+      'Look up messages GemiX previously delivered to OTHER people on the caller\'s behalf, via WhatsApp and/or email. '
+      + 'Use it when a user wants to verify messages sent earlier — not to confirm a message you just sent (the send tool\'s success result already confirms that). '
+      + 'Only the last 10 outgoing messages are kept (shared across WhatsApp and email). '
+      + 'Any files that were attached are shown to you again when still retrievable, otherwise flagged as expired.',
+    properties: {
+      channel: {
+        type: 'string',
+        enum: ['whatsapp', 'email', 'both'],
+        description: 'Which channel to inspect. Omit or use "both" to include both.',
+      },
+      recipients: {
+        type: 'array',
+        items: { type: 'string' },
+        description: isAdmin
+          ? 'OPTIONAL filter, any mix of phone numbers (with country code, e.g. +393XXXXXXXXX) and/or email addresses, from the &lt;ActiveMembers&gt; roster or given by the user. A phone matches WhatsApp messages, an email matches email messages. Omit to list every recipient.'
+          : 'OPTIONAL filter by active member name(s) — mapped to their WhatsApp number and email. Omit to list every recipient.',
+      },
+    },
+  });
+}
+
 const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
   description: 'Report a bug/failure. Use for tool error DOES NOT state the Admin was already notified, general logical bugs or issues with system components e.g. unclear instructions, unexpected behaviors, bugs noted in the history... Inform the user in your final response.',
@@ -650,6 +675,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   }
   if (isActiveMember && isWhatsApp) {
     tools.push(TOOL_READ_MUSIC_STATS);
+  }
+  // Confirm past outgoing messages (WhatsApp/email) sent to other users on the
+  // caller's behalf. Active WhatsApp members only (admin: any number).
+  if (isActiveMember && isWhatsApp) {
+    tools.push(buildReadSentMessagesTool(isAdmin));
   }
 
   // 6. Bug Report (all platforms, all modes)

@@ -64,6 +64,7 @@ const {
 } = require('../../utils/waMentions');
 const { processWhatsAppQuotedReply } = require('../../utils/quoteIngress');
 const { groupWhatsAppMessages } = require('../../utils/waAlbumGroup');
+const { whatsAppReactionTagForMessages } = require('../../utils/reactions');
 
 async function getRecentWhatsAppMessageIds(msg) {
   try {
@@ -332,6 +333,10 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     }
 
     if (!textContent) return null;
+
+    // Emoji reactions on any album item (user or GemiX message) → inline tag.
+    const reactionTag = await whatsAppReactionTagForMessages(groupMsgs);
+    if (reactionTag) textContent = `${textContent} ${reactionTag}`.trim();
 
     const prefix = `[${ts}] ${senderName}: `;
     const useLabeledContent = !isFromBot || isSystemEvent;
@@ -647,6 +652,10 @@ async function buildIncomingContentPartsFromMessages(
   if (!textBody.trim() && quoteMsg && contentParts.length === 0) {
     textBody = '[In reply to a message]\n';
   }
+
+  // Emoji reactions on the current message (or any album item) → inline tag.
+  const reactionTag = await whatsAppReactionTagForMessages(messages);
+  if (reactionTag) textBody = `${textBody} ${reactionTag}`.trim();
 
   if (textBody.trim()) {
     const tsMs = (primaryMsg.timestamp || 0) * 1000;

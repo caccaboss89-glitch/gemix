@@ -145,6 +145,18 @@ function findMemberByName(name) {
 }
 
 /**
+ * Find a member by email address (case-insensitive).
+ * @param {string} email
+ * @returns {object|null} The member object or null if not found
+ */
+function findMemberByEmail(email) {
+  if (!email || typeof email !== 'string') return null;
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  return ACTIVE_MEMBERS.find(m => m.email && m.email.toLowerCase() === normalized) || null;
+}
+
+/**
  * Check if a member has admin privileges.
  * @param {object|null} member - The member object
  * @returns {boolean} True if member exists and has admin flag set to true
@@ -158,6 +170,7 @@ module.exports = {
   findMemberByWa,
   findMemberByDiscord,
   findMemberByName,
+  findMemberByEmail,
   resolveActiveMemberByName,
   isAdmin,
 };

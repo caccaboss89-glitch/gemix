@@ -34,6 +34,7 @@ const TOOL = {
   TOGGLE_RELEASE: 'toggle_release_notify',
   READ_RULES: 'read_server_rules',
   READ_MUSIC_STATS: 'read_music_stats',
+  READ_SENT_MESSAGES: 'read_sent_messages',
   FORMAL_PDF: 'generate_formal_request_pdf',
   BUG_REPORT: 'bug_report',
 };
@@ -131,7 +132,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   const cap = CAPS[profile] || CAPS[PROFILE.WA_DEDICATED_PRIVATE];
   const isActiveMember = opts.isActiveMember !== false;
 
-  const memberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL, TOOL.READ_RULES, TOOL.READ_MUSIC_STATS];
+  const memberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL, TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES];
   if (!isActiveMember && memberOnly.includes(toolName)) {
     return `"${toolName}" is only available to active server members on WhatsApp.`;
   }
@@ -148,7 +149,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   const waOnly = [
     TOOL.MUSIC_CREATOR, TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
     TOOL.CODE_INTERPRETER, TOOL.TOGGLE_RELEASE,
-    TOOL.READ_MUSIC_STATS, TOOL.READ_RULES,
+    TOOL.READ_MUSIC_STATS, TOOL.READ_RULES, TOOL.READ_SENT_MESSAGES,
   ];
   if (cap.isDiscord && waOnly.includes(toolName)) {
     return `"${toolName}" is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for that feature.`;

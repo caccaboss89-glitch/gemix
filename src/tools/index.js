@@ -16,8 +16,10 @@ const { readServerRules } = require('./serverRules');
 const { generateFormalRequestPdf } = require('./formalRequestPdf');
 const { sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppDirect } = require('./whatsappSender');
-const { resolveActiveMemberByName } = require('../config/members');
+const { resolveActiveMemberByName, findMemberByWa, findMemberByEmail } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
+const { recordSentMessage } = require('../utils/sentMessagesStore');
+const { readSentMessages } = require('./sentMessagesReader');
 const { readMusicStats } = require('./musicStats');
 const { updatePrivateMemory } = require('./userMemory');
 const { updateGroupMemory } = require('./groupMemory');
@@ -60,6 +62,28 @@ function _escapeHtml(str) {
 
 const WA_MISSING_RECIPIENT_ERROR =
   'Missing recipient. send_whatsapp_message targets a specific phone number; use your structured reply for the current chat, not this tool.';
+
+/** Recipient record for a delivered WhatsApp message (enriched with member data). */
+function _sentRecipientFromWa(targetJid) {
+  const digits = String(targetJid.jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  const member = digits ? findMemberByWa(digits + '@c.us') : null;
+  return {
+    phone: digits || null,
+    email: member ? member.email || null : null,
+    display: targetJid.display || (digits ? `+${digits}` : 'unknown'),
+  };
+}
+
+/** Recipient record for a delivered email (enriched with member data when known). */
+function _sentRecipientFromEmail(targetEmail) {
+  const member = findMemberByEmail(targetEmail.email);
+  const digits = member ? String(member.wa || '').split('@')[0].split(':')[0].replace(/\D/g, '') : null;
+  return {
+    phone: digits || null,
+    email: targetEmail.email || null,
+    display: targetEmail.display || targetEmail.email || 'unknown',
+  };
+}
 
 /**
  * Resolve the target WhatsApp JID for delivery.
@@ -383,6 +407,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             );
             result = { success: true, message: `Email sent successfully to ${targetEmail.display}.${emailMissingNote}` };
           }
+          // Log this outgoing message so the caller can later confirm it was sent.
+          recordSentMessage({
+            senderKey: userCtx.taskFileId,
+            channel: 'email',
+            recipient: _sentRecipientFromEmail(targetEmail),
+            subject: stripOutgoingDeliveryArtifacts(args.subject || ''),
+            body: stripOutgoingDeliveryArtifacts(args.body || ''),
+            attachments: emailSelection.attachments,
+          });
         } catch (err) {
           await notifyAdmin('Email Tool', `Failed to send email to ${targetEmail.email}: ${err.message}`);
           result = { success: false, error: `Error sending email: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -444,6 +477,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           } else {
             result = { success: true, message: `WhatsApp message sent successfully to ${targetJid.display}.${waMissingNote}` };
           }
+          // Log this outgoing message so the caller can later confirm it was sent.
+          recordSentMessage({
+            senderKey: userCtx.taskFileId,
+            channel: 'whatsapp',
+            recipient: _sentRecipientFromWa(targetJid),
+            text: stripOutgoingDeliveryArtifacts(args.message),
+            attachments: waSelection.attachments,
+          });
         } catch (err) {
           await notifyAdmin('WhatsApp Delivery', `Failed to send WhatsApp message to ${targetJid.display}: ${err.message}`);
           result = { success: false, error: `Error sending WhatsApp message: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -453,6 +494,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
       case 'read_music_stats': {
         result = await readMusicStats();
+        break;
+      }
+
+      case 'read_sent_messages': {
+        // May return an array of content parts (text + recovered attachment
+        // previews) so any files sent earlier are viewable this round.
+        result = await readSentMessages(args, userCtx);
         break;
       }
 

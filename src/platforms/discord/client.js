@@ -37,6 +37,7 @@ const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
 const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { processDiscordQuotedReply } = require('../../utils/quoteIngress');
 const { materializeDiscordBatchContent } = require('../../utils/batchContentRefresh');
+const { discordReactionTag } = require('../../utils/reactions');
 
 const log = createLogger('DISCORD');
 
@@ -180,6 +181,10 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
       textBody = stripRedundantFilenameBesideAttachmentTag(textBody, tag, hints);
     }
   }
+
+  // Emoji reactions on the current message → inline tag.
+  const reactionTag = discordReactionTag(msg);
+  if (reactionTag) textBody = `${textBody} ${reactionTag}`.trim();
 
   if (textBody) {
     const tsMs = msg.createdAt?.getTime?.() || Date.now();
@@ -542,6 +547,10 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     }
 
     if (!textContent) return null;
+
+    // Emoji reactions on this message (user or GemiX message) → inline tag.
+    const reactionTag = discordReactionTag(m);
+    if (reactionTag) textContent = `${textContent} ${reactionTag}`.trim();
 
     const senderName = isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username);
     const prefix = `[${ts}] ${senderName}: `;
