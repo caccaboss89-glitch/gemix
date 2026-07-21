@@ -98,6 +98,7 @@ async function sendWhatsAppAttachment(att, postMedia, sendOptions = {}) {
 
 module.exports = {
   PLATFORM,
+  hasExternalUrl,
   partitionAttachments,
   applyBuildAgentFlags,
   sendWhatsAppAttachment,
