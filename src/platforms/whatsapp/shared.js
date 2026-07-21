@@ -34,6 +34,7 @@ const {
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
 const { sendWhatsAppAttachment } = require('../../utils/attachmentDelivery');
 const { mapWithConcurrency } = require('../../utils/concurrency');
+const { withWaPuppeteerRetry, formatWaError } = require('../../utils/waPuppeteer');
 const { createLogger } = require('../../utils/logger');
 
 const log = createLogger('WhatsAppResponse');
@@ -484,10 +485,12 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
 
     if (result.fallbackMessage) {
       try {
-        await chat.sendMessage(result.fallbackMessage);
+        // Retry on a transient detached/destroyed frame so the download link
+        // still lands if the page recovers after a heavy attachment send.
+        await withWaPuppeteerRetry(() => chat.sendMessage(result.fallbackMessage), { retries: 2, delayMs: 800 });
         log.info(`Sent link-fallback message for ${result.linkFallback.length} attachment(s)`);
       } catch (err) {
-        log.error(`Failed to send fallback message: ${err.message}`);
+        log.error(`Failed to send fallback message: ${formatWaError(err)}`);
       }
     }
   }

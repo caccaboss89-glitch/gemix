@@ -22,6 +22,7 @@ function isWaPuppeteerTransientError(err) {
   if (blob.includes('protocol error')) return true;
   if (blob.includes('navigating frame was detached')) return true;
   if (blob.includes('frame was detached')) return true;
+  if (blob.includes('detached frame')) return true; // "Attempted to use detached Frame '…'"
   if (blob.includes('most likely because of a navigation')) return true;
 
   // Puppeteer evaluate path in stack without a useful message

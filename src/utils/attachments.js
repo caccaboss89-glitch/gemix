@@ -13,8 +13,16 @@ const fs = require('fs');
 const path = require('path');
 const { mimeBase } = require('../config/mimeExtensions');
 
-/** WhatsApp direct send cap (whatsapp-web.js); above → temp download link. */
-const WA_DIRECT_MAX_BYTES = 100 * 1024 * 1024;
+/**
+ * WhatsApp direct-send cap: above this the file goes to a temp download link.
+ * Held at WhatsApp's native media limit (16 MB) on purpose — whatsapp-web.js
+ * sends media by injecting base64 into the WA Web page, and large payloads
+ * (tens of MB) can detach/crash the Puppeteer frame, which then also kills the
+ * follow-up messages (e.g. the link-fallback text). The link fallback delivers
+ * big files reliably instead. Raise it only if your whatsapp-web.js build
+ * reliably sends larger files directly.
+ */
+const WA_DIRECT_MAX_BYTES = 16 * 1024 * 1024;
 
 const WA_TEMP_LINK_AUDIO_EXTS = new Set([
   '.mp3', '.mpeg', '.mpga', '.ogg', '.opus', '.oga', '.wav', '.m4a', '.flac', '.aac', '.webm',
