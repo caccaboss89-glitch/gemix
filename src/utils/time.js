@@ -57,6 +57,48 @@ function getRomeISO() {
 }
 
 /**
+ * Get the current Europe/Rome wall-clock as structured parts (DST-aware).
+ * Same timezone basis as reminders and sent-message timestamps (never UTC).
+ * The weekday is derived from the Rome calendar date, so it stays correct
+ * regardless of the machine timezone or DST.
+ * @param {Date} [date] - Instant to convert (defaults to now).
+ * @returns {{ year:number, month:number, day:number, hour:number, minute:number, second:number, weekday:number }}
+ *   weekday: 0 = Sunday … 6 = Saturday.
+ */
+function getRomeParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Rome',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date).map(p => [p.type, p.value])
+  );
+  const year = parseInt(parts.year, 10);
+  const month = parseInt(parts.month, 10);
+  const day = parseInt(parts.day, 10);
+  // Some runtimes return '24' for midnight in hour12:false mode.
+  const hour = parts.hour === '24' ? 0 : parseInt(parts.hour, 10);
+  // Weekday of the Rome calendar date (midnight UTC of that date is unambiguous).
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute: parseInt(parts.minute, 10),
+    second: parseInt(parts.second, 10),
+    weekday,
+  };
+}
+
+/**
  * Get the last Sunday of a given month and year.
  * Used for calculating DST transition dates (last Sunday of March and October).
  * @param {number} year - Year (e.g., 2026)
@@ -213,4 +255,4 @@ function convertRomeLocalToISO(localDatetime) {
   return `${localDatetime}${sign}${hh}:${mm}`;
 }
 
-module.exports = { getRomeTime, getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour };
+module.exports = { getRomeTime, getRomeISO, getRomeParts, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour };

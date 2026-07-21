@@ -537,7 +537,7 @@ function buildReadSentMessagesTool(isAdmin) {
   return makeTool({
     name: 'read_sent_messages',
     description:
-      'Look up messages GemiX previously delivered to OTHER people on the caller\'s behalf, via WhatsApp and/or email. '
+      'Look up messages GemiX previously delivered to OTHER people on the caller\'s behalf (only what the caller sent — never any reply the recipients wrote back), via WhatsApp and/or email. '
       + 'Use it when a user wants to verify messages sent earlier — not to confirm a message you just sent (the send tool\'s success result already confirms that). '
       + 'Only the last 10 outgoing messages are kept (shared across WhatsApp and email). '
       + 'Any files that were attached are shown to you again when still retrievable, otherwise flagged as expired.',

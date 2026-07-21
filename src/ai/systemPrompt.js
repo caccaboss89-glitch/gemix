@@ -13,8 +13,10 @@ const {
   buildLimitsLines,
   buildCallerAccessNote,
   getCapabilities,
+  profileHasMediaQuota,
 } = require('../config/platformCapabilities');
 const { getToolsForUser } = require('./tools');
+const { formatQuotaCounts } = require('../utils/mediaUsageLimits');
 const { escapeXml } = require('../utils/xmlEscape');
 
 const WA_FORMAT = 'only *bold* _italic_ ~strike~ `code` and > quote (line start) render; other markup does not, and Markdown link citations are not shown.';
@@ -117,7 +119,12 @@ function buildSystemPrompt(ctx) {
     contextBlocks.push(_renderBuildWorkspace(ctx.userWorkspace));
   }
 
-  contextBlocks.push(_block('Limits', buildLimitsLines(profile)));
+  // Per-user weekly generation quota line: non-admins only, and only where the
+  // three generation tools exist (WhatsApp) — admins and Discord get no line.
+  const mediaQuotaCounts = (!isAdmin && profileHasMediaQuota(profile))
+    ? formatQuotaCounts(ctx.userIdentity?.taskFileId)
+    : null;
+  contextBlocks.push(_block('Limits', buildLimitsLines(profile, { mediaQuotaCounts })));
 
   if (cap.longTermMemory) {
     let defaultMemory = 'Default guidelines: reply in Italian; use emojis sparingly.';

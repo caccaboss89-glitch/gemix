@@ -203,15 +203,50 @@ function _isGrokCreditExhaustedHttpBody(errMsg) {
   return end > 0 && tryParse(candidate.slice(0, end + 1));
 }
 
+/**
+ * True when errMsg is the xAI HTTP 403 OAuth "bad-credentials" body
+ * (`unauthenticated:bad-credentials` / "OAuth2 access token could not be
+ * validated"). Once the SuperGrok team credits run out, xAI's spending-limit
+ * body morphs into this after a while, so in this deployment it means the same
+ * thing: credits exhausted, not a transient auth failure worth alerting the
+ * admin. Accepts a bare `HTTP 403: {...}` line or one nested in a longer string.
+ * @param {string} errMsg
+ * @returns {boolean}
+ */
+function _isOAuthUnauthenticatedHttp403Body(errMsg) {
+  if (!errMsg || typeof errMsg !== 'string') return false;
+  const marker = 'HTTP 403:';
+  const idx = errMsg.indexOf(marker);
+  if (idx === -1) return false;
+  const candidate = errMsg.slice(idx + marker.length).trim();
+  const codeIsUnauthenticated = (raw) => {
+    try {
+      const code = JSON.parse(raw)?.code;
+      return typeof code === 'string' && code.startsWith('unauthenticated');
+    } catch {
+      return false;
+    }
+  };
+  if (candidate.startsWith('{')) {
+    if (codeIsUnauthenticated(candidate)) return true;
+    const end = candidate.lastIndexOf('}');
+    if (end > 0 && codeIsUnauthenticated(candidate.slice(0, end + 1))) return true;
+  }
+  // Fallback on the human-readable OAuth validation message.
+  return /could not be validated/i.test(candidate);
+}
+
 /** Stable error.code set by callApiWithRetry (English message kept for logs). */
 const GROK_CREDIT_EXHAUSTED_CODE = 'GROK_CREDIT_EXHAUSTED';
 
 /**
- * Canonical detector for SuperGrok / xAI team spending-limit exhaustion.
+ * Canonical detector for SuperGrok / xAI team credit exhaustion.
  * Accepts Error or string. True for:
  *   - err.code === GROK_CREDIT_EXHAUSTED_CODE
  *   - the rethrow from callApiWithRetry ("… API credit exhausted …")
  *   - raw / nested `HTTP 403` JSON with code personal-team-blocked:spending-limit
+ *   - the `HTTP 403` OAuth `unauthenticated:bad-credentials` body xAI starts
+ *     returning once the credits are exhausted (same cause, different message)
  * @param {Error|string|null|undefined} errOrMsg
  * @returns {boolean}
  */
@@ -225,7 +260,7 @@ function isGrokCreditExhaustedError(errOrMsg) {
   if (!errMsg) return false;
   // English log marker written by callApiWithRetry (keep in sync with throw below)
   if (errMsg.includes('API credit exhausted')) return true;
-  return _isGrokCreditExhaustedHttpBody(errMsg);
+  return _isGrokCreditExhaustedHttpBody(errMsg) || _isOAuthUnauthenticatedHttp403Body(errMsg);
 }
 
 /**

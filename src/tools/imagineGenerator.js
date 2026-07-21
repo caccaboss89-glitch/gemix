@@ -32,6 +32,7 @@ const { mimeForExtension } = require('../config/mimeExtensions');
 const { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath, MAX_VIDEO_BYTES } = require('../utils/aiFileDelivery');
 const { clearXaiUploadCache } = require('../utils/xaiUpload');
 const { isXaiFileDownloadError } = require('../utils/refreshXaiMessageUrls');
+const { reserveGeneration } = require('../utils/mediaUsageLimits');
 
 const log = createLogger('ImagineGenerator');
 
@@ -353,64 +354,74 @@ async function generateImage(args, userCtx, responseCtx) {
 
   log.info(`generate_image: refs=${refList.length}, aspect=${aspect || 'auto'}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
-  const submit = await _xaiImagineSubmitWithRefRefresh({
-    label: 'Grok-Imagine-Image',
-    timeoutMs: IMAGE_TIMEOUT_MS,
-    refList,
-    maxRefs: MAX_REF_IMAGES_FOR_IMAGE,
-    userCtx,
-    responseCtx,
-    buildRequest: (urls) => {
-      const body = {
-        model: IMAGE_GEN_MODEL,
-        prompt,
-        response_format: 'url',
-      };
-      if (urls.length === 0) {
-        if (aspect !== null) body.aspect_ratio = aspect;
-        return { endpointPath: '/images/generations', body };
-      }
-      if (urls.length === 1) {
-        body.image = { url: urls[0], type: 'image_url' };
-      } else {
-        body.images = urls.map(url => ({ type: 'image_url', url }));
-      }
-      return { endpointPath: '/images/edits', body };
-    },
-  });
-  if (!submit.ok) {
-    return { success: false, error: `Image generation failed: ${submit.reason}` };
-  }
-  const data = submit.data;
-  const refsForNote = submit.refs;
+  // Weekly per-user quota (admins exempt). Reserve the slot before the network
+  // call so parallel calls in one round cannot exceed the cap; refund on failure.
+  const quota = await reserveGeneration('image', userCtx);
+  if (!quota.ok) return { success: false, error: quota.error };
 
-  const item = Array.isArray(data?.data) ? data.data[0] : null;
-  if (!item || typeof item.url !== 'string') {
-    await notifyAdmin('GenerateImage', `No media URL in response: ${JSON.stringify(data).slice(0, 300)}`);
-    return { success: false, error: `Image generation produced no media URL.${ADMIN_NOTIFIED_SUFFIX}` };
-  }
-
-  let buffer;
   try {
-    buffer = await _downloadMedia(item.url);
-  } catch (err) {
-    await notifyAdmin('GenerateImage', `Load media from ${item.url} failed: ${err.message}`);
-    return { success: false, error: `Image load failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    const submit = await _xaiImagineSubmitWithRefRefresh({
+      label: 'Grok-Imagine-Image',
+      timeoutMs: IMAGE_TIMEOUT_MS,
+      refList,
+      maxRefs: MAX_REF_IMAGES_FOR_IMAGE,
+      userCtx,
+      responseCtx,
+      buildRequest: (urls) => {
+        const body = {
+          model: IMAGE_GEN_MODEL,
+          prompt,
+          response_format: 'url',
+        };
+        if (urls.length === 0) {
+          if (aspect !== null) body.aspect_ratio = aspect;
+          return { endpointPath: '/images/generations', body };
+        }
+        if (urls.length === 1) {
+          body.image = { url: urls[0], type: 'image_url' };
+        } else {
+          body.images = urls.map(url => ({ type: 'image_url', url }));
+        }
+        return { endpointPath: '/images/edits', body };
+      },
+    });
+    if (!submit.ok) {
+      return { success: false, error: `Image generation failed: ${submit.reason}` };
+    }
+    const data = submit.data;
+    const refsForNote = submit.refs;
+
+    const item = Array.isArray(data?.data) ? data.data[0] : null;
+    if (!item || typeof item.url !== 'string') {
+      await notifyAdmin('GenerateImage', `No media URL in response: ${JSON.stringify(data).slice(0, 300)}`);
+      return { success: false, error: `Image generation produced no media URL.${ADMIN_NOTIFIED_SUFFIX}` };
+    }
+
+    let buffer;
+    try {
+      buffer = await _downloadMedia(item.url);
+    } catch (err) {
+      await notifyAdmin('GenerateImage', `Load media from ${item.url} failed: ${err.message}`);
+      return { success: false, error: `Image load failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    }
+
+    const ext = _extFromGeneratedMedia(item.url, item.mime_type, 'jpg');
+    const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'image');
+
+    const truncNote = truncated ? ' (prompt was truncated)' : '';
+    const refNote = refsForNote.urls.length > 0
+      ? ` Used ${refsForNote.urls.length} reference image(s).`
+      : '';
+    quota.commit();
+    return {
+      success: true,
+      filename,
+      message: `Image generated successfully and pushed to the delivery buffer as "${filename}".${refNote} `
+        + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`,
+    };
+  } finally {
+    await quota.release();
   }
-
-  const ext = _extFromGeneratedMedia(item.url, item.mime_type, 'jpg');
-  const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'image');
-
-  const truncNote = truncated ? ' (prompt was truncated)' : '';
-  const refNote = refsForNote.urls.length > 0
-    ? ` Used ${refsForNote.urls.length} reference image(s).`
-    : '';
-  return {
-    success: true,
-    filename,
-    message: `Image generated successfully and pushed to the delivery buffer as "${filename}".${refNote} `
-      + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`,
-  };
 }
 
 // -- generate_video ----------------------------------------------------------
@@ -450,70 +461,80 @@ async function generateVideo(args, userCtx, responseCtx) {
 
   log.info(`generate_video: aspect=${refList.length === 0 ? aspect : 'auto'}, refs=${refList.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
-  const submitResult = await _xaiImagineSubmitWithRefRefresh({
-    label: 'Grok-Imagine-Video',
-    timeoutMs: IMAGE_TIMEOUT_MS,
-    refList,
-    maxRefs: MAX_REF_IMAGES_FOR_VIDEO,
-    userCtx,
-    responseCtx,
-    buildRequest: (urls) => {
-      const body = {
-        model: VIDEO_GEN_MODEL,
-        prompt,
-        duration: VIDEO_GEN_DURATION_S,
-        resolution: VIDEO_GEN_RESOLUTION,
-      };
-      if (urls.length === 0) {
-        body.aspect_ratio = aspect;
-      } else if (urls.length === 1) {
-        body.image = { url: urls[0], type: 'image_url' };
-      } else {
-        body.reference_images = urls.map(url => ({ type: 'image_url', url }));
-      }
-      return { endpointPath: '/videos/generations', body };
-    },
-  });
-  if (!submitResult.ok) {
-    return { success: false, error: `Video generation failed: ${submitResult.reason}` };
-  }
-  const submit = submitResult.data;
-  const refsForNote = submitResult.refs;
+  // Weekly per-user quota (admins exempt). Reserve the slot before the network
+  // call so parallel calls in one round cannot exceed the cap; refund on failure.
+  const quota = await reserveGeneration('video', userCtx);
+  if (!quota.ok) return { success: false, error: quota.error };
 
-  const requestId = submit?.request_id;
-  if (!requestId || typeof requestId !== 'string') {
-    await notifyAdmin('GenerateVideo', `No request_id in response: ${JSON.stringify(submit).slice(0, 300)}`);
-    return { success: false, error: `Video generation did not return a request id.${ADMIN_NOTIFIED_SUFFIX}` };
-  }
-
-  let videoUrl;
   try {
-    videoUrl = await _pollVideoResult(requestId);
-  } catch (err) {
-    await notifyAdmin('GenerateVideo', `Polling ${requestId} failed: ${err.message}`);
-    return { success: false, error: `Video generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    const submitResult = await _xaiImagineSubmitWithRefRefresh({
+      label: 'Grok-Imagine-Video',
+      timeoutMs: IMAGE_TIMEOUT_MS,
+      refList,
+      maxRefs: MAX_REF_IMAGES_FOR_VIDEO,
+      userCtx,
+      responseCtx,
+      buildRequest: (urls) => {
+        const body = {
+          model: VIDEO_GEN_MODEL,
+          prompt,
+          duration: VIDEO_GEN_DURATION_S,
+          resolution: VIDEO_GEN_RESOLUTION,
+        };
+        if (urls.length === 0) {
+          body.aspect_ratio = aspect;
+        } else if (urls.length === 1) {
+          body.image = { url: urls[0], type: 'image_url' };
+        } else {
+          body.reference_images = urls.map(url => ({ type: 'image_url', url }));
+        }
+        return { endpointPath: '/videos/generations', body };
+      },
+    });
+    if (!submitResult.ok) {
+      return { success: false, error: `Video generation failed: ${submitResult.reason}` };
+    }
+    const submit = submitResult.data;
+    const refsForNote = submitResult.refs;
+
+    const requestId = submit?.request_id;
+    if (!requestId || typeof requestId !== 'string') {
+      await notifyAdmin('GenerateVideo', `No request_id in response: ${JSON.stringify(submit).slice(0, 300)}`);
+      return { success: false, error: `Video generation did not return a request id.${ADMIN_NOTIFIED_SUFFIX}` };
+    }
+
+    let videoUrl;
+    try {
+      videoUrl = await _pollVideoResult(requestId);
+    } catch (err) {
+      await notifyAdmin('GenerateVideo', `Polling ${requestId} failed: ${err.message}`);
+      return { success: false, error: `Video generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    }
+
+    let buffer;
+    try {
+      buffer = await _downloadMedia(videoUrl);
+    } catch (err) {
+      await notifyAdmin('GenerateVideo', `Load media from ${videoUrl} failed: ${err.message}`);
+      return { success: false, error: `Video load failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    }
+
+    const ext = _extFromGeneratedMedia(videoUrl, null, 'mp4');
+    const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'video');
+
+    const truncNote = truncated ? ' (prompt was truncated)' : '';
+    const refNote = refsForNote.urls.length > 0
+      ? ` Used ${refsForNote.urls.length} reference image(s).`
+      : '';
+    quota.commit();
+    return {
+      success: true,
+      filename,
+      message: `Video generated successfully (${VIDEO_GEN_DURATION_S}s, ${VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`,
+    };
+  } finally {
+    await quota.release();
   }
-
-  let buffer;
-  try {
-    buffer = await _downloadMedia(videoUrl);
-  } catch (err) {
-    await notifyAdmin('GenerateVideo', `Load media from ${videoUrl} failed: ${err.message}`);
-    return { success: false, error: `Video load failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
-  }
-
-  const ext = _extFromGeneratedMedia(videoUrl, null, 'mp4');
-  const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'video');
-
-  const truncNote = truncated ? ' (prompt was truncated)' : '';
-  const refNote = refsForNote.urls.length > 0
-    ? ` Used ${refsForNote.urls.length} reference image(s).`
-    : '';
-  return {
-    success: true,
-    filename,
-    message: `Video generated successfully (${VIDEO_GEN_DURATION_S}s, ${VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`,
-  };
 }
 
 /**

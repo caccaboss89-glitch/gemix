@@ -18,6 +18,7 @@ const { buildXaiFileParts } = require('../utils/aiFileDelivery');
 const { downloadPublicFileToDisk } = require('../utils/fetch');
 const { TEMP_DIR } = require('../utils/tempFileServer');
 const { sanitizeFilename } = require('../utils/text');
+const { formatTimestamp } = require('../utils/time');
 const { readSentRecords, resolveStoredAttachmentPath } = require('../utils/sentMessagesStore');
 const { createLogger } = require('../utils/logger');
 
@@ -218,7 +219,8 @@ async function readSentMessages(args, userCtx) {
 
     const msgOut = {
       channel: r.channel,
-      sentAt: new Date(r.ts).toISOString(),
+      // Europe/Rome, DST-aware — same formatting as reminders/history (never UTC).
+      sentAt: formatTimestamp(r.ts),
     };
     if (r.channel === 'email') {
       msgOut.subject = r.subject || '';

@@ -312,10 +312,19 @@ function buildPreSendCheck(maxRef) {
   ];
 }
 
-function buildLimitsLines(profile) {
+/** True when a profile exposes all three generation tools (image + video + song). */
+function profileHasMediaQuota(profile) {
+  const cap = CAPS[profile];
+  if (!cap) return false;
+  return cap.tools.has(TOOL.GENERATE_IMAGE)
+    && cap.tools.has(TOOL.GENERATE_VIDEO)
+    && cap.tools.has(TOOL.MUSIC_CREATOR);
+}
+
+function buildLimitsLines(profile, opts = {}) {
   const cap = CAPS[profile];
   let historyLine =
-    '- Recent chat-history files are attached natively this turn — you see their content directly; each keeps an [Attachment: filename] label. '
+    '- History files are visible directly with [Attachment: filename]; past reactions appear as [Reactions: emoji xN]. '
     + 'Only the newest 10 images + 10 files are loaded.';
   if (cap.historyTranscriptionNote) {
     historyLine += ' Your own past voice messages in history are shown as <PastVoiceReply> blocks on those assistant turns (transcript text; audio not reloaded).';
@@ -332,6 +341,15 @@ function buildLimitsLines(profile) {
   } else if (cap.isWhatsApp && !cap.voiceReply) {
     lines.push(
       '- Voice replies are not available in this personal-account chat; explain that voice messages are on the dedicated GemiX WhatsApp account.',
+    );
+  }
+  // Per-user weekly generation quota. Only on platforms exposing all three gen
+  // tools; the caller passes counts for non-admins only (admins have no quota).
+  if (opts.mediaQuotaCounts && profileHasMediaQuota(profile)) {
+    lines.push(
+      `- Weekly generation quota for this user — ${opts.mediaQuotaCounts} `
+      + '(resets Tuesday at 16:00). At the cap the tool returns an error; '
+      + 'if the user asks, tell them what is left.',
     );
   }
   return lines;
@@ -351,4 +369,5 @@ module.exports = {
   buildPreSendCheck,
   buildLimitsLines,
   buildCallerAccessNote,
+  profileHasMediaQuota,
 };

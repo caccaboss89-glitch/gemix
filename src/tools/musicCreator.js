@@ -5,9 +5,7 @@
 // (Lyria is not available via xAI/Grok).
 const { createLogger } = require('../utils/logger');
 const { MUSIC_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_HTTP_REFERER } = require('../config/env');
-const systemState = require('../utils/systemState');
-const { findMemberByWa, isAdmin } = require('../config/members');
-const { getRomeISO } = require('../utils/time');
+const { reserveGeneration } = require('../utils/mediaUsageLimits');
 const { fetchWithTimeout } = require('../utils/fetch');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { convertMp3ToWhatsAppOpus } = require('./voiceMessage');
@@ -96,23 +94,19 @@ async function musicCreator(prompt, userCtx) {
   }
 
   const userId = userCtx.waJid || userCtx.userId;
-  const member = findMemberByWa(userId);
-  const userIsAdmin = isAdmin(member);
+  const userIsAdmin = Boolean(userCtx.isAdmin);
 
-  // Daily Limit
-  if (!userIsAdmin) {
-    const today = getRomeISO().split('T')[0];
-    const userKey = `${userId}_${today}`;
-    const usageState = systemState.get('musicDailyUsage') || {};
-
-    if (usageState[userKey]) {
-      return { toolResult: { success: false, error: 'Daily limit reached. You can generate 1 song per day. Try again tomorrow!' }, attachments: [] };
-    }
-    if (pendingGenerations.has(userId)) {
-      return { toolResult: { success: false, error: 'A music generation is already in progress...' }, attachments: [] };
-    }
-    pendingGenerations.add(userId);
+  // One in-flight generation per user (independent of the weekly quota below).
+  if (!userIsAdmin && pendingGenerations.has(userId)) {
+    return { toolResult: { success: false, error: 'A music generation is already in progress...' }, attachments: [] };
   }
+
+  // Weekly per-user quota (max 2 songs/week, resets Tuesday 16:00; admins exempt).
+  const quota = await reserveGeneration('song', userCtx);
+  if (!quota.ok) {
+    return { toolResult: { success: false, error: quota.error }, attachments: [] };
+  }
+  if (!userIsAdmin) pendingGenerations.add(userId);
 
   try {
     if (!prompt || prompt.trim().length < 5) {
@@ -171,20 +165,7 @@ async function musicCreator(prompt, userCtx) {
       }
       const filename = `song_${Date.now()}.ogg`;
 
-      if (!userIsAdmin) {
-        const today = getRomeISO().split('T')[0];
-        const userKey = `${userId}_${today}`;
-        await systemState.update('musicDailyUsage', (current) => {
-          const updated = {};
-          for (const key of Object.keys(current)) {
-            if (key.endsWith(`_${today}`)) {
-              updated[key] = current[key];
-            }
-          }
-          updated[userKey] = true;
-          return updated;
-        });
-      }
+      quota.commit();
 
       return {
         toolResult: { success: true, message: '🎵 Song generated successfully!' },
@@ -212,6 +193,7 @@ async function musicCreator(prompt, userCtx) {
       attachments: [],
     };
   } finally {
+    await quota.release();
     if (!userIsAdmin) pendingGenerations.delete(userId);
   }
 }

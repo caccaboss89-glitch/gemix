@@ -715,12 +715,13 @@ async function handleMessage(ctx) {
     const platformLabel = (typeof ctx?.platform === 'string' && ctx.platform)
       ? ctx.platform.toUpperCase().padEnd(10)
       : 'UNKNOWN   ';
-    log.error(`\n❌ [${platformLabel}] HANDLER ERROR:`);
-    log.error(`   ${err.message}`);
-    log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
     try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed in catch: ${vcErr.message}`); }
 
+    // Grok credit exhaustion (SuperGrok weekly cap, or the OAuth "bad-credentials"
+    // 403 xAI returns once credits run out) is an expected, already-handled state:
+    // reply with the credit notice — no admin alert and no red error/stack trace.
     if (isGrokCreditExhaustedError(err)) {
+      log.warn(`   [${platformLabel.trim()}] Grok credits exhausted — replying with the credit notice (admin not notified).`);
       return {
         text: GROK_CREDIT_EXHAUSTED_MESSAGE,
         voiceBuffer: null,
@@ -731,6 +732,10 @@ async function handleMessage(ctx) {
         systemMessage: true,
       };
     }
+
+    log.error(`\n❌ [${platformLabel}] HANDLER ERROR:`);
+    log.error(`   ${err.message}`);
+    log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
 
     return {
       text: FALLBACK_ERROR_PREFIX,
