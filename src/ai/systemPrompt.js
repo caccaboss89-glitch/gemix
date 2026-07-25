@@ -1,8 +1,10 @@
 // src/ai/systemPrompt.js — composed system prompt from platformCapabilities + ctx.
 
-const { getRomeTime } = require('../utils/time');
+const { getRomeTime, formatTimestamp } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
-const { ADMIN_NAME } = require('../config/env');
+const { ADMIN_NAME, GROK_MODEL } = require('../config/env');
+const { getModelDisplayName } = require('../utils/footer');
+const { defaultSettings, customizedFields } = require('../utils/settingsStore');
 const { PLATFORM_WA_PERSONAL } = require('../config/constants');
 const { formatParticipantsForPrompt } = require('../utils/waParticipants');
 const {
@@ -20,6 +22,11 @@ const { formatQuotaCounts } = require('../utils/mediaUsageLimits');
 const { escapeXml } = require('../utils/xmlEscape');
 
 const WA_FORMAT = 'only *bold* _italic_ ~strike~ `code` and > quote (line start) render; other markup does not, and Markdown link citations are not shown.';
+/** Monthly reminder to re-confirm customized preferences (see settingsStore). */
+const SETTINGS_REVIEW_NOTICE =
+  'IMPORTANT: the custom settings above have not changed in over a month. Handle the user\'s request as usual, '
+  + 'then add a note at the end of your reply reading their settings back to them - focusing on the custom ones - '
+  + 'and ask whether they still fit or they want changes. If they ask for changes, apply them with manage_preferences.';
 const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
 /** One level = 4 spaces. Section body depth 1; nested XML / Rules lists depth 2. */
 const PROMPT_INDENT = '    ';
@@ -76,9 +83,9 @@ function buildSystemPrompt(ctx) {
   const contextBlocks = [];
 
   contextBlocks.push(_block('Identity', [
-    `Name: GemiX - fusion of SuperGrok and Gemini${cap.isDiscord ? ' (Legal Division)' : ''}.`,
+    `Name: you are ${getModelDisplayName(GROK_MODEL)} inside GemiX - fusion of SuperGrok and Gemini${cap.isDiscord ? ' (Legal Division)' : ''}.`,
     `Time (Europe/Rome): ${now}.`,
-    'Persona: you have a sense of irony, you understand even when it\'s implied.',
+    'Character: you have a sense of irony, you understand even when it\'s implied.',
   ]));
 
   if (profile === PROFILE.DISCORD_THREAD) contextBlocks.push(_buildDiscordPlatform(ctx, promptOpts));
@@ -127,18 +134,9 @@ function buildSystemPrompt(ctx) {
   contextBlocks.push(_block('Limits', buildLimitsLines(profile, { mediaQuotaCounts })));
 
   if (cap.longTermMemory) {
-    let defaultMemory = 'Default guidelines: reply in Italian; use emojis sparingly.';
-    if (cap.voiceReply) {
-      defaultMemory += ' Use voice replies (voice:true) for short, casual, non-technical messages; use text for long or technical ones. Vary voice vs text across your recent replies so you are not repetitive.';
-    }
-    const sharedMemory = ctx.isGroup || ctx.platform === PLATFORM_WA_PERSONAL;
-    if (sharedMemory) {
-      const label = ctx.platform === PLATFORM_WA_PERSONAL ? 'Chat' : 'Group';
-      const body = escapeXml(ctx.groupMemory || defaultMemory);
-      contextBlocks.push(`<Memory>\n    <${label}>${body}</${label}>\n</Memory>`);
-    } else {
-      const body = escapeXml(ctx.userMemory || defaultMemory);
-      contextBlocks.push(`<Memory>\n    <User>${body}</User>\n</Memory>`);
+    contextBlocks.push(_renderCurrentSettings(ctx));
+    if (ctx.settingsReviewDue) {
+      contextBlocks.push(_block('SettingsReview', [SETTINGS_REVIEW_NOTICE]));
     }
   }
 
@@ -154,6 +152,28 @@ function buildSystemPrompt(ctx) {
   sections.push(_block('PreSendCheck', buildPreSendCheck(count)));
 
   return sections.join('\n');
+}
+
+/**
+ * Render the per-chat preferences GemiX must honour, each flagged as (default)
+ * or (custom) so it can tell at a glance what the user actually chose.
+ */
+function _renderCurrentSettings(ctx) {
+  const settings = ctx.settings || { ...defaultSettings(), updatedAt: null };
+  const custom = new Set(customizedFields(settings));
+  const scope = ctx.isGroup
+    ? 'group'
+    : (ctx.platform === PLATFORM_WA_PERSONAL ? 'chat' : 'user');
+  const mark = (field) => (custom.has(field) ? 'custom' : 'default');
+  const lines = [
+    `Voice: ${settings.voice} (${mark('voice')})`,
+    `Effort: ${settings.effort} (${mark('effort')})`,
+    `Language: ${settings.language} (${mark('language')})`,
+    `Memory: ${escapeXml(settings.memory)} (${mark('memory')})`,
+    `Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`,
+  ];
+  const body = _indentLines(lines.join('\n'), 1);
+  return `<CurrentSettings scope="${scope}">\n${body}\n</CurrentSettings>`;
 }
 
 /** Persisted build sub-agent workspace listing (WhatsApp only). Always emitted. */

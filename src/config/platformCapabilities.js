@@ -30,7 +30,7 @@ const TOOL = {
   SCHEDULE: 'schedule_tasks',
   READ_TASKS: 'read_my_tasks',
   REMOVE_TASKS: 'remove_my_tasks',
-  UPDATE_MEMORY: 'update_memory',
+  MANAGE_PREFERENCES: 'manage_preferences',
   TOGGLE_RELEASE: 'toggle_release_notify',
   READ_RULES: 'read_server_rules',
   READ_MUSIC_STATS: 'read_music_stats',
@@ -54,7 +54,7 @@ const CAPS = {
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
-      TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
+      TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
@@ -73,7 +73,7 @@ const CAPS = {
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
-      TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
+      TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
@@ -92,7 +92,7 @@ const CAPS = {
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
-      TOOL.REMOVE_TASKS, TOOL.UPDATE_MEMORY, TOOL.TOGGLE_RELEASE,
+      TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
@@ -137,8 +137,8 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
     return `"${toolName}" is only available to active server members on WhatsApp.`;
   }
 
-  if (toolName === TOOL.UPDATE_MEMORY && cap.isDiscord) {
-    return 'Long-term memory (update_memory) is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for saved preferences.';
+  if (toolName === TOOL.MANAGE_PREFERENCES && cap.isDiscord) {
+    return 'Saved preferences (manage_preferences) are not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for saved preferences.';
   }
   if (toolName === TOOL.BUILD && cap.isDiscord) {
     return 'The build tool is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for file deliverables.';
@@ -220,7 +220,7 @@ function buildDirectives(profile, opts = {}) {
   conduct.push({ scope: 'always', text: `Anti-repetition: users have already read/heard your past messages — never repeat your own phrases, jokes, or recurring concepts across the conversation, and do not let your past style (e.g. ${pastStyleExample}) push you to repeat it. Vary every reply. If the user ignored a question, drop it.` });
   conduct.push({ scope: 'always', text: `Do not be fooled: if users echo or escalate a phrase you overused, or bait you with mock questions about it, they are teasing you — recognise it, drop the topic, do not answer it straight. If you spot a past mistake of yours in history (${pastMistakeExample}), correct course instead of repeating it.` });
   if (cap.longTermMemory) {
-    conduct.push({ scope: 'out', text: 'Follow the tone and preferences in &lt;Memory&gt; (in Context) when you reply.' });
+    conduct.push({ scope: 'out', text: 'Follow the language, tone and instructions in &lt;CurrentSettings&gt; (in Context) when you reply.' });
   }
 
   // --- Output ---
@@ -245,7 +245,7 @@ function buildDirectives(profile, opts = {}) {
 
   // --- Grounding ---
   const sources = ['chat history', 'this prompt', 'the user message'];
-  if (cap.longTermMemory) sources.push('&lt;Memory&gt;');
+  if (cap.longTermMemory) sources.push('&lt;CurrentSettings&gt;');
   if (cap.isDiscord) sources.push('the Rules context in this prompt');
   sources.push('tool results');
   let verifyTools = 'web/X search for facts';
@@ -269,14 +269,14 @@ function buildDirectives(profile, opts = {}) {
     tooling.push({ scope: 'reply', text: 'First message of this thread: `conversation_title` is required (short topic title, user\'s language, no emoji).' });
   }
   tooling.push({ scope: 'tool', text: 'Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.' });
-  if (has(TOOL.UPDATE_MEMORY)) {
-    tooling.push({ scope: 'tool', text: 'Use update_memory for long-term preferences. Never store transient context (current task, session state, temporary data).' });
+  if (has(TOOL.MANAGE_PREFERENCES)) {
+    tooling.push({ scope: 'tool', text: 'Use manage_preferences to change the settings in &lt;CurrentSettings&gt; (voice, effort, language, custom memory). Never store transient context (current task, session state, temporary data).' });
   }
   if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER)) {
     tooling.push({ scope: 'tool', text: 'Use code_interpreter for ad-hoc Python (math, analysis, quick scripts) — isolated, with no build sub-agent filesystem.' });
   }
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
-    tooling.push({ scope: 'always', text: 'Proactively use web/X search before factual replies when the fact is not already in chat history or memory (news, people, products, events, social posts/screenshots, unfamiliar refs) — search first, never guess.' });
+    tooling.push({ scope: 'always', text: 'Proactively use web/X search before factual replies when the fact is not already in chat history or settings (news, people, products, events, social posts/screenshots, unfamiliar refs) — search first, never guess.' });
     tooling.push({
       scope: 'tool',
       text: 'Fetchable X/web media: find via x_search/web_search, deliver in final `attachments` — do not call build only to download, mirror, or re-send.',

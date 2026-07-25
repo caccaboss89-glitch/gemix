@@ -43,7 +43,7 @@ function resolvePersonalChatStorageId(chatId) {
   return PERSONAL_CHAT_STORAGE_PREFIX + String(chatId);
 }
 
-/** Long-term memory file id for a WA personal pair chat (shared by both users). */
+/** Persistent settings file id for a WA personal pair chat (shared by both users). */
 function resolvePersonalMemoryFileId(chatId) {
   const storageId = resolvePersonalChatStorageId(chatId);
   return storageId ? `memory_${storageId}` : null;

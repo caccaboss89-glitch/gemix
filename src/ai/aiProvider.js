@@ -7,6 +7,7 @@
 
 const { GROK_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
 const { MAX_TOKENS } = require('../config/constants');
+const { VALID_EFFORTS } = require('../utils/settingsStore');
 const { applyResponsesTextFormat } = require('./responseSchema');
 const {
   chatToolsToResponsesTools,
@@ -33,6 +34,7 @@ function _applyPromptCacheKey(body, key) {
  * @param {string|null} [opts.historyStorageId] - Enables automatic refresh of
  *   expired tmpfile.link URLs referenced in messages before failing.
  * @param {string|null} [opts.promptCacheKey] - Stable per-conversation xAI cache id.
+ * @param {string} [opts.reasoningEffort] - 'low' | 'medium' | 'high' (default 'high').
  */
 async function callAI(messages, tools = null, opts = {}) {
   const logExtra = opts.requestId ? { requestId: opts.requestId } : {};
@@ -40,7 +42,8 @@ async function callAI(messages, tools = null, opts = {}) {
   const body = {
     model: GROK_MODEL,
     max_output_tokens: MAX_TOKENS,
-    reasoning: { effort: 'high' },
+    // Per-chat setting (manage_preferences), 'high' when unset.
+    reasoning: { effort: VALID_EFFORTS.includes(opts.reasoningEffort) ? opts.reasoningEffort : 'high' },
     store: false,
   };
   _applyPromptCacheKey(body, opts.promptCacheKey);

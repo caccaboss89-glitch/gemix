@@ -13,6 +13,7 @@ const { fetchXaiWithOAuthRetry } = require('../ai/apiClient');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
 const { XAI_TTS_ENABLED, XAI_TTS_VOICE } = require('../config/constants');
+const { defaultSettings } = require('../utils/settingsStore');
 const { FFMPEG_PATH } = require('../config/env');
 const { getXaiAuth } = require('../config/xaiAuth');
 
@@ -24,9 +25,15 @@ const TTS_REQUEST_TIMEOUT_MS = 90 * 1000;
 // Overall voice generation timeout covering TTS and transcode. On expiry, the call fails rather than hanging.
 const VOICE_GENERATION_TIMEOUT_MS = 120 * 1000;
 
-// Fixed xAI TTS parameters: Italian language + MP3 output
-// (transcoded to OGG/Opus for WhatsApp below). Voice id from XAI_TTS_VOICE (.env).
+// Fixed xAI TTS output format (transcoded to OGG/Opus for WhatsApp below).
+// Voice id and language come from the per-chat settings, falling back to the
+// deployment defaults (XAI_TTS_VOICE in .env, Italian).
 const TTS_OUTPUT_FORMAT = { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 };
+
+/** Language passed to the Google Translate fallback (which takes a bare code). */
+function _baseLanguage(language) {
+  return String(language || 'it').split('-')[0].toLowerCase();
+}
 
 /**
  * Strip vocal effect tags from text.
@@ -108,9 +115,10 @@ function convertMp3ToWhatsAppOpus(mp3Buffer) {
  * @param {string} text - Text to convert to speech (max 1000 characters).
  *   May contain xAI speech tags ([pause], <soft>...</soft>, ...) - GemiX
  *   writes them directly; they are stripped for the Google fallback.
+ * @param {object} [settings] - Per-chat settings { voice, language }; defaults when omitted.
  * @returns {Promise<Buffer>} OGG/Opus audio buffer (48kHz mono, iOS-optimized WhatsApp format)
  */
-async function generateVoice(text) {
+async function generateVoice(text, settings = {}) {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(
@@ -119,17 +127,21 @@ async function generateVoice(text) {
     );
   });
   try {
-    return await Promise.race([_generateVoice(text), timeout]);
+    return await Promise.race([_generateVoice(text, settings), timeout]);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
-async function _generateVoice(text) {
+async function _generateVoice(text, settings) {
+  const defaults = defaultSettings();
+  const voiceId = settings?.voice || defaults.voice || XAI_TTS_VOICE;
+  const language = settings?.language || defaults.language;
+
   // Try the direct xAI TTS endpoint first (only if enabled).
   if (XAI_TTS_ENABLED) {
     try {
-      const mp3Buffer = await xaiTTS(text);
+      const mp3Buffer = await xaiTTS(text, voiceId, language);
       return await convertMp3ToWhatsAppOpus(mp3Buffer);
     } catch (err) {
       log.warn('xAI TTS failed, falling back to Google Translate:', err.message);
@@ -138,11 +150,12 @@ async function _generateVoice(text) {
   }
 
   // Google Translate TTS fallback. Strip vocal tags defensively before use,
-  // as the text may contain vocal tags.
+  // as the text may contain vocal tags. It has no voice selection: only the
+  // language is honoured here, so the chosen voice id does not apply.
   const cleanText = stripVocalTags(text);
 
   try {
-    return await googleTranslateTTS(cleanText);
+    return await googleTranslateTTS(cleanText, language);
   } catch (err) {
     if (!XAI_TTS_ENABLED) {
       // Notify admin on Google TTS failure when xAI TTS is disabled.
@@ -159,15 +172,15 @@ async function _generateVoice(text) {
  * Call `POST /v1/tts` and return the MP3 buffer. Uses shared xAI OAuth refresh
  * (disk reload + Hermes when XAI_USE_API_KEY=false).
  */
-async function xaiTTS(text) {
+async function xaiTTS(text, voiceId, language) {
   const { baseUrl } = getXaiAuth();
   const res = await fetchXaiWithOAuthRetry(`${baseUrl}/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       text,
-      voice_id: XAI_TTS_VOICE,
-      language: 'it',
+      voice_id: voiceId,
+      language,
       output_format: TTS_OUTPUT_FORMAT,
     }),
   }, { timeoutMs: TTS_REQUEST_TIMEOUT_MS, maxAttempts: 2 });
@@ -182,11 +195,11 @@ async function xaiTTS(text) {
 // -- Google Translate TTS (fallback) --------------------------------------
 
 /**
- * Google Translate TTS fallback (fixed language: Italian, fixed speed: normal).
+ * Google Translate TTS fallback (no voice selection, fixed speed: normal).
  */
-async function googleTranslateTTS(text) {
+async function googleTranslateTTS(text, language) {
   const urls = googleTTS.getAllAudioUrls(text, {
-    lang: 'it',
+    lang: _baseLanguage(language),
     slow: false,
     host: 'https://translate.google.com',
   });

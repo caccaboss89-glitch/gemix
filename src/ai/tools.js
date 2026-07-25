@@ -7,6 +7,14 @@
 
 const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION } = require('../config/constants');
 const { LEGAL_NAME } = require('../config/env');
+const {
+  defaultSettings,
+  VALID_VOICES,
+  VOICES_MALE,
+  VOICES_FEMALE,
+  VALID_EFFORTS,
+  VALID_LANGUAGES,
+} = require('../utils/settingsStore');
 
 // -- Helpers -------------------------------------------------------------
 
@@ -184,25 +192,46 @@ const TOOL_READ_MUSIC_STATS = makeTool({
   properties: {},
 });
 
-function buildUpdateMemoryTool(isGroup, isPersonalChat = false) {
+function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
   const scope = isGroup
     ? 'the current group'
     : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
+  const defaults = defaultSettings();
   return makeTool({
-    name: 'update_memory',
-    description: `Update personalized memory for ${scope}, for long-term preferences only. Do NOT store transient context.`,
+    name: 'manage_preferences',
+    description: `Change the settings for ${scope} — the ones listed in &lt;CurrentSettings&gt;. `
+      + 'Pass only the fields to change; the others stay as they are. Values marked (default) there are the program defaults.',
     properties: {
-      replace: {
-        type: 'boolean',
-        description: 'true = content replaces the full memory (rewrite/reorganize). false = append content to existing memory. Empty content always clears memory.',
+      voice: {
+        type: 'string',
+        enum: VALID_VOICES,
+        description: `Voice used for spoken replies (default ${defaults.voice}). `
+          + `Male: ${VOICES_MALE.join(', ')}. Female: ${VOICES_FEMALE.join(', ')}. `
+          + 'Pick the one matching the gender and character the user asks for.',
       },
-      content: {
+      effort: {
+        type: 'string',
+        enum: VALID_EFFORTS,
+        description: `How much reasoning you spend per reply (default ${defaults.effort}): low = fastest, high = most thorough.`,
+      },
+      language: {
+        type: 'string',
+        enum: VALID_LANGUAGES,
+        description: `Language you reply and speak in (default ${defaults.language}). Main codes: it, en, es-ES, fr, de, pt-BR, zh, ja, ru, ar-SA.`,
+      },
+      memory: {
         type: 'string',
         allowEmpty: true,
-        description: 'Memory text (max 1000 chars total after save, empty=clear). Always write in English.',
+        description: 'Free-text custom instructions, for anything not covered by the fields above: '
+          + 'e.g. speak with a certain slang, use lots of emoji, prefer voice replies, or what the user is working on in this period '
+          + '(ideas/projects that stay relevant for days, weeks or months — never a one-off question or transient context). '
+          + `Max 1000 chars, always in English; empty resets it to the default. Do not write timestamps: the system tracks them.`,
+      },
+      replace: {
+        type: 'boolean',
+        description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.',
       },
     },
-    required: ['replace', 'content'],
   });
 }
 
@@ -359,7 +388,12 @@ function buildEmailTool(isAdmin) {
 
   const properties = {
     subject: { type: 'string', description: 'Email subject' },
-    body: { type: 'string', description: 'HTML body (no markdown)' },
+    body: {
+      type: 'string',
+      description: 'HTML body (no markdown), rendered as real HTML by the mail client — inline CSS styling, tables and colors are supported. '
+        + 'To show an image INSIDE the body, list it in attachments[] and reference it as &lt;img src="cid:FILENAME"&gt; with its exact filename; '
+        + 'files not referenced this way are sent as normal attachments.',
+    },
     recipient: {
       type: 'object',
       description: isAdmin ? 'Target recipient (email).' : 'Recipient',
@@ -450,14 +484,14 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       type: 'string',
       description: 'Execution time in ISO 8601 (e.g. 2026-06-05T14:30:00). System uses the correct timezone.',
     },
-    recurrence: {
-      type: 'object',
-      description: 'Optional recurrence settings.',
-      properties: {
-        freq: { type: 'string', enum: ['hourly', 'daily', 'weekly', 'monthly'] },
-        endAt: { type: 'string', description: 'End date (ISO 8601).' },
-      },
-      required: ['freq', 'endAt'],
+    repeat: {
+      type: 'string',
+      description: 'OPTIONAL recurrence as an RRULE string; omit for a one-time reminder. '
+        + 'FREQ=HOURLY|DAILY|WEEKLY|MONTHLY (required), plus optional INTERVAL=N (default 1), '
+        + 'BYDAY=MO,TU,WE,TH,FR,SA,SU (weekly only), UNTIL=YYYY-MM-DDTHH:MM:SS (default: the 1-year limit), '
+        + 'EXDATE=YYYY-MM-DD,… (dates to skip). '
+        + 'Examples: "FREQ=DAILY;INTERVAL=2" every 2 days; "FREQ=WEEKLY;BYDAY=MO,FR" every Monday and Friday; '
+        + '"FREQ=MONTHLY;INTERVAL=3;EXDATE=2026-12-25" every 3 months except that date.',
     },
   };
 
@@ -478,9 +512,9 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Schedule reminders for the current chat, other active members or external contacts. The reminder is DELIVERED at the scheduled time to whoever you set as recipient — set it whenever the target is not the current chat. One task per person.'
+      ? 'Schedule reminders for the current chat, other active members or external contacts. The reminder is DELIVERED at the scheduled time to whoever you set as recipient — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails.'
       : isActiveMember
-        ? 'Schedule reminders for the current chat or other active members. The reminder is DELIVERED to the recipient you set — set it whenever the target is not the current chat. One task per person.'
+        ? 'Schedule reminders for the current chat or other active members. The reminder is DELIVERED to the recipient you set — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails.'
         : 'Schedule personal reminders for the current chat.',
     properties: {
       tasks: {
@@ -625,7 +659,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   }
 
   // 1b. Grok Imagine - image and video generation (WhatsApp only).
-  // Per-round caps live in PER_ROUND_TOOL_LIMITS (toolCallExecution.js).
+  // Not capped per round: the binding limit is the per-user weekly quota
+  // (mediaUsageLimits.js), reserved atomically before each generation.
   if (isWhatsApp) {
     tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO);
   }
@@ -661,10 +696,10 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
   }
 
-  // 5. Memory, Meta & Stats (no long-term memory on Discord)
+  // 5. Preferences, Meta & Stats (no persistent settings on Discord)
   if (!isDiscord) {
     const isPersonalChat = userCtx.platform === PLATFORM_WA_PERSONAL;
-    tools.push(buildUpdateMemoryTool(isWhatsAppGroup, isPersonalChat));
+    tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
   }
   if (!isDiscord) {
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);

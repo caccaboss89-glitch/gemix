@@ -6,22 +6,26 @@
 // human-readable confirmation messages with recipient/recurrence details.
 
 const crypto = require('crypto');
-const { MAX_TASK_DAYS, VALID_RECURRENCE_FREQS } = require('../config/constants');
+const { MAX_TASK_DAYS } = require('../config/constants');
 const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
-const { resolveActiveMemberByName, findMemberByWa } = require('../config/members');
+const { resolveActiveMemberByName } = require('../config/members');
 const { normalizePhoneToJid } = require('./whatsappSender');
 const { normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('../utils/text');
 const { modifyTaskFile } = require('../utils/taskStore');
+const { parseRecurrenceRule, describeRecurrence, toRomeISO } = require('../utils/recurrence');
+const { formatTaskRecipient } = require('../utils/taskRecipient');
 
 /**
  * Schedule one or more tasks for a user or group.
  * Validates dates, permissions, and destinations before writing to task files.
  * @param {Array} tasks - Array of task objects from GemiX {
  *   content, scheduledAt,
+ *   repeat?: RRULE string (e.g. "FREQ=DAILY;INTERVAL=2"),
  *   whatsapp: { toGroup?, toPrivate?, recipient?: { name?, phone? } }
  * }
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, isActiveMember, isAdmin, isGroup, groupId }
- * @returns {string} Result message with task confirmation or error details
+ * @returns {{ success: boolean, tasks: Array, message?: string }} Per-task
+ *   confirmations/errors plus a single (pluralized) verification note.
  */
 async function scheduleTasks(tasks, ctx) {
   const now = new Date();
@@ -56,34 +60,49 @@ async function scheduleTasks(tasks, ctx) {
       continue;
     }
 
-    // Recurrence validation (available for all users)
+    // Recurrence validation (available for all users): one compact RRULE
+    // string, normalized here and persisted in structured form for the engine.
     let recurrence = null;
-    if (task.recurrence) {
-      const { freq, endAt } = task.recurrence;
-      if (!freq || !VALID_RECURRENCE_FREQS.includes(freq)) {
-        results.push({ success: false, error: `Invalid recurrence frequency: "${freq}". Use: ${VALID_RECURRENCE_FREQS.join(', ')}.` });
+    if (task.repeat) {
+      const parsed = parseRecurrenceRule(task.repeat);
+      if (!parsed.ok) {
+        results.push({ success: false, error: parsed.error });
         continue;
       }
-      // Convert local endAt datetime to ISO with correct offset
-      const endAtISO = convertRomeLocalToISO(endAt);
-      if (!endAtISO) {
-        results.push({ success: false, error: `Invalid recurrence end date: "${endAt}". Use format: YYYY-MM-DDTHH:MM:SS` });
-        continue;
+      const { freq, interval, byday, exdate, until } = parsed.value;
+
+      // UNTIL is optional: default to the 1-year limit so a recurrence always ends.
+      let untilISO = toRomeISO(new Date(maxDateMs));
+      if (until) {
+        // Accept a bare date (treated as end of that day) or a full datetime.
+        const untilLocal = /^\d{4}-\d{2}-\d{2}$/.test(until) ? `${until}T23:59:59` : until;
+        untilISO = convertRomeLocalToISO(untilLocal);
+        if (!untilISO) {
+          results.push({ success: false, error: `Invalid UNTIL: "${until}". Use YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD.` });
+          continue;
+        }
+        const untilDate = new Date(untilISO);
+        if (isNaN(untilDate.getTime())) {
+          results.push({ success: false, error: `Invalid UNTIL: "${until}"` });
+          continue;
+        }
+        if (untilDate.getTime() <= scheduledAtTime) {
+          results.push({ success: false, error: 'UNTIL must be after the reminder start date.' });
+          continue;
+        }
+        if (untilDate.getTime() > maxDateMs) {
+          results.push({ success: false, error: 'UNTIL exceeds the 1-year limit.' });
+          continue;
+        }
       }
-      const endDate = new Date(endAtISO);
-      if (isNaN(endDate.getTime())) {
-        results.push({ success: false, error: `Invalid recurrence end date: "${endAt}"` });
-        continue;
-      }
-      if (endDate.getTime() <= scheduledAtTime) {
-        results.push({ success: false, error: 'Recurrence end date must be after the start date.' });
-        continue;
-      }
-      if (endDate.getTime() > maxDateMs) {
-        results.push({ success: false, error: `Recurrence end date exceeds the 1-year limit.` });
-        continue;
-      }
-      recurrence = { freq, endAt: endAtISO };
+
+      recurrence = {
+        freq,
+        interval,
+        until: untilISO,
+        ...(byday.length ? { byday } : {}),
+        ...(exdate.length ? { exdate } : {}),
+      };
     }
 
     if (task.whatsapp && task.whatsapp.toGroup && !ctx.isGroup) {
@@ -191,28 +210,22 @@ async function scheduleTasks(tasks, ctx) {
 
     const scheduledAtRome = formatTimestamp(scheduledAt);
 
-    // Build a human-readable recipient label:
-    // - active member -> first name only
-    // - external phone (whatsapp JID) -> phone number
-    // - current user (self) -> nothing (omit)
-    let recipientLabel = '';
-    if (destinations.whatsapp) {
-      const destJid = destinations.whatsapp;
-      const isSelf = destJid === ctx.waJid;
-      if (!isSelf) {
-        const member = findMemberByWa(destJid);
-        if (member) {
-          recipientLabel = member.name.split(' ')[0]; // first name only
-        } else {
-          recipientLabel = destJid.split('@')[0]; // phone number
-        }
+    // Recipient label from the caller's perspective (empty = self-reminder):
+    // admin sees the phone (with the member first name in parentheses when
+    // known), active members see the member first name.
+    const recipientLabel = formatTaskRecipient(destinations, {
+      isAdmin: ctx.isAdmin,
+      waJid: ctx.waJid,
+      groupWord: 'gruppo',
+    });
+
+    let recLabel = '';
+    if (recurrence) {
+      recLabel = `\n  🔁 Ricorrenza: ${describeRecurrence(recurrence, 'it')} fino al ${formatTimestamp(recurrence.until)}`;
+      if (recurrence.exdate && recurrence.exdate.length) {
+        recLabel += ` (escluse: ${recurrence.exdate.join(', ')})`;
       }
     }
-    if (destinations.whatsappGroup) {
-      recipientLabel = recipientLabel ? `${recipientLabel} + gruppo` : 'gruppo';
-    }
-
-    const recLabel = recurrence ? `\n  🔁 Ricorrenza: ${recurrence.freq} fino al ${formatTimestamp(recurrence.endAt)}` : '';
     const recipientLine = recipientLabel ? `\n  👤 Destinatario: ${recipientLabel}` : '';
 
     let taskSummary =
@@ -227,12 +240,19 @@ async function scheduleTasks(tasks, ctx) {
       taskSummary = dstWarning + '\n' + taskSummary;
     }
 
-    taskSummary += '\n\n⚠️ Verifica che ogni parametro corrisponda esattamente a quanto richiesto dall\'utente. Se qualcosa non è corretto, elimina il task con il suo ID e ricrealo.';
-
     results.push({ success: true, message: taskSummary });
   }
 
-  return { success: true, message: results };
+  // Single verification note (pluralized) instead of repeating it per task.
+  const okCount = results.filter(r => r.success && !r.warning).length;
+  let verifyNote = null;
+  if (okCount === 1) {
+    verifyNote = '⚠️ Verifica che il promemoria corrisponda esattamente a quanto richiesto dall\'utente. Se qualcosa non è corretto, elimina il task con il suo ID e ricrealo.';
+  } else if (okCount > 1) {
+    verifyNote = '⚠️ Verifica che tutti i promemoria corrispondano esattamente a quanto richiesto dall\'utente. Se qualcosa non è corretto, elimina il task interessato con il suo ID e ricrealo.';
+  }
+
+  return { success: true, tasks: results, ...(verifyNote ? { message: verifyNote } : {}) };
 }
 
 module.exports = { scheduleTasks };

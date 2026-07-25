@@ -8,7 +8,8 @@
 const fsPromises = require('fs').promises;
 const fs = require('fs');
 const { TASKS_DIR, SCHEDULER_INTERVAL_MS, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
-const { getRomeISO, convertRomeLocalToISO } = require('../utils/time');
+const { getRomeISO } = require('../utils/time');
+const { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped } = require('../utils/recurrence');
 const { addScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { checkNewRelease } = require('./releaseMonitor');
@@ -27,52 +28,6 @@ const TASK_DELIVERY_MAX_ATTEMPTS = 3;
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
 let lastReleaseCheckTime = 0;
-
-/**
- * Compute the next occurrence date for a recurring task.
- * Maintains correct DST-aware offset for Italy (Europe/Rome timezone).
- * @param {string} scheduledAtISO - Current ISO date string with offset (e.g., "2026-04-17T16:30:00+02:00")
- * @param {string} freq - Frequency: 'hourly' | 'daily' | 'weekly' | 'monthly'
- * @returns {string|null} Next occurrence ISO with correct offset or null if freq is invalid
- */
-function computeNextOccurrence(scheduledAtISO, freq) {
-  const baseDate = new Date(scheduledAtISO);
-  if (isNaN(baseDate.getTime())) return null;
-
-  switch (freq) {
-    case 'hourly': baseDate.setUTCHours(baseDate.getUTCHours() + 1); break;
-    case 'daily': baseDate.setUTCDate(baseDate.getUTCDate() + 1); break;
-    case 'weekly': baseDate.setUTCDate(baseDate.getUTCDate() + 7); break;
-    case 'monthly': {
-      const currentMonth = baseDate.getUTCMonth();
-      const targetDay = baseDate.getUTCDate();
-      baseDate.setUTCMonth(currentMonth + 1, 1);
-      const daysInNextMonth = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth() + 1, 0)).getUTCDate();
-      baseDate.setUTCDate(Math.min(targetDay, daysInNextMonth));
-      break;
-    }
-    default: return null;
-  }
-
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Rome',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-
-  const parts = Object.fromEntries(
-    formatter.formatToParts(baseDate).map(p => [p.type, p.value])
-  );
-
-  const hour = parts.hour === '24' ? '00' : parts.hour;
-  const localISO = `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}:${parts.second}`;
-  return convertRomeLocalToISO(localISO);
-}
 
 /**
  * Periodic sweeper for the build sub-agent's per-workspace tree.
@@ -201,7 +156,7 @@ async function _executeTaskWithRetries(task) {
   return false;
 }
 
-function _finalizeDueTasks(data, dueTasks, deliveredIds) {
+function _finalizeDueTasks(data, dueTasks, handledIds) {
   const dueIds = new Set(dueTasks.map(t => t.id));
   const updatedTasks = [];
 
@@ -210,12 +165,15 @@ function _finalizeDueTasks(data, dueTasks, deliveredIds) {
       updatedTasks.push(t);
       continue;
     }
-    if (!deliveredIds.has(t.id)) {
+    if (!handledIds.has(t.id)) {
+      // Delivery failed after all retries: drop the task.
       continue;
     }
-    if (t.recurrence && t.recurrence.freq) {
-      const next = computeNextOccurrence(t.scheduledAt, t.recurrence.freq);
-      if (next && (!t.recurrence.endAt || new Date(next).getTime() <= new Date(t.recurrence.endAt).getTime())) {
+    const recurrence = normalizePersistedRecurrence(t.recurrence);
+    if (recurrence) {
+      // Hops over excluded dates and stops once UNTIL is passed.
+      const next = advanceOccurrence(t.scheduledAt, recurrence);
+      if (next) {
         t.scheduledAt = next;
         updatedTasks.push(t);
         log.info(`Recurring task ${t.id} rescheduled: ${t.scheduledAt}`);
@@ -223,6 +181,7 @@ function _finalizeDueTasks(data, dueTasks, deliveredIds) {
         log.info(`Recurring task ${t.id} ended (recurrence end reached).`);
       }
     }
+    // One-time handled task: delivered and done, not re-added.
   }
 
   data.tasks = updatedTasks;
@@ -277,10 +236,18 @@ async function checkAndExecuteTasks() {
 
     if (!dueTasks.length) continue;
 
-    const deliveredIds = new Set();
+    // "Handled" = delivered OR intentionally skipped (occurrence on an excepted
+    // date). Both advance a recurring task; only a failed delivery drops it.
+    const handledIds = new Set();
     for (const task of dueTasks) {
+      const norm = normalizePersistedRecurrence(task.recurrence);
+      if (norm && isDateSkipped(task.scheduledAt, norm.exdate)) {
+        handledIds.add(task.id);
+        log.info(`Task ${task.id} occurrence skipped (recurrence exception)`);
+        continue;
+      }
       if (await _executeTaskWithRetries(task)) {
-        deliveredIds.add(task.id);
+        handledIds.add(task.id);
         log.info(`Task executed: ${task.id}`);
       }
     }
@@ -288,7 +255,7 @@ async function checkAndExecuteTasks() {
     try {
       await modifyTaskFile(fileId, async (data) => {
         if (!data || !data.tasks || data.tasks.length === 0) return data;
-        return _finalizeDueTasks(data, dueTasks, deliveredIds);
+        return _finalizeDueTasks(data, dueTasks, handledIds);
       });
     } catch (err) {
       log.error(`Task file finalize error ${fileId}:`, err.message);

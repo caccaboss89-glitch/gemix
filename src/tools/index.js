@@ -21,8 +21,7 @@ const { normalizePhoneToJid } = require('./whatsappSender');
 const { recordSentMessage } = require('../utils/sentMessagesStore');
 const { readSentMessages } = require('./sentMessagesReader');
 const { readMusicStats } = require('./musicStats');
-const { updatePrivateMemory } = require('./userMemory');
-const { updateGroupMemory } = require('./groupMemory');
+const { managePreferences } = require('./preferences');
 const { toggleReleaseNotify } = require('./releaseNotify');
 const { buildTool } = require('./build');
 const { pushBufferAttachment } = require('../utils/attachments');
@@ -34,6 +33,12 @@ const { createLogger } = require('../utils/logger');
 const { toEmailAttachment } = require('../utils/attachments');
 const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
 const { sendWhatsAppAttachment, partitionAttachments, PLATFORM } = require('../utils/attachmentDelivery');
+const {
+  buildEmailBodyHtml,
+  resolveInlineImages,
+  appendHtmlBlock,
+  buildNoticeBlock,
+} = require('../utils/emailHtml');
 
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { resolveDeliverySelection } = require('../utils/deliverySelection');
@@ -46,18 +51,6 @@ const log = createLogger('Tools');
 
 function _getVoiceLimitChatKey(userCtx) {
   return userCtx?.chatId || userCtx?.groupId || userCtx?.waJid || userCtx?.userId || 'unknown';
-}
-
-/**
- * Escape HTML special characters to prevent injection in email bodies.
- */
-function _escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 const WA_MISSING_RECIPIENT_ERROR =
@@ -296,7 +289,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           result = { success: false, error: 'includeGroupTasks not available: only in WhatsApp groups.' };
           break;
         }
-        result = await readTasks(userCtx.taskFileId, groupFileId, includeGroup);
+        result = await readTasks(userCtx.taskFileId, groupFileId, includeGroup, {
+          isAdmin: userCtx.isAdmin,
+          isActiveMember: userCtx.isActiveMember,
+          waJid: userCtx.waJid,
+        });
         break;
       }
 
@@ -362,51 +359,54 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           ? ` Attachment(s) not resolved and NOT sent: ${emailSelection.missing.join(', ')}.`
           : '';
         try {
-          // Partition into direct email attach vs link-only fallback
-          if (emailSelection.attachments.length > 0) {
-            const { direct: directAtts, linkOnly: linkOnlyAtts } = partitionAttachments(
-              emailSelection.attachments,
-              PLATFORM.EMAIL,
-            );
-            const sent = directAtts
-              .map(att => toEmailAttachment(att))
-              .filter(emailAtt => emailAtt && emailAtt.filename && (emailAtt.content || emailAtt.path));
+          // The body is HTML by contract: sanitize and pass it through, then
+          // turn any cid: reference into a real inline image.
+          let emailBodyHtml = buildEmailBodyHtml(stripOutgoingDeliveryArtifacts(args.body || ''));
+          const inlineResult = resolveInlineImages(emailBodyHtml, emailSelection.attachments);
+          emailBodyHtml = inlineResult.html;
 
-            let fallbackMessage = null;
-            if (linkOnlyAtts.length > 0) {
-              try {
-                const fallbackData = buildFallbackAttachmentMessage(linkOnlyAtts, { platform: 'email' });
-                fallbackMessage = fallbackData.message;
-              } catch (err) {
-                log.error(`Failed to generate email link-fallback: ${err.message}`);
-                fallbackMessage = '⚠️ Alcuni allegati non hanno potuto essere inclusi direttamente nell\'email e non è stato possibile creare link temporanei.';
-              }
+          // Files not embedded in the body are delivered as normal attachments,
+          // with the usual link fallback for anything too heavy to attach.
+          const { direct: directAtts, linkOnly: linkOnlyAtts } = partitionAttachments(
+            inlineResult.rest,
+            PLATFORM.EMAIL,
+          );
+          const sent = directAtts
+            .map(att => toEmailAttachment(att))
+            .filter(emailAtt => emailAtt && emailAtt.filename && (emailAtt.content || emailAtt.path));
+
+          if (linkOnlyAtts.length > 0) {
+            let fallbackMessage;
+            try {
+              fallbackMessage = buildFallbackAttachmentMessage(linkOnlyAtts, { platform: 'email' }).message;
+            } catch (err) {
+              log.error(`Failed to generate email link-fallback: ${err.message}`);
+              fallbackMessage = '⚠️ Alcuni allegati non hanno potuto essere inclusi direttamente nell\'email e non è stato possibile creare link temporanei.';
             }
-
-            let emailBodyHtml = `<div style="font-family:sans-serif">${_escapeHtml(stripOutgoingDeliveryArtifacts(args.body || '')).replace(/\n/g, '<br>')}</div>`;
-
-            if (fallbackMessage) {
-              emailBodyHtml += `<br><hr style="border:0;border-top:1px solid #ccc;margin:20px 0;"><div style="font-family:sans-serif;color:#555;">${_escapeHtml(fallbackMessage).replace(/\n/g, '<br>')}</div>`;
-            }
-
-            // Send main email with all direct attachments
-            await sendEmailDirect(
-              targetEmail.email,
-              stripOutgoingDeliveryArtifacts(args.subject || ''),
-              emailBodyHtml,
-              sent
-            );
-
-            result = { success: true, message: `Email sent successfully to ${targetEmail.display}${sent.length > 0 ? ` with ${sent.length} attachment(s)` : ''}${linkOnlyAtts.length > 0 ? ` (${linkOnlyAtts.length} via links)` : ''}.${emailMissingNote}` };
-          } else {
-            await sendEmailDirect(
-              targetEmail.email,
-              stripOutgoingDeliveryArtifacts(args.subject || ''),
-              `<div style="font-family:sans-serif">${_escapeHtml(stripOutgoingDeliveryArtifacts(args.body || '')).replace(/\n/g, '<br>')}</div>`,
-              []
-            );
-            result = { success: true, message: `Email sent successfully to ${targetEmail.display}.${emailMissingNote}` };
+            emailBodyHtml = appendHtmlBlock(emailBodyHtml, buildNoticeBlock(fallbackMessage));
           }
+
+          await sendEmailDirect(
+            targetEmail.email,
+            stripOutgoingDeliveryArtifacts(args.subject || ''),
+            emailBodyHtml,
+            [...inlineResult.inline, ...sent],
+          );
+
+          const inlineNote = inlineResult.inline.length > 0
+            ? ` ${inlineResult.inline.length} image(s) embedded in the body.`
+            : '';
+          const unresolvedNote = inlineResult.unresolved.length > 0
+            ? ` Removed cid reference(s) with no matching image file: ${inlineResult.unresolved.join(', ')}.`
+            : '';
+          const parts = [
+            sent.length > 0 ? ` with ${sent.length} attachment(s)` : '',
+            linkOnlyAtts.length > 0 ? ` (${linkOnlyAtts.length} via links)` : '',
+          ].join('');
+          result = {
+            success: true,
+            message: `Email sent successfully to ${targetEmail.display}${parts}.${inlineNote}${unresolvedNote}${emailMissingNote}`,
+          };
           // Log this outgoing message so the caller can later confirm it was sent.
           recordSentMessage({
             senderKey: userCtx.taskFileId,
@@ -504,13 +504,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         break;
       }
 
-      case 'update_memory': {
-        const replace = args.replace === true;
-        if (userCtx.isGroup) {
-          result = await updateGroupMemory(args.content, userCtx.groupId, replace);
-        } else {
-          result = await updatePrivateMemory(args.content, userCtx.memoryFileId, replace);
-        }
+      case 'manage_preferences': {
+        result = await managePreferences(args, userCtx.settingsFileId);
         break;
       }
 

@@ -50,7 +50,7 @@ const { appendResearchBadge, buildResearchBadgeText } = require('./utils/footer'
 const { resolveWorkspaceId, workspaceIdToSlug } = require('./utils/workspaceId');
 const { touchActivity } = require('./utils/buildState');
 const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
-const { readMemory } = require('./utils/memoryStore');
+const { readSettings, isReviewDue, markReviewed } = require('./utils/settingsStore');
 const { cleanAssistantResponse, stripOutgoingDeliveryArtifacts } = require('./utils/text');
 const { sanitizeDiscordThreadTitle } = require('./utils/discord');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
@@ -89,20 +89,22 @@ function extractPlainTextContent(content) {
   return '';
 }
 
-function reloadLongTermMemory(ctx, ui) {
-  if (ctx.platform === PLATFORM_DISCORD) return;
+/**
+ * Settings file for this chat: per group, per personal-chat pair, or per user.
+ * @returns {string|null} null on Discord (no persistent settings there).
+ */
+function resolveSettingsFileId(ctx, ui) {
+  if (ctx.platform === PLATFORM_DISCORD) return null;
   const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
-  const isPersonalWa = ctx.platform === PLATFORM_WA_PERSONAL;
-  if (isWhatsAppGroup) {
-    ctx.groupMemory = readMemory('memory_' + getGroupTaskFileId(ctx.groupId));
-    ctx.userMemory = null;
-  } else if (isPersonalWa && ctx.chatId) {
-    ctx.groupMemory = readMemory(resolvePersonalMemoryFileId(ctx.chatId));
-    ctx.userMemory = null;
-  } else {
-    ctx.userMemory = readMemory('memory_' + ui.taskFileId);
-    ctx.groupMemory = null;
-  }
+  if (isWhatsAppGroup) return 'memory_' + getGroupTaskFileId(ctx.groupId);
+  if (ctx.platform === PLATFORM_WA_PERSONAL && ctx.chatId) return resolvePersonalMemoryFileId(ctx.chatId);
+  return 'memory_' + ui.taskFileId;
+}
+
+/** Re-read the persisted preferences so a manage_preferences call takes effect at once. */
+function reloadSettings(ctx, ui) {
+  if (ctx.platform === PLATFORM_DISCORD) return;
+  ctx.settings = readSettings(resolveSettingsFileId(ctx, ui));
 }
 
 function getReleaseNotifyTarget(ctx, ui) {
@@ -209,26 +211,18 @@ async function handleMessage(ctx) {
     // Voice replies are a structured-reply flag (WhatsApp dedicated only),
     // never a tool. The model sets `voice:true` and writes `response` with TTS tags.
     const allowVoice = Boolean(getCapabilities(ctx).voiceReply);
-    const memoryFileId = isDiscord ? null : ('memory_' + ui.taskFileId);
-    const sharedMemoryFileId = isPersonalWa && ctx.chatId
-      ? resolvePersonalMemoryFileId(ctx.chatId)
-      : null;
+    const settingsFileId = resolveSettingsFileId(ctx, ui);
 
-    let userMemory = null;
-    let groupMemory = null;
-    if (!isDiscord) {
-      if (isWhatsAppGroup) {
-        const groupMemoryFileId = 'memory_' + getGroupTaskFileId(ctx.groupId);
-        groupMemory = readMemory(groupMemoryFileId);
-      } else if (sharedMemoryFileId) {
-        groupMemory = readMemory(sharedMemoryFileId);
-      } else {
-        userMemory = readMemory(memoryFileId);
-      }
+    // Per-chat preferences drive the prompt's <CurrentSettings>, the reasoning
+    // effort, and the TTS voice/language.
+    ctx.settings = isDiscord ? null : readSettings(settingsFileId);
+    // Monthly renewal notice: injected only when something is customized, and
+    // recorded right away so it cannot repeat even if it goes unanswered.
+    ctx.settingsReviewDue = Boolean(ctx.settings && isReviewDue(ctx.settings));
+    if (ctx.settingsReviewDue) {
+      try { await markReviewed(settingsFileId); }
+      catch (err) { log.warn(`markReviewed failed: ${err.message}`); }
     }
-
-    ctx.userMemory = userMemory;
-    ctx.groupMemory = groupMemory;
 
     if (isDiscord) {
       ctx.rulesContext = loadRegolamento();
@@ -239,7 +233,7 @@ async function handleMessage(ctx) {
       isAdmin: userIsAdmin,
       member: ui.member,
       taskFileId: ui.taskFileId,
-      memoryFileId: sharedMemoryFileId || memoryFileId,
+      settingsFileId,
       userId: ctx.userId,
       userName: ctx.userName,
       waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
@@ -440,7 +434,7 @@ async function handleMessage(ctx) {
         if (ctx.presence && typeof ctx.presence.setRecording === 'function') {
           try { await ctx.presence.setRecording(); } catch { /* best effort */ }
         }
-        voiceBuffer = await generateVoice(spoken);
+        voiceBuffer = await generateVoice(spoken, ctx.settings || {});
       } catch (err) {
         log.error(`   Voice generation failed (${err.message}); replying as text`);
         return null;
@@ -479,7 +473,7 @@ async function handleMessage(ctx) {
       // Refresh the workspace listing before each AI call so any file the
       // build sub-agent just produced shows up immediately in <BuildWorkspace>.
       refreshUserWorkspace();
-      reloadLongTermMemory(ctx, ui);
+      reloadSettings(ctx, ui);
 
       // Delivery / structured-reply state for this round: drives the prompt's
       // delivery instructions and whether conversation_title is required.
@@ -498,6 +492,7 @@ async function handleMessage(ctx) {
         responseFormat,
         historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
+        reasoningEffort: ctx.settings?.effort,
       };
 
       const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
@@ -514,7 +509,7 @@ async function handleMessage(ctx) {
         }
         messages.push(assistantMsg);
 
-        // Reset per-round tool caps (generate_image x5, generate_video x3, etc.).
+        // Reset per-round tool caps (build, read_server_rules, read_music_stats).
         deliveryCtx.roundToolCounts = new Map();
 
         const orderedCalls = assistantMsg.tool_calls;
@@ -655,7 +650,7 @@ async function handleMessage(ctx) {
     let wrapUpAttachments = [];
     let wrapUpVoice = false;
     try {
-      reloadLongTermMemory(ctx, ui);
+      reloadSettings(ctx, ui);
       const deliveryState = computeDeliveryState();
       ctx.deliveryState = deliveryState;
       ctx.isFirstTurn = deliveryState.includeTitle;
@@ -676,6 +671,7 @@ async function handleMessage(ctx) {
         responseFormat,
         historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
+        reasoningEffort: ctx.settings?.effort,
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);

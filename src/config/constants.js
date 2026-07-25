@@ -86,9 +86,6 @@ module.exports = {
 
   // Media
   MAX_IMAGE_BYTES: 8 * 1024 * 1024,
-  // Main brain: max generate_image / generate_video tool calls in one model turn.
-  MAX_GENERATE_IMAGE_PER_ROUND: 5,
-  MAX_GENERATE_VIDEO_PER_ROUND: 3,
   VIDEO_GEN_DURATION_S: 6,
   VIDEO_GEN_RESOLUTION: '480p',
   MAX_TTS_CHARS: 1000,
@@ -111,7 +108,6 @@ module.exports = {
   TASK_PREFIX_DISCORD: 'dc_',
   TASK_PREFIX_WA: 'wa_',
   TASK_PREFIX_GROUP: 'group_',
-  VALID_RECURRENCE_FREQS: ['hourly', 'daily', 'weekly', 'monthly'],
 
   // WhatsApp Puppeteer
   PUPPETEER_ARGS: [
