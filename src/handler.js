@@ -340,6 +340,10 @@ async function handleMessage(ctx) {
     };
 
     let rounds = 0;
+    // xAI sometimes returns completed+reasoning with no message/tool_calls.
+    // One extra attempt only — do not burn the full tool-round budget.
+    let emptyOutputRetries = 0;
+    const MAX_EMPTY_OUTPUT_RETRIES = 1;
     let lastModelUsed = null;
     const sessionStartTime = Date.now();
     let sessionDurationLimitReached = false;
@@ -605,13 +609,15 @@ async function handleMessage(ctx) {
       log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
       // xAI occasionally returns status=completed with only a reasoning item
-      // (no function_call, no message/output_text). Retry while rounds remain
-      // instead of immediately falling back to the empty-response error.
+      // (no function_call, no message/output_text). At most one retry; if it
+      // still returns empty (or the API is 503-flaky), fall back immediately —
+      // do not spin through all MAX_TOOL_ROUNDS.
       if (!text.trim() && finalAttachments.length === 0) {
-        if (rounds < MAX_TOOL_ROUNDS) {
+        if (emptyOutputRetries < MAX_EMPTY_OUTPUT_RETRIES && rounds < MAX_TOOL_ROUNDS) {
+          emptyOutputRetries += 1;
           log.warn(
-            '   Empty model output (no tool call, no structured reply) — retrying '
-            + `(round ${rounds}/${MAX_TOOL_ROUNDS})`,
+            `   Empty model output (no tool call, no structured reply) — one retry `
+            + `(${emptyOutputRetries}/${MAX_EMPTY_OUTPUT_RETRIES})`,
           );
           if (Array.isArray(assistantMsg._responsesOutput) && assistantMsg._responsesOutput.length > 0) {
             messages.push(assistantMsg);
@@ -625,7 +631,11 @@ async function handleMessage(ctx) {
           });
           continue;
         }
-        log.warn('   Empty AI response after retries, sending fallback');
+        log.warn(
+          emptyOutputRetries > 0
+            ? '   Empty AI response after retry, sending fallback'
+            : '   Empty AI response, sending fallback',
+        );
         await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
         return {
           text: FALLBACK_ERROR_PREFIX,
