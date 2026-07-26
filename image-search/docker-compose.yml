@@ -6,11 +6,16 @@
 #   cd /path/to/GemiX/image-search
 #   # set a random secret once:
 #   sed -i "s/CHANGE_ME_TO_A_LONG_RANDOM_STRING/$(openssl rand -hex 32)/" searxng/settings.yml
+#   # Prefer Compose V2 plugin; fallback to docker-compose V1 if needed:
+#   docker compose version || docker-compose version
 #   docker compose up -d
+#   # if "unknown command: compose" or flag errors:
+#   #   sudo apt-get install -y docker-compose-plugin
+#   #   # or: docker-compose up -d
 #   curl -sS 'http://127.0.0.1:8888/search?q=cats&format=json&categories=images' | head -c 400
 #
-# Optional .env next to GemiX:
-#   IMAGE_SEARCH_BASE_URL=http://127.0.0.1:8888
+# Optional in GemiX .env (commented by default; env.js default is the same URL):
+#   # IMAGE_SEARCH_BASE_URL=http://127.0.0.1:8888
 
 services:
   searxng:

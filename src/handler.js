@@ -604,8 +604,28 @@ async function handleMessage(ctx) {
       let text = cleanAssistantResponse(parsed.text || '');
       log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
+      // xAI occasionally returns status=completed with only a reasoning item
+      // (no function_call, no message/output_text). Retry while rounds remain
+      // instead of immediately falling back to the empty-response error.
       if (!text.trim() && finalAttachments.length === 0) {
-        log.warn('   Empty AI response, sending fallback');
+        if (rounds < MAX_TOOL_ROUNDS) {
+          log.warn(
+            '   Empty model output (no tool call, no structured reply) — retrying '
+            + `(round ${rounds}/${MAX_TOOL_ROUNDS})`,
+          );
+          if (Array.isArray(assistantMsg._responsesOutput) && assistantMsg._responsesOutput.length > 0) {
+            messages.push(assistantMsg);
+          }
+          messages.push({
+            role: 'user',
+            content:
+              '[System] Your previous output was empty: no tool call and no structured reply. '
+              + 'Immediately call any tools you need (e.g. search_images for web photos) '
+              + 'or send a valid structured reply. Never leave the reply empty.',
+          });
+          continue;
+        }
+        log.warn('   Empty AI response after retries, sending fallback');
         await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
         return {
           text: FALLBACK_ERROR_PREFIX,

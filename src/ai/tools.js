@@ -201,9 +201,6 @@ const TOOL_X_SEARCH_NATIVE = {
   enable_video_understanding: true,
 };
 
-/** Native server-side search tools (web + X) for the main brain. */
-const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
-
 // -- Static tool definitions (schema never varies) -------------------------
 
 const TOOL_SEARCH_IMAGES = makeTool({
@@ -703,44 +700,27 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   const tools = [];
 
-  // 1. Search & Information Retrieval. web_search and x_search are native
-  // xAI server-side tools (zero round cost), available on every platform.
-  // search_images is a local function tool (SearXNG): vision previews
-  // (input_image) + direct image URLs for final attachments. web_search has
-  // no image search/understanding (facts/links only).
-  // History files are attached natively on user-side entries (no read_file on
-  // the main brain). Assistant-side entries stay [Attachment] tags only.
-  tools.push(
-    ...NATIVE_SEARCH_TOOLS,
-    TOOL_SEARCH_IMAGES,
-  );
+  // Order = importance / how often the main brain should reach for them.
+  // 1) Search: native web → local web images → native X (image mode off on web).
+  // History files attach natively on user turns; assistant history stays [Attachment] tags.
+  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_SEARCH_IMAGES, TOOL_X_SEARCH_NATIVE);
+
+  // 2) Media generation (WhatsApp). Weekly quota is the real cap (mediaUsageLimits).
   if (isWhatsApp) {
-    tools.push(TOOL_MUSIC_CREATOR);
+    tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO, TOOL_MUSIC_CREATOR);
   }
 
-  // 1b. Grok Imagine - image and video generation (WhatsApp only).
-  // Not capped per round: the binding limit is the per-user weekly quota
-  // (mediaUsageLimits.js), reserved atomically before each generation.
-  if (isWhatsApp) {
-    tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO);
-  }
-
-  // 1c. xAI server-side code interpreter - native Responses tool, executed
-  // by xAI inside its own isolated sandbox. Available outside Discord.
-  // Round cost: zero (server-side).
+  // 3) Ad-hoc Python (native server-side) — outside Discord.
   if (!isDiscord) {
     tools.push(TOOL_CODE_INTERPRETER_NATIVE);
   }
 
-  // 2. Build sub-agent - single delegation point for any task that needs
-  // to write/edit files, run shell commands, or assemble deliverables.
-  // Available outside Discord.
+  // 4) Build deliverables (sandbox) — outside Discord.
   if (!isDiscord) {
     tools.push(buildBuildTool(isWhatsAppGroup));
   }
 
-  // 3. Communication & Delivery. Voice replies are NOT a tool: GemiX sets the
-  // `voice` flag in its structured reply (WA dedicated only — see responseSchema).
+  // 5) Outbound delivery. Voice is not a tool (structured `voice` flag on WA dedicated).
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   }
@@ -749,35 +729,27 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildWhatsAppTool(isAdmin));
   }
 
-  // 4. Task Management
+  // 6) Reminders / tasks — outside Discord.
   if (!isDiscord) {
     tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
     tools.push(buildReadMyTasksTool(isWhatsAppGroup));
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
   }
 
-  // 5. Preferences, Meta & Stats (no persistent settings on Discord)
+  // 7) Preferences & meta (no persistent settings on Discord).
   if (!isDiscord) {
     const isPersonalChat = userCtx.platform === PLATFORM_WA_PERSONAL;
     tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
-  }
-  if (!isDiscord) {
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
-  // Statute tool: active WA members only (Discord has RulesContext in the system prompt).
+  // Active WA members: statute, music stats, sent-message audit.
   if (isActiveMember && isWhatsApp) {
     tools.push(TOOL_READ_SERVER_RULES);
-  }
-  if (isActiveMember && isWhatsApp) {
     tools.push(TOOL_READ_MUSIC_STATS);
-  }
-  // Confirm past outgoing messages (WhatsApp/email) sent to other users on the
-  // caller's behalf. Active WhatsApp members only (admin: any number).
-  if (isActiveMember && isWhatsApp) {
     tools.push(buildReadSentMessagesTool(isAdmin));
   }
 
-  // 6. Bug Report (all platforms, all modes)
+  // 8) Bug report last (all platforms).
   tools.push(TOOL_BUG_REPORT);
 
   return tools;
@@ -864,5 +836,4 @@ module.exports = {
   syncProfileToolSets,
   toolNamesToSet,
   validateToolArgs,
-  NATIVE_SEARCH_TOOLS,
 };
