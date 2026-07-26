@@ -37,7 +37,7 @@ function partitionHandlerToolCalls(toolCalls) {
  * Per-round caps for main-brain tools (handler + tools/index.js).
  *
  * Only tools where repeating the call in the same round is pointless or unsafe
- * are listed. Generation tools (generate_image / generate_video / music_creator)
+ * are listed. Generation tools (generate_image / generate_video / generate_music)
  * are intentionally NOT capped here: their real constraint is the per-user
  * weekly quota (mediaUsageLimits.js), so capping them per round would only
  * waste model rounds.

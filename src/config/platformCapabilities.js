@@ -21,7 +21,7 @@ const TOOL = {
   WEB_SEARCH: 'web_search',
   X_SEARCH: 'x_search',
   WEB_IMAGE_SEARCH: 'web_image_search',
-  MUSIC_CREATOR: 'music_creator',
+  GENERATE_MUSIC: 'generate_music',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
   CODE_INTERPRETER: 'code_interpreter',
@@ -52,7 +52,7 @@ const CAPS = {
     systemHistoryLabel: false,
     voiceReply: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -71,7 +71,7 @@ const CAPS = {
     systemHistoryLabel: true,
     voiceReply: true,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -90,7 +90,7 @@ const CAPS = {
     systemHistoryLabel: false,
     voiceReply: true,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -148,7 +148,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
     return `"${toolName}" is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for scheduled reminders.`;
   }
   const waOnly = [
-    TOOL.MUSIC_CREATOR, TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
+    TOOL.GENERATE_MUSIC, TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
     TOOL.CODE_INTERPRETER, TOOL.TOGGLE_RELEASE,
     TOOL.READ_MUSIC_STATS, TOOL.READ_RULES, TOOL.READ_SENT_MESSAGES,
   ];
@@ -283,9 +283,12 @@ function buildDirectives(profile, opts = {}) {
     const mediaSources = [];
     if (has(TOOL.X_SEARCH)) mediaSources.push('X media via x_search (CDN URLs)');
     if (has(TOOL.WEB_IMAGE_SEARCH)) mediaSources.push('web images via web_image_search (direct image URLs)');
+    const noBuildMirror = has(TOOL.BUILD)
+      ? 'Deliver those URLs in final `attachments` — do not call build only to download, mirror, or re-send. '
+      : 'Deliver those URLs in final `attachments`. ';
     tooling.push({
       scope: 'tool',
-      text: `Fetchable media: ${mediaSources.join('; ')}. Deliver those URLs in final \`attachments\` — do not call build only to download, mirror, or re-send. `
+      text: `Fetchable media: ${mediaSources.join('; ')}. ${noBuildMirror}`
         + 'web_search is for facts and page links, not for sending images. Never invent file URLs or use unsupported render/citation component syntax.',
     });
   }
@@ -325,7 +328,7 @@ function profileHasMediaQuota(profile) {
   if (!cap) return false;
   return cap.tools.has(TOOL.GENERATE_IMAGE)
     && cap.tools.has(TOOL.GENERATE_VIDEO)
-    && cap.tools.has(TOOL.MUSIC_CREATOR);
+    && cap.tools.has(TOOL.GENERATE_MUSIC);
 }
 
 function buildLimitsLines(profile, opts = {}) {

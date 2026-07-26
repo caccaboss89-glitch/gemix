@@ -308,8 +308,8 @@ const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
   required: ['fullName', 'title', 'motivation', 'requesterSignature'],
 });
 
-const TOOL_MUSIC_CREATOR = makeTool({
-  name: 'music_creator',
+const TOOL_GENERATE_MUSIC = makeTool({
+  name: 'generate_music',
   description: 'Create a 30-second music clip from a prompt. Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
@@ -675,7 +675,7 @@ function buildBuildTool(isGroup) {
       'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
       + 'Not for fetchable X/web media — use x_search / web_image_search + final attachments. '
       + 'Isolated turn — no chat history; it sees only your prompt, <BuildWorkspace> files, and attachments[] you stage. '
-      + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from music_creator, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
+      + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from generate_music, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
       + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
       + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
       + `Workspace for ${scope}, ${BUILD_WORKSPACE_TTL_LABEL} TTL, ${BUILD_WORKSPACE_QUOTA_MB} MB, once per main-brain round.`,
@@ -711,7 +711,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 2) Media generation (WhatsApp). Weekly quota is the real cap (mediaUsageLimits).
   if (isWhatsApp) {
-    tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO, TOOL_MUSIC_CREATOR);
+    tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO, TOOL_GENERATE_MUSIC);
   }
 
   // 3) Ad-hoc Python (native server-side) — outside Discord.

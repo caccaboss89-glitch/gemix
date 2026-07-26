@@ -237,7 +237,7 @@ async function searchImages(args = {}) {
       success: false,
       error:
         `Image search service unreachable at ${base}: ${err.message}. `
-        + 'Ensure the local SearXNG container is running (see image-search/ docker-compose).',
+        + 'Ensure the local SearXNG container (gemix-searxng) is running.',
     };
   }
 

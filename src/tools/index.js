@@ -228,7 +228,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
   try {
     // Switch to recording state if the tool generates audio
-    if (name === 'music_creator') {
+    if (name === 'generate_music') {
       if (userCtx.presence && typeof userCtx.presence.setRecording === 'function') {
         await userCtx.presence.setRecording();
       }
@@ -515,7 +515,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         break;
       }
 
-      case 'music_creator': {
+      case 'generate_music': {
         if (!args.prompt) {
           result = { success: false, error: 'Missing prompt parameter in tool call arguments.' };
           break;
