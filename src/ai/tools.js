@@ -183,13 +183,15 @@ function validateToolArgs(args, toolDef) {
 // response (zero extra rounds in our outer loop). The bot does NOT implement
 // function tools with these names: the model invokes the native path, we
 // never see them as tool_calls.
+// Reserved native function names (do not reuse as client tools): search_images
+// (SERVER_SIDE_TOOL_IMAGE_SEARCH), web_search/browse_page/open_page/…, x_*_search, etc.
 const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
 
 const TOOL_WEB_SEARCH_NATIVE = {
   type: 'web_search',
   num_results: 10,
   // No enable_image_understanding / enable_image_search here: web_search is
-  // facts and page links only. Image vision for web photos is via search_images
+  // facts and page links only. Image vision for web photos is via web_image_search
   // (local tool + input_image previews). X media understanding stays on x_search.
   enable_image_search: false,
 };
@@ -203,8 +205,10 @@ const TOOL_X_SEARCH_NATIVE = {
 
 // -- Static tool definitions (schema never varies) -------------------------
 
-const TOOL_SEARCH_IMAGES = makeTool({
-  name: 'search_images',
+// Named web_image_search (not search_images): xAI reserves search_images for its
+// server-side image tool; reusing that name as a client function caused empty replies.
+const TOOL_WEB_IMAGE_SEARCH = makeTool({
+  name: 'web_image_search',
   description:
     'Search the web for existing images. Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
     + 'put chosen `url` values in final `attachments` to send them. '
@@ -669,7 +673,7 @@ function buildBuildTool(isGroup) {
     name: 'build',
     description:
       'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
-      + 'Not for fetchable X/web media — use x_search / search_images + final attachments. '
+      + 'Not for fetchable X/web media — use x_search / web_image_search + final attachments. '
       + 'Isolated turn — no chat history; it sees only your prompt, <BuildWorkspace> files, and attachments[] you stage. '
       + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from music_creator, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
       + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
@@ -703,7 +707,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // Order = importance / how often the main brain should reach for them.
   // 1) Search: native web → local web images → native X (image mode off on web).
   // History files attach natively on user turns; assistant history stays [Attachment] tags.
-  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_SEARCH_IMAGES, TOOL_X_SEARCH_NATIVE);
+  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_WEB_IMAGE_SEARCH, TOOL_X_SEARCH_NATIVE);
 
   // 2) Media generation (WhatsApp). Weekly quota is the real cap (mediaUsageLimits).
   if (isWhatsApp) {

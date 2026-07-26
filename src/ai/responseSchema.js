@@ -6,7 +6,7 @@
 // optional `attachments`, with `conversation_title` added on the first Discord
 // thread turn, and a leading `voice` boolean on WA dedicated only. Keeping it
 // fixed means `attachments` is always available, even on a single-round turn
-// where x_search CDN media URLs or search_images results can still be listed.
+// where x_search CDN media URLs or web_image_search results can still be listed.
 // The schema rides on the same HTTP call as tools (no extra round). Per xAI
 // docs, json_schema applies only to the final output_text, not to tool calls.
 //
@@ -36,7 +36,7 @@ const VOICE_RESPONSE_FIELD_DESC =
 const GEMIX_ATTACHMENTS_FIELD_DESC =
   'OPTIONAL. The ONLY way to send files in this chat. '
   + 'Each entry: delivery-buffer or history filename, or a direct public https file URL (image/video/audio/PDF/etc. — never a page/article/post link; '
-  + 'for X media use x_search CDN URLs; for web images use the `url` fields from search_images). '
+  + 'for X media use x_search CDN URLs; for web images use the `url` fields from web_image_search). '
   + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
 
 const TITLE_FIELD_DESC =

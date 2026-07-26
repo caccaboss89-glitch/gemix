@@ -97,7 +97,7 @@ module.exports = {
   GEMIX_SANDBOX_PROXY_HOST: process.env.GEMIX_SANDBOX_PROXY_HOST || 'gemix-sandbox-proxy',
   GEMIX_SANDBOX_PROXY_PORT: process.env.GEMIX_SANDBOX_PROXY_PORT || '8080',
 
-  // Local SearXNG instance used by the search_images tool (JSON API).
+  // Local SearXNG instance used by the web_image_search tool (JSON API).
   // Bind to loopback only in production. No trailing slash.
   IMAGE_SEARCH_BASE_URL: (process.env.IMAGE_SEARCH_BASE_URL || 'http://127.0.0.1:8888').replace(/\/+$/, ''),
 

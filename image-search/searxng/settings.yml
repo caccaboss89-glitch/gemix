@@ -1,4 +1,4 @@
-# Minimal SearXNG config for GemiX search_images.
+# Minimal SearXNG config for GemiX web_image_search.
 # use_default_settings keeps the full engine catalog; we only override what we need.
 
 use_default_settings: true

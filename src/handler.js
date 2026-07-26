@@ -626,7 +626,7 @@ async function handleMessage(ctx) {
             role: 'user',
             content:
               '[System] Your previous output was empty: no tool call and no structured reply. '
-              + 'Immediately call any tools you need (e.g. search_images for web photos) '
+              + 'Immediately call any tools you need (e.g. web_image_search for web photos) '
               + 'or send a valid structured reply. Never leave the reply empty.',
           });
           continue;

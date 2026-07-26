@@ -20,7 +20,7 @@ const PROFILE = {
 const TOOL = {
   WEB_SEARCH: 'web_search',
   X_SEARCH: 'x_search',
-  SEARCH_IMAGES: 'search_images',
+  SEARCH_IMAGES: 'web_image_search',
   MUSIC_CREATOR: 'music_creator',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
@@ -282,7 +282,7 @@ function buildDirectives(profile, opts = {}) {
   if (has(TOOL.X_SEARCH) || has(TOOL.SEARCH_IMAGES)) {
     const mediaSources = [];
     if (has(TOOL.X_SEARCH)) mediaSources.push('X media via x_search (CDN URLs)');
-    if (has(TOOL.SEARCH_IMAGES)) mediaSources.push('web images via search_images (direct image URLs)');
+    if (has(TOOL.SEARCH_IMAGES)) mediaSources.push('web images via web_image_search (direct image URLs)');
     tooling.push({
       scope: 'tool',
       text: `Fetchable media: ${mediaSources.join('; ')}. Deliver those URLs in final \`attachments\` — do not call build only to download, mirror, or re-send. `

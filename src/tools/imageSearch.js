@@ -287,7 +287,7 @@ async function searchImages(args = {}) {
     if (img.engine) entry.engine = img.engine;
     if (v && v.part) {
       nativeParts.push(
-        { type: 'text', text: `[search_images IMAGE_${i}]` },
+        { type: 'text', text: `[web_image_search IMAGE_${i}]` },
         v.part,
       );
     } else if (v && v.error) {
