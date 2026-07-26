@@ -423,7 +423,7 @@ function buildWhatsAppTool(isAdmin) {
 
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — send a message to a specific phone number. Never for intermediate updates in the current chat. Start by saying on behalf of which user you\'re writing, e.g. "Marco mi ha chiesto di dirti..."',
+    description: 'Delivery tool — send a message to a specific phone number. Never for intermediate updates in the current chat. Start by saying on behalf of which user you\'re writing, e.g. "Marco mi ha chiesto di dirti...". Messages can end up in spam, so suggest the user check there if needed.',
     properties,
     required: ['recipient', 'message'],
   });
@@ -462,7 +462,10 @@ function buildEmailTool(isAdmin) {
 
   return makeTool({
     name: 'send_email',
-    description: 'Delivery tool - send an email. If the user asked you to send it on behalf of someone else start by saying on behalf of which user you\'re writing, e.g. "Marco mi ha chiesto di dirti..."',
+    description:
+      'Delivery tool — send an email. Outbound only: you cannot read the user\'s inbox or any email others sent them (replies included). '
+      + 'To review what GemiX already sent on their behalf, use read_sent_messages. '
+      + 'If the user asked you to send it on behalf of someone else start by saying on behalf of which user you\'re writing, e.g. "Marco mi ha chiesto di dirti..."',
     properties,
     required: ['recipient', 'subject', 'body'],
   });

@@ -278,10 +278,49 @@ function chatToolsToResponsesTools(tools) {
   return out.length > 0 ? out : null;
 }
 
+/**
+ * Pick the user-facing assistant text from one or more message items.
+ *
+ * With server-side tools (web_search etc.), xAI may emit an intermediate
+ * `message` (e.g. "Cerco subito…") and a final one in the same response.
+ * Joining them breaks structured JSON; prefer the last piece that parses as
+ * a structured reply, else the last non-empty message text.
+ *
+ * @param {string[]} messageTexts - One string per output message item (parts already joined).
+ * @returns {string}
+ */
+function _pickAssistantText(messageTexts) {
+  if (!Array.isArray(messageTexts) || messageTexts.length === 0) return '';
+  if (messageTexts.length === 1) return messageTexts[0];
+
+  for (let i = messageTexts.length - 1; i >= 0; i--) {
+    const raw = messageTexts[i];
+    const t = typeof raw === 'string' ? raw.trim() : '';
+    if (!t) continue;
+    try {
+      const p = JSON.parse(t);
+      if (
+        p && typeof p === 'object' && !Array.isArray(p)
+        && (typeof p.response === 'string' || typeof p.message === 'string')
+      ) {
+        return raw;
+      }
+    } catch { /* try earlier piece */ }
+  }
+
+  for (let i = messageTexts.length - 1; i >= 0; i--) {
+    if (typeof messageTexts[i] === 'string' && messageTexts[i].trim()) {
+      return messageTexts[i];
+    }
+  }
+  return messageTexts[messageTexts.length - 1] || '';
+}
+
 function responsesToAssistantMessage(data) {
   const message = { role: 'assistant', content: '' };
   const toolCalls = [];
-  const textPieces = [];
+  // One entry per output `message` item (content parts joined within the item).
+  const messageTexts = [];
   const responsesOutput = [];
 
   if (Array.isArray(data?.output)) {
@@ -289,14 +328,17 @@ function responsesToAssistantMessage(data) {
       if (!item || typeof item !== 'object') continue;
 
       if (item.type === 'message' && Array.isArray(item.content)) {
+        const parts = [];
         for (const part of item.content) {
           if (!part || typeof part !== 'object') continue;
           if (part.type === 'output_text' && typeof part.text === 'string') {
-            textPieces.push(part.text);
+            parts.push(part.text);
           } else if (typeof part.text === 'string' && !part.type) {
-            textPieces.push(part.text);
+            parts.push(part.text);
           }
         }
+        const text = parts.join('');
+        if (text.trim()) messageTexts.push(text);
         if (_shouldStoreOutputItem(item)) responsesOutput.push(_cloneOutputItem(item));
         continue;
       }
@@ -331,11 +373,11 @@ function responsesToAssistantMessage(data) {
     }
   }
 
-  if (textPieces.length === 0 && typeof data?.output_text === 'string' && data.output_text) {
-    textPieces.push(data.output_text);
+  if (messageTexts.length === 0 && typeof data?.output_text === 'string' && data.output_text) {
+    messageTexts.push(data.output_text);
   }
 
-  message.content = textPieces.join('').trim();
+  message.content = _pickAssistantText(messageTexts).trim();
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
   if (responsesOutput.length > 0) {
     message._responsesOutput = responsesOutput;

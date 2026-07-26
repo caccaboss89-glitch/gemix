@@ -102,9 +102,63 @@ function applyResponsesTextFormat(body, format) {
 }
 
 /**
+ * Extract top-level JSON objects from a string (brace-balanced, string-aware).
+ * Used when the model emits multiple JSON objects back-to-back.
+ *
+ * @param {string} str
+ * @returns {object[]}
+ */
+function _extractTopLevelJsonObjects(str) {
+  const objects = [];
+  if (typeof str !== 'string' || !str) return objects;
+
+  let i = 0;
+  while (i < str.length) {
+    const start = str.indexOf('{', i);
+    if (start < 0) break;
+
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    let closed = false;
+    for (let j = start; j < str.length; j++) {
+      const c = str[j];
+      if (inString) {
+        if (escape) escape = false;
+        else if (c === '\\') escape = true;
+        else if (c === '"') inString = false;
+        continue;
+      }
+      if (c === '"') {
+        inString = true;
+        continue;
+      }
+      if (c === '{') depth++;
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) {
+          try {
+            const obj = JSON.parse(str.slice(start, j + 1));
+            if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+              objects.push(obj);
+            }
+          } catch { /* skip invalid slice */ }
+          i = j + 1;
+          closed = true;
+          break;
+        }
+      }
+    }
+    if (!closed) break;
+  }
+  return objects;
+}
+
+/**
  * Parse a structured final reply. Tolerates code fences and stray text
- * around the JSON object; falls back to treating the raw content as plain
- * text when no valid JSON object is found.
+ * around the JSON object; if multiple JSON objects are concatenated, uses
+ * the last one that looks like a reply. Falls back to treating the raw
+ * content as plain text when no valid JSON object is found.
  *
  * @param {string} raw - Assistant message content.
  * @returns {{ structured: boolean, text: string, title: string|null, attachments: string[], voice: boolean }}
@@ -126,7 +180,18 @@ function parseStructuredReply(raw) {
     if (start >= 0 && end > start) {
       try {
         parsed = JSON.parse(candidate.slice(start, end + 1));
-      } catch { /* fall through */ }
+      } catch {
+        // e.g. two objects concatenated: `{...}{...}` — take the last reply-like one.
+        const objects = _extractTopLevelJsonObjects(candidate);
+        for (let i = objects.length - 1; i >= 0; i--) {
+          const o = objects[i];
+          if (typeof o.response === 'string' || typeof o.message === 'string') {
+            parsed = o;
+            break;
+          }
+        }
+        if (!parsed && objects.length > 0) parsed = objects[objects.length - 1];
+      }
     }
   }
 

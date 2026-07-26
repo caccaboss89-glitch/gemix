@@ -119,11 +119,30 @@ const shutdownHandler = async (signal) => {
 process.on('SIGINT', () => shutdownHandler('SIGINT'));
 process.on('SIGTERM', () => shutdownHandler('SIGTERM'));
 
+/**
+ * Format process-level errors for admin WhatsApp. Full stacks are useful in
+ * PM2 logs; WA/Puppeteer noise (e.g. re-inject page bindings) is summarized.
+ * @param {unknown} err
+ * @returns {string}
+ */
+function formatProcessErrorForAdmin(err) {
+  const msg = err?.message || String(err);
+  const stack = err?.stack || '';
+  const blob = `${msg}\n${stack}`;
+  if (
+    /whatsapp-web\.js|onQRChangedEvent|Failed to add page binding|exposeFunctionIfAbsent|Puppeteer\.js/i
+      .test(blob)
+  ) {
+    return 'Errore con WhatsApp.js (dettagli in console).';
+  }
+  return `Error: ${msg}\nStack: ${stack}`;
+}
+
 process.on('unhandledRejection', (err) => {
   log.error('❌ Unhandled rejection:', err);
   try {
     const { notifyAdmin } = require('./utils/adminNotifier'); // dynamic require for lazy error path
-    notifyAdmin('Unhandled Rejection', `Error: ${err?.message || err}\nStack: ${err?.stack || ''}`).catch(() => {});
+    notifyAdmin('Unhandled Rejection', formatProcessErrorForAdmin(err)).catch(() => {});
   } catch {}
 });
 
@@ -131,7 +150,7 @@ process.on('uncaughtException', (err) => {
   log.error('❌ Uncaught exception:', err);
   try {
     const { notifyAdmin } = require('./utils/adminNotifier'); // dynamic require for lazy error path
-    notifyAdmin('Uncaught Exception', `Error: ${err?.message || err}\nStack: ${err?.stack || ''}`).catch(() => {});
+    notifyAdmin('Uncaught Exception', formatProcessErrorForAdmin(err)).catch(() => {});
   } catch {}
   // Do not exit: PM2 will restart on hard crashes. The error is surfaced
   // and the process continues running so in-flight tool sessions can
