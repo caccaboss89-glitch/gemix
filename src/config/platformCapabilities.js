@@ -20,7 +20,7 @@ const PROFILE = {
 const TOOL = {
   WEB_SEARCH: 'web_search',
   X_SEARCH: 'x_search',
-  SEARCH_IMAGES: 'web_image_search',
+  WEB_IMAGE_SEARCH: 'web_image_search',
   MUSIC_CREATOR: 'music_creator',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
@@ -52,7 +52,7 @@ const CAPS = {
     systemHistoryLabel: false,
     voiceReply: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.SEARCH_IMAGES, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -71,7 +71,7 @@ const CAPS = {
     systemHistoryLabel: true,
     voiceReply: true,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.SEARCH_IMAGES, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -90,7 +90,7 @@ const CAPS = {
     systemHistoryLabel: false,
     voiceReply: true,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.SEARCH_IMAGES, TOOL.MUSIC_CREATOR,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.MUSIC_CREATOR,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -109,7 +109,7 @@ const CAPS = {
     systemHistoryLabel: false,
     voiceReply: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.SEARCH_IMAGES,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH,
       TOOL.FORMAL_PDF, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
@@ -279,10 +279,10 @@ function buildDirectives(profile, opts = {}) {
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
     tooling.push({ scope: 'always', text: 'Proactively use web/X search before factual replies when the fact is not already in chat history or settings (news, people, products, events, social posts/screenshots, unfamiliar refs) — search first, never guess.' });
   }
-  if (has(TOOL.X_SEARCH) || has(TOOL.SEARCH_IMAGES)) {
+  if (has(TOOL.X_SEARCH) || has(TOOL.WEB_IMAGE_SEARCH)) {
     const mediaSources = [];
     if (has(TOOL.X_SEARCH)) mediaSources.push('X media via x_search (CDN URLs)');
-    if (has(TOOL.SEARCH_IMAGES)) mediaSources.push('web images via web_image_search (direct image URLs)');
+    if (has(TOOL.WEB_IMAGE_SEARCH)) mediaSources.push('web images via web_image_search (direct image URLs)');
     tooling.push({
       scope: 'tool',
       text: `Fetchable media: ${mediaSources.join('; ')}. Deliver those URLs in final \`attachments\` — do not call build only to download, mirror, or re-send. `

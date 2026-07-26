@@ -23,9 +23,9 @@ const {
   VALID_LANGUAGES,
 } = require('../utils/settingsStore');
 const {
-  DEFAULT_COUNT: SEARCH_IMAGES_DEFAULT_COUNT,
-  MIN_COUNT: SEARCH_IMAGES_MIN_COUNT,
-  MAX_COUNT: SEARCH_IMAGES_MAX_COUNT,
+  DEFAULT_COUNT: WEB_IMAGE_SEARCH_DEFAULT_COUNT,
+  MIN_COUNT: WEB_IMAGE_SEARCH_MIN_COUNT,
+  MAX_COUNT: WEB_IMAGE_SEARCH_MAX_COUNT,
 } = require('../tools/imageSearch');
 const {
   MAX_REF_IMAGES_FOR_IMAGE,
@@ -221,8 +221,8 @@ const TOOL_WEB_IMAGE_SEARCH = makeTool({
     count: {
       type: 'integer',
       description:
-        `How many image results to return (${SEARCH_IMAGES_MIN_COUNT}–${SEARCH_IMAGES_MAX_COUNT}, `
-        + `default ${SEARCH_IMAGES_DEFAULT_COUNT}).`,
+        `How many image results to return (${WEB_IMAGE_SEARCH_MIN_COUNT}–${WEB_IMAGE_SEARCH_MAX_COUNT}, `
+        + `default ${WEB_IMAGE_SEARCH_DEFAULT_COUNT}).`,
     },
   },
   required: ['query'],
