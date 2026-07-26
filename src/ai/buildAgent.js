@@ -10,7 +10,15 @@ const {
   BUILD_HARD_TIMEOUT_MS,
   BUILD_MAX_ROUNDS,
   BUILD_WORKSPACE_QUOTA_MB,
+  BUILD_WORKSPACE_TTL_MS,
 } = require('../config/constants');
+
+const BUILD_WORKSPACE_TTL_LABEL = (() => {
+  const hours = BUILD_WORKSPACE_TTL_MS / (60 * 60 * 1000);
+  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
+  const mins = Math.round(BUILD_WORKSPACE_TTL_MS / (60 * 1000));
+  return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
+})();
 const { renewBuildLock } = require('../utils/buildState');
 const {
   listWorkspaceFiles,
@@ -47,7 +55,7 @@ function buildGrokRules({ renamedAttachments, stagedNames, externalUrls } = {}) 
     'You are GemiX-Build: complete the task brief inside this isolated container.',
     `Time (Europe/Rome): ${getRomeTime()}.`,
     'Filesystem: work only under /workspace/ (writable). Do not rely on host paths outside it.',
-    `Quota: keep the workspace under about ${BUILD_WORKSPACE_QUOTA_MB} MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~4h TTL managed by the host).`,
+    `Quota: keep the workspace under about ${BUILD_WORKSPACE_QUOTA_MB} MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~${BUILD_WORKSPACE_TTL_LABEL} TTL managed by the host).`,
     'Network: HTTP/HTTPS egress already uses HTTP_PROXY/HTTPS_PROXY (residential), including API calls to xAI. Do not pass --proxy to yt-dlp/curl. On proxy 502, CONNECT errors, timeouts, or DNS failures: internet is down — stop, do not retry loops, explain the system outage in your reply.',
     'Toolchain: Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, zip/unzip, curl/wget. Runtime pip/npm/apt are disabled — do not attempt package installs.',
     'Use your built-in Grok skills and tools as needed.',

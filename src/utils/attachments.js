@@ -1,7 +1,7 @@
 // src/utils/attachments.js
 // Unified attachment shape used across responseCtx.
 // An attachment is: { name, mimetype, buffer?, filePath?, externalUrl?, waTempLinkPreferred? }
-//   - buffer:   Buffer already in memory (small/in-flight files: voice, image_search thumbs, formal PDF)
+//   - buffer:   Buffer already in memory (small/in-flight files: voice, formal PDF, generated media)
 //   - filePath: absolute path on disk (build workspace harvest, history, large files)
 //   - externalUrl: source link when the file cannot be hosted (e.g. URL >100 MB)
 //   - waTempLinkPreferred: build-agent audio/video only (normal delivery uses size only)

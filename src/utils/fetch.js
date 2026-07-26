@@ -112,7 +112,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS)
 
 /**
  * Fetch with timeout + automatic admin notification on error.
- * Useful for external service calls (GitHub, TTS, image search, etc.)
+ * Useful for external service calls (GitHub, TTS, etc.)
  * @param {string} url - The URL to fetch
  * @param {object} [options={}] - Standard fetch options
  * @param {string} [source] - Error source label for admin notification (e.g., 'GitHub')

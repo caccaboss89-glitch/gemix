@@ -1,0 +1,37 @@
+# GemiX local image search — SearXNG (free, self-hosted, Google Images + fallbacks).
+#
+# Bind to loopback only. GemiX calls IMAGE_SEARCH_BASE_URL (default http://127.0.0.1:8888).
+#
+# Quick start (Linux server):
+#   cd /path/to/GemiX/image-search
+#   # set a random secret once:
+#   sed -i "s/CHANGE_ME_TO_A_LONG_RANDOM_STRING/$(openssl rand -hex 32)/" searxng/settings.yml
+#   docker compose up -d
+#   curl -sS 'http://127.0.0.1:8888/search?q=cats&format=json&categories=images' | head -c 400
+#
+# Optional .env next to GemiX:
+#   IMAGE_SEARCH_BASE_URL=http://127.0.0.1:8888
+
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: gemix-searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
+      # Keep limiter off for local loopback API use from GemiX.
+      SEARXNG_LIMITER: "false"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0

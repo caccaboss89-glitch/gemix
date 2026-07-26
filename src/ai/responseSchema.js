@@ -6,11 +6,12 @@
 // optional `attachments`, with `conversation_title` added on the first Discord
 // thread turn, and a leading `voice` boolean on WA dedicated only. Keeping it
 // fixed means `attachments` is always available, even on a single-round turn
-// where xAI runs web/X search server-side (so found media URLs can still be
-// delivered). The schema rides on the same HTTP call as tools
-// (no extra round). Per xAI docs, json_schema applies only to the final
-// output_text, not to tool calls.
+// where x_search CDN media URLs or search_images results can still be listed.
+// The schema rides on the same HTTP call as tools (no extra round). Per xAI
+// docs, json_schema applies only to the final output_text, not to tool calls.
 //
+const { MAX_TTS_CHARS } = require('../config/constants');
+
 const RESPONSE_FIELD_DESC =
   'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax. '
   + 'Use only the formatting declared in the system prompt Format line.';
@@ -26,7 +27,7 @@ const VOICE_FLAG_DESC =
 const VOICE_RESPONSE_FIELD_DESC =
   'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY spoken words plus '
   + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
-  + 'Keep it under 1000 characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags '
+  + `Keep it under ${MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags `
   + 'for a human result, even if your recent text replies had none. When `voice` is '
   + 'false write plain text using only the formatting declared in the system prompt Format line, and DO NOT use any voice tag. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
@@ -34,8 +35,9 @@ const VOICE_RESPONSE_FIELD_DESC =
 
 const GEMIX_ATTACHMENTS_FIELD_DESC =
   'OPTIONAL. The ONLY way to send files in this chat. '
-  + 'Each entry: delivery-buffer or history filename, or a direct public https file URL (image/video/audio/PDF/etc. — never a page/article/post link; for X use x_search for the CDN URL). '
-  + 'Prefer search URLs over build. Omit if nothing to send. Never other file syntax (e.g. render_components).';
+  + 'Each entry: delivery-buffer or history filename, or a direct public https file URL (image/video/audio/PDF/etc. — never a page/article/post link; '
+  + 'for X media use x_search CDN URLs; for web images use the `url` fields from search_images). '
+  + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
 
 const TITLE_FIELD_DESC =
   'Concise topic title for this new conversation (max ~80 chars), no emojis, in the user\'s language.';

@@ -1,0 +1,49 @@
+# Minimal SearXNG config for GemiX search_images.
+# use_default_settings keeps the full engine catalog; we only override what we need.
+
+use_default_settings: true
+
+general:
+  instance_name: "GemiX Image Search"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  # JSON is required for the GemiX tool API. Keep html for manual browser checks.
+  formats:
+    - html
+    - json
+
+server:
+  # Overwritten by container env where set; port inside the container is 8080.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  # MUST be changed on the server (docker-compose header shows openssl one-liner).
+  secret_key: "CHANGE_ME_TO_A_LONG_RANDOM_STRING"
+  method: "GET"
+
+ui:
+  static_use_hash: true
+
+# Activate broad image engines (defaults often leave Google Images inactive).
+engines:
+  - name: google images
+    engine: google_images
+    shortcut: goi
+    inactive: false
+    disabled: false
+  - name: bing images
+    engine: bing_images
+    shortcut: bii
+    inactive: false
+    disabled: false
+  - name: duckduckgo images
+    engine: duckduckgo_extra
+    categories: [images]
+    ddg_category: images
+    shortcut: ddi
+    inactive: false
+    disabled: false

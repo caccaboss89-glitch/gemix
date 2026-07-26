@@ -26,6 +26,7 @@ const { toggleReleaseNotify } = require('./releaseNotify');
 const { buildTool } = require('./build');
 const { pushBufferAttachment } = require('../utils/attachments');
 const { musicCreator } = require('./musicCreator');
+const { searchImages } = require('./imageSearch');
 const { getGroupTaskFileId } = require('../utils/userIdentifier');
 const { sanitizeFilename } = require('../utils/text');
 const { resolveProfile, toolUnavailableMessage } = require('../config/platformCapabilities');
@@ -234,6 +235,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
 
     switch (name) {
+      case 'search_images': {
+        result = await searchImages(args);
+        break;
+      }
+
       case 'generate_image': {
         if (typeof userCtx.sendIntermediateNotification === 'function') {
           await userCtx.sendIntermediateNotification(

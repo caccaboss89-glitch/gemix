@@ -5,7 +5,14 @@
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
 // The build tool description is generic and does not expose sub-agent internals.
 
-const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION } = require('../config/constants');
+const {
+  PLATFORM_DISCORD,
+  PLATFORM_WA_PERSONAL,
+  VIDEO_GEN_DURATION_S,
+  VIDEO_GEN_RESOLUTION,
+  BUILD_WORKSPACE_TTL_MS,
+  BUILD_WORKSPACE_QUOTA_MB,
+} = require('../config/constants');
 const { LEGAL_NAME } = require('../config/env');
 const {
   defaultSettings,
@@ -15,6 +22,23 @@ const {
   VALID_EFFORTS,
   VALID_LANGUAGES,
 } = require('../utils/settingsStore');
+const {
+  DEFAULT_COUNT: SEARCH_IMAGES_DEFAULT_COUNT,
+  MIN_COUNT: SEARCH_IMAGES_MIN_COUNT,
+  MAX_COUNT: SEARCH_IMAGES_MAX_COUNT,
+} = require('../tools/imageSearch');
+const {
+  MAX_REF_IMAGES_FOR_IMAGE,
+  MAX_REF_IMAGES_FOR_VIDEO,
+} = require('../tools/imagineGenerator');
+
+/** Human-readable build workspace TTL for tool/prompt text (from BUILD_WORKSPACE_TTL_MS). */
+const BUILD_WORKSPACE_TTL_LABEL = (() => {
+  const hours = BUILD_WORKSPACE_TTL_MS / (60 * 60 * 1000);
+  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
+  const mins = Math.round(BUILD_WORKSPACE_TTL_MS / (60 * 1000));
+  return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
+})();
 
 // -- Helpers -------------------------------------------------------------
 
@@ -164,8 +188,10 @@ const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
 const TOOL_WEB_SEARCH_NATIVE = {
   type: 'web_search',
   num_results: 10,
-  enable_image_understanding: true,
-  enable_image_search: true,
+  // No enable_image_understanding / enable_image_search here: web_search is
+  // facts and page links only. Image vision for web photos is via search_images
+  // (local tool + input_image previews). X media understanding stays on x_search.
+  enable_image_search: false,
 };
 
 const TOOL_X_SEARCH_NATIVE = {
@@ -179,6 +205,27 @@ const TOOL_X_SEARCH_NATIVE = {
 const NATIVE_SEARCH_TOOLS = [TOOL_WEB_SEARCH_NATIVE, TOOL_X_SEARCH_NATIVE];
 
 // -- Static tool definitions (schema never varies) -------------------------
+
+const TOOL_SEARCH_IMAGES = makeTool({
+  name: 'search_images',
+  description:
+    'Search the web for existing images. Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
+    + 'put chosen `url` values in final `attachments` to send them. '
+    + 'Prefer this over generate_image when a real web image is enough. Not for X/Twitter media.',
+  properties: {
+    query: {
+      type: 'string',
+      description: 'Image search query.',
+    },
+    count: {
+      type: 'integer',
+      description:
+        `How many image results to return (${SEARCH_IMAGES_MIN_COUNT}–${SEARCH_IMAGES_MAX_COUNT}, `
+        + `default ${SEARCH_IMAGES_DEFAULT_COUNT}).`,
+    },
+  },
+  required: ['query'],
+});
 
 const TOOL_READ_SERVER_RULES = makeTool({
   name: 'read_server_rules',
@@ -282,16 +329,23 @@ const TOOL_MUSIC_CREATOR = makeTool({
 
 const TOOL_GENERATE_IMAGE = makeTool({
   name: 'generate_image',
-  description: 'Generate an image from a textual prompt, optionally guided by up to 3 reference images (editing, composition, style transfer). Result is pushed to the delivery buffer.',
+  description:
+    `Generate an image from a textual prompt, optionally guided by up to ${MAX_REF_IMAGES_FOR_IMAGE} reference images `
+    + '(editing, composition, style transfer). Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
-      description: 'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them ALWAYS as <IMAGE_0>, <IMAGE_1>, <IMAGE_2> in array order - never by filename.',
+      description:
+        'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them '
+        + 'ALWAYS as <IMAGE_0>, <IMAGE_1>, … in array order - never by filename.',
     },
     reference_images: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Up to 3. Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. Order matters (<IMAGE_0> = first). 1 = edit/transform; 2-3 = combine or style transfer. Omit for pure text-to-image.',
+      description:
+        `Up to ${MAX_REF_IMAGES_FOR_IMAGE}. Each entry: filename with extension from the delivery buffer or chat history, `
+        + 'or a public https URL. Order matters (<IMAGE_0> = first). 1 = edit/transform; 2+ = combine or style transfer. '
+        + 'Omit for pure text-to-image.',
     },
     aspect_ratio: {
       type: 'string',
@@ -313,7 +367,9 @@ const TOOL_GENERATE_VIDEO = makeTool({
     reference_images: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Up to 7. Each entry: filename with extension from the delivery buffer or chat history, or a public https URL. 1 = animate as first frame; 2-7 = style/subject guides. Omit for pure text-to-video.',
+      description:
+        `Up to ${MAX_REF_IMAGES_FOR_VIDEO}. Each entry: filename with extension from the delivery buffer or chat history, `
+        + 'or a public https URL. 1 = animate as first frame; 2+ = style/subject guides. Omit for pure text-to-video.',
     },
     aspect_ratio: {
       type: 'string',
@@ -616,12 +672,12 @@ function buildBuildTool(isGroup) {
     name: 'build',
     description:
       'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
-      + 'Not for fetchable X/web media — use search + final attachments. '
+      + 'Not for fetchable X/web media — use x_search / search_images + final attachments. '
       + 'Isolated turn — no chat history; it sees only your prompt, <BuildWorkspace> files, and attachments[] you stage. '
       + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from music_creator, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
       + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
       + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
-      + `Workspace for ${scope}, 4h TTL, 500 MB, once per main-brain round.`,
+      + `Workspace for ${scope}, ${BUILD_WORKSPACE_TTL_LABEL} TTL, ${BUILD_WORKSPACE_QUOTA_MB} MB, once per main-brain round.`,
     properties: {
       prompt: {
         type: 'string',
@@ -649,10 +705,14 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 1. Search & Information Retrieval. web_search and x_search are native
   // xAI server-side tools (zero round cost), available on every platform.
+  // search_images is a local function tool (SearXNG): vision previews
+  // (input_image) + direct image URLs for final attachments. web_search has
+  // no image search/understanding (facts/links only).
   // History files are attached natively on user-side entries (no read_file on
   // the main brain). Assistant-side entries stay [Attachment] tags only.
   tools.push(
     ...NATIVE_SEARCH_TOOLS,
+    TOOL_SEARCH_IMAGES,
   );
   if (isWhatsApp) {
     tools.push(TOOL_MUSIC_CREATOR);

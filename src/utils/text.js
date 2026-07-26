@@ -25,13 +25,29 @@ function sanitizeFilename(text, maxLen = 80) {
     .slice(0, maxLen) || 'file';
 }
 
-const VOICE_TAGS_INLINE_RE = /\[(pause|long-pause|hum-tune|laugh|chuckle|giggle|cry|tsk|tongue-click|lip-smack|breath|inhale|exhale|sigh)\]/gi;
-const VOICE_TAGS_WRAP_RE = /<\/?(?:soft|whisper|loud|build-intensity|decrease-intensity|higher-pitch|lower-pitch|slow|fast|sing-song|singing|laugh-speak|emphasis)>/gi;
+// Canonical tag names, as declared to the model in ai/responseSchema.js
+// (VOICE_RESPONSE_FIELD_DESC). Kept as plain name lists (not the bracket
+// syntax) so the stripping regexes below can tolerate the model writing a
+// wrapping-only tag with inline [brackets] or vice versa - both still get
+// removed instead of leaking into the reply.
+const VOICE_TAGS_INLINE_NAMES = ['pause', 'long-pause', 'hum-tune', 'laugh', 'chuckle', 'giggle', 'cry', 'tsk', 'tongue-click', 'lip-smack', 'breath', 'inhale', 'exhale', 'sigh'];
+const VOICE_TAGS_WRAP_NAMES = ['soft', 'whisper', 'loud', 'build-intensity', 'decrease-intensity', 'higher-pitch', 'lower-pitch', 'slow', 'fast', 'sing-song', 'singing', 'laugh-speak', 'emphasis'];
+const VOICE_TAG_NAMES = [...VOICE_TAGS_INLINE_NAMES, ...VOICE_TAGS_WRAP_NAMES];
+const VOICE_TAG_NAMES_ALT = VOICE_TAG_NAMES.join('|');
+
+// Every declared tag name, matched in EITHER syntax: inline [name] or
+// wrapping <name>/</name>. Voice replies only ever use `response` text (never
+// rendered as real HTML/brackets), so this is unambiguous and covers a model
+// mixing up which tags are "inline" vs "wrapping".
+const VOICE_TAGS_INLINE_RE = new RegExp(`\\[(?:${VOICE_TAG_NAMES_ALT})\\]`, 'gi');
+const VOICE_TAGS_WRAP_RE = new RegExp(`<\\/?(?:${VOICE_TAG_NAMES_ALT})>`, 'gi');
 
 /**
  * Strip voice effect tags from a string.
  * Removes inline tags like [pause] and wrapping tags like <soft>...</soft>
- * that are only valid in a voice reply (response with `voice:true`).
+ * that are only valid in a voice reply (response with `voice:true`). Tolerates
+ * either bracket syntax for any declared tag name (e.g. a stray [laugh-speak]
+ * written with inline brackets), so no tag can leak into the visible text.
  * @param {string} text
  * @returns {string}
  */

@@ -5,7 +5,15 @@ const { ACTIVE_MEMBERS } = require('../config/members');
 const { ADMIN_NAME, GROK_MODEL } = require('../config/env');
 const { getModelDisplayName } = require('../utils/footer');
 const { defaultSettings, customizedFields } = require('../utils/settingsStore');
-const { PLATFORM_WA_PERSONAL } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
+
+/** Human-readable build workspace TTL (from BUILD_WORKSPACE_TTL_MS). */
+const BUILD_WORKSPACE_TTL_LABEL = (() => {
+  const hours = BUILD_WORKSPACE_TTL_MS / (60 * 60 * 1000);
+  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
+  const mins = Math.round(BUILD_WORKSPACE_TTL_MS / (60 * 1000));
+  return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
+})();
 const { formatParticipantsForPrompt } = require('../utils/waParticipants');
 const {
   PROFILE,
@@ -184,7 +192,7 @@ function _renderBuildWorkspace(ws) {
     const more = ws.more ? '\n    ... and more' : '';
     return (
       `<BuildWorkspace files="${total}">\n${items}${more}\n`
-      + '    On disk only (4h TTL) until build runs — then new/modified workspace files are harvested into the delivery buffer; pick final user `attachments` from that buffer.\n'
+      + `    On disk only (${BUILD_WORKSPACE_TTL_LABEL} TTL) until build runs — then new/modified workspace files are harvested into the delivery buffer; pick final user \`attachments\` from that buffer.\n`
       + '    To re-send existing outputs: ask build with a resend-only prompt and attachments=[].\n'
       + '</BuildWorkspace>'
     );
@@ -192,7 +200,7 @@ function _renderBuildWorkspace(ws) {
   return (
     '<BuildWorkspace files="0">\n'
     + '    (empty — authoritative; do not call build to search for missing files)\n'
-    + '    If the user asks for a past build output, explain it expired (4h TTL).\n'
+    + `    If the user asks for a past build output, explain it expired (${BUILD_WORKSPACE_TTL_LABEL} TTL).\n`
     + '</BuildWorkspace>'
   );
 }

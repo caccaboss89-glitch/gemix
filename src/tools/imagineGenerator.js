@@ -594,4 +594,9 @@ async function _pollVideoResult(requestId) {
   throw new Error(`Timed out after ${Math.round(VIDEO_POLL_TIMEOUT_MS / 1000)}s waiting for the video.`);
 }
 
-module.exports = { generateImage, generateVideo };
+module.exports = {
+  generateImage,
+  generateVideo,
+  MAX_REF_IMAGES_FOR_IMAGE,
+  MAX_REF_IMAGES_FOR_VIDEO,
+};
