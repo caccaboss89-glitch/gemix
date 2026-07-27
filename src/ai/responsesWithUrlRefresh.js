@@ -16,7 +16,7 @@ const MAX_STALE_URL_REFRESHES = 2;
  * @param {object} opts
  * @param {string} opts.modelName
  * @param {Array|null} opts.messages - When set, body.input is rebuilt each attempt
- *   from messages (system items stay in input[] order; no top-level instructions).
+ *   from messages (roles stay in input[] order; no top-level instructions).
  * @param {object} opts.body - Responses API body (mutated when messages provided).
  * @param {object} [opts.logExtra]
  * @param {number} [opts.timeoutMs]

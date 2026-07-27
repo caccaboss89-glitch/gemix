@@ -187,10 +187,10 @@ function _replayStoredOutput(input, items) {
 /**
  * Convert chat-style messages to Responses `input[]`.
  *
- * All `role: system` messages (static prefix first, Runtime trailer last) are
- * emitted as input items in order. xAI prefix-cache matches from the start of
- * this array — do not put the static system prompt only in top-level
- * `instructions` (that field is not part of the cached message prefix).
+ * `role: system` items stay in input[] order (static prefix should be first
+ * and alone — a second system after history is folded by xAI and busts
+ * progressive cache). Runtime trailer is role:user. Do not put the static
+ * system only in top-level `instructions` (not part of the message prefix).
  *
  * @param {Array} messages
  * @param {{ instructions?: string }} [opts] - Optional top-level instructions
@@ -218,7 +218,7 @@ function chatMessagesToResponsesInput(messages, opts = {}) {
             .join('\n');
         }
         if (text) {
-          // Keep system items in input[] order (static prefix + Runtime trailer).
+          // Keep system items in input[] order (prefer a single static head).
           input.push({ role: 'system', content: text });
         }
         break;

@@ -268,8 +268,8 @@ function buildDirectives(profile, opts = {}) {
   ];
 
   // --- Tooling (former <ToolUsage> block) ---
-  // conversation_title / includeTitle is a free-form Runtime trailer note so
-  // R-numbering stays fixed across Discord first-turn vs later turns.
+  // Discord conversation_title lives in text.format + Runtime (not Directives),
+  // so R-numbering stays fixed.
   const tooling = [
     {
       scope: 'tool',

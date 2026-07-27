@@ -28,9 +28,9 @@ function _applyPromptCacheKey(body, key) {
 
 /**
  * Call Grok on the direct xAI Responses endpoint.
- * @param {Array} messages - Static system first, then history + user + tool
- *   items + optional trailing Runtime system message. xAI prefix-cache matches
- *   from the start of this list (mapped to Responses `input[]`).
+ * @param {Array} messages - Static system first (only role:system), then
+ *   history + user + tool items + optional trailing Runtime as role:user.
+ *   xAI prefix-cache matches from the start of this list (`input[]`).
  * @param {Array|null} tools
  * @param {object} [opts]
  * @param {string|null} [opts.historyStorageId] - Enables automatic refresh of

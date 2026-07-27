@@ -1,11 +1,11 @@
 // src/ai/systemPrompt.js — static system prefix + dynamic Runtime trailer.
 //
-// Live path (handler): byte-stable buildStaticInstructions as the first
-// input[] role:system item once per turn, then buildDynamicRuntimeContext as
-// the last role:system item each AI call. xAI prefix-cache matches from the
-// start of input[]; Time, delivery buffer, workspace listing, quotas, settings,
-// caller, and turn-varying platform fields stay in the trailer so multi-round
-// tool loops keep a stable prefix. Discord Rules context is process-stable → static.
+// Live path (handler): byte-stable buildStaticInstructions as the only
+// input[] role:system (first item). buildDynamicRuntimeContext is the last
+// role:user item each AI call (<Runtime>…</Runtime>) — not a second system
+// message (xAI folds multi-system into the head and busts progressive history
+// cache). Time, delivery buffer, workspace, quotas, settings, caller, and
+// turn-varying platform fields stay in that trailer. Discord Rules → static.
 
 const { getRomeTime, formatTimestamp } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
@@ -42,7 +42,14 @@ const SETTINGS_REVIEW_NOTICE =
   'IMPORTANT: the custom settings above have not changed in over a month. Handle the user\'s request as usual, '
   + 'then add a note at the end of your reply reading their settings back to them - focusing on the custom ones - '
   + 'and ask whether they still fit or they want changes. If they ask for changes, apply them with manage_preferences.';
-const SYSTEM_LINE_RULE = '[System] entries in chat history are bot-generated server events, not user messages.';
+// Program-owned items that must not be read as the human speaking.
+// [System] = assistant role in history (bot fromMe), label only in the text.
+// <Runtime> = trailing user-role trailer (wire-only; not a second system message).
+// Never list Runtime fields here (platform-specific; would leak capabilities).
+const SYSTEM_LINE_RULE =
+  '[System]-labeled assistant history lines and a trailing &lt;Runtime&gt;…&lt;/Runtime&gt; user item are program-owned, not the human.';
+const RUNTIME_LINE_RULE =
+  'Trailing &lt;Runtime&gt;…&lt;/Runtime&gt; user item is program-owned, not the human.';
 /** One level = 4 spaces. Section body depth 1; nested XML / Rules lists depth 2. */
 const PROMPT_INDENT = '    ';
 
@@ -100,7 +107,7 @@ function buildStaticInstructions(ctx) {
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
   const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
-  // No delivery.includeTitle here — that is a Runtime trailer note so R* stay fixed.
+  // Discord conversation_title guidance + Thread title live only in Runtime.
   const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter };
 
   const sections = [];
@@ -166,7 +173,8 @@ function buildStaticInstructions(ctx) {
 
 /**
  * Program-owned turn-varying state. Handler appends this as the last
- * input[] item (role:system, `_runtimeTrailer: true`) before every AI call.
+ * input[] item (role:user, `_runtimeTrailer: true`) before every AI call.
+ * Content is tagged <Runtime> so it is not mistaken for the human user.
  */
 function buildDynamicRuntimeContext(ctx) {
   const now = getRomeTime();
@@ -174,7 +182,7 @@ function buildDynamicRuntimeContext(ctx) {
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
-  const delivery = ctx.deliveryState || { bufferFiles: [], includeTitle: false };
+  const delivery = ctx.deliveryState || { bufferFiles: [] };
   const promptOpts = { isActiveMember };
 
   const blocks = [];
@@ -187,9 +195,14 @@ function buildDynamicRuntimeContext(ctx) {
   }
 
   if (profile === PROFILE.DISCORD_THREAD) {
-    if (ctx.threadName && !delivery.includeTitle) {
+    // Varying name → Runtime only (never static). Always surface when known.
+    if (ctx.threadName) {
       blocks.push(`Thread title: ${escapeXml(ctx.threadName)}`);
     }
+    blocks.push(
+      '`conversation_title`: "" keeps the name; set a short title if Thread title is a placeholder '
+      + '(e.g. ".", one letter) or the topic has shifted; if it still fits, repeat it or use "".',
+    );
     if (ctx.availableEmojis) blocks.push(`Emojis: ${ctx.availableEmojis}`);
     if (ctx.serverEvents) blocks.push(`Events: ${ctx.serverEvents}`);
   } else if (ctx.isGroup) {
@@ -224,13 +237,6 @@ function buildDynamicRuntimeContext(ctx) {
     if (ctx.settingsReviewDue) {
       blocks.push(_block('SettingsReview', [SETTINGS_REVIEW_NOTICE]));
     }
-  }
-
-  if (delivery.includeTitle) {
-    blocks.push(
-      'First message of this thread: `conversation_title` is required '
-      + '(short topic title, user\'s language, no emoji).',
-    );
   }
 
   return _macro('Runtime', blocks);
@@ -288,6 +294,7 @@ function _buildDiscordPlatformStatic() {
   const lines = [
     '<Platform name="discord">',
     _platformField('Role', 'Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.'),
+    _platformField('History notes', RUNTIME_LINE_RULE),
     _platformField('Format', 'Markdown supported (but no tables).'),
     '</Platform>',
   ];
@@ -303,7 +310,10 @@ function _buildPersonalWaPlatformStatic(ctx, promptOpts) {
     '<Platform name="whatsapp_personal">',
     _platformField('Rule', 'Admin-account chat with one other user. Reply only when this message contains @gemix. History, memory, and build workspace are shared for this chat pair.'),
     _platformField('Chat', `You (GemiX, never tag yourself), ${escapeXml(ADMIN_NAME)} (Account Owner), ${otherName}`),
-    _platformField('History notes', 'Admin messages appear in history under the label "Account Owner", not their name. Your replies have no speaker prefix.'),
+    _platformField(
+      'History notes',
+      `Admin messages appear in history under the label "Account Owner", not their name. Your replies have no speaker prefix. ${RUNTIME_LINE_RULE}`,
+    ),
     _platformField('Format', WA_FORMAT),
   ];
   const access = buildCallerAccessNote(PROFILE.WA_PERSONAL, promptOpts);
@@ -323,9 +333,11 @@ function _buildDedicatedWaPlatformStatic(ctx, cap, promptOpts) {
     lines.push(_platformField('Rule', 'Private chat - reply to every message.'));
     lines.push(_platformField('Chat', `You (GemiX, never tag yourself) and ${escapeXml(ctx.userName)}.`));
   }
-  if (cap.systemHistoryLabel) {
-    lines.push(_platformField('History notes', SYSTEM_LINE_RULE));
-  }
+  // Private dedicated: [System] + Runtime. Groups: Runtime only (no [System] speaker).
+  lines.push(_platformField(
+    'History notes',
+    cap.systemHistoryLabel ? SYSTEM_LINE_RULE : RUNTIME_LINE_RULE,
+  ));
   lines.push(_platformField('Format', WA_FORMAT));
   const access = buildCallerAccessNote(resolveProfile(ctx), promptOpts);
   if (access) lines.push(_platformField('Caller access', access));

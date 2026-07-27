@@ -3,12 +3,11 @@
 // Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
 //
 // Main brain (GemiX): fixed schema on every round — `response` (required) plus
-// optional `attachments`, with `conversation_title` added on the first Discord
-// thread turn, and a leading `voice` boolean on WA dedicated only. Keeping it
-// fixed means `attachments` is always available, even on a single-round turn
-// where x_search CDN media URLs or web_image_search results can still be listed.
-// The schema rides on the same HTTP call as tools (no extra round). Per xAI
-// docs, json_schema applies only to the final output_text, not to tool calls.
+// optional `attachments`, plus `conversation_title` on every Discord turn
+// (always required key; empty string = leave thread name unchanged; keeps
+// text.format byte-stable for prefix cache), and a leading `voice` boolean on
+// WA dedicated only. The schema rides on the same HTTP call as tools (no extra
+// round). Per xAI docs, json_schema applies only to the final output_text.
 //
 const { MAX_TTS_CHARS } = require('../config/constants');
 
@@ -38,17 +37,23 @@ const GEMIX_ATTACHMENTS_FIELD_DESC =
   + 'for X media use x_search CDN URLs; for web images use the `url` fields from web_image_search). '
   + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
 
+// Required key every Discord turn (stable text.format). Empty string is valid:
+// the program leaves the thread name unchanged. Non-empty renames the thread.
 const TITLE_FIELD_DESC =
-  'Concise topic title for this new conversation (max ~80 chars), no emojis, in the user\'s language.';
+  'Thread topic title (user\'s language, no emoji, max ~80 chars). '
+  + 'Required key: use "" to keep the current name; otherwise set a clear title when '
+  + 'the current Thread title (see Runtime) is a placeholder (e.g. ".", one letter) '
+  + 'or no longer matches the conversation; if it still fits, repeat it or use "".';
 
 /**
  * Build the fixed main-brain text.format schema for the current round:
  * `response` (required) + optional `attachments`, plus `conversation_title`
- * (required) on the first Discord thread turn, plus a leading `voice` boolean
- * on WA dedicated (decides voice vs text for the current-chat reply).
+ * (required key) on every Discord turn, plus a leading `voice` boolean on
+ * WA dedicated (decides voice vs text for the current-chat reply).
  *
  * @param {object} opts
- * @param {boolean} [opts.includeTitle] - First Discord thread turn (title not set yet).
+ * @param {boolean} [opts.includeTitle] - Discord: always true so schema stays
+ *   byte-stable across turns (empty string = no rename).
  * @param {boolean} [opts.allowVoice] - WA dedicated: expose the `voice` flag.
  * @returns {object}
  */

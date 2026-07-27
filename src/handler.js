@@ -7,8 +7,10 @@
 //   2. Touch the per-user/group build workspace activity timestamp (WA only).
 //   3. Build chat messages: static system first (byte-stable for the turn —
 //      xAI prefix-cache matches from the start of input[]), then history +
-//      current user. Turn-varying Runtime is a trailing role:system item,
-//      rewritten before every AI call. Media uses
+//      current user. Turn-varying Runtime is a trailing role:user item
+//      (program-owned <Runtime>…</Runtime>), rewritten before every AI call —
+//      never a second role:system (xAI folds extra system into the head and
+//      busts progressive history cache). Media uses
 //      utils/incomingMediaIngress.js → aiFileDelivery.js: native `input_image`
 //      / `input_file` parts via public URLs (user/history files attached
 //      natively; assistant-side entries including GemiX voice stay [Attachment]
@@ -19,9 +21,9 @@
 //      (1) standard tools parallel, (2) delivery parallel - repeat until the
 //      model returns the final response or the round budget is reached. The
 //      final reply is always structured JSON (response / optional attachments,
-//      plus conversation_title on the first Discord thread turn, plus a `voice`
-//      flag on WA dedicated) enforced via a fixed text.format schema. When
-//      `voice:true` (WA dedicated only), `response` is spoken via TTS instead of text.
+//      plus conversation_title on every Discord turn (stable schema; "" = no
+//      rename), plus a `voice` flag on WA dedicated) enforced via text.format.
+//      When `voice:true` (WA dedicated only), `response` is spoken via TTS.
 //   5. Apply the research badge (real web/X search counts) and ship the
 //      reply back to the platform.
 
@@ -246,8 +248,8 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      // First Discord thread turn: the structured reply carries the required
-      // conversation_title (no assistant message in fetched history yet).
+      // Discord: no assistant in fetched history yet (not used for schema; title
+      // field is always on Discord text.format for prefix-cache stability).
       isFirstTurn: ctx.platform === PLATFORM_DISCORD
         && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
@@ -289,17 +291,16 @@ async function handleMessage(ctx) {
     refreshUserWorkspace();
 
     ctx.isFirstTurn = userCtx.isFirstTurn;
-    // Seed deliveryState for Runtime trailer + response schema (includeTitle /
-    // buffer). Static instructions never read includeTitle; recomputed each AI call.
-    const discordFirstTurn = Boolean(userCtx.isFirstTurn);
+    // Seed deliveryState for Runtime trailer (buffer). Discord title field is
+    // always in text.format; current Thread title is only in Runtime.
     ctx.deliveryState = {
       bufferFiles: (responseCtx.attachments || []).map(a => a.name).filter(Boolean),
-      includeTitle: discordFirstTurn && !responseCtx.discordTitle,
     };
 
-    // Static system first (xAI caches from the start of input[]), then history
-    // + current user. Runtime is a trailing system item rewritten each call.
-    // Rebuilt only if the live tool fingerprint changes mid-turn (rare).
+    // Static system first (only role:system — keep it that way for prefix
+    // cache). Then history + current user. Runtime is a trailing role:user
+    // trailer rewritten each call. Rebuilt static only if the live tool
+    // fingerprint changes mid-turn (rare).
     let staticInstructions = buildStaticInstructions(ctx);
     let toolsFp = promptToolsFingerprint(ctx);
     const messages = [{
@@ -355,22 +356,18 @@ async function handleMessage(ctx) {
     };
 
     /**
-     * Append a fresh Runtime system item as the last message for this request.
-     *
-     * TEMP CACHE TEST — second role:system (Runtime) disabled.
-     * Hypothesis: xAI may compact multiple system roles (e.g. merge trailer into
-     * the leading system), so a turn-varying Runtime after history would bust
-     * progressive prefix cache on later user turns (Discord R3→R4 plateau).
-     * Re-enable the push below after the experiment; keep stripRuntimeTrailers.
+     * Append turn-varying Runtime as the last input item (role:user).
+     * Must not use role:system: xAI effectively merges extra system messages
+     * into the leading system block, so a changing Runtime after history
+     * invalidates progressive prefix cache for all later turns.
      */
     const appendRuntimeTrailer = () => {
       stripRuntimeTrailers();
-      // TEMP: no second system message for cache A/B test.
-      // messages.push({
-      //   role: 'system',
-      //   content: buildDynamicRuntimeContext(ctx),
-      //   _runtimeTrailer: true,
-      // });
+      messages.push({
+        role: 'user',
+        content: buildDynamicRuntimeContext(ctx),
+        _runtimeTrailer: true,
+      });
     };
 
     try {
@@ -409,14 +406,10 @@ async function handleMessage(ctx) {
     const promptCacheKey = generatePromptCacheKey(userCtx);
 
     // Structured-reply state, recomputed before every AI call: `bufferFiles`
-    // lists what is currently in the delivery buffer (surfaced in Runtime),
-    // and `includeTitle` flags the first Discord thread turn (schema + Runtime note).
+    // lists what is currently in the delivery buffer (surfaced in Runtime).
     const computeDeliveryState = () => {
       const bufferFiles = (responseCtx.attachments || []).map(a => a.name).filter(Boolean);
-      return {
-        bufferFiles,
-        includeTitle: discordFirstTurn && !responseCtx.discordTitle,
-      };
+      return { bufferFiles };
     };
 
     const accumulateSearchStats = (searchStats) => {
@@ -439,10 +432,14 @@ async function handleMessage(ctx) {
       return attachments;
     };
 
+    // Non-empty conversation_title → rename; "" / missing → leave thread name as-is.
     const applyParsedTitle = (parsed) => {
       if (!parsed.title) return;
       const title = sanitizeDiscordThreadTitle(stripOutgoingDeliveryArtifacts(parsed.title));
-      if (title) responseCtx.discordTitle = title;
+      if (!title) return;
+      responseCtx.discordTitle = title;
+      // Keep Runtime Thread title in sync for later rounds of the same turn.
+      ctx.threadName = title;
     };
 
     // Tool defs for the round in flight (platform/membership-gated; delivery
@@ -531,8 +528,6 @@ async function handleMessage(ctx) {
 
       const deliveryState = computeDeliveryState();
       ctx.deliveryState = deliveryState;
-      ctx.isFirstTurn = deliveryState.includeTitle;
-      userCtx.isFirstTurn = deliveryState.includeTitle;
 
       const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       currentRoundTools = roundTools;
@@ -546,7 +541,8 @@ async function handleMessage(ctx) {
       }
 
       appendRuntimeTrailer();
-      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
+      // Discord: conversation_title always in schema (byte-stable text.format).
+      const responseFormat = buildGemixResponseFormat({ includeTitle: isDiscord, allowVoice });
       const callOpts = {
         maxTurns: MAX_TOOL_ROUNDS,
         requestId: ctx.requestId,
@@ -748,8 +744,6 @@ async function handleMessage(ctx) {
       reloadSettings(ctx, ui);
       const deliveryState = computeDeliveryState();
       ctx.deliveryState = deliveryState;
-      ctx.isFirstTurn = deliveryState.includeTitle;
-      userCtx.isFirstTurn = deliveryState.includeTitle;
       const wrapUpTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       const nextFp = promptToolsFingerprint(ctx);
       if (nextFp !== toolsFp) {
@@ -757,7 +751,7 @@ async function handleMessage(ctx) {
         toolsFp = nextFp;
         syncStaticPrefix();
       }
-      const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
+      const responseFormat = buildGemixResponseFormat({ includeTitle: isDiscord, allowVoice });
       const wrapUpNote = sessionDurationLimitReached
         ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'SYSTEM: You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
