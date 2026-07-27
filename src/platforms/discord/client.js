@@ -124,6 +124,9 @@ function splitDiscordMessage(text, maxLen = 2000) {
 
 function discordMessageHasUsableContent(msg) {
   if (!msg) return false;
+  // Discord system events (channel rename, pin notice, thread created, …)
+  // have type ≠ Default/Reply/… and must not enter the AI conversation.
+  if (msg.system) return false;
   if (msg.content && String(msg.content).trim()) return true;
   if (msg.attachments && msg.attachments.size > 0) return true;
   if (msg.reference?.messageId) return true;
@@ -201,6 +204,8 @@ async function onDiscordMessage(msg) {
   }
   if (msg.author.id === discordClient.user.id) return;
   if (msg.author.bot) return;
+  // Rename / pin / join notices etc. — not user chat (also filtered in history).
+  if (msg.system) return;
 
   const channel = msg.channel;
   if (!channel.isThread()) return;
@@ -469,6 +474,10 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
   const messages = [...raw.values()]
     .filter(m => (!starterMessageId || m.id !== starterMessageId) && (!exclude || !exclude.has(m.id)))
+    // CHANNEL_NAME_CHANGE (type 4) and other Discord system events: author is
+    // the renamer (often GemiX), content is just the new title — without this
+    // they were mapped to role:assistant and polluted model history/cache.
+    .filter(m => !m.system)
     .reverse()
     .slice(-MAX_HISTORY);
 
