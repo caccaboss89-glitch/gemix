@@ -1,7 +1,8 @@
-// Stable per-conversation IDs for xAI Responses API prompt_cache_key.
-// Sticky routing only: pairs with a byte-stable leading system message in
-// input[] and an append-only conversation + trailing Runtime trailer. Exact
-// prefix match is still required for cache hits; this key does not replace that.
+// Stable per-conversation IDs for xAI sticky routing / prompt cache.
+// Sent as body.prompt_cache_key and header x-grok-conv-id (Grok Build does both).
+// Pairs with a byte-stable leading system message in input[] and append-only
+// conversation + trailing Runtime. Exact prefix match is still required for
+// cache hits; this key only helps route to a server that may already hold KV.
 
 const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
 const { resolveStorageId } = require('./userPaths');

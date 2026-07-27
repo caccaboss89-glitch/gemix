@@ -126,6 +126,19 @@ function _cloneOutputItem(item) {
   }
 }
 
+/**
+ * Shape a stored reasoning item for the next request `input[]`.
+ * Grok Build / xAI: pass summary, content, encrypted_content, id — but
+ * `status` is output-only and the API rejects it on input.
+ */
+function _reasoningItemForInput(item) {
+  const out = _cloneOutputItem(item);
+  if (out && typeof out === 'object') {
+    delete out.status;
+  }
+  return out;
+}
+
 function _shouldStoreOutputItem(item) {
   if (!item || typeof item !== 'object' || typeof item.type !== 'string') return false;
   if (item.type === 'reasoning') {
@@ -140,6 +153,7 @@ function _shouldStoreOutputItem(item) {
 function _pushFunctionCallInput(input, item) {
   const callId = item.call_id || item.id;
   if (!callId || typeof item.name !== 'string') return;
+  // Omit output-only fields (status, server id) — same as Grok Build.
   input.push({
     type: 'function_call',
     call_id: callId,
@@ -153,6 +167,8 @@ function _pushFunctionCallInput(input, item) {
 /**
  * Replay a prior Responses API `output[]` slice into the next request `input[]`.
  * Matches xAI docs: spread `response.output` before new user/tool items.
+ * Reasoning is kept (encrypted_content + summary) so the model continues the
+ * same chain-of-thought; only wire-illegal output fields are stripped.
  */
 function _replayStoredOutput(input, items) {
   if (!Array.isArray(items)) return;
@@ -160,6 +176,8 @@ function _replayStoredOutput(input, items) {
     if (!_shouldStoreOutputItem(item)) continue;
     if (item.type === 'function_call') {
       _pushFunctionCallInput(input, item);
+    } else if (item.type === 'reasoning') {
+      input.push(_reasoningItemForInput(item));
     } else {
       input.push(_cloneOutputItem(item));
     }

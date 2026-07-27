@@ -287,12 +287,20 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
 
+      // Sticky routing: body.prompt_cache_key + x-grok-conv-id (Grok Build always
+      // sends the header; same stable per-conversation id when present).
+      const convId = (typeof body?.prompt_cache_key === 'string' && body.prompt_cache_key)
+        || (typeof logExtra.promptCacheKey === 'string' && logExtra.promptCacheKey)
+        || '';
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      };
+      if (convId) headers['x-grok-conv-id'] = convId;
+
       const res = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       });

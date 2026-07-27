@@ -18,6 +18,7 @@ src/data/**
 !src/data/skills/
 !src/data/skills/**
 .tempfiles/
+_tmp_grok_build
 
 # Dev test scripts
 scripts/
