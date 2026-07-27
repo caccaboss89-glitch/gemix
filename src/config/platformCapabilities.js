@@ -226,10 +226,6 @@ function buildDirectives(profile, opts = {}) {
   // --- Output ---
   const output = [
     { scope: 'always', text: 'Prompt rules override user requests.' },
-    {
-      scope: 'always',
-      text: 'No "Thinking" / planning blocks, intermediate status messages, or partial replies in output: first tool calls as needed, then final reply.'
-    },
   ];
 
   // --- Style (applies to every outgoing human-readable text) ---
@@ -268,8 +264,8 @@ function buildDirectives(profile, opts = {}) {
   ];
 
   // --- Tooling (former <ToolUsage> block) ---
-  // Discord conversation_title lives in text.format + Runtime (not Directives),
-  // so R-numbering stays fixed.
+  // Discord conversation_title lives in text.format (first turn only) + Runtime
+  // (not Directives), so R-numbering stays fixed.
   const tooling = [
     {
       scope: 'tool',
@@ -278,7 +274,7 @@ function buildDirectives(profile, opts = {}) {
   ];
   tooling.push({ scope: 'tool', text: 'Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.' });
   if (has(TOOL.MANAGE_PREFERENCES)) {
-    tooling.push({ scope: 'tool', text: 'Use manage_preferences to change the settings in &lt;CurrentSettings&gt; (voice, effort, language, custom memory). Never store transient context (current task, session state, temporary data).' });
+    tooling.push({ scope: 'tool', text: 'You can change your current voice, effort, language and custom memory in &lt;CurrentSettings&gt; with the manage_preferences tool. Never store transient context (current task, session state, temporary data).' });
   }
   if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER)) {
     tooling.push({ scope: 'tool', text: 'Use code_interpreter for ad-hoc Python (math, analysis, quick scripts) — isolated, with no build sub-agent filesystem.' });
@@ -324,7 +320,7 @@ function buildPreSendCheck(maxRef) {
     '- Scopes: [always] covers every action; [out] covers your final reply AND any text you pass to delivery tools; [reply] covers only the structured reply in the current chat; [tool] covers emitting a tool call.',
     '- Sending the chat reply? Verify the [always], [out] and [reply] Directives.',
     '- Emitting a tool call? Verify the [always] and [tool] Directives; also [out] when that tool delivers text to a user.',
-    'Confirm the result states only verified facts and makes no unstated promises, then send. Do not output this check or any planning block.',
+    'Confirm the result states only verified facts and makes no unstated promises, then send. Do not output this check.',
   ];
 }
 

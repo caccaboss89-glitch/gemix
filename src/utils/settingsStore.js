@@ -38,7 +38,7 @@ const VALID_LANGUAGES = [
 const DEFAULT_MEMORY =
   'Use voice replies (voice:true) for short, casual, non-technical messages; use text for long or technical ones. '
   + 'Vary voice vs text across your recent replies so you are not repetitive. '
-  + 'You can change your voice, effort, language and this memory with the manage_preferences tool.';
+  + 'Use emojis sometimes.';
 
 /**
  * Program defaults. The voice comes from .env (XAI_TTS_VOICE) so the

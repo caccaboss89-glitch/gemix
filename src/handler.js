@@ -21,8 +21,8 @@
 //      (1) standard tools parallel, (2) delivery parallel - repeat until the
 //      model returns the final response or the round budget is reached. The
 //      final reply is always structured JSON (response / optional attachments,
-//      plus conversation_title on every Discord turn (stable schema; "" = no
-//      rename), plus a `voice` flag on WA dedicated) enforced via text.format.
+//      plus conversation_title on Discord first turn only, plus a `voice`
+//      flag on WA dedicated) enforced via text.format.
 //      When `voice:true` (WA dedicated only), `response` is spoken via TTS.
 //   5. Apply the research badge (real web/X search counts) and ship the
 //      reply back to the platform.
@@ -248,8 +248,8 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      // Discord: no assistant in fetched history yet (not used for schema; title
-      // field is always on Discord text.format for prefix-cache stability).
+      // Discord: no assistant in fetched history yet → first turn (title field
+      // required in text.format; later turns omit conversation_title entirely).
       isFirstTurn: ctx.platform === PLATFORM_DISCORD
         && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
@@ -292,7 +292,7 @@ async function handleMessage(ctx) {
 
     ctx.isFirstTurn = userCtx.isFirstTurn;
     // Seed deliveryState for Runtime trailer (buffer). Discord title field is
-    // always in text.format; current Thread title is only in Runtime.
+    // first-turn-only in text.format; current Thread title is only in Runtime.
     ctx.deliveryState = {
       bufferFiles: (responseCtx.attachments || []).map(a => a.name).filter(Boolean),
     };
@@ -541,8 +541,12 @@ async function handleMessage(ctx) {
       }
 
       appendRuntimeTrailer();
-      // Discord: conversation_title always in schema (byte-stable text.format).
-      const responseFormat = buildGemixResponseFormat({ includeTitle: isDiscord, allowVoice });
+      // Discord: conversation_title only on first turn (required); later turns
+      // omit it so the model cannot rename mid-conversation.
+      const responseFormat = buildGemixResponseFormat({
+        includeTitle: isDiscord && Boolean(ctx.isFirstTurn),
+        allowVoice,
+      });
       const callOpts = {
         maxTurns: MAX_TOOL_ROUNDS,
         requestId: ctx.requestId,
@@ -751,7 +755,10 @@ async function handleMessage(ctx) {
         toolsFp = nextFp;
         syncStaticPrefix();
       }
-      const responseFormat = buildGemixResponseFormat({ includeTitle: isDiscord, allowVoice });
+      const responseFormat = buildGemixResponseFormat({
+        includeTitle: isDiscord && Boolean(ctx.isFirstTurn),
+        allowVoice,
+      });
       const wrapUpNote = sessionDurationLimitReached
         ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'SYSTEM: You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';

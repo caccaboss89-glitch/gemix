@@ -107,7 +107,7 @@ function buildStaticInstructions(ctx) {
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
   const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
-  // Discord conversation_title guidance + Thread title live only in Runtime.
+  // Discord Thread title / conversation_title guidance live only in Runtime.
   const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter };
 
   const sections = [];
@@ -199,10 +199,11 @@ function buildDynamicRuntimeContext(ctx) {
     if (ctx.threadName) {
       blocks.push(`Thread title: ${escapeXml(ctx.threadName)}`);
     }
-    blocks.push(
-      '`conversation_title`: "" keeps the name; set a short title if Thread title is a placeholder '
-      + '(e.g. ".", one letter) or the topic has shifted; if it still fits, repeat it or use "".',
-    );
+    // First turn: conversation_title lives only in text.format (no Runtime
+    // restate of the field desc). Later turns: field omitted from schema + note.
+    if (!ctx.isFirstTurn) {
+      blocks.push('You cannot change the conversation title anymore.');
+    }
     if (ctx.availableEmojis) blocks.push(`Emojis: ${ctx.availableEmojis}`);
     if (ctx.serverEvents) blocks.push(`Events: ${ctx.serverEvents}`);
   } else if (ctx.isGroup) {
