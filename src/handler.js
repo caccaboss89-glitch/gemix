@@ -354,14 +354,23 @@ async function handleMessage(ctx) {
       }
     };
 
-    /** Append a fresh Runtime system item as the last message for this request. */
+    /**
+     * Append a fresh Runtime system item as the last message for this request.
+     *
+     * TEMP CACHE TEST — second role:system (Runtime) disabled.
+     * Hypothesis: xAI may compact multiple system roles (e.g. merge trailer into
+     * the leading system), so a turn-varying Runtime after history would bust
+     * progressive prefix cache on later user turns (Discord R3→R4 plateau).
+     * Re-enable the push below after the experiment; keep stripRuntimeTrailers.
+     */
     const appendRuntimeTrailer = () => {
       stripRuntimeTrailers();
-      messages.push({
-        role: 'system',
-        content: buildDynamicRuntimeContext(ctx),
-        _runtimeTrailer: true,
-      });
+      // TEMP: no second system message for cache A/B test.
+      // messages.push({
+      //   role: 'system',
+      //   content: buildDynamicRuntimeContext(ctx),
+      //   _runtimeTrailer: true,
+      // });
     };
 
     try {
