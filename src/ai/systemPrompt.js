@@ -1,4 +1,10 @@
-// src/ai/systemPrompt.js — composed system prompt from platformCapabilities + ctx.
+// src/ai/systemPrompt.js — static Responses `instructions` + dynamic Runtime trailer.
+//
+// Live path (handler): byte-stable buildStaticInstructions once per turn, then
+// buildDynamicRuntimeContext as the last input[] role:system item each AI call.
+// Time, delivery buffer, workspace listing, quotas, settings, caller, and
+// turn-varying platform fields stay in the trailer so multi-round tool loops
+// keep a stable prefix. Discord Rules context is process-stable → static.
 
 const { getRomeTime, formatTimestamp } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
@@ -26,7 +32,7 @@ const {
   profileHasMediaQuota,
 } = require('../config/platformCapabilities');
 const { getToolsForUser } = require('./tools');
-const { formatQuotaCounts } = require('../utils/mediaUsageLimits');
+const { formatQuotaCounts, formatMediaQuotaResetLabel } = require('../utils/mediaUsageLimits');
 const { escapeXml } = require('../utils/xmlEscape');
 
 const WA_FORMAT = 'only *bold* _italic_ ~strike~ `code` and > quote (line start) render; other markup does not, and Markdown link citations are not shown.';
@@ -61,13 +67,21 @@ function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
   return { toolNames, hasCodeInterpreter };
 }
 
+/** Stable fingerprint of live tool names for mid-turn static rebuild detection. */
+function promptToolsFingerprint(ctx) {
+  const isActiveMember = Boolean(ctx.userIdentity?.isActiveMember);
+  const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
+  const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
+  const names = [...toolNames].sort();
+  return `${names.join(',')}|ci=${hasCodeInterpreter ? 1 : 0}`;
+}
+
 function _callerLineInner(ctx, promptOpts) {
   const status = promptOpts.isActiveMember !== false ? 'active member' : 'non-active';
   return `${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.`;
 }
 
-function _buildBatchNote(profile) {
-  void profile;
+function _buildBatchNote() {
   // Debounced multi-message turns keep distinct role:user units (earlier ones
   // in history, last as content). Each unit keeps its author label.
   return '<BatchNote>This turn includes several recent messages from more than one participant '
@@ -75,30 +89,40 @@ function _buildBatchNote(profile) {
     + '&lt;Caller&gt; is only the author of the latest message.</BatchNote>';
 }
 
-function buildSystemPrompt(ctx) {
-  const now = getRomeTime();
+/**
+ * Byte-stable system instructions for Responses `instructions`.
+ * Profile / membership / tools for this conversation — no turn-varying fields.
+ */
+function buildStaticInstructions(ctx) {
   const isActiveMember = Boolean(ctx.userIdentity?.isActiveMember);
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
   const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
-  // Delivery / structured-reply state for this round (set by handler.js).
-  // Outside the handler (e.g. prompt audit script) it defaults to empty.
-  const delivery = ctx.deliveryState || { bufferFiles: [], includeTitle: false };
-  const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter, delivery };
+  // No delivery.includeTitle here — that is a Runtime trailer note so R* stay fixed.
+  const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter };
 
   const sections = [];
   const contextBlocks = [];
 
   contextBlocks.push(_block('Identity', [
     `Name: you are ${getModelDisplayName(GROK_MODEL)} inside GemiX - fusion of SuperGrok and Gemini${cap.isDiscord ? ' (Legal Division)' : ''}.`,
-    `Time (Europe/Rome): ${now}.`,
     'Character: you have a sense of irony, you understand even when it\'s implied.',
   ]));
 
-  if (profile === PROFILE.DISCORD_THREAD) contextBlocks.push(_buildDiscordPlatform(ctx, promptOpts));
-  else if (ctx.platform === PLATFORM_WA_PERSONAL) contextBlocks.push(_buildPersonalWaPlatform(ctx, promptOpts));
-  else contextBlocks.push(_buildDedicatedWaPlatform(ctx, cap, promptOpts));
+  if (profile === PROFILE.DISCORD_THREAD) {
+    contextBlocks.push(_buildDiscordPlatformStatic());
+    // Statute is process-cached and conversation-stable (~24KB) — keep in
+    // static instructions so multi-round tool loops do not re-send it with Time.
+    if (ctx.rulesContext) {
+      contextBlocks.push(`Rules context: ${escapeXml(ctx.rulesContext)}`);
+    }
+  } else if (ctx.platform === PLATFORM_WA_PERSONAL) {
+    contextBlocks.push(_buildPersonalWaPlatformStatic(ctx, promptOpts));
+  } else {
+    contextBlocks.push(_buildDedicatedWaPlatformStatic(ctx, cap, promptOpts));
+  }
+
   if (isActiveMember) {
     if (isAdmin) {
       // Admin addresses members directly by phone/email (see send_* and
@@ -121,34 +145,11 @@ function buildSystemPrompt(ctx) {
       contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name.</ActiveMembers>`);
     }
   }
-  if (ctx.batchMultiSpeaker) {
-    contextBlocks.push(_buildBatchNote(profile));
-  }
 
-  const bufferFiles = Array.isArray(delivery.bufferFiles) ? delivery.bufferFiles : [];
-  if (bufferFiles.length > 0) {
-    contextBlocks.push(`<DeliveryBuffer>${escapeXml(bufferFiles.join(', '))}</DeliveryBuffer>`);
-  }
+  // Static limits only (no weekly quota counts — those refresh mid tool-loop).
+  contextBlocks.push(_block('Limits', buildLimitsLines(profile)));
 
-  if (cap.buildWorkspace) {
-    contextBlocks.push(_renderBuildWorkspace(ctx.userWorkspace));
-  }
-
-  // Per-user weekly generation quota line: non-admins only, and only where the
-  // three generation tools exist (WhatsApp) — admins and Discord get no line.
-  const mediaQuotaCounts = (!isAdmin && profileHasMediaQuota(profile))
-    ? formatQuotaCounts(ctx.userIdentity?.taskFileId)
-    : null;
-  contextBlocks.push(_block('Limits', buildLimitsLines(profile, { mediaQuotaCounts })));
-
-  if (cap.longTermMemory) {
-    contextBlocks.push(_renderCurrentSettings(ctx));
-    if (ctx.settingsReviewDue) {
-      contextBlocks.push(_block('SettingsReview', [SETTINGS_REVIEW_NOTICE]));
-    }
-  }
-
-  // Macro 1: everything GemiX must KNOW (declarative).
+  // Macro 1: everything GemiX must KNOW (declarative, stable for the turn).
   sections.push(_macro('Context', contextBlocks));
 
   // Macro 2: everything GemiX must DO (imperative). Numbered R1..Rn with a
@@ -156,10 +157,82 @@ function buildSystemPrompt(ctx) {
   const { block: directivesBlock, count } = _renderDirectives(buildDirectives(profile, promptOpts));
   sections.push(directivesBlock);
 
-  // Macro 3: enforcement, last for maximum recency.
+  // Macro 3: enforcement, last for maximum recency within static instructions.
   sections.push(_block('PreSendCheck', buildPreSendCheck(count)));
 
   return sections.join('\n');
+}
+
+/**
+ * Program-owned turn-varying state. Handler appends this as the last
+ * input[] item (role:system, `_runtimeTrailer: true`) before every AI call.
+ */
+function buildDynamicRuntimeContext(ctx) {
+  const now = getRomeTime();
+  const isActiveMember = Boolean(ctx.userIdentity?.isActiveMember);
+  const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
+  const profile = resolveProfile(ctx);
+  const cap = getCapabilities(ctx);
+  const delivery = ctx.deliveryState || { bufferFiles: [], includeTitle: false };
+  const promptOpts = { isActiveMember };
+
+  const blocks = [];
+
+  blocks.push(`Time (Europe/Rome): ${now}.`);
+  blocks.push(`<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
+
+  if (ctx.batchMultiSpeaker) {
+    blocks.push(_buildBatchNote());
+  }
+
+  if (profile === PROFILE.DISCORD_THREAD) {
+    if (ctx.threadName && !delivery.includeTitle) {
+      blocks.push(`Thread title: ${escapeXml(ctx.threadName)}`);
+    }
+    if (ctx.availableEmojis) blocks.push(`Emojis: ${ctx.availableEmojis}`);
+    if (ctx.serverEvents) blocks.push(`Events: ${ctx.serverEvents}`);
+  } else if (ctx.isGroup) {
+    const roster = Array.isArray(ctx.groupParticipants) ? ctx.groupParticipants : [];
+    if (roster.length > 0) {
+      blocks.push(`Participants: ${formatParticipantsForPrompt(roster, escapeXml)}`);
+    }
+  }
+
+  const bufferFiles = Array.isArray(delivery.bufferFiles) ? delivery.bufferFiles : [];
+  if (bufferFiles.length > 0) {
+    blocks.push(`<DeliveryBuffer>${escapeXml(bufferFiles.join(', '))}</DeliveryBuffer>`);
+  }
+
+  if (cap.buildWorkspace) {
+    blocks.push(_renderBuildWorkspace(ctx.userWorkspace));
+  }
+
+  // Per-user weekly generation quota line: non-admins only, and only where the
+  // three generation tools exist (WhatsApp) — admins and Discord get no line.
+  if (!isAdmin && profileHasMediaQuota(profile)) {
+    const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId);
+    blocks.push(
+      `Weekly generation quota for this user — ${counts} `
+      + `(resets ${formatMediaQuotaResetLabel()}). At the cap the tool returns an error; `
+      + 'if the user asks, tell them what is left.',
+    );
+  }
+
+  if (cap.longTermMemory) {
+    blocks.push(_renderCurrentSettings(ctx));
+    if (ctx.settingsReviewDue) {
+      blocks.push(_block('SettingsReview', [SETTINGS_REVIEW_NOTICE]));
+    }
+  }
+
+  if (delivery.includeTitle) {
+    blocks.push(
+      'First message of this thread: `conversation_title` is required '
+      + '(short topic title, user\'s language, no emoji).',
+    );
+  }
+
+  return _macro('Runtime', blocks);
 }
 
 /**
@@ -209,22 +282,19 @@ function _platformField(label, content) {
   return `${PROMPT_INDENT}${label}: ${content}`;
 }
 
-function _buildDiscordPlatform(ctx, promptOpts) {
-  const lines = ['<Platform name="discord">'];
-  lines.push(_platformField('Role', 'Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.'));
-  if (ctx.threadName && !ctx.deliveryState?.includeTitle) {
-    lines.push(_platformField('Thread title', escapeXml(ctx.threadName)));
-  }
-  lines.push(_platformField('Format', 'Markdown supported (but no tables).'));
-  if (ctx.availableEmojis) lines.push(_platformField('Emojis', ctx.availableEmojis));
-  if (ctx.serverEvents) lines.push(_platformField('Events', ctx.serverEvents));
-  if (ctx.rulesContext) lines.push(_platformField('Rules context', escapeXml(ctx.rulesContext)));
-  lines.push(_platformField('Caller', _callerLineInner(ctx, promptOpts)));
-  lines.push('</Platform>');
+/** Discord structural Platform only (thread title / emojis / events are Runtime). */
+function _buildDiscordPlatformStatic() {
+  const lines = [
+    '<Platform name="discord">',
+    _platformField('Role', 'Help with Statute (Statuto Albertino) rules and generate Art. 6 formal PDF requests. Active in the "gemix" channel.'),
+    _platformField('Format', 'Markdown supported (but no tables).'),
+    '</Platform>',
+  ];
   return lines.join('\n');
 }
 
-function _buildPersonalWaPlatform(ctx, promptOpts) {
+/** Personal WA structural Platform (Caller is in Runtime). */
+function _buildPersonalWaPlatformStatic(ctx, promptOpts) {
   const otherName = ctx.personalOtherUserName
     ? escapeXml(ctx.personalOtherUserName)
     : 'the other participant';
@@ -233,7 +303,6 @@ function _buildPersonalWaPlatform(ctx, promptOpts) {
     _platformField('Rule', 'Admin-account chat with one other user. Reply only when this message contains @gemix. History, memory, and build workspace are shared for this chat pair.'),
     _platformField('Chat', `You (GemiX, never tag yourself), ${escapeXml(ADMIN_NAME)} (Account Owner), ${otherName}`),
     _platformField('History notes', 'Admin messages appear in history under the label "Account Owner", not their name. Your replies have no speaker prefix.'),
-    _platformField('Caller', _callerLineInner(ctx, promptOpts)),
     _platformField('Format', WA_FORMAT),
   ];
   const access = buildCallerAccessNote(PROFILE.WA_PERSONAL, promptOpts);
@@ -242,15 +311,12 @@ function _buildPersonalWaPlatform(ctx, promptOpts) {
   return lines.join('\n');
 }
 
-function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
+/** Dedicated WA structural Platform (Caller / Participants are in Runtime). */
+function _buildDedicatedWaPlatformStatic(ctx, cap, promptOpts) {
   const lines = ['<Platform name="whatsapp_dedicated">'];
   if (ctx.isGroup) {
     lines.push(_platformField('Group name', escapeXml(ctx.groupName) || 'unknown'));
     lines.push(_platformField('Rule', 'Reply when @mentioned or when the user replies to a GemiX message.'));
-    const roster = Array.isArray(ctx.groupParticipants) ? ctx.groupParticipants : [];
-    if (roster.length > 0) {
-      lines.push(_platformField('Participants', formatParticipantsForPrompt(roster, escapeXml)));
-    }
     lines.push(_platformField('Mentions', 'REQUIRED when you name another member (anyone except <Caller>) in the reply: @<phone digits> only (no +, no display name after @).'));
   } else {
     lines.push(_platformField('Rule', 'Private chat - reply to every message.'));
@@ -259,7 +325,6 @@ function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
   if (cap.systemHistoryLabel) {
     lines.push(_platformField('History notes', SYSTEM_LINE_RULE));
   }
-  lines.push(_platformField('Caller', _callerLineInner(ctx, promptOpts)));
   lines.push(_platformField('Format', WA_FORMAT));
   const access = buildCallerAccessNote(resolveProfile(ctx), promptOpts);
   if (access) lines.push(_platformField('Caller access', access));
@@ -269,11 +334,6 @@ function _buildDedicatedWaPlatform(ctx, cap, promptOpts) {
 
 function _block(tag, lines) {
   const body = _indentLines(lines.join('\n'), 1);
-  return `<${tag}>\n${body}\n</${tag}>`;
-}
-
-function _blockRaw(tag, blocks) {
-  const body = blocks.map(b => _indentLines(b, 1)).join('\n');
   return `<${tag}>\n${body}\n</${tag}>`;
 }
 
@@ -302,4 +362,8 @@ function _renderDirectives(groups) {
   return { block: `<Directives>\n${parts.join('\n')}\n</Directives>`, count: n };
 }
 
-module.exports = { buildSystemPrompt };
+module.exports = {
+  buildStaticInstructions,
+  buildDynamicRuntimeContext,
+  promptToolsFingerprint,
+};

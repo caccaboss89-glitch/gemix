@@ -3,13 +3,14 @@
 // Per-user WEEKLY generation quota for images, videos and songs.
 //
 // Limits are enforced per user (active or not); the admin is exempt. Counts
-// are persisted via systemState (survive restarts) and reset every Tuesday at
-// 16:00 Europe/Rome — the same wall-clock the reminders and sent-message
-// timestamps use (DST-aware, never UTC), NOT a fixed offset.
+// are persisted via systemState (survive restarts) and reset at the configured
+// weekday + time Europe/Rome (env MEDIA_WEEKLY_RESET_*; defaults Tuesday 16:00)
+// — the same wall-clock the reminders and sent-message timestamps use
+// (DST-aware, never UTC), NOT a fixed offset.
 //
-// A period is identified by the date of its opening Tuesday (YYYY-MM-DD); when
-// a stored record belongs to an older period it is treated as empty (and pruned
-// on the next write), so the reset is lazy and needs no scheduler.
+// A period is identified by the date of its opening reset weekday (YYYY-MM-DD);
+// when a stored record belongs to an older period it is treated as empty (and
+// pruned on the next write), so the reset is lazy and needs no scheduler.
 //
 // Callers reserve a slot up-front (so parallel tool calls in one round cannot
 // exceed the cap) and refund it if the generation fails.
@@ -17,6 +18,11 @@
 const systemState = require('./systemState');
 const { getRomeParts } = require('./time');
 const { createLogger } = require('./logger');
+const {
+  MEDIA_WEEKLY_RESET_WEEKDAY,
+  MEDIA_WEEKLY_RESET_HOUR,
+  MEDIA_WEEKLY_RESET_MINUTE,
+} = require('../config/env');
 
 const log = createLogger('MediaLimits');
 
@@ -26,21 +32,40 @@ const STATE_MODULE = 'mediaWeeklyUsage';
 /** Weekly caps per generation kind. */
 const MEDIA_WEEKLY_LIMITS = { image: 5, video: 2, song: 2 };
 
-/** Weekly reset boundary: Tuesday (0 = Sunday) at 16:00 Europe/Rome. */
-const RESET_WEEKDAY = 2;
-const RESET_HOUR = 16;
+/** Weekly reset boundary from env (weekday 0=Sun…6=Sat; hour/minute Europe/Rome). */
+const RESET_WEEKDAY = MEDIA_WEEKLY_RESET_WEEKDAY;
+const RESET_HOUR = MEDIA_WEEKLY_RESET_HOUR;
+const RESET_MINUTE = MEDIA_WEEKLY_RESET_MINUTE;
+const RESET_MINUTES_OF_DAY = RESET_HOUR * 60 + RESET_MINUTE;
+
+const WEEKDAY_NAMES_EN = [
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+];
+
+/**
+ * Human label for the reset boundary (prompt + tool errors), Europe/Rome.
+ * e.g. "Tuesday at 15:57"
+ * @returns {string}
+ */
+function formatMediaQuotaResetLabel() {
+  const day = WEEKDAY_NAMES_EN[RESET_WEEKDAY] || 'Tuesday';
+  const hh = String(RESET_HOUR).padStart(2, '0');
+  const mm = String(RESET_MINUTE).padStart(2, '0');
+  return `${day} at ${hh}:${mm}`;
+}
 
 /**
  * Stable key for the current weekly period: the date (YYYY-MM-DD, Europe/Rome)
- * of the most recent Tuesday-16:00 boundary at or before now.
+ * of the most recent reset weekday+time boundary at or before now.
  * @returns {string}
  */
 function currentPeriodKey() {
-  const { year, month, day, hour, weekday } = getRomeParts();
-  // Days since the most recent Tuesday (0 when today is Tuesday).
+  const { year, month, day, hour, minute, weekday } = getRomeParts();
+  // Days since the most recent reset weekday (0 when today is that weekday).
   let daysBack = (weekday - RESET_WEEKDAY + 7) % 7;
-  // Before 16:00 on Tuesday the current period still belongs to last Tuesday.
-  if (daysBack === 0 && hour < RESET_HOUR) daysBack = 7;
+  // Before reset time on the reset day the current period still belongs to last week.
+  const nowMinutes = hour * 60 + minute;
+  if (daysBack === 0 && nowMinutes < RESET_MINUTES_OF_DAY) daysBack = 7;
   const anchor = new Date(Date.UTC(year, month - 1, day));
   anchor.setUTCDate(anchor.getUTCDate() - daysBack);
   const y = anchor.getUTCFullYear();
@@ -64,7 +89,7 @@ function getMediaUsage(userKey) {
 }
 
 /**
- * Format the usage counts for the prompt Limits section.
+ * Format the usage counts for the Runtime trailer weekly quota line.
  * @param {string} userKey
  * @returns {string} e.g. "Video: 1/2 Immagini 3/5 Canzoni 0/2"
  */
@@ -83,7 +108,7 @@ function formatQuotaCounts(userKey) {
 function limitReachedError(kind) {
   const label = { image: 'image', video: 'video', song: 'song' }[kind] || kind;
   return `Weekly ${label} generation limit reached (${MEDIA_WEEKLY_LIMITS[kind]} per week). `
-    + 'It resets every Tuesday at 16:00.';
+    + `It resets every ${formatMediaQuotaResetLabel()}.`;
 }
 
 /**
@@ -177,9 +202,13 @@ async function reserveGeneration(kind, userCtx) {
 
 module.exports = {
   MEDIA_WEEKLY_LIMITS,
+  RESET_WEEKDAY,
+  RESET_HOUR,
+  RESET_MINUTE,
   currentPeriodKey,
   getMediaUsage,
   formatQuotaCounts,
+  formatMediaQuotaResetLabel,
   limitReachedError,
   reserveMediaQuota,
   refundMediaQuota,

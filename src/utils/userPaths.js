@@ -9,12 +9,11 @@
 //       <storageId>/                  ← chat history (WA jid/group, Discord thread id)
 //         history/
 //         history_meta.json
-//         voice_counts.json
 //       user_<sanitized>/             ← build workspaces (workspaceId user:…)
 //       group_<sanitized>/            ← build workspaces (workspaceId group:…)
 //
 // Build trees live under user_* / group_* (see workspaceId.js, buildWorkspace.js).
-// This module only manages <storageId>/ history and voice_counts.json.
+// This module only manages <storageId>/ history paths.
 
 const fs = require('fs');
 const path = require('path');
@@ -84,8 +83,8 @@ function ensureDir(p) {
 /**
  * Create the per-user folders if missing. Idempotent.
  *
- * Just history now - every other zone the bot writes (voice counts,
- * build workspace) materializes its own dirs on demand.
+ * Just history now - every other zone the bot writes (build workspace,
+ * etc.) materializes its own dirs on demand.
  */
 function ensureUserSkeleton(userCtx) {
   const root = getUserRoot(userCtx);

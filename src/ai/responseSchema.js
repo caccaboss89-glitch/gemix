@@ -21,7 +21,6 @@ const RESPONSE_FIELD_DESC =
 const VOICE_FLAG_DESC =
   'Set true to send THIS reply as a voice message in the current chat instead of text. '
   + 'Keep long or technical answers as text. '
-  + 'At most 3 voice messages in a row per chat, then reply as text. '
   + 'Voice is only for the current chat — you cannot send a voice message to anyone else.';
 
 const VOICE_RESPONSE_FIELD_DESC =

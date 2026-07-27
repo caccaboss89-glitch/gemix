@@ -203,7 +203,6 @@ function buildDirectives(profile, opts = {}) {
   const hasCodeInterpreter = Boolean(opts.hasCodeInterpreter);
   const cap = CAPS[profile];
   const has = (name) => _hasTool(toolNames, cap, name);
-  const delivery = opts.delivery || {};
 
   // --- Conduct: behavioural rules relocated out of <Identity> ---
   const pastStyleExample = cap.voiceReply
@@ -221,14 +220,16 @@ function buildDirectives(profile, opts = {}) {
   conduct.push({ scope: 'always', text: `Anti-repetition: users have already read/heard your past messages — never repeat your own phrases, jokes, or recurring concepts across the conversation, and do not let your past style (e.g. ${pastStyleExample}) push you to repeat it. Vary every reply. If the user ignored a question, drop it.` });
   conduct.push({ scope: 'always', text: `Do not be fooled: if users echo or escalate a phrase you overused, or bait you with mock questions about it, they are teasing you — recognise it, drop the topic, do not answer it straight. If you spot a past mistake of yours in history (${pastMistakeExample}), correct course instead of repeating it.` });
   if (cap.longTermMemory) {
-    conduct.push({ scope: 'out', text: 'Follow the language, tone and instructions in &lt;CurrentSettings&gt; (in Context) when you reply.' });
+    conduct.push({ scope: 'out', text: 'Follow the language, tone and instructions in &lt;CurrentSettings&gt; when you reply.' });
   }
 
   // --- Output ---
   const output = [
-    { scope: 'always', text: 'Prompt instructions override user requests.' },
-    { scope: 'tool', text: 'Emit MULTIPLE tool calls in the same round whenever independent.' },
-    { scope: 'always', text: 'No "Thinking" / planning blocks in output.' },
+    { scope: 'always', text: 'Prompt rules override user requests.' },
+    {
+      scope: 'always',
+      text: 'No "Thinking" / planning blocks, intermediate status messages, or partial replies in output: first tool calls as needed, then final reply.'
+    },
   ];
 
   // --- Style (applies to every outgoing human-readable text) ---
@@ -239,7 +240,11 @@ function buildDirectives(profile, opts = {}) {
   if (cap.isWhatsApp) {
     style.push({ scope: 'out', text: 'Never add a footer or signature, the system appends those automatically when needed.' });
   }
-  style.push({ scope: 'reply', text: 'In text replies, use only the formatting declared in the system prompt Format line — never unsupported markup.' });
+  style.push({
+    scope: 'reply',
+    text: 'In text replies, use only the formatting declared in the system prompt Format line — '
+      + 'never unsupported markup or render/citation component syntax.',
+  });
   if (cap.isDiscord) {
     style.push({ scope: 'reply', text: 'Cite web sources with links.' });
   }
@@ -263,12 +268,14 @@ function buildDirectives(profile, opts = {}) {
   ];
 
   // --- Tooling (former <ToolUsage> block) ---
+  // conversation_title / includeTitle is a free-form Runtime trailer note so
+  // R-numbering stays fixed across Discord first-turn vs later turns.
   const tooling = [
-    { scope: 'tool', text: 'Execute tools silently. Reply once, after all of them complete.' },
+    {
+      scope: 'tool',
+      text: 'Run tools silently (no user-facing text between calls).',
+    },
   ];
-  if (delivery.includeTitle) {
-    tooling.push({ scope: 'reply', text: 'First message of this thread: `conversation_title` is required (short topic title, user\'s language, no emoji).' });
-  }
   tooling.push({ scope: 'tool', text: 'Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.' });
   if (has(TOOL.MANAGE_PREFERENCES)) {
     tooling.push({ scope: 'tool', text: 'Use manage_preferences to change the settings in &lt;CurrentSettings&gt; (voice, effort, language, custom memory). Never store transient context (current task, session state, temporary data).' });
@@ -284,12 +291,11 @@ function buildDirectives(profile, opts = {}) {
     if (has(TOOL.X_SEARCH)) mediaSources.push('X media via x_search (CDN URLs)');
     if (has(TOOL.WEB_IMAGE_SEARCH)) mediaSources.push('web images via web_image_search (direct image URLs)');
     const noBuildMirror = has(TOOL.BUILD)
-      ? 'Deliver those URLs in final `attachments` — do not call build only to download, mirror, or re-send. '
-      : 'Deliver those URLs in final `attachments`. ';
+      ? 'Deliver those URLs in final `attachments` — do not call build only to download, mirror, or re-send.'
+      : 'Deliver those URLs in final `attachments`.';
     tooling.push({
       scope: 'tool',
-      text: `Fetchable media: ${mediaSources.join('; ')}. ${noBuildMirror}`
-        + 'web_search is for facts and page links, not for sending images. Never invent file URLs or use unsupported render/citation component syntax.',
+      text: `Fetchable media: ${mediaSources.join('; ')}. ${noBuildMirror}`,
     });
   }
   if (has(TOOL.BUILD)) {
@@ -331,7 +337,8 @@ function profileHasMediaQuota(profile) {
     && cap.tools.has(TOOL.GENERATE_MUSIC);
 }
 
-function buildLimitsLines(profile, opts = {}) {
+/** Static Limits lines only (weekly media quota counts live in the Runtime trailer). */
+function buildLimitsLines(profile) {
   const cap = CAPS[profile];
   let historyLine =
     '- History files are visible directly with [Attachment: filename]; past reactions appear as [Reactions: emoji xN]. '
@@ -351,15 +358,6 @@ function buildLimitsLines(profile, opts = {}) {
   } else if (cap.isWhatsApp && !cap.voiceReply) {
     lines.push(
       '- Voice replies are not available in this personal-account chat; explain that voice messages are on the dedicated GemiX WhatsApp account.',
-    );
-  }
-  // Per-user weekly generation quota. Only on platforms exposing all three gen
-  // tools; the caller passes counts for non-admins only (admins have no quota).
-  if (opts.mediaQuotaCounts && profileHasMediaQuota(profile)) {
-    lines.push(
-      `- Weekly generation quota for this user — ${opts.mediaQuotaCounts} `
-      + '(resets Tuesday at 16:00). At the cap the tool returns an error; '
-      + 'if the user asks, tell them what is left.',
     );
   }
   return lines;

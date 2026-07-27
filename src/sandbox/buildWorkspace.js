@@ -272,11 +272,6 @@ function wipeWorkspace(workspaceId) {
 }
 
 /**
- * Returns true when there is at least one file in the workspace tree.
- * Used by the main brain's system prompt builder to decide whether to
- * inject a <UserWorkspace> block.
- */
-/**
  * Normalize a workspace path from a harvest entry or staged name
  * to a relative path under the workspace root.
  *

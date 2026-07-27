@@ -101,7 +101,7 @@ async function musicCreator(prompt, userCtx) {
     return { toolResult: { success: false, error: 'A music generation is already in progress...' }, attachments: [] };
   }
 
-  // Weekly per-user quota (max 2 songs/week, resets Tuesday 16:00; admins exempt).
+  // Weekly per-user quota (max 2 songs/week; reset from MEDIA_WEEKLY_RESET_*; admins exempt).
   const quota = await reserveGeneration('song', userCtx);
   if (!quota.ok) {
     return { toolResult: { success: false, error: quota.error }, attachments: [] };

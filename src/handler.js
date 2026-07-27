@@ -5,13 +5,16 @@
 // One round of conversation looks like this:
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
 //   2. Touch the per-user/group build workspace activity timestamp (WA only).
-//   3. Build the messages array: system prompt + chat history + the current
-//      user content. Media uses utils/incomingMediaIngress.js →
-//      aiFileDelivery.js: native `input_image` / `input_file` parts via
-//      public URLs (user/history files attached natively; assistant-side
-//      entries including GemiX voice stay [Attachment] tags only), or tag-only
-//      for raw binaries. GemiX past voice transcripts replace assistant
-//      [Attachment: …] tags in history with <PastVoiceReply> (WA voice platforms).
+//   3. Build chat messages (history + current user content only). Static system
+//      instructions go to Responses top-level `instructions` (byte-stable for
+//      the turn). Turn-varying Runtime state is a trailing role:system item in
+//      `input[]`, rewritten before every AI call. Media uses
+//      utils/incomingMediaIngress.js → aiFileDelivery.js: native `input_image`
+//      / `input_file` parts via public URLs (user/history files attached
+//      natively; assistant-side entries including GemiX voice stay [Attachment]
+//      tags only), or tag-only for raw binaries. GemiX past voice transcripts
+//      replace assistant [Attachment: …] tags in history with <PastVoiceReply>
+//      (WA voice platforms).
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in two phases:
 //      (1) standard tools parallel, (2) delivery parallel - repeat until the
 //      model returns the final response or the round budget is reached. The
@@ -23,7 +26,11 @@
 //      reply back to the platform.
 
 const { callAI } = require('./ai/aiProvider');
-const { buildSystemPrompt } = require('./ai/systemPrompt');
+const {
+  buildStaticInstructions,
+  buildDynamicRuntimeContext,
+  promptToolsFingerprint,
+} = require('./ai/systemPrompt');
 const { getToolsForUser, getToolAccessError } = require('./ai/tools');
 const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/responseSchema');
 const { resolveDeliverySelection } = require('./utils/deliverySelection');
@@ -31,8 +38,7 @@ const { applyPastVoiceRepliesToHistory } = require('./utils/voiceTranscripts');
 const { generateVoice } = require('./tools/voiceMessage');
 const { sanitizeVoiceMessageText } = require('./utils/text');
 const { getCapabilities } = require('./config/platformCapabilities');
-const { executeTool, resetVoiceCount, getVoiceLimitChatKey } = require('./tools');
-const { getVoiceCount, incrementVoiceCount } = require('./utils/voiceCounter');
+const { executeTool } = require('./tools');
 const {
   MAX_TOOL_ROUNDS,
   MAX_TTS_CHARS,
@@ -181,7 +187,6 @@ async function handleMessage(ctx) {
             log.warn(`maintenance release notify mirror to WhatsApp failed: ${err.message}`);
           }
         }
-        await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
         return {
           text,
           voiceBuffer: null,
@@ -193,7 +198,6 @@ async function handleMessage(ctx) {
         };
       }
       log.info(`   Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
-      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
       return {
         text: MAINTENANCE_USER_MESSAGE,
         voiceBuffer: null,
@@ -285,10 +289,17 @@ async function handleMessage(ctx) {
     refreshUserWorkspace();
 
     ctx.isFirstTurn = userCtx.isFirstTurn;
+    // Seed deliveryState for Runtime trailer + response schema (includeTitle /
+    // buffer). Static instructions never read includeTitle; recomputed each AI call.
+    const discordFirstTurn = Boolean(userCtx.isFirstTurn);
+    ctx.deliveryState = {
+      bufferFiles: (responseCtx.attachments || []).map(a => a.name).filter(Boolean),
+      includeTitle: discordFirstTurn && !responseCtx.discordTitle,
+    };
 
-    const messages = [
-      { role: 'system', content: buildSystemPrompt(ctx) },
-    ];
+    // History + current user only. Static instructions are top-level Responses
+    // `instructions`; Runtime is a trailing system item rewritten each call.
+    const messages = [];
 
     // GemiX voice in history is [Attachment] on assistant (no native audio parts).
     // Replace those tags in-place with <PastVoiceReply> on the assistant messages
@@ -313,6 +324,30 @@ async function handleMessage(ctx) {
     }
 
     messages.push({ role: 'user', content: ctx.content });
+
+    // Static system prefix for this turn (profile/membership/tools). Rebuilt
+    // only if the live tool fingerprint actually changes mid-turn (rare).
+    let staticInstructions = buildStaticInstructions(ctx);
+    let toolsFp = promptToolsFingerprint(ctx);
+
+    /** Remove program-owned Runtime trailers so they never sit mid-list. */
+    const stripRuntimeTrailers = () => {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i] && messages[i]._runtimeTrailer) {
+          messages.splice(i, 1);
+        }
+      }
+    };
+
+    /** Append a fresh Runtime system item as the last message for this request. */
+    const appendRuntimeTrailer = () => {
+      stripRuntimeTrailers();
+      messages.push({
+        role: 'system',
+        content: buildDynamicRuntimeContext(ctx),
+        _runtimeTrailer: true,
+      });
+    };
 
     try {
       const historyUserId = resolveStorageId(ctx);
@@ -348,12 +383,10 @@ async function handleMessage(ctx) {
     const sessionStartTime = Date.now();
     let sessionDurationLimitReached = false;
     const promptCacheKey = generatePromptCacheKey(userCtx);
-    const discordFirstTurn = Boolean(userCtx.isFirstTurn);
 
     // Structured-reply state, recomputed before every AI call: `bufferFiles`
-    // lists what is currently in the delivery buffer (surfaced in the prompt),
-    // and `includeTitle` flags the first Discord thread turn (which adds the
-    // required `conversation_title`). The JSON schema itself is fixed every round.
+    // lists what is currently in the delivery buffer (surfaced in Runtime),
+    // and `includeTitle` flags the first Discord thread turn (schema + Runtime note).
     const computeDeliveryState = () => {
       const bufferFiles = (responseCtx.attachments || []).map(a => a.name).filter(Boolean);
       return {
@@ -389,7 +422,7 @@ async function handleMessage(ctx) {
     };
 
     // Tool defs for the round in flight (platform/membership-gated; delivery
-    // buffer state is injected into the system prompt, not into tool schemas).
+    // buffer state is injected into the Runtime trailer, not into tool schemas).
     let currentRoundTools = [];
 
     const runToolCall = async (tc) => {
@@ -417,17 +450,11 @@ async function handleMessage(ctx) {
 
     // Generate a voice reply from the model's final `response` text when it set
     // `voice:true` (WhatsApp dedicated only). Returns a voice response object,
-    // or null to fall back to a normal text reply (limit hit, too long, error).
+    // or null to fall back to a normal text reply (too long, error).
     const buildVoiceReply = async (rawResponseText, finalAttachments) => {
-      const chatKey = getVoiceLimitChatKey(ctx);
       const spoken = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
       if (!spoken.trim()) return null;
 
-      const count = await getVoiceCount(userCtx, chatKey);
-      if (count >= 3) {
-        log.warn(`   Voice requested but limit reached in ${chatKey}; replying as text`);
-        return null;
-      }
       if (spoken.length > MAX_TTS_CHARS) {
         log.warn(`   Voice text too long (${spoken.length} > ${MAX_TTS_CHARS}); replying as text`);
         return null;
@@ -444,7 +471,6 @@ async function handleMessage(ctx) {
         return null;
       }
 
-      await incrementVoiceCount(userCtx, chatKey);
       const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
         ? buildResearchBadgeText(responseCtx.researchStats)
         : null;
@@ -474,21 +500,27 @@ async function handleMessage(ctx) {
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
       log.info(`[${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
 
-      // Refresh the workspace listing before each AI call so any file the
-      // build sub-agent just produced shows up immediately in <BuildWorkspace>.
+      // Refresh turn-varying Runtime fields before each AI call. Static
+      // instructions stay byte-identical unless the tool fingerprint changes.
       refreshUserWorkspace();
       reloadSettings(ctx, ui);
 
-      // Delivery / structured-reply state for this round: drives the prompt's
-      // delivery instructions and whether conversation_title is required.
       const deliveryState = computeDeliveryState();
       ctx.deliveryState = deliveryState;
       ctx.isFirstTurn = deliveryState.includeTitle;
       userCtx.isFirstTurn = deliveryState.includeTitle;
-      messages[0].content = buildSystemPrompt(ctx);
 
       const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       currentRoundTools = roundTools;
+      const nextFp = promptToolsFingerprint(ctx);
+      if (nextFp !== toolsFp) {
+        // Unexpected today (getToolsForUser ignores isFirstTurn); keep correct if gating ever changes.
+        staticInstructions = buildStaticInstructions(ctx);
+        toolsFp = nextFp;
+        log.info('   Static instructions rebuilt (tool fingerprint changed mid-turn)');
+      }
+
+      appendRuntimeTrailer();
       const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
       const callOpts = {
         maxTurns: MAX_TOOL_ROUNDS,
@@ -497,9 +529,19 @@ async function handleMessage(ctx) {
         historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
         reasoningEffort: ctx.settings?.effort,
+        instructions: staticInstructions,
       };
 
-      const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
+      let assistantMsg;
+      let provider;
+      let model;
+      let searchStats;
+      try {
+        ({ message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts));
+      } finally {
+        // Always drop the trailer so failures never leave a mid-list system item.
+        stripRuntimeTrailers();
+      }
       lastModelUsed = model;
       accumulateSearchStats(searchStats);
       log.info(`   Provider: ${provider} (${model})`);
@@ -636,7 +678,6 @@ async function handleMessage(ctx) {
             ? '   Empty AI response after retry, sending fallback'
             : '   Empty AI response, sending fallback',
         );
-        await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
         return {
           text: FALLBACK_ERROR_PREFIX,
           voiceBuffer: null,
@@ -660,7 +701,6 @@ async function handleMessage(ctx) {
         }
       }
 
-      await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx));
       return {
         text: text || null,
         voiceBuffer: null,
@@ -680,29 +720,44 @@ async function handleMessage(ctx) {
     let wrapUpAttachments = [];
     let wrapUpVoice = false;
     try {
+      refreshUserWorkspace();
       reloadSettings(ctx, ui);
       const deliveryState = computeDeliveryState();
       ctx.deliveryState = deliveryState;
       ctx.isFirstTurn = deliveryState.includeTitle;
       userCtx.isFirstTurn = deliveryState.includeTitle;
-      messages[0].content = buildSystemPrompt(ctx);
       const wrapUpTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
+      const nextFp = promptToolsFingerprint(ctx);
+      if (nextFp !== toolsFp) {
+        staticInstructions = buildStaticInstructions(ctx);
+        toolsFp = nextFp;
+      }
       const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
       const wrapUpNote = sessionDurationLimitReached
         ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'SYSTEM: You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
+      stripRuntimeTrailers();
       messages.push({
         role: 'user',
         content: wrapUpNote,
       });
-      const { message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
-        toolChoice: 'none',
-        requestId: ctx.requestId,
-        responseFormat,
-        historyStorageId: resolveStorageId(ctx) || null,
-        promptCacheKey,
-        reasoningEffort: ctx.settings?.effort,
-      });
+      appendRuntimeTrailer();
+      let finalMsg;
+      let finalModel;
+      let searchStats;
+      try {
+        ({ message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
+          toolChoice: 'none',
+          requestId: ctx.requestId,
+          responseFormat,
+          historyStorageId: resolveStorageId(ctx) || null,
+          promptCacheKey,
+          reasoningEffort: ctx.settings?.effort,
+          instructions: staticInstructions,
+        }));
+      } finally {
+        stripRuntimeTrailers();
+      }
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
       const parsed = parseStructuredReply(finalMsg.content || '');
@@ -711,6 +766,7 @@ async function handleMessage(ctx) {
       wrapUpVoice = Boolean(allowVoice && parsed.voice);
       wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanAssistantResponse(parsed.text || '');
     } catch (wrapErr) {
+      stripRuntimeTrailers();
       log.error(`   Forced wrap-up call failed: ${wrapErr.message}`);
     }
 
@@ -725,7 +781,6 @@ async function handleMessage(ctx) {
       wrapUpText = appendResearchBadge(wrapUpText, responseCtx.researchStats);
     }
 
-    try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed: ${vcErr.message}`); }
     const wrapText = wrapUpText.trim() ? wrapUpText : FALLBACK_ERROR_PREFIX;
     return {
       text: wrapText,
@@ -741,7 +796,6 @@ async function handleMessage(ctx) {
     const platformLabel = (typeof ctx?.platform === 'string' && ctx.platform)
       ? ctx.platform.toUpperCase().padEnd(10)
       : 'UNKNOWN   ';
-    try { await resetVoiceCount(ctx, getVoiceLimitChatKey(ctx)); } catch (vcErr) { log.warn(`resetVoiceCount failed in catch: ${vcErr.message}`); }
 
     // Grok credit exhaustion (SuperGrok weekly cap, or the OAuth "bad-credentials"
     // 403 xAI returns once credits run out) is an expected, already-handled state:

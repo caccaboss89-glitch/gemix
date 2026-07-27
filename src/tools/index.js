@@ -43,16 +43,11 @@ const {
 
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { resolveDeliverySelection } = require('../utils/deliverySelection');
-const { resetVoiceCount } = require('../utils/voiceCounter');
 const {
   PER_ROUND_TOOL_LIMITS,
   perRoundCapErrorPayload,
 } = require('../utils/toolCallExecution');
 const log = createLogger('Tools');
-
-function _getVoiceLimitChatKey(userCtx) {
-  return userCtx?.chatId || userCtx?.groupId || userCtx?.waJid || userCtx?.userId || 'unknown';
-}
 
 const WA_MISSING_RECIPIENT_ERROR =
   'Missing recipient. send_whatsapp_message targets a specific phone number; use your structured reply for the current chat, not this tool.';
@@ -169,9 +164,6 @@ function platformToolBlockReason(toolName, userCtx) {
  */
 async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs = null) {
   const name = toolCall.function.name;
-
-  // Voice streak counter resets when GemiX sends a text reply (handler.js), so
-  // consecutive voice:true replies cannot exceed the per-chat limit.
 
   let args;
   try {
@@ -580,6 +572,4 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
 module.exports = {
   executeTool,
-  resetVoiceCount,
-  getVoiceLimitChatKey: _getVoiceLimitChatKey,
 };

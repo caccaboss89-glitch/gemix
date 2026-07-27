@@ -166,8 +166,20 @@ function _replayStoredOutput(input, items) {
   }
 }
 
-function chatMessagesToResponsesInput(messages) {
-  let instructions = '';
+/**
+ * Convert chat-style messages to Responses `input[]`.
+ *
+ * Static system text is NOT taken from messages: pass it via
+ * `opts.instructions` (Responses top-level field). Any `role: system` message
+ * (e.g. the program-owned Runtime trailer) is emitted as an input item in
+ * order so it can stay last after history / tool results.
+ *
+ * @param {Array} messages
+ * @param {{ instructions?: string }} [opts]
+ * @returns {{ instructions: string, input: Array }}
+ */
+function chatMessagesToResponsesInput(messages, opts = {}) {
+  const instructions = typeof opts.instructions === 'string' ? opts.instructions : '';
   const input = [];
 
   if (!Array.isArray(messages)) return { instructions, input };
@@ -182,12 +194,13 @@ function chatMessagesToResponsesInput(messages) {
           text = msg.content;
         } else if (Array.isArray(msg.content)) {
           text = msg.content
-            .filter(p => p && p.type === 'text' && typeof p.text === 'string')
+            .filter(p => p && (p.type === 'text' || p.type === 'input_text') && typeof p.text === 'string')
             .map(p => p.text)
             .join('\n');
         }
         if (text) {
-          instructions = instructions ? `${instructions}\n\n${text}` : text;
+          // xAI accepts role:system items with string content (not folded into instructions).
+          input.push({ role: 'system', content: text });
         }
         break;
       }

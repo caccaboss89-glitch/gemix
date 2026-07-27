@@ -1,6 +1,7 @@
 // Stable per-conversation IDs for xAI Responses API prompt_cache_key.
-// Keeps requests for the same chat on the same cache affinity (system prompt,
-// early turns). Keys are deterministic for the lifetime of each conversation.
+// Sticky routing only: pairs with byte-stable top-level `instructions` and an
+// append-only conversation + trailing Runtime trailer. Exact prefix match is
+// still required for cache hits; this key does not replace that.
 
 const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
 const { resolveStorageId } = require('./userPaths');

@@ -271,7 +271,7 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
         type: 'string',
         allowEmpty: true,
         description: 'Free-text custom instructions, for anything not covered by the fields above: '
-          + 'e.g. speak with a certain slang, use lots of emoji, prefer voice replies, or what the user is working on in this period '
+          + 'e.g. speak with a certain slang, use lots of emoji, always prefer text or voice replies, or what the user is working on in this period '
           + '(ideas/projects that stay relevant for days, weeks or months — never a one-off question or transient context). '
           + `Max 1000 chars, always in English; empty resets it to the default. Do not write timestamps: the system tracks them.`,
       },

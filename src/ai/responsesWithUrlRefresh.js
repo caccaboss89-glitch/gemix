@@ -15,8 +15,11 @@ const MAX_STALE_URL_REFRESHES = 2;
 /**
  * @param {object} opts
  * @param {string} opts.modelName
- * @param {Array|null} opts.messages - When set, body.input/instructions are rebuilt each attempt.
+ * @param {Array|null} opts.messages - When set, body.input is rebuilt each attempt
+ *   (and instructions from opts.instructions / body.instructions — never re-folded
+ *   from role:system messages).
  * @param {object} opts.body - Responses API body (mutated when messages provided).
+ * @param {string} [opts.instructions] - Authoritative static system instructions.
  * @param {object} [opts.logExtra]
  * @param {number} [opts.timeoutMs]
  * @param {string|null} [opts.historyStorageId] - History path fallback for refresh.
@@ -33,12 +36,19 @@ async function callResponsesWithStaleUrlRetry(opts) {
     allowStaleUrlRefresh = false,
   } = opts;
 
+  // Prefer explicit opts.instructions so retries keep a byte-identical static prefix.
+  const fixedInstructions = typeof opts.instructions === 'string'
+    ? opts.instructions
+    : (typeof body.instructions === 'string' ? body.instructions : '');
+
   const canRefresh = allowStaleUrlRefresh || Boolean(historyStorageId);
   let staleRefreshCount = 0;
 
   for (;;) {
     if (Array.isArray(messages)) {
-      const { instructions, input } = chatMessagesToResponsesInput(messages);
+      const { instructions, input } = chatMessagesToResponsesInput(messages, {
+        instructions: fixedInstructions,
+      });
       body.input = input;
       if (instructions && instructions.length > 0) {
         body.instructions = instructions;

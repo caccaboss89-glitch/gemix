@@ -88,6 +88,21 @@ module.exports = {
   XAI_TTS_VOICE: process.env.XAI_TTS_VOICE || 'leo',
   STARTUP_SYSTEM_CLEANUP: toBool(process.env.STARTUP_SYSTEM_CLEANUP, false),
 
+  // Weekly media quota reset (Europe/Rome). Used for period keys + prompt/tool wording.
+  // Weekday: 0=Sunday … 6=Saturday (default Tuesday=2). Hour 0–23, minute 0–59 (default 16:00).
+  MEDIA_WEEKLY_RESET_WEEKDAY: (() => {
+    const n = parseInt(process.env.MEDIA_WEEKLY_RESET_WEEKDAY, 10);
+    return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2;
+  })(),
+  MEDIA_WEEKLY_RESET_HOUR: (() => {
+    const n = parseInt(process.env.MEDIA_WEEKLY_RESET_HOUR, 10);
+    return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 16;
+  })(),
+  MEDIA_WEEKLY_RESET_MINUTE: (() => {
+    const n = parseInt(process.env.MEDIA_WEEKLY_RESET_MINUTE, 10);
+    return Number.isInteger(n) && n >= 0 && n <= 59 ? n : 0;
+  })(),
+
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   FFPROBE_PATH: process.env.FFPROBE_PATH || 'ffprobe',
   FFMPEG_PATH: process.env.FFMPEG_PATH || 'ffmpeg',
