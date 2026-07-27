@@ -16,10 +16,8 @@ const MAX_STALE_URL_REFRESHES = 2;
  * @param {object} opts
  * @param {string} opts.modelName
  * @param {Array|null} opts.messages - When set, body.input is rebuilt each attempt
- *   (and instructions from opts.instructions / body.instructions — never re-folded
- *   from role:system messages).
+ *   from messages (system items stay in input[] order; no top-level instructions).
  * @param {object} opts.body - Responses API body (mutated when messages provided).
- * @param {string} [opts.instructions] - Authoritative static system instructions.
  * @param {object} [opts.logExtra]
  * @param {number} [opts.timeoutMs]
  * @param {string|null} [opts.historyStorageId] - History path fallback for refresh.
@@ -36,25 +34,16 @@ async function callResponsesWithStaleUrlRetry(opts) {
     allowStaleUrlRefresh = false,
   } = opts;
 
-  // Prefer explicit opts.instructions so retries keep a byte-identical static prefix.
-  const fixedInstructions = typeof opts.instructions === 'string'
-    ? opts.instructions
-    : (typeof body.instructions === 'string' ? body.instructions : '');
-
   const canRefresh = allowStaleUrlRefresh || Boolean(historyStorageId);
   let staleRefreshCount = 0;
 
   for (;;) {
     if (Array.isArray(messages)) {
-      const { instructions, input } = chatMessagesToResponsesInput(messages, {
-        instructions: fixedInstructions,
-      });
+      const { input } = chatMessagesToResponsesInput(messages);
       body.input = input;
-      if (instructions && instructions.length > 0) {
-        body.instructions = instructions;
-      } else {
-        delete body.instructions;
-      }
+      // Main brain puts the static system prompt in input[0], not top-level
+      // instructions (xAI prefix-cache is message-array based).
+      delete body.instructions;
     }
 
     try {

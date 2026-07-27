@@ -1,10 +1,11 @@
-// src/ai/systemPrompt.js — static Responses `instructions` + dynamic Runtime trailer.
+// src/ai/systemPrompt.js — static system prefix + dynamic Runtime trailer.
 //
-// Live path (handler): byte-stable buildStaticInstructions once per turn, then
-// buildDynamicRuntimeContext as the last input[] role:system item each AI call.
-// Time, delivery buffer, workspace listing, quotas, settings, caller, and
-// turn-varying platform fields stay in the trailer so multi-round tool loops
-// keep a stable prefix. Discord Rules context is process-stable → static.
+// Live path (handler): byte-stable buildStaticInstructions as the first
+// input[] role:system item once per turn, then buildDynamicRuntimeContext as
+// the last role:system item each AI call. xAI prefix-cache matches from the
+// start of input[]; Time, delivery buffer, workspace listing, quotas, settings,
+// caller, and turn-varying platform fields stay in the trailer so multi-round
+// tool loops keep a stable prefix. Discord Rules context is process-stable → static.
 
 const { getRomeTime, formatTimestamp } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
@@ -90,7 +91,7 @@ function _buildBatchNote() {
 }
 
 /**
- * Byte-stable system instructions for Responses `instructions`.
+ * Byte-stable static system prefix for the first input[] role:system item.
  * Profile / membership / tools for this conversation — no turn-varying fields.
  */
 function buildStaticInstructions(ctx) {

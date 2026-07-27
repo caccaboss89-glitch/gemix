@@ -28,12 +28,11 @@ function _applyPromptCacheKey(body, key) {
 
 /**
  * Call Grok on the direct xAI Responses endpoint.
- * @param {Array} messages - History + user + tool items + optional trailing
- *   Runtime system message (not the static system prompt).
+ * @param {Array} messages - Static system first, then history + user + tool
+ *   items + optional trailing Runtime system message. xAI prefix-cache matches
+ *   from the start of this list (mapped to Responses `input[]`).
  * @param {Array|null} tools
  * @param {object} [opts]
- * @param {string} [opts.instructions] - Byte-stable static system instructions
- *   (Responses top-level). Kept identical across multi-round tool calls.
  * @param {string|null} [opts.historyStorageId] - Enables automatic refresh of
  *   expired tmpfile.link URLs referenced in messages before failing.
  * @param {string|null} [opts.promptCacheKey] - Stable per-conversation xAI cache id.
@@ -50,10 +49,6 @@ async function callAI(messages, tools = null, opts = {}) {
     store: false,
   };
   _applyPromptCacheKey(body, opts.promptCacheKey);
-
-  if (typeof opts.instructions === 'string' && opts.instructions.length > 0) {
-    body.instructions = opts.instructions;
-  }
 
   if (XAI_REASONING_REPLAY) {
     body.include = ['reasoning.encrypted_content'];
@@ -77,8 +72,6 @@ async function callAI(messages, tools = null, opts = {}) {
     body,
     logExtra,
     historyStorageId: opts.historyStorageId || null,
-    // Keep the same static prefix on stale-URL retries (do not re-fold from messages).
-    instructions: typeof opts.instructions === 'string' ? opts.instructions : undefined,
   });
 
   const message = responsesToAssistantMessage(data);

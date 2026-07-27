@@ -5,10 +5,10 @@
 // One round of conversation looks like this:
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
 //   2. Touch the per-user/group build workspace activity timestamp (WA only).
-//   3. Build chat messages (history + current user content only). Static system
-//      instructions go to Responses top-level `instructions` (byte-stable for
-//      the turn). Turn-varying Runtime state is a trailing role:system item in
-//      `input[]`, rewritten before every AI call. Media uses
+//   3. Build chat messages: static system first (byte-stable for the turn —
+//      xAI prefix-cache matches from the start of input[]), then history +
+//      current user. Turn-varying Runtime is a trailing role:system item,
+//      rewritten before every AI call. Media uses
 //      utils/incomingMediaIngress.js → aiFileDelivery.js: native `input_image`
 //      / `input_file` parts via public URLs (user/history files attached
 //      natively; assistant-side entries including GemiX voice stay [Attachment]
@@ -297,9 +297,16 @@ async function handleMessage(ctx) {
       includeTitle: discordFirstTurn && !responseCtx.discordTitle,
     };
 
-    // History + current user only. Static instructions are top-level Responses
-    // `instructions`; Runtime is a trailing system item rewritten each call.
-    const messages = [];
+    // Static system first (xAI caches from the start of input[]), then history
+    // + current user. Runtime is a trailing system item rewritten each call.
+    // Rebuilt only if the live tool fingerprint changes mid-turn (rare).
+    let staticInstructions = buildStaticInstructions(ctx);
+    let toolsFp = promptToolsFingerprint(ctx);
+    const messages = [{
+      role: 'system',
+      content: staticInstructions,
+      _staticPrefix: true,
+    }];
 
     // GemiX voice in history is [Attachment] on assistant (no native audio parts).
     // Replace those tags in-place with <PastVoiceReply> on the assistant messages
@@ -325,10 +332,18 @@ async function handleMessage(ctx) {
 
     messages.push({ role: 'user', content: ctx.content });
 
-    // Static system prefix for this turn (profile/membership/tools). Rebuilt
-    // only if the live tool fingerprint actually changes mid-turn (rare).
-    let staticInstructions = buildStaticInstructions(ctx);
-    let toolsFp = promptToolsFingerprint(ctx);
+    /** Keep messages[0] in sync if the static prefix is rebuilt mid-turn. */
+    const syncStaticPrefix = () => {
+      if (messages[0] && messages[0]._staticPrefix) {
+        messages[0].content = staticInstructions;
+      } else {
+        messages.unshift({
+          role: 'system',
+          content: staticInstructions,
+          _staticPrefix: true,
+        });
+      }
+    };
 
     /** Remove program-owned Runtime trailers so they never sit mid-list. */
     const stripRuntimeTrailers = () => {
@@ -501,7 +516,7 @@ async function handleMessage(ctx) {
       log.info(`[${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
 
       // Refresh turn-varying Runtime fields before each AI call. Static
-      // instructions stay byte-identical unless the tool fingerprint changes.
+      // prefix stays byte-identical unless the tool fingerprint changes.
       refreshUserWorkspace();
       reloadSettings(ctx, ui);
 
@@ -517,7 +532,8 @@ async function handleMessage(ctx) {
         // Unexpected today (getToolsForUser ignores isFirstTurn); keep correct if gating ever changes.
         staticInstructions = buildStaticInstructions(ctx);
         toolsFp = nextFp;
-        log.info('   Static instructions rebuilt (tool fingerprint changed mid-turn)');
+        syncStaticPrefix();
+        log.info('   Static system prefix rebuilt (tool fingerprint changed mid-turn)');
       }
 
       appendRuntimeTrailer();
@@ -529,7 +545,6 @@ async function handleMessage(ctx) {
         historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
         reasoningEffort: ctx.settings?.effort,
-        instructions: staticInstructions,
       };
 
       let assistantMsg;
@@ -731,6 +746,7 @@ async function handleMessage(ctx) {
       if (nextFp !== toolsFp) {
         staticInstructions = buildStaticInstructions(ctx);
         toolsFp = nextFp;
+        syncStaticPrefix();
       }
       const responseFormat = buildGemixResponseFormat({ includeTitle: deliveryState.includeTitle, allowVoice });
       const wrapUpNote = sessionDurationLimitReached
@@ -753,7 +769,6 @@ async function handleMessage(ctx) {
           historyStorageId: resolveStorageId(ctx) || null,
           promptCacheKey,
           reasoningEffort: ctx.settings?.effort,
-          instructions: staticInstructions,
         }));
       } finally {
         stripRuntimeTrailers();

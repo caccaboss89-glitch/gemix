@@ -2,8 +2,8 @@
 //
 // Bidirectional adapter between chat-completions style messages and tools
 // (used by handler, tools, history) and xAI Responses API wire format
-// (`/v1/responses` with `input[]`, `instructions`, flat tools, typed items
-// like function_call / function_call_output).
+// (`/v1/responses` with `input[]`, flat tools, typed items like
+// function_call / function_call_output). Static system lives in input[0].
 
 const { XAI_REASONING_REPLAY } = require('../config/env');
 
@@ -169,13 +169,14 @@ function _replayStoredOutput(input, items) {
 /**
  * Convert chat-style messages to Responses `input[]`.
  *
- * Static system text is NOT taken from messages: pass it via
- * `opts.instructions` (Responses top-level field). Any `role: system` message
- * (e.g. the program-owned Runtime trailer) is emitted as an input item in
- * order so it can stay last after history / tool results.
+ * All `role: system` messages (static prefix first, Runtime trailer last) are
+ * emitted as input items in order. xAI prefix-cache matches from the start of
+ * this array — do not put the static system prompt only in top-level
+ * `instructions` (that field is not part of the cached message prefix).
  *
  * @param {Array} messages
- * @param {{ instructions?: string }} [opts]
+ * @param {{ instructions?: string }} [opts] - Optional top-level instructions
+ *   (unused by the main brain; kept for callers that still set it).
  * @returns {{ instructions: string, input: Array }}
  */
 function chatMessagesToResponsesInput(messages, opts = {}) {
@@ -199,7 +200,7 @@ function chatMessagesToResponsesInput(messages, opts = {}) {
             .join('\n');
         }
         if (text) {
-          // xAI accepts role:system items with string content (not folded into instructions).
+          // Keep system items in input[] order (static prefix + Runtime trailer).
           input.push({ role: 'system', content: text });
         }
         break;
