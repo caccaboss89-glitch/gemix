@@ -55,7 +55,7 @@ const {
 const { createLogger } = require('./utils/logger');
 const { appendResearchBadge, buildResearchBadgeText } = require('./utils/footer');
 
-const { resolveWorkspaceId, workspaceIdToSlug } = require('./utils/workspaceId');
+const { resolveWorkspaceId } = require('./utils/workspaceId');
 const { touchActivity } = require('./utils/buildState');
 const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
 const { readSettings, isReviewDue, markReviewed } = require('./utils/settingsStore');

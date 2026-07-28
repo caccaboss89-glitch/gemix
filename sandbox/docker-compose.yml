@@ -23,16 +23,21 @@ services:
     restart: unless-stopped
     # Forwards ALL sandbox egress upstream to the residential SOCKS5
     # (tailsocks -> Redmi). No allowlist. Fail-closed when the Redmi is off.
+    #
+    # Production Linux (dedicated gemix_sandbox_egress): export the egress
+    # gateway, then pass it in — do NOT use host.docker.internal / 172.17.0.1:
+    #   EGRESS_GW=$(docker network inspect gemix_sandbox_egress -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+    #   REDMI_SOCKS_HOST=$EGRESS_GW GEMIX_NOTIFY_URL=http://$EGRESS_GW:9999/notify \
+    #     docker compose -f sandbox/docker-compose.yml up --build
+    # Docker Desktop only may still use host.docker.internal via extra_hosts.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       PROXY_PORT: "8080"
-      # Residential SOCKS5 upstream reachable from this container.
-      REDMI_SOCKS_HOST: "${REDMI_SOCKS_HOST:-host.docker.internal}"
+      # Residential SOCKS5 host reachable from this container (egress gateway IP).
+      REDMI_SOCKS_HOST: "${REDMI_SOCKS_HOST:-}"
       REDMI_SOCKS_PORT: "${REDMI_SOCKS_PORT:-5040}"
-      # URL of the host's internal notify server - set to reach the Node process.
-      # On Linux Docker: http://172.17.0.1:9999/notify
-      # On Docker Desktop: http://host.docker.internal:9999/notify
+      # Host internal notify URL, e.g. http://$EGRESS_GW:9999/notify
       GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
       GEMIX_NOTIFY_SECRET: "${GEMIX_NOTIFY_SECRET:-}"
     networks:

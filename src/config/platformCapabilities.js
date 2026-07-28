@@ -7,6 +7,8 @@ const {
   PLATFORM_WA_DEDICATED,
   MAX_AUDIO_DURATION_S,
   MAX_VIDEO_DURATION_S,
+  MAX_HISTORY_MEDIA_IMAGES,
+  MAX_HISTORY_MEDIA_FILES,
 } = require('./constants');
 
 const PROFILE = {
@@ -87,7 +89,7 @@ const CAPS = {
     longTermMemory: true,
     buildWorkspace: true,
     historyTranscriptionNote: true,
-    systemHistoryLabel: false,
+    systemHistoryLabel: true,
     voiceReply: true,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
@@ -339,7 +341,7 @@ function buildLimitsLines(profile) {
   const cap = CAPS[profile];
   let historyLine =
     '- History files are visible directly with [Attachment: filename]; past reactions appear as [Reactions: emoji xN]. '
-    + 'Only the newest 10 images + 10 files are loaded.';
+    + `Only the newest ${MAX_HISTORY_MEDIA_IMAGES} images + ${MAX_HISTORY_MEDIA_FILES} files are loaded.`;
   if (cap.historyTranscriptionNote) {
     historyLine += ' Your own past voice messages in history are shown as <PastVoiceReply> blocks on those assistant turns (transcript text; audio not reloaded).';
   }

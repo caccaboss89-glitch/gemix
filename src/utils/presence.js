@@ -113,22 +113,34 @@ class WhatsAppPresence {
   async _update() {
     if (!this.chat || !this.currentState) return;
     this._isRefreshing = true;
+    let sendPromise = null;
+    let label = 'sendState';
     try {
       if (this.currentState === 'recording') {
         if (typeof this.chat.sendStateRecording === 'function') {
-          await _withTimeout(this.chat.sendStateRecording(), UPDATE_TIMEOUT_MS, 'sendStateRecording');
+          sendPromise = this.chat.sendStateRecording();
+          label = 'sendStateRecording';
         } else if (typeof this.chat.sendState === 'function') {
-          await _withTimeout(this.chat.sendState('recording'), UPDATE_TIMEOUT_MS, 'sendState(recording)');
+          sendPromise = this.chat.sendState('recording');
+          label = 'sendState(recording)';
         }
-      } else {
-        if (typeof this.chat.sendStateTyping === 'function') {
-          await _withTimeout(this.chat.sendStateTyping(), UPDATE_TIMEOUT_MS, 'sendStateTyping');
-        } else if (typeof this.chat.sendState === 'function') {
-          await _withTimeout(this.chat.sendState('typing'), UPDATE_TIMEOUT_MS, 'sendState(typing)');
+      } else if (typeof this.chat.sendStateTyping === 'function') {
+        sendPromise = this.chat.sendStateTyping();
+        label = 'sendStateTyping';
+      } else if (typeof this.chat.sendState === 'function') {
+        sendPromise = this.chat.sendState('typing');
+        label = 'sendState(typing)';
+      }
+      if (sendPromise) {
+        try {
+          await _withTimeout(sendPromise, UPDATE_TIMEOUT_MS, label);
+        } catch (err) {
+          log.warn(`Failed to send presence state (${this.currentState}): ${err.message}`);
+          // Keep the guard until the underlying RPC settles so the next
+          // interval tick does not stack concurrent sendState* calls.
+          await Promise.resolve(sendPromise).catch(() => {});
         }
       }
-    } catch (err) {
-      log.warn(`Failed to send presence state (${this.currentState}): ${err.message}`);
     } finally {
       this._isRefreshing = false;
     }

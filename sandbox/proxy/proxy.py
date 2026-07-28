@@ -250,7 +250,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._reject(502, "residential upstream unavailable")
             return
 
-        content_length = int(self.headers.get("Content-Length", "0") or 0)
+        try:
+            content_length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            self._reject(400, "bad Content-Length")
+            return
+        if content_length < 0:
+            self._reject(400, "bad Content-Length")
+            return
         body = self.rfile.read(content_length) if content_length else b""
 
         req_lines = [f"{self.command} {path} HTTP/1.1".encode()]

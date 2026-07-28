@@ -142,15 +142,6 @@ function collectAllWorkspaceDeliverablePaths(workspaceId) {
   return out;
 }
 
-/** @deprecated use collectAllWorkspaceDeliverablePaths / collectWorkspaceDeltaPaths */
-function collectWorkspaceDeliverablePaths(workspaceId) {
-  return collectAllWorkspaceDeliverablePaths(workspaceId);
-}
-
-function listAllWorkspaceFilesForHarvest(workspaceId) {
-  return _listWorkspaceFileEntries(workspaceId);
-}
-
 function _clipCapture(text, maxBytes = CAPTURE_MAX_BYTES) {
   if (typeof text !== 'string' || !text) return '';
   const buf = Buffer.from(text, 'utf8');
@@ -328,8 +319,6 @@ async function runBuildAgent({
 module.exports = {
   runBuildAgent,
   buildGrokRules,
-  listAllWorkspaceFilesForHarvest,
-  collectWorkspaceDeliverablePaths,
   collectAllWorkspaceDeliverablePaths,
   collectWorkspaceDeltaPaths,
   snapshotWorkspaceFiles,

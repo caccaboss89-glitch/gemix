@@ -10,28 +10,34 @@ const { MUSIC_STATS_URL } = require('../config/env');
 /**
  * Fetch and summarize music bot stats from GitHub.
  * Extracts only essential data to minimize token usage.
- * @returns {Promise<string>} Formatted stats summary
+ * @returns {Promise<{success: boolean, message?: string, error?: string}>}
  */
 async function readMusicStats() {
-  const res = await fetchExternal(MUSIC_STATS_URL, {
-    headers: { 'User-Agent': 'GemiX-MusicStats/1.0' },
-  }, 'Music Stats');
+  try {
+    const res = await fetchExternal(MUSIC_STATS_URL, {
+      headers: { 'User-Agent': 'GemiX-MusicStats/1.0' },
+    }, 'Music Stats');
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch music stats: HTTP ${res.status}`);
-  }
+    if (!res.ok) {
+      return { success: false, error: `Failed to fetch music stats: HTTP ${res.status}` };
+    }
 
-  const data = await res.json();
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('Failed to fetch music stats: response body is not a JSON object');
+    const data = await res.json();
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return { success: false, error: 'Failed to fetch music stats: response body is not a JSON object' };
+    }
+    return formatStats(data);
+  } catch (err) {
+    // fetchExternal already notifyAdmin'd on network failure; return so
+    // executeTool's outer catch does not notify again.
+    return { success: false, error: err.message };
   }
-  return formatStats(data);
 }
 
 /**
- * Format raw stats.json into a concise summary string.
+ * Format raw stats.json into a concise summary object for executeTool.
  * @param {object} data - Parsed stats.json
- * @returns {string} Formatted summary
+ * @returns {{ success: true, message: string }}
  */
 function formatStats(data) {
   const users = data.users || {};

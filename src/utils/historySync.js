@@ -26,6 +26,21 @@ const RECENT_VOICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 let recentVoiceEntries = [];
 
+/** Per-user chain so concurrent syncFileToHistory RMW on history_meta.json cannot clobber. */
+const _syncLocks = new Map();
+
+function _withSyncLock(userId, fn) {
+  const prev = _syncLocks.get(userId) || Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const current = prev.catch(() => {}).then(() => gate);
+  _syncLocks.set(userId, current);
+  return prev.catch(() => {}).then(fn).finally(() => {
+    release();
+    if (_syncLocks.get(userId) === current) _syncLocks.delete(userId);
+  });
+}
+
 /**
  * Get the history directory and meta file for a user.
  * @param {string} userId - Unique identifier for the user's folder
@@ -231,76 +246,80 @@ function resolveGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestamp
 async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) {
   if (!userId || !uniqueId) return null;
 
-  const { historyDir, metaFile } = getUserHistoryPaths(userId);
-  ensureDir(historyDir);
+  return _withSyncLock(userId, async () => {
+    const { historyDir, metaFile } = getUserHistoryPaths(userId);
+    ensureDir(historyDir);
 
-  let meta = _loadMeta(metaFile, userId);
+    let meta = _loadMeta(metaFile, userId);
 
-  // If uniqueId exists and the entry is actually on disk, reuse it
-  if (meta[uniqueId]) {
-    const existingName = _getEntryFilename(meta[uniqueId]);
-    const existingPath = existingName ? path.join(historyDir, existingName) : null;
-    if (existingPath && fs.existsSync(existingPath)) {
-      try {
-        const st = fs.statSync(existingPath);
-        if (st.isFile() && st.size > 0) {
-          const now = new Date();
-          try { fs.utimesSync(existingPath, now, now); } catch { /* best-effort */ }
-          return existingName;
-        }
-        log.warn(`History cache for ${uniqueId} is empty (${existingName}), re-downloading`);
-        try { fs.unlinkSync(existingPath); } catch { /* ignore */ }
-      } catch { /* re-download below */ }
+    // If uniqueId exists and the entry is actually on disk, reuse it
+    if (meta[uniqueId]) {
+      const existingName = _getEntryFilename(meta[uniqueId]);
+      const existingPath = existingName ? path.join(historyDir, existingName) : null;
+      if (existingPath && fs.existsSync(existingPath)) {
+        try {
+          const st = fs.statSync(existingPath);
+          if (st.isFile() && st.size > 0) {
+            const now = new Date();
+            try { fs.utimesSync(existingPath, now, now); } catch { /* best-effort */ }
+            return existingName;
+          }
+          log.warn(`History cache for ${uniqueId} is empty (${existingName}), re-downloading`);
+          try { fs.unlinkSync(existingPath); } catch { /* ignore */ }
+        } catch { /* re-download below */ }
+        delete meta[uniqueId];
+        _saveMeta(metaFile, meta, userId);
+      }
+      // Entry missing on disk, clear from meta and re-save
       delete meta[uniqueId];
       _saveMeta(metaFile, meta, userId);
     }
-    // Entry missing on disk, clear from meta and re-save
-    delete meta[uniqueId];
-    _saveMeta(metaFile, meta, userId);
-  }
 
-  // We need the buffer now
-  let buffer;
-  try {
-    buffer = await fetchBufferFn();
-    if (!buffer) return null;
-  } catch (err) {
-    log.error(`Failed to fetch buffer for ${originalName}: ${err.message}`);
-    return null;
-  }
-
-  // Sanitize name: remove leading dots for security, keep alphanumerics
-  let cleanName = sanitizeFilename(originalName || 'file').replace(/^\.+/, '') || 'file';
-
-  const extMatch = cleanName.match(/\.([^.]+)$/);
-  const ext = extMatch ? `.${extMatch[1]}` : '';
-  const baseName = extMatch ? cleanName.slice(0, -ext.length) : cleanName;
-
-  let finalName = cleanName;
-  let counter = 1;
-  const existingValues = new Set(Object.values(meta).map(_getEntryFilename).filter(Boolean));
-
-  while (existingValues.has(finalName) || fs.existsSync(path.join(historyDir, finalName))) {
-    finalName = `${baseName}(${counter})${ext}`;
-    counter++;
-    if (counter > 1000) {
-      finalName = `${baseName}(${Date.now()}_${Math.floor(Math.random() * 10000)})${ext}`;
-      break;
+    // We need the buffer now
+    let buffer;
+    try {
+      buffer = await fetchBufferFn();
+      if (!buffer) return null;
+    } catch (err) {
+      log.error(`Failed to fetch buffer for ${originalName}: ${err.message}`);
+      return null;
     }
-  }
 
-  // Write file and update meta
-  const filePath = path.join(historyDir, finalName);
-  try {
-    fs.writeFileSync(filePath, buffer);
-    const freshMeta = _loadMeta(metaFile, userId);
-    freshMeta[uniqueId] = { filename: finalName };
-    _saveMeta(metaFile, freshMeta, userId);
-    return finalName;
-  } catch (err) {
-    log.error(`Failed to save history file for user ${userId}: ${err.message}`);
-    return null;
-  }
+    // Sanitize name: remove leading dots for security, keep alphanumerics
+    let cleanName = sanitizeFilename(originalName || 'file').replace(/^\.+/, '') || 'file';
+
+    const extMatch = cleanName.match(/\.([^.]+)$/);
+    const ext = extMatch ? `.${extMatch[1]}` : '';
+    const baseName = extMatch ? cleanName.slice(0, -ext.length) : cleanName;
+
+    // Reload meta after fetch so concurrent inserts (serialized per user) are visible.
+    meta = _loadMeta(metaFile, userId);
+    let finalName = cleanName;
+    let counter = 1;
+    const existingValues = new Set(Object.values(meta).map(_getEntryFilename).filter(Boolean));
+
+    while (existingValues.has(finalName) || fs.existsSync(path.join(historyDir, finalName))) {
+      finalName = `${baseName}(${counter})${ext}`;
+      counter++;
+      if (counter > 1000) {
+        finalName = `${baseName}(${Date.now()}_${Math.floor(Math.random() * 10000)})${ext}`;
+        break;
+      }
+    }
+
+    // Write file and update meta
+    const filePath = path.join(historyDir, finalName);
+    try {
+      fs.writeFileSync(filePath, buffer);
+      const freshMeta = _loadMeta(metaFile, userId);
+      freshMeta[uniqueId] = { filename: finalName };
+      _saveMeta(metaFile, freshMeta, userId);
+      return finalName;
+    } catch (err) {
+      log.error(`Failed to save history file for user ${userId}: ${err.message}`);
+      return null;
+    }
+  });
 }
 
 /**

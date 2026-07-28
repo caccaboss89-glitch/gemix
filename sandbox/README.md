@@ -126,7 +126,8 @@ lo riusano.
 | Cambia | Azione |
 | :--- | :--- |
 | File JS sotto `src/` | restart GemiX, niente Docker rebuild |
-| `sandbox/Dockerfile` / `requirements-sandbox.txt` / `preload_models.py` | rebuild `gemix-sandbox:latest` + restart GemiX || `sandbox/proxy/*` | rebuild `gemix-sandbox-proxy:latest` + ricreare il container del proxy + restart GemiX |
+| `sandbox/Dockerfile` / `requirements-sandbox.txt` / `preload_models.py` | rebuild `gemix-sandbox:latest` + restart GemiX |
+| `sandbox/proxy/*` | rebuild `gemix-sandbox-proxy:latest` + ricreare il container del proxy + restart GemiX |
 | Endpoint SOCKS upstream (`REDMI_SOCKS_HOST`/`REDMI_SOCKS_PORT`) | ricreare il container del proxy con la nuova env |
 
 Esempio rebuild sandbox principale:

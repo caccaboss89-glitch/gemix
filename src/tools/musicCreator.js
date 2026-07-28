@@ -101,6 +101,24 @@ async function musicCreator(prompt, userCtx) {
     return { toolResult: { success: false, error: 'A music generation is already in progress...' }, attachments: [] };
   }
 
+  if (!prompt || prompt.trim().length < 5) {
+    return { toolResult: { success: false, error: 'Prompt missing or too short.' }, attachments: [] };
+  }
+
+  const apiKey = OPENROUTER_API_KEY;
+  const model = MUSIC_MODEL;
+  const apiUrl = `${OPENROUTER_BASE_URL}/chat/completions`;
+
+  if (!apiKey) {
+    return { toolResult: { success: false, error: 'OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).' }, attachments: [] };
+  }
+  if (!model) {
+    return { toolResult: { success: false, error: 'MUSIC_MODEL is missing in environment (required for Lyria music generation).' }, attachments: [] };
+  }
+  if (!OPENROUTER_BASE_URL) {
+    return { toolResult: { success: false, error: 'OPENROUTER_BASE_URL is missing in environment.' }, attachments: [] };
+  }
+
   // Weekly per-user quota (max 2 songs/week; reset from MEDIA_WEEKLY_RESET_*; admins exempt).
   const quota = await reserveGeneration('song', userCtx);
   if (!quota.ok) {
@@ -109,24 +127,6 @@ async function musicCreator(prompt, userCtx) {
   if (!userIsAdmin) pendingGenerations.add(userId);
 
   try {
-    if (!prompt || prompt.trim().length < 5) {
-      return { toolResult: { success: false, error: 'Prompt missing or too short.' }, attachments: [] };
-    }
-
-    const apiKey = OPENROUTER_API_KEY;
-    const model = MUSIC_MODEL;
-    const apiUrl = `${OPENROUTER_BASE_URL}/chat/completions`;
-
-    if (!apiKey) {
-      return { toolResult: { success: false, error: 'OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).' }, attachments: [] };
-    }
-    if (!model) {
-      return { toolResult: { success: false, error: 'MUSIC_MODEL is missing in environment (required for Lyria music generation).' }, attachments: [] };
-    }
-    if (!OPENROUTER_BASE_URL) {
-      return { toolResult: { success: false, error: 'OPENROUTER_BASE_URL is missing in environment.' }, attachments: [] };
-    }
-
     log.info(`Generating music for ${userId}`);
 
     const body = {

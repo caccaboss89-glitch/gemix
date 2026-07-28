@@ -55,6 +55,7 @@ async function _consumeResponseBodyCapped(res, maxBytes, timeoutMs, destPath = n
     }
   } catch (err) {
     failed = true;
+    try { await reader.cancel(); } catch { /* ignore */ }
     if (stream) {
       stream.destroy();
       try { if (destPath && fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch { /* ignore */ }

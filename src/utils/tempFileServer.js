@@ -403,6 +403,9 @@ function startTempFileServer() {
           log.error(`Stream error for ${entry.originalName}: ${err.message}`);
           if (!res.headersSent) {
             res.writeHead(500).end();
+          } else {
+            // Headers already sent with pipe: terminate so clients do not hang.
+            res.destroy(err);
           }
         });
       } catch (err) {

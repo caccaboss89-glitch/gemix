@@ -2,7 +2,7 @@
 //
 // Manages per-chat subscription state for GemiX release notifications.
 // Persists via systemState ('releases' key).
-// Exposes isReleaseNotifyEnabled, toggleReleaseNotify, and getSubscribedChats
+// Exposes toggleReleaseNotify, enableReleaseNotify, and getSubscribedChats
 // for use by handler and admin flows. In-memory Map with disk backup.
 
 const fs = require('fs');
@@ -44,23 +44,6 @@ async function _save() {
 
 _load();
 
-function _findByWaJid(waJid) {
-  if (!waJid) return null;
-  for (const [chatId, storedWaJid] of subscribedChats.entries()) {
-    if (storedWaJid === waJid) return { chatId, waJid: storedWaJid };
-  }
-  return null;
-}
-
-function isReleaseNotifyEnabled(chatId, waJid) {
-  if (!chatId && !waJid) return false;
-  if (chatId && waJid) {
-    return subscribedChats.get(chatId) === waJid;
-  }
-  if (chatId) return subscribedChats.has(chatId);
-  return Boolean(_findByWaJid(waJid));
-}
-
 async function enableReleaseNotify(chatId, waJid) {
   if (!chatId || !waJid) {
     return { success: false, alreadyEnabled: false, error: 'Unable to determine the chat or WhatsApp number.' };
@@ -83,7 +66,7 @@ async function enableReleaseNotify(chatId, waJid) {
  * @param {boolean} enabled - Whether to enable or disable notifications
  * @param {string} chatId - Unique chat identifier
  * @param {string} waJid - WhatsApp JID where notifications will be delivered
- * @returns {string} Result message
+ * @returns {Promise<{success: boolean, message?: string, error?: string, alreadyEnabled?: boolean}>}
  */
 async function toggleReleaseNotify(enabled, chatId, waJid) {
   if (!chatId || !waJid) {
@@ -118,4 +101,4 @@ function getSubscribedChats() {
   return new Map(subscribedChats);
 }
 
-module.exports = { toggleReleaseNotify, getSubscribedChats, isReleaseNotifyEnabled, enableReleaseNotify };
+module.exports = { toggleReleaseNotify, getSubscribedChats, enableReleaseNotify };

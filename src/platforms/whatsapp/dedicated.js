@@ -102,7 +102,13 @@ function initDedicatedWhatsApp() {
         return;
       }
       _initializeInProgress = true;
-      client.initialize();
+      Promise.resolve(client.initialize())
+        .catch((err) => {
+          log.error(`Reconnect initialize failed: ${err?.message || err}`);
+        })
+        .finally(() => {
+          _initializeInProgress = false;
+        });
     }, delay);
   });
 

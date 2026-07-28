@@ -122,7 +122,13 @@ function resolveInlineImages(html, attachments) {
   let index = 0;
 
   for (const ref of refs) {
-    const key = path.basename(decodeURIComponent(ref)).toLowerCase();
+    let decoded = ref;
+    try {
+      decoded = decodeURIComponent(ref);
+    } catch {
+      // Malformed % sequences: treat as raw ref (may remain unresolved).
+    }
+    const key = path.basename(decoded).toLowerCase();
     const att = byName.get(key);
     const refRe = new RegExp(`cid:${_escapeRegExp(ref)}`, 'gi');
 

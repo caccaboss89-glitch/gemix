@@ -180,6 +180,7 @@ function isReviewDue(settings, now = Date.now()) {
 /**
  * Record that the renewal notice was injected. It counts as the review even if
  * GemiX never mentions it or the user ignores it, so the notice cannot loop.
+ * Throws if the write fails so callers do not treat the notice as recorded.
  * @param {string} fileId
  * @returns {Promise<void>}
  */
@@ -190,7 +191,10 @@ async function markReviewed(fileId) {
     // Nothing stored means everything is default: no review to record.
     if (!stored || typeof stored !== 'object') return;
     stored.reviewedAt = getRomeISO();
-    _writeRawUnlocked(fileId, stored);
+    const written = _writeRawUnlocked(fileId, stored);
+    if (!written.success) {
+      throw new Error(written.error || 'Failed to write reviewedAt');
+    }
   });
 }
 

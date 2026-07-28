@@ -188,8 +188,13 @@ function recordSentMessage(entry) {
       });
 
       const kept = records.slice(-MAX_SENT_MESSAGES);
-      _pruneOrphanFiles(senderKey, kept);
-      _save(senderKey, kept);
+      // Save first: only prune orphans after messages.json is confirmed so a
+      // failed rewrite cannot leave the log pointing at already-deleted files.
+      if (_save(senderKey, kept)) {
+        _pruneOrphanFiles(senderKey, kept);
+      } else {
+        log.warn(`recordSentMessage: save failed for ${senderKey}; skipped orphan prune`);
+      }
     } catch (err) {
       log.warn(`recordSentMessage failed: ${err.message}`);
     }

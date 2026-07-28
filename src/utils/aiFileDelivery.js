@@ -36,7 +36,7 @@ const {
   isVideoOverDurationLimit,
   resolveMediaDurationSec,
 } = require('./mediaIngressLimits');
-const { getMediaDurationSec } = require('./mediaDuration');
+const { getMediaDurationSecFromPath } = require('./mediaDuration');
 const { createLogger } = require('./logger');
 
 const log = createLogger('AiFileDelivery');
@@ -200,7 +200,7 @@ async function validateXaiFile(absPath, displayPath, opts = {}) {
     if (fileSize > MAX_AUDIO_BYTES) {
       return { ok: false, error: `Audio file exceeds size limit (${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)} MB max).` };
     }
-    const audioDur = await getMediaDurationSec(fs.readFileSync(absPath), _extOf(absPath).slice(1) || 'ogg');
+    const audioDur = await getMediaDurationSecFromPath(absPath);
     if (isAudioOverDurationLimit(audioDur)) {
       return {
         ok: false,
@@ -214,7 +214,7 @@ async function validateXaiFile(absPath, displayPath, opts = {}) {
     if (fileSize > MAX_VIDEO_BYTES) {
       return { ok: false, error: `Video file exceeds size limit (${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB max).` };
     }
-    const videoDur = await getMediaDurationSec(fs.readFileSync(absPath), _extOf(absPath).slice(1) || 'mp4');
+    const videoDur = await getMediaDurationSecFromPath(absPath);
     if (isVideoOverDurationLimit(videoDur)) {
       return {
         ok: false,

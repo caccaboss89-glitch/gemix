@@ -58,8 +58,13 @@ async function writeTaskFile(fileId, data) {
       return;
     }
     const tempPath = filePath + '.tmp';
-    await fsPromises.writeFile(tempPath, JSON.stringify(data, null, 2));
-    await fsPromises.rename(tempPath, filePath);
+    try {
+      await fsPromises.writeFile(tempPath, JSON.stringify(data, null, 2));
+      await fsPromises.rename(tempPath, filePath);
+    } catch (err) {
+      try { await fsPromises.unlink(tempPath); } catch { /* best effort */ }
+      throw err;
+    }
   });
 }
 
@@ -88,8 +93,13 @@ async function modifyTaskFile(fileId, fn) {
       return;
     }
     const tempPath = filePath + '.tmp';
-    await fsPromises.writeFile(tempPath, JSON.stringify(result, null, 2));
-    await fsPromises.rename(tempPath, filePath);
+    try {
+      await fsPromises.writeFile(tempPath, JSON.stringify(result, null, 2));
+      await fsPromises.rename(tempPath, filePath);
+    } catch (err) {
+      try { await fsPromises.unlink(tempPath); } catch { /* best effort */ }
+      throw err;
+    }
   });
 }
 

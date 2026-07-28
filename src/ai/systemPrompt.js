@@ -334,7 +334,7 @@ function _buildDedicatedWaPlatformStatic(ctx, cap, promptOpts) {
     lines.push(_platformField('Rule', 'Private chat - reply to every message.'));
     lines.push(_platformField('Chat', `You (GemiX, never tag yourself) and ${escapeXml(ctx.userName)}.`));
   }
-  // Private dedicated: [System] + Runtime. Groups: Runtime only (no [System] speaker).
+  // systemHistoryLabel: SYSTEM_LINE_RULE ([System] + Runtime); else RUNTIME_LINE_RULE only.
   lines.push(_platformField(
     'History notes',
     cap.systemHistoryLabel ? SYSTEM_LINE_RULE : RUNTIME_LINE_RULE,

@@ -17,6 +17,7 @@ const {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
 } = require('./attachmentCaption');
+const { resolveIngressFilename } = require('./attachmentFilenames');
 
 function isPersonalGemixTextReply(msg) {
   if (!msg?.fromMe) return false;
@@ -27,7 +28,9 @@ function isPersonalGemixTextReply(msg) {
 
 function _effectiveBody(msg) {
   const body = msg.body || '';
-  const hints = attachmentFilenameHints(msg._data?.filename, msg._data?.filename, null);
+  const waFilename = msg._data?.filename;
+  const resolvedName = resolveIngressFilename(waFilename, msg._data?.mimetype, msg.id?.id);
+  const hints = attachmentFilenameHints(waFilename, resolvedName, null);
   return stripRedundantAttachmentCaption(body, hints);
 }
 

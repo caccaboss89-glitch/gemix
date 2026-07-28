@@ -24,9 +24,9 @@ function _formatTask(t, i, ctx, showRecipient) {
 
   const recurrence = normalizePersistedRecurrence(t.recurrence);
   if (recurrence) {
-    line += ` | 🔁 ${describeRecurrence(recurrence, 'en')}`;
-    if (recurrence.until) line += ` until ${formatTimestamp(recurrence.until)}`;
-    if (recurrence.exdate.length) line += ` (skip: ${recurrence.exdate.join(', ')})`;
+    line += ` | 🔁 ${describeRecurrence(recurrence, 'it')}`;
+    if (recurrence.until) line += ` fino al ${formatTimestamp(recurrence.until)}`;
+    if (recurrence.exdate.length) line += ` (escluse: ${recurrence.exdate.join(', ')})`;
   }
 
   // Recipient is only meaningful for active members/admin, who can set
@@ -35,7 +35,7 @@ function _formatTask(t, i, ctx, showRecipient) {
     const recipient = formatTaskRecipient(t.destinations, {
       isAdmin: ctx.isAdmin,
       waJid: ctx.waJid,
-      groupWord: 'group',
+      groupWord: 'gruppo',
     });
     if (recipient) line += ` | 👤 ${recipient}`;
   }
@@ -58,21 +58,21 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
 
   const personalData = await readTaskFile(taskFileId);
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
-    result += `📋 **Your personal tasks:**\n`;
+    result += `📋 **I tuoi task personali:**\n`;
     result += personalData.tasks.map((t, i) => _formatTask(t, i, ctx, true)).join('\n');
   } else {
-    result += `📋 No personal tasks scheduled.`;
+    result += `📋 Nessun task personale schedulato.`;
   }
 
   if (includeGroup && groupTaskFileId) {
     const groupData = await readTaskFile(groupTaskFileId);
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
-      result += `\n\n📋 **Group tasks:**\n`;
+      result += `\n\n📋 **Task di gruppo:**\n`;
       result += groupData.tasks.map((t, i) => _formatTask(t, i, ctx, false)).join('\n');
     }
   }
 
-  const output = `<ScheduledTasks include_group="${includeGroup}">\n${result || 'No tasks scheduled.'}\n</ScheduledTasks>`;
+  const output = `<ScheduledTasks include_group="${includeGroup}">\n${result || 'Nessun task schedulato.'}\n</ScheduledTasks>`;
 
   return { success: true, message: output };
 }

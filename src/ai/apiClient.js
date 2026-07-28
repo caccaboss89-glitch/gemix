@@ -399,7 +399,9 @@ async function callResponsesModel(modelName, body, logExtra = {}) {
   } catch (parseErr) {
     log.error(`   JSON parse error from ${modelName}:`);
     log.error(`      ${parseErr.message}`);
-    throw new Error(`${modelName} API: invalid response (JSON parsing failed)`);
+    const msg = `${modelName} API: invalid response (JSON parsing failed)`;
+    await notifyAdmin(`API (${modelName})`, msg);
+    throw new Error(`${msg}${ADMIN_NOTIFIED_SUFFIX}`);
   }
 
   try {
@@ -411,14 +413,18 @@ async function callResponsesModel(modelName, body, logExtra = {}) {
   // API error takes precedence over shape checks — HTTP 200 bodies can still
   // carry data.error alongside empty/partial output.
   if (data?.error) {
-    throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
+    const msg = `${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`;
+    await notifyAdmin(`API (${modelName})`, msg);
+    throw new Error(`${msg}${ADMIN_NOTIFIED_SUFFIX}`);
   }
 
   if (!data || (!Array.isArray(data.output) && typeof data.output_text !== 'string')) {
     log.error(`   Malformed ${modelName} response (Responses API):`);
     log.error(`      output: ${typeof data?.output} | output_text: ${typeof data?.output_text}`);
     log.error(`      full response: ${JSON.stringify(data)}`);
-    throw new Error(`${modelName} API: no response received (empty or malformed)`);
+    const msg = `${modelName} API: no response received (empty or malformed)`;
+    await notifyAdmin(`API (${modelName})`, msg);
+    throw new Error(`${msg}${ADMIN_NOTIFIED_SUFFIX}`);
   }
 
   return data;

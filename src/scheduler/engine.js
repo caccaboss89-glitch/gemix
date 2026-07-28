@@ -28,6 +28,7 @@ const TASK_DELIVERY_MAX_ATTEMPTS = 3;
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
 let lastReleaseCheckTime = 0;
+let _cycleInFlight = false;
 
 /**
  * Periodic sweeper for the build sub-agent's per-workspace tree.
@@ -76,10 +77,17 @@ function startScheduler() {
   log.info('Started. Checking every', SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
 
   const schedulerInterval = setInterval(async () => {
+    if (_cycleInFlight) {
+      log.warn('Previous scheduler cycle still running — skipping overlapping tick');
+      return;
+    }
+    _cycleInFlight = true;
     try {
       await checkAndExecuteTasks();
     } catch (err) {
       log.error('Cycle error:', err);
+    } finally {
+      _cycleInFlight = false;
     }
   }, SCHEDULER_INTERVAL_MS);
   schedulerInterval.unref();
@@ -99,7 +107,9 @@ function _taskIsDue(task, nowTime) {
 }
 
 /**
- * Deliver a scheduled task. Throws if every configured destination fails.
+ * Deliver a scheduled task to all configured WhatsApp destinations.
+ * Throws if any destination fails so the task is not finalized/advanced;
+ * a later cycle can retry (successful destinations may receive the message again).
  */
 async function _deliverTask(task) {
   let messageText = stripOutgoingDeliveryArtifacts(
@@ -128,7 +138,9 @@ async function _deliverTask(task) {
       errors.push(err.message);
     }
   }
-  if (errors.length === attempts.length) {
+  // Partial multi-destination success still fails the task so the missed
+  // destination can retry on a later cycle (do not finalize/advance).
+  if (errors.length) {
     throw new Error(errors.join('; '));
   }
 }
@@ -213,11 +225,16 @@ async function checkAndExecuteTasks() {
   }
 
   if (now.getTime() - lastReleaseCheckTime >= 15 * 60 * 1000) {
-    lastReleaseCheckTime = now.getTime();
-    try {
-      await checkNewRelease(dedicatedClient);
-    } catch (err) {
-      log.error('ReleaseMonitor - error during check:', err);
+    // Stamp only after a real attempt with a client (null client no-ops and
+    // would otherwise burn the 15-minute gate before dedicated WA is ready).
+    if (dedicatedClient) {
+      try {
+        await checkNewRelease(dedicatedClient);
+        lastReleaseCheckTime = now.getTime();
+      } catch (err) {
+        log.error('ReleaseMonitor - error during check:', err);
+        lastReleaseCheckTime = now.getTime();
+      }
     }
   }
 

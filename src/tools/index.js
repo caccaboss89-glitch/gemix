@@ -2,9 +2,10 @@
 //
 // Central dispatcher for all tool calls from the main brain.
 // Responsibilities: permission checks, schema validation via validateToolArgs,
-// Per-round tool caps (generate_image/video, build, etc.), recipient resolution
-// (for email/wa), the main execution switch, and unified error handling with
-// admin notification on uncaught failures. All individual tools are required here.
+// per-round tool caps (build, read_music_stats, read_server_rules), recipient
+// resolution (for email/wa), the main execution switch, and unified error
+// handling with admin notification on uncaught failures. All individual tools
+// are required here.
 
 const { getToolAccessError, validateToolArgs } = require('../ai/tools');
 const { generateImage, generateVideo } = require('./imagineGenerator');

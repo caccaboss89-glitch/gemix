@@ -109,12 +109,11 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash sandbox \
     && mkdir -p /workspace \
     && chown -R sandbox:sandbox /workspace /home/sandbox
 
-# rembg caches under $HOME/.u2net - move it to the sandbox user's home so it is
-# available without re-downloading when we switch user below.
-RUN if [ -d /root/.u2net ]; then \
-        mkdir -p /home/sandbox/.u2net && \
-        cp -r /root/.u2net/. /home/sandbox/.u2net/ && \
-        chown -R sandbox:sandbox /home/sandbox/.u2net; \
+# rembg caches under $HOME/.u2net during preload (HOME=/var/lib/gemix-grok above).
+# Runtime HOME is the same path (buildSandbox.js), so leave models there; only
+# ensure the sandbox user can read them (preload runs as root).
+RUN if [ -d /var/lib/gemix-grok/.u2net ]; then \
+        chmod -R a+rX /var/lib/gemix-grok/.u2net; \
     fi
 
 # Disable pip at runtime so the AI cannot install arbitrary packages.

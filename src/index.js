@@ -108,7 +108,10 @@ log.info('GemiX - Avvio in corso...\n');
   startScheduler();
   startInternalNotifyServer();
   startTempFileServer();
-})();
+})().catch((err) => {
+  log.error('Startup failed:', err);
+  process.exit(1);
+});
 
 const shutdownHandler = async (signal) => {
   log.info(`\nGemiX - Shutting down (${signal})...`);

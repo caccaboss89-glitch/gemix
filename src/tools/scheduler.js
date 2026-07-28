@@ -105,8 +105,9 @@ async function scheduleTasks(tasks, ctx) {
       };
     }
 
+    let toGroupIgnoredWarning = null;
     if (task.whatsapp && task.whatsapp.toGroup && !ctx.isGroup) {
-      results.push({ success: true, message: 'Ignored whatsapp.toGroup: you are not in a valid group for this platform.', warning: true });
+      toGroupIgnoredWarning = 'Ignored whatsapp.toGroup: you are not in a valid group for this platform.';
       task.whatsapp.toGroup = false;
     }
 
@@ -236,6 +237,9 @@ async function scheduleTasks(tasks, ctx) {
       recipientLine +
       recLabel;
 
+    if (toGroupIgnoredWarning) {
+      taskSummary = toGroupIgnoredWarning + '\n' + taskSummary;
+    }
     if (dstWarning) {
       taskSummary = dstWarning + '\n' + taskSummary;
     }

@@ -168,28 +168,30 @@ function _materializeAttachmentPath(att) {
 
 async function _createZipArchive(zipPath, entries) {
   if (entries.length < 2) return false;
-  if (process.platform === 'win32') {
-    const staging = path.join(TEMP_DIR, `zipstage_${crypto.randomBytes(8).toString('hex')}`);
-    fs.mkdirSync(staging, { recursive: true });
-    try {
-      for (const e of entries) {
-        const dest = path.join(staging, e.name);
-        fs.copyFileSync(e.path, dest);
-      }
+  // Stage under unique e.name on every platform so remapped logical names
+  // (report.pdf / report(1).pdf) survive even when path.basename collides.
+  const staging = path.join(TEMP_DIR, `zipstage_${crypto.randomBytes(8).toString('hex')}`);
+  fs.mkdirSync(staging, { recursive: true });
+  try {
+    for (const e of entries) {
+      const dest = path.join(staging, e.name);
+      fs.copyFileSync(e.path, dest);
+    }
+    if (process.platform === 'win32') {
       const psPath = staging.replace(/'/g, "''");
       const psZip = zipPath.replace(/'/g, "''");
       await execFileAsync('powershell', [
         '-NoProfile', '-Command',
         `Compress-Archive -Path '${psPath}\\*' -DestinationPath '${psZip}' -Force`,
       ], { timeout: 120000 });
-      return fs.existsSync(zipPath);
-    } finally {
-      try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* ignore */ }
+    } else {
+      const stagedPaths = entries.map(e => path.join(staging, e.name));
+      await execFileAsync('zip', ['-j', zipPath, ...stagedPaths], { timeout: 120000 });
     }
+    return fs.existsSync(zipPath);
+  } finally {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* ignore */ }
   }
-  const args = ['-j', zipPath, ...entries.map(e => e.path)];
-  await execFileAsync('zip', args, { timeout: 120000 });
-  return fs.existsSync(zipPath);
 }
 
 /** Collapse multiple hostable WA temp-link files into one zip when possible. */
