@@ -28,6 +28,8 @@ function _load() {
       const raw = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
       if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
         subscribedChats = new Map(Object.entries(raw));
+        // Migrate into systemState immediately so subscriptions are not RAM-only.
+        _save().catch(() => { /* best-effort; next enable/toggle will retry */ });
       }
     } catch { }
   }

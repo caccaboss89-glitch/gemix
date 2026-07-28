@@ -3,9 +3,9 @@
 // Config split rule:
 //   - .env  - all deployment-specific values: external URLs, API keys,
 //             model names, voice ids, GitHub repo, public URL, feature flags.
-//             Loaded by env.js and re-exported as plain JS values; no fallback
-//             defaults in code. Missing variables surface as undefined and
-//             must crash early at first use (or be guarded explicitly).
+//             Loaded by env.js: REQUIRED vars fail-fast at startup; optional
+//             vars get documented soft defaults in env.js. Missing required
+//             variables crash early; optionals never surface as undefined.
 //   - this  - fixed code-level constants: limits, timeouts, paths derived
 //             from __dirname, format strings, file/MIME tables. Values that
 //             never change between dev/staging/prod and are part of the

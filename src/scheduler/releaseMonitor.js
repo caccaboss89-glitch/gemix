@@ -233,10 +233,8 @@ async function checkNewRelease(waClient) {
 
     if (releaseId === lastCheckedReleaseId) return;
 
-    // New release detected
-    lastCheckedReleaseId = releaseId;
-    await _saveState();
-
+    // New release detected — do not persist lastCheckedReleaseId until after
+    // notification attempts so a crash mid-build cannot permanently skip this release.
     const title = release.name || release.tag_name || 'Nuova release';
     const body = release.body || '';
 
@@ -288,6 +286,8 @@ async function checkNewRelease(waClient) {
     const subscribedChats = getSubscribedChats();
     if (subscribedChats.size === 0) {
       log.info(`New release ${title} detected, but no subscribed chats.`);
+      lastCheckedReleaseId = releaseId;
+      await _saveState();
       return;
     }
 
@@ -314,6 +314,9 @@ async function checkNewRelease(waClient) {
         log.error(`Release send error to ${waJid} (chat ${chatId}):`, err.message);
       }
     }
+
+    lastCheckedReleaseId = releaseId;
+    await _saveState();
   } catch (err) {
     log.error('Release check error:', err.message);
   }

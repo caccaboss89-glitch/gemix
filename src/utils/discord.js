@@ -12,8 +12,8 @@
  */
 function removeDiscordEmoji(text) {
   if (!text) return text;
-  // Remove Discord custom emoji format: <:name:id>
-  text = text.replace(/<:[a-zA-Z0-9_]+:\d+>/g, '');
+  // Remove Discord custom emoji (static <:name:id> and animated <a:name:id>)
+  text = text.replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, '');
   // Remove Discord user mention format: <@!id> or <@id>
   text = text.replace(/<@!?\d+>/g, '');
   // Remove Discord channel mention format: <#id>

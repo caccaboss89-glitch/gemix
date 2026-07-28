@@ -134,20 +134,6 @@ function parseRecurrenceRule(rule) {
 }
 
 /**
- * Render a normalized recurrence back to its canonical RRULE string.
- * @param {object} rec
- * @returns {string}
- */
-function formatRecurrenceRule(rec) {
-  if (!rec || !rec.freq) return '';
-  const out = [`FREQ=${rec.freq}`];
-  if (rec.interval && rec.interval !== 1) out.push(`INTERVAL=${rec.interval}`);
-  if (Array.isArray(rec.byday) && rec.byday.length) out.push(`BYDAY=${rec.byday.join(',')}`);
-  if (Array.isArray(rec.exdate) && rec.exdate.length) out.push(`EXDATE=${rec.exdate.join(',')}`);
-  return out.join(';');
-}
-
-/**
  * The Europe/Rome calendar date (YYYY-MM-DD) of an instant.
  * @param {string|Date} iso
  * @returns {string|null}
@@ -328,7 +314,6 @@ module.exports = {
   WEEKDAY_CODES,
   toRomeISO: _toRomeISO,
   parseRecurrenceRule,
-  formatRecurrenceRule,
   normalizePersistedRecurrence,
   computeNextOccurrence,
   advanceOccurrence,

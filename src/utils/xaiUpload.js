@@ -25,6 +25,8 @@ const URL_CACHE_TTL_MS = 60 * 60 * 1000;
 
 // Map<absPath, { mtimeMs, size, url, uploadedAt }>
 const _urlCache = new Map();
+// In-flight uploads so concurrent callers for the same path share one POST.
+const _pendingUploads = new Map();
 
 function _cacheGet(absPath, stat) {
   const hit = _urlCache.get(absPath);
@@ -84,20 +86,40 @@ async function uploadFileForXai(absPath, displayName, mimetype, opts = {}) {
   if (!forceRefresh) {
     const cached = _cacheGet(absPath, stat);
     if (cached) return cached;
+    const pending = _pendingUploads.get(absPath);
+    if (pending) return pending;
   } else {
     _urlCache.delete(absPath);
+    _pendingUploads.delete(absPath);
   }
 
-  const buffer = fs.readFileSync(absPath);
-  const url = await _uploadBuffer(buffer, displayName, mimetype);
-  _urlCache.set(absPath, { mtimeMs: stat.mtimeMs, size: stat.size, url, uploadedAt: Date.now() });
-  log.info(`Uploaded for xAI: ${path.basename(displayName)} (${stat.size} bytes)${forceRefresh ? ' (refreshed)' : ''}`);
-  return url;
+  const uploadPromise = (async () => {
+    const buffer = fs.readFileSync(absPath);
+    const url = await _uploadBuffer(buffer, displayName, mimetype);
+    const freshStat = fs.statSync(absPath);
+    _urlCache.set(absPath, {
+      mtimeMs: freshStat.mtimeMs,
+      size: freshStat.size,
+      url,
+      uploadedAt: Date.now(),
+    });
+    log.info(`Uploaded for xAI: ${path.basename(displayName)} (${freshStat.size} bytes)${forceRefresh ? ' (refreshed)' : ''}`);
+    return url;
+  })();
+
+  _pendingUploads.set(absPath, uploadPromise);
+  uploadPromise.finally(() => {
+    if (_pendingUploads.get(absPath) === uploadPromise) {
+      _pendingUploads.delete(absPath);
+    }
+  });
+  return uploadPromise;
 }
 
 /** Drop all cached tmpfile.link URLs (e.g. before re-uploading after xAI fetch failure). */
 function clearXaiUploadCache() {
   _urlCache.clear();
+  _pendingUploads.clear();
 }
 
 module.exports = { uploadFileForXai, clearXaiUploadCache };

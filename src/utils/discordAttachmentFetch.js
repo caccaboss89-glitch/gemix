@@ -3,6 +3,8 @@
 // Safe Discord attachment download helpers (25 MB cap, shared by incoming
 // message handling and history rebuild).
 
+const { downloadPublicFile } = require('./fetch');
+
 const DISCORD_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
 function createDiscordAttachmentBufferFetcher(att) {
@@ -13,7 +15,11 @@ function createDiscordAttachmentBufferFetcher(att) {
         if (att.size > DISCORD_ATTACHMENT_MAX_BYTES) {
           throw new Error(`Attachment too large (${Math.round(att.size / 1048576)}MB, max 25MB)`);
         }
-        return Buffer.from(await (await fetch(att.url)).arrayBuffer());
+        // Timeout + res.ok + runtime byte cap (covers understated att.size).
+        const { buffer } = await downloadPublicFile(att.url, {
+          maxBytes: DISCORD_ATTACHMENT_MAX_BYTES,
+        });
+        return buffer;
       })();
     }
     return bufferPromise;

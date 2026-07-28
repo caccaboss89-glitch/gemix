@@ -35,6 +35,8 @@ const log = createLogger('WA-PERSONAL');
 
 let client;
 let _reconnectAttempts = 0;
+let _reconnectTimer = null;
+let _initializeInProgress = false;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 
 /**
@@ -69,6 +71,11 @@ function initPersonalWhatsApp() {
 
   client.on('ready', () => {
     clearTimeout(watchdog);
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = null;
+    }
+    _initializeInProgress = false;
     log.info('Client ready:', client.info.wid._serialized);
     _reconnectAttempts = 0;
   });
@@ -81,10 +88,23 @@ function initPersonalWhatsApp() {
 
   client.on('disconnected', (reason) => {
     log.warn('Disconnected:', reason);
+    _initializeInProgress = false;
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = null;
+    }
     _reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, _reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
     log.info(`Reconnect attempt ${_reconnectAttempts} in ${delay / 1000}s...`);
-    setTimeout(() => client.initialize(), delay);
+    _reconnectTimer = setTimeout(() => {
+      _reconnectTimer = null;
+      if (_initializeInProgress) {
+        log.info('Initialize already in progress — skipping stacked reconnect');
+        return;
+      }
+      _initializeInProgress = true;
+      client.initialize();
+    }, delay);
   });
 
   client.on('message_create', async (msg) => {

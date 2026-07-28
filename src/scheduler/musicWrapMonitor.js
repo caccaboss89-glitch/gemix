@@ -1,9 +1,11 @@
 // src/scheduler/musicWrapMonitor.js
 //
 // Monitors GitHub music stats for updates and sends monthly wrap notifications
-// to active members on the 1st of each month (or when new stats appear).
+// to active members only on the 1st of each month. On that day also requires a
+// new stats timestamp and that today's check has not already completed.
 // Persists state via systemState.
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR } = require('../config/constants');
@@ -116,9 +118,12 @@ async function checkStatsFileUpdate() {
     }
 
     const data = await response.json();
-    // Use the lastUpdated timestamp from the file as the change identifier
-    const timestamp = data.lastUpdated || new Date().toISOString();
-    return timestamp;
+    // Prefer lastUpdated; fall back to a stable content hash so a missing field
+    // does not invent a new wall-clock ISO on every poll (re-notify loop).
+    if (data && typeof data.lastUpdated === 'string' && data.lastUpdated) {
+      return data.lastUpdated;
+    }
+    return 'sha256:' + crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
   } catch (err) {
     log.error('Failed to fetch stats.json:', err.message);
     return null;
@@ -138,19 +143,20 @@ function wasMessageSentToday(memberWa, state) {
 
 /**
  * Check conditions and send music wrap notification message to active members.
- * Triggers on: (1) First day of month (2) New commits detected (3) Not checked today.
+ * Runs only on the 1st of the month; on that day also requires a new stats
+ * timestamp and that today's check has not already completed successfully.
  * @param {object} dedicatedClient - The whatsapp-web.js Client instance
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} true when the day is done (or not the 1st); false to retry later
  */
 async function checkAndSendMusicWrap(dedicatedClient) {
   if (!dedicatedClient) {
     log.warn('Dedicated WhatsApp client unavailable (not ready yet)');
-    return;
+    return false;
   }
 
   if (!isFirstOfMonth()) {
     // Silently skip - isFirstOfMonth already logs the day check
-    return;
+    return true;
   }
 
   const today = getItalyDateString();
@@ -159,7 +165,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   // If the check was already done today (per systemState lastCheckDate), skip.
   if (state.lastCheckDate === today) {
     log.info(`Already checked today (${today}), skipping`);
-    return;
+    return true;
   }
 
   log.info('First of month! Running checks...');
@@ -167,7 +173,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   const statsTimestamp = await checkStatsFileUpdate();
   if (!statsTimestamp) {
     log.warn('Unable to verify updates from GitHub');
-    return;
+    return false;
   }
 
   if (state.lastStatsTimestamp === statsTimestamp) {
@@ -175,12 +181,13 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     // Record the check even without updates.
     state.lastCheckDate = today;
     await saveMonitorState(state);
-    return;
+    return true;
   }
 
   log.info(`New update detected (timestamp: ${statsTimestamp})`);
 
   let sentCount = 0;
+  let anyFailed = false;
 
   for (const member of ACTIVE_MEMBERS) {
     if (wasMessageSentToday(member.wa, state)) {
@@ -199,16 +206,22 @@ async function checkAndSendMusicWrap(dedicatedClient) {
       sentCount++;
     } catch (err) {
       log.error(`Error sending to ${member.name}:`, err.message);
+      anyFailed = true;
     }
   }
 
-  state.lastStatsTimestamp = statsTimestamp;
-  state.lastCheckDate = today;
+  // Persist per-member progress always; advance day/stats gates only when all sends ok.
+  if (!anyFailed) {
+    state.lastStatsTimestamp = statsTimestamp;
+    state.lastCheckDate = today;
+  }
   await saveMonitorState(state);
 
   if (sentCount > 0) {
-    log.info(`Done: ${sentCount}/${ACTIVE_MEMBERS.length} messages sent`);
+    log.info(`Done: ${sentCount}/${ACTIVE_MEMBERS.length} messages sent${anyFailed ? ' (partial — will retry remaining)' : ''}`);
   }
+
+  return !anyFailed;
 }
 
 module.exports = { checkAndSendMusicWrap };

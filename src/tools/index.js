@@ -350,7 +350,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           result = { success: false, error: `You have already sent an email to this address. Each email can only receive 1 message per request.` };
           break;
         }
-        deliveryCtx.contactedEmail.add(targetEmail.email);
         // Files explicitly selected by the model (delivery-buffer names or public URLs).
         const emailSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
         const emailMissingNote = emailSelection.missing.length > 0
@@ -390,6 +389,9 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             emailBodyHtml,
             [...inlineResult.inline, ...sent],
           );
+
+          // Reserve only after successful delivery so a failed send can be retried.
+          deliveryCtx.contactedEmail.add(targetEmail.email);
 
           const inlineNote = inlineResult.inline.length > 0
             ? ` ${inlineResult.inline.length} image(s) embedded in the body.`
@@ -437,14 +439,18 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           result = { success: false, error: `You have already sent a WhatsApp message to this number. Each number can only receive 1 message per request.` };
           break;
         }
-        deliveryCtx.contactedWA.add(targetJid.jid);
         // Files explicitly selected by the model (delivery-buffer names or public URLs).
         const waSelection = await resolveDeliverySelection(args.attachments, responseCtx, userCtx);
         const waMissingNote = waSelection.missing.length > 0
           ? ` Attachment(s) not resolved and NOT sent: ${waSelection.missing.join(', ')}.`
           : '';
+        let waTextSent = false;
         try {
           await sendWhatsAppDirect(targetJid.jid, stripOutgoingDeliveryArtifacts(args.message));
+          waTextSent = true;
+          // Reserve after text delivery so a total pre-send failure can be retried,
+          // but a later attachment failure does not allow a second text blast.
+          deliveryCtx.contactedWA.add(targetJid.jid);
           if (waSelection.attachments.length > 0) {
             // Try to send attachments with fallback support
             const sendAttachment = async (att) => {
@@ -484,6 +490,20 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
             attachments: waSelection.attachments,
           });
         } catch (err) {
+          if (waTextSent) {
+            deliveryCtx.contactedWA.add(targetJid.jid);
+            try {
+              recordSentMessage({
+                senderKey: userCtx.taskFileId,
+                channel: 'whatsapp',
+                recipient: _sentRecipientFromWa(targetJid),
+                text: stripOutgoingDeliveryArtifacts(args.message),
+                attachments: waSelection.attachments,
+              });
+            } catch (recordErr) {
+              log.error(`Failed to record partial WhatsApp send: ${recordErr.message}`);
+            }
+          }
           await notifyAdmin('WhatsApp Delivery', `Failed to send WhatsApp message to ${targetJid.display}: ${err.message}`);
           result = { success: false, error: `Error sending WhatsApp message: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
         }

@@ -117,7 +117,10 @@ function resolveActiveMemberByName(query) {
  */
 function findMemberByWa(jid) {
   const phone = jid.split('@')[0].split(':')[0];
-  return ACTIVE_MEMBERS.find(m => m.wa.split('@')[0] === phone) || null;
+  return ACTIVE_MEMBERS.find(m => {
+    if (typeof m.wa !== 'string' || !m.wa) return false;
+    return m.wa.split('@')[0] === phone;
+  }) || null;
 }
 
 /**
@@ -130,7 +133,7 @@ function findMemberByWa(jid) {
 function findMemberByDiscord(username, displayName, nickname) {
   const candidates = [username, displayName, nickname].filter(Boolean).map(n => n.toLowerCase());
   return ACTIVE_MEMBERS.find(m =>
-    m.nicks.some(nick => candidates.includes(nick.toLowerCase()))
+    Array.isArray(m.nicks) && m.nicks.some(nick => candidates.includes(String(nick).toLowerCase()))
   ) || null;
 }
 

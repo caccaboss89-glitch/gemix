@@ -39,25 +39,31 @@ function _runHermesRefresh() {
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killer);
+      fn(value);
+    };
+
     const killer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch { /* ignore */ }
-      reject(new Error(`Hermes refresh timed out after ${HERMES_REFRESH_TIMEOUT_MS / 1000}s`));
+      settle(reject, new Error(`Hermes refresh timed out after ${HERMES_REFRESH_TIMEOUT_MS / 1000}s`));
     }, HERMES_REFRESH_TIMEOUT_MS);
     killer.unref?.();
 
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (err) => {
-      clearTimeout(killer);
-      reject(new Error(`Hermes process error: ${err.message}`));
+      settle(reject, new Error(`Hermes process error: ${err.message}`));
     });
     child.on('close', (code) => {
-      clearTimeout(killer);
       if (code !== 0) {
         const detail = (stderr || stdout || `exit code ${code}`).trim().slice(0, 500);
-        return reject(new Error(`Hermes exited with code ${code}: ${detail}`));
+        return settle(reject, new Error(`Hermes exited with code ${code}: ${detail}`));
       }
-      resolve(stdout.trim());
+      settle(resolve, stdout.trim());
     });
   });
 }

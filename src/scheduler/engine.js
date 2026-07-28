@@ -133,8 +133,11 @@ async function _deliverTask(task) {
   }
 }
 
+/** Backoff between delivery attempts (WA/Puppeteer blips often need a few seconds). */
+const TASK_DELIVERY_BACKOFF_MS = [2000, 5000];
+
 /**
- * Run up to TASK_DELIVERY_MAX_ATTEMPTS immediate retries on failure.
+ * Run up to TASK_DELIVERY_MAX_ATTEMPTS retries with short backoff between failures.
  * @returns {boolean} true when delivered successfully
  */
 async function _executeTaskWithRetries(task) {
@@ -151,6 +154,8 @@ async function _executeTaskWithRetries(task) {
         log.error(`Task ${task.id} removed after ${TASK_DELIVERY_MAX_ATTEMPTS} failed delivery attempts`);
         return false;
       }
+      const delayMs = TASK_DELIVERY_BACKOFF_MS[attempt - 1] ?? TASK_DELIVERY_BACKOFF_MS[TASK_DELIVERY_BACKOFF_MS.length - 1];
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
   return false;
@@ -194,10 +199,14 @@ async function checkAndExecuteTasks() {
   const todayDateString = romeTimeStr.split(' ')[0];
 
   if (lastMusicWrapCheckDate !== todayDateString) {
-    lastMusicWrapCheckDate = todayDateString;
     log.info(`New date detected (${todayDateString}), checking MusicWrap...`);
     try {
-      await checkAndSendMusicWrap(dedicatedClient);
+      // Only stamp the day gate after a definitive success/no-op so client-not-ready
+      // or stats fetch failure can still retry later while it is the 1st.
+      const handled = await checkAndSendMusicWrap(dedicatedClient);
+      if (handled) {
+        lastMusicWrapCheckDate = todayDateString;
+      }
     } catch (err) {
       log.error('MusicWrap check error:', err);
     }

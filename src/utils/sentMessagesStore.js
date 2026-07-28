@@ -30,6 +30,21 @@ const SENT_ROOT = path.join(DATA_DIR, 'sent_messages');
 /** Shared cap across WhatsApp + email, per sender. */
 const MAX_SENT_MESSAGES = 10;
 
+// Per-senderKey async lock to prevent concurrent load→mutate→save races.
+const _locks = new Map();
+
+function _withLock(senderKey, fn) {
+  const key = String(senderKey || '');
+  const prev = _locks.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((r) => { release = r; });
+  _locks.set(key, current);
+  return prev.then(fn).finally(() => {
+    release();
+    if (_locks.get(key) === current) _locks.delete(key);
+  });
+}
+
 /** Above this size a file is not retained (it could not be re-shown anyway). */
 const MAX_RETAINED_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
@@ -146,36 +161,39 @@ function _pruneOrphanFiles(senderKey, records) {
  * @param {Array<object>} [entry.attachments] - resolved attachment objects
  */
 function recordSentMessage(entry) {
-  try {
-    const senderKey = entry && entry.senderKey;
-    if (!senderKey || !entry.channel) return;
+  const senderKey = entry && entry.senderKey;
+  if (!senderKey || !entry.channel) return;
 
-    const records = _load(senderKey);
-    const retained = Array.isArray(entry.attachments)
-      ? entry.attachments.map(a => _retainAttachment(senderKey, a))
-      : [];
+  // Fire-and-forget with per-sender lock; callers historically treat this as sync.
+  return _withLock(senderKey, async () => {
+    try {
+      const records = _load(senderKey);
+      const retained = Array.isArray(entry.attachments)
+        ? entry.attachments.map(a => _retainAttachment(senderKey, a))
+        : [];
 
-    records.push({
-      id: crypto.randomBytes(8).toString('hex'),
-      ts: Date.now(),
-      channel: entry.channel,
-      recipient: {
-        phone: (entry.recipient && entry.recipient.phone) || null,
-        email: (entry.recipient && entry.recipient.email) || null,
-        display: (entry.recipient && entry.recipient.display) || null,
-      },
-      text: entry.text || '',
-      subject: entry.subject || '',
-      body: entry.body || '',
-      attachments: retained,
-    });
+      records.push({
+        id: crypto.randomBytes(8).toString('hex'),
+        ts: Date.now(),
+        channel: entry.channel,
+        recipient: {
+          phone: (entry.recipient && entry.recipient.phone) || null,
+          email: (entry.recipient && entry.recipient.email) || null,
+          display: (entry.recipient && entry.recipient.display) || null,
+        },
+        text: entry.text || '',
+        subject: entry.subject || '',
+        body: entry.body || '',
+        attachments: retained,
+      });
 
-    const kept = records.slice(-MAX_SENT_MESSAGES);
-    _pruneOrphanFiles(senderKey, kept);
-    _save(senderKey, kept);
-  } catch (err) {
-    log.warn(`recordSentMessage failed: ${err.message}`);
-  }
+      const kept = records.slice(-MAX_SENT_MESSAGES);
+      _pruneOrphanFiles(senderKey, kept);
+      _save(senderKey, kept);
+    } catch (err) {
+      log.warn(`recordSentMessage failed: ${err.message}`);
+    }
+  });
 }
 
 /**

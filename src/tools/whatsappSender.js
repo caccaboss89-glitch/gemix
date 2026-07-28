@@ -73,4 +73,4 @@ async function sendWhatsAppDirect(chatId, message, options = {}) {
   await dedicatedClient.sendMessage(chatId, message, sendOptions);
 }
 
-module.exports = { sendWhatsAppDirect, setDedicatedClient, normalizePhoneToJid, isValidPhoneNumber };
+module.exports = { sendWhatsAppDirect, setDedicatedClient, normalizePhoneToJid };

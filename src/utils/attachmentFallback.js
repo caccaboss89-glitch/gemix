@@ -44,10 +44,9 @@ function formatUrlForWhatsApp(url) {
  * Build an Italian system message with temp hosted links and/or passthrough source URLs.
  *
  * @param {Array<object>} linkFallbackAttachments - Policy-routed or send-failed attachments
- * @param {object} [options]
  * @returns {{ message: string, fallbackLinks: Array<{name: string, url: string, size: number, expiresInMinutes: number|null, external?: boolean}>, totalSize: number }}
  */
-function buildFallbackAttachmentMessage(linkFallbackAttachments, options = {}) {
+function buildFallbackAttachmentMessage(linkFallbackAttachments) {
   if (!Array.isArray(linkFallbackAttachments) || linkFallbackAttachments.length === 0) {
     throw new Error('No link-fallback attachments provided');
   }

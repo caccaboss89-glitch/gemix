@@ -39,7 +39,7 @@ const { resolveDeliverySelection } = require('./utils/deliverySelection');
 const { applyPastVoiceRepliesToHistory } = require('./utils/voiceTranscripts');
 const { generateVoice } = require('./tools/voiceMessage');
 const { sanitizeVoiceMessageText } = require('./utils/text');
-const { getCapabilities } = require('./config/platformCapabilities');
+const { getCapabilities, resolveProfile, toolUnavailableMessage } = require('./config/platformCapabilities');
 const { executeTool } = require('./tools');
 const {
   MAX_TOOL_ROUNDS,
@@ -69,6 +69,7 @@ const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = 
 const { enableReleaseNotify } = require('./tools/releaseNotify');
 const { sendWhatsAppDirect } = require('./tools/whatsappSender');
 const {
+  partitionHandlerToolCalls,
   perRoundCappedDuplicateIds,
   perRoundCapErrorPayload,
   PER_ROUND_TOOL_LIMITS,
@@ -88,8 +89,6 @@ const log = createLogger('Handler');
 // Total wall-clock budget for one main turn. Caps runaway tool loops even
 // when the model keeps emitting tool_calls within the round limit.
 const SESSION_MAX_DURATION_MS = 10 * 60 * 1000;
-
-const { partitionHandlerToolCalls } = require('./utils/toolCallExecution');
 
 function extractPlainTextContent(content) {
   if (typeof content === 'string') return content;
@@ -130,8 +129,6 @@ function buildMaintenanceReleaseEnabledMessage() {
 function buildMaintenanceReleaseAlreadyEnabledMessage() {
   return `${RELEASE_NOTIFY_ALREADY_PREFIX}\n\nPotrai disabilitarle chiedendolo direttamente a GemiX quando tornerà disponibile.`;
 }
-
-const { resolveProfile, toolUnavailableMessage } = require('./config/platformCapabilities');
 
 function _toolNotAvailableMessage(toolName, ctx) {
   return toolUnavailableMessage(toolName, resolveProfile(ctx), {
@@ -504,7 +501,7 @@ async function handleMessage(ctx) {
         discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed,
         voiceTranscriptText: spoken,
-        voiceTranscriptChatId: ctx.chatId || chatKey,
+        voiceTranscriptChatId: ctx.chatId || ctx.groupId || null,
         researchFooter,
       };
     };
@@ -563,7 +560,7 @@ async function handleMessage(ctx) {
       try {
         ({ message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts));
       } finally {
-        // Always drop the trailer so failures never leave a mid-list system item.
+        // Always drop the trailer so failures never leave a mid-list Runtime item.
         stripRuntimeTrailers();
       }
       lastModelUsed = model;

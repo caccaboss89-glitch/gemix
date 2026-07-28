@@ -287,7 +287,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      // Sticky routing: body.prompt_cache_key + x-grok-conv-id (Grok Build always
+      // Sticky routing: body.prompt_cache_key + x-grok-conv-id (Grok Build repo always
       // sends the header; same stable per-conversation id when present).
       const convId = (typeof body?.prompt_cache_key === 'string' && body.prompt_cache_key)
         || (typeof logExtra.promptCacheKey === 'string' && logExtra.promptCacheKey)
@@ -408,14 +408,16 @@ async function callResponsesModel(modelName, body, logExtra = {}) {
     log.warn(`Failed to write API response log: ${err.message}`);
   }
 
+  // API error takes precedence over shape checks — HTTP 200 bodies can still
+  // carry data.error alongside empty/partial output.
+  if (data?.error) {
+    throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
+  }
+
   if (!data || (!Array.isArray(data.output) && typeof data.output_text !== 'string')) {
     log.error(`   Malformed ${modelName} response (Responses API):`);
     log.error(`      output: ${typeof data?.output} | output_text: ${typeof data?.output_text}`);
     log.error(`      full response: ${JSON.stringify(data)}`);
-
-    if (data?.error) {
-      throw new Error(`${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`);
-    }
     throw new Error(`${modelName} API: no response received (empty or malformed)`);
   }
 

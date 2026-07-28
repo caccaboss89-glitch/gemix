@@ -49,10 +49,19 @@ class WhatsAppPresence {
     // If already running with the same state, do nothing
     if (this.intervalId && this.currentState === type) return;
 
+    // Drop any prior interval before await so type switches cannot overlap.
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+
     this.currentState = type;
 
     // Initial update
     await this._update();
+
+    // stop() or a concurrent start may have changed state during the await.
+    if (this.currentState !== type) return;
 
     // Setup refresh interval (WhatsApp auto-clears after ~25-30s)
     if (this.intervalId) clearInterval(this.intervalId);

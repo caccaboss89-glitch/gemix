@@ -7,7 +7,7 @@
 // spoken text on the correct role, not appended to the current user turn.
 
 const path = require('path');
-const { extractAttachmentTagPaths, buildAttachmentTag } = require('./media');
+const { extractAttachmentTagPaths } = require('./media');
 const { getStoredHistoryVoiceTranscription } = require('./historySync');
 const { escapeXml } = require('./xmlEscape');
 
@@ -53,7 +53,6 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
     const text = getStoredHistoryVoiceTranscription(storageId, name);
     if (!text) continue;
 
-    seen.add(name);
     const past = _formatPastVoiceReply(name, text);
     // Match [Attachment: name] and optional [Attachment (expired): name]
     const re = new RegExp(
@@ -63,12 +62,23 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
     const before = next;
     next = next.replace(re, past);
     if (next !== before) {
+      seen.add(name);
       replaced += 1;
-    } else {
-      // Tag path may be history/name — try full path form
-      const fullTag = buildAttachmentTag(tagPath, name);
-      if (next.includes(fullTag)) {
-        next = next.split(fullTag).join(past);
+      continue;
+    }
+
+    // Tag path may be history/name — replace the literal extracted path form
+    // (buildAttachmentTag strips history/ and would rebuild the basename form already tried).
+    const literalPath = String(tagPath || '').trim();
+    if (literalPath && literalPath !== name) {
+      const pathRe = new RegExp(
+        `\\[Attachment(?:\\s*\\(expired\\))?:\\s*${_escapeRegExp(literalPath)}\\]`,
+        'g',
+      );
+      const beforePath = next;
+      next = next.replace(pathRe, past);
+      if (next !== beforePath) {
+        seen.add(name);
         replaced += 1;
       }
     }

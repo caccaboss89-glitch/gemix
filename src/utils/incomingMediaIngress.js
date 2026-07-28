@@ -202,7 +202,6 @@ function capHistoryImageParts(historyMessages, maxImages, maxFiles) {
 }
 
 module.exports = {
-  createMemoizedFetchBuffer,
   ingressWaMessageMedia,
   ingressDiscordAttachment,
   capHistoryImageParts,

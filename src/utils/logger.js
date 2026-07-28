@@ -6,7 +6,8 @@
 // All loggers can be prefixed with a module name for easier filtering.
 
 const { LOG_LEVEL } = require('../config/env');
-const LEVELS = { error: 0, warn: 1, info: 2, debug: 3, silent: 4 };
+// silent is -1 so no level (error..debug) passes the <= threshold.
+const LEVELS = { silent: -1, error: 0, warn: 1, info: 2, debug: 3 };
 
 function getLevel() {
   const raw = LOG_LEVEL;

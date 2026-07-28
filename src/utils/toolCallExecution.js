@@ -2,15 +2,6 @@
 //
 // Shared helpers for ordering and batching tool calls within one model turn.
 
-function parseToolCallArgs(tc) {
-  const raw = JSON.parse(tc.function.arguments || '{}');
-  const args = {};
-  for (const key of Object.keys(raw)) {
-    args[key.trim()] = raw[key];
-  }
-  return args;
-}
-
 const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
 
 /**
@@ -124,13 +115,8 @@ function perRoundCapErrorPayload(toolName, limit) {
 }
 
 module.exports = {
-  parseToolCallArgs,
   partitionHandlerToolCalls,
-  HANDLER_DELIVERY_TOOLS,
-  ONCE_PER_ROUND_ERROR,
-  EXCLUSIVE_ROUND_ERROR,
   PER_ROUND_TOOL_LIMITS,
-  EXCLUSIVE_ROUND_TOOLS,
   perRoundCappedDuplicateIds,
   perRoundCapErrorPayload,
 };

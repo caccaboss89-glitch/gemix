@@ -128,7 +128,7 @@ function _cloneOutputItem(item) {
 
 /**
  * Shape a stored reasoning item for the next request `input[]`.
- * Grok Build / xAI: pass summary, content, encrypted_content, id — but
+ * Grok Build repo: pass summary, content, encrypted_content, id — but
  * `status` is output-only and the API rejects it on input.
  */
 function _reasoningItemForInput(item) {
@@ -153,7 +153,7 @@ function _shouldStoreOutputItem(item) {
 function _pushFunctionCallInput(input, item) {
   const callId = item.call_id || item.id;
   if (!callId || typeof item.name !== 'string') return;
-  // Omit output-only fields (status, server id) — same as Grok Build.
+  // Omit output-only fields (status, server id) — same as Grok Build repo.
   input.push({
     type: 'function_call',
     call_id: callId,

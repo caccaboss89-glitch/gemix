@@ -60,4 +60,18 @@ async function getMediaDurationSec(buffer, extHint = '') {
   }
 }
 
-module.exports = { getMediaDurationSec };
+/**
+ * Probe duration from an existing file path (no full-buffer rewrite).
+ * @param {string} filePath
+ * @returns {Promise<number|null>}
+ */
+async function getMediaDurationSecFromPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return null;
+  try {
+    return await _runFfprobe(filePath);
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { getMediaDurationSec, getMediaDurationSecFromPath };

@@ -22,6 +22,9 @@ async function readMusicStats() {
   }
 
   const data = await res.json();
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Failed to fetch music stats: response body is not a JSON object');
+  }
   return formatStats(data);
 }
 

@@ -1,8 +1,7 @@
 // src/utils/systemState.js
 //
-// Persistent key-value store for system-wide state (e.g. tool usage tracking).
-// Provides atomic read-modify-write operations via an in-memory lock and
-// includes a specialized helper for daily per-tool usage limits.
+// Persistent key-value store for system-wide state (media quotas, monitors, …).
+// Provides atomic read-modify-write operations via an in-memory lock.
 
 const fs = require('fs');
 const path = require('path');
@@ -11,8 +10,6 @@ const { createLogger } = require('./logger');
 
 const log = createLogger('SystemState');
 const STATE_FILE = path.join(DATA_DIR, 'systemState.json');
-
-const { getRomeISO } = require('./time');
 
 // In-memory lock to ensure atomic read-modify-write
 let _lockPromise = Promise.resolve();
@@ -75,8 +72,11 @@ function get(moduleName) {
 
 /**
  * Update state for a specific module.
+ * Throws if the write fails so callers cannot treat persistence as successful
+ * when disk is unchanged.
  * @param {string} moduleName
- * @param {object|function} update - New state object or function receiving current module state
+ * @param {object|function} newState - New state object or function receiving current module state
+ * @returns {Promise<true>}
  */
 async function update(moduleName, newState) {
   return _withLock(async () => {
@@ -91,52 +91,15 @@ async function update(moduleName, newState) {
     }
     
     state[moduleName] = next;
-    return _writeRaw(state);
-  });
-}
-
-/**
- * Specialized helper for daily tool tracking.
- * Checks if a tool can be used by a user today (limit: 1 user per day globally).
- * @param {string} toolId
- * @param {string} userId
- * @returns {Promise<{allowed: boolean, reason?: string}>}
- */
-async function checkDailyToolUsage(toolId, userId) {
-  let result = { allowed: false };
-  
-  await _withLock(async () => {
-    const state = _readRaw();
-    if (!state.toolTracking) state.toolTracking = {};
-    if (!state.toolTracking[toolId]) state.toolTracking[toolId] = { lastUser: null, lastDate: null };
-    
-    const tracking = state.toolTracking[toolId];
-    const today = getRomeISO().split('T')[0]; // YYYY-MM-DD (Rome time)
-    
-    if (tracking.lastDate === today) {
-      if (tracking.lastUser === userId) {
-        result = { allowed: true }; // Same user can reuse it today
-      } else {
-        result = { allowed: false, reason: 'The tool has already been used by another user today.' };
-      }
-    } else {
-      tracking.lastDate = today;
-      tracking.lastUser = userId;
-      state.toolTracking[toolId] = tracking;
-      const success = _writeRaw(state);
-      if (success) {
-        result = { allowed: true };
-      } else {
-        result = { allowed: false, reason: 'System storage error: failed to persist tool tracking state.' };
-      }
+    const ok = _writeRaw(state);
+    if (!ok) {
+      throw new Error(`Failed to persist system state for module "${moduleName}"`);
     }
+    return true;
   });
-  
-  return result;
 }
 
 module.exports = {
   get,
   update,
-  checkDailyToolUsage
 };

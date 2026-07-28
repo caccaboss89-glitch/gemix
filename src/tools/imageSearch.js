@@ -324,7 +324,4 @@ module.exports = {
   DEFAULT_COUNT,
   MIN_COUNT,
   MAX_COUNT,
-  _cleanQuery,
-  _clampCount,
-  _pickImageUrl,
 };

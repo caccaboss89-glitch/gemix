@@ -270,6 +270,8 @@ async function onDiscordMessage(msg) {
 }
 
 async function _discordGuildExtras(guild) {
+  if (!guild) return { availableEmojis: '', serverEvents: '' };
+
   let availableEmojis = '';
   try {
     const emojis = guild.emojis.cache;

@@ -6,7 +6,7 @@
 
 const fs = require('fs');
 const { MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../config/constants');
-const { getMediaDurationSec } = require('./mediaDuration');
+const { getMediaDurationSec, getMediaDurationSecFromPath } = require('./mediaDuration');
 
 function formatAudioTooLongNote(durationSec) {
   const d = Number(durationSec);
@@ -31,11 +31,10 @@ function isVideoOverDurationLimit(durationSec) {
 }
 
 /** Probe duration from a file already stored under data/users/.../history/. */
-async function durationSecFromHistoryFile(absPath, extHint) {
+async function durationSecFromHistoryFile(absPath, _extHint) {
   if (!absPath || !fs.existsSync(absPath)) return null;
   try {
-    const buf = fs.readFileSync(absPath);
-    return await getMediaDurationSec(buf, extHint);
+    return await getMediaDurationSecFromPath(absPath);
   } catch {
     return null;
   }

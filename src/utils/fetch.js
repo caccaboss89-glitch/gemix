@@ -36,6 +36,7 @@ async function _consumeResponseBodyCapped(res, maxBytes, timeoutMs, destPath = n
   }
 
   const deadline = Date.now() + timeoutMs;
+  let failed = false;
   try {
     while (true) {
       if (Date.now() > deadline) {
@@ -53,13 +54,15 @@ async function _consumeResponseBodyCapped(res, maxBytes, timeoutMs, destPath = n
       else chunks.push(buf);
     }
   } catch (err) {
+    failed = true;
     if (stream) {
       stream.destroy();
       try { if (destPath && fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch { /* ignore */ }
     }
     throw err;
   } finally {
-    if (stream) {
+    // Only end() on success — end() after destroy can mask the original error.
+    if (stream && !failed) {
       await new Promise((resolve, reject) => {
         stream.end((endErr) => (endErr ? reject(endErr) : resolve()));
       });
