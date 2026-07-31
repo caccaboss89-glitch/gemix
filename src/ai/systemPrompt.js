@@ -132,6 +132,11 @@ function buildStaticInstructions(ctx) {
   }
 
   if (isActiveMember) {
+    // Shared opener for outbound delivery to someone else (tools only hint briefly).
+    const onBehalfTools = profile === PROFILE.DISCORD_THREAD
+      ? 'send_whatsapp_message or send_email'
+      : 'send_whatsapp_message, send_email, or schedule_tasks';
+    const onBehalfRule = `When using ${onBehalfTools} toward someone else, start by saying on behalf of which user you're writing, e.g. "Marco mi ha chiesto di dirti..."`;
     if (isAdmin) {
       // Admin addresses members directly by phone/email (see send_* and
       // schedule_tasks). The roster gives the exact identifiers so no name
@@ -147,10 +152,10 @@ function buildStaticInstructions(ctx) {
       const deliveryRule = profile === PROFILE.DISCORD_THREAD
         ? 'external destinations only'
         : 'send_whatsapp_message/send_email: external destinations only; schedule_tasks: omit destination for current chat/group, or set recipient for someone else';
-      contextBlocks.push(`<ActiveMembers>Address them in ${deliveryToolHint} by the phone/email in this list — ${deliveryRule}. ${roster}.</ActiveMembers>`);
+      contextBlocks.push(`<ActiveMembers>Address them in ${deliveryToolHint} by the phone/email in this list — ${deliveryRule}. ${onBehalfRule}. ${roster}.</ActiveMembers>`);
     } else {
       const members = ACTIVE_MEMBERS.map(m => m.name).join(', ');
-      contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name.</ActiveMembers>`);
+      contextBlocks.push(`<ActiveMembers>${members}. In delivery tools, address others by roster name. ${onBehalfRule}.</ActiveMembers>`);
     }
   }
 

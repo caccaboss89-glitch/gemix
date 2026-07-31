@@ -4,7 +4,7 @@
 //
 // Limits are enforced per user (active or not); the admin is exempt. Counts
 // are persisted via systemState (survive restarts) and reset at the configured
-// weekday + time Europe/Rome (env MEDIA_WEEKLY_RESET_*; defaults Tuesday 16:00)
+// weekday + time Europe/Rome (env MEDIA_WEEKLY_RESET_*; defaults Monday 00:00)
 // — the same wall-clock the reminders and sent-message timestamps use
 // (DST-aware, never UTC), NOT a fixed offset.
 //
@@ -44,11 +44,11 @@ const WEEKDAY_NAMES_EN = [
 
 /**
  * Human label for the reset boundary (prompt + tool errors), Europe/Rome.
- * e.g. "Tuesday at 15:57"
+ * e.g. "Monday at 00:00"
  * @returns {string}
  */
 function formatMediaQuotaResetLabel() {
-  const day = WEEKDAY_NAMES_EN[RESET_WEEKDAY] || 'Tuesday';
+  const day = WEEKDAY_NAMES_EN[RESET_WEEKDAY] || 'Monday';
   const hh = String(RESET_HOUR).padStart(2, '0');
   const mm = String(RESET_MINUTE).padStart(2, '0');
   return `${day} at ${hh}:${mm}`;

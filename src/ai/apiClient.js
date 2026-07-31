@@ -17,8 +17,8 @@ const { isXaiFileDownloadError } = require('../utils/refreshXaiMessageUrls');
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
-const LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
-const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour
+const LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days (monthly retention)
+const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour (scan interval; age gate is monthly)
 const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
 
 const crypto = require('crypto');

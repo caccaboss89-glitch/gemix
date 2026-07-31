@@ -89,14 +89,14 @@ module.exports = {
   STARTUP_SYSTEM_CLEANUP: toBool(process.env.STARTUP_SYSTEM_CLEANUP, false),
 
   // Weekly media quota reset (Europe/Rome). Used for period keys + prompt/tool wording.
-  // Weekday: 0=Sunday … 6=Saturday (default Tuesday=2). Hour 0–23, minute 0–59 (default 16:00).
+  // Weekday: 0=Sunday … 6=Saturday (default Monday=1). Hour 0–23, minute 0–59 (default 00:00).
   MEDIA_WEEKLY_RESET_WEEKDAY: (() => {
     const n = parseInt(process.env.MEDIA_WEEKLY_RESET_WEEKDAY, 10);
-    return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 2;
+    return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 1;
   })(),
   MEDIA_WEEKLY_RESET_HOUR: (() => {
     const n = parseInt(process.env.MEDIA_WEEKLY_RESET_HOUR, 10);
-    return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 16;
+    return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 0;
   })(),
   MEDIA_WEEKLY_RESET_MINUTE: (() => {
     const n = parseInt(process.env.MEDIA_WEEKLY_RESET_MINUTE, 10);
