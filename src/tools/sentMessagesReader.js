@@ -1,5 +1,9 @@
 // src/tools/sentMessagesReader.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // read_sent_messages tool: lets an active member (or admin) confirm what GemiX
 // previously delivered to OTHER people on their behalf, on WhatsApp and/or
 // email. Results are grouped by recipient. Any files that were attached are

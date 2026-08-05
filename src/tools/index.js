@@ -1,5 +1,11 @@
 // src/tools/index.js
 //
+// Tool directives: all tool-facing text (including the envelopes hand-written
+// inline by this dispatcher) is in English, uses no emojis, no XML wrappers,
+// and every tool result is coerced to the fixed JSON `{ success, message?,
+// error?, ... }` envelope before reaching the model. User-facing delivery text
+// (WhatsApp/Discord banners, email bodies) is out of scope.
+//
 // Central dispatcher for all tool calls from the main brain.
 // Responsibilities: permission checks, schema validation via validateToolArgs,
 // per-round tool caps (build, read_music_stats, read_server_rules), recipient

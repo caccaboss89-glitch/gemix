@@ -1,5 +1,9 @@
 // src/tools/imageSearch.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // Local web image search via a self-hosted SearXNG instance (JSON API).
 // Returns direct https image file URLs for delivery through final `attachments`,
 // and attaches each found image as native vision content (input_image) so the

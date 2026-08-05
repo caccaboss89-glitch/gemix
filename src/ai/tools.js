@@ -1,5 +1,12 @@
 // src/ai/tools.js
 //
+// Tool directives: all tool-facing text (name, description, parameter
+// descriptions, and the result strings produced in src/tools/*.js) is in
+// English, uses no emojis and no XML tags, and returns a fixed JSON envelope
+// `{ success, message?, error?, ... }`. Keep every tool self-contained: put
+// when-to-use / how-to-use guidance in that tool's own description (not in the
+// prompt), and never reference prompt XML block names from a description.
+//
 // Central registry of tool definitions for the main brain (function calling schema).
 // Uses makeTool + validateToolArgs (lightweight hallucination guard, no ajv).
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
@@ -182,11 +189,9 @@ function validateToolArgs(args, toolDef) {
 // xAI runs them inside the same request and folds the results back into the
 // response (zero extra rounds in our outer loop). The bot does NOT implement
 // function tools with these names: the model invokes the native path, we
-// never see them as tool_calls.
+// never see them as tool_calls. (web_search and x_search are the native tools used.)
 // Reserved native function names (do not reuse as client tools): search_images
 // (SERVER_SIDE_TOOL_IMAGE_SEARCH), web_search/browse_page/open_page/…, x_*_search, etc.
-const TOOL_CODE_INTERPRETER_NATIVE = { type: 'code_interpreter' };
-
 const TOOL_WEB_SEARCH_NATIVE = {
   type: 'web_search',
   num_results: 10,
@@ -210,7 +215,7 @@ const TOOL_X_SEARCH_NATIVE = {
 const TOOL_WEB_IMAGE_SEARCH = makeTool({
   name: 'web_image_search',
   description:
-    'Search the web for existing images. Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
+    'Search the web for existing images (provides direct image URLs). Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
     + 'put chosen `url` values in final `attachments` to send them. '
     + 'Prefer this over generate_image when a real web image is enough. Not for X/Twitter media.',
   properties: {
@@ -247,8 +252,9 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
   const defaults = defaultSettings();
   return makeTool({
     name: 'manage_preferences',
-    description: `Change the settings for ${scope} — the ones listed in &lt;CurrentSettings&gt;. `
-      + 'Pass only the fields to change; the others stay as they are. Values marked (default) there are the program defaults.',
+    description: `Change your own settings for ${scope} — the ones listed in CurrentSettings (voice, effort, language, custom memory). `
+      + 'Pass only the fields to change; the others stay as they are. Values marked (default) there are the program defaults. '
+      + 'Never store transient context (current task, session state, temporary data).',
     properties: {
       voice: {
         type: 'string',
@@ -392,14 +398,14 @@ const DELIVERY_ATTACHMENTS_PROP = {
 };
 
 function buildWhatsAppTool(isAdmin) {
-  // Admin: address members directly by phone (roster in <ActiveMembers>).
+  // Admin: address members directly by phone (roster in ActiveMembers).
   // Active non-admin: name only (the backend resolves it to the member).
   // This tool never targets the current chat — replies there use structured output.
   const recipientProps = {};
   if (isAdmin) {
     recipientProps.phone = {
       type: 'string',
-      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user. Required — external number only.',
+      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user. Required — external number only.',
     };
   } else {
     recipientProps.name = {
@@ -434,7 +440,7 @@ function buildEmailTool(isAdmin) {
   if (isAdmin) {
     recipientProps.email = {
       type: 'string',
-      description: 'Recipient email address, from the &lt;ActiveMembers&gt; roster or given by the user.',
+      description: 'Recipient email address, from the ActiveMembers roster or given by the user.',
     };
   } else {
     recipientProps.name = {
@@ -478,7 +484,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
 
   if (isAdmin) {
     // Mirror send_whatsapp_message/send_email: the admin only associates a
-    // phone (from the <ActiveMembers> roster or given by the user). No
+    // phone (from the ActiveMembers roster or given by the user). No
     // toPrivate/toGroup flags — omit recipient = current chat/group; set
     // recipient = the scheduler delivers privately to that number (it treats a
     // bare recipient as a private reminder).
@@ -488,7 +494,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       properties: {
         phone: {
           type: 'string',
-          description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the &lt;ActiveMembers&gt; roster or given by the user.',
+          description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user.',
         },
       },
     };
@@ -645,7 +651,7 @@ function buildReadSentMessagesTool(isAdmin) {
         type: 'array',
         items: { type: 'string' },
         description: isAdmin
-          ? 'OPTIONAL filter, any mix of phone numbers (with country code, e.g. +393XXXXXXXXX) and/or email addresses, from the &lt;ActiveMembers&gt; roster or given by the user. A phone matches WhatsApp messages, an email matches email messages. Omit to list every recipient.'
+          ? 'OPTIONAL filter, any mix of phone numbers (with country code, e.g. +393XXXXXXXXX) and/or email addresses, from the ActiveMembers roster or given by the user. A phone matches WhatsApp messages, an email matches email messages. Omit to list every recipient.'
           : 'OPTIONAL filter by active member name(s) — mapped to their WhatsApp number and email. Omit to list every recipient.',
       },
     },
@@ -676,8 +682,9 @@ function buildBuildTool(isGroup) {
     name: 'build',
     description:
       'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
-      + 'Not for fetchable X/web media — use x_search / web_image_search + final attachments. '
-      + 'Isolated turn — no chat history; it sees only your prompt, <BuildWorkspace> files, and attachments[] you stage. '
+      + 'Use build to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp, multi-step deliverables; images/video only if embedded in those). Not for standalone imagine or search-downloadable media. '
+      + 'Not for fetchable X/web media — use x_search / web_image_search + final attachments; never call build only to download, mirror, or re-send such media. '
+      + 'Isolated turn — no chat history; it sees only your prompt, the BuildWorkspace files, and attachments[] you stage. '
       + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from generate_music, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
       + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
       + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
@@ -717,17 +724,12 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO, TOOL_GENERATE_MUSIC);
   }
 
-  // 3) Ad-hoc Python (native server-side) — outside Discord.
-  if (!isDiscord) {
-    tools.push(TOOL_CODE_INTERPRETER_NATIVE);
-  }
-
-  // 4) Build deliverables (sandbox) — outside Discord.
+  // 3) Build deliverables (sandbox) — outside Discord.
   if (!isDiscord) {
     tools.push(buildBuildTool(isWhatsAppGroup));
   }
 
-  // 5) Outbound delivery. Voice is not a tool (structured `voice` flag on WA dedicated).
+  // 4) Outbound delivery. Voice is not a tool (structured `voice` flag on WA dedicated).
   if (isDiscord) {
     tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   }
@@ -736,14 +738,14 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildWhatsAppTool(isAdmin));
   }
 
-  // 6) Reminders / tasks — outside Discord.
+  // 5) Reminders / tasks — outside Discord.
   if (!isDiscord) {
     tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
     tools.push(buildReadMyTasksTool(isWhatsAppGroup));
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
   }
 
-  // 7) Preferences & meta (no persistent settings on Discord).
+  // 6) Preferences & meta (no persistent settings on Discord).
   if (!isDiscord) {
     const isPersonalChat = userCtx.platform === PLATFORM_WA_PERSONAL;
     tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
@@ -756,7 +758,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildReadSentMessagesTool(isAdmin));
   }
 
-  // 8) Bug report last (all platforms).
+  // 7) Bug report last (all platforms).
   tools.push(TOOL_BUG_REPORT);
 
   return tools;

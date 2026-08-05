@@ -26,7 +26,6 @@ const TOOL = {
   GENERATE_MUSIC: 'generate_music',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
-  CODE_INTERPRETER: 'code_interpreter',
   BUILD: 'build',
   SEND_WHATSAPP: 'send_whatsapp_message',
   SEND_EMAIL: 'send_email',
@@ -55,7 +54,7 @@ const CAPS = {
     voiceReply: false,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
-      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
+      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
@@ -74,7 +73,7 @@ const CAPS = {
     voiceReply: true,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
-      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
+      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
@@ -93,7 +92,7 @@ const CAPS = {
     voiceReply: true,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
-      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO, TOOL.CODE_INTERPRETER,
+      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
       TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
@@ -151,7 +150,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   }
   const waOnly = [
     TOOL.GENERATE_MUSIC, TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
-    TOOL.CODE_INTERPRETER, TOOL.TOGGLE_RELEASE,
+    TOOL.TOGGLE_RELEASE,
     TOOL.READ_MUSIC_STATS, TOOL.READ_RULES, TOOL.READ_SENT_MESSAGES,
   ];
   if (cap.isDiscord && waOnly.includes(toolName)) {
@@ -203,7 +202,6 @@ function buildCallerAccessNote(profile, opts = {}) {
  */
 function buildDirectives(profile, opts = {}) {
   const toolNames = opts.toolNames || null;
-  const hasCodeInterpreter = Boolean(opts.hasCodeInterpreter);
   const cap = CAPS[profile];
   const has = (name) => _hasTool(toolNames, cap, name);
 
@@ -266,7 +264,7 @@ function buildDirectives(profile, opts = {}) {
     { scope: 'always', text: `When unsure, slow down: verify with a tool (${verifyTools}) or ask the user, and if something stays unconfirmed say so plainly — never guess or rush.` },
   ];
 
-  // --- Tooling (former <ToolUsage> block) ---
+  // --- Tooling (general rules only; per-tool usage lives in each tool's own description) ---
   // Discord conversation_title lives in text.format (first turn only) + Runtime
   // (not Directives), so R-numbering stays fixed.
   const tooling = [
@@ -275,33 +273,10 @@ function buildDirectives(profile, opts = {}) {
       text: 'Run tools silently (no user-facing text between calls).',
     },
   ];
+  tooling.push({ scope: 'tool', text: 'Use every tool you need to answer well — call independent tools in parallel when possible.' });
   tooling.push({ scope: 'tool', text: 'Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.' });
-  if (has(TOOL.MANAGE_PREFERENCES)) {
-    tooling.push({ scope: 'tool', text: 'You can change your current voice, effort, language and custom memory in &lt;CurrentSettings&gt; with the manage_preferences tool. Never store transient context (current task, session state, temporary data).' });
-  }
-  if (hasCodeInterpreter || has(TOOL.CODE_INTERPRETER)) {
-    tooling.push({ scope: 'tool', text: 'Use code_interpreter for ad-hoc Python (math, analysis, quick scripts) — isolated, with no build sub-agent filesystem.' });
-  }
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
     tooling.push({ scope: 'always', text: 'Proactively use web/X search before factual replies when the fact is not already in chat history or settings (news, people, products, events, social posts/screenshots, unfamiliar refs) — search first, never guess.' });
-  }
-  if (has(TOOL.X_SEARCH) || has(TOOL.WEB_IMAGE_SEARCH)) {
-    const mediaSources = [];
-    if (has(TOOL.X_SEARCH)) mediaSources.push('X media via x_search (CDN URLs)');
-    if (has(TOOL.WEB_IMAGE_SEARCH)) mediaSources.push('web images via web_image_search (direct image URLs)');
-    const noBuildMirror = has(TOOL.BUILD)
-      ? 'Deliver those URLs in final `attachments` — do not call build only to download, mirror, or re-send.'
-      : 'Deliver those URLs in final `attachments`.';
-    tooling.push({
-      scope: 'tool',
-      text: `Fetchable media: ${mediaSources.join('; ')}. ${noBuildMirror}`,
-    });
-  }
-  if (has(TOOL.BUILD)) {
-    tooling.push({
-      scope: 'tool',
-      text: 'Use build to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp, multi-step deliverables; images/video only if embedded in those). Not for standalone imagine or search-downloadable media.',
-    });
   }
 
   return [

@@ -1,14 +1,18 @@
 // src/tools/musicStats.js
 //
-// Fetches public music listening stats from an external MusicBot GitHub repo
-// (https://.../stats.json) and returns a compact, XML-wrapped summary.
-// Used exclusively by the read_music_stats tool. Pure formatting + fetch.
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
+// Fetches public music listening stats from an external MusicBot stats URL
+// and returns a compact summary in `message`. Used exclusively by the
+// read_music_stats tool. Pure formatting + fetch.
 
 const { fetchExternal } = require('../utils/fetch');
 const { MUSIC_STATS_URL } = require('../config/env');
 
 /**
- * Fetch and summarize music bot stats from GitHub.
+ * Fetch and summarize music bot stats from the stats URL.
  * Extracts only essential data to minimize token usage.
  * @returns {Promise<{success: boolean, message?: string, error?: string}>}
  */
@@ -35,8 +39,8 @@ async function readMusicStats() {
 }
 
 /**
- * Format raw stats.json into a concise summary object for executeTool.
- * @param {object} data - Parsed stats.json
+ * Format raw stats JSON into a concise summary object for executeTool.
+ * @param {object} data - Parsed stats payload
  * @returns {{ success: true, message: string }}
  */
 function formatStats(data) {
@@ -78,10 +82,10 @@ function formatStats(data) {
     const top5 = songs.sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 5);
     const top5Str = top5.map((s, i) => `  ${i + 1}. ${s.title} (${s.count}x)`).join('\n');
 
-    return `👤 ${u.global_name || u.username} (@${u.username})\n` +
-      `   Listening: ${hours}h ${minutes}m | Songs: ${totalSongs}\n` +
-      `   Server playlist adds: ${u.serverPlaylistAdds || 0} | Personal: ${u.personalPlaylistAdds || 0}\n` +
-      `   Top 5 songs:\n${top5Str}`;
+    return `${u.global_name || u.username} (@${u.username})\n` +
+      `  Listening: ${hours}h ${minutes}m | Songs: ${totalSongs}\n` +
+      `  Server playlist adds: ${u.serverPlaylistAdds || 0} | Personal: ${u.personalPlaylistAdds || 0}\n` +
+      `  Top 5 songs:\n${top5Str}`;
   });
 
   // --- Global top 5 ---
@@ -107,9 +111,9 @@ function formatStats(data) {
   const totalHours = Math.floor(totalListeningMs / 3600000);
   const totalMinutes = Math.floor((totalListeningMs % 3600000) / 60000);
 
-  let output = '🎵 MUSIC BOT STATISTICS\n\n';
+  let output = 'MUSIC BOT STATISTICS\n\n';
 
-  output += '📊 GLOBAL:\n';
+  output += 'GLOBAL:\n';
   output += `  Songs started: ${global.songsStarted || 'N/A'}\n`;
   output += `  Songs completed: ${global.songsCompleted || 'N/A'}\n`;
   output += `  Active users: ${userEntries.length}\n`;
@@ -118,19 +122,17 @@ function formatStats(data) {
   output += `  Personal playlist adds: ${totalPersonalAdds}\n`;
 
   if (globalTop5.length > 0) {
-    output += `\n🏆 GLOBAL TOP 5 SONGS:\n${globalTop5Str}\n`;
+    output += `\nGLOBAL TOP 5 SONGS:\n${globalTop5Str}\n`;
   }
 
-  output += '\n👥 USERS:\n\n';
+  output += '\nUSERS:\n\n';
   output += userSummaries.join('\n\n');
 
   if (data.lastUpdated) {
-    output += `\n\n📅 Last updated: ${data.lastUpdated}`;
+    output += `\n\nLast updated: ${data.lastUpdated}`;
   }
 
-  const xmlOutput = `<MusicStats last_updated="${data.lastUpdated || ''}">\n${output}\n</MusicStats>`;
-
-  return { success: true, message: xmlOutput };
+  return { success: true, message: output };
 }
 
 module.exports = { readMusicStats };

@@ -1,5 +1,9 @@
 // src/tools/build.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // `build` tool: hand a task to Grok Build inside the per-workspace Docker sandbox.
 //
 // Host side:

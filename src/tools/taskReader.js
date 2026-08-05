@@ -1,9 +1,13 @@
 // src/tools/taskReader.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // Reads scheduled reminders (personal and optionally group) from taskStore.
-// Formats them with timestamps, recipients, recurrence and IDs into an
-// XML-wrapped <ScheduledTasks> message for the main brain. Companion to
-// taskRemover and scheduler.
+// Formats them with timestamps, recipients, recurrence and IDs into a
+// human-readable list for the main brain. Companion to taskRemover and
+// scheduler.
 
 const { readTaskFile } = require('../utils/taskStore');
 const { formatTimestamp } = require('../utils/time');
@@ -20,13 +24,13 @@ const { formatTaskRecipient } = require('../utils/taskRecipient');
  * @returns {string}
  */
 function _formatTask(t, i, ctx, showRecipient) {
-  let line = `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}"\n   🗓️ ${formatTimestamp(t.scheduledAt)}`;
+  let line = `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}" – ${formatTimestamp(t.scheduledAt)}`;
 
   const recurrence = normalizePersistedRecurrence(t.recurrence);
   if (recurrence) {
-    line += ` | 🔁 ${describeRecurrence(recurrence, 'it')}`;
-    if (recurrence.until) line += ` fino al ${formatTimestamp(recurrence.until)}`;
-    if (recurrence.exdate.length) line += ` (escluse: ${recurrence.exdate.join(', ')})`;
+    line += ` | ${describeRecurrence(recurrence, 'en')}`;
+    if (recurrence.until) line += ` until ${formatTimestamp(recurrence.until)}`;
+    if (recurrence.exdate.length) line += ` (excluded: ${recurrence.exdate.join(', ')})`;
   }
 
   // Recipient is only meaningful for active members/admin, who can set
@@ -35,12 +39,12 @@ function _formatTask(t, i, ctx, showRecipient) {
     const recipient = formatTaskRecipient(t.destinations, {
       isAdmin: ctx.isAdmin,
       waJid: ctx.waJid,
-      groupWord: 'gruppo',
+      groupWord: 'group',
     });
-    if (recipient) line += ` | 👤 ${recipient}`;
+    if (recipient) line += ` | recipient: ${recipient}`;
   }
 
-  line += ` | ID: \`${t.id}\``;
+  line += ` | ID: ${t.id}`;
   return line;
 }
 
@@ -58,23 +62,21 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
 
   const personalData = await readTaskFile(taskFileId);
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
-    result += `📋 **I tuoi task personali:**\n`;
+    result += `Your personal reminders:\n`;
     result += personalData.tasks.map((t, i) => _formatTask(t, i, ctx, true)).join('\n');
   } else {
-    result += `📋 Nessun task personale schedulato.`;
+    result += `No personal reminders scheduled.`;
   }
 
   if (includeGroup && groupTaskFileId) {
     const groupData = await readTaskFile(groupTaskFileId);
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
-      result += `\n\n📋 **Task di gruppo:**\n`;
+      result += `\n\nGroup reminders:\n`;
       result += groupData.tasks.map((t, i) => _formatTask(t, i, ctx, false)).join('\n');
     }
   }
 
-  const output = `<ScheduledTasks include_group="${includeGroup}">\n${result || 'Nessun task schedulato.'}\n</ScheduledTasks>`;
-
-  return { success: true, message: output };
+  return { success: true, message: result || 'No reminders scheduled.' };
 }
 
 module.exports = { readTasks };

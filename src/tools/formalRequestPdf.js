@@ -1,5 +1,11 @@
 // src/tools/formalRequestPdf.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+// The generated PDF document body stays Italian (formal Statuto requirement);
+// these directives cover tool messages, not the document content.
+//
 // Generates formal PDF requests compliant with Art. 6 of the Statuto Albertino.
 // Uses pdfkit + Helvetica, a minimal inline-markdown parser (bold/italic + lists),
 // and a rigid set of predefined sections (headings are stripped from motivation).

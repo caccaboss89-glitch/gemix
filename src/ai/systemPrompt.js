@@ -66,22 +66,20 @@ function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
   };
   const tools = getToolsForUser(isActiveMember, isAdmin, userCtx);
   const toolNames = new Set();
-  let hasCodeInterpreter = false;
   for (const t of tools) {
-    if (t && t.type === 'code_interpreter') hasCodeInterpreter = true;
-    else if (t?.function?.name) toolNames.add(t.function.name);
+    if (t?.function?.name) toolNames.add(t.function.name);
     else if (typeof t?.type === 'string' && t.type !== 'function') toolNames.add(t.type);
   }
-  return { toolNames, hasCodeInterpreter };
+  return { toolNames };
 }
 
 /** Stable fingerprint of live tool names for mid-turn static rebuild detection. */
 function promptToolsFingerprint(ctx) {
   const isActiveMember = Boolean(ctx.userIdentity?.isActiveMember);
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
-  const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
+  const { toolNames } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
   const names = [...toolNames].sort();
-  return `${names.join(',')}|ci=${hasCodeInterpreter ? 1 : 0}`;
+  return names.join(',');
 }
 
 function _callerLineInner(ctx, promptOpts) {
@@ -106,9 +104,9 @@ function buildStaticInstructions(ctx) {
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
-  const { toolNames, hasCodeInterpreter } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
+  const { toolNames } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
   // Discord Thread title / conversation_title guidance live only in Runtime.
-  const promptOpts = { isActiveMember, toolNames, hasCodeInterpreter };
+  const promptOpts = { isActiveMember, toolNames };
 
   const sections = [];
   const contextBlocks = [];

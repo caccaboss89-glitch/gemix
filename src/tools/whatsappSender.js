@@ -1,5 +1,9 @@
 // src/tools/whatsappSender.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // Thin wrapper around the dedicated WhatsApp client for direct sending.
 // Used by scheduler and recipient tools. Applies WhatsApp text sanitization
 // before delivery (normalizeMarkdown, stripOutgoingDeliveryArtifacts) and

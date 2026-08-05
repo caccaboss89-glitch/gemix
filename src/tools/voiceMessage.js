@@ -1,5 +1,10 @@
 // src/tools/voiceMessage.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+// (This file returns binary audio Buffers, so it produces no tool-facing text.)
+//
 // Voice generation pipeline. Produces OGG/Opus audio buffers for WhatsApp
 // voice messages. Uses the direct xAI TTS endpoint (`POST /v1/tts`) when
 // enabled (primary), with Google Translate TTS fallback. Always applies

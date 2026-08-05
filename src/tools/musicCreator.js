@@ -1,5 +1,10 @@
 // src/tools/musicCreator.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+// The success `message` is formatted by the dispatcher with the final filename.
+//
 // Music generation via Lyria on OpenRouter (SSE streaming).
 // Uses dedicated OPENROUTER_API_KEY and MUSIC_MODEL environment variables
 // (Lyria is not available via xAI/Grok).
@@ -168,7 +173,7 @@ async function musicCreator(prompt, userCtx) {
       quota.commit();
 
       return {
-        toolResult: { success: true, message: '🎵 Song generated successfully!' },
+        toolResult: { success: true },
         attachments: [{ name: filename, buffer, mimetype: 'audio/ogg', sendAudioAsVoice: true }],
       };
     }

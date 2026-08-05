@@ -113,7 +113,6 @@ function _toolContentToResponsesOutput(content) {
 
 /** xAI server-side tool output items replayed on the next request (in-order). */
 const SERVER_SIDE_OUTPUT_TYPES = new Set([
-  'code_interpreter_call',
   'web_search_call',
   'custom_tool_call',
 ]);

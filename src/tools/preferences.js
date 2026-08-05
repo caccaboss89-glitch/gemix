@@ -1,5 +1,9 @@
 // src/tools/preferences.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // Implementation of the `manage_preferences` tool: writes the per-chat settings
 // shown in the <CurrentSettings> prompt block (TTS voice, reasoning effort,
 // reply language, and the free-text custom memory).

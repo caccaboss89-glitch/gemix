@@ -1,5 +1,9 @@
 // src/tools/scheduler.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // Schedules tasks (one-time or recurring) for WhatsApp delivery (private or group).
 // Validates dates against DST, 1-year limit, permissions (admin/active member for recipients).
 // Uses taskStore for persistence, time utils for Rome timezone handling, and builds
@@ -217,23 +221,23 @@ async function scheduleTasks(tasks, ctx) {
     const recipientLabel = formatTaskRecipient(destinations, {
       isAdmin: ctx.isAdmin,
       waJid: ctx.waJid,
-      groupWord: 'gruppo',
+      groupWord: 'group',
     });
 
     let recLabel = '';
     if (recurrence) {
-      recLabel = `\n  🔁 Ricorrenza: ${describeRecurrence(recurrence, 'it')} fino al ${formatTimestamp(recurrence.until)}`;
+      recLabel = `\n  recurrence: ${describeRecurrence(recurrence, 'en')} until ${formatTimestamp(recurrence.until)}`;
       if (recurrence.exdate && recurrence.exdate.length) {
-        recLabel += ` (escluse: ${recurrence.exdate.join(', ')})`;
+        recLabel += ` (excluded: ${recurrence.exdate.join(', ')})`;
       }
     }
-    const recipientLine = recipientLabel ? `\n  👤 Destinatario: ${recipientLabel}` : '';
+    const recipientLine = recipientLabel ? `\n  recipient: ${recipientLabel}` : '';
 
     let taskSummary =
-      `📋 Task schedulato:\n` +
-      `  🆔 ID: ${newTask.id}\n` +
-      `  📝 Messaggio: ${cleanContent.substring(0, 80)}${cleanContent.length > 80 ? '...' : ''}` +
-      `\n  🕐 Data/ora: ${scheduledAtRome}` +
+      `Task scheduled:\n` +
+      `  id: ${newTask.id}\n` +
+      `  message: ${cleanContent.substring(0, 80)}${cleanContent.length > 80 ? '...' : ''}` +
+      `\n  scheduledAt: ${scheduledAtRome}` +
       recipientLine +
       recLabel;
 
@@ -251,9 +255,9 @@ async function scheduleTasks(tasks, ctx) {
   const okCount = results.filter(r => r.success && !r.warning).length;
   let verifyNote = null;
   if (okCount === 1) {
-    verifyNote = '⚠️ Verifica che il promemoria corrisponda esattamente a quanto richiesto dall\'utente. Se qualcosa non è corretto, elimina il task con il suo ID e ricrealo.';
+    verifyNote = 'Verify the reminder matches exactly what the user requested. If anything is wrong, remove the task by its ID and recreate it.';
   } else if (okCount > 1) {
-    verifyNote = '⚠️ Verifica che tutti i promemoria corrispondano esattamente a quanto richiesto dall\'utente. Se qualcosa non è corretto, elimina il task interessato con il suo ID e ricrealo.';
+    verifyNote = 'Verify every reminder matches exactly what the user requested. If anything is wrong, remove the affected task by its ID and recreate it.';
   }
 
   return { success: true, tasks: results, ...(verifyNote ? { message: verifyNote } : {}) };

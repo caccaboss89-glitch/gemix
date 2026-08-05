@@ -1,5 +1,9 @@
 // src/tools/imagineGenerator.js
 //
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are returned as plain objects so the dispatcher
+// serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
+//
 // Grok Imagine - generate images and short videos on the direct xAI API:
 //   - POST /v1/images/generations  (text-to-image)
 //   - POST /v1/images/edits        (image generation guided by reference images)
