@@ -13,6 +13,10 @@
 // (input_file/input_image) on the turn they appear, current or in history.
 // Assistant-side history entries (including GemiX voice) stay [Attachment]
 // tags only — that role cannot carry native file parts.
+//
+// Videos are the one exception: history builders pass `deferVideo` so older
+// clips stay tags and reach the model only through the read_video tool (xAI
+// turns a video into ~1 frame per second, which floods the window).
 
 const fs = require('fs');
 const path = require('path');
@@ -134,6 +138,17 @@ function classifyAiFileDelivery(name, contentType) {
 }
 
 // -- Media kind + validation --------------------------------------------------
+
+/**
+ * True when the attachment is a video, which the history builders defer instead
+ * of attaching (see deliverSyncedAttachment's `deferVideo`).
+ * @param {string} name
+ * @param {string} [contentType]
+ * @returns {boolean}
+ */
+function isVideoAttachment(name, contentType) {
+  return _mediaKindFor(name, contentType) === 'video';
+}
 
 function _mediaKindFor(name, contentType) {
   const ext = _extOf(name);
@@ -393,6 +408,8 @@ function _durationSkipResult(tag, kind, durationSec) {
  * @param {string|null} [opts.ownerKey] - temp-dir isolation key for buffer files.
  * @param {boolean} [opts.tagOnly] - emit the tag without parts (assistant-side
  *   history entries, whose role cannot carry input parts).
+ * @param {boolean} [opts.deferVideo] - history builders: leave videos as a tag
+ *   pointing at read_video instead of attaching them.
  * @returns {Promise<{ tag: string, contentParts: object[], textFragment: string,
  *   overDurationLimit?: string, durationNote?: string }>}
  */
@@ -404,6 +421,7 @@ async function deliverSyncedAttachment(opts) {
     fetchBuffer,
     metadataDurationSec = 0,
     tagOnly = false,
+    deferVideo = false,
   } = opts;
 
   const tag = buildAttachmentTag(syncedPath, name);
@@ -443,6 +461,22 @@ async function deliverSyncedAttachment(opts) {
 
   if (tagOnly) {
     return { tag, syncedPath: syncedPath || null, contentParts: [], textFragment: `${tag} ` };
+  }
+
+  // History videos are not attached. xAI expands a video into roughly one frame
+  // per second, so two 2-minute clips sitting in the window bury the actual
+  // question under hundreds of images. They stay as tags and read_video pulls
+  // one back in on demand — but only once the file is on disk under history/,
+  // since that filename is the handle read_video resolves. Videos in the current
+  // message and in the message being replied to are still attached directly:
+  // those are what the user is asking about.
+  if (deferVideo && kind === 'video' && syncedPath) {
+    return {
+      tag,
+      syncedPath,
+      contentParts: [],
+      textFragment: `${tag} (not loaded — read_video with this filename to watch it) `,
+    };
   }
 
   const resolved = await _resolveIngressTarget(opts);
@@ -501,6 +535,7 @@ module.exports = {
   MAX_FILE_READS,
   MAX_VIDEO_BYTES,
   classifyAiFileDelivery,
+  isVideoAttachment,
   buildXaiFileParts,
   exposeXaiUrlFromAbsPath,
   deliverSyncedAttachment,

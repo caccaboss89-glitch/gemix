@@ -8,7 +8,7 @@
 //
 // Central dispatcher for all tool calls from the main brain.
 // Responsibilities: permission checks, schema validation via validateToolArgs,
-// per-round tool caps (build, read_music_stats), recipient
+// per-round tool caps (build, read_music_stats, read_video), recipient
 // resolution (for email/wa), the main execution switch, and unified error
 // handling with admin notification on uncaught failures. All individual tools
 // are required here.
@@ -27,6 +27,7 @@ const { normalizePhoneToJid } = require('./whatsappSender');
 const { recordSentMessage } = require('../utils/sentMessagesStore');
 const { readSentMessages } = require('./sentMessagesReader');
 const { readMusicStats } = require('./musicStats');
+const { readVideo } = require('./videoReader');
 const { managePreferences } = require('./preferences');
 const { toggleReleaseNotify } = require('./releaseNotify');
 const { buildTool } = require('./build');
@@ -513,6 +514,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
       case 'read_music_stats': {
         result = await readMusicStats();
+        break;
+      }
+
+      case 'read_video': {
+        // May return content parts (text + the input_file for the clip) so the
+        // deferred history video is watchable this round.
+        result = await readVideo(args, userCtx);
         break;
       }
 

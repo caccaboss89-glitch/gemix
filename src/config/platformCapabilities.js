@@ -23,6 +23,7 @@ const TOOL = {
   WEB_SEARCH: 'web_search',
   X_SEARCH: 'x_search',
   WEB_IMAGE_SEARCH: 'web_image_search',
+  READ_VIDEO: 'read_video',
   GENERATE_MUSIC: 'generate_music',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
@@ -51,7 +52,7 @@ const CAPS = {
     historyTranscriptionNote: false,
     voiceReply: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO, TOOL.GENERATE_MUSIC,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -69,7 +70,7 @@ const CAPS = {
     historyTranscriptionNote: true,
     voiceReply: true,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO, TOOL.GENERATE_MUSIC,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -87,7 +88,7 @@ const CAPS = {
     historyTranscriptionNote: true,
     voiceReply: true,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO, TOOL.GENERATE_MUSIC,
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
@@ -105,7 +106,7 @@ const CAPS = {
     historyTranscriptionNote: false,
     voiceReply: false,
     tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH,
+      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO,
       TOOL.FORMAL_PDF, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
@@ -308,7 +309,8 @@ function buildLimitsLines(profile) {
   const cap = CAPS[profile];
   let historyLine =
     '- History files are visible directly with [Attachment: filename]; past reactions appear as [Reactions: emoji xN]. '
-    + `Only the newest ${MAX_HISTORY_MEDIA_IMAGES} images + ${MAX_HISTORY_MEDIA_FILES} files are loaded.`;
+    + `Only the newest ${MAX_HISTORY_MEDIA_IMAGES} images + ${MAX_HISTORY_MEDIA_FILES} files are loaded. `
+    + 'Videos are the exception: only the ones in the message you are answering (or in the message it replies to) are loaded, older ones need read_video.';
   if (cap.historyTranscriptionNote) {
     historyLine += ' Your own past voice messages in history are shown as <PastVoiceReply> blocks on those assistant turns (transcript text; audio not reloaded).';
   }

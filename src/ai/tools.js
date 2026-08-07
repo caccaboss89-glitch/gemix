@@ -15,6 +15,7 @@
 const {
   PLATFORM_DISCORD,
   PLATFORM_WA_PERSONAL,
+  MAX_VIDEO_DURATION_S,
   VIDEO_GEN_DURATION_S,
   VIDEO_GEN_RESOLUTION,
   BUILD_WORKSPACE_TTL_MS,
@@ -242,6 +243,22 @@ const TOOL_WEB_IMAGE_SEARCH = makeTool({
     },
   },
   required: ['query'],
+});
+
+const TOOL_READ_VIDEO = makeTool({
+  name: 'read_video',
+  description:
+    'Watch a video that is already in this chat but was not loaded this turn. '
+    + 'Videos in the message you are answering (and in the message it replies to) are attached automatically — never call this for those. '
+    + 'Older ones show up as "[Attachment: name.mp4] (not loaded...)": pass that exact filename here to load one. '
+    + `Videos over ${MAX_VIDEO_DURATION_S}s are never available. One video per round: pick the one the user is actually asking about.`,
+  properties: {
+    filename: {
+      type: 'string',
+      description: 'Exact filename from the [Attachment: ...] tag in this chat. Not a URL: videos hosted elsewhere on the web cannot be opened.',
+    },
+  },
+  required: ['filename'],
 });
 
 const TOOL_READ_MUSIC_STATS = makeTool({
@@ -720,9 +737,11 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const tools = [];
 
   // Order = importance / how often the main brain should reach for them.
-  // 1) Search: native web → local web images → native X (image mode off on web).
-  // History files attach natively on user turns; assistant history stays [Attachment] tags.
-  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_WEB_IMAGE_SEARCH, TOOL_X_SEARCH_NATIVE);
+  // 1) Pulling material into context: native web → local web images → native X
+  // (image mode off on web) → one video already in this chat. History files
+  // attach natively on user turns (videos excepted, hence read_video);
+  // assistant history stays [Attachment] tags.
+  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_WEB_IMAGE_SEARCH, TOOL_X_SEARCH_NATIVE, TOOL_READ_VIDEO);
 
   // 2) Media generation (WhatsApp). Weekly quota is the real cap (mediaUsageLimits).
   if (isWhatsApp) {

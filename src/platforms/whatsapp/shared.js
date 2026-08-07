@@ -17,7 +17,13 @@ const { isSystemMessage } = require('../../config/systemMessages');
 const { wrapSystemNotification } = require('../../utils/systemTags');
 
 const { buildAttachmentTag } = require('../../utils/media');
-const { MAX_IMAGE_READS, MAX_FILE_READS, classifyAiFileDelivery, DELIVERY_MODE } = require('../../utils/aiFileDelivery');
+const {
+  MAX_IMAGE_READS,
+  MAX_FILE_READS,
+  classifyAiFileDelivery,
+  isVideoAttachment,
+  DELIVERY_MODE,
+} = require('../../utils/aiFileDelivery');
 const { resolveGemixVoiceTranscription, storeRecentVoiceText } = require('../../utils/historySync');
 const { ingressWaMessageMedia, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 const {
@@ -152,7 +158,12 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       if (isHistoryBotMessage(msg, mi)) continue; // our own sends are tag-only anyway
       const waFilename = msg._data?.filename;
       const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
-      const mode = classifyAiFileDelivery(resolvedName || waFilename || 'file', msg._data?.mimetype || '');
+      const budgetName = resolvedName || waFilename || 'file';
+      const budgetMime = msg._data?.mimetype || '';
+      // History videos never attach (read_video fetches them), so they must not
+      // burn a file slot another document could use.
+      if (isVideoAttachment(budgetName, budgetMime)) continue;
+      const mode = classifyAiFileDelivery(budgetName, budgetMime);
       if (mode === DELIVERY_MODE.IMAGE) {
         if (imgBudget > 0) { imgBudget--; uploadAllowed[mi] = true; }
       } else if (mode === DELIVERY_MODE.FILE) {
@@ -290,6 +301,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       if (overBudget) anyOverBudget = true;
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
         tagOnly: isFromBot || overBudget,
+        deferVideo: true,
       });
       if (platform !== PLATFORM_WA_PERSONAL && isGemiX
           && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {

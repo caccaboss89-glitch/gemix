@@ -41,6 +41,9 @@ function partitionHandlerToolCalls(toolCalls) {
  */
 const PER_ROUND_TOOL_LIMITS = {
   read_music_stats: 1,
+  // A video costs ~1 frame per second of context; loading several at once is
+  // the flood read_video exists to prevent.
+  read_video: 1,
   build: 1,
 };
 

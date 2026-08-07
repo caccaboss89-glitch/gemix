@@ -26,6 +26,8 @@ function createMemoizedFetchBuffer(fetchOnce) {
  * @param {object} [options]
  * @param {boolean} [options.tagOnly] - tag without native parts (assistant-side
  *   history entries whose role cannot carry input parts).
+ * @param {boolean} [options.deferVideo] - history builders: videos stay tags
+ *   pointing at read_video (see aiFileDelivery.js).
  */
 async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
   const mediaType = msg.type;
@@ -86,6 +88,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     metadataDurationSec: duration,
     ownerKey: historyStorageId,
     tagOnly: options.tagOnly === true,
+    deferVideo: options.deferVideo === true,
     platformAttachmentId: msgId,
   });
 
@@ -106,7 +109,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
  * Sync + classify one Discord attachment (current turn, quote, or history rebuild).
  */
 async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
-  const { metadataDurationSec = 0, tagOnly = false } = options;
+  const { metadataDurationSec = 0, tagOnly = false, deferVideo = false } = options;
 
   if (isDiscordAttachmentOversize(att)) {
     const tag = buildAttachmentTag(null, att.name);
@@ -135,6 +138,7 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     metadataDurationSec,
     ownerKey: historyStorageId,
     tagOnly,
+    deferVideo,
     platformAttachmentId: att.id,
   });
 

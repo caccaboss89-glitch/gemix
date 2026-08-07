@@ -11,7 +11,13 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
-const { MAX_IMAGE_READS, MAX_FILE_READS, classifyAiFileDelivery, DELIVERY_MODE } = require('../../utils/aiFileDelivery');
+const {
+  MAX_IMAGE_READS,
+  MAX_FILE_READS,
+  classifyAiFileDelivery,
+  isVideoAttachment,
+  DELIVERY_MODE,
+} = require('../../utils/aiFileDelivery');
 const { isDiscordAttachmentOversize } = require('../../utils/discordAttachmentFetch');
 const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
 const { mapWithConcurrency } = require('../../utils/concurrency');
@@ -497,6 +503,9 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
       if (m.author.id === discordClient.user.id) continue;
       for (const att of m.attachments.values()) {
         if (isDiscordAttachmentOversize(att)) continue;
+        // History videos never attach (read_video fetches them), so they must
+        // not burn a file slot another document could use.
+        if (isVideoAttachment(att.name || 'file', att.contentType || '')) continue;
         const mode = classifyAiFileDelivery(att.name || 'file', att.contentType || '');
         if (mode === DELIVERY_MODE.IMAGE) {
           if (imgBudget > 0) { imgBudget--; uploadAllowedAtt.add(att.id); }
@@ -522,6 +531,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
       const overBudget = !isBot && !uploadAllowedAtt.has(att.id);
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         tagOnly: isBot || overBudget,
+        deferVideo: true,
         metadataDurationSec: Number(att.duration || 0),
       });
       if (ingress.oversize) {
