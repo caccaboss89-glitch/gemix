@@ -168,9 +168,9 @@ function buildStaticInstructions(ctx) {
 
 /**
  * Program-owned turn-varying state. Handler inserts this once per turn as a
- * role:user item between history and the current user message, so later rounds
- * only append after it. Content is tagged <Runtime> so it is not mistaken for
- * the human user.
+ * role:user item right after the current user message, and never moves it, so
+ * later rounds only append after it. Content is tagged <Runtime> so it is not
+ * mistaken for the human user.
  */
 function buildDynamicRuntimeContext(ctx) {
   const now = getRomeTime();

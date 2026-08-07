@@ -7,11 +7,10 @@
 //   2. Touch the per-user/group build workspace activity timestamp (WA only).
 //   3. Build chat messages: static system first (byte-stable for the turn —
 //      xAI prefix-cache matches from the start of input[]), then history, the
-//      program-owned <Runtime>…</Runtime> role:user item, then the current user
-//      message. Runtime is built once per turn and never moves, so every later
-//      round only appends to input[] and the matched prefix keeps growing —
-//      never a second role:system (xAI folds extra system into the head and
-//      busts progressive history cache). Media uses
+//      current user message, then the program-owned <Runtime>…</Runtime>
+//      role:user item. Runtime is built once per turn and never moves, so every
+//      later round only appends to input[] — never a second role:system (xAI
+//      folds extra system into the head and busts progressive cache). Media uses
 //      utils/incomingMediaIngress.js → aiFileDelivery.js: native `input_image`
 //      / `input_file` parts via public URLs (user/history files attached
 //      natively; assistant-side entries including GemiX voice stay [Attachment]
@@ -298,7 +297,7 @@ async function handleMessage(ctx) {
     };
 
     // Static system first (only role:system — keep it that way for prefix
-    // cache). Then history, the Runtime block, and the current user message.
+    // cache). Then history, the current user message, and the Runtime block.
     // Rebuilt static only if the live tool fingerprint changes mid-turn (rare).
     let staticInstructions = buildStaticInstructions(ctx);
     let toolsFp = promptToolsFingerprint(ctx);
@@ -330,19 +329,24 @@ async function handleMessage(ctx) {
       messages.push(...historyForApi);
     }
 
-    // Turn-varying program state, built once and then left alone: it sits
-    // between history and the current user message, so every round of this turn
-    // only appends after it and the cached prefix keeps growing. Rebuilding it
-    // per round (or parking it last) would put changing bytes ahead of the
-    // replayed reasoning and tool items and force a recompute every round.
+    messages.push({ role: 'user', content: ctx.content });
+
+    // Turn-varying program state: built once, placed right after the current
+    // user message, and never moved again. Both constraints matter.
+    //   - after the user message, because next turn history replays it in the
+    //     same spot; anything turn-varying placed before it would differ from
+    //     what history holds there and cut the cross-turn prefix at the history.
+    //   - never rebuilt or re-appended, because then each round would drop
+    //     changing bytes where the replayed reasoning and tool items land and
+    //     force a recompute from there on.
+    // Together they make each round a pure append and keep the cross-turn
+    // prefix at its maximum (static + history + this message).
     // Must not use role:system either: xAI merges extra system messages into the
     // leading system block, which moves them and busts the prefix for good.
     // What it states can move during the turn (delivery buffer, build workspace,
     // quota counts, preferences); the tool results that cause those changes
     // report them, so the frozen snapshot stays truthful about turn start.
     messages.push({ role: 'user', content: buildDynamicRuntimeContext(ctx) });
-
-    messages.push({ role: 'user', content: ctx.content });
 
     /** Keep messages[0] in sync if the static prefix is rebuilt mid-turn. */
     const syncStaticPrefix = () => {
