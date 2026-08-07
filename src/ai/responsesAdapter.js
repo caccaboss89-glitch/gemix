@@ -84,6 +84,20 @@ function _toolContentToResponsesOutput(content) {
     }
   }
 
+  // Tools that hand files to the model put the JSON envelope in a leading text
+  // part and then label/file pairs ("[web_image_search IMAGE_0]", the preview,
+  // "[…IMAGE_1]", …). Forward that tail verbatim so every label stays next to
+  // the file it names; folding all the text into the output would leave the
+  // files unlabeled and only positionally identifiable.
+  const head = content[0];
+  if (head && head.type === 'text' && typeof head.text === 'string') {
+    return {
+      output: head.text,
+      extraUserParts: _userContentToInputParts(content.slice(1)),
+    };
+  }
+
+  // No envelope: keep every text in the output and send the files after it.
   const textPieces = [];
   const extraUserParts = [];
   for (const part of content) {
@@ -92,17 +106,8 @@ function _toolContentToResponsesOutput(content) {
       textPieces.push(part.text);
       continue;
     }
-    if (part.type === 'input_file' && typeof part.file_url === 'string') {
-      extraUserParts.push({ type: 'input_file', file_url: part.file_url });
-      continue;
-    }
-    if (part.type === 'input_image' && typeof part.image_url === 'string') {
-      extraUserParts.push({ type: 'input_image', image_url: part.image_url });
-      continue;
-    }
-    if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
-      extraUserParts.push({ type: 'input_image', image_url: part.image_url.url });
-    }
+    const wire = _toWireUserPart(part);
+    if (wire) extraUserParts.push(wire);
   }
 
   const output = textPieces.length > 0

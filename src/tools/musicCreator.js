@@ -103,7 +103,13 @@ async function musicCreator(prompt, userCtx) {
 
   // One in-flight generation per user (independent of the weekly quota below).
   if (!userIsAdmin && pendingGenerations.has(userId)) {
-    return { toolResult: { success: false, error: 'A music generation is already in progress...' }, attachments: [] };
+    return {
+      toolResult: {
+        success: false,
+        error: 'A music generation is already running for this user. Wait for it to finish before starting another.',
+      },
+      attachments: [],
+    };
   }
 
   if (!prompt || prompt.trim().length < 5) {

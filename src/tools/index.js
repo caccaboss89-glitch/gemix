@@ -48,7 +48,11 @@ const {
   buildNoticeBlock,
 } = require('../utils/emailHtml');
 
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
+const {
+  notifyAdmin,
+  ADMIN_NOTIFIED_SUFFIX,
+  ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT,
+} = require('../utils/adminNotifier');
 const { resolveDeliverySelection } = require('../utils/deliverySelection');
 const {
   PER_ROUND_TOOL_LIMITS,
@@ -574,7 +578,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         await notifyAdmin('Bug Report', bugDescription);
         result = {
           success: true,
-          message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX.replace(' DO NOT use bug_report for this error.', '')}`,
+          message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT}`,
         };
         break;
       }
