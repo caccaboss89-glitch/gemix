@@ -304,7 +304,7 @@ function profileHasMediaQuota(profile) {
     && cap.tools.has(TOOL.GENERATE_MUSIC);
 }
 
-/** Static Limits lines only (weekly media quota counts live in the Runtime trailer). */
+/** Static Limits lines only (weekly media quota counts live in the Runtime block). */
 function buildLimitsLines(profile) {
   const cap = CAPS[profile];
   let historyLine =

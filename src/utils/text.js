@@ -190,7 +190,7 @@ const HISTORY_TIMESTAMP_PREFIX_RE = /^\[\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d
 
 // Conservative: only strip a single leading speaker label at the very start of the reply.
 // Avoids removing legitimate "GemiX:" appearances elsewhere in the text.
-const LEADING_SPEAKER_LABEL_RE = /^(?:GemiX|\[System\]|Account Owner|Bot)\s*:\s*/i;
+const LEADING_SPEAKER_LABEL_RE = /^(?:GemiX|Account Owner|Bot)\s*:\s*/i;
 
 // Matches self-generated research badges like:
 //   "🌐: 3 sources. 𝕏: 2 posts."
@@ -272,7 +272,7 @@ function stripOutgoingDeliveryArtifacts(text) {
  * Strip echoes of the history conversation prefix that our platform code injects
  * when feeding chat history to the model. Removes patterns like
  * "[19/05/2026, 22:41] GemiX:" anywhere in the text and a single leading
- * "GemiX:"/"[System]:"/"Account Owner:" label at the start of the reply.
+ * "GemiX:"/"Account Owner:" label at the start of the reply.
  * @param {string} text
  * @returns {string}
  */

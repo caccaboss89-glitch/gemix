@@ -188,7 +188,7 @@ function _replayStoredOutput(input, items) {
  *
  * `role: system` items stay in input[] order (static prefix should be first
  * and alone — a second system after history is folded by xAI and busts
- * progressive cache). Runtime trailer is role:user. Do not put the static
+ * progressive cache). The Runtime block is role:user. Do not put the static
  * system only in top-level `instructions` (not part of the message prefix).
  *
  * @param {Array} messages

@@ -6,9 +6,10 @@
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
 //   2. Touch the per-user/group build workspace activity timestamp (WA only).
 //   3. Build chat messages: static system first (byte-stable for the turn —
-//      xAI prefix-cache matches from the start of input[]), then history +
-//      current user. Turn-varying Runtime is a trailing role:user item
-//      (program-owned <Runtime>…</Runtime>), rewritten before every AI call —
+//      xAI prefix-cache matches from the start of input[]), then history, the
+//      program-owned <Runtime>…</Runtime> role:user item, then the current user
+//      message. Runtime is built once per turn and never moves, so every later
+//      round only appends to input[] and the matched prefix keeps growing —
 //      never a second role:system (xAI folds extra system into the head and
 //      busts progressive history cache). Media uses
 //      utils/incomingMediaIngress.js → aiFileDelivery.js: native `input_image`
@@ -267,41 +268,38 @@ async function handleMessage(ctx) {
     ctx.requestId = userCtx.requestId;
 
     // -- Build workspace activity tracking (WhatsApp only) --
-    // Touch last-activity on each main turn and refresh <BuildWorkspace> in the prompt.
+    // Touch last-activity on each main turn and read <BuildWorkspace> for the
+    // prompt. Read once: the Runtime block that carries it is built once too,
+    // and the build tool reports the files it produces in its own result.
     const workspaceId = isDiscord ? null : resolveWorkspaceId(ctx);
+    ctx.userWorkspace = null;
     if (workspaceId) {
       try { touchActivity(workspaceId); }
       catch (e) { log.warn(`touchActivity failed: ${e.message}`); }
-    }
-    const refreshUserWorkspace = () => {
-      if (isDiscord || !workspaceId) { ctx.userWorkspace = null; return; }
       try {
         const listing = listWorkspaceFiles(workspaceId, 30);
-        ctx.userWorkspace = listing.total > 0
-          ? {
-              total: listing.total,
-              files: listing.files,
-              more: !!listing.more,
-            }
-          : null;
+        if (listing.total > 0) {
+          ctx.userWorkspace = {
+            total: listing.total,
+            files: listing.files,
+            more: !!listing.more,
+          };
+        }
       } catch (e) {
-        log.warn(`refreshUserWorkspace failed: ${e.message}`);
-        ctx.userWorkspace = null;
+        log.warn(`listWorkspaceFiles failed: ${e.message}`);
       }
-    };
-    refreshUserWorkspace();
+    }
 
     ctx.isFirstTurn = userCtx.isFirstTurn;
-    // Seed deliveryState for Runtime trailer (buffer). Discord title field is
+    // Seed deliveryState for the Runtime block (buffer). Discord title field is
     // first-turn-only in text.format; current Thread title is only in Runtime.
     ctx.deliveryState = {
       bufferFiles: (responseCtx.attachments || []).map(a => a.name).filter(Boolean),
     };
 
     // Static system first (only role:system — keep it that way for prefix
-    // cache). Then history + current user. Runtime is a trailing role:user
-    // trailer rewritten each call. Rebuilt static only if the live tool
-    // fingerprint changes mid-turn (rare).
+    // cache). Then history, the Runtime block, and the current user message.
+    // Rebuilt static only if the live tool fingerprint changes mid-turn (rare).
     let staticInstructions = buildStaticInstructions(ctx);
     let toolsFp = promptToolsFingerprint(ctx);
     const messages = [{
@@ -332,6 +330,18 @@ async function handleMessage(ctx) {
       messages.push(...historyForApi);
     }
 
+    // Turn-varying program state, built once and then left alone: it sits
+    // between history and the current user message, so every round of this turn
+    // only appends after it and the cached prefix keeps growing. Rebuilding it
+    // per round (or parking it last) would put changing bytes ahead of the
+    // replayed reasoning and tool items and force a recompute every round.
+    // Must not use role:system either: xAI merges extra system messages into the
+    // leading system block, which moves them and busts the prefix for good.
+    // What it states can move during the turn (delivery buffer, build workspace,
+    // quota counts, preferences); the tool results that cause those changes
+    // report them, so the frozen snapshot stays truthful about turn start.
+    messages.push({ role: 'user', content: buildDynamicRuntimeContext(ctx) });
+
     messages.push({ role: 'user', content: ctx.content });
 
     /** Keep messages[0] in sync if the static prefix is rebuilt mid-turn. */
@@ -345,30 +355,6 @@ async function handleMessage(ctx) {
           _staticPrefix: true,
         });
       }
-    };
-
-    /** Remove program-owned Runtime trailers so they never sit mid-list. */
-    const stripRuntimeTrailers = () => {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i] && messages[i]._runtimeTrailer) {
-          messages.splice(i, 1);
-        }
-      }
-    };
-
-    /**
-     * Append turn-varying Runtime as the last input item (role:user).
-     * Must not use role:system: xAI effectively merges extra system messages
-     * into the leading system block, so a changing Runtime after history
-     * invalidates progressive prefix cache for all later turns.
-     */
-    const appendRuntimeTrailer = () => {
-      stripRuntimeTrailers();
-      messages.push({
-        role: 'user',
-        content: buildDynamicRuntimeContext(ctx),
-        _runtimeTrailer: true,
-      });
     };
 
     try {
@@ -406,13 +392,6 @@ async function handleMessage(ctx) {
     let sessionDurationLimitReached = false;
     const promptCacheKey = generatePromptCacheKey(userCtx);
 
-    // Structured-reply state, recomputed before every AI call: `bufferFiles`
-    // lists what is currently in the delivery buffer (surfaced in Runtime).
-    const computeDeliveryState = () => {
-      const bufferFiles = (responseCtx.attachments || []).map(a => a.name).filter(Boolean);
-      return { bufferFiles };
-    };
-
     const accumulateSearchStats = (searchStats) => {
       if (!searchStats || (searchStats.webSources === 0 && searchStats.xPosts === 0)) return;
       if (!responseCtx.researchStats) {
@@ -439,12 +418,10 @@ async function handleMessage(ctx) {
       const title = sanitizeDiscordThreadTitle(stripOutgoingDeliveryArtifacts(parsed.title));
       if (!title) return;
       responseCtx.discordTitle = title;
-      // Keep Runtime Thread title in sync for later rounds of the same turn.
-      ctx.threadName = title;
     };
 
     // Tool defs for the round in flight (platform/membership-gated; delivery
-    // buffer state is injected into the Runtime trailer, not into tool schemas).
+    // buffer state is injected into the Runtime block, not into tool schemas).
     let currentRoundTools = [];
 
     const runToolCall = async (tc) => {
@@ -522,13 +499,9 @@ async function handleMessage(ctx) {
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
       log.info(`[${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
 
-      // Refresh turn-varying Runtime fields before each AI call. Static
-      // prefix stays byte-identical unless the tool fingerprint changes.
-      refreshUserWorkspace();
+      // Pick up a manage_preferences change for this call's reasoning effort.
+      // Static prefix stays byte-identical unless the tool fingerprint changes.
       reloadSettings(ctx, ui);
-
-      const deliveryState = computeDeliveryState();
-      ctx.deliveryState = deliveryState;
 
       const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       currentRoundTools = roundTools;
@@ -541,7 +514,6 @@ async function handleMessage(ctx) {
         log.info('   Static system prefix rebuilt (tool fingerprint changed mid-turn)');
       }
 
-      appendRuntimeTrailer();
       // Discord: conversation_title only on first turn (required); later turns
       // omit it so the model cannot rename mid-conversation.
       const responseFormat = buildGemixResponseFormat({
@@ -557,16 +529,7 @@ async function handleMessage(ctx) {
         reasoningEffort: ctx.settings?.effort,
       };
 
-      let assistantMsg;
-      let provider;
-      let model;
-      let searchStats;
-      try {
-        ({ message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts));
-      } finally {
-        // Always drop the trailer so failures never leave a mid-list Runtime item.
-        stripRuntimeTrailers();
-      }
+      const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
       lastModelUsed = model;
       accumulateSearchStats(searchStats);
       log.info(`   Provider: ${provider} (${model})`);
@@ -747,10 +710,7 @@ async function handleMessage(ctx) {
     let wrapUpAttachments = [];
     let wrapUpVoice = false;
     try {
-      refreshUserWorkspace();
       reloadSettings(ctx, ui);
-      const deliveryState = computeDeliveryState();
-      ctx.deliveryState = deliveryState;
       const wrapUpTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
       const nextFp = promptToolsFingerprint(ctx);
       if (nextFp !== toolsFp) {
@@ -765,27 +725,18 @@ async function handleMessage(ctx) {
       const wrapUpNote = sessionDurationLimitReached
         ? 'This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
-      stripRuntimeTrailers();
       messages.push({
         role: 'user',
         content: wrapSystemReminder(wrapUpNote),
       });
-      appendRuntimeTrailer();
-      let finalMsg;
-      let finalModel;
-      let searchStats;
-      try {
-        ({ message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
-          toolChoice: 'none',
-          requestId: ctx.requestId,
-          responseFormat,
-          historyStorageId: resolveStorageId(ctx) || null,
-          promptCacheKey,
-          reasoningEffort: ctx.settings?.effort,
-        }));
-      } finally {
-        stripRuntimeTrailers();
-      }
+      const { message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
+        toolChoice: 'none',
+        requestId: ctx.requestId,
+        responseFormat,
+        historyStorageId: resolveStorageId(ctx) || null,
+        promptCacheKey,
+        reasoningEffort: ctx.settings?.effort,
+      });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
       const parsed = parseStructuredReply(finalMsg.content || '');
@@ -794,7 +745,6 @@ async function handleMessage(ctx) {
       wrapUpVoice = Boolean(allowVoice && parsed.voice);
       wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanAssistantResponse(parsed.text || '');
     } catch (wrapErr) {
-      stripRuntimeTrailers();
       log.error(`   Forced wrap-up call failed: ${wrapErr.message}`);
     }
 

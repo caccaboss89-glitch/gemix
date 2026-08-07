@@ -557,11 +557,18 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     }
   }
 
-  const contentDesc = canTargetOthers
-    ? 'Reminder text for the recipient at delivery time (not instructions to yourself). When reminding someone else, start by saying on whose behalf you\'re writing. Use only the formatting declared in the system prompt Format line.'
+  // Delivered verbatim at the scheduled time, so it has to read as the reminder
+  // itself, not as a restatement of the request that created it.
+  const contentSuffix =
+    ' Phrase it as the message that arrives at that moment: "remind me to go to the gym tomorrow at 6pm" '
+    + 'becomes "Time to go to the gym!", never "Remember to go to the gym tomorrow". '
+    + 'Use only the formatting declared in the system prompt Format line.';
+
+  const contentDesc = (canTargetOthers
+    ? 'Reminder text for the recipient at delivery time (not instructions to yourself). When reminding someone else, start by saying on whose behalf you\'re writing.'
     : (isWhatsAppGroup
-      ? 'Reminder text for the group or for you in DM, per whatsapp settings. Use only the formatting declared in the system prompt Format line.'
-      : 'Reminder text delivered to you at the scheduled time. Use only the formatting declared in the system prompt Format line.');
+      ? 'Reminder text for the group or for you in DM, per whatsapp settings.'
+      : 'Reminder text delivered to you at the scheduled time.')) + contentSuffix;
 
   const taskItemProps = {
     content: {

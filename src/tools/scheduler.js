@@ -252,12 +252,14 @@ async function scheduleTasks(tasks, ctx) {
   }
 
   // Single verification note (pluralized) instead of repeating it per task.
+  // Only the time is checked: the message is meant to read as the reminder that
+  // arrives then, not as a copy of the words the user used to ask for it.
   const okCount = results.filter(r => r.success && !r.warning).length;
   let verifyNote = null;
   if (okCount === 1) {
-    verifyNote = 'Verify the reminder matches exactly what the user requested. If anything is wrong, remove the task by its ID and recreate it.';
+    verifyNote = 'Verify scheduledAt is the moment the user asked for. If it is wrong, remove the task by its ID and recreate it.';
   } else if (okCount > 1) {
-    verifyNote = 'Verify every reminder matches exactly what the user requested. If anything is wrong, remove the affected task by its ID and recreate it.';
+    verifyNote = 'Verify every scheduledAt is the moment the user asked for. If one is wrong, remove that task by its ID and recreate it.';
   }
 
   return { success: true, tasks: results, ...(verifyNote ? { message: verifyNote } : {}) };
