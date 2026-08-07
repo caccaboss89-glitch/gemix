@@ -87,14 +87,6 @@ function _callerLineInner(ctx, promptOpts) {
   return `${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.`;
 }
 
-function _buildBatchNote() {
-  // Debounced multi-message turns keep distinct role:user units (earlier ones
-  // in history, last as content). Each unit keeps its author label.
-  return '<BatchNote>This turn includes several recent messages from more than one participant '
-    + '(each kept as its own user turn with an author label). '
-    + '&lt;Caller&gt; is only the author of the latest message.</BatchNote>';
-}
-
 /**
  * Byte-stable static system prefix for the first input[] role:system item.
  * Profile / membership / tools for this conversation — no turn-varying fields.
@@ -192,10 +184,6 @@ function buildDynamicRuntimeContext(ctx) {
 
   blocks.push(`Time (Europe/Rome): ${now}.`);
   blocks.push(`<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
-
-  if (ctx.batchMultiSpeaker) {
-    blocks.push(_buildBatchNote());
-  }
 
   if (profile === PROFILE.DISCORD_THREAD) {
     // Varying name → Runtime only (never static). Always surface when known.

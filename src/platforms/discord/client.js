@@ -17,7 +17,7 @@ const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/
 const { mapWithConcurrency } = require('../../utils/concurrency');
 
 const { enqueueBatchedTurn } = require('../../utils/batchIngress');
-const { analyzeBatchSpeakers, pickLatestBatchEntry } = require('../../utils/batchContext');
+const { pickLatestBatchEntry } = require('../../utils/batchContext');
 const {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
@@ -383,6 +383,7 @@ async function _handleDiscordBatch(entries) {
   await runTurnPipeline({
     log,
     lockKey: `discord:${channel.id}`,
+    platform: 'discord',
     stopLockRenew,
     entries,
     discardLogLabel: `thread ${channel.id}`,
@@ -419,7 +420,6 @@ async function _handleDiscordBatch(entries) {
         { recentMessageIds, pickLatest: latest || pickLatestBatchEntry(ents) },
       );
       const lat = latestEntry || latest || ents[0];
-      const { multiSpeaker } = analyzeBatchSpeakers(ents, 'discord');
       const extras = await _discordGuildExtras(guild);
       const mergedHistory = Array.isArray(history)
         ? history.concat(historySuffix)
@@ -436,7 +436,6 @@ async function _handleDiscordBatch(entries) {
         content,
         history: mergedHistory,
         historyLoadIncomplete,
-        batchMultiSpeaker: multiSpeaker,
         threadName: channel.name,
         availableEmojis: extras.availableEmojis,
         serverEvents: extras.serverEvents,

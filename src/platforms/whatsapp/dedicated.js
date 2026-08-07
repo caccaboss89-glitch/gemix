@@ -17,7 +17,7 @@ const { CHROMIUM_PATH } = require('../../config/env');
 const { containsMetaAiTag } = require('../../utils/waMentions');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
-const { analyzeBatchSpeakers, pickLatestBatchEntry } = require('../../utils/batchContext');
+const { pickLatestBatchEntry } = require('../../utils/batchContext');
 const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
 const {
   isWaPuppeteerTransientError,
@@ -242,6 +242,7 @@ async function _handleDedicatedBatch(entries) {
   await runTurnPipeline({
     log,
     lockKey: `wa_dedicated:${chat.id._serialized}`,
+    platform: PLATFORM_WA_DEDICATED,
     stopLockRenew,
     entries,
     discardLogLabel: chat.id._serialized,
@@ -273,7 +274,6 @@ async function _handleDedicatedBatch(entries) {
         platform: PLATFORM_WA_DEDICATED,
       });
       const lat = latestEntry || latest || ents[0];
-      const { multiSpeaker } = analyzeBatchSpeakers(ents, PLATFORM_WA_DEDICATED);
       let groupParticipants = null;
       if (isGroup) {
         try {
@@ -300,7 +300,6 @@ async function _handleDedicatedBatch(entries) {
         content,
         history: mergedHistory,
         historyLoadIncomplete,
-        batchMultiSpeaker: multiSpeaker,
         waJid: lat.phoneJid,
         presence: waPresence,
       };

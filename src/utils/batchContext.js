@@ -1,8 +1,10 @@
 // src/utils/batchContext.js
 //
-// When several messages are merged in the debounce window, the text of each
-// message keeps its own speaker label, but handler context (who is "the user"
-// for permissions and tools) must follow the latest message in the burst.
+// The debounce window is per chat, so anything anyone sends while it is open
+// used to be merged into the same turn. filterBatchToTriggerSpeaker narrows a
+// fired batch back to the participant it was opened for; the helpers below then
+// resolve handler context (who is "the user" for permissions and tools) from
+// that participant's own burst.
 
 /**
  * @param {Array<object>} entries - Batch entries oldest-first
@@ -23,16 +25,30 @@ function getBatchSpeakerKey(entry, platform) {
 }
 
 /**
- * Detect multiple human speakers in one debounced batch.
- * Caller identity for tools still follows pickLatestBatchEntry (latest author).
+ * Keep only the messages the batch was opened for.
+ *
+ * Batching exists to fuse one person's burst — several files sent back to back
+ * arrive as separate messages and must not each start a turn. It was never
+ * meant to fuse different people: merging two participants made the turn
+ * ambiguous, since tools and reminders ran under one caller identity while the
+ * text came from several, and the extra voices were noise in the reply.
+ *
+ * The window belongs to whoever opened it (entries[0] — the message that took
+ * the response lock). Anything another participant sends inside it is dropped
+ * for this turn and not queued, exactly like messages arriving while GemiX is
+ * already answering. Fails open when the trigger has no resolvable speaker key.
+ *
+ * @param {Array<object>} entries - Batch entries oldest-first
+ * @param {string} platform
+ * @returns {{ entries: Array<object>, dropped: number }}
  */
-function analyzeBatchSpeakers(entries, platform) {
-  const keys = new Set();
-  for (const e of entries || []) {
-    const k = getBatchSpeakerKey(e, platform);
-    if (k) keys.add(k);
-  }
-  return { multiSpeaker: keys.size > 1, speakerCount: keys.size };
+function filterBatchToTriggerSpeaker(entries, platform) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length <= 1) return { entries: list, dropped: 0 };
+  const triggerKey = getBatchSpeakerKey(list[0], platform);
+  if (!triggerKey) return { entries: list, dropped: 0 };
+  const kept = list.filter(e => getBatchSpeakerKey(e, platform) === triggerKey);
+  return { entries: kept, dropped: list.length - kept.length };
 }
 
-module.exports = { pickLatestBatchEntry, analyzeBatchSpeakers };
+module.exports = { pickLatestBatchEntry, filterBatchToTriggerSpeaker };

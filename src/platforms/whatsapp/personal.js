@@ -18,7 +18,6 @@ const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../c
 const { CHROMIUM_PATH } = require('../../config/env');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
-const { analyzeBatchSpeakers } = require('../../utils/batchContext');
 const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
 const {
   isWaPuppeteerTransientError,
@@ -277,6 +276,7 @@ async function _handlePersonalBatch(entries) {
   await runTurnPipeline({
     log,
     lockKey: `wa_personal:${chat.id._serialized}`,
+    platform: PLATFORM_WA_PERSONAL,
     stopLockRenew,
     entries,
     discardLogLabel: chat.id._serialized,
@@ -308,7 +308,6 @@ async function _handlePersonalBatch(entries) {
         platform: PLATFORM_WA_PERSONAL,
       });
       const lat = latestEntry || latest || ents[0];
-      const { multiSpeaker } = analyzeBatchSpeakers(ents, PLATFORM_WA_PERSONAL);
       const personalOtherUserName = await resolvePersonalChatOtherName(chat);
       const mergedHistory = Array.isArray(history)
         ? history.concat(historySuffix)
@@ -326,7 +325,6 @@ async function _handlePersonalBatch(entries) {
         content,
         history: mergedHistory,
         historyLoadIncomplete,
-        batchMultiSpeaker: multiSpeaker,
         waJid: lat.phoneJid,
         presence: waPresence,
       };

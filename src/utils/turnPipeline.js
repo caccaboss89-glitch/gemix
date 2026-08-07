@@ -1,7 +1,7 @@
 // Shared batch→history→handleMessage→deliver sequence for all platforms.
 
 const responseLock = require('./responseLock');
-const { pickLatestBatchEntry } = require('./batchContext');
+const { pickLatestBatchEntry, filterBatchToTriggerSpeaker } = require('./batchContext');
 const { normalizeHistoryLoad } = require('./historyFetch');
 
 const { BATCH_LOCK_TTL_MS } = require('../config/constants');
@@ -23,8 +23,9 @@ function _ensurePipelineLock(lockKey, stopLockRenew) {
  * @param {object} opts
  * @param {object} opts.log - logger
  * @param {string} opts.lockKey
+ * @param {string} opts.platform - resolves each entry's speaker key
  * @param {Function|null} opts.stopLockRenew
- * @param {Array} opts.entries - batch entries
+ * @param {Array} opts.entries - batch entries (narrowed to the trigger speaker)
  * @param {string} opts.discardLogLabel - chat id for discard warning
  * @param {Function} opts.loadHistory - async ({ entries, latest, first }) => history array
  * @param {Function} opts.buildHandlerCtx - ({ entries, history, latest, first }) => handler ctx
@@ -37,8 +38,9 @@ async function runTurnPipeline(opts) {
   const {
     log,
     lockKey,
+    platform,
     stopLockRenew,
-    entries,
+    entries: firedEntries,
     discardLogLabel,
     loadHistory,
     buildHandlerCtx,
@@ -48,6 +50,10 @@ async function runTurnPipeline(opts) {
     onDeliverError,
   } = opts;
 
+  const { entries, dropped } = filterBatchToTriggerSpeaker(firedEntries, platform);
+  if (dropped > 0) {
+    log.info(`   Batch for ${discardLogLabel}: ignoring ${dropped} message(s) from other participants (not queued)`);
+  }
   const first = entries[0];
   const latest = pickLatestBatchEntry(entries) || first;
 
