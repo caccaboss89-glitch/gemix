@@ -3,7 +3,7 @@
 // Collection of text utilities used throughout GemiX:
 // - Filename sanitization for safe storage
 // - Stripping TTS voice effect tags ([pause], <soft>, etc.)
-// - Normalizing Markdown for WhatsApp compatibility
+// - Normalizing Markdown for WhatsApp compatibility (xAI inline citations included)
 // - Cleaning history prefixes, system messages, research badges, footers, etc.
 // - High-level clean functions for incoming and outgoing messages
 
@@ -67,13 +67,16 @@ const VOICE_ALLOWED_RE = /[^\p{L}\p{N}\s.,!?'’-]/gu;
  * Sanitize the text of a voice message before TTS (and before it is stored in
  * history_meta for <PastVoiceReply>, so both stay in sync). Keeps spoken words, the
  * supported voice effect tags, and basic readable punctuation; strips emoji,
- * @phone mention tags, and non-readable symbols (_, ", \, *, ~, `, #, …).
+ * @phone mention tags, markdown links, and non-readable symbols (_, ", \, *, ~, `, #, …).
  * @param {string} text
  * @returns {string}
  */
 function sanitizeVoiceMessageText(text) {
   if (!text || typeof text !== 'string') return '';
   text = stripPhoneMentionTags(text);
+  // Markdown links (xAI inline citations included) would otherwise survive the
+  // symbol cleanup as their bare words and get read aloud ("1 https x.ai news").
+  text = stripMarkdownLinks(text);
   // Protect voice tags so their brackets/dashes survive the symbol cleanup.
   // The placeholder uses only letters/digits (kept by VOICE_ALLOWED_RE).
   const tags = [];
@@ -98,6 +101,11 @@ function sanitizeVoiceMessageText(text) {
 const MD_FOOTNOTE_LINK_RE = /\[\[[^\]]*\]\]\([^)]*\)/g;
 const MD_INLINE_LINK_RE = /(?<!!)\[[^\]]+\]\([^)]*\)/g;
 
+// Same footnote shape, with the URL captured: xAI's inline citations.
+const INLINE_CITATION_RE = /\[\[[^\]]*\]\]\(([^)\s]+)\)/g;
+/** Heading of the source list appended on platforms without clickable anchor text. */
+const SOURCES_LIST_HEADING = 'Fonti:';
+
 /**
  * Strip markdown link syntax from outgoing text. Bare https:// URLs are kept.
  * Used on WhatsApp where [text](url) is not rendered as a link.
@@ -114,18 +122,52 @@ function stripMarkdownLinks(text) {
 }
 
 /**
+ * Turn xAI's inline citations into a plain-text source list.
+ *
+ * The Responses API enables inline citations by default: whenever the model
+ * cites a server-side web/X search result it writes `[[N]](url)` straight into
+ * the reply text (docs.x.ai → Tools → Citations). Discord renders that as a
+ * clickable `[N]`, but WhatsApp has no anchor-text markup at all — bare URLs
+ * are the only thing it linkifies — so there the markdown used to be deleted
+ * outright and every source was lost.
+ *
+ * Here each citation keeps a `[N]` marker in place and the URLs are appended
+ * as a numbered list under the reply. Numbering is rebuilt from first-appearance
+ * order of the distinct URLs, so the list is always 1..N with no gaps even when
+ * the model reuses or skips numbers. No citation → text returned unchanged.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function renderInlineCitations(text) {
+  if (!text || typeof text !== 'string') return text;
+  const numberByUrl = new Map();
+  const marked = text.replace(INLINE_CITATION_RE, (_, url) => {
+    if (!numberByUrl.has(url)) numberByUrl.set(url, numberByUrl.size + 1);
+    return `[${numberByUrl.get(url)}]`;
+  });
+  if (numberByUrl.size === 0) return text;
+  const list = [...numberByUrl].map(([url, n]) => `[${n}] ${url}`).join('\n');
+  return `${marked.replace(/\s+$/u, '')}\n\n${SOURCES_LIST_HEADING}\n${list}`;
+}
+
+/**
  * Normalize Markdown for WhatsApp (which has limited MD support).
  * - ### - removed (headings not supported)
  * - * bullet points - - bullet points (better compatibility)
  * - **text** - *text* (bold)
  * - __text__ - _text_ (italic)
  * - ~~text~~ - ~text~ (strikethrough)
- * - [text](url) / [[n]](url) - removed (bare URLs kept)
+ * - [[n]](url) - xAI inline citations - converted to [n] + appended source list
+ * - [text](url) - removed (bare URLs kept)
  * @param {string} text
  * @returns {string}
  */
 function normalizeMarkdown(text) {
   if (!text || typeof text !== 'string') return text;
+  // Citations first: stripMarkdownLinks would otherwise delete them, URL included.
+  // Idempotent, so text the handler already converted passes through untouched.
+  text = renderInlineCitations(text);
   text = stripMarkdownLinks(text);
   // Remove heading markers (###) completely - WhatsApp doesn't support them
   text = text.replace(/^#{1,6}\s+/gm, '');
@@ -143,7 +185,6 @@ function normalizeMarkdown(text) {
 // Matches the history line prefix our platform code adds, e.g.
 //   "[19/05/2026, 22:41] GemiX: "
 //   "[19/05/2026 22:41] Account Owner: "
-//   "[19/05/2026, 22:41:30] [System]: "
 // The model sometimes echoes this format from history into its own reply - strip it everywhere.
 const HISTORY_TIMESTAMP_PREFIX_RE = /^\[\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\]\s*[^\n:]{1,60}:\s*/gm;
 
@@ -165,6 +206,9 @@ const IN_REPLY_TO_PREFIX_RE = /^\[In reply to:\s*(?:\[[^\]]*\]|[^\]])*\](?:\n|\s
 // Model must not echo these in user-facing text (history/ingress only).
 const OUT_ATTACHMENT_TAG_RE = /\[Attachment:\s*[^\]]+\]/gi;
 const PAST_VOICE_REPLY_RE = /<PastVoiceReply(?:\s[^>]*)?>[\s\S]*?<\/PastVoiceReply>/gi;
+// Program-owned wrappers (see utils/systemTags.js): drop the tags but keep the
+// text, so an echoed reminder body degrades to plain prose instead of markup.
+const SYSTEM_TAG_RE = /<\/?system-(?:notification|reminder)>/gi;
 
 /**
  * Strip any GemiX-generated system-message lines that the AI may have
@@ -209,7 +253,9 @@ function stripPastVoiceReplyTags(text) {
 }
 
 /**
- * Strip backend-only markers the model must never send to users.
+ * Strip backend-only markers the model must never send to users:
+ * [Attachment: …] tags, <PastVoiceReply> blocks, and the <system-notification> /
+ * <system-reminder> wrappers of program-owned turns.
  * @param {string} text
  * @returns {string}
  */
@@ -217,6 +263,7 @@ function stripOutgoingDeliveryArtifacts(text) {
   if (!text || typeof text !== 'string') return '';
   let cleaned = text.replace(OUT_ATTACHMENT_TAG_RE, '');
   cleaned = stripPastVoiceReplyTags(cleaned);
+  cleaned = cleaned.replace(SYSTEM_TAG_RE, '');
   cleaned = cleaned.replace(/[ \t]{2,}/g, ' ');
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -318,6 +365,7 @@ module.exports = {
   sanitizeVoiceMessageText,
   normalizeMarkdown,
   stripMarkdownLinks,
+  renderInlineCitations,
   stripHistoryPrefixes,
   stripSystemMessages,
   stripOutgoingDeliveryArtifacts,

@@ -38,6 +38,8 @@ const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { processDiscordQuotedReply } = require('../../utils/quoteIngress');
 const { materializeDiscordBatchContent } = require('../../utils/batchContentRefresh');
 const { discordReactionTag } = require('../../utils/reactions');
+const { isSystemMessage } = require('../../config/systemMessages');
+const { wrapSystemNotification } = require('../../utils/systemTags');
 
 const log = createLogger('DISCORD');
 
@@ -513,10 +515,11 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     const mediaParts = [];
 
     for (const att of m.attachments.values()) {
-      // Main brain sees recent history files directly: user-role entries carry
-      // native parts. GemiX's own (assistant) entries stay [Attachment] tags
-      // only — that role cannot carry input parts. Over the per-call media
-      // budget we also force tag-only so the file is never uploaded to xAI.
+      // Main brain sees recent history files directly: entries from other
+      // authors carry native parts. Everything our own account posted stays
+      // [Attachment] tags only — GemiX's replies ride the assistant role, which
+      // cannot carry input parts. Over the per-call media budget we also force
+      // tag-only so the file is never uploaded to xAI.
       const overBudget = !isBot && !uploadAllowedAtt.has(att.id);
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         tagOnly: isBot || overBudget,
@@ -563,12 +566,18 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     const reactionTag = discordReactionTag(m);
     if (reactionTag) textContent = `${textContent} ${reactionTag}`.trim();
 
-    const senderName = isBot ? 'GemiX' : (m.member?.nickname || m.author.displayName || m.author.username);
-    const prefix = `[${ts}] ${senderName}: `;
-    const finalText = isBot ? textContent : `${prefix}${textContent}`;
+    // Banners our own account posted (maintenance, fallback error, credit
+    // notice, release confirmations) are program-to-user notices, not GemiX
+    // replies: they go in as role:user inside <system-notification> so the
+    // model never reads them as its own past words. See utils/systemTags.js.
+    const isSystemNotice = isBot && isSystemMessage(textContent);
+    const senderName = m.member?.nickname || m.author.displayName || m.author.username;
+    let finalText;
+    if (isSystemNotice) finalText = wrapSystemNotification(`[${ts}] ${textContent}`);
+    else finalText = isBot ? textContent : `[${ts}] ${senderName}: ${textContent}`;
 
     return {
-      role: isBot ? 'assistant' : 'user',
+      role: isBot && !isSystemNotice ? 'assistant' : 'user',
       content: mediaParts.length > 0
         ? [{ type: 'text', text: finalText }, ...mediaParts]
         : finalText,

@@ -150,7 +150,7 @@ async function onDedicatedMessage(msg) {
       isMentioned = mentions.some(contact => contact.id._serialized === botJid);
     } catch { }
 
-    // Reply to any bot fromMe (normal GemiX reply or [System] notices like
+    // Reply to any bot fromMe (normal GemiX reply or program notices like
     // release / music wrap / temp links) counts as addressing GemiX.
     let isReplyToBot = false;
     if (msg.hasQuotedMsg) {

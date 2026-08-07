@@ -50,7 +50,6 @@ const CAPS = {
     longTermMemory: true,
     buildWorkspace: true,
     historyTranscriptionNote: false,
-    systemHistoryLabel: false,
     voiceReply: false,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
@@ -69,7 +68,6 @@ const CAPS = {
     longTermMemory: true,
     buildWorkspace: true,
     historyTranscriptionNote: true,
-    systemHistoryLabel: true,
     voiceReply: true,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
@@ -88,7 +86,6 @@ const CAPS = {
     longTermMemory: true,
     buildWorkspace: true,
     historyTranscriptionNote: true,
-    systemHistoryLabel: true,
     voiceReply: true,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.GENERATE_MUSIC,
@@ -107,7 +104,6 @@ const CAPS = {
     longTermMemory: false,
     buildWorkspace: false,
     historyTranscriptionNote: false,
-    systemHistoryLabel: false,
     voiceReply: false,
     tools: new Set([
       TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH,

@@ -1,4 +1,4 @@
-// Personal-account (admin) WhatsApp: GemiX vs Account Owner vs [System] in history.
+// Personal-account (admin) WhatsApp: GemiX vs Account Owner vs system notices in history.
 //
 // GemiX conversational block (chronological):
 //   1. Starts with a fromMe text message that contains the GemiX footer.
@@ -9,7 +9,8 @@
 //      - media with caption/body text (only admin can do that on this account).
 //
 // fromMe bodies matching isSystemMessage / scheduled footer are NOT Account Owner:
-// history labels them [System] in shared.js (admin never types those prefixes).
+// shared.js renders them as <system-notification> user turns (admin never types
+// those prefixes).
 
 const { hasFooter, hasScheduledFooter } = require('./footer');
 const { isSystemMessage } = require('../config/systemMessages');

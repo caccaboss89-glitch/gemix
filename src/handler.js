@@ -24,8 +24,9 @@
 //      plus conversation_title on Discord first turn only, plus a `voice`
 //      flag on WA dedicated) enforced via text.format.
 //      When `voice:true` (WA dedicated only), `response` is spoken via TTS.
-//   5. Apply the research badge (real web/X search counts) and ship the
-//      reply back to the platform.
+//   5. Off Discord, turn xAI's inline citations into a plain source list
+//      (WhatsApp renders no anchor text), apply the research badge (real web/X
+//      search counts), and ship the reply back to the platform.
 
 const { callAI } = require('./ai/aiProvider');
 const {
@@ -59,7 +60,7 @@ const { resolveWorkspaceId } = require('./utils/workspaceId');
 const { touchActivity } = require('./utils/buildState');
 const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
 const { readSettings, isReviewDue, markReviewed } = require('./utils/settingsStore');
-const { cleanAssistantResponse, stripOutgoingDeliveryArtifacts } = require('./utils/text');
+const { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, renderInlineCitations } = require('./utils/text');
 const { sanitizeDiscordThreadTitle } = require('./utils/discord');
 const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
@@ -83,6 +84,7 @@ const {
 } = require('./config/systemMessages');
 const { isGrokCreditExhaustedError } = require('./ai/apiClient');
 const { clearCallNotifications } = require('./utils/notificationDedup');
+const { wrapSystemReminder } = require('./utils/systemTags');
 
 const log = createLogger('Handler');
 
@@ -247,6 +249,8 @@ async function handleMessage(ctx) {
       platform: ctx.platform,
       // Discord: no assistant in fetched history yet → first turn (title field
       // required in text.format; later turns omit conversation_title entirely).
+      // Program banners we posted are <system-notification> user turns, so a
+      // thread that only got one of those still counts as never answered.
       isFirstTurn: ctx.platform === PLATFORM_DISCORD
         && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
@@ -669,6 +673,7 @@ async function handleMessage(ctx) {
       }
 
       let text = cleanAssistantResponse(parsed.text || '');
+      if (!isDiscord) text = renderInlineCitations(text);
       log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
       // xAI occasionally returns status=completed with only a reasoning item
@@ -687,10 +692,11 @@ async function handleMessage(ctx) {
           }
           messages.push({
             role: 'user',
-            content:
-              '[System] Your previous output was empty: no tool call and no structured reply. '
+            content: wrapSystemReminder(
+              'Your previous output was empty: no tool call and no structured reply. '
               + 'Immediately call any tools you need (e.g. web_image_search for web photos) '
               + 'or send a valid structured reply. Never leave the reply empty.',
+            ),
           });
           continue;
         }
@@ -757,12 +763,12 @@ async function handleMessage(ctx) {
         allowVoice,
       });
       const wrapUpNote = sessionDurationLimitReached
-        ? 'SYSTEM: This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
-        : 'SYSTEM: You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
+        ? 'This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
+        : 'You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
       stripRuntimeTrailers();
       messages.push({
         role: 'user',
-        content: wrapUpNote,
+        content: wrapSystemReminder(wrapUpNote),
       });
       appendRuntimeTrailer();
       let finalMsg;
@@ -798,6 +804,7 @@ async function handleMessage(ctx) {
       if (voiceReply) return voiceReply;
       wrapUpText = cleanAssistantResponse(wrapUpText);
     }
+    if (!isDiscord) wrapUpText = renderInlineCitations(wrapUpText);
 
     if (wrapUpText.trim() && responseCtx.researchStats) {
       wrapUpText = appendResearchBadge(wrapUpText, responseCtx.researchStats);

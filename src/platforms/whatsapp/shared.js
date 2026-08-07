@@ -14,6 +14,7 @@ const { formatTimestamp } = require('../../utils/time');
 const { hasScheduledFooter } = require('../../utils/footer');
 const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
 const { isSystemMessage } = require('../../config/systemMessages');
+const { wrapSystemNotification } = require('../../utils/systemTags');
 
 const { buildAttachmentTag } = require('../../utils/media');
 const { MAX_IMAGE_READS, MAX_FILE_READS, classifyAiFileDelivery, DELIVERY_MODE } = require('../../utils/aiFileDelivery');
@@ -126,9 +127,12 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     ? buildPersonalGemixFlags(messages)
     : null;
 
-  // True when a history message is GemiX/system/scheduled (assistant role, which
-  // cannot carry native parts → always tag-only). On dedicated every fromMe is
-  // bot; on personal only the GemiX-flagged fromMe is (Account Owner is a user).
+  // True when a history message came out of our own account (GemiX reply,
+  // system notice, scheduled delivery) → always tag-only: GemiX's replies land
+  // on the assistant role, which cannot carry native parts, and program notices
+  // only ever reference files the user already received. On dedicated every
+  // fromMe is bot; on personal only the GemiX-flagged fromMe is (Account Owner
+  // is a user).
   const isHistoryBotMessage = (msg, mi) => (platform === PLATFORM_WA_PERSONAL
     ? Boolean(msg.fromMe && personalGemixFlags && personalGemixFlags[mi])
     : Boolean(msg.fromMe));
@@ -145,7 +149,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       const msg = messages[mi];
       if (!msg.hasMedia) continue;
       if (formatSpecialMessageText(msg) !== null) continue; // location/event: no upload
-      if (isHistoryBotMessage(msg, mi)) continue; // assistant entries are tag-only anyway
+      if (isHistoryBotMessage(msg, mi)) continue; // our own sends are tag-only anyway
       const waFilename = msg._data?.filename;
       const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
       const mode = classifyAiFileDelivery(resolvedName || waFilename || 'file', msg._data?.mimetype || '');
@@ -169,8 +173,10 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
   // bounded concurrency, preserving chronological order in the result. Serial
   // uploads here used to dominate turn latency and could blow the history
   // fetch timeout when many recent messages carried media.
+  // Scheduled + registry system messages carry no sender label: they are
+  // rendered as <system-notification> turns, which already say who wrote them.
   async function resolveHistorySenderMeta(msg, mi) {
-    let senderName;
+    let senderName = null;
     let isGemiX = false;
     let isScheduled = false;
     let isSystem = false;
@@ -180,10 +186,8 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
         // Admin-sent system prefixes (release, music wrap, temp links, errors, …)
         // are always GemiX system — never Account Owner (admin will not type them).
         if (hasScheduledFooter(msg.body)) {
-          senderName = '[System]';
           isScheduled = true;
         } else if (isSystemMessage(msg.body)) {
-          senderName = '[System]';
           isSystem = true;
         } else if (personalGemixFlags[mi]) {
           senderName = 'GemiX';
@@ -200,14 +204,11 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
         }
       }
     } else {
-      // Dedicated: every fromMe is bot. Scheduled + registry system messages get
-      // [System] in private and groups (music wrap, release, temp links, …).
+      // Dedicated: every fromMe is bot (music wrap, release, temp links, …).
       if (msg.fromMe) {
         if (hasScheduledFooter(msg.body)) {
-          senderName = '[System]';
           isScheduled = true;
         } else if (isSystemMessage(msg.body)) {
-          senderName = '[System]';
           isSystem = true;
         } else {
           senderName = 'GemiX';
@@ -339,11 +340,17 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     const reactionTag = await whatsAppReactionTagForMessages(groupMsgs);
     if (reactionTag) textContent = `${textContent} ${reactionTag}`.trim();
 
-    const prefix = `[${ts}] ${senderName}: `;
-    const useLabeledContent = !isFromBot || isSystemEvent;
-    const finalText = useLabeledContent ? `${prefix}${textContent}` : textContent;
+    // Program-to-user notices (scheduled reminders, release, temp links, error
+    // banners) are ours only in the sense that our account sent them: GemiX did
+    // not write them and they are not addressed to it. They go in as role:user
+    // inside <system-notification> — as role:assistant the model read them as
+    // its own past words. Only the timestamp is kept; the tag carries the rest.
+    // GemiX's own replies stay unlabeled assistant turns.
+    const finalText = isSystemEvent
+      ? wrapSystemNotification(`[${ts}] ${textContent}`)
+      : (isFromBot ? textContent : `[${ts}] ${senderName}: ${textContent}`);
     return {
-      role: isFromBot ? 'assistant' : 'user',
+      role: isFromBot && !isSystemEvent ? 'assistant' : 'user',
       content: mediaParts.length > 0
         ? [{ type: 'text', text: finalText }, ...mediaParts]
         : finalText,
