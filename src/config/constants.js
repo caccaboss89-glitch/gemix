@@ -58,7 +58,7 @@ module.exports = {
   // instead of bailing out - so GemiX always returns a real response.
   // Also passed as `max_turns` on the Responses body to bound server-side
   // sub-tool turns (web_search/x_search) per request.
-  MAX_TOOL_ROUNDS: 10,
+  MAX_TOOL_ROUNDS: 50,
 
   // Build sub-agent sandbox container.
   // Memory cap and idle TTL for the sandbox.
