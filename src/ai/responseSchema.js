@@ -3,11 +3,17 @@
 // Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
 //
 // Main brain (GemiX): fixed schema on every round — `response` (required) plus
-// optional `attachments`, plus `conversation_title` on Discord first turn only
-// (required key; later turns omit the field so the model cannot rename mid-
-// conversation), and a leading `voice` boolean on WA dedicated only. The
-// schema rides on the same HTTP call as tools (no extra round). Per xAI docs,
-// json_schema applies only to the final output_text.
+// optional `attachments`, plus `conversation_title` on every Discord turn
+// (required key, empty string = keep the current title), and a leading `voice`
+// boolean on WA dedicated only. The schema rides on the same HTTP call as tools
+// (no extra round). Per xAI docs, json_schema applies only to the final
+// output_text.
+//
+// conversation_title is deliberately in the schema on EVERY Discord turn, not
+// just the first: xAI renders text.format back into the model's context, so a
+// schema that changed shape after turn 1 sent a different prefix on turn 2 and
+// cost the whole cached prompt. `required` only means the key must be present —
+// "" is a valid value and parseStructuredReply reads it as "no rename".
 //
 const { MAX_TTS_CHARS } = require('../config/constants');
 
@@ -37,23 +43,22 @@ const GEMIX_ATTACHMENTS_FIELD_DESC =
   + 'for X media use x_search CDN URLs; for web images use the `url` fields from web_image_search). '
   + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
 
-// Discord first turn only (required). Non-empty renames the thread; later
-// conversation turns omit this property from the schema entirely.
+// Discord, every turn. Non-empty renames the thread, "" leaves it alone.
 const TITLE_FIELD_DESC =
   'Thread topic title (user\'s language, no emoji, max ~80 chars). '
-  + 'Required on this first reply: set a clear title when the current Thread title '
-  + '(see Runtime) is a placeholder (e.g. ".", one letter) or does not describe the '
-  + 'topic; if it already fits, repeat it.';
+  + 'Leave it EMPTY ("") to keep the current one — that is the normal case. '
+  + 'Only fill it when the current Thread title (see Runtime) is a placeholder '
+  + '(e.g. ".", one letter) or the conversation has moved to a different topic.';
 
 /**
  * Build the fixed main-brain text.format schema for the current round:
  * `response` (required) + optional `attachments`, plus `conversation_title`
- * (required key) on Discord first turn only, plus a leading `voice` boolean on
- * WA dedicated (decides voice vs text for the current-chat reply).
+ * (required key) on Discord, plus a leading `voice` boolean on WA dedicated
+ * (decides voice vs text for the current-chat reply).
  *
  * @param {object} opts
- * @param {boolean} [opts.includeTitle] - Discord first turn: include required
- *   conversation_title; later turns leave it out of the schema.
+ * @param {boolean} [opts.includeTitle] - Discord: include the required
+ *   conversation_title key. Must be the same on every turn of a conversation.
  * @param {boolean} [opts.allowVoice] - WA dedicated: expose the `voice` flag.
  * @returns {object}
  */

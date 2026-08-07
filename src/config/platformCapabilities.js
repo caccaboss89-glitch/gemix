@@ -260,8 +260,8 @@ function buildDirectives(profile, opts = {}) {
   ];
 
   // --- Tooling (general rules only; per-tool usage lives in each tool's own description) ---
-  // Discord conversation_title lives in text.format (first turn only) + Runtime
-  // (not Directives), so R-numbering stays fixed.
+  // Discord conversation_title lives in text.format + Runtime (not Directives),
+  // so R-numbering stays fixed.
   //
   // NOTE: we deliberately do NOT add a "call independent tools in parallel" rule here.
   // The xAI backend already injects that guidance server-side (verbatim, above the tool

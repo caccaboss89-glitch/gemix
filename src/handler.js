@@ -247,12 +247,6 @@ async function handleMessage(ctx) {
       groupId: ctx.groupId,
       chatId: ctx.chatId || null,
       platform: ctx.platform,
-      // Discord: no assistant in fetched history yet → first turn (title field
-      // required in text.format; later turns omit conversation_title entirely).
-      // Program banners we posted are <system-notification> user turns, so a
-      // thread that only got one of those still counts as never answered.
-      isFirstTurn: ctx.platform === PLATFORM_DISCORD
-        && !(Array.isArray(ctx.history) && ctx.history.some(m => m && m.role === 'assistant')),
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
       // Bound helper for tools that want to fire an intermediate notification
@@ -289,9 +283,8 @@ async function handleMessage(ctx) {
       }
     }
 
-    ctx.isFirstTurn = userCtx.isFirstTurn;
-    // Seed deliveryState for the Runtime block (buffer). Discord title field is
-    // first-turn-only in text.format; current Thread title is only in Runtime.
+    // Seed deliveryState for the Runtime block (buffer). The Discord title
+    // field lives in text.format; the current Thread title is only in Runtime.
     ctx.deliveryState = {
       bufferFiles: (responseCtx.attachments || []).map(a => a.name).filter(Boolean),
     };
@@ -511,7 +504,8 @@ async function handleMessage(ctx) {
       currentRoundTools = roundTools;
       const nextFp = promptToolsFingerprint(ctx);
       if (nextFp !== toolsFp) {
-        // Unexpected today (getToolsForUser ignores isFirstTurn); keep correct if gating ever changes.
+        // Unexpected today (getToolsForUser depends on nothing that moves mid-turn);
+        // keep it correct in case gating ever changes.
         staticInstructions = buildStaticInstructions(ctx);
         toolsFp = nextFp;
         syncStaticPrefix();
@@ -521,7 +515,7 @@ async function handleMessage(ctx) {
       // Discord: conversation_title only on first turn (required); later turns
       // omit it so the model cannot rename mid-conversation.
       const responseFormat = buildGemixResponseFormat({
-        includeTitle: isDiscord && Boolean(ctx.isFirstTurn),
+        includeTitle: isDiscord,
         allowVoice,
       });
       const callOpts = {
@@ -723,7 +717,7 @@ async function handleMessage(ctx) {
         syncStaticPrefix();
       }
       const responseFormat = buildGemixResponseFormat({
-        includeTitle: isDiscord && Boolean(ctx.isFirstTurn),
+        includeTitle: isDiscord,
         allowVoice,
       });
       const wrapUpNote = sessionDurationLimitReached

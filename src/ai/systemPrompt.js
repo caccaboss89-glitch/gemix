@@ -187,14 +187,10 @@ function buildDynamicRuntimeContext(ctx) {
   blocks.push(`<Caller>${_callerLineInner(ctx, promptOpts)}</Caller>`);
 
   if (profile === PROFILE.DISCORD_THREAD) {
-    // Varying name → Runtime only (never static). Always surface when known.
+    // Varying name → Runtime only (never static). Always surface when known:
+    // conversation_title in text.format is compared against it every turn.
     if (ctx.threadName) {
       blocks.push(`Thread title: ${escapeXml(ctx.threadName)}`);
-    }
-    // First turn: conversation_title lives only in text.format (no Runtime
-    // restate of the field desc). Later turns: field omitted from schema + note.
-    if (!ctx.isFirstTurn) {
-      blocks.push('You cannot change the conversation title anymore.');
     }
     if (ctx.availableEmojis) blocks.push(`Emojis: ${ctx.availableEmojis}`);
     if (ctx.serverEvents) blocks.push(`Events: ${ctx.serverEvents}`);
