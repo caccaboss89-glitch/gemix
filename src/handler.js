@@ -580,7 +580,7 @@ async function handleMessage(ctx) {
         }
         messages.push(assistantMsg);
 
-        // Reset per-round tool caps (build, read_server_rules, read_music_stats).
+        // Reset per-round tool caps (build, read_music_stats).
         deliveryCtx.roundToolCounts = new Map();
 
         const orderedCalls = assistantMsg.tool_calls;

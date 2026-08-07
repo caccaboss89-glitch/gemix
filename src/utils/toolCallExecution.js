@@ -41,7 +41,6 @@ function partitionHandlerToolCalls(toolCalls) {
  */
 const PER_ROUND_TOOL_LIMITS = {
   read_music_stats: 1,
-  read_server_rules: 1,
   build: 1,
 };
 

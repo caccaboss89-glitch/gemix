@@ -8,7 +8,7 @@
 //
 // Central dispatcher for all tool calls from the main brain.
 // Responsibilities: permission checks, schema validation via validateToolArgs,
-// per-round tool caps (build, read_music_stats, read_server_rules), recipient
+// per-round tool caps (build, read_music_stats), recipient
 // resolution (for email/wa), the main execution switch, and unified error
 // handling with admin notification on uncaught failures. All individual tools
 // are required here.
@@ -19,7 +19,6 @@ const { stripOutgoingDeliveryArtifacts } = require('../utils/text');
 const { scheduleTasks } = require('./scheduler');
 const { readTasks } = require('./taskReader');
 const { removeTasks } = require('./taskRemover');
-const { readServerRules } = require('./serverRules');
 const { generateFormalRequestPdf } = require('./formalRequestPdf');
 const { sendEmailDirect } = require('./emailSender');
 const { sendWhatsAppDirect } = require('./whatsappSender');
@@ -315,11 +314,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           ? getGroupTaskFileId(userCtx.groupId)
           : userCtx.taskFileId;
         result = await removeTasks(args.taskIds, fileId);
-        break;
-      }
-
-      case 'read_server_rules': {
-        result = await readServerRules();
         break;
       }
 

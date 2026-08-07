@@ -34,7 +34,6 @@ const TOOL = {
   REMOVE_TASKS: 'remove_my_tasks',
   MANAGE_PREFERENCES: 'manage_preferences',
   TOGGLE_RELEASE: 'toggle_release_notify',
-  READ_RULES: 'read_server_rules',
   READ_MUSIC_STATS: 'read_music_stats',
   READ_SENT_MESSAGES: 'read_sent_messages',
   FORMAL_PDF: 'generate_formal_request_pdf',
@@ -56,7 +55,7 @@ const CAPS = {
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
-      TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
+      TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
   },
@@ -74,7 +73,7 @@ const CAPS = {
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
-      TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
+      TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
   },
@@ -92,7 +91,7 @@ const CAPS = {
       TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
       TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
       TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
-      TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
+      TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
       TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
     ]),
   },
@@ -130,7 +129,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   const cap = CAPS[profile] || CAPS[PROFILE.WA_DEDICATED_PRIVATE];
   const isActiveMember = opts.isActiveMember !== false;
 
-  const memberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL, TOOL.READ_RULES, TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES];
+  const memberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL, TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES];
   if (!isActiveMember && memberOnly.includes(toolName)) {
     return `"${toolName}" is only available to active server members on WhatsApp.`;
   }
@@ -147,7 +146,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   const waOnly = [
     TOOL.GENERATE_MUSIC, TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
     TOOL.TOGGLE_RELEASE,
-    TOOL.READ_MUSIC_STATS, TOOL.READ_RULES, TOOL.READ_SENT_MESSAGES,
+    TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES,
   ];
   if (cap.isDiscord && waOnly.includes(toolName)) {
     return `"${toolName}" is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for that feature.`;
@@ -168,7 +167,6 @@ function _hasTool(toolNames, cap, name) {
 const MEMBER_GATED_TOOLS = [
   TOOL.SEND_WHATSAPP,
   TOOL.SEND_EMAIL,
-  TOOL.READ_RULES,
   TOOL.READ_MUSIC_STATS,
   TOOL.READ_SENT_MESSAGES,
 ];

@@ -244,12 +244,6 @@ const TOOL_WEB_IMAGE_SEARCH = makeTool({
   required: ['query'],
 });
 
-const TOOL_READ_SERVER_RULES = makeTool({
-  name: 'read_server_rules',
-  description: 'Read the server rules (Statuto Albertino / Constitution). Use when you need the full statute text.',
-  properties: {},
-});
-
 const TOOL_READ_MUSIC_STATS = makeTool({
   name: 'read_music_stats',
   description: 'Read music listening statistics.',
@@ -762,9 +756,10 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
-  // Active WA members: statute, music stats, sent-message audit.
+  // Active WA members: music stats, sent-message audit. The Statute is not a
+  // tool anywhere: Discord gets its full text in the static prompt, and on
+  // WhatsApp statute questions are redirected to the Discord thread.
   if (isActiveMember && isWhatsApp) {
-    tools.push(TOOL_READ_SERVER_RULES);
     tools.push(TOOL_READ_MUSIC_STATS);
     tools.push(buildReadSentMessagesTool(isAdmin));
   }
