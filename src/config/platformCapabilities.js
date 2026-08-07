@@ -267,14 +267,12 @@ function buildDirectives(profile, opts = {}) {
   // --- Tooling (general rules only; per-tool usage lives in each tool's own description) ---
   // Discord conversation_title lives in text.format (first turn only) + Runtime
   // (not Directives), so R-numbering stays fixed.
-  const tooling = [
-    {
-      scope: 'tool',
-      text: 'Run tools silently (no user-facing text between calls).',
-    },
-  ];
-  tooling.push({ scope: 'tool', text: 'Use every tool you need to answer well — call independent tools in parallel when possible.' });
-  tooling.push({ scope: 'tool', text: 'Always use bug_report for tool errors that do NOT indicate that the admin has already been notified, unclear system instructions or general problems encountered, then inform the user.' });
+  //
+  // NOTE: we deliberately do NOT add a "call independent tools in parallel" rule here.
+  // The xAI backend already injects that guidance server-side (verbatim, above the tool
+  // list: "You use tools via function calls to help you solve questions. You can use
+  // multiple tools in parallel by calling them together."). Adding our own would duplicate it.
+  const tooling = [];
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
     tooling.push({ scope: 'always', text: 'Proactively use web/X search before factual replies when the fact is not already in chat history or settings (news, people, products, events, social posts/screenshots, unfamiliar refs) — search first, never guess.' });
   }
@@ -294,11 +292,11 @@ function buildDirectives(profile, opts = {}) {
  */
 function buildPreSendCheck(maxRef) {
   return [
-    `Before sending any reply or emitting any tool call, silently verify the pending action against every applicable Directive (R1–R${maxRef}), one by one, skipping none.`,
+    `Before sending any reply or emitting any tool call, verify the pending action against every applicable Directive (R1–R${maxRef}), one by one, skipping none.`,
     '- Scopes: [always] covers every action; [out] covers your final reply AND any text you pass to delivery tools; [reply] covers only the structured reply in the current chat; [tool] covers emitting a tool call.',
     '- Sending the chat reply? Verify the [always], [out] and [reply] Directives.',
     '- Emitting a tool call? Verify the [always] and [tool] Directives; also [out] when that tool delivers text to a user.',
-    'Confirm the result states only verified facts and makes no unstated promises, then send. Do not output this check.',
+    'Confirm the result states only verified facts and makes no unstated promises, then send.',
   ];
 }
 

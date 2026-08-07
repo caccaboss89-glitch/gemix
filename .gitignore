@@ -2,6 +2,8 @@
 .grok/
 graphify-out/
 AGENTS.md
+GROK.md
+CLAUDE.md
 
 # Dependency and cache
 node_modules/
@@ -22,9 +24,10 @@ _tmp_grok_build
 
 # Dev test scripts
 scripts/
-agent-tools/
 
 # Configuration
 .env
 package-lock.json
 SERVER_SETUP.md
+# Temp notes
+session-notes

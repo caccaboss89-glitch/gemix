@@ -192,6 +192,17 @@ function validateToolArgs(args, toolDef) {
 // never see them as tool_calls. (web_search and x_search are the native tools used.)
 // Reserved native function names (do not reuse as client tools): search_images
 // (SERVER_SIDE_TOOL_IMAGE_SEARCH), web_search/browse_page/open_page/…, x_*_search, etc.
+//
+// IMPORTANT (verified 2026-08-06 by live prompt-leak probe, see
+// session-notes/xai-injection-findings.md): declaring the native web_search and
+// x_search types makes xAI REPLACE our two minimal defs with its own full agentic
+// server-side toolset. The model actually sees and can call the SAME tool family the
+// Grok app/website uses: open_page, open_page_with_find, x_user_search,
+// x_semantic_search, x_keyword_search, x_thread_fetch, view_image, view_x_video —
+// plus our web_search/x_search. web_search uses xAI's built-in page browser; x_search
+// expands to the x_* search/fetch/view set. This is the intended behavior (we rely on
+// it for page-content + X media); we only keep our thin types to enable the feature,
+// not to define its surfaces — those come from xAI.
 const TOOL_WEB_SEARCH_NATIVE = {
   type: 'web_search',
   num_results: 10,
@@ -660,7 +671,7 @@ function buildReadSentMessagesTool(isAdmin) {
 
 const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
-  description: 'Report a bug/failure. Use for tool error DOES NOT state the Admin was already notified, general logical bugs or issues with system components e.g. unclear instructions, unexpected behaviors, bugs noted in the history... Inform the user in your final response.',
+  description: 'Report a bug/failure. Always use this when a tool errors and the error does NOT already state the admin was notified, or for general logical bugs / system-component issues (unclear instructions, unexpected behavior, bugs noted in chat history). After reporting, inform the user of the problem and that the admin has been notified in your final response.',
   properties: {
     description: {
       type: 'string',
