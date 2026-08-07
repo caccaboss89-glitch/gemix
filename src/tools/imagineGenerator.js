@@ -52,8 +52,9 @@ const MAX_CONSECUTIVE_429_POLLS = 5;
 const VIDEO_IN_PROGRESS_STATUSES = new Set([
   '', 'pending', 'processing', 'queued', 'running', 'in_progress', 'in progress',
 ]);
+// "expired" is documented alongside "failed" as a terminal poll status.
 const VIDEO_TERMINAL_FAILURE_STATUSES = new Set([
-  'failed', 'error', 'rejected', 'cancelled', 'canceled',
+  'failed', 'expired', 'error', 'rejected', 'cancelled', 'canceled',
 ]);
 
 // Cap on the prompt to keep request payloads reasonable.
