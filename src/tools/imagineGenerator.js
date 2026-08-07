@@ -63,8 +63,9 @@ const MAX_PROMPT_LEN = 2000;
 const ALLOWED_IMAGE_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4']);
 const ALLOWED_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3']);
 
-// xAI limits: /images/edits accepts up to 3 reference images; video
-// generation accepts 1 (image-to-video) up to 7 (reference-to-video).
+// /images/edits accepts up to 3 reference images (documented xAI limit).
+// Reference-to-video publishes no count limit, so 7 is our own cap; both are
+// checked before the request so the model gets the error without a round trip.
 const MAX_REF_IMAGES_FOR_IMAGE = 3;
 const MAX_REF_IMAGES_FOR_VIDEO = 7;
 
