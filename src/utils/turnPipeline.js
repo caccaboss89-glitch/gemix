@@ -30,6 +30,10 @@ function _ensurePipelineLock(lockKey, stopLockRenew) {
  * @param {Function} opts.loadHistory - async ({ entries, latest, first }) => history array
  * @param {Function} opts.buildHandlerCtx - ({ entries, history, latest, first }) => handler ctx
  * @param {Function} [opts.prepareSession] - async () => { stop?: Function } (typing/presence)
+ * @param {Function} [opts.interceptTurn] - async ({ entries, latest, first }) =>
+ *   { response, onDelivered?: Function } | null. A returned response becomes the whole
+ *   turn: no history load, no media ingress, no AI call. onDelivered runs only once the
+ *   response actually went out. Used by the WhatsApp privacy gate.
  * @param {Function} [opts.transformResponse] - (response, ctx) => response
  * @param {Function} opts.deliver - async (ctx, response) => void
  * @param {Function} [opts.onDeliverError] - async (ctx, err) => void
@@ -45,10 +49,32 @@ async function runTurnPipeline(opts) {
     loadHistory,
     buildHandlerCtx,
     prepareSession,
+    interceptTurn,
     transformResponse,
     deliver,
     onDeliverError,
   } = opts;
+
+  /** Transform, send, and report whether it went out. @returns {Promise<boolean>} */
+  const deliverTurn = async (ctx, response) => {
+    let outgoing = response;
+    if (typeof transformResponse === 'function') {
+      outgoing = transformResponse(outgoing, ctx) || outgoing;
+    }
+    try {
+      log.info('\nSending response...');
+      await deliver(ctx, outgoing);
+      log.info('   Message sent');
+      return true;
+    } catch (err) {
+      log.error('\nError sending response:');
+      log.error(`   ${err.message}`);
+      if (typeof onDeliverError === 'function') {
+        await onDeliverError(ctx, err);
+      }
+      return false;
+    }
+  };
 
   const { entries, dropped } = filterBatchToTriggerSpeaker(firedEntries, platform);
   if (dropped > 0) {
@@ -70,6 +96,19 @@ async function runTurnPipeline(opts) {
     }
     pipelineOwnsLock = true;
 
+    // Runs before anything reads the chat or fetches media, so a turn it answers
+    // costs no history rebuild and no attachment download.
+    if (typeof interceptTurn === 'function') {
+      const intercepted = await interceptTurn({ entries, latest, first });
+      if (intercepted) {
+        const sent = await deliverTurn(null, intercepted.response);
+        if (sent && typeof intercepted.onDelivered === 'function') {
+          await intercepted.onDelivered();
+        }
+        return;
+      }
+    }
+
     const historyPayload = await loadHistory({ entries, latest, first });
     const { history, incomplete: historyLoadIncomplete } = normalizeHistoryLoad(historyPayload);
 
@@ -84,23 +123,9 @@ async function runTurnPipeline(opts) {
     });
     if (ctx && typeof ctx.then === 'function') ctx = await ctx;
     const { handleMessage } = require('../handler');
-    let response = await handleMessage(ctx);
+    const response = await handleMessage(ctx);
 
-    if (typeof transformResponse === 'function') {
-      response = transformResponse(response, ctx) || response;
-    }
-
-    try {
-      log.info('\nSending response...');
-      await deliver(ctx, response);
-      log.info('   Message sent');
-    } catch (err) {
-      log.error('\nError sending response:');
-      log.error(`   ${err.message}`);
-      if (typeof onDeliverError === 'function') {
-        await onDeliverError(ctx, err);
-      }
-    }
+    await deliverTurn(ctx, response);
   } finally {
     try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
     try {

@@ -29,6 +29,7 @@ const { resolvePersonalChatStorageId } = require('../../utils/userPaths');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
 const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
+const { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } = require('./privacyGate');
 
 const log = createLogger('WA-PERSONAL');
 
@@ -178,11 +179,12 @@ async function onPersonalMessage(msg) {
 
   // Personal account: GemiX runs only when @gemix appears in this message's body
   // (either participant). A reply/quote to a GemiX message alone is NOT enough.
-  // Exception: caption-less multi-attach siblings while a batch is already open
-  // for this chat (album items after the @gemix-bearing first photo).
+  // Exceptions: caption-less multi-attach siblings while a batch is already open
+  // for this chat (album items after the @gemix-bearing first photo), and the
+  // privacy wipe command, which must work everywhere and never starts an AI call.
   const batchKey = `wa_personal:${chat.id._serialized}`;
   const hasGemixTag = (msg.body || '').toLowerCase().includes('@gemix');
-  if (!hasGemixTag) {
+  if (!hasGemixTag && !isPrivacyWipeCommand(msg.body)) {
     if (!isPendingAlbumContinuation(msg, peekPendingBatchLastEntry(batchKey))) return;
     log.info('   Accepting WA personal album continuation (no @gemix on sibling media)');
   }
@@ -280,6 +282,12 @@ async function _handlePersonalBatch(entries) {
     stopLockRenew,
     entries,
     discardLogLabel: chat.id._serialized,
+    interceptTurn: buildWhatsAppPrivacyIntercept({
+      chat,
+      platform: PLATFORM_WA_PERSONAL,
+      isGroup: false,
+      log,
+    }),
     loadHistory: async ({ entries: ents }) => {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
       const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);

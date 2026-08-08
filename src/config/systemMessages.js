@@ -95,6 +95,86 @@ const ATTACHMENT_FALLBACK_FAILED_MESSAGE =
 const ATTACHMENT_FALLBACK_FAILED_REGEX =
   /^\u26A0\uFE0F I seguenti allegati non hanno potuto essere inviati/;
 
+// -- Privacy: first-contact notice and data wipe ---------------------------
+
+/**
+ * Command that empties the chat and erases every trace of the user from the
+ * server. WhatsApp only, recognised only when it is the whole message, and it
+ * never starts an AI call (see platforms/whatsapp/privacyGate.js).
+ */
+const PRIVACY_WIPE_COMMAND = '/clear';
+
+/**
+ * Sent instead of the AI turn the first time a person writes on WhatsApp, so
+ * whatever they attached to that message is never downloaded before they have
+ * been told what happens to it.
+ */
+const PRIVACY_NOTICE_PREFIX = '🔒 *Informativa privacy GemiX*';
+const PRIVACY_NOTICE_REGEX  = /^🔒 \*Informativa privacy GemiX\*/;
+
+/** Confirmation sent once PRIVACY_WIPE_COMMAND erased everything. */
+const PRIVACY_WIPE_DONE_PREFIX = '🗑️ *Dati eliminati*';
+const PRIVACY_WIPE_DONE_REGEX  = /^🗑️ \*Dati eliminati\*/;
+
+/** Sent when the chat clear or one of the deletions failed. */
+const PRIVACY_WIPE_FAILED_MESSAGE =
+  '⚠️ *Eliminazione non riuscita*\n\nNon è stato possibile eliminare tutti i tuoi dati per un errore tecnico. '
+  + 'Contatta l\'amministratore.';
+const PRIVACY_WIPE_FAILED_REGEX = /^⚠️ \*Eliminazione non riuscita\*/;
+
+/** Active members keep their registry entry: only the admin can remove it. */
+const PRIVACY_MEMBER_CONTACT_NOTE =
+  'Nome, numero e indirizzo email restano nel registro dei membri attivi: per rimuovere anche quelli, '
+  + 'contatta l\'amministratore.';
+
+/**
+ * Full first-contact notice. Storage criteria are stated in words rather than
+ * in figures so the copy cannot drift from the limits in constants.js (which
+ * cannot be imported here: it is constants.js that imports this file).
+ * @param {{ isActiveMember?: boolean }} [opts]
+ * @returns {string}
+ */
+function buildPrivacyNoticeMessage(opts = {}) {
+  const lines = [
+    PRIVACY_NOTICE_PREFIX,
+    '',
+    'È la prima volta che mi scrivi, quindi prima di risponderti ci tengo a dirti come vengono trattati i tuoi dati.',
+    '',
+    '- Le conversazioni restano sul server per darmi il contesto delle risposte, e l\'amministratore può '
+    + 'potenzialmente accedere alle conversazioni complete.',
+    '- Gli allegati restano sul server finché compaiono nella finestra di messaggi recenti che uso per '
+    + 'rispondere: quando ne escono vengono eliminati, così come i file che genero, dopo qualche ora di inattività.',
+    '- Non scrivermi mai dati sensibili, credenziali o informazioni private.',
+    '- Gli allegati che hai inviato insieme a questo primo messaggio non sono stati scaricati né salvati.',
+    '',
+    `Se continui a scrivere accetti queste condizioni. Se non le accetti, scrivi \`${PRIVACY_WIPE_COMMAND}\` da `
+    + 'solo, senza altro testo: svuoto questa chat, cancello anche il messaggio che hai appena inviato ed elimino '
+    + 'dal server tutti i tuoi dati. Puoi usarlo in qualunque momento.',
+  ];
+  if (opts.isActiveMember) {
+    lines.push('', PRIVACY_MEMBER_CONTACT_NOTE);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Confirmation that the wipe succeeded.
+ * @param {{ isActiveMember?: boolean }} [opts]
+ * @returns {string}
+ */
+function buildPrivacyWipeDoneMessage(opts = {}) {
+  const lines = [
+    PRIVACY_WIPE_DONE_PREFIX,
+    '',
+    'Ho svuotato questa chat ed eliminato dal server tutti i tuoi dati: cronologia, allegati, trascrizioni dei '
+    + 'miei messaggi vocali, preferenze salvate, promemoria programmati e file generati.',
+  ];
+  if (opts.isActiveMember) {
+    lines.push('', PRIVACY_MEMBER_CONTACT_NOTE);
+  }
+  return lines.join('\n');
+}
+
 // -- Error / alert patterns ----------------------------------------------
 // These regexes detect error, avviso, and reminder messages.
 const LEGACY_ERROR_REGEX  = /^\u274C \*ERRORE/;   // ❌ *ERRORE
@@ -114,6 +194,9 @@ const ALL_SYSTEM_MESSAGE_REGEXES = [
   GROK_CREDIT_EXHAUSTED_REGEX,
   TEMP_ATTACHMENT_REGEX,
   ATTACHMENT_FALLBACK_FAILED_REGEX,
+  PRIVACY_NOTICE_REGEX,
+  PRIVACY_WIPE_DONE_REGEX,
+  PRIVACY_WIPE_FAILED_REGEX,
   LEGACY_ERROR_REGEX,
   LEGACY_AVVISO_REGEX,
   LEGACY_REMINDER_REGEX,
@@ -142,6 +225,12 @@ module.exports = {
   GROK_CREDIT_EXHAUSTED_MESSAGE,
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
+  PRIVACY_WIPE_COMMAND,
+  PRIVACY_NOTICE_PREFIX,
+  PRIVACY_WIPE_DONE_PREFIX,
+  PRIVACY_WIPE_FAILED_MESSAGE,
+  buildPrivacyNoticeMessage,
+  buildPrivacyWipeDoneMessage,
   // individual regexes (for targeted checks)
   RELEASE_NOTIFICATION_REGEX,
   MUSIC_WRAP_REGEX,
@@ -153,6 +242,9 @@ module.exports = {
   GROK_CREDIT_EXHAUSTED_REGEX,
   TEMP_ATTACHMENT_REGEX,
   ATTACHMENT_FALLBACK_FAILED_REGEX,
+  PRIVACY_NOTICE_REGEX,
+  PRIVACY_WIPE_DONE_REGEX,
+  PRIVACY_WIPE_FAILED_REGEX,
   LEGACY_ERROR_REGEX,
   LEGACY_AVVISO_REGEX,
   LEGACY_REMINDER_REGEX,

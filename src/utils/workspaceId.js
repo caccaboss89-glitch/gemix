@@ -37,8 +37,8 @@ function resolveWorkspaceId(ctx) {
  * Derive a filesystem-safe slug from a workspace id. Used both for the
  * on-disk workspace path and for docker container names.
  *
- *   group:391234567890-1234567890@g.us  ->  group_391234567890-1234567890_at_g_us
- *   user:390000000000@c.us              ->  user_390000000000_at_c_us
+ *   group:391234567890-1234567890@g.us  ->  group_391234567890-1234567890_at_g.us
+ *   user:390000000000@c.us              ->  user_390000000000_at_c.us
  *
  * Length is capped at 63 to fit Docker's container name limit.
  */

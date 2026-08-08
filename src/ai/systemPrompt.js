@@ -19,6 +19,7 @@ const { ADMIN_NAME, GROK_MODEL } = require('../config/env');
 const { getModelDisplayName } = require('../utils/footer');
 const { defaultSettings, customizedFields } = require('../utils/settingsStore');
 const { PLATFORM_WA_PERSONAL, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
+const { PRIVACY_WIPE_COMMAND } = require('../config/systemMessages');
 
 /** Human-readable build workspace TTL (from BUILD_WORKSPACE_TTL_MS). */
 const BUILD_WORKSPACE_TTL_LABEL = (() => {
@@ -199,6 +200,15 @@ function _buildChatLines(ctx, cap, profile) {
     + 'The sources you mark with render_inline_citation arrive here as [[1]](url) markers, and the system '
     + 'turns them into numbered markers with a "Fonti:" list under the reply — so keep citing, and never '
     + 'write that list yourself.',
+  );
+  // The gate that owns the command runs before this prompt is even built, so
+  // anything the model can read has already been through it.
+  lines.push(
+    `Sending \`${PRIVACY_WIPE_COMMAND}\` and nothing else empties this chat and erases every trace of the user `
+    + 'from the server, at any moment; that message is handled before you and never reaches you. So an attempt at '
+    + 'it that you can read is one that failed because the message carried something else too — tell them to send '
+    + 'it on its own. And a request reaching you at all means they accepted the privacy notice they were shown '
+    + 'before their first one: never bring that up yourself.',
   );
   return lines;
 }

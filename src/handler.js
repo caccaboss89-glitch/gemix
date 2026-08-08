@@ -47,7 +47,6 @@ const {
   MAX_TTS_CHARS,
   PLATFORM_DISCORD,
   PLATFORM_WA_DEDICATED,
-  PLATFORM_WA_PERSONAL,
   MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY,
   MAINTENANCE_USER_MESSAGE,
@@ -62,9 +61,8 @@ const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
 const { readSettings, isReviewDue, markReviewed } = require('./utils/settingsStore');
 const { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, renderInlineCitations } = require('./utils/text');
 const { sanitizeDiscordThreadTitle } = require('./utils/discord');
-const { getGroupTaskFileId } = require('./utils/userIdentifier');
 const { loadRegolamento } = require('./utils/regolamento');
-const { resolveStorageId, resolvePersonalMemoryFileId } = require('./utils/userPaths');
+const { resolveStorageId, resolveSettingsFileId } = require('./utils/userPaths');
 const { generatePromptCacheKey } = require('./utils/promptCacheKey');
 const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
 const { enableReleaseNotify } = require('./tools/releaseNotify');
@@ -96,18 +94,6 @@ function extractPlainTextContent(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.find(p => p.type === 'text')?.text || '';
   return '';
-}
-
-/**
- * Settings file for this chat: per group, per personal-chat pair, or per user.
- * @returns {string|null} null on Discord (no persistent settings there).
- */
-function resolveSettingsFileId(ctx, ui) {
-  if (ctx.platform === PLATFORM_DISCORD) return null;
-  const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
-  if (isWhatsAppGroup) return 'memory_' + getGroupTaskFileId(ctx.groupId);
-  if (ctx.platform === PLATFORM_WA_PERSONAL && ctx.chatId) return resolvePersonalMemoryFileId(ctx.chatId);
-  return 'memory_' + ui.taskFileId;
 }
 
 /** Re-read the persisted preferences so a manage_preferences call takes effect at once. */
@@ -210,8 +196,6 @@ async function handleMessage(ctx) {
       };
     }
 
-    const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
-    const isPersonalWa = ctx.platform === PLATFORM_WA_PERSONAL;
     const isDiscord = ctx.platform === PLATFORM_DISCORD;
     // Voice replies are a structured-reply flag (WhatsApp dedicated only),
     // never a tool. The model sets `voice:true` and writes `response` with TTS tags.

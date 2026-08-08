@@ -28,6 +28,7 @@ const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
 const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
 const { buildGroupParticipants } = require('../../utils/waParticipants');
+const { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } = require('./privacyGate');
 
 const log = createLogger('WA-DEDICATED');
 
@@ -166,7 +167,9 @@ async function onDedicatedMessage(msg) {
       msg,
       peekPendingBatchLastEntry(batchKey),
     );
-    if (!isMentioned && !isReplyToBot && !albumContinuation) return;
+    // The privacy wipe command has to work everywhere, so it comes through
+    // without a mention. It never starts an AI call (see privacyGate).
+    if (!isMentioned && !isReplyToBot && !albumContinuation && !isPrivacyWipeCommand(msg.body)) return;
     if (albumContinuation && !isMentioned && !isReplyToBot) {
       log.info('   Accepting WA dedicated group album continuation (no mention on sibling media)');
     }
@@ -246,6 +249,12 @@ async function _handleDedicatedBatch(entries) {
     stopLockRenew,
     entries,
     discardLogLabel: chat.id._serialized,
+    interceptTurn: buildWhatsAppPrivacyIntercept({
+      chat,
+      platform: PLATFORM_WA_DEDICATED,
+      isGroup,
+      log,
+    }),
     loadHistory: async ({ entries: ents }) => {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
       const historyUserId = isGroup ? chat.id._serialized : (pickLatestBatchEntry(ents) || ents[0]).phoneJid;

@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
+const { getGroupTaskFileId } = require('./userIdentifier');
 
 /** Prefix for on-disk history of admin↔user personal-account chats (shared pair). */
 const PERSONAL_CHAT_STORAGE_PREFIX = 'personal_';
@@ -46,6 +47,21 @@ function resolvePersonalChatStorageId(chatId) {
 function resolvePersonalMemoryFileId(chatId) {
   const storageId = resolvePersonalChatStorageId(chatId);
   return storageId ? `memory_${storageId}` : null;
+}
+
+/**
+ * Persisted settings file for a chat: per group, per personal-chat pair, or per
+ * user. Discord keeps no settings, so it resolves to null.
+ * @param {object} ctx - message context (platform, isGroup, groupId, chatId)
+ * @param {{ taskFileId: string }} ui - resolved user identity
+ * @returns {string|null}
+ */
+function resolveSettingsFileId(ctx, ui) {
+  if (ctx.platform === PLATFORM_DISCORD) return null;
+  const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
+  if (isWhatsAppGroup) return 'memory_' + getGroupTaskFileId(ctx.groupId);
+  if (ctx.platform === PLATFORM_WA_PERSONAL && ctx.chatId) return resolvePersonalMemoryFileId(ctx.chatId);
+  return 'memory_' + ui.taskFileId;
 }
 
 function resolveStorageId(userCtx) {
@@ -97,6 +113,7 @@ function ensureUserSkeleton(userCtx) {
 module.exports = {
   resolvePersonalChatStorageId,
   resolvePersonalMemoryFileId,
+  resolveSettingsFileId,
   resolveStorageId,
   getUserRoot,
   getHistoryDir,

@@ -142,6 +142,29 @@ function storeRecentVoiceText(chatId, text, msgTimestampMs = null) {
   _saveRecentVoiceEntries();
 }
 
+/**
+ * Drop every cached voice text for a chat (data wipe). The transcriptions
+ * already persisted into history_meta.json go with the user's history folder.
+ * @param {string} chatId
+ * @returns {boolean} false when the rewrite failed
+ */
+function forgetRecentVoiceText(chatId) {
+  if (!chatId) return true;
+  const before = recentVoiceEntries.length;
+  recentVoiceEntries = recentVoiceEntries.filter(e => !e || e.chatId !== chatId);
+  if (recentVoiceEntries.length === before) return true;
+  _saveRecentVoiceEntries();
+  // _saveRecentVoiceEntries swallows write errors: re-read to confirm the
+  // entries are really gone from disk before reporting the wipe as complete.
+  try {
+    if (!fs.existsSync(GEMIX_VOICE_TEXT_CACHE_FILE)) return true;
+    const raw = JSON.parse(fs.readFileSync(GEMIX_VOICE_TEXT_CACHE_FILE, 'utf-8'));
+    return !Array.isArray(raw) || !raw.some(e => e && e.chatId === chatId);
+  } catch {
+    return false;
+  }
+}
+
 function retrieveRecentVoiceText(chatId, msgTimestampMs) {
   if (!chatId || !msgTimestampMs) return null;
   let bestIdx = -1;
@@ -486,6 +509,7 @@ module.exports = {
   getStoredHistoryVoiceTranscription,
   storeHistoryVoiceTranscription,
   storeRecentVoiceText,
+  forgetRecentVoiceText,
   pruneHistory,
   collectReferencedHistoryFilenames,
   DISCORD_MAX_AGE_MS,

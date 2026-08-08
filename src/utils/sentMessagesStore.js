@@ -228,9 +228,29 @@ function resolveStoredAttachmentPath(senderKey, storedFile) {
   return null;
 }
 
+/**
+ * Remove a sender's whole log, retained attachment bytes included (data wipe).
+ * @param {string} senderKey
+ * @returns {Promise<boolean>} false when the folder could not be removed
+ */
+function deleteSentMessages(senderKey) {
+  if (!senderKey) return Promise.resolve(true);
+  return _withLock(senderKey, async () => {
+    const dir = _senderDir(senderKey);
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return true;
+    } catch (err) {
+      log.warn(`Failed to delete sent-messages folder for ${senderKey}: ${err.message}`);
+      return false;
+    }
+  });
+}
+
 module.exports = {
   recordSentMessage,
   readSentRecords,
   resolveStoredAttachmentPath,
+  deleteSentMessages,
   MAX_SENT_MESSAGES,
 };

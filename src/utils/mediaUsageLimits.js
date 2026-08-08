@@ -164,6 +164,21 @@ async function refundMediaQuota(kind, userKey) {
 }
 
 /**
+ * Drop a user's counters entirely (data wipe). The next generation starts the
+ * current period from zero.
+ * @param {string} userKey
+ * @returns {Promise<void>}
+ */
+async function clearMediaUsage(userKey) {
+  if (!userKey) return;
+  await systemState.update(STATE_MODULE, (current) => {
+    const next = { ...(current || {}) };
+    delete next[userKey];
+    return next;
+  });
+}
+
+/**
  * Reserve a generation slot for a tool call. Admins (and calls without a stable
  * user id) are exempt. Returns a handle: call commit() once the generation
  * succeeds, and always call release() in a finally block — release refunds the
@@ -212,5 +227,6 @@ module.exports = {
   limitReachedError,
   reserveMediaQuota,
   refundMediaQuota,
+  clearMediaUsage,
   reserveGeneration,
 };

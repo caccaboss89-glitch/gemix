@@ -29,5 +29,3 @@ scripts/
 .env
 package-lock.json
 SERVER_SETUP.md
-# Temp notes
-session-notes
