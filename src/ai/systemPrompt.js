@@ -166,10 +166,11 @@ function _buildChatLines(ctx, cap, profile) {
     lines.push(
       'The admin\'s own WhatsApp account, in a chat with one other person. Reply only when the message '
       + 'contains @gemix. History, memory and build workspace are shared between the two of them.',
-      `In the chat: you (GemiX — never tag yourself), ${escapeXml(ADMIN_NAME)} (the account owner) `
-      + `and ${otherName}.`,
+      `In the chat: ${escapeXml(ADMIN_NAME)} (the account owner) and ${otherName}.`,
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
       + 'name. Your own replies carry no speaker prefix.',
+      'Never write an @tag here: your own @gemix is stripped out of replies because it would trigger you '
+      + 'again, and there is nobody else in the chat to tag. Name people plainly.',
     );
   } else if (ctx.isGroup) {
     lines.push(
@@ -181,13 +182,20 @@ function _buildChatLines(ctx, cap, profile) {
   } else {
     lines.push(
       'A private chat on the dedicated GemiX account. Reply to every message.',
-      `In the chat: you (GemiX — never tag yourself) and ${escapeXml(ctx.userName)}.`,
+      `In the chat: just you and ${escapeXml(ctx.userName)}.`,
+      'There is nobody to tag in a private chat: name people plainly, never with an @tag.',
     );
   }
 
   lines.push(WA_FORMAT);
+  // Citations are not automatic: xAI's own directive makes the model cite, and
+  // renderInlineCitations (utils/text.js) rewrites the [[N]](url) markers it
+  // produces. Saying "the system appends sources" would read as "you need not
+  // cite", and the sources would vanish.
   lines.push(
-    'Never add a footer, a signature or a list of sources: the system appends those itself when they are needed.',
+    'Never add a footer or a signature: the system appends those itself when they are needed. '
+    + 'Do cite your web and X sources as usual — the system rewrites those citations into numbered markers '
+    + 'with a "Fonti:" list under the reply, so write the citations but never that list.',
   );
   return lines;
 }
@@ -231,8 +239,8 @@ function _buildAudienceLines(ctx, cap, profile, promptOpts, isAdmin) {
   if (!cap.isDiscord) {
     // read_server_rules is gone: the statute only reaches the model on Discord.
     lines.push(
-      'Questions about the Statute (Statuto Albertino) belong to the gemix thread on Discord: send the user '
-      + 'there rather than answering from memory.',
+      'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server) '
+      + 'belong to the gemix thread on Discord: send the user there rather than answering from memory.',
     );
   }
   return lines;

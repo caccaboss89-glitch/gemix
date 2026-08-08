@@ -7,8 +7,7 @@ const {
   PLATFORM_WA_DEDICATED,
   MAX_AUDIO_DURATION_S,
   MAX_VIDEO_DURATION_S,
-  MAX_HISTORY_MEDIA_IMAGES,
-  MAX_HISTORY_MEDIA_FILES,
+  MAX_HISTORY,
 } = require('./constants');
 
 const PROFILE = {
@@ -172,18 +171,17 @@ const MEMBER_GATED_TOOLS = [
   TOOL.READ_SENT_MESSAGES,
 ];
 
-/** What each member-gated tool buys the caller, phrased for the audience section. */
-const MEMBER_TOOL_REACH = {
-  [TOOL.SEND_WHATSAPP]: 'send_whatsapp_message delivers a WhatsApp message outside this chat',
-  [TOOL.SEND_EMAIL]: 'send_email delivers an email',
-  [TOOL.READ_MUSIC_STATS]: 'read_music_stats reads their listening data',
-  [TOOL.READ_SENT_MESSAGES]: 'read_sent_messages shows what you already sent for them',
-};
+/** "a, b and c" — keeps the tool lists readable inside a sentence. */
+function _andList(items) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
 
 /**
  * Body of "Who you are talking to": what active membership unlocks, or what the
  * caller does not get without it. Both branches read the live tool set, so the
- * text never promises a tool that is missing from this turn's schema.
+ * text never promises a tool that is missing from this turn's schema. The tools
+ * are named, never explained — what each one does is in its own description.
  */
 function buildAudienceLines(profile, opts = {}) {
   const cap = CAPS[profile];
@@ -197,8 +195,8 @@ function buildAudienceLines(profile, opts = {}) {
     const missing = MEMBER_GATED_TOOLS.filter(t => !has(t));
     if (missing.length) {
       lines.push(
-        `${missing.join(', ')} are not in your tool list this turn. Do not try to invoke them, `
-        + 'and if you are asked for one, say plainly that it takes active-member status.',
+        `${_andList(missing)} take active-member status, so they are not in your tool list this turn. `
+        + 'Do not try to invoke them, and say so plainly if you are asked for one.',
       );
     }
     if (has(TOOL.SCHEDULE)) {
@@ -207,15 +205,19 @@ function buildAudienceLines(profile, opts = {}) {
     return lines;
   }
 
-  const reach = MEMBER_GATED_TOOLS.filter(has).map(t => MEMBER_TOOL_REACH[t]);
-  if (has(TOOL.SCHEDULE)) {
-    reach.push('schedule_tasks can drop a reminder on another member\'s phone, not just on the person in front of you');
-  }
   const lines = [
     'The person writing is an active server member, so you are their custom assistant rather than the ordinary one: '
-    + 'you know who the other active members are and you can reach them.',
+    + 'you know who the other members are, and you can act outside this chat.',
   ];
-  if (reach.length) lines.push(`${reach.join('; ')}.`);
+  const granted = MEMBER_GATED_TOOLS.filter(has);
+  if (granted.length > 0) {
+    let unlocked = `That membership is what puts ${_andList(granted)} in your hands`;
+    unlocked += has(TOOL.SCHEDULE)
+      ? ', and why schedule_tasks can leave a reminder on another member\'s phone and not only on the person '
+        + 'in front of you.'
+      : '.';
+    lines.push(`${unlocked} Someone who is not an active member gets none of it.`);
+  }
   return lines;
 }
 
@@ -300,23 +302,30 @@ function buildAnswerLines(profile, opts = {}) {
 }
 
 /**
- * Body of "Sending files". Covers only what no tool description can: that media
- * already published on X travels as a CDN link into the reply attachments, and
- * never through the build sandbox.
+ * Body of "Sending files". States the mechanism the tool descriptions cannot:
+ * the program does the fetching, so a URL in `attachments` is the whole job.
+ * Without this, media already sitting on a CDN gets routed through the build
+ * sandbox, or the model claims it cannot download anything at all.
  */
 function buildSendingFilesLines(profile, opts = {}) {
   const cap = CAPS[profile];
   const has = (name) => _hasTool(opts.toolNames, cap, name);
-  if (!has(TOOL.X_SEARCH)) return [];
 
-  let line =
-    'To send a video, image or audio that lives on X, find the post, take the direct CDN URL of the media itself, '
-    + 'and put that URL in the reply attachments.';
-  if (has(TOOL.BUILD)) {
-    line += ' Never route it through the build agent: build exists to create or convert files, '
-      + 'not to download something that is already fetchable.';
+  const lines = [
+    'Whatever you list in `attachments` is fetched and delivered by the program: a filename from this chat or '
+    + 'from the delivery buffer, or a direct https link to the file itself. You never download anything yourself '
+    + 'and you never need a tool to do it for you — the link is enough.',
+  ];
+  if (has(TOOL.X_SEARCH)) {
+    let x = 'So when someone wants a photo or a video from an X post, open that post with the X tools, take the '
+      + 'CDN link of the media out of the result, and put that link in `attachments`.';
+    if (has(TOOL.BUILD)) {
+      x += ' Never route it through the build agent: build is for files that have to be created or converted, '
+        + 'not for fetching something that is already a URL.';
+    }
+    lines.push(x);
   }
-  return [line];
+  return lines;
 }
 
 /** True when a profile exposes all three generation tools (image + video + song). */
@@ -335,11 +344,13 @@ function profileHasMediaQuota(profile) {
  */
 function buildVisibilityLines(profile) {
   const cap = CAPS[profile];
+  // The real boundary is the message window, not a media count: the per-turn
+  // caps equal MAX_HISTORY, so inside a 30-message window they never bind.
   let historyLine =
-    'Files already in the history are visible as `[Attachment: filename]`, past reactions as `[Reactions: emoji xN]`. '
-    + `Only the newest ${MAX_HISTORY_MEDIA_IMAGES} images and ${MAX_HISTORY_MEDIA_FILES} files come loaded. `
-    + 'Videos are the exception: only the ones in the message you are answering, or in the message it replies to, '
-    + 'are loaded — older ones are not.';
+    `Your history is the last ${MAX_HISTORY} messages of this chat, and anything older is not in your context at `
+    + 'all. Files inside that window arrive loaded and labelled `[Attachment: filename]`, past reactions as '
+    + '`[Reactions: emoji xN]`. Videos are the exception: only the ones in the message you are answering, or in '
+    + 'the message it replies to, are loaded.';
   if (cap.historyTranscriptionNote) {
     historyLine += ' Your own past voice messages appear as `<PastVoiceReply>` blocks on those assistant turns: '
       + 'transcript text, with the audio not reloaded.';

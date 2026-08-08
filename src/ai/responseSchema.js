@@ -165,10 +165,53 @@ function _extractTopLevelJsonObjects(str) {
 }
 
 /**
+ * Salvage the `response` field of a `gemix_reply` object that was cut off mid-string.
+ *
+ * xAI sometimes returns `status: "completed"` on an answer whose text simply
+ * stops (seen on citation-heavy replies after server-side searches; see
+ * session-notes/xai-injection-findings.md). Without this the whole raw JSON
+ * would be shown to the user as if it were the reply.
+ *
+ * @param {string} candidate
+ * @returns {string} the decoded reply text, or '' when there is nothing to save
+ */
+function _salvageTruncatedResponse(candidate) {
+  const key = candidate.search(/"(response|message)"\s*:\s*"/);
+  if (key < 0) return '';
+  const open = candidate.indexOf('"', candidate.indexOf(':', key)) + 1;
+  if (open <= 0) return '';
+
+  let out = '';
+  for (let i = open; i < candidate.length; i++) {
+    const c = candidate[i];
+    if (c === '\\') {
+      // Trailing lone backslash: the escape sequence itself was cut off.
+      if (i + 1 >= candidate.length) break;
+      const esc = candidate[i + 1];
+      const simple = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', '"': '"', '\\': '\\', '/': '/' };
+      if (esc === 'u') {
+        const hex = candidate.slice(i + 2, i + 6);
+        if (hex.length < 4) break;
+        out += String.fromCharCode(parseInt(hex, 16));
+        i += 5;
+      } else {
+        out += simple[esc] ?? esc;
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '"') break; // properly closed after all
+    out += c;
+  }
+  return out;
+}
+
+/**
  * Parse a structured final reply. Tolerates code fences and stray text
  * around the JSON object; if multiple JSON objects are concatenated, uses
- * the last one that looks like a reply. Falls back to treating the raw
- * content as plain text when no valid JSON object is found.
+ * the last one that looks like a reply. When the object is truncated the
+ * `response` field is salvaged; only content that is not JSON at all falls
+ * through to being treated as plain text.
  *
  * @param {string} raw - Assistant message content.
  * @returns {{ structured: boolean, text: string, title: string|null, attachments: string[], voice: boolean }}
@@ -205,7 +248,14 @@ function parseStructuredReply(raw) {
     }
   }
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const salvaged = _salvageTruncatedResponse(candidate);
+    if (salvaged.trim()) {
+      // attachments/title are dropped: a cut-off object cannot be trusted for them.
+      return { structured: true, text: salvaged, title: null, attachments: [], voice: /"voice"\s*:\s*true/.test(candidate) };
+    }
+    return fallback;
+  }
 
   const text = typeof parsed.response === 'string'
     ? parsed.response
