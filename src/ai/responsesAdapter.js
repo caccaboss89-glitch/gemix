@@ -317,10 +317,12 @@ function chatToolsToResponsesTools(tools) {
 /**
  * Pick the user-facing assistant text from one or more message items.
  *
- * With server-side tools (web_search etc.), xAI may emit an intermediate
- * `message` (e.g. "Cerco subito…") and a final one in the same response.
- * Joining them breaks structured JSON; prefer the last piece that parses as
- * a structured reply, else the last non-empty message text.
+ * With server-side tools the agentic loop narrates itself: xAI emits a `message`
+ * item per step, each a complete structured reply, and only the last one is the
+ * answer. Verified by probe — one run produced 16 of them across 29 server-side
+ * calls ("Sto recuperando il post…", "Riprovo in un altro modo.", … then the
+ * real reply). Joining them would break the structured JSON, so prefer the last
+ * piece that parses as a reply, else the last non-empty message text.
  *
  * @param {string[]} messageTexts - One string per output message item (parts already joined).
  * @returns {string}

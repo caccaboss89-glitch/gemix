@@ -167,10 +167,12 @@ function _extractTopLevelJsonObjects(str) {
 /**
  * Salvage the `response` field of a `gemix_reply` object that was cut off mid-string.
  *
- * xAI sometimes returns `status: "completed"` on an answer whose text simply
- * stops (seen on citation-heavy replies after server-side searches; see
- * session-notes/xai-injection-findings.md). Without this the whole raw JSON
- * would be shown to the user as if it were the reply.
+ * Verified by live probe: xAI sometimes returns `status: "completed"` on an
+ * answer whose text simply stops — seen on a citation-heavy reply after ten
+ * server-side searches, at 1193 output tokens against a 64000 cap, with every
+ * url_citation annotation collapsed to index 0. A control run with the same
+ * schema and a heavier question came back whole, so the fault is intermittent
+ * and backend-side. Without this salvage the raw JSON reaches the user.
  *
  * @param {string} candidate
  * @returns {string} the decoded reply text, or '' when there is nothing to save

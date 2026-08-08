@@ -169,8 +169,8 @@ function _buildChatLines(ctx, cap, profile) {
       `In the chat: ${escapeXml(ADMIN_NAME)} (the account owner) and ${otherName}.`,
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
       + 'name. Your own replies carry no speaker prefix.',
-      'Never write an @tag here: your own @gemix is stripped out of replies because it would trigger you '
-      + 'again, and there is nobody else in the chat to tag. Name people plainly.',
+      'You cannot mention anyone in this chat, neither the other person nor yourself: mentions only work '
+      + 'in groups. Name people plainly.',
     );
   } else if (ctx.isGroup) {
     lines.push(
@@ -183,19 +183,22 @@ function _buildChatLines(ctx, cap, profile) {
     lines.push(
       'A private chat on the dedicated GemiX account. Reply to every message.',
       `In the chat: just you and ${escapeXml(ctx.userName)}.`,
-      'There is nobody to tag in a private chat: name people plainly, never with an @tag.',
+      'You cannot mention anyone in a private chat, neither the user nor yourself: mentions only work '
+      + 'in groups. Name people plainly.',
     );
   }
 
   lines.push(WA_FORMAT);
-  // Citations are not automatic: xAI's own directive makes the model cite, and
-  // renderInlineCitations (utils/text.js) rewrites the [[N]](url) markers it
-  // produces. Saying "the system appends sources" would read as "you need not
-  // cite", and the sources would vanish.
+  // Citations are not automatic: the backend's own directive makes the model
+  // cite with render_inline_citation, which reaches us as [[N]](url) markers in
+  // the text, and renderInlineCitations rewrites those. Saying "the system
+  // appends sources" would read as "you need not cite" and lose every source,
+  // so this names the mechanism instead of restating the backend's rule.
   lines.push(
     'Never add a footer or a signature: the system appends those itself when they are needed. '
-    + 'Do cite your web and X sources as usual — the system rewrites those citations into numbered markers '
-    + 'with a "Fonti:" list under the reply, so write the citations but never that list.',
+    + 'The sources you mark with render_inline_citation arrive here as [[1]](url) markers, and the system '
+    + 'turns them into numbered markers with a "Fonti:" list under the reply — so keep citing, and never '
+    + 'write that list yourself.',
   );
   return lines;
 }

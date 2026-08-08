@@ -194,22 +194,27 @@ function validateToolArgs(args, toolDef) {
 // Reserved native function names (do not reuse as client tools): search_images
 // (SERVER_SIDE_TOOL_IMAGE_SEARCH), web_search/browse_page/open_page/…, x_*_search, etc.
 //
-// IMPORTANT (verified 2026-08-06 by live prompt-leak probe, see
-// session-notes/xai-injection-findings.md): declaring the native web_search and
-// x_search types makes xAI REPLACE our two minimal defs with its own full agentic
-// server-side toolset. The model actually sees and can call the SAME tool family the
-// Grok app/website uses: open_page, open_page_with_find, x_user_search,
-// x_semantic_search, x_keyword_search, x_thread_fetch, view_image, view_x_video —
-// plus our web_search/x_search. web_search uses xAI's built-in page browser; x_search
-// expands to the x_* search/fetch/view set. This is the intended behavior (we rely on
-// it for page-content + X media); we only keep our thin types to enable the feature,
-// not to define its surfaces — those come from xAI.
+// IMPORTANT (verified by live prompt-leak probe, re-confirmed 2026-08-08):
+// declaring the native web_search and x_search types makes xAI REPLACE our two
+// minimal defs with its own full agentic server-side toolset. The model sees and
+// can call the SAME tool family the Grok app/website uses: open_page,
+// open_page_with_find, x_user_search, x_semantic_search, x_keyword_search,
+// x_thread_fetch, view_image, view_x_video. The leak pins down the substitution:
+// `x_search` never appears to the model at all — declaring it only switches on
+// the x_* family — and `web_search` survives by name with a schema of xAI's own
+// (query + num_results), so our extra fields are request-level switches the
+// model never reads. This is the intended behavior (we rely on it for
+// page-content + X media); our thin types enable the feature, they do not
+// define its surface.
 const TOOL_WEB_SEARCH_NATIVE = {
   type: 'web_search',
   num_results: 10,
   // No enable_image_understanding / enable_image_search here: web_search is
   // facts and page links only. Image vision for web photos is via web_image_search
   // (local tool + input_image previews). X media understanding stays on x_search.
+  // Turning enable_image_search on also injects a `search_images` tool and a
+  // `render_searched_image` component (verified by probe), so it is not a
+  // free-standing switch.
   enable_image_search: false,
 };
 
