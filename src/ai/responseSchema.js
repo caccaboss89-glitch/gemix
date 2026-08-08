@@ -17,9 +17,10 @@
 //
 const { MAX_TTS_CHARS } = require('../config/constants');
 
+// Which markup actually renders is stated once, in the "This chat" section of
+// the system prompt — not restated here.
 const RESPONSE_FIELD_DESC =
-  'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax. '
-  + 'Use only the formatting declared in the system prompt Format line.';
+  'The reply text shown to the user. Plain conversational text only - never JSON, tags, or tool syntax.';
 
 // Voice-reply fields (WA dedicated only). `voice` is placed BEFORE `response` so
 // the model decides the channel first and writes `response` accordingly.
@@ -33,7 +34,7 @@ const VOICE_RESPONSE_FIELD_DESC =
   + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
   + `Keep it under ${MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags `
   + 'for a human result, even if your recent text replies had none. When `voice` is '
-  + 'false write plain text using only the formatting declared in the system prompt Format line, and DO NOT use any voice tag. '
+  + 'false write plain text and DO NOT use any voice tag. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
 

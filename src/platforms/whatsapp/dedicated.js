@@ -267,7 +267,7 @@ async function _handleDedicatedBatch(entries) {
     },
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
       const historyUserId = isGroup ? chat.id._serialized : (pickLatestBatchEntry(ents) || ents[0]).phoneJid;
-      const { content, historySuffix, latestEntry } = await materializeWhatsAppBatchContent(ents, {
+      const { content, latestEntry } = await materializeWhatsAppBatchContent(ents, {
         chat,
         historyStorageId: historyUserId,
         isGroup,
@@ -282,11 +282,6 @@ async function _handleDedicatedBatch(entries) {
           log.warn(`   Failed to build group participant roster: ${err.message}`);
         }
       }
-      // Distinct non-album batch units (e.g. file, then file, then text) stay
-      // separate role:user turns: earlier ones are historySuffix, last is content.
-      const mergedHistory = Array.isArray(history)
-        ? history.concat(historySuffix)
-        : historySuffix;
       return {
         platform: PLATFORM_WA_DEDICATED,
         isGroup,
@@ -298,7 +293,7 @@ async function _handleDedicatedBatch(entries) {
         userName: lat.userName,
         userIdentity: lat.userIdentity,
         content,
-        history: mergedHistory,
+        history: Array.isArray(history) ? history : [],
         historyLoadIncomplete,
         waJid: lat.phoneJid,
         presence: waPresence,

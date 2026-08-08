@@ -1,6 +1,7 @@
 // Rebuild incoming content parts at batch fire (fresh quote window, same media).
-// WhatsApp multi-attach albums are merged into one user turn; distinct sends
-// stay separate role:user units (earlier ones appended to history, last = content).
+// The whole burst becomes ONE role:user item: the handler wraps it in
+// <user_query>, and a request split across several sends has to arrive as a
+// single request, not as one message preceded by its own history.
 
 const { pickLatestBatchEntry } = require('./batchContext');
 const {
@@ -22,46 +23,60 @@ function finalizeBatchContentParts(parts) {
 }
 
 /**
- * Split ordered batch units into historySuffix (all but last) + content (last).
- * Same ingress contract on every platform: distinct messages → distinct role:user;
- * the debounced turn only merges into one AI call, not one fused user blob.
+ * Fuse ordered batch units into the single content of one role:user item.
+ *
+ * Part order is preserved and adjacent text parts are joined with a newline, so
+ * three captioned photos stay "text, image, text, image, text, image" and three
+ * consecutive typed lines collapse into one paragraph block. Media never moves
+ * away from the text it was sent with.
  *
  * @param {Array<{ content: string|Array, entry?: object }>} units - oldest → newest
  * @param {object|null} [fallbackLatest]
- * @returns {{ content: string|Array, historySuffix: Array, latestEntry: object|null }}
+ * @returns {{ content: string|Array, latestEntry: object|null }}
  */
-function splitBatchUnitsToHistoryAndContent(units, fallbackLatest = null) {
+function mergeBatchUnitsToContent(units, fallbackLatest = null) {
   const list = Array.isArray(units) ? units : [];
   if (list.length === 0) {
-    return { content: '', historySuffix: [], latestEntry: fallbackLatest };
+    return { content: '', latestEntry: fallbackLatest };
   }
-  const historySuffix = list.slice(0, -1).map((u) => ({
-    role: 'user',
-    content: u.content,
-  }));
+
+  const parts = [];
+  for (const unit of list) {
+    const unitParts = typeof unit.content === 'string'
+      ? (unit.content ? [{ type: 'text', text: unit.content }] : [])
+      : (Array.isArray(unit.content) ? unit.content : []);
+    for (const part of unitParts) {
+      const prev = parts[parts.length - 1];
+      if (part?.type === 'text' && prev?.type === 'text') {
+        prev.text = `${prev.text}\n${part.text}`;
+      } else {
+        parts.push(part?.type === 'text' ? { ...part } : part);
+      }
+    }
+  }
+
   const last = list[list.length - 1];
   return {
-    content: last.content,
-    historySuffix,
+    content: finalizeBatchContentParts(parts),
     latestEntry: last.entry || fallbackLatest,
   };
 }
 
 /**
- * Build API-facing content for a WA batch:
- * - Album (same sender, short time window, caption-less continuations) → one user unit
- * - Distinct messages → separate units; all but the last become historySuffix
- *   (role:user), last is the turn content.
+ * Build API-facing content for a WA batch. Album grouping (same sender, short
+ * time window, caption-less continuations) still runs, because it decides which
+ * messages share one caption and one quoted-media lookup; the units it produces
+ * are then fused into the single content of the turn.
  *
  * @param {Array} entries - batch entries with .msg, .userName, .phoneJid
  * @param {{ chat: object, historyStorageId: string, isGroup: boolean, platform: string }} opts
- * @returns {Promise<{ content: string|Array, historySuffix: Array, latestEntry: object }>}
+ * @returns {Promise<{ content: string|Array, latestEntry: object }>}
  */
 async function materializeWhatsAppBatchContent(entries, opts) {
   const { chat, historyStorageId, isGroup, platform } = opts;
   const list = Array.isArray(entries) ? entries.filter((e) => e?.msg) : [];
   if (list.length === 0) {
-    return { content: '', historySuffix: [], latestEntry: null };
+    return { content: '', latestEntry: null };
   }
 
   const latest = pickLatestBatchEntry(list) || list[list.length - 1];
@@ -95,25 +110,25 @@ async function materializeWhatsAppBatchContent(entries, opts) {
     });
   }
 
-  return splitBatchUnitsToHistoryAndContent(units, latest);
+  return mergeBatchUnitsToContent(units, latest);
 }
 
 /**
  * Discord batch materialization (same API shape as WhatsApp).
  * Each Discord message is already one logical unit (native multi-attach on a
- * single Message). Distinct messages in the debounce window stay separate
- * role:user turns; only the last is ctx.content.
+ * single Message); every message in the debounce window is fused into the
+ * single content of the turn.
  *
  * @param {Array} entries - batch entries with .msg, .userName, .contentParts optional
  * @param {(entry: object, recentMessageIds: Set|null) => Promise<Array>} buildParts
  *   async builder for one message's contentParts
  * @param {{ recentMessageIds?: Set|null, pickLatest?: object|null }} [opts]
- * @returns {Promise<{ content: string|Array, historySuffix: Array, latestEntry: object|null }>}
+ * @returns {Promise<{ content: string|Array, latestEntry: object|null }>}
  */
 async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
   const list = Array.isArray(entries) ? entries.filter((e) => e?.msg) : [];
   if (list.length === 0) {
-    return { content: '', historySuffix: [], latestEntry: null };
+    return { content: '', latestEntry: null };
   }
   const recentMessageIds = opts.recentMessageIds || null;
   const latest = opts.pickLatest || pickLatestBatchEntry(list) || list[list.length - 1];
@@ -126,12 +141,12 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
       entry: ent,
     });
   }
-  return splitBatchUnitsToHistoryAndContent(units, latest);
+  return mergeBatchUnitsToContent(units, latest);
 }
 
 module.exports = {
   materializeWhatsAppBatchContent,
   materializeDiscordBatchContent,
   finalizeBatchContentParts,
-  splitBatchUnitsToHistoryAndContent,
+  mergeBatchUnitsToContent,
 };

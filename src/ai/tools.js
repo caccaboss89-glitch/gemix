@@ -437,7 +437,7 @@ function buildWhatsAppTool(isAdmin) {
   }
 
   const properties = {
-    message: { type: 'string', description: 'Message text. Use only the formatting declared in the system prompt Format line.' },
+    message: { type: 'string', description: 'Message text. WhatsApp formatting only — no Markdown links.' },
     recipient: {
       type: 'object',
       description: isAdmin
@@ -562,7 +562,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   const contentSuffix =
     ' Phrase it as the message that arrives at that moment: "remind me to go to the gym tomorrow at 6pm" '
     + 'becomes "Time to go to the gym!", never "Remember to go to the gym tomorrow". '
-    + 'Use only the formatting declared in the system prompt Format line.';
+    + 'WhatsApp formatting only — no Markdown links.';
 
   const contentDesc = (canTargetOthers
     ? 'Reminder text for the recipient at delivery time (not instructions to yourself). When reminding someone else, start by saying on whose behalf you\'re writing.'

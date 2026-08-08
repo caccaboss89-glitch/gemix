@@ -84,7 +84,7 @@ const {
 } = require('./config/systemMessages');
 const { isGrokCreditExhaustedError } = require('./ai/apiClient');
 const { clearCallNotifications } = require('./utils/notificationDedup');
-const { wrapSystemReminder } = require('./utils/systemTags');
+const { wrapSystemReminder, wrapUserQuery } = require('./utils/systemTags');
 
 const log = createLogger('Handler');
 
@@ -322,18 +322,22 @@ async function handleMessage(ctx) {
       messages.push(...historyForApi);
     }
 
-    messages.push({ role: 'user', content: ctx.content });
+    // The whole burst is a single item (utils/batchContentRefresh), tagged so the
+    // model knows which request it is answering. The tag is the one deliberate
+    // break in the cross-turn prefix: next turn the history replays these same
+    // messages untagged and separate, so the shared prefix now ends where this
+    // turn's burst began instead of at the Runtime block below.
+    messages.push({ role: 'user', content: wrapUserQuery(ctx.content) });
 
     // Turn-varying program state: built once, placed right after the current
     // user message, and never moved again. Both constraints matter.
-    //   - after the user message, because next turn history replays it in the
-    //     same spot; anything turn-varying placed before it would differ from
-    //     what history holds there and cut the cross-turn prefix at the history.
+    //   - after the user message, so that nothing turn-varying lands where the
+    //     history will replay a message next turn.
     //   - never rebuilt or re-appended, because then each round would drop
     //     changing bytes where the replayed reasoning and tool items land and
     //     force a recompute from there on.
-    // Together they make each round a pure append and keep the cross-turn
-    // prefix at its maximum (static + history + this message).
+    // Together they keep every round a pure append, which is the cache that
+    // actually holds (87-89% within a turn).
     // Must not use role:system either: xAI merges extra system messages into the
     // leading system block, which moves them and busts the prefix for good.
     // What it states can move during the turn (delivery buffer, build workspace,

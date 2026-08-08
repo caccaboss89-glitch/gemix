@@ -415,10 +415,9 @@ async function _handleDiscordBatch(entries) {
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest, first }) => {
       const recentMessageIds = first?._discordWindow?.recentMessageIds
         || (await fetchDiscordMessageWindow(channel, starterMessageId)).recentMessageIds;
-      // Same contract as WhatsApp: distinct batch messages → separate role:user
-      // (historySuffix + last content). Multi-attach on one Discord message stays
-      // one unit natively (all attachments on that Message).
-      const { content, historySuffix, latestEntry } = await materializeDiscordBatchContent(
+      // Same contract as WhatsApp: the whole burst fuses into one role:user item.
+      // Multi-attach on a single Discord message is already one unit natively.
+      const { content, latestEntry } = await materializeDiscordBatchContent(
         ents,
         async (ent, ids) => buildDiscordIncomingContentParts(
           ent.msg, channel, historyStorageId, ids, ent.userName || 'Unknown',
@@ -427,9 +426,6 @@ async function _handleDiscordBatch(entries) {
       );
       const lat = latestEntry || latest || ents[0];
       const extras = await _discordGuildExtras(guild);
-      const mergedHistory = Array.isArray(history)
-        ? history.concat(historySuffix)
-        : historySuffix;
       return {
         platform: 'discord',
         isGroup: false,
@@ -440,7 +436,7 @@ async function _handleDiscordBatch(entries) {
         userName: lat.userName,
         userIdentity: lat.userIdentity,
         content,
-        history: mergedHistory,
+        history: Array.isArray(history) ? history : [],
         historyLoadIncomplete,
         threadName: channel.name,
         availableEmojis: extras.availableEmojis,

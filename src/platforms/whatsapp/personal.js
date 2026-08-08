@@ -301,7 +301,7 @@ async function _handlePersonalBatch(entries) {
     },
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
       const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);
-      const { content, historySuffix, latestEntry } = await materializeWhatsAppBatchContent(ents, {
+      const { content, latestEntry } = await materializeWhatsAppBatchContent(ents, {
         chat,
         historyStorageId,
         isGroup: false,
@@ -309,9 +309,6 @@ async function _handlePersonalBatch(entries) {
       });
       const lat = latestEntry || latest || ents[0];
       const personalOtherUserName = await resolvePersonalChatOtherName(chat);
-      const mergedHistory = Array.isArray(history)
-        ? history.concat(historySuffix)
-        : historySuffix;
       return {
         platform: PLATFORM_WA_PERSONAL,
         isGroup: false,
@@ -323,7 +320,7 @@ async function _handlePersonalBatch(entries) {
         userIdentity: lat.userIdentity,
         personalOtherUserName,
         content,
-        history: mergedHistory,
+        history: Array.isArray(history) ? history : [],
         historyLoadIncomplete,
         waJid: lat.phoneJid,
         presence: waPresence,
