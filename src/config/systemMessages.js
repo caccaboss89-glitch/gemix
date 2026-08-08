@@ -131,7 +131,10 @@ const PRIVACY_MEMBER_CONTACT_NOTE =
  * Full first-contact notice. Storage criteria are stated in words rather than
  * in figures so the copy cannot drift from the limits in constants.js (which
  * cannot be imported here: it is constants.js that imports this file).
- * @param {{ isActiveMember?: boolean }} [opts]
+ *
+ * @param {{ isActiveMember?: boolean, hasAttachments?: boolean }} [opts]
+ *   hasAttachments adds the reassurance about the files that came with this very
+ *   message: it only makes sense when there were any.
  * @returns {string}
  */
 function buildPrivacyNoticeMessage(opts = {}) {
@@ -145,12 +148,17 @@ function buildPrivacyNoticeMessage(opts = {}) {
     '- Gli allegati restano sul server finché compaiono nella finestra di messaggi recenti che uso per '
     + 'rispondere: quando ne escono vengono eliminati, così come i file che genero, dopo qualche ora di inattività.',
     '- Non scrivermi mai dati sensibili, credenziali o informazioni private.',
-    '- Gli allegati che hai inviato insieme a questo primo messaggio non sono stati scaricati né salvati.',
+  ];
+  if (opts.hasAttachments) {
+    lines.push('- Gli allegati che hai inviato insieme a questo primo messaggio non sono stati scaricati né salvati.');
+  }
+  lines.push(
     '',
     `Se continui a scrivere accetti queste condizioni. Se non le accetti, scrivi \`${PRIVACY_WIPE_COMMAND}\` da `
     + 'solo, senza altro testo: svuoto questa chat, cancello anche il messaggio che hai appena inviato ed elimino '
-    + 'dal server tutti i tuoi dati. Puoi usarlo in qualunque momento.',
-  ];
+    + 'dal server tutti i tuoi dati — messaggi, allegati, trascrizioni dei miei vocali, preferenze, promemoria '
+    + 'programmati e file generati. Puoi usarlo in qualunque momento.',
+  );
   if (opts.isActiveMember) {
     lines.push('', PRIVACY_MEMBER_CONTACT_NOTE);
   }

@@ -189,7 +189,7 @@ function buildAudienceLines(profile, opts = {}) {
 
   if (opts.isActiveMember === false) {
     const lines = [
-      'The person writing is not an active server member, so you are the ordinary assistant here: '
+      'The person writing this is not an active member of the Discord server, so you are the ordinary assistant here: '
       + 'you handle what they ask in this chat, and nothing you do reaches anyone outside it.',
     ];
     const missing = MEMBER_GATED_TOOLS.filter(t => !has(t));

@@ -92,9 +92,12 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
 
     if (hasBeenInformed(waJid)) return null;
 
+    // Whether the burst carried files decides one line of the notice: nothing
+    // was downloaded, and saying so is only meaningful if there was something.
+    const hasAttachments = entries.some(e => e && e.msg && e.msg.hasMedia);
     log.info(`   First request from ${waJid} — sending the privacy notice instead (attachments not downloaded)`);
     return {
-      response: _systemReply(buildPrivacyNoticeMessage({ isActiveMember })),
+      response: _systemReply(buildPrivacyNoticeMessage({ isActiveMember, hasAttachments })),
       // Only after the notice is really on its way: a delivery failure must
       // leave the person un-informed so the next message shows it again.
       onDelivered: () => markInformed(waJid),
