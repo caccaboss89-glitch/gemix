@@ -1,7 +1,6 @@
 # IDE
 .grok/
 .claude/
-graphify-out/
 AGENTS.md
 GROK.md
 CLAUDE.md
