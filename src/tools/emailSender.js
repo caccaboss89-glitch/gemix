@@ -1,4 +1,4 @@
-// src/tools/emailSender.js
+﻿// src/tools/emailSender.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -10,9 +10,9 @@
 // (keeps email text clean; Discord emoji are not desired in formal email output).
 // Used by the email recipient tool and formal request flows.
 
-const nodemailer = require('nodemailer');
-const { BOT_EMAIL, BOT_PASS } = require('../config/env');
-const { removeDiscordEmoji } = require('../utils/discord');
+import nodemailer from 'nodemailer';
+import { BOT_EMAIL, BOT_PASS  } from '../config/env.js';
+import { removeDiscordEmoji  } from '../utils/discord.js';
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -37,4 +37,4 @@ async function sendEmailDirect(toEmail, subject, body, attachments = []) {
   });
 }
 
-module.exports = { sendEmailDirect };
+export default { sendEmailDirect };

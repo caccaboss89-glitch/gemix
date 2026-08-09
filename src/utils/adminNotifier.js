@@ -1,9 +1,10 @@
-// src/utils/adminNotifier.js
+﻿// src/utils/adminNotifier.js
 //
 // Forwards critical errors from the bot and the sandbox proxy to the
 // administrator via WhatsApp. Uses a per-source cooldown.
 
-const { ACTIVE_MEMBERS } = require('../config/members');
+import { ACTIVE_MEMBERS } from '../config/members.js';
+import { ADMIN_ERROR_PREFIX } from '../config/systemMessages.js';
 
 let client = null;
 
@@ -43,7 +44,6 @@ async function notifyAdmin(source, errorMessage) {
   const admin = ACTIVE_MEMBERS.find(m => m.admin);
   if (!admin) return;
 
-  const { ADMIN_ERROR_PREFIX } = require('../config/systemMessages'); // dynamic require for system message prefixes
   const timestamp = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
   const message = `${ADMIN_ERROR_PREFIX} ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
 
@@ -54,7 +54,7 @@ async function notifyAdmin(source, errorMessage) {
   }
 }
 
-module.exports = {
+export default {
   setAdminNotifierClient,
   notifyAdmin,
   ADMIN_NOTIFIED_SUFFIX,

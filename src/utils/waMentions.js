@@ -1,4 +1,4 @@
-// WhatsApp @mention handling.
+﻿// WhatsApp @mention handling.
 //
 // Incoming: rewrite the @<id> tags WhatsApp encodes in a message body into
 // @<phone-number> so GemiX never sees raw @lid values and can recognise who
@@ -8,7 +8,10 @@
 // turn them into real WhatsApp mentions, and strip the tags GemiX is not
 // allowed to send (Meta AI, and on the personal account its own @gemix).
 
-const { META_AI_NUMBER } = require('../config/constants');
+import constants from '../config/constants.js';
+import { getDedicatedClient } from '../platforms/whatsapp/dedicated.js';
+
+const { META_AI_NUMBER } = constants;
 
 /** Digits of a mentioned contact, preferring its real phone number over a @lid id. */
 function _contactPhoneDigits(c) {
@@ -67,8 +70,6 @@ async function resolveMentionsForMessage(msg, isGroup) {
   const unresolvedLids = mentions.filter(c => c?.id?.server === 'lid' && !c.number && !c._resolvedNumber);
   if (unresolvedLids.length > 0) {
     try {
-      // Lazy require avoids a circular dependency (dedicated.js → shared.js → waMentions.js).
-      const { getDedicatedClient } = require('../platforms/whatsapp/dedicated');
       const client = getDedicatedClient();
       if (client && typeof client.getContactLidAndPhone === 'function') {
         const mappings = await client.getContactLidAndPhone(unresolvedLids.map(c => c.id._serialized));
@@ -122,7 +123,6 @@ async function resolveLidTagsInBody(body, knownPhones, lidCache) {
 
   if (toResolve.length > 0) {
     try {
-      const { getDedicatedClient } = require('../platforms/whatsapp/dedicated');
       const client = getDedicatedClient();
       if (client && typeof client.getContactLidAndPhone === 'function') {
         const mappings = await client.getContactLidAndPhone(toResolve.map(d => `${d}@lid`));
@@ -224,7 +224,7 @@ function stripPhoneMentionTags(text) {
   return text.replace(LOOSE_OUT_MENTION_RE, '');
 }
 
-module.exports = {
+export default {
   replaceMentionsInBody,
   resolveMentionsForMessage,
   resolveLidTagsInBody,

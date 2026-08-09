@@ -1,4 +1,4 @@
-// src/tools/taskRemover.js
+﻿// src/tools/taskRemover.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -6,7 +6,7 @@
 //
 // Removes tasks by ID(s) from a personal or group task file using taskStore.
 
-const { modifyTaskFile } = require('../utils/taskStore');
+import { modifyTaskFile  } from '../utils/taskStore.js';
 
 /**
  * Remove tasks by IDs from a user's or group's task file (atomic read-modify-write).
@@ -38,4 +38,4 @@ async function removeTasks(taskIds, fileId) {
   return result;
 }
 
-module.exports = { removeTasks };
+export default { removeTasks };

@@ -1,4 +1,4 @@
-// src/platforms/whatsapp/shared.js
+﻿// src/platforms/whatsapp/shared.js
 //
 // Shared WhatsApp logic used by both dedicated.js and personal.js.
 // Builds history, handles incoming media/quoted messages, processes
@@ -6,43 +6,57 @@
 // WA dedicated, plus file attachments). Central place for WhatsApp-specific
 // formatting and media handling.
 
-const { MessageMedia } = require('whatsapp-web.js');
-const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = require('../../config/constants');
-const { formatWhatsAppPollText } = require('../../utils/pollParser');
-const { isSpecialNonMediaMessage, formatSpecialMessageText, formatWhatsAppContactText } = require('../../utils/waSpecialMessages');
-const { formatTimestamp } = require('../../utils/time');
-const { hasScheduledFooter } = require('../../utils/footer');
-const { buildPersonalGemixFlags } = require('../../utils/personalWaHistory');
-const { isSystemMessage } = require('../../config/systemMessages');
-const { wrapSystemNotification } = require('../../utils/systemTags');
-
-const { buildAttachmentTag } = require('../../utils/media');
-const {
+import { MessageMedia } from 'whatsapp-web.js';
+import constants from '../../config/constants.js';
+import { formatWhatsAppPollText } from '../../utils/pollParser.js';
+import { isSpecialNonMediaMessage, formatSpecialMessageText, formatWhatsAppContactText } from '../../utils/waSpecialMessages.js';
+import { formatTimestamp } from '../../utils/time.js';
+import { hasScheduledFooter } from '../../utils/footer.js';
+import { buildPersonalGemixFlags } from '../../utils/personalWaHistory.js';
+import { isSystemMessage } from '../../config/systemMessages.js';
+import { wrapSystemNotification } from '../../utils/systemTags.js';
+import { buildAttachmentTag } from '../../utils/media.js';
+import {
   MAX_IMAGE_READS,
   MAX_FILE_READS,
   classifyAiFileDelivery,
   isVideoAttachment,
   DELIVERY_MODE
-} = require('../../utils/aiFileDelivery');
-const { resolveGemixVoiceTranscription, storeRecentVoiceText } = require('../../utils/historySync');
-const { ingressWaMessageMedia, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
-const {
+} from '../../utils/aiFileDelivery.js';
+import { resolveGemixVoiceTranscription, storeRecentVoiceText } from '../../utils/historySync.js';
+import { ingressWaMessageMedia, capHistoryImageParts } from '../../utils/incomingMediaIngress.js';
+import {
   normalizeMarkdown,
   stripOutgoingDeliveryArtifacts,
   cleanIncomingText,
   formatLabeledUserContent
-} = require('../../utils/text');
-const {
-  attachmentFilenameHints: _attachmentFilenameHints,
-  stripRedundantAttachmentCaption: _stripRedundantAttachmentCaption,
-  stripRedundantFilenameBesideAttachmentTag: _stripRedundantFilenameBesideAttachmentTag
-} = require('../../utils/attachmentCaption');
+} from '../../utils/text.js';
+import {
+  attachmentFilenameHints as _attachmentFilenameHints,
+  stripRedundantAttachmentCaption as _stripRedundantAttachmentCaption,
+  stripRedundantFilenameBesideAttachmentTag as _stripRedundantFilenameBesideAttachmentTag
+} from '../../utils/attachmentCaption.js';
+import { sendAttachmentsWithFallback } from '../../utils/attachmentFallback.js';
+import { sendWhatsAppAttachment } from '../../utils/attachmentDelivery.js';
+import { mapWithConcurrency } from '../../utils/concurrency.js';
+import { withWaPuppeteerRetry, formatWaError } from '../../utils/waPuppeteer.js';
+import { createLogger } from '../../utils/logger.js';
+import {
+  resolveIngressFilename as _resolveWaFilename
+} from '../../utils/attachmentFilenames.js';
+import {
+  replaceMentionsInBody as _replaceMentionsInBody,
+  resolveMentionsForMessage as _resolveMentionsForMessage,
+  resolveLidTagsInBody as _resolveLidTagsInBody,
+  stripDisallowedOutgoingMentions,
+  normalizeOutgoingMentionTags,
+  collectMentionJids
+} from '../../utils/waMentions.js';
+import { processWhatsAppQuotedReply } from '../../utils/quoteIngress.js';
+import { groupWhatsAppMessages } from '../../utils/waAlbumGroup.js';
+import { whatsAppReactionTagForMessages } from '../../utils/reactions.js';
 
-const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
-const { sendWhatsAppAttachment } = require('../../utils/attachmentDelivery');
-const { mapWithConcurrency } = require('../../utils/concurrency');
-const { withWaPuppeteerRetry, formatWaError } = require('../../utils/waPuppeteer');
-const { createLogger } = require('../../utils/logger');
+const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = constants;
 
 const log = createLogger('WhatsAppResponse');
 
@@ -51,28 +65,9 @@ const log = createLogger('WhatsAppResponse');
 // budget pass (see constants.js).
 const HISTORY_UPLOAD_CONCURRENCY = 15;
 
-const { resolveIngressFilename: _resolveWaFilename } = require('../../utils/attachmentFilenames');
-
 function _waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
 }
-
-// Mention handling: rewrite the @<id> tags WhatsApp encodes in a body into
-// @<phone-number> (resolving @lid ids to the real number) so the model never
-// sees a raw @lid and can map each tag to a name via <Participants>; plus the
-// outgoing helpers that strip disallowed tags and collect mention JIDs.
-// See utils/waMentions.js.
-const {
-  replaceMentionsInBody: _replaceMentionsInBody,
-  resolveMentionsForMessage: _resolveMentionsForMessage,
-  resolveLidTagsInBody: _resolveLidTagsInBody,
-  stripDisallowedOutgoingMentions,
-  normalizeOutgoingMentionTags,
-  collectMentionJids
-} = require('../../utils/waMentions');
-const { processWhatsAppQuotedReply } = require('../../utils/quoteIngress');
-const { groupWhatsAppMessages } = require('../../utils/waAlbumGroup');
-const { whatsAppReactionTagForMessages } = require('../../utils/reactions');
 
 async function getRecentWhatsAppMessageIds(msg) {
   try {
@@ -656,7 +651,7 @@ function waMessageHasUsableContent(msg) {
   return false;
 }
 
-module.exports = {
+export default {
   buildWhatsAppHistory,
   buildIncomingContentPartsFromMessages,
   sendWhatsAppResponse,

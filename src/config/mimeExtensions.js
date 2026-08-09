@@ -127,7 +127,7 @@ function mimeForExtension(ext, fallback = 'application/octet-stream', contentTyp
   return EXT_TO_MIME_MAP[key] || fallback;
 }
 
-module.exports = {
+export {
   mimeBase,
   dottedExtensionForMime,
   mimeForExtension

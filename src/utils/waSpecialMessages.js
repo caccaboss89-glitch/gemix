@@ -1,4 +1,4 @@
-// src/utils/waSpecialMessages.js
+﻿// src/utils/waSpecialMessages.js
 //
 // Recognize and parse the WhatsApp "special" message types whatsapp-web.js
 // surfaces with non-textual payloads:
@@ -9,7 +9,7 @@
 //                               start time when present in the serialized payload).
 // Contacts (vcard) and polls are handled elsewhere (inline / pollParser.js).
 
-const { formatTimestamp } = require('./time');
+import { formatTimestamp  } from './time.js';
 
 /** WA may emit either type string for group events. */
 const EVENT_MESSAGE_TYPES = new Set(['scheduled_event_creation', 'event_creation']);
@@ -168,7 +168,7 @@ function formatSpecialMessageText(msg) {
   return null;
 }
 
-module.exports = {
+export default {
   isSpecialNonMediaMessage,
   formatWhatsAppContactText,
   formatSpecialMessageText

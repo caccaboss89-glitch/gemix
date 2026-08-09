@@ -1,4 +1,4 @@
-// src/utils/tempFileServer.js
+﻿// src/utils/tempFileServer.js
 // HTTP server that hosts temporary files with expiration.
 //
 // Serves the temporary download links sent to USERS when WhatsApp/Discord
@@ -15,19 +15,19 @@
 // blocked (registered files must live under DATA_DIR or TEMP_DIR). Per-token
 // rate limit caps abuse from leaked links.
 
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { createLogger } = require('./logger');
-const { mimeForExtension } = require('../config/mimeExtensions');
-const { getPublicBaseUrl } = require('./publicTunnelUrl');
-const { GEMIX_TEMP_FILE_PORT } = require('../config/env');
-const {
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { createLogger  } from './logger.js';
+import { mimeForExtension  } from '../config/mimeExtensions.js';
+import { getPublicBaseUrl  } from './publicTunnelUrl.js';
+import { GEMIX_TEMP_FILE_PORT  } from '../config/env.js';
+import {
   DATA_DIR,
   TUNNEL_TOKEN_TTL_HISTORY_MS,
   TUNNEL_TOKEN_TTL_TEMP_MS
-} = require('../config/constants');
+ } from '../config/constants.js';
 
 const log = createLogger('TempFileServer');
 
@@ -411,7 +411,7 @@ function startTempFileServer() {
   log.info(`Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
 }
 
-module.exports = {
+export default {
   startTempFileServer,
   registerTempFile,
   tempDirForOwner,

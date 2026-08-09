@@ -1,4 +1,4 @@
-// src/utils/voiceTranscripts.js
+﻿// src/utils/voiceTranscripts.js
 //
 // GemiX voice messages appear in chat history as [Attachment: …] tags on
 // assistant turns (assistant role cannot carry native audio parts). Before the
@@ -6,10 +6,10 @@
 // <PastVoiceReply file="…">transcript</PastVoiceReply> so the model sees the
 // spoken text on the correct role, not appended to the current user turn.
 
-const path = require('path');
-const { extractAttachmentTagPaths } = require('./media');
-const { getStoredHistoryVoiceTranscription } = require('./historySync');
-const { escapeXml } = require('./xmlEscape');
+import path from 'path';
+import { extractAttachmentTagPaths  } from './media.js';
+import { getStoredHistoryVoiceTranscription  } from './historySync.js';
+import { escapeXml  } from './xmlEscape.js';
 
 const VOICE_AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a']);
 
@@ -141,6 +141,6 @@ function applyPastVoiceRepliesToHistory(history, storageId) {
   return { history: out, replacedCount };
 }
 
-module.exports = {
+export default {
   applyPastVoiceRepliesToHistory
 };

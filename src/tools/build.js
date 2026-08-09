@@ -1,4 +1,4 @@
-// src/tools/build.js
+﻿// src/tools/build.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -15,27 +15,27 @@
 //
 // Rate-limited to once per main-brain round (PER_ROUND_TOOL_LIMITS).
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { PLATFORM_DISCORD } = require('../config/constants');
-const { mimeForExtension } = require('../config/mimeExtensions');
-const { resolveWorkspaceId } = require('../utils/workspaceId');
-const { resolveProfile, toolUnavailableMessage, TOOL } = require('../config/platformCapabilities');
-const {
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { PLATFORM_DISCORD  } from '../config/constants.js';
+import { mimeForExtension  } from '../config/mimeExtensions.js';
+import { resolveWorkspaceId  } from '../utils/workspaceId.js';
+import { resolveProfile, toolUnavailableMessage, TOOL  } from '../config/platformCapabilities.js';
+import {
   ensureWorkspace,
   stageAttachmentBuffer,
   stageAttachmentFromPath,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile,
   resolveInsideWorkspace
-} = require('../sandbox/buildWorkspace');
-const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
-const { runBuildAgent, DELIVERY_SELECTION_NOTICE } = require('../ai/buildAgent');
-const { resolveUrlEntry, resolveLocalFileEntry } = require('../utils/deliverySelection');
-const { applyBuildAgentFlags } = require('../utils/attachmentDelivery');
-const { pushBufferAttachment } = require('../utils/attachments');
-const { createLogger } = require('../utils/logger');
+ } from '../sandbox/buildWorkspace.js';
+import { acquireBuildLock, releaseBuildLock  } from '../utils/buildState.js';
+import { runBuildAgent, DELIVERY_SELECTION_NOTICE  } from '../ai/buildAgent.js';
+import { resolveUrlEntry, resolveLocalFileEntry  } from '../utils/deliverySelection.js';
+import { applyBuildAgentFlags  } from '../utils/attachmentDelivery.js';
+import { pushBufferAttachment  } from '../utils/attachments.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('BuildTool');
 
@@ -279,4 +279,4 @@ async function buildTool(args, userCtx, responseCtx) {
   }
 }
 
-module.exports = { buildTool };
+export default { buildTool };

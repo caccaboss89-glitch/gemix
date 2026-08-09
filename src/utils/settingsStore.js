@@ -1,4 +1,4 @@
-// src/utils/settingsStore.js
+﻿// src/utils/settingsStore.js
 //
 // Persistent per-chat preferences (users and groups), stored as one small JSON
 // file per chat under data/memories/. Holds the TTS voice, reasoning effort,
@@ -8,12 +8,12 @@
 // Written by the `manage_preferences` tool and read on every turn to render the
 // <CurrentSettings> prompt block.
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { XAI_TTS_VOICE } = require('../config/env');
-const { getRomeISO } = require('./time');
-const { withKeyedLock } = require('./keyedLock');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR  } from '../config/constants.js';
+import { XAI_TTS_VOICE  } from '../config/env.js';
+import { getRomeISO  } from './time.js';
+import { withKeyedLock  } from './keyedLock.js';
 
 const SETTINGS_DIR = path.join(DATA_DIR, 'memories');
 const MAX_MEMORY_CHARS = 1000;
@@ -212,7 +212,7 @@ function resolveMemoryContent(existing, content, replace) {
   return { content: `${prior}\n${incoming.trim()}`, cleared: false };
 }
 
-module.exports = {
+export default {
   MAX_MEMORY_CHARS,
   DEFAULT_MEMORY,
   VOICES_MALE,

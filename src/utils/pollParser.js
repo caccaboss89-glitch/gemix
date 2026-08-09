@@ -1,4 +1,4 @@
-// src/utils/pollParser.js
+﻿// src/utils/pollParser.js
 //
 // WhatsApp poll parsing helpers for whatsapp-web.js.
 // whatsapp-web.js exposes poll data in inconsistent internal shapes
@@ -75,6 +75,6 @@ function formatWhatsAppPollText(msg, textBody) {
   return `${pollQuestion}\nOpzioni:\n${normalized}`.trim();
 }
 
-module.exports = {
+export default {
   formatWhatsAppPollText
 };

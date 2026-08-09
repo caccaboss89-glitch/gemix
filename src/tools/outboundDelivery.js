@@ -1,4 +1,4 @@
-// src/tools/outboundDelivery.js
+﻿// src/tools/outboundDelivery.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are plain objects the dispatcher serializes into the
@@ -12,9 +12,9 @@
 // happened, so a send that failed outright can be retried, while a send that
 // half-succeeded (text out, attachments not) cannot blast the text twice.
 
-const { resolveDeliverySelection } = require('../utils/deliverySelection');
-const { recordSentMessage } = require('../utils/sentMessagesStore');
-const { createLogger } = require('../utils/logger');
+import { resolveDeliverySelection  } from '../utils/deliverySelection.js';
+import { recordSentMessage  } from '../utils/sentMessagesStore.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('OutboundDelivery');
 
@@ -63,7 +63,7 @@ function recordOutbound(entry) {
   }
 }
 
-module.exports = {
+export default {
   resolveOutboundAttachments,
   alreadyContactedError,
   recordOutbound

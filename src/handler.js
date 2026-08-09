@@ -1,4 +1,4 @@
-// src/handler.js
+﻿// src/handler.js
 //
 // Main message handler.
 //
@@ -28,21 +28,21 @@
 //      (WhatsApp renders no anchor text), apply the research badge (real web/X
 //      search counts), and ship the reply back to the platform.
 
-const { callAI } = require('./ai/aiProvider');
-const {
+import { callAI  } from './ai/aiProvider.js';
+import {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
   promptToolsFingerprint
-} = require('./ai/systemPrompt');
-const { getToolsForUser, getToolAccessError } = require('./ai/tools');
-const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/responseSchema');
-const { resolveDeliverySelection } = require('./utils/deliverySelection');
-const { applyPastVoiceRepliesToHistory } = require('./utils/voiceTranscripts');
-const { generateVoice } = require('./tools/voiceMessage');
-const { sanitizeVoiceMessageText } = require('./utils/text');
-const { getCapabilities, resolveProfile, toolUnavailableMessage } = require('./config/platformCapabilities');
-const { executeTool } = require('./tools');
-const {
+ } from './ai/systemPrompt.js';
+import { getToolsForUser, getToolAccessError  } from './ai/tools.js';
+import { buildGemixResponseFormat, parseStructuredReply  } from './ai/responseSchema.js';
+import { resolveDeliverySelection  } from './utils/deliverySelection.js';
+import { applyPastVoiceRepliesToHistory  } from './utils/voiceTranscripts.js';
+import { generateVoice  } from './tools/voiceMessage.js';
+import { sanitizeVoiceMessageText  } from './utils/text.js';
+import { getCapabilities, resolveProfile, toolUnavailableMessage  } from './config/platformCapabilities.js';
+import { executeTool } from './tools/index.js';
+import {
   MAX_TOOL_ROUNDS,
   MAX_TTS_CHARS,
   PLATFORM_DISCORD,
@@ -50,39 +50,39 @@ const {
   MAINTENANCE_ADMIN_ONLY,
   MAINTENANCE_USER_MESSAGE,
   MAINTENANCE_RELEASE_NOTIFY_COMMAND
-} = require('./config/constants');
-const { MAINTENANCE_MODE } = require('./config/env');
-const { createLogger } = require('./utils/logger');
-const { appendResearchBadge, buildResearchBadgeText } = require('./utils/footer');
+ } from './config/constants.js';
+import { MAINTENANCE_MODE  } from './config/env.js';
+import { createLogger  } from './utils/logger.js';
+import { appendResearchBadge, buildResearchBadgeText  } from './utils/footer.js';
 
-const { resolveWorkspaceId } = require('./utils/workspaceId');
-const { touchActivity } = require('./utils/buildState');
-const { listWorkspaceFiles } = require('./sandbox/buildWorkspace');
-const { readSettings, isReviewDue, markReviewed } = require('./utils/settingsStore');
-const { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, renderInlineCitations } = require('./utils/text');
-const { sanitizeDiscordThreadTitle } = require('./utils/discord');
-const { loadRegolamento } = require('./utils/regolamento');
-const { resolveStorageId, resolveSettingsFileId } = require('./utils/userPaths');
-const { generatePromptCacheKey } = require('./utils/promptCacheKey');
-const { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS } = require('./utils/historySync');
-const { enableReleaseNotify } = require('./tools/releaseNotify');
-const { sendWhatsAppDirect } = require('./tools/whatsappSender');
-const {
+import { resolveWorkspaceId  } from './utils/workspaceId.js';
+import { touchActivity  } from './utils/buildState.js';
+import { listWorkspaceFiles  } from './sandbox/buildWorkspace.js';
+import { readSettings, isReviewDue, markReviewed  } from './utils/settingsStore.js';
+import { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, renderInlineCitations  } from './utils/text.js';
+import { sanitizeDiscordThreadTitle  } from './utils/discord.js';
+import { loadRegolamento  } from './utils/regolamento.js';
+import { resolveStorageId, resolveSettingsFileId  } from './utils/userPaths.js';
+import { generatePromptCacheKey  } from './utils/promptCacheKey.js';
+import { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS  } from './utils/historySync.js';
+import { enableReleaseNotify  } from './tools/releaseNotify.js';
+import { sendWhatsAppDirect  } from './tools/whatsappSender.js';
+import {
   partitionHandlerToolCalls,
   perRoundCappedDuplicateIds,
   perRoundCapErrorPayload,
   PER_ROUND_TOOL_LIMITS
-} = require('./utils/toolCallExecution');
-const { sendIntermediateNotification } = require('./utils/intermediateNotification');
-const {
+ } from './utils/toolCallExecution.js';
+import { sendIntermediateNotification  } from './utils/intermediateNotification.js';
+import {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
   GROK_CREDIT_EXHAUSTED_MESSAGE
-} = require('./config/systemMessages');
-const { isGrokCreditExhaustedError } = require('./ai/apiClient');
-const { clearCallNotifications } = require('./utils/notificationDedup');
-const { wrapSystemReminder, wrapUserQuery } = require('./utils/systemTags');
+ } from './config/systemMessages.js';
+import { isGrokCreditExhaustedError  } from './ai/apiClient.js';
+import { clearCallNotifications  } from './utils/notificationDedup.js';
+import { wrapSystemReminder, wrapUserQuery  } from './utils/systemTags.js';
 
 const log = createLogger('Handler');
 
@@ -803,4 +803,4 @@ async function handleMessage(ctx) {
   }
 }
 
-module.exports = { handleMessage };
+export default { handleMessage };

@@ -1,14 +1,17 @@
-// src/index.js
+﻿// src/index.js
 //
 // Main entry point for GemiX. Handles startup (directory creation, optional
 // system cleanup), initializes all platforms (WhatsApp dedicated/personal +
 // Discord), starts schedulers, internal servers, and the attachment tunnel.
 
-const fs = require('fs');
-const { execSync } = require('child_process');
-const { TASKS_DIR, DATA_DIR } = require('./config/constants');
-const { createLogger } = require('./utils/logger');
-const { STARTUP_SYSTEM_CLEANUP } = require('./config/env');
+import fs from 'fs';
+import { execSync } from 'child_process';
+import constants from './config/constants.js';
+import { createLogger } from './utils/logger.js';
+import envConfig from './config/env.js';
+
+const { TASKS_DIR, DATA_DIR } = constants;
+const { STARTUP_SYSTEM_CLEANUP } = envConfig;
 
 const log = createLogger('GemiX');
 
@@ -59,16 +62,17 @@ if (STARTUP_SYSTEM_CLEANUP && process.platform === 'linux') {
   log.debug('System cleanup skipped (set STARTUP_SYSTEM_CLEANUP=true to enable)');
 }
 
-const { initDedicatedWhatsApp } = require('./platforms/whatsapp/dedicated');
-const { initPersonalWhatsApp } = require('./platforms/whatsapp/personal');
-const { initDiscord } = require('./platforms/discord/client');
-const { startScheduler, setSchedulerWaClient } = require('./scheduler/engine');
-const { setAdminNotifierClient } = require('./utils/adminNotifier');
-const buildSandbox = require('./sandbox/buildSandbox');
-const { startInternalNotifyServer } = require('./utils/internalNotifyServer');
-const { startTempFileServer } = require('./utils/tempFileServer');
-const { GROK_MODEL } = require('./config/env');
-const { getXaiAuth, describeXaiAuthSource } = require('./config/xaiAuth');
+import { initDedicatedWhatsApp } from './platforms/whatsapp/dedicated.js';
+import { initPersonalWhatsApp } from './platforms/whatsapp/personal.js';
+import { initDiscord } from './platforms/discord/client.js';
+import { startScheduler, setSchedulerWaClient } from './scheduler/engine.js';
+import { setAdminNotifierClient } from './utils/adminNotifier.js';
+import buildSandbox from './sandbox/buildSandbox.js';
+import { startInternalNotifyServer } from './utils/internalNotifyServer.js';
+import { startTempFileServer } from './utils/tempFileServer.js';
+import { getXaiAuth, describeXaiAuthSource } from './config/xaiAuth.js';
+
+const { GROK_MODEL } = envConfig;
 
 log.info('GemiX - Avvio in corso...\n');
 
@@ -144,16 +148,18 @@ function formatProcessErrorForAdmin(err) {
 process.on('unhandledRejection', (err) => {
   log.error('❌ Unhandled rejection:', err);
   try {
-    const { notifyAdmin } = require('./utils/adminNotifier'); // dynamic require for lazy error path
-    notifyAdmin('Unhandled Rejection', formatProcessErrorForAdmin(err)).catch(() => {});
+    import('./utils/adminNotifier.js').then(({ notifyAdmin }) => {
+      notifyAdmin('Unhandled Rejection', formatProcessErrorForAdmin(err)).catch(() => {});
+    }).catch(() => {});
   } catch {}
 });
 
 process.on('uncaughtException', (err) => {
   log.error('❌ Uncaught exception:', err);
   try {
-    const { notifyAdmin } = require('./utils/adminNotifier'); // dynamic require for lazy error path
-    notifyAdmin('Uncaught Exception', formatProcessErrorForAdmin(err)).catch(() => {});
+    import('./utils/adminNotifier.js').then(({ notifyAdmin }) => {
+      notifyAdmin('Uncaught Exception', formatProcessErrorForAdmin(err)).catch(() => {});
+    }).catch(() => {});
   } catch {}
   // Do not exit: PM2 will restart on hard crashes. The error is surfaced
   // and the process continues running so in-flight tool sessions can

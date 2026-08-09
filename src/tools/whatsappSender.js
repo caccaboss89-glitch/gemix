@@ -1,4 +1,4 @@
-// src/tools/whatsappSender.js
+﻿// src/tools/whatsappSender.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -11,8 +11,8 @@
 // @gemix), so direct sends (send_whatsapp_message, scheduled reminders) follow
 // the same mention rules as current-chat replies.
 
-const { normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('../utils/text');
-const { stripDisallowedOutgoingMentions, normalizeOutgoingMentionTags, collectMentionJids } = require('../utils/waMentions');
+import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { stripDisallowedOutgoingMentions, normalizeOutgoingMentionTags, collectMentionJids  } from '../utils/waMentions.js';
 
 let dedicatedClient = null;
 
@@ -77,4 +77,4 @@ async function sendWhatsAppDirect(chatId, message, options = {}) {
   await dedicatedClient.sendMessage(chatId, message, sendOptions);
 }
 
-module.exports = { sendWhatsAppDirect, setDedicatedClient, normalizePhoneToJid };
+export default { sendWhatsAppDirect, setDedicatedClient, normalizePhoneToJid };

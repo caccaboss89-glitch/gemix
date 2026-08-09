@@ -15,6 +15,6 @@ function isNonReadableExt(ext) {
   return NON_READABLE_EXTS.has(e.startsWith('.') ? e : `.${e}`);
 }
 
-module.exports = {
+export {
   isNonReadableExt
 };

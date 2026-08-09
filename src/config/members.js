@@ -6,10 +6,12 @@
 // This module loads the active members at startup.
 //
 // If the members file is missing or invalid, the loader returns an empty list.
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('./constants');
-const { createLogger } = require('../utils/logger');
+import fs from 'fs';
+import path from 'path';
+import constants from './constants.js';
+import { createLogger } from '../utils/logger.js';
+
+const { DATA_DIR } = constants;
 
 const MEMBERS_FILE = path.join(DATA_DIR, 'members.json');
 
@@ -158,7 +160,7 @@ function isAdmin(member) {
   return member !== null && member.admin === true;
 }
 
-module.exports = {
+export {
   ACTIVE_MEMBERS,
   findMemberByWa,
   findMemberByDiscord,

@@ -1,4 +1,4 @@
-// src/tools/musicStats.js
+﻿// src/tools/musicStats.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -8,8 +8,8 @@
 // and returns a compact summary in `message`. Used exclusively by the
 // read_music_stats tool. Pure formatting + fetch.
 
-const { fetchExternal } = require('../utils/fetch');
-const { MUSIC_STATS_URL } = require('../config/env');
+import { fetchExternal  } from '../utils/fetch.js';
+import { MUSIC_STATS_URL  } from '../config/env.js';
 
 /**
  * Fetch and summarize music bot stats from the stats URL.
@@ -135,4 +135,4 @@ function formatStats(data) {
   return { success: true, message: output };
 }
 
-module.exports = { readMusicStats };
+export default { readMusicStats };

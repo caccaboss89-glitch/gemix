@@ -1,12 +1,12 @@
-// src/utils/systemState.js
+﻿// src/utils/systemState.js
 //
 // Persistent key-value store for system-wide state (media quotas, monitors, …).
 // Provides atomic read-modify-write operations via an in-memory lock.
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { createLogger } = require('./logger');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR  } from '../config/constants.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('SystemState');
 const STATE_FILE = path.join(DATA_DIR, 'systemState.json');
@@ -99,7 +99,7 @@ async function update(moduleName, newState) {
   });
 }
 
-module.exports = {
+export default {
   get,
   update
 };

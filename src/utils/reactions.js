@@ -1,4 +1,4 @@
-// src/utils/reactions.js
+﻿// src/utils/reactions.js
 //
 // Read-only rendering of emoji reactions attached to a chat message, so GemiX
 // can SEE reactions on both user and its own (bot) messages — in the current
@@ -10,7 +10,7 @@
 //   [Reactions: ❤️ x2, 👍]
 // Empty string when the message has no reactions (nothing changes, as before).
 
-const { createLogger } = require('./logger');
+import { createLogger  } from './logger.js';
 
 const log = createLogger('Reactions');
 
@@ -111,7 +111,7 @@ function discordReactionTag(msg) {
   }
 }
 
-module.exports = {
+export default {
   whatsAppReactionTagForMessages,
   discordReactionTag
 };

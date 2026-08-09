@@ -1,4 +1,4 @@
-// src/utils/buildState.js
+﻿// src/utils/buildState.js
 //
 // Per-workspace activity tracking and locking for the `build` sub-agent.
 //
@@ -13,12 +13,12 @@
 // Both pieces of state live in `<workspaceMetaDir>/.build_state.json` and
 // are written atomically (tmp + rename).
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { getBuildWorkspaceMetaDir } = require('./workspaceId');
-const { BUILD_LOCK_WAIT_MS, BUILD_HARD_TIMEOUT_MS, DATA_DIR } = require('../config/constants');
-const { createLogger } = require('./logger');
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { getBuildWorkspaceMetaDir  } from './workspaceId.js';
+import { BUILD_LOCK_WAIT_MS, BUILD_HARD_TIMEOUT_MS, DATA_DIR  } from '../config/constants.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('BuildState');
 
@@ -177,7 +177,7 @@ function listWorkspaceStates() {
   return out;
 }
 
-module.exports = {
+export default {
   touchActivity,
   acquireBuildLock,
   releaseBuildLock,

@@ -1,4 +1,4 @@
-// Central policy for how files reach xAI on /v1/responses.
+﻿// Central policy for how files reach xAI on /v1/responses.
 //
 // Every supported file is exposed through a public URL (tmpfile.link upload,
 // see utils/xaiUpload.js) and attached natively:
@@ -18,30 +18,30 @@
 // clips stay tags and reach the model only through the read_video tool (xAI
 // turns a video into ~1 frame per second, which floods the window).
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const {
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import {
   DATA_DIR,
   MAX_IMAGE_BYTES,
   MAX_HISTORY_MEDIA_IMAGES,
   MAX_HISTORY_MEDIA_FILES
-} = require('../config/constants');
-const { mimeForExtension, mimeBase } = require('../config/mimeExtensions');
-const { isNonReadableExt } = require('../config/nonReadableExts');
-const { tempDirForOwner } = require('./tempFileServer');
-const { syncFileToHistory } = require('./historySync');
-const { uploadFileForXai } = require('./xaiUpload');
-const { buildAttachmentTag } = require('./media');
-const {
+ } from '../config/constants.js';
+import { mimeForExtension, mimeBase  } from '../config/mimeExtensions.js';
+import { isNonReadableExt  } from '../config/nonReadableExts.js';
+import { tempDirForOwner  } from './tempFileServer.js';
+import { syncFileToHistory  } from './historySync.js';
+import { uploadFileForXai  } from './xaiUpload.js';
+import { buildAttachmentTag  } from './media.js';
+import {
   formatAudioTooLongNote,
   formatVideoTooLongNote,
   isAudioOverDurationLimit,
   isVideoOverDurationLimit,
   resolveMediaDurationSec
-} = require('./mediaIngressLimits');
-const { getMediaDurationSecFromPath } = require('./mediaDuration');
-const { createLogger } = require('./logger');
+ } from './mediaIngressLimits.js';
+import { getMediaDurationSecFromPath  } from './mediaDuration.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('AiFileDelivery');
 
@@ -531,7 +531,7 @@ async function deliverSyncedAttachment(opts) {
   };
 }
 
-module.exports = {
+export default {
   DELIVERY_MODE,
   XAI_IMAGE_EXTS,
   MAX_IMAGE_READS,

@@ -1,4 +1,4 @@
-// src/platforms/whatsapp/client.js
+﻿// src/platforms/whatsapp/client.js
 //
 // Shared lifecycle for both WhatsApp accounts (dedicated + personal): QR auth,
 // the startup watchdog, and reconnection with exponential backoff. The two
@@ -10,11 +10,11 @@
 // `ready` exits the process so PM2 restarts it clean, while a disconnect is
 // retried in-process (WhatsApp Web drops sessions routinely).
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const { PUPPETEER_ARGS, WA_QR_TIMEOUT } = require('../../config/constants');
-const { CHROMIUM_PATH } = require('../../config/env');
-const { isWaPuppeteerTransientError, formatWaError } = require('../../utils/waPuppeteer');
+import { Client, LocalAuth  } from 'whatsapp-web.js';
+import qrcode from 'qrcode-terminal';
+import { PUPPETEER_ARGS, WA_QR_TIMEOUT  } from '../../config/constants.js';
+import { CHROMIUM_PATH  } from '../../config/env.js';
+import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppeteer.js';
 
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
@@ -126,4 +126,4 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   return client;
 }
 
-module.exports = { createWhatsAppClient, isWaClientReady: _isReady };
+export default { createWhatsAppClient, isWaClientReady: _isReady };

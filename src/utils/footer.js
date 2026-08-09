@@ -1,9 +1,9 @@
-// src/utils/footer.js
+﻿// src/utils/footer.js
 //
 // Utilities for adding/removing the standard GemiX footer and for
 // formatting model names. Also handles scheduled message footers.
 
-const { GEMIX_FOOTER_PREFIX } = require('../config/constants');
+import { GEMIX_FOOTER_PREFIX  } from '../config/constants.js';
 
 /**
  * Append a suffix that starts with a blank line (e.g. GEMIX_FOOTER_PREFIX).
@@ -136,7 +136,7 @@ function appendResearchBadge(text, stats) {
   return appendBlock(text, `\n\n${badge}`);
 }
 
-module.exports = {
+export default {
   addFooter,
   removeFooter,
   hasFooter,

@@ -1,4 +1,4 @@
-// src/tools/sendEmail.js
+﻿// src/tools/sendEmail.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and the result is a plain object the dispatcher serializes into the
@@ -8,25 +8,25 @@
 // into a safe one, embeds any `cid:` image it references, and attaches the rest
 // — with a temp-link block appended for files too heavy to attach.
 
-const { sendEmailDirect } = require('./emailSender');
-const { resolveActiveMemberByName, findMemberByEmail } = require('../config/members');
-const { stripOutgoingDeliveryArtifacts } = require('../utils/text');
-const { toEmailAttachment } = require('../utils/attachments');
-const { buildFallbackAttachmentMessage } = require('../utils/attachmentFallback');
-const { partitionAttachments, PLATFORM } = require('../utils/attachmentDelivery');
-const {
+import { sendEmailDirect  } from './emailSender.js';
+import { resolveActiveMemberByName, findMemberByEmail  } from '../config/members.js';
+import { stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { toEmailAttachment  } from '../utils/attachments.js';
+import { buildFallbackAttachmentMessage  } from '../utils/attachmentFallback.js';
+import { partitionAttachments, PLATFORM  } from '../utils/attachmentDelivery.js';
+import {
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,
   buildNoticeBlock
-} = require('../utils/emailHtml');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { createLogger } = require('../utils/logger');
-const {
+ } from '../utils/emailHtml.js';
+import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { createLogger  } from '../utils/logger.js';
+import {
   resolveOutboundAttachments,
   alreadyContactedError,
   recordOutbound
-} = require('./outboundDelivery');
+ } from './outboundDelivery.js';
 
 const log = createLogger('SendEmail');
 
@@ -152,4 +152,4 @@ async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
   }
 }
 
-module.exports = { sendEmailTool };
+export default { sendEmailTool };

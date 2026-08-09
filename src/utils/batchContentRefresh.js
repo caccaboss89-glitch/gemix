@@ -1,14 +1,14 @@
-// Rebuild incoming content parts at batch fire (fresh quote window, same media).
+﻿// Rebuild incoming content parts at batch fire (fresh quote window, same media).
 // The whole burst becomes ONE role:user item: the handler wraps it in
 // <user_query>, and a request split across several sends has to arrive as a
 // single request, not as one message preceded by its own history.
 
-const { pickLatestBatchEntry } = require('./batchContext');
-const {
+import { pickLatestBatchEntry  } from './batchContext.js';
+import {
   buildIncomingContentPartsFromMessages,
   getRecentWhatsAppMessageIds
-} = require('../platforms/whatsapp/shared');
-const { groupWhatsAppBatchEntries } = require('./waAlbumGroup');
+ } from '../platforms/whatsapp/shared.js';
+import { groupWhatsAppBatchEntries  } from './waAlbumGroup.js';
 
 /**
  * Normalize content parts for handler / history: bare string when text-only.
@@ -144,7 +144,7 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
   return mergeBatchUnitsToContent(units, latest);
 }
 
-module.exports = {
+export default {
   materializeWhatsAppBatchContent,
   materializeDiscordBatchContent
 };

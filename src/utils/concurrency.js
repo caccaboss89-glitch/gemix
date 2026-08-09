@@ -1,4 +1,4 @@
-// src/utils/concurrency.js
+﻿// src/utils/concurrency.js
 //
 // Small helper to run async work over a list with bounded parallelism while
 // preserving input order in the results. Used to upload history attachments
@@ -36,4 +36,4 @@ async function mapWithConcurrency(items, limit, fn) {
   return results;
 }
 
-module.exports = { mapWithConcurrency };
+export default { mapWithConcurrency };

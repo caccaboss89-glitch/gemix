@@ -1,4 +1,4 @@
-// src/tools/index.js
+﻿// src/tools/index.js
 //
 // Tool directives: all tool-facing text (including the envelopes hand-written
 // inline by this dispatcher) is in English, uses no emojis, no XML wrappers,
@@ -12,33 +12,36 @@
 // failures. Permission and per-round caps are the handler's job (it owns the
 // tool list the model was offered) and are not re-checked here.
 
-const { validateToolArgs } = require('../ai/tools');
-const { generateImage, generateVideo } = require('./imagineGenerator');
-const { scheduleTasks } = require('./scheduler');
-const { readTasks } = require('./taskReader');
-const { removeTasks } = require('./taskRemover');
-const { generateFormalRequestPdf } = require('./formalRequestPdf');
-const { sendEmailTool } = require('./sendEmail');
-const { sendWhatsAppTool } = require('./sendWhatsApp');
-const { readSentMessages } = require('./sentMessagesReader');
-const { readMusicStats } = require('./musicStats');
-const { readVideo } = require('./videoReader');
-const { managePreferences } = require('./preferences');
-const { toggleReleaseNotify } = require('./releaseNotify');
-const { buildTool } = require('./build');
-const { pushBufferAttachment } = require('../utils/attachments');
-const { musicCreator } = require('./musicCreator');
-const { searchImages } = require('./imageSearch');
-const { getGroupTaskFileId } = require('../utils/userIdentifier');
-const { sanitizeFilename } = require('../utils/text');
-const { isWhatsAppPlatform } = require('../config/constants');
-const { createLogger } = require('../utils/logger');
+import { validateToolArgs } from '../ai/tools.js';
+import { generateImage, generateVideo } from './imagineGenerator.js';
+import { scheduleTasks } from './scheduler.js';
+import { readTasks } from './taskReader.js';
+import { removeTasks } from './taskRemover.js';
+import { generateFormalRequestPdf } from './formalRequestPdf.js';
+import { sendEmailTool } from './sendEmail.js';
+import { sendWhatsAppTool } from './sendWhatsApp.js';
+import { readSentMessages } from './sentMessagesReader.js';
+import { readMusicStats } from './musicStats.js';
+import { readVideo } from './videoReader.js';
+import { managePreferences } from './preferences.js';
+import { toggleReleaseNotify } from './releaseNotify.js';
+import { buildTool } from './build.js';
+import { pushBufferAttachment } from '../utils/attachments.js';
+import { musicCreator } from './musicCreator.js';
+import { searchImages } from './imageSearch.js';
+import { getGroupTaskFileId } from '../utils/userIdentifier.js';
+import { sanitizeFilename } from '../utils/text.js';
+import constants from '../config/constants.js';
+import { createLogger } from '../utils/logger.js';
+import adminNotifierExport from '../utils/adminNotifier.js';
+import { buildEngineeringNotificationMessage } from '../utils/notificationDedup.js';
 
+const { isWhatsAppPlatform } = constants;
 const {
   notifyAdmin,
   ADMIN_NOTIFIED_SUFFIX,
   ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT
-} = require('../utils/adminNotifier');
+} = adminNotifierExport;
 const log = createLogger('Tools');
 
 /**
@@ -123,7 +126,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     case 'build': {
       // Fire the "delegating to build team" banner once per AI call.
       if (typeof userCtx.sendIntermediateNotification === 'function') {
-        const { buildEngineeringNotificationMessage } = require('../utils/notificationDedup');
         await userCtx.sendIntermediateNotification('build', buildEngineeringNotificationMessage());
       }
       result = await buildTool(args, userCtx, responseCtx);
@@ -300,6 +302,6 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
   return { toolCallId: toolCall.id, result: finalResult };
 }
 
-module.exports = {
+export default {
   executeTool
 };

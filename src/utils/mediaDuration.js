@@ -1,13 +1,13 @@
-// src/utils/mediaDuration.js
+﻿// src/utils/mediaDuration.js
 // Best-effort media duration probing using ffprobe (ships with ffmpeg).
 // Used to enforce video / audio duration caps when the platform layer
 // does not expose duration metadata (e.g. Discord video uploads).
 
 const fs = require('fs').promises;
-const os = require('os');
-const path = require('path');
-const { spawn } = require('child_process');
-const { FFPROBE_PATH } = require('../config/env');
+import os from 'os';
+import path from 'path';
+import { spawn  } from 'child_process';
+import { FFPROBE_PATH  } from '../config/env.js';
 
 const FFPROBE_TIMEOUT_MS = 10_000;
 
@@ -73,4 +73,4 @@ async function getMediaDurationSecFromPath(filePath) {
   }
 }
 
-module.exports = { getMediaDurationSec, getMediaDurationSecFromPath };
+export default { getMediaDurationSec, getMediaDurationSecFromPath };

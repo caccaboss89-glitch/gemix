@@ -1,4 +1,4 @@
-// src/sandbox/buildWorkspace.js
+﻿// src/sandbox/buildWorkspace.js
 //
 // Filesystem-side helpers for the build sub-agent's workspace.
 //
@@ -11,12 +11,12 @@
 //
 // Quota: BUILD_WORKSPACE_QUOTA_MB. Enforced on writes and on attachment staging.
 
-const fs = require('fs');
-const path = require('path');
-const { BUILD_WORKSPACE_QUOTA_MB } = require('../config/constants');
-const { getBuildWorkspacePath } = require('../utils/workspaceId');
-const { sanitizeFilename } = require('../utils/text');
-const { createLogger } = require('../utils/logger');
+import fs from 'fs';
+import path from 'path';
+import { BUILD_WORKSPACE_QUOTA_MB  } from '../config/constants.js';
+import { getBuildWorkspacePath  } from '../utils/workspaceId.js';
+import { sanitizeFilename  } from '../utils/text.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('BuildWorkspace');
 
@@ -376,7 +376,7 @@ function resolveInsideWorkspace(workspaceId, relPath) {
   return abs;
 }
 
-module.exports = {
+export default {
   ensureWorkspace,
   ensureWorkspaceWritable,
   sandboxUserString,

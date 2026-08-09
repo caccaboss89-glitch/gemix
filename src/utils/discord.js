@@ -1,4 +1,4 @@
-// src/utils/discord.js
+﻿// src/utils/discord.js
 //
 // Utility for cleaning Discord-specific formatting from text before it
 // reaches the AI or is used in other contexts. Removes custom emojis,
@@ -39,4 +39,4 @@ function sanitizeDiscordThreadTitle(title, maxLen = 100) {
   return cleaned.trim().substring(0, maxLen);
 }
 
-module.exports = { removeDiscordEmoji, sanitizeDiscordThreadTitle };
+export default { removeDiscordEmoji, sanitizeDiscordThreadTitle };

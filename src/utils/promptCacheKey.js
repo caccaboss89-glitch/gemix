@@ -1,11 +1,11 @@
-// Stable per-conversation IDs for xAI sticky routing / prompt cache.
+﻿// Stable per-conversation IDs for xAI sticky routing / prompt cache.
 // Sent as body.prompt_cache_key and header x-grok-conv-id (Grok Build repo uses
 // the header on main turns). Pairs with a single byte-stable leading system in
 // input[], append-only history, and a per-turn Runtime role:user block (not a
 // second system). Exact prefix match is still required; this key only sticky-routes.
 
-const { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
-const { resolveStorageId } = require('./userPaths');
+import { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL  } from '../config/constants.js';
+import { resolveStorageId  } from './userPaths.js';
 
 const MAX_KEY_LEN = 128;
 
@@ -37,6 +37,6 @@ function generatePromptCacheKey(ctx) {
   return _capKey(_mainKeyFromParts(ctx.platform, Boolean(ctx.isGroup), storageId));
 }
 
-module.exports = {
+export default {
   generatePromptCacheKey
 };

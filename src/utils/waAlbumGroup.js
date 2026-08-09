@@ -1,4 +1,4 @@
-// Group WhatsApp multi-attachment "album" sends (one UI message, N protocol
+﻿// Group WhatsApp multi-attachment "album" sends (one UI message, N protocol
 // messages) so the model sees a single user turn with every tag + native part.
 //
 // whatsapp-web.js delivers each album item as its own Message. Timestamps are
@@ -157,7 +157,7 @@ function groupWhatsAppBatchEntries(entries) {
   return out;
 }
 
-module.exports = {
+export default {
   isPendingAlbumContinuation,
   groupWhatsAppMessages,
   groupWhatsAppBatchEntries

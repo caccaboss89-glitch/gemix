@@ -14,13 +14,15 @@
 //     }
 //   }
 
-const fs = require('fs');
+import fs from 'fs';
+import envConfig from './env.js';
+
 const {
   XAI_USE_API_KEY,
   XAI_API_KEY,
   XAI_AUTH_FILE,
   XAI_BASE_URL
-} = require('./env');
+} = envConfig;
 
 const DEFAULT_BASE_URL = 'https://api.x.ai/v1';
 
@@ -98,4 +100,4 @@ function describeXaiAuthSource() {
   return `oauth file (${XAI_AUTH_FILE})`;
 }
 
-module.exports = { getXaiAuth, describeXaiAuthSource };
+export { getXaiAuth, describeXaiAuthSource };

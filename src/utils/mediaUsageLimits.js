@@ -1,4 +1,4 @@
-// src/utils/mediaUsageLimits.js
+﻿// src/utils/mediaUsageLimits.js
 //
 // Per-user WEEKLY generation quota for images, videos and songs.
 //
@@ -15,14 +15,14 @@
 // Callers reserve a slot up-front (so parallel tool calls in one round cannot
 // exceed the cap) and refund it if the generation fails.
 
-const systemState = require('./systemState');
-const { getRomeParts } = require('./time');
-const { createLogger } = require('./logger');
-const {
+import systemState from './systemState.js';
+import { getRomeParts  } from './time.js';
+import { createLogger  } from './logger.js';
+import {
   MEDIA_WEEKLY_RESET_WEEKDAY,
   MEDIA_WEEKLY_RESET_HOUR,
   MEDIA_WEEKLY_RESET_MINUTE
-} = require('../config/env');
+ } from '../config/env.js';
 
 const log = createLogger('MediaLimits');
 
@@ -215,7 +215,7 @@ async function reserveGeneration(kind, userCtx) {
   };
 }
 
-module.exports = {
+export default {
   formatQuotaCounts,
   formatMediaQuotaResetLabel,
   clearMediaUsage,

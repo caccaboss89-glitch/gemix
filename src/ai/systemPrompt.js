@@ -1,4 +1,4 @@
-// src/ai/systemPrompt.js — static system prefix + the per-turn Runtime block.
+﻿// src/ai/systemPrompt.js — static system prefix + the per-turn Runtime block.
 //
 // Live path (handler): byte-stable buildStaticInstructions as the only input[]
 // role:system (first item), written as prose under "## " headings. XML is
@@ -15,16 +15,16 @@
 // this block is built, and each tool result names the file it added — which is
 // what the model reads for the rest of the turn.
 
-const { getRomeTime, formatTimestamp } = require('../utils/time');
-const { ACTIVE_MEMBERS } = require('../config/members');
-const { ADMIN_NAME, GROK_MODEL } = require('../config/env');
-const { getModelDisplayName } = require('../utils/footer');
-const { defaultSettings, customizedFields } = require('../utils/settingsStore');
-const { PLATFORM_WA_PERSONAL, BUILD_WORKSPACE_TTL_LABEL } = require('../config/constants');
-const { PRIVACY_WIPE_COMMAND } = require('../config/systemMessages');
+import { getRomeTime, formatTimestamp  } from '../utils/time.js';
+import { ACTIVE_MEMBERS  } from '../config/members.js';
+import { ADMIN_NAME, GROK_MODEL  } from '../config/env.js';
+import { getModelDisplayName  } from '../utils/footer.js';
+import { defaultSettings, customizedFields  } from '../utils/settingsStore.js';
+import { PLATFORM_WA_PERSONAL, BUILD_WORKSPACE_TTL_LABEL  } from '../config/constants.js';
+import { PRIVACY_WIPE_COMMAND  } from '../config/systemMessages.js';
 
-const { formatParticipantsForPrompt } = require('../utils/waParticipants');
-const {
+import { formatParticipantsForPrompt  } from '../utils/waParticipants.js';
+import {
   PROFILE,
   resolveProfile,
   buildAnswerLines,
@@ -33,10 +33,10 @@ const {
   buildAudienceLines,
   getCapabilities,
   profileHasMediaQuota
-} = require('../config/platformCapabilities');
-const { getToolsForUser, toolNamesToSet } = require('./tools');
-const { formatQuotaCounts, formatMediaQuotaResetLabel } = require('../utils/mediaUsageLimits');
-const { escapeXml } = require('../utils/xmlEscape');
+ } from '../config/platformCapabilities.js';
+import { getToolsForUser, toolNamesToSet  } from './tools.js';
+import { formatQuotaCounts, formatMediaQuotaResetLabel  } from '../utils/mediaUsageLimits.js';
+import { escapeXml  } from '../utils/xmlEscape.js';
 
 // WhatsApp has rendered bullets, numbered lists and fenced blocks since 2024.
 const WA_FORMAT =
@@ -365,7 +365,7 @@ function _macro(tag, blocks) {
   return `<${tag}>\n${body}\n</${tag}>`;
 }
 
-module.exports = {
+export default {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
   promptToolsFingerprint

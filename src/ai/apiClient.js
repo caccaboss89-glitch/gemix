@@ -1,19 +1,19 @@
-// src/ai/apiClient.js
+﻿// src/ai/apiClient.js
 //
 // Centralized API client for all direct xAI LLM calls (`/v1/responses`).
 // Reads the OAuth token from config/xaiAuth.js on every attempt (the auth
 // file is refreshed externally), provides retry + timeout logic, structured
 // request/response logging, and log directory quota enforcement.
 
-const fs = require('fs');
-const path = require('path');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { MAX_API_RETRIES, API_TIMEOUT_MS } = require('../config/constants');
-const { XAI_USE_API_KEY } = require('../config/env');
-const { getXaiAuth } = require('../config/xaiAuth');
-const { createLogger } = require('../utils/logger');
-const { refreshHermesOAuth } = require('../utils/hermesAuthRefresh');
-const { isXaiFileDownloadError } = require('../utils/refreshXaiMessageUrls');
+import fs from 'fs';
+import path from 'path';
+import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { MAX_API_RETRIES, API_TIMEOUT_MS  } from '../config/constants.js';
+import { XAI_USE_API_KEY  } from '../config/env.js';
+import { getXaiAuth  } from '../config/xaiAuth.js';
+import { createLogger  } from '../utils/logger.js';
+import { refreshHermesOAuth  } from '../utils/hermesAuthRefresh.js';
+import { isXaiFileDownloadError  } from '../utils/refreshXaiMessageUrls.js';
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
@@ -21,7 +21,7 @@ const LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days (monthly retention)
 const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour (scan interval; age gate is monthly)
 const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
 
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 /**
  * Enforce a total size quota on the log directory by deleting the oldest
@@ -502,7 +502,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   throw new Error('xAI authenticated fetch failed');
 }
 
-module.exports = {
+export default {
   callResponsesModel,
   callApiWithRetry,
   logApiResponse,

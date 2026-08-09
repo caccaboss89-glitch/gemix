@@ -1,51 +1,54 @@
-// src/platforms/discord/client.js
+﻿// src/platforms/discord/client.js
 //
 // Discord platform adapter: initializes the discord.js client, handles
 // messageCreate events in forum threads, builds multimodal history,
 // and sends responses (text + attachments) back to Discord.
 // Only activates inside the configured DISCORD_THREAD_NAME category.
 
-const { Client, GatewayIntentBits, Partials, AttachmentBuilder, Events } = require('discord.js');
-const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
-const { DISCORD_THREAD_NAME, MAX_HISTORY, PLATFORM_DISCORD } = require('../../config/constants');
+import { Client, GatewayIntentBits, Partials, AttachmentBuilder, Events } from 'discord.js';
+import envConfig from '../../config/env.js';
+import constants from '../../config/constants.js';
 
-const { identifyUser } = require('../../utils/userIdentifier');
-const { formatTimestamp } = require('../../utils/time');
-const {
+const { BOT_TOKEN, GUILD_ID } = envConfig;
+const { DISCORD_THREAD_NAME, MAX_HISTORY, PLATFORM_DISCORD } = constants;
+
+import { identifyUser } from '../../utils/userIdentifier.js';
+import { formatTimestamp } from '../../utils/time.js';
+import {
   MAX_IMAGE_READS,
   MAX_FILE_READS,
   classifyAiFileDelivery,
   isVideoAttachment,
   DELIVERY_MODE
-} = require('../../utils/aiFileDelivery');
-const { isDiscordAttachmentOversize } = require('../../utils/discordAttachmentFetch');
-const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
-const { mapWithConcurrency } = require('../../utils/concurrency');
-
-const { enqueueBatchedTurn } = require('../../utils/batchIngress');
-const { pickLatestBatchEntry } = require('../../utils/batchContext');
-const {
+} from '../../utils/aiFileDelivery.js';
+import { isDiscordAttachmentOversize } from '../../utils/discordAttachmentFetch.js';
+import { ingressDiscordAttachment, capHistoryImageParts } from '../../utils/incomingMediaIngress.js';
+import { mapWithConcurrency } from '../../utils/concurrency.js';
+import { enqueueBatchedTurn } from '../../utils/batchIngress.js';
+import { pickLatestBatchEntry } from '../../utils/batchContext.js';
+import {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
   stripRedundantFilenameBesideAttachmentTag
-} = require('../../utils/attachmentCaption');
-const { createLogger } = require('../../utils/logger');
-const { toDiscordAttachmentArgs } = require('../../utils/attachments');
-const { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } = require('../../utils/attachmentFallback');
-const { partitionAttachments, PLATFORM } = require('../../utils/attachmentDelivery');
-const {
+} from '../../utils/attachmentCaption.js';
+import { createLogger } from '../../utils/logger.js';
+import { toDiscordAttachmentArgs } from '../../utils/attachments.js';
+import { sendAttachmentsWithFallback, buildFallbackAttachmentMessage } from '../../utils/attachmentFallback.js';
+import { partitionAttachments, PLATFORM } from '../../utils/attachmentDelivery.js';
+import {
   stripOutgoingDeliveryArtifacts,
   cleanIncomingText,
   formatLabeledUserContent
-} = require('../../utils/text');
-const { sanitizeDiscordThreadTitle } = require('../../utils/discord');
-const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
-const { runTurnPipeline } = require('../../utils/turnPipeline');
-const { processDiscordQuotedReply } = require('../../utils/quoteIngress');
-const { materializeDiscordBatchContent } = require('../../utils/batchContentRefresh');
-const { discordReactionTag } = require('../../utils/reactions');
-const { isSystemMessage } = require('../../config/systemMessages');
-const { wrapSystemNotification } = require('../../utils/systemTags');
+} from '../../utils/text.js';
+import { notifyAdmin } from '../../utils/adminNotifier.js';
+import { sanitizeDiscordThreadTitle  } from '../../utils/discord.js';
+import { fetchHistoryWithTimeout  } from '../../utils/historyFetch.js';
+import { runTurnPipeline  } from '../../utils/turnPipeline.js';
+import { processDiscordQuotedReply  } from '../../utils/quoteIngress.js';
+import { materializeDiscordBatchContent  } from '../../utils/batchContentRefresh.js';
+import { discordReactionTag  } from '../../utils/reactions.js';
+import { isSystemMessage  } from '../../config/systemMessages.js';
+import { wrapSystemNotification  } from '../../utils/systemTags.js';
 
 const log = createLogger('DISCORD');
 
@@ -452,7 +455,6 @@ async function _handleDiscordBatch(entries) {
     },
     onDeliverError: async (_ctx, err) => {
       try {
-        const { notifyAdmin } = require('../../utils/adminNotifier');
         await notifyAdmin('Discord Chat Delivery', `Failed to send response in channel ${channel.id}: ${err.message}`);
       } catch { /* ignore */ }
       try {
@@ -600,4 +602,4 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
   return { history, recentMessageIds };
 }
 
-module.exports = { initDiscord };
+export default { initDiscord };

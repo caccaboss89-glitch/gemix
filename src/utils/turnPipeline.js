@@ -1,10 +1,12 @@
-// Shared batch→history→handleMessage→deliver sequence for all platforms.
+﻿// Shared batch→history→handleMessage→deliver sequence for all platforms.
 
-const responseLock = require('./responseLock');
-const { pickLatestBatchEntry, filterBatchToTriggerSpeaker } = require('./batchContext');
-const { normalizeHistoryLoad } = require('./historyFetch');
+import responseLock from './responseLock.js';
+import { pickLatestBatchEntry, filterBatchToTriggerSpeaker } from './batchContext.js';
+import { normalizeHistoryLoad } from './historyFetch.js';
+import constants from '../config/constants.js';
+import { handleMessage } from '../handler.js';
 
-const { BATCH_LOCK_TTL_MS } = require('../config/constants');
+const { BATCH_LOCK_TTL_MS } = constants;
 
 /** Keep or re-acquire the per-chat lock before running a batched turn. */
 function _ensurePipelineLock(lockKey, stopLockRenew) {
@@ -122,7 +124,6 @@ async function runTurnPipeline(opts) {
       entries, history, historyLoadIncomplete, latest, first, session
     });
     if (ctx && typeof ctx.then === 'function') ctx = await ctx;
-    const { handleMessage } = require('../handler');
     const response = await handleMessage(ctx);
 
     await deliverTurn(ctx, response);
@@ -140,4 +141,4 @@ async function runTurnPipeline(opts) {
   }
 }
 
-module.exports = { runTurnPipeline };
+export default { runTurnPipeline };

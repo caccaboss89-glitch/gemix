@@ -1,4 +1,4 @@
-// src/scheduler/engine.js
+﻿// src/scheduler/engine.js
 //
 // Core periodic scheduler: executes due tasks from per-user/group JSON files,
 // advances recurring tasks, delivers via WhatsApp (using dedicated client),
@@ -6,20 +6,20 @@
 // Uses per-file locking via taskStore.
 
 const fsPromises = require('fs').promises;
-const fs = require('fs');
-const { TASKS_DIR, SCHEDULER_INTERVAL_MS, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
-const { getRomeISO } = require('../utils/time');
-const { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped } = require('../utils/recurrence');
-const { addScheduledFooter } = require('../utils/footer');
-const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
-const { checkNewRelease } = require('./releaseMonitor');
-const { modifyTaskFile, readTaskFile } = require('../utils/taskStore');
-const { createLogger } = require('../utils/logger');
-const { stripVoiceTags, normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('../utils/text');
-const { sendWhatsAppDirect } = require('../tools/whatsappSender');
-const { listWorkspaceStates } = require('../utils/buildState');
-const buildSandbox = require('../sandbox/buildSandbox');
-const { wipeWorkspace } = require('../sandbox/buildWorkspace');
+import fs from 'fs';
+import { TASKS_DIR, SCHEDULER_INTERVAL_MS, BUILD_WORKSPACE_TTL_MS  } from '../config/constants.js';
+import { getRomeISO  } from '../utils/time.js';
+import { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped  } from '../utils/recurrence.js';
+import { addScheduledFooter  } from '../utils/footer.js';
+import { checkAndSendMusicWrap  } from './musicWrapMonitor.js';
+import { checkNewRelease  } from './releaseMonitor.js';
+import { modifyTaskFile, readTaskFile  } from '../utils/taskStore.js';
+import { createLogger  } from '../utils/logger.js';
+import { stripVoiceTags, normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
+import { listWorkspaceStates  } from '../utils/buildState.js';
+import buildSandbox from '../sandbox/buildSandbox.js';
+import { wipeWorkspace  } from '../sandbox/buildWorkspace.js';
 
 const log = createLogger('Scheduler');
 
@@ -284,4 +284,4 @@ async function checkAndExecuteTasks() {
   }
 }
 
-module.exports = { startScheduler, setSchedulerWaClient };
+export default { startScheduler, setSchedulerWaClient };

@@ -4,10 +4,10 @@
 // Loads .env once, validates REQUIRED vars (fail-fast), exports plain values.
 // Never access process.env directly anywhere else in the codebase.
 
-require('dotenv').config();
+import 'dotenv/config';
 
-const path = require('path');
-const os = require('os');
+import path from 'path';
+import os from 'os';
 
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
 
@@ -49,7 +49,7 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-module.exports = {
+export default {
   GROK_MODEL: process.env.GROK_MODEL,
 
   // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.

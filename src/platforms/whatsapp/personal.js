@@ -1,4 +1,4 @@
-// src/platforms/whatsapp/personal.js
+﻿// src/platforms/whatsapp/personal.js
 //
 // Personal WhatsApp account client (secondary number).
 // Admin WhatsApp account: 2-participant chats (admin + one user). GemiX runs only
@@ -6,25 +6,26 @@
 // per chat pair (not per caller). History: footer text opens a GemiX block; following
 // attachment-only fromMe messages stay GemiX until the other user writes or admin interrupts.
 
-const { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } = require('./shared');
-const { createWhatsAppClient } = require('./client');
-const { materializeWhatsAppBatchContent } = require('../../utils/batchContentRefresh');
-const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
+import { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } from './shared.js';
+import { createWhatsAppClient } from './client.js';
+import { materializeWhatsAppBatchContent } from '../../utils/batchContentRefresh.js';
+import { getDedicatedClient, isDedicatedClientReady } from './dedicated.js';
+import { identifyUser } from '../../utils/userIdentifier.js';
+import { addFooter, removeFooter, getModelDisplayName, hasFooter } from '../../utils/footer.js';
+import constants from '../../config/constants.js';
+import { createLogger } from '../../utils/logger.js';
+import { enqueueBatchedTurn, peekPendingBatchLastEntry } from '../../utils/batchIngress.js';
+import { isPendingAlbumContinuation } from '../../utils/waAlbumGroup.js';
+import { withWaPuppeteerRetry } from '../../utils/waPuppeteer.js';
+import { resolveWaSender, normalizePhoneJid } from '../../utils/waContact.js';
+import { resolvePersonalChatStorageId } from '../../utils/userPaths.js';
+import { fetchHistoryWithTimeout } from '../../utils/historyFetch.js';
+import { runTurnPipeline } from '../../utils/turnPipeline.js';
+import { WhatsAppPresence } from '../../utils/presence.js';
+import { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } from './privacyGate.js';
+import { notifyAdmin } from '../../utils/adminNotifier.js';
 
-const { identifyUser } = require('../../utils/userIdentifier');
-const { addFooter, removeFooter, getModelDisplayName, hasFooter } = require('../../utils/footer');
-const { PLATFORM_WA_PERSONAL } = require('../../config/constants');
-const { createLogger } = require('../../utils/logger');
-const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
-const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
-const { withWaPuppeteerRetry } = require('../../utils/waPuppeteer');
-const { resolveWaSender, normalizePhoneJid } = require('../../utils/waContact');
-
-const { resolvePersonalChatStorageId } = require('../../utils/userPaths');
-const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
-const { runTurnPipeline } = require('../../utils/turnPipeline');
-const { WhatsAppPresence } = require('../../utils/presence');
-const { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } = require('./privacyGate');
+const { PLATFORM_WA_PERSONAL } = constants;
 
 const log = createLogger('WA-PERSONAL');
 
@@ -229,10 +230,9 @@ async function _handlePersonalBatch(entries) {
       await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_PERSONAL });
     },
     onDeliverError: async () => {
-      const { notifyAdmin } = require('../../utils/adminNotifier');
       await notifyAdmin('WA Personal Chat Delivery', `Failed to send response to chat ${chat.id._serialized}`);
     }
   });
 }
 
-module.exports = { initPersonalWhatsApp };
+export default { initPersonalWhatsApp };

@@ -1,12 +1,12 @@
-// src/utils/mediaIngressLimits.js
+﻿// src/utils/mediaIngressLimits.js
 //
 // Shared duration caps for media entering the model (current message,
 // chat history). Byte caps live in aiFileDelivery.js.
 // Discord downloads: 25 MB (discordAttachmentFetch.js).
 
-const fs = require('fs');
-const { MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = require('../config/constants');
-const { getMediaDurationSec, getMediaDurationSecFromPath } = require('./mediaDuration');
+import fs from 'fs';
+import { MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S  } from '../config/constants.js';
+import { getMediaDurationSec, getMediaDurationSecFromPath  } from './mediaDuration.js';
 
 function formatAudioTooLongNote(durationSec) {
   const d = Number(durationSec);
@@ -55,7 +55,7 @@ async function resolveMediaDurationSec({ metadataSec = 0, buffer = null, extHint
   return 0;
 }
 
-module.exports = {
+export default {
   formatAudioTooLongNote,
   formatVideoTooLongNote,
   isAudioOverDurationLimit,

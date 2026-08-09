@@ -1,4 +1,4 @@
-// src/utils/recurrence.js
+﻿// src/utils/recurrence.js
 //
 // Recurrence model for scheduled reminders, expressed with a compact RRULE
 // string (RFC 5545 subset) so the model writes one short parameter instead of a
@@ -19,7 +19,7 @@
 //   - scheduler/engine.js (advance a due recurring task to its next run)
 //   - tools/taskReader.js (render a human-readable recurrence label)
 
-const { convertRomeLocalToISO, getRomeParts } = require('./time');
+import { convertRomeLocalToISO, getRomeParts  } from './time.js';
 
 const VALID_FREQS = ['HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY'];
 
@@ -309,7 +309,7 @@ function describeRecurrence(rec, lang = 'en') {
   return interval === 1 ? `${prefix} ${word}` : `${prefix} ${interval} ${word}`;
 }
 
-module.exports = {
+export default {
   toRomeISO: _toRomeISO,
   parseRecurrenceRule,
   normalizePersistedRecurrence,

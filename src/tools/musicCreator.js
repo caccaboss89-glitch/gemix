@@ -1,4 +1,4 @@
-// src/tools/musicCreator.js
+﻿// src/tools/musicCreator.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -8,12 +8,12 @@
 // Music generation via Lyria on OpenRouter (SSE streaming).
 // Uses dedicated OPENROUTER_API_KEY and MUSIC_MODEL environment variables
 // (Lyria is not available via xAI/Grok).
-const { createLogger } = require('../utils/logger');
-const { MUSIC_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_HTTP_REFERER } = require('../config/env');
-const { reserveGeneration } = require('../utils/mediaUsageLimits');
-const { fetchWithTimeout } = require('../utils/fetch');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { convertMp3ToWhatsAppOpus } = require('./voiceMessage');
+import { createLogger  } from '../utils/logger.js';
+import { MUSIC_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_HTTP_REFERER  } from '../config/env.js';
+import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
+import { fetchWithTimeout  } from '../utils/fetch.js';
+import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { convertMp3ToWhatsAppOpus  } from './voiceMessage.js';
 
 const log = createLogger('MusicCreator');
 
@@ -209,4 +209,4 @@ async function musicCreator(prompt, userCtx) {
   }
 }
 
-module.exports = { musicCreator };
+export default { musicCreator };

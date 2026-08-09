@@ -1,4 +1,4 @@
-// src/utils/systemTags.js
+﻿// src/utils/systemTags.js
 //
 // XML wrappers for the two kinds of program-owned message the model can see in
 // input[]. Both are sent with role:user, never role:system:
@@ -81,7 +81,7 @@ function wrapUserQuery(content) {
   return parts;
 }
 
-module.exports = {
+export default {
   wrapSystemNotification,
   wrapSystemReminder,
   wrapUserQuery

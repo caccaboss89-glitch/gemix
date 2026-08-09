@@ -13,8 +13,12 @@
 //
 // If a value depends on the deployment, it goes in .env. Otherwise it lives
 // here.
-const path = require('path');
-const { MAINTENANCE_PREFIX } = require('./systemMessages');
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import { MAINTENANCE_PREFIX } from './systemMessages.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const MAINTENANCE_RELEASE_NOTIFY_COMMAND = '/updates';
 
@@ -37,7 +41,7 @@ function formatDurationLabel(ms) {
   return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
 }
 
-module.exports = {
+export default {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
 
   // Maintenance mode (MAINTENANCE_MODE itself is a deployment flag: read it from env.js)

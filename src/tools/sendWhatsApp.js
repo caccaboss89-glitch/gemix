@@ -1,4 +1,4 @@
-// src/tools/sendWhatsApp.js
+﻿// src/tools/sendWhatsApp.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and the result is a plain object the dispatcher serializes into the
@@ -8,18 +8,18 @@
 // (replies there ride the structured response). Text goes first, then any files,
 // with the usual temp-link fallback for what WhatsApp will not carry directly.
 
-const { sendWhatsAppDirect, normalizePhoneToJid } = require('./whatsappSender');
-const { resolveActiveMemberByName, findMemberByWa } = require('../config/members');
-const { stripOutgoingDeliveryArtifacts } = require('../utils/text');
-const { sendAttachmentsWithFallback } = require('../utils/attachmentFallback');
-const { sendWhatsAppAttachment, PLATFORM } = require('../utils/attachmentDelivery');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { createLogger } = require('../utils/logger');
-const {
+import { sendWhatsAppDirect, normalizePhoneToJid  } from './whatsappSender.js';
+import { resolveActiveMemberByName, findMemberByWa  } from '../config/members.js';
+import { stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { sendAttachmentsWithFallback  } from '../utils/attachmentFallback.js';
+import { sendWhatsAppAttachment, PLATFORM  } from '../utils/attachmentDelivery.js';
+import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { createLogger  } from '../utils/logger.js';
+import {
   resolveOutboundAttachments,
   alreadyContactedError,
   recordOutbound
-} = require('./outboundDelivery');
+ } from './outboundDelivery.js';
 
 const log = createLogger('SendWhatsApp');
 
@@ -139,4 +139,4 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
   }
 }
 
-module.exports = { sendWhatsAppTool };
+export default { sendWhatsAppTool };

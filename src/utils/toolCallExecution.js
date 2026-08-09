@@ -1,4 +1,4 @@
-// src/utils/toolCallExecution.js
+﻿// src/utils/toolCallExecution.js
 //
 // Shared helpers for ordering and batching tool calls within one model turn.
 
@@ -116,7 +116,7 @@ function perRoundCapErrorPayload(toolName, limit) {
   });
 }
 
-module.exports = {
+export default {
   partitionHandlerToolCalls,
   PER_ROUND_TOOL_LIMITS,
   perRoundCappedDuplicateIds,

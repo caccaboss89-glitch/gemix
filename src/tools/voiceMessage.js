@@ -1,4 +1,4 @@
-// src/tools/voiceMessage.js
+﻿// src/tools/voiceMessage.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -11,15 +11,15 @@
 // MP3-to-Opus transcode. Strips vocal tags for Google TTS input (speech
 // tags are written by GemiX itself in the voice reply `response` text).
 
-const googleTTS = require('google-tts-api');
-const { spawn } = require('child_process');
-const { fetchWithTimeout, readResponseBodyWithTimeout } = require('../utils/fetch');
-const { fetchXaiWithOAuthRetry } = require('../ai/apiClient');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { createLogger } = require('../utils/logger');
-const { defaultSettings } = require('../utils/settingsStore');
-const { FFMPEG_PATH, XAI_TTS_ENABLED, XAI_TTS_VOICE } = require('../config/env');
-const { getXaiAuth } = require('../config/xaiAuth');
+import googleTTS from 'google-tts-api';
+import { spawn  } from 'child_process';
+import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
+import { fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
+import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { createLogger  } from '../utils/logger.js';
+import { defaultSettings  } from '../utils/settingsStore.js';
+import { FFMPEG_PATH, XAI_TTS_ENABLED, XAI_TTS_VOICE  } from '../config/env.js';
+import { getXaiAuth  } from '../config/xaiAuth.js';
 
 const log = createLogger('TTS');
 
@@ -252,4 +252,4 @@ async function googleTranslateTTS(text, language, signal) {
   return convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
 }
 
-module.exports = { generateVoice, convertMp3ToWhatsAppOpus };
+export default { generateVoice, convertMp3ToWhatsAppOpus };

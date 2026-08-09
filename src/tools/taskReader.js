@@ -1,4 +1,4 @@
-// src/tools/taskReader.js
+﻿// src/tools/taskReader.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -9,10 +9,10 @@
 // human-readable list for the main brain. Companion to taskRemover and
 // scheduler.
 
-const { readTaskFile } = require('../utils/taskStore');
-const { formatTimestamp } = require('../utils/time');
-const { normalizePersistedRecurrence, describeRecurrence } = require('../utils/recurrence');
-const { formatTaskRecipient } = require('../utils/taskRecipient');
+import { readTaskFile  } from '../utils/taskStore.js';
+import { formatTimestamp  } from '../utils/time.js';
+import { normalizePersistedRecurrence, describeRecurrence  } from '../utils/recurrence.js';
+import { formatTaskRecipient  } from '../utils/taskRecipient.js';
 
 /**
  * Format a single task line.
@@ -79,4 +79,4 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
   return { success: true, message: result || 'No reminders scheduled.' };
 }
 
-module.exports = { readTasks };
+export default { readTasks };

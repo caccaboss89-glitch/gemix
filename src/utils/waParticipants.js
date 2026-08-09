@@ -1,8 +1,9 @@
-// Build the roster of a WhatsApp group (name + phone number per member) so the
+﻿// Build the roster of a WhatsApp group (name + phone number per member) so the
 // prompt can show GemiX who is in the chat and let it tag them with
 // @<phone-number>. GemiX itself is always included for context.
 
-const { createLogger } = require('./logger');
+import { createLogger } from './logger.js';
+import { getDedicatedClient } from '../platforms/whatsapp/dedicated.js';
 
 const log = createLogger('WaParticipants');
 
@@ -15,8 +16,6 @@ const log = createLogger('WaParticipants');
  * @returns {Promise<Array<{number:string,name:string,isGemix:boolean}>>}
  */
 async function buildGroupParticipants(chat) {
-  // Lazy require avoids a circular dependency (dedicated.js → shared.js → here).
-  const { getDedicatedClient } = require('../platforms/whatsapp/dedicated');
   const client = getDedicatedClient();
   if (!client) return [];
 
@@ -83,4 +82,4 @@ function formatParticipantsForPrompt(participants, esc) {
     .join(', ');
 }
 
-module.exports = { buildGroupParticipants, formatParticipantsForPrompt };
+export default { buildGroupParticipants, formatParticipantsForPrompt };

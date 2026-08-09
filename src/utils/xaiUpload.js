@@ -1,4 +1,4 @@
-// src/utils/xaiUpload.js
+﻿// src/utils/xaiUpload.js
 //
 // Public file hosting for xAI ingestion (input_file / input_image and
 // image/video reference URLs). Files are uploaded to tmpfile.link and the
@@ -11,9 +11,9 @@
 // The GemiX attachment tunnel (tempFileServer + Caddy) is NOT used for xAI:
 // it only serves temporary download links sent to end users.
 
-const fs = require('fs');
-const path = require('path');
-const { createLogger } = require('./logger');
+import fs from 'fs';
+import path from 'path';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('XaiUpload');
 
@@ -122,4 +122,4 @@ function clearXaiUploadCache() {
   _pendingUploads.clear();
 }
 
-module.exports = { uploadFileForXai, clearXaiUploadCache };
+export default { uploadFileForXai, clearXaiUploadCache };

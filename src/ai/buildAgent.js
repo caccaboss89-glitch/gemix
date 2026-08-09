@@ -1,27 +1,27 @@
-// src/ai/buildAgent.js
+﻿// src/ai/buildAgent.js
 //
 // Build sub-agent runner: Grok Build CLI inside the per-workspace Docker sandbox.
 // Host: immutable --rules, auth via getXaiAuth (token + baseUrl) as process env,
 // hard timeout, harvest new/changed workspace files into the delivery path.
 // No host-side write_file/edit_file/bash tool loop and no structured attachments JSON.
 
-const { getXaiAuth } = require('../config/xaiAuth');
-const {
+import { getXaiAuth  } from '../config/xaiAuth.js';
+import {
   BUILD_HARD_TIMEOUT_MS,
   BUILD_MAX_ROUNDS,
   BUILD_WORKSPACE_QUOTA_MB,
   BUILD_WORKSPACE_TTL_LABEL
-} = require('../config/constants');
-const { renewBuildLock } = require('../utils/buildState');
-const {
+ } from '../config/constants.js';
+import { renewBuildLock  } from '../utils/buildState.js';
+import {
   listWorkspaceFiles,
   ensureWorkspaceWritable,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile
-} = require('../sandbox/buildWorkspace');
-const buildSandbox = require('../sandbox/buildSandbox');
-const { getRomeTime } = require('../utils/time');
-const { createLogger } = require('../utils/logger');
+ } from '../sandbox/buildWorkspace.js';
+import buildSandbox from '../sandbox/buildSandbox.js';
+import { getRomeTime  } from '../utils/time.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('BuildAgent');
 
@@ -309,7 +309,7 @@ async function runBuildAgent({
   };
 }
 
-module.exports = {
+export default {
   runBuildAgent,
   buildGrokRules,
   DELIVERY_SELECTION_NOTICE

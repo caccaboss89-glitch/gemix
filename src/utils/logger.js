@@ -5,7 +5,9 @@
 // environment variable (or the centralized value in env.js).
 // All loggers can be prefixed with a module name for easier filtering.
 
-const { LOG_LEVEL } = require('../config/env');
+import envConfig from '../config/env.js';
+
+const { LOG_LEVEL } = envConfig;
 // silent is -1 so no level (error..debug) passes the <= threshold.
 const LEVELS = { silent: -1, error: 0, warn: 1, info: 2, debug: 3 };
 
@@ -58,4 +60,4 @@ function createLogger(prefix = '') {
   };
 }
 
-module.exports = { createLogger };
+export { createLogger };

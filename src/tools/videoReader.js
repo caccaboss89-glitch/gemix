@@ -1,4 +1,4 @@
-// src/tools/videoReader.js
+﻿// src/tools/videoReader.js
 //
 // read_video: load one video that is already in this chat's history.
 //
@@ -14,13 +14,13 @@
 // rather than a fix for our own context budget. Web images and X videos are
 // already covered by xAI's own server-side tools.
 
-const fs = require('fs');
-const path = require('path');
-const { buildXaiFileParts, isVideoAttachment } = require('../utils/aiFileDelivery');
-const { getHistoryDir } = require('../utils/userPaths');
-const { mimeForExtension } = require('../config/mimeExtensions');
-const { MAX_VIDEO_DURATION_S } = require('../config/constants');
-const { createLogger } = require('../utils/logger');
+import fs from 'fs';
+import path from 'path';
+import { buildXaiFileParts, isVideoAttachment  } from '../utils/aiFileDelivery.js';
+import { getHistoryDir  } from '../utils/userPaths.js';
+import { mimeForExtension  } from '../config/mimeExtensions.js';
+import { MAX_VIDEO_DURATION_S  } from '../config/constants.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('VideoReader');
 
@@ -100,4 +100,4 @@ async function readVideo(args, userCtx) {
   return [{ type: 'text', text: JSON.stringify(payload) }, part];
 }
 
-module.exports = { readVideo };
+export default { readVideo };

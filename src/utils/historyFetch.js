@@ -1,4 +1,4 @@
-// Shared timeout when loading chat history at batch fire (WA + Discord).
+﻿// Shared timeout when loading chat history at batch fire (WA + Discord).
 
 const HISTORY_FETCH_TIMEOUT_MS = 15_000;
 
@@ -49,7 +49,7 @@ async function fetchHistoryWithTimeout(buildFn, log, label) {
   }
 }
 
-module.exports = {
+export default {
   fetchHistoryWithTimeout,
   normalizeHistoryLoad
 };

@@ -1,14 +1,14 @@
-// src/utils/taskStore.js
+﻿// src/utils/taskStore.js
 //
 // Persistent storage layer for scheduled reminders (reminders).
 // Handles read/write/modify operations on per-user/group task files
 // with per-file async locking to prevent race conditions.
 
-const fs = require('fs');
+import fs from 'fs';
 const fsPromises = require('fs').promises;
-const path = require('path');
-const { TASKS_DIR } = require('../config/constants');
-const { withKeyedLock } = require('./keyedLock');
+import path from 'path';
+import { TASKS_DIR  } from '../config/constants.js';
+import { withKeyedLock  } from './keyedLock.js';
 
 if (!fs.existsSync(TASKS_DIR)) {
   fs.mkdirSync(TASKS_DIR, { recursive: true });
@@ -94,4 +94,4 @@ async function modifyTaskFile(fileId, fn) {
   });
 }
 
-module.exports = { readTaskFile, writeTaskFile, modifyTaskFile };
+export default { readTaskFile, writeTaskFile, modifyTaskFile };

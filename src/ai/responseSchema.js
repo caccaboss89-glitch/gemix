@@ -1,4 +1,4 @@
-// src/ai/responseSchema.js
+﻿// src/ai/responseSchema.js
 //
 // Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
 //
@@ -15,7 +15,7 @@
 // cost the whole cached prompt. `required` only means the key must be present —
 // "" is a valid value and parseStructuredReply reads it as "no rename".
 //
-const { MAX_TTS_CHARS } = require('../config/constants');
+import { MAX_TTS_CHARS  } from '../config/constants.js';
 
 // Which markup actually renders is stated once, in the "This chat" section of
 // the system prompt — not restated here.
@@ -274,7 +274,7 @@ function parseStructuredReply(raw) {
   return { structured: true, text, title, attachments, voice };
 }
 
-module.exports = {
+export default {
   buildGemixResponseFormat,
   applyResponsesTextFormat,
   parseStructuredReply

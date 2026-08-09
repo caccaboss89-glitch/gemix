@@ -1,9 +1,9 @@
-// src/utils/attachmentCaption.js
+﻿// src/utils/attachmentCaption.js
 //
 // Strip auto-filled attachment filenames from message bodies (WhatsApp puts
 // the document name in .body when there is no caption; Discord rarely does).
 
-const { sanitizeFilename } = require('./text');
+import { sanitizeFilename  } from './text.js';
 
 /** "name(2).ext" -> "name.ext" (history rename-on-collision). */
 function basenameWithoutCollisionCounter(name) {
@@ -84,7 +84,7 @@ function stripRedundantFilenameBesideAttachmentTag(textBody, tag, nameHints) {
   return textBody.trim();
 }
 
-module.exports = {
+export default {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
   stripRedundantFilenameBesideAttachmentTag

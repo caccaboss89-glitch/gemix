@@ -1,23 +1,22 @@
-// src/scheduler/releaseMonitor.js
+﻿// src/scheduler/releaseMonitor.js
 //
 // Monitors GitHub releases and notifies subscribed chats (via releaseNotify)
 // with release notes; inline HTML/markdown images and audio links are stripped
 // from the text and sent as separate WhatsApp media messages.
 // Persists last seen release ID via systemState.
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { GITHUB_TOKEN, GITHUB_REPO } = require('../config/env');
-const { getSubscribedChats } = require('../tools/releaseNotify');
-const { fetchWithTimeout } = require('../utils/fetch');
-const { createLogger } = require('../utils/logger');
-const { MessageMedia } = require('whatsapp-web.js');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR } from '../config/constants.js';
+import { GITHUB_TOKEN, GITHUB_REPO } from '../config/env.js';
+import { getSubscribedChats } from '../tools/releaseNotify.js';
+import { fetchWithTimeout } from '../utils/fetch.js';
+import { createLogger } from '../utils/logger.js';
+import { MessageMedia } from 'whatsapp-web.js';
+import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
+import { RELEASE_NOTIFICATION_PREFIX } from '../config/systemMessages.js';
 
 const log = createLogger('ReleaseMonitor');
-
-const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
-const { RELEASE_NOTIFICATION_PREFIX } = require('../config/systemMessages');
 
 let lastCheckedReleaseId = null;
 
@@ -322,4 +321,4 @@ async function checkNewRelease(waClient) {
   }
 }
 
-module.exports = { checkNewRelease };
+export default { checkNewRelease };

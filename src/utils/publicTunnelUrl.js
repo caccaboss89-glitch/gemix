@@ -1,8 +1,8 @@
-// Public HTTPS base for temp attachment URLs (xAI input_file, WhatsApp download links).
+﻿// Public HTTPS base for temp attachment URLs (xAI input_file, WhatsApp download links).
 // Set GEMIX_PUBLIC_ATTACHMENT_BASE_URL in .env (no trailing slash).
 
-const { createLogger } = require('./logger');
-const env = require('../config/env');
+import { createLogger  } from './logger.js';
+import env from '../config/env.js';
 
 const log = createLogger('PublicAttachmentUrl');
 
@@ -29,4 +29,4 @@ function getPublicBaseUrl() {
   return LOCAL_FALLBACK;
 }
 
-module.exports = { getPublicBaseUrl };
+export default { getPublicBaseUrl };

@@ -1,11 +1,11 @@
-// src/ai/responsesAdapter.js
+﻿// src/ai/responsesAdapter.js
 //
 // Bidirectional adapter between chat-completions style messages and tools
 // (used by handler, tools, history) and xAI Responses API wire format
 // (`/v1/responses` with `input[]`, flat tools, typed items like
 // function_call / function_call_output). Static system lives in input[0].
 
-const { XAI_REASONING_REPLAY } = require('../config/env');
+import { XAI_REASONING_REPLAY  } from '../config/env.js';
 
 /** Strip internal-only fields before sending parts to xAI. */
 function _toWireUserPart(part) {
@@ -503,7 +503,7 @@ function extractServerSearchStats(data) {
   return { webSources, xPosts };
 }
 
-module.exports = {
+export default {
   chatMessagesToResponsesInput,
   chatToolsToResponsesTools,
   responsesToAssistantMessage,

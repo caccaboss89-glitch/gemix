@@ -1,4 +1,4 @@
-// src/platforms/whatsapp/privacyGate.js
+﻿// src/platforms/whatsapp/privacyGate.js
 //
 // What runs before an AI turn on WhatsApp, once the debounce window has closed
 // so a burst of files counts as the single message it was meant to be:
@@ -12,14 +12,14 @@
 // Anything else returns null and the turn proceeds normally, so continuing the
 // conversation is the acceptance the notice describes. Discord has no gate.
 
-const {
+import {
   PRIVACY_WIPE_COMMAND,
   PRIVACY_WIPE_FAILED_MESSAGE,
   buildPrivacyNoticeMessage,
   buildPrivacyWipeDoneMessage
-} = require('../../config/systemMessages');
-const { hasBeenInformed, markInformed } = require('../../utils/privacyConsent');
-const { wipeWhatsAppUserData } = require('../../utils/privacyWipe');
+ } from '../../config/systemMessages.js';
+import { hasBeenInformed, markInformed  } from '../../utils/privacyConsent.js';
+import { wipeWhatsAppUserData  } from '../../utils/privacyWipe.js';
 
 /**
  * True when a message body is exactly the wipe command. Deliberately strict:
@@ -105,4 +105,4 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
   };
 }
 
-module.exports = { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept };
+export default { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept };

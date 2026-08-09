@@ -1,4 +1,4 @@
-// src/utils/deliverySelection.js
+﻿// src/utils/deliverySelection.js
 //
 // Resolve the attachment entries the model selected for delivery (in the
 // structured final reply or in a delivery tool's `attachments` parameter)
@@ -8,17 +8,17 @@
 // Only listed files ship; everything else stays in the buffer.
 // A URL payload too big even for disk staging is delivered as a source link.
 
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const { downloadPublicFile, downloadPublicFileToDisk, filenameFromPublicUrl } = require('./fetch');
-const { sanitizeFilename } = require('./text');
-const { uniqueAttachmentName } = require('./attachments');
-const { applyBuildAgentFlags } = require('./attachmentDelivery');
-const { getHistoryDir } = require('./userPaths');
-const { mimeForExtension } = require('../config/mimeExtensions');
-const { TEMP_DIR } = require('./tempFileServer');
-const { createLogger } = require('./logger');
+import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
+import { downloadPublicFile, downloadPublicFileToDisk, filenameFromPublicUrl  } from './fetch.js';
+import { sanitizeFilename  } from './text.js';
+import { uniqueAttachmentName  } from './attachments.js';
+import { applyBuildAgentFlags  } from './attachmentDelivery.js';
+import { getHistoryDir  } from './userPaths.js';
+import { mimeForExtension  } from '../config/mimeExtensions.js';
+import { TEMP_DIR  } from './tempFileServer.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('DeliverySelection');
 
@@ -206,7 +206,7 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
   return { attachments, missing };
 }
 
-module.exports = {
+export default {
   resolveDeliverySelection,
   resolveLocalFileEntry,
   resolveUrlEntry

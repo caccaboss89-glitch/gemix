@@ -1,4 +1,4 @@
-// src/tools/scheduler.js
+﻿// src/tools/scheduler.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -9,15 +9,15 @@
 // Uses taskStore for persistence, time utils for Rome timezone handling, and builds
 // human-readable confirmation messages with recipient/recurrence details.
 
-const crypto = require('crypto');
-const { MAX_TASK_DAYS } = require('../config/constants');
-const { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour } = require('../utils/time');
-const { resolveActiveMemberByName } = require('../config/members');
-const { normalizePhoneToJid } = require('./whatsappSender');
-const { normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('../utils/text');
-const { modifyTaskFile } = require('../utils/taskStore');
-const { parseRecurrenceRule, describeRecurrence, toRomeISO } = require('../utils/recurrence');
-const { formatTaskRecipient } = require('../utils/taskRecipient');
+import crypto from 'crypto';
+import { MAX_TASK_DAYS  } from '../config/constants.js';
+import { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour  } from '../utils/time.js';
+import { resolveActiveMemberByName  } from '../config/members.js';
+import { normalizePhoneToJid  } from './whatsappSender.js';
+import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { modifyTaskFile  } from '../utils/taskStore.js';
+import { parseRecurrenceRule, describeRecurrence, toRomeISO  } from '../utils/recurrence.js';
+import { formatTaskRecipient  } from '../utils/taskRecipient.js';
 
 /**
  * Schedule one or more tasks for a user or group.
@@ -265,4 +265,4 @@ async function scheduleTasks(tasks, ctx) {
   return { success: true, tasks: results, ...(verifyNote ? { message: verifyNote } : {}) };
 }
 
-module.exports = { scheduleTasks };
+export default { scheduleTasks };

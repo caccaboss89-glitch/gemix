@@ -1,4 +1,4 @@
-// src/utils/emailHtml.js
+﻿// src/utils/emailHtml.js
 //
 // Email body preparation for the send_email tool.
 //
@@ -12,9 +12,9 @@
 // are attached with a Content-ID so they render inside the message body.
 // Anything that cannot be embedded stays a normal attachment (fallback).
 
-const path = require('path');
-const { mimeBase } = require('../config/mimeExtensions');
-const { toEmailAttachment } = require('./attachments');
+import path from 'path';
+import { mimeBase  } from '../config/mimeExtensions.js';
+import { toEmailAttachment  } from './attachments.js';
 
 /** Elements whose content must never reach a mail client. */
 const DANGEROUS_BLOCK_RE = /<(script|iframe|object|embed|noscript)\b[\s\S]*?<\/\1\s*>/gi;
@@ -186,7 +186,7 @@ function buildNoticeBlock(text) {
     + `<div style="font-family:sans-serif;color:#555;">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
 }
 
-module.exports = {
+export default {
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,

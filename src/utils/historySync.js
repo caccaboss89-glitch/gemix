@@ -1,17 +1,17 @@
-// src/utils/historySync.js
+﻿// src/utils/historySync.js
 //
 // Handles persistent storage of user/group chat history files, deterministic
 // pruning of unreferenced attachments, and metadata for GemiX voice
 // transcriptions. Also manages the short-lived voice text cache written when
 // a voice reply is generated (matched to bot voice files in history).
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { createLogger } = require('./logger');
-const { sanitizeFilename } = require('./text');
-const { extractAttachmentTagPaths } = require('./media');
-const { withKeyedLock } = require('./keyedLock');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR  } from '../config/constants.js';
+import { createLogger  } from './logger.js';
+import { sanitizeFilename  } from './text.js';
+import { extractAttachmentTagPaths  } from './media.js';
+import { withKeyedLock  } from './keyedLock.js';
 
 const log = createLogger('HistorySync');
 
@@ -493,7 +493,7 @@ function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
 
 _loadRecentVoiceEntries();
 
-module.exports = {
+export default {
   syncFileToHistory,
   resolveGemixVoiceTranscription,
   getStoredHistoryVoiceTranscription,

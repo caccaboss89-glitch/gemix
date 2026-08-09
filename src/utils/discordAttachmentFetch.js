@@ -1,9 +1,9 @@
-// src/utils/discordAttachmentFetch.js
+﻿// src/utils/discordAttachmentFetch.js
 //
 // Safe Discord attachment download helpers (25 MB cap, shared by incoming
 // message handling and history rebuild).
 
-const { downloadPublicFile } = require('./fetch');
+import { downloadPublicFile  } from './fetch.js';
 
 const DISCORD_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -35,7 +35,7 @@ function formatDiscordOversizeNote(att) {
   return isDiscordAttachmentOversize(att) ? ' (over 25MB download limit)' : '';
 }
 
-module.exports = {
+export default {
   DISCORD_ATTACHMENT_MAX_BYTES,
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,

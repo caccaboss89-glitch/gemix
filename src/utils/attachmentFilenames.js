@@ -1,7 +1,7 @@
-// Shared MIME → extension map for WA/Discord ingress and history sync.
+﻿// Shared MIME → extension map for WA/Discord ingress and history sync.
 
-const path = require('path');
-const { dottedExtensionForMime } = require('../config/mimeExtensions');
+import path from 'path';
+import { dottedExtensionForMime  } from '../config/mimeExtensions.js';
 
 function resolveIngressFilename(givenName, mimetype, msgId = null) {
   if (givenName && path.extname(givenName)) return givenName;
@@ -11,4 +11,4 @@ function resolveIngressFilename(givenName, mimetype, msgId = null) {
   return ext ? `${base}${ext}` : base;
 }
 
-module.exports = { resolveIngressFilename };
+export default { resolveIngressFilename };

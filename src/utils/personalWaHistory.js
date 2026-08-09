@@ -1,4 +1,4 @@
-// Personal-account (admin) WhatsApp: GemiX vs Account Owner vs system notices in history.
+﻿// Personal-account (admin) WhatsApp: GemiX vs Account Owner vs system notices in history.
 //
 // GemiX conversational block (chronological):
 //   1. Starts with a fromMe text message that contains the GemiX footer.
@@ -12,13 +12,13 @@
 // shared.js renders them as <system-notification> user turns (admin never types
 // those prefixes).
 
-const { hasFooter, hasScheduledFooter } = require('./footer');
-const { isSystemMessage } = require('../config/systemMessages');
-const {
+import { hasFooter, hasScheduledFooter  } from './footer.js';
+import { isSystemMessage  } from '../config/systemMessages.js';
+import {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption
-} = require('./attachmentCaption');
-const { resolveIngressFilename } = require('./attachmentFilenames');
+ } from './attachmentCaption.js';
+import { resolveIngressFilename  } from './attachmentFilenames.js';
 
 function isPersonalGemixTextReply(msg) {
   if (!msg?.fromMe) return false;
@@ -101,6 +101,6 @@ function buildPersonalGemixFlags(messages) {
   return isGemix;
 }
 
-module.exports = {
+export default {
   buildPersonalGemixFlags
 };

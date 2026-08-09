@@ -1,4 +1,4 @@
-// src/utils/privacyConsent.js
+﻿// src/utils/privacyConsent.js
 //
 // Registry of everyone who has already been shown the privacy notice, stored
 // as one JSON file keyed by the sender's WhatsApp number:
@@ -13,11 +13,11 @@
 //
 // Discord is deliberately out of scope: nothing there reads or writes this file.
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { createLogger } = require('./logger');
-const { getRomeISO } = require('./time');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR  } from '../config/constants.js';
+import { createLogger  } from './logger.js';
+import { getRomeISO  } from './time.js';
 
 const log = createLogger('PrivacyConsent');
 
@@ -115,4 +115,4 @@ async function forgetUser(waJid) {
   });
 }
 
-module.exports = { consentKey, hasBeenInformed, markInformed, forgetUser };
+export default { consentKey, hasBeenInformed, markInformed, forgetUser };

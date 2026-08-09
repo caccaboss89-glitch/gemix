@@ -1,11 +1,11 @@
-// src/utils/hermesAuthRefresh.js
+﻿// src/utils/hermesAuthRefresh.js
 //
 // When GemiX reads expired OAuth tokens from ~/.hermes/auth.json, Hermes CLI
 // must run a real API call to refresh them. A one-shot chat ping does that.
 
-const { spawn } = require('child_process');
-const { createLogger } = require('./logger');
-const { HERMES_BIN } = require('../config/env');
+import { spawn  } from 'child_process';
+import { createLogger  } from './logger.js';
+import { HERMES_BIN  } from '../config/env.js';
 
 const log = createLogger('Hermes');
 
@@ -89,4 +89,4 @@ async function refreshHermesOAuth() {
   return _refreshInFlight;
 }
 
-module.exports = { refreshHermesOAuth };
+export default { refreshHermesOAuth };

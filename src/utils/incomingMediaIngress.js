@@ -1,15 +1,15 @@
-// Shared ingress helpers: classify attachments and turn synced history files
+﻿// Shared ingress helpers: classify attachments and turn synced history files
 // into native content parts + attachment-tag text (Discord + WA quote/current).
 
-const { buildAttachmentTag, isSupportedMedia } = require('./media');
-const { deliverSyncedAttachment } = require('./aiFileDelivery');
-const { resolveIngressFilename } = require('./attachmentFilenames');
-const { syncFileToHistory } = require('./historySync');
-const {
+import { buildAttachmentTag, isSupportedMedia  } from './media.js';
+import { deliverSyncedAttachment  } from './aiFileDelivery.js';
+import { resolveIngressFilename  } from './attachmentFilenames.js';
+import { syncFileToHistory  } from './historySync.js';
+import {
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,
   formatDiscordOversizeNote
-} = require('./discordAttachmentFetch');
+ } from './discordAttachmentFetch.js';
 
 function createMemoizedFetchBuffer(fetchOnce) {
   let promise = null;
@@ -205,7 +205,7 @@ function capHistoryImageParts(historyMessages, maxImages, maxFiles) {
   }
 }
 
-module.exports = {
+export default {
   ingressWaMessageMedia,
   ingressDiscordAttachment,
   capHistoryImageParts

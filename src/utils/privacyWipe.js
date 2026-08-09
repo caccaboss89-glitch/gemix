@@ -1,4 +1,4 @@
-// src/utils/privacyWipe.js
+﻿// src/utils/privacyWipe.js
 //
 // Erases everything GemiX persists about one WhatsApp conversation and about
 // the person who asked for it: chat history and its attachments (the voice
@@ -15,18 +15,18 @@
 // still lets the rest go through and the caller can tell the user the wipe was
 // incomplete instead of silently claiming success.
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR, TASKS_DIR } = require('../config/constants');
-const { createLogger } = require('./logger');
-const { getUserRoot, resolveSettingsFileId } = require('./userPaths');
-const { resolveWorkspaceId, getBuildWorkspaceMetaDir } = require('./workspaceId');
-const { getGroupTaskFileId } = require('./userIdentifier');
-const { forgetRecentVoiceText } = require('./historySync');
-const { deleteSentMessages } = require('./sentMessagesStore');
-const { clearMediaUsage } = require('./mediaUsageLimits');
-const { forgetUser } = require('./privacyConsent');
-const { toggleReleaseNotify } = require('../tools/releaseNotify');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR, TASKS_DIR  } from '../config/constants.js';
+import { createLogger  } from './logger.js';
+import { getUserRoot, resolveSettingsFileId  } from './userPaths.js';
+import { resolveWorkspaceId, getBuildWorkspaceMetaDir  } from './workspaceId.js';
+import { getGroupTaskFileId  } from './userIdentifier.js';
+import { forgetRecentVoiceText  } from './historySync.js';
+import { deleteSentMessages  } from './sentMessagesStore.js';
+import { clearMediaUsage  } from './mediaUsageLimits.js';
+import { forgetUser  } from './privacyConsent.js';
+import { toggleReleaseNotify  } from '../tools/releaseNotify.js';
 
 const log = createLogger('PrivacyWipe');
 
@@ -139,4 +139,4 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   return { ok: failed.length === 0, failed };
 }
 
-module.exports = { wipeWhatsAppUserData };
+export default { wipeWhatsAppUserData };

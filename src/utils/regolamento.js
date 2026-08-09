@@ -1,4 +1,4 @@
-// src/utils/regolamento.js
+﻿// src/utils/regolamento.js
 //
 // Single-source loader for the Discord server rules (Statuto Albertino).
 // Full text is injected into Discord static instructions as free-form
@@ -7,10 +7,10 @@
 // Cached in-memory after the first read; the underlying file rarely
 // changes and a manual restart picks up edits.
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { createLogger } = require('./logger');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR  } from '../config/constants.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('Regolamento');
 
@@ -48,4 +48,4 @@ function loadRegolamento() {
   }
 }
 
-module.exports = { loadRegolamento };
+export default { loadRegolamento };

@@ -1,29 +1,31 @@
-// src/platforms/whatsapp/dedicated.js
+﻿// src/platforms/whatsapp/dedicated.js
 //
 // Dedicated WhatsApp account client (primary number).
 // Handles QR auth, reconnection, message routing (personal + group mentions/replies),
 // and delegates to the shared WhatsApp handler + batcher.
 // Only one instance (the "dedicated" client).
 
-const { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } = require('./shared');
-const { createWhatsAppClient, isWaClientReady } = require('./client');
-const { resolveWaSender } = require('../../utils/waContact');
-const { materializeWhatsAppBatchContent } = require('../../utils/batchContentRefresh');
+import { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } from './shared.js';
+import { createWhatsAppClient, isWaClientReady } from './client.js';
+import { resolveWaSender } from '../../utils/waContact.js';
+import { materializeWhatsAppBatchContent } from '../../utils/batchContentRefresh.js';
+import { identifyUser } from '../../utils/userIdentifier.js';
+import { setDedicatedClient } from '../../tools/whatsappSender.js';
+import constants from '../../config/constants.js';
+import { containsMetaAiTag } from '../../utils/waMentions.js';
+import { createLogger } from '../../utils/logger.js';
+import { enqueueBatchedTurn, peekPendingBatchLastEntry } from '../../utils/batchIngress.js';
+import { pickLatestBatchEntry } from '../../utils/batchContext.js';
+import { isPendingAlbumContinuation } from '../../utils/waAlbumGroup.js';
+import { withWaPuppeteerRetry } from '../../utils/waPuppeteer.js';
+import { fetchHistoryWithTimeout } from '../../utils/historyFetch.js';
+import { runTurnPipeline } from '../../utils/turnPipeline.js';
+import { WhatsAppPresence } from '../../utils/presence.js';
+import { buildGroupParticipants } from '../../utils/waParticipants.js';
+import { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } from './privacyGate.js';
+import { notifyAdmin } from '../../utils/adminNotifier.js';
 
-const { identifyUser } = require('../../utils/userIdentifier');
-const { setDedicatedClient } = require('../../tools/whatsappSender');
-const { PLATFORM_WA_DEDICATED, META_AI_NUMBER } = require('../../config/constants');
-const { containsMetaAiTag } = require('../../utils/waMentions');
-const { createLogger } = require('../../utils/logger');
-const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
-const { pickLatestBatchEntry } = require('../../utils/batchContext');
-const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
-const { withWaPuppeteerRetry } = require('../../utils/waPuppeteer');
-const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
-const { runTurnPipeline } = require('../../utils/turnPipeline');
-const { WhatsAppPresence } = require('../../utils/presence');
-const { buildGroupParticipants } = require('../../utils/waParticipants');
-const { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } = require('./privacyGate');
+const { PLATFORM_WA_DEDICATED, META_AI_NUMBER } = constants;
 
 const log = createLogger('WA-DEDICATED');
 
@@ -210,7 +212,6 @@ async function _handleDedicatedBatch(entries) {
       await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_DEDICATED });
     },
     onDeliverError: async () => {
-      const { notifyAdmin } = require('../../utils/adminNotifier');
       await notifyAdmin('WA Dedicated Chat Delivery', `Failed to send response to chat ${chat.id._serialized}`);
     }
   });
@@ -224,4 +225,4 @@ function isDedicatedClientReady() {
   return Boolean(client?.info?.wid?._serialized);
 }
 
-module.exports = { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady };
+export default { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady };

@@ -1,4 +1,4 @@
-// src/utils/intermediateNotification.js
+﻿// src/utils/intermediateNotification.js
 //
 // Delivers "please wait" banners for slow tools to the active conversation.
 // Used by the main brain via userCtx.sendIntermediateNotification.
@@ -13,17 +13,17 @@
 //   WA personal      → ctx.presence.chat.sendMessage (personal client only)
 //   WA dedicated DM/group → ctx.presence.chat.sendMessage, else dedicated JID fallback
 
-const {
+import {
   PLATFORM_DISCORD,
   PLATFORM_WA_PERSONAL,
   PLATFORM_WA_DEDICATED
-} = require('../config/constants');
-const { markNotifiedInCall } = require('./notificationDedup');
-const { sendWhatsAppDirect } = require('../tools/whatsappSender');
-const { removeDiscordEmoji } = require('./discord');
-const { normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('./text');
-const { addFooter } = require('./footer');
-const { createLogger } = require('./logger');
+ } from '../config/constants.js';
+import { markNotifiedInCall  } from './notificationDedup.js';
+import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
+import { removeDiscordEmoji  } from './discord.js';
+import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from './text.js';
+import { addFooter  } from './footer.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('IntermediateNotification');
 
@@ -126,6 +126,6 @@ async function sendIntermediateNotification(ctx, kind, message) {
   return false;
 }
 
-module.exports = {
+export default {
   sendIntermediateNotification
 };

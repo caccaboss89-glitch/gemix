@@ -1,4 +1,4 @@
-// src/sandbox/buildSandbox.js
+﻿// src/sandbox/buildSandbox.js
 //
 // Per-workspace docker container manager for the `build` sub-agent.
 //
@@ -19,25 +19,25 @@
 //   - All egress (curl/wget/yt-dlp/requests/grok API) goes through the egress
 //     proxy, which forwards upstream via the residential SOCKS5 (Redmi).
 
-const crypto = require('crypto');
-const stream = require('stream');
+import crypto from 'crypto';
+import stream from 'stream';
 
-const {
+import {
   SANDBOX_MEMORY_MB,
   SANDBOX_IDLE_TTL_MS,
   BUILD_HARD_TIMEOUT_MS,
   BUILD_MAX_ROUNDS
-} = require('../config/constants');
-const {
+ } from '../config/constants.js';
+import {
   GEMIX_SANDBOX_IMAGE,
   GEMIX_SANDBOX_NETWORK,
   GEMIX_SANDBOX_PROXY_HOST,
   GEMIX_SANDBOX_PROXY_PORT
-} = require('../config/env');
+ } from '../config/env.js';
 
-const { workspaceIdToSlug } = require('../utils/workspaceId');
-const { ensureWorkspace, ensureWorkspaceWritable, sandboxUserString } = require('./buildWorkspace');
-const { createLogger } = require('../utils/logger');
+import { workspaceIdToSlug  } from '../utils/workspaceId.js';
+import { ensureWorkspace, ensureWorkspaceWritable, sandboxUserString  } from './buildWorkspace.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('BuildSandbox');
 
@@ -483,7 +483,7 @@ _reaper.unref();
 
 cleanupOrphanBuildSandboxes().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
 
-module.exports = {
+export default {
   execGrokBuild,
   buildGrokExecSpec,
   shutdown,

@@ -1,11 +1,11 @@
-// src/utils/userIdentifier.js
+﻿// src/utils/userIdentifier.js
 //
 // Resolves a user across platforms (WhatsApp / Discord) into a unified
 // identity object containing the member record (if active), active status,
 // and the canonical taskFileId (WhatsApp memory, scheduled reminders, etc.).
 
-const { findMemberByWa, findMemberByDiscord, isAdmin } = require('../config/members');
-const { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_WA, TASK_PREFIX_GROUP } = require('../config/constants');
+import { findMemberByWa, findMemberByDiscord, isAdmin  } from '../config/members.js';
+import { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_WA, TASK_PREFIX_GROUP  } from '../config/constants.js';
 
 /**
  * Identifies a user across platforms and returns unified identity info.
@@ -51,4 +51,4 @@ function getGroupTaskFileId(groupId) {
   return TASK_PREFIX_GROUP + groupId.replace('@g.us', '');
 }
 
-module.exports = { identifyUser, getGroupTaskFileId };
+export default { identifyUser, getGroupTaskFileId };

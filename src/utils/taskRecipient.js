@@ -1,11 +1,11 @@
-// src/utils/taskRecipient.js
+﻿// src/utils/taskRecipient.js
 //
 // Human-readable recipient label for a scheduled reminder's destinations,
 // rendered from the caller's perspective. Shared by the scheduler confirmation
 // (tools/scheduler.js) and the reminder listing (tools/taskReader.js) so both
 // surfaces describe the recipient the same way.
 
-const { findMemberByWa } = require('../config/members');
+import { findMemberByWa  } from '../config/members.js';
 
 /**
  * Build a recipient label for a task's destinations.
@@ -44,4 +44,4 @@ function formatTaskRecipient(destinations, { isAdmin = false, waJid = null, grou
   return label;
 }
 
-module.exports = { formatTaskRecipient };
+export default { formatTaskRecipient };

@@ -1,4 +1,4 @@
-// src/utils/notificationDedup.js
+﻿// src/utils/notificationDedup.js
 //
 // Per-call intermediate notification dedup.
 //
@@ -15,8 +15,8 @@
 //   markNotifiedInCall(ctx, 'video')  - true on first call, false on repeats
 //   clearCallNotifications(ctx)       - called in the finally block of handleMessage
 
-const { createLogger } = require('./logger');
-const { PLATFORM_DISCORD, isWhatsAppPlatform } = require('../config/constants');
+import { createLogger  } from './logger.js';
+import { PLATFORM_DISCORD, isWhatsAppPlatform  } from '../config/constants.js';
 
 const log = createLogger('NotificationDedup');
 
@@ -103,7 +103,7 @@ const _cleanupTimer = setInterval(() => {
 }, 2 * 60 * 1000);
 _cleanupTimer.unref();
 
-module.exports = {
+export default {
   markNotifiedInCall,
   clearCallNotifications,
   buildEngineeringNotificationMessage

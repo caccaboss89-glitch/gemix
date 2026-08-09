@@ -1,6 +1,8 @@
 // Canonical per-context behavior: tools, prompt sections, and user-facing
 // unavailable-tool messages. Keeps intentional platform differences explicit.
 
+import constants from './constants.js';
+
 const {
   PLATFORM_DISCORD,
   PLATFORM_WA_PERSONAL,
@@ -8,7 +10,7 @@ const {
   MAX_AUDIO_DURATION_S,
   MAX_VIDEO_DURATION_S,
   MAX_HISTORY
-} = require('./constants');
+} = constants;
 
 const PROFILE = {
   WA_PERSONAL: 'wa_personal',
@@ -367,10 +369,10 @@ function buildVisibilityLines(profile) {
   return lines;
 }
 
-const { syncProfileToolSets } = require('../ai/tools');
+import { syncProfileToolSets } from '../ai/tools.js';
 syncProfileToolSets(CAPS, PROFILE);
 
-module.exports = {
+export {
   PROFILE,
   TOOL,
   CAPS,

@@ -1,8 +1,8 @@
-// Platform delivery policy and attachment partitioning for outbound files.
+﻿// Platform delivery policy and attachment partitioning for outbound files.
 // Normal delivery: link only when too heavy for the platform (or externalUrl).
 // Build agent sets waTempLinkPreferred on audio/video via applyBuildAgentFlags().
 
-const {
+import {
   attachmentSize,
   shouldWhatsAppUseTempLink,
   toDiscordAttachmentArgs,
@@ -10,8 +10,9 @@ const {
   isWhatsAppAudioVideoAttachment,
   toWhatsAppMediaArgs,
   WA_DIRECT_MAX_BYTES
-} = require('./attachments');
-const { DISCORD_ATTACHMENT_MAX_BYTES } = require('./discordAttachmentFetch');
+} from './attachments.js';
+import { DISCORD_ATTACHMENT_MAX_BYTES } from './discordAttachmentFetch.js';
+import { MessageMedia } from 'whatsapp-web.js';
 
 const PLATFORM = {
   WHATSAPP: 'whatsapp',
@@ -85,7 +86,6 @@ function applyBuildAgentFlags(att) {
  * @param {object} [sendOptions]
  */
 async function sendWhatsAppAttachment(att, postMedia, sendOptions = {}) {
-  const { MessageMedia } = require('whatsapp-web.js');
   const m = toWhatsAppMediaArgs(att);
   if (!m) {
     throw new Error(`Cannot convert attachment to WhatsApp media: ${att.name || 'unknown'}`);
@@ -96,7 +96,7 @@ async function sendWhatsAppAttachment(att, postMedia, sendOptions = {}) {
   await postMedia(media, options);
 }
 
-module.exports = {
+export default {
   PLATFORM,
   hasExternalUrl,
   partitionAttachments,

@@ -205,7 +205,7 @@ function isSystemMessage(body) {
     || LEGACY_SYSTEM_MESSAGE_PREFIXES.some(p => body.startsWith(p));
 }
 
-module.exports = {
+export {
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
   ADMIN_ERROR_PREFIX,

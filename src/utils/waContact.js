@@ -1,4 +1,4 @@
-// src/utils/waContact.js
+﻿// src/utils/waContact.js
 //
 // Resolving who sent a WhatsApp message. Both accounts need the same two
 // things out of a raw wwebjs message — a display name and a stable
@@ -52,4 +52,4 @@ async function resolveWaSender(msg) {
   return { senderJid, userName, phoneJid: normalizePhoneJid(phoneJid) };
 }
 
-module.exports = { resolveWaSender, normalizePhoneJid, stripDeviceSuffix };
+export default { resolveWaSender, normalizePhoneJid, stripDeviceSuffix };

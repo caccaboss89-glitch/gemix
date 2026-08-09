@@ -1,4 +1,4 @@
-// src/utils/sentMessagesStore.js
+﻿// src/utils/sentMessagesStore.js
 //
 // Persistent log of the messages GemiX delivered to OTHER users on a sender's
 // behalf (send_whatsapp_message / send_email). Only the last N outgoing
@@ -15,13 +15,13 @@
 //   data/sent_messages/<senderKey>/messages.json   ← last N records
 //   data/sent_messages/<senderKey>/files/<stored>  ← retained attachment bytes
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { DATA_DIR } = require('../config/constants');
-const { readAttachmentBuffer, attachmentSize } = require('./attachments');
-const { sanitizeFilename } = require('./text');
-const { createLogger } = require('./logger');
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { DATA_DIR  } from '../config/constants.js';
+import { readAttachmentBuffer, attachmentSize  } from './attachments.js';
+import { sanitizeFilename  } from './text.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('SentMessages');
 
@@ -247,7 +247,7 @@ function deleteSentMessages(senderKey) {
   });
 }
 
-module.exports = {
+export default {
   recordSentMessage,
   readSentRecords,
   resolveStoredAttachmentPath,

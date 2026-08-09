@@ -1,4 +1,4 @@
-// src/ai/tools.js
+﻿// src/ai/tools.js
 //
 // Tool directives: all tool-facing text (name, description, parameter
 // descriptions, and the result strings produced in src/tools/*.js) is in
@@ -12,7 +12,7 @@
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
 // The build tool description is generic and does not expose sub-agent internals.
 
-const {
+import {
   PLATFORM_DISCORD,
   PLATFORM_WA_PERSONAL,
   MAX_VIDEO_DURATION_S,
@@ -21,25 +21,25 @@ const {
   BUILD_WORKSPACE_TTL_LABEL,
   BUILD_WORKSPACE_QUOTA_MB,
   isWhatsAppPlatform
-} = require('../config/constants');
-const { LEGAL_NAME } = require('../config/env');
-const {
+ } from '../config/constants.js';
+import { LEGAL_NAME  } from '../config/env.js';
+import {
   defaultSettings,
   VALID_VOICES,
   VOICES_MALE,
   VOICES_FEMALE,
   VALID_EFFORTS,
   VALID_LANGUAGES
-} = require('../utils/settingsStore');
-const {
+ } from '../utils/settingsStore.js';
+import {
   DEFAULT_COUNT: WEB_IMAGE_SEARCH_DEFAULT_COUNT,
   MIN_COUNT: WEB_IMAGE_SEARCH_MIN_COUNT,
   MAX_COUNT: WEB_IMAGE_SEARCH_MAX_COUNT
-} = require('../tools/imageSearch');
-const {
+ } from '../tools/imageSearch.js';
+import {
   MAX_REF_IMAGES_FOR_IMAGE,
   MAX_REF_IMAGES_FOR_VIDEO
-} = require('../tools/imagineGenerator');
+ } from '../tools/imagineGenerator.js';
 
 // -- Helpers -------------------------------------------------------------
 
@@ -844,7 +844,7 @@ function getToolAccessError(toolName, allowedRoundNames, unavailableMessage) {
   return `Tool "${toolName}" is not available in the current context.`;
 }
 
-module.exports = {
+export default {
   getToolsForUser,
   getToolAccessError,
   syncProfileToolSets,

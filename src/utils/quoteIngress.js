@@ -1,22 +1,22 @@
-// Quote/reply handling when the referenced message is inside or outside MAX_HISTORY.
+﻿// Quote/reply handling when the referenced message is inside or outside MAX_HISTORY.
 // Walks reply chains (A replies to B replies to C) and emits concatenated
 // [In reply to: ...] prefixes so the model keeps cross-message context in both
 // the current turn and rebuilt history.
 
-const { PLATFORM_WA_DEDICATED } = require('../config/constants');
-const {
+import { PLATFORM_WA_DEDICATED  } from '../config/constants.js';
+import {
   REPLY_OUTSIDE_HISTORY_PREFIX,
   REPLY_CHAIN_TRUNCATED_PREFIX,
   cleanIncomingText
-} = require('./text');
-const { replaceMentionsInBody, resolveMentionsForMessage, resolveLidTagsInBody } = require('./waMentions');
-const { formatSpecialMessageText, formatWhatsAppContactText } = require('./waSpecialMessages');
-const { formatWhatsAppPollText } = require('./pollParser');
-const {
+ } from './text.js';
+import { replaceMentionsInBody, resolveMentionsForMessage, resolveLidTagsInBody  } from './waMentions.js';
+import { formatSpecialMessageText, formatWhatsAppContactText  } from './waSpecialMessages.js';
+import { formatWhatsAppPollText  } from './pollParser.js';
+import {
   ingressWaMessageMedia,
   ingressDiscordAttachment
-} = require('./incomingMediaIngress');
-const { createLogger } = require('./logger');
+ } from './incomingMediaIngress.js';
+import { createLogger  } from './logger.js';
 
 const log = createLogger('QuoteIngress');
 
@@ -305,7 +305,7 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
   }
 }
 
-module.exports = {
+export default {
   processWhatsAppQuotedReply,
   processDiscordQuotedReply,
   MAX_REPLY_CHAIN_DEPTH

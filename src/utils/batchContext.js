@@ -1,4 +1,4 @@
-// src/utils/batchContext.js
+﻿// src/utils/batchContext.js
 //
 // The debounce window is per chat, so anything anyone sends while it is open
 // used to be merged into the same turn. filterBatchToTriggerSpeaker narrows a
@@ -51,4 +51,4 @@ function filterBatchToTriggerSpeaker(entries, platform) {
   return { entries: kept, dropped: list.length - kept.length };
 }
 
-module.exports = { pickLatestBatchEntry, filterBatchToTriggerSpeaker };
+export default { pickLatestBatchEntry, filterBatchToTriggerSpeaker };

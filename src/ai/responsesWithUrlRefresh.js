@@ -1,13 +1,13 @@
-// src/ai/responsesWithUrlRefresh.js
+﻿// src/ai/responsesWithUrlRefresh.js
 //
 // Shared callResponsesModel wrapper: on xAI "failed to download file from URL"
 // errors, refresh tmpfile.link URLs from disk and retry (no admin notify).
 
-const { clearXaiUploadCache } = require('../utils/xaiUpload');
-const { refreshXaiUrlsInMessages } = require('../utils/refreshXaiMessageUrls');
-const { callResponsesModel } = require('./apiClient');
-const { chatMessagesToResponsesInput } = require('./responsesAdapter');
-const { createLogger } = require('../utils/logger');
+import { clearXaiUploadCache  } from '../utils/xaiUpload.js';
+import { refreshXaiUrlsInMessages  } from '../utils/refreshXaiMessageUrls.js';
+import { callResponsesModel  } from './apiClient.js';
+import { chatMessagesToResponsesInput  } from './responsesAdapter.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('AI');
 const MAX_STALE_URL_REFRESHES = 2;
@@ -71,4 +71,4 @@ async function callResponsesWithStaleUrlRetry(opts) {
   }
 }
 
-module.exports = { callResponsesWithStaleUrlRetry, MAX_STALE_URL_REFRESHES };
+export default { callResponsesWithStaleUrlRetry, MAX_STALE_URL_REFRESHES };

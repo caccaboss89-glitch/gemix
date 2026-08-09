@@ -1,25 +1,23 @@
-// src/scheduler/musicWrapMonitor.js
+﻿// src/scheduler/musicWrapMonitor.js
 //
 // Monitors GitHub music stats for updates and sends monthly wrap notifications
 // to active members only on the 1st of each month. On that day also requires a
 // new stats timestamp and that today's check has not already completed.
 // Persists state via systemState.
 
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { ACTIVE_MEMBERS } = require('../config/members');
-const { createLogger } = require('../utils/logger');
-const { normalizeMarkdown } = require('../utils/text');
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR } from '../config/constants.js';
+import { ACTIVE_MEMBERS } from '../config/members.js';
+import { createLogger } from '../utils/logger.js';
+import { normalizeMarkdown } from '../utils/text.js';
+import { MUSIC_WRAP_PASSWORD, MUSIC_STATS_URL, MUSIC_WRAP_URL } from '../config/env.js';
+import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
+import { fetchExternal } from '../utils/fetch.js';
+import { MUSIC_WRAP_PREFIX } from '../config/systemMessages.js';
 
 const log = createLogger('MusicWrap');
-
-const { MUSIC_WRAP_PASSWORD, MUSIC_STATS_URL, MUSIC_WRAP_URL } = require('../config/env');
-
-const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
-const { fetchExternal } = require('../utils/fetch');
-const { MUSIC_WRAP_PREFIX } = require('../config/systemMessages');
 
 /**
  * Load monitor state from unified system state.
@@ -224,4 +222,4 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   return !anyFailed;
 }
 
-module.exports = { checkAndSendMusicWrap };
+export default { checkAndSendMusicWrap };

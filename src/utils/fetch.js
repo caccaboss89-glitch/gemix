@@ -1,13 +1,13 @@
-// src/utils/fetch.js
+﻿// src/utils/fetch.js
 //
 // Wrapper around native fetch that adds reliable timeout handling and
 // optional automatic admin notification on failures. Used for external
 // service calls throughout the bot.
 
-const fs = require('fs');
-const path = require('path');
-const { FETCH_TIMEOUT_MS } = require('../config/constants');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('./adminNotifier');
+import fs from 'fs';
+import path from 'path';
+import { FETCH_TIMEOUT_MS  } from '../config/constants.js';
+import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from './adminNotifier.js';
 
 function _downloadTimeoutMs(maxBytes, optsTimeout) {
   if (Number.isFinite(optsTimeout)) return optsTimeout;
@@ -243,7 +243,7 @@ async function downloadPublicFileToDisk(url, destPath, opts = {}) {
   };
 }
 
-module.exports = {
+export default {
   fetchWithTimeout,
   fetchExternal,
   downloadPublicFile,

@@ -1,4 +1,4 @@
-// src/utils/workspaceId.js
+﻿// src/utils/workspaceId.js
 //
 // Computes the canonical workspace identifier for the build sub-agent
 // based on the current user/group context:
@@ -9,10 +9,10 @@
 //
 // The `group:` / `user:` prefix provides filesystem-safe disambiguation.
 
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-const { PLATFORM_WA_PERSONAL } = require('../config/constants');
-const { resolveStorageId } = require('./userPaths');
+import path from 'path';
+import { DATA_DIR  } from '../config/constants.js';
+import { PLATFORM_WA_PERSONAL  } from '../config/constants.js';
+import { resolveStorageId  } from './userPaths.js';
 
 /**
  * Compute the canonical workspace identifier for the current request.
@@ -77,7 +77,7 @@ function getBuildWorkspaceMetaDir(workspaceId) {
   return path.join(DATA_DIR, 'users', slug);
 }
 
-module.exports = {
+export default {
   resolveWorkspaceId,
   workspaceIdToSlug,
   getBuildWorkspacePath,

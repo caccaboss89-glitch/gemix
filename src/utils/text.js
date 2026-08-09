@@ -1,4 +1,4 @@
-// src/utils/text.js
+﻿// src/utils/text.js
 //
 // Collection of text utilities used throughout GemiX:
 // - Filename sanitization for safe storage
@@ -7,7 +7,10 @@
 // - Cleaning history prefixes, system messages, research badges, footers, etc.
 // - High-level clean functions for incoming and outgoing messages
 
-const { stripPhoneMentionTags } = require('./waMentions');
+import { stripPhoneMentionTags } from './waMentions.js';
+import { isSystemMessage } from '../config/systemMessages.js';
+import { removeFooter, removeScheduledFooter } from './footer.js';
+import { formatTimestamp } from './time.js';
 
 /**
  * Sanitize a string for use as a filename.
@@ -227,8 +230,6 @@ const SYSTEM_TAG_RE = /<\/?system-(?:notification|reminder)>/gi;
  */
 function stripSystemMessages(text) {
   if (!text || typeof text !== 'string') return text;
-  // Lazy require to avoid circular dependency.
-  const { isSystemMessage } = require('../config/systemMessages');
   const lines = text.split(/\r?\n/);
   const kept = [];
   for (const line of lines) {
@@ -306,8 +307,6 @@ function cleanAssistantResponse(text) {
   cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
   cleaned = stripSystemMessages(cleaned);
 
-  // Lazy require to avoid circular dependencies
-  const { removeFooter, removeScheduledFooter } = require('./footer');
   cleaned = removeFooter(cleaned);
   cleaned = removeScheduledFooter(cleaned);
 
@@ -323,7 +322,6 @@ function cleanAssistantResponse(text) {
  */
 function formatLabeledUserContent(timestampMs, senderName, textBody) {
   if (textBody === null || textBody === undefined || !String(textBody).trim()) return textBody || '';
-  const { formatTimestamp } = require('./time');
   const ts = formatTimestamp(timestampMs);
   const name = (senderName || 'Unknown').trim() || 'Unknown';
   return `[${ts}] ${name}: ${textBody}`;
@@ -338,8 +336,6 @@ function formatLabeledUserContent(timestampMs, senderName, textBody) {
  */
 function cleanIncomingText(text) {
   if (!text || typeof text !== 'string') return '';
-  // Lazy require to avoid circular dependencies
-  const { removeFooter, removeScheduledFooter } = require('./footer');
   let cleaned = removeFooter(text);
   cleaned = removeScheduledFooter(cleaned);
 
@@ -358,7 +354,7 @@ const REPLY_OUTSIDE_HISTORY_PREFIX = '[In reply to: (message outside recent hist
 /** Prefix when a reply chain is deeper than MAX_REPLY_CHAIN_DEPTH. */
 const REPLY_CHAIN_TRUNCATED_PREFIX = '[In reply to: (reply chain truncated)]\n';
 
-module.exports = {
+export default {
   sanitizeFilename,
   stripVoiceTags,
   sanitizeVoiceMessageText,

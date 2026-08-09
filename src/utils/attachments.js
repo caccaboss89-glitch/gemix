@@ -1,4 +1,4 @@
-// src/utils/attachments.js
+﻿// src/utils/attachments.js
 // Unified attachment shape used across responseCtx.
 // An attachment is: { name, mimetype, buffer?, filePath?, externalUrl?, waTempLinkPreferred? }
 //   - buffer:   Buffer already in memory (small/in-flight files: voice, formal PDF, generated media)
@@ -9,9 +9,9 @@
 // At least one of buffer, filePath, or externalUrl must be set. Helper functions handle
 // read-on-demand from disk.
 
-const fs = require('fs');
-const path = require('path');
-const { mimeBase } = require('../config/mimeExtensions');
+import fs from 'fs';
+import path from 'path';
+import { mimeBase  } from '../config/mimeExtensions.js';
 
 /**
  * WhatsApp direct-send cap: above this the file goes to a temp download link.
@@ -188,7 +188,7 @@ function hasExternalUrlOnly(att) {
   return typeof att?.externalUrl === 'string' && att.externalUrl.trim().length > 0;
 }
 
-module.exports = {
+export default {
   uniqueAttachmentName,
   pushBufferAttachment,
   readAttachmentBuffer,

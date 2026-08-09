@@ -1,4 +1,4 @@
-// src/tools/releaseNotify.js
+﻿// src/tools/releaseNotify.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -9,11 +9,10 @@
 // Exposes toggleReleaseNotify, enableReleaseNotify, and getSubscribedChats
 // for use by handler and admin flows. In-memory Map with disk backup.
 
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR } = require('../config/constants');
-
-const { get: getSystemState, update: updateSystemState } = require('../utils/systemState');
+import fs from 'fs';
+import path from 'path';
+import { DATA_DIR } from '../config/constants.js';
+import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
 
 /** @type {Map<string, string>} chatId -> waJid (delivery target) */
 let subscribedChats = new Map();
@@ -105,4 +104,4 @@ function getSubscribedChats() {
   return new Map(subscribedChats);
 }
 
-module.exports = { toggleReleaseNotify, getSubscribedChats, enableReleaseNotify };
+export default { toggleReleaseNotify, getSubscribedChats, enableReleaseNotify };

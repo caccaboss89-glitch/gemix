@@ -1,8 +1,8 @@
-// src/utils/media.js
+﻿// src/utils/media.js
 //
 // Helpers for attachment tags and supported WhatsApp media types.
 
-const { SUPPORTED_MEDIA } = require('../config/constants');
+import { SUPPORTED_MEDIA  } from '../config/constants.js';
 
 function isSupportedMedia(type) {
   return SUPPORTED_MEDIA.includes(type);
@@ -33,7 +33,7 @@ function extractAttachmentTagPaths(text) {
   return paths;
 }
 
-module.exports = {
+export default {
   isSupportedMedia,
   buildAttachmentTag,
   extractAttachmentTagPaths

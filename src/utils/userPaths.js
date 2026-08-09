@@ -1,4 +1,4 @@
-// src/utils/userPaths.js
+﻿// src/utils/userPaths.js
 //
 // Filesystem helpers for per-user storage.
 //
@@ -15,9 +15,9 @@
 // Build trees live under user_* / group_* (see workspaceId.js, buildWorkspace.js).
 // This module only manages <storageId>/ history paths.
 
-const path = require('path');
-const { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, isWhatsAppPlatform } = require('../config/constants');
-const { getGroupTaskFileId } = require('./userIdentifier');
+import path from 'path';
+import { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, isWhatsAppPlatform  } from '../config/constants.js';
+import { getGroupTaskFileId  } from './userIdentifier.js';
 
 /** Prefix for on-disk history of admin↔user personal-account chats (shared pair). */
 const PERSONAL_CHAT_STORAGE_PREFIX = 'personal_';
@@ -90,7 +90,7 @@ function getHistoryDir(userCtx) {
   return r && path.join(r, 'history');
 }
 
-module.exports = {
+export default {
   resolvePersonalChatStorageId,
   resolveSettingsFileId,
   resolveStorageId,

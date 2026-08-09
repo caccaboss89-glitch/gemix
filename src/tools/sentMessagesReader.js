@@ -1,4 +1,4 @@
-// src/tools/sentMessagesReader.js
+﻿// src/tools/sentMessagesReader.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -13,18 +13,18 @@
 // Scope guard: an active non-admin caller can only look up other active
 // members (mirrors the send tools). Admin may look up any number.
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { resolveActiveMemberByName, findMemberByWa, findMemberByEmail } = require('../config/members');
-const { normalizePhoneToJid } = require('./whatsappSender');
-const { buildXaiFileParts } = require('../utils/aiFileDelivery');
-const { downloadPublicFileToDisk } = require('../utils/fetch');
-const { TEMP_DIR } = require('../utils/tempFileServer');
-const { sanitizeFilename } = require('../utils/text');
-const { formatTimestamp } = require('../utils/time');
-const { readSentRecords, resolveStoredAttachmentPath } = require('../utils/sentMessagesStore');
-const { createLogger } = require('../utils/logger');
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { resolveActiveMemberByName, findMemberByWa, findMemberByEmail  } from '../config/members.js';
+import { normalizePhoneToJid  } from './whatsappSender.js';
+import { buildXaiFileParts  } from '../utils/aiFileDelivery.js';
+import { downloadPublicFileToDisk  } from '../utils/fetch.js';
+import { TEMP_DIR  } from '../utils/tempFileServer.js';
+import { sanitizeFilename  } from '../utils/text.js';
+import { formatTimestamp  } from '../utils/time.js';
+import { readSentRecords, resolveStoredAttachmentPath  } from '../utils/sentMessagesStore.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('SentMessagesReader');
 
@@ -268,4 +268,4 @@ async function readSentMessages(args, userCtx) {
   return payload;
 }
 
-module.exports = { readSentMessages };
+export default { readSentMessages };

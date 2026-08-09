@@ -1,4 +1,4 @@
-// src/tools/imagineGenerator.js
+﻿// src/tools/imagineGenerator.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -14,30 +14,30 @@
 // are uploaded via utils/xaiUpload.js first. The generated media URL is
 // downloaded and stored as a buffered attachment for delivery.
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const {
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import {
   IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL
-} = require('../config/env');
-const { VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION, MAX_IMAGE_BYTES } = require('../config/constants');
-const { getXaiAuth } = require('../config/xaiAuth');
-const { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry } = require('../ai/apiClient');
-const { fetchWithTimeout, readResponseBodyWithTimeout } = require('../utils/fetch');
-const { tempDirForOwner } = require('../utils/tempFileServer');
-const { resolveStorageId } = require('../utils/userPaths');
-const { resolveLocalFileEntry } = require('../utils/deliverySelection');
-const { resolveWorkspaceId, workspaceIdToSlug } = require('../utils/workspaceId');
-const { pushBufferAttachment } = require('../utils/attachments');
-const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
-const { sanitizeFilename } = require('../utils/text');
-const { createLogger } = require('../utils/logger');
-const { mimeForExtension } = require('../config/mimeExtensions');
-const { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath, MAX_VIDEO_BYTES } = require('../utils/aiFileDelivery');
-const { clearXaiUploadCache } = require('../utils/xaiUpload');
-const { isXaiFileDownloadError } = require('../utils/refreshXaiMessageUrls');
-const { reserveGeneration } = require('../utils/mediaUsageLimits');
+ } from '../config/env.js';
+import { VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION, MAX_IMAGE_BYTES  } from '../config/constants.js';
+import { getXaiAuth  } from '../config/xaiAuth.js';
+import { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
+import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
+import { tempDirForOwner  } from '../utils/tempFileServer.js';
+import { resolveStorageId  } from '../utils/userPaths.js';
+import { resolveLocalFileEntry  } from '../utils/deliverySelection.js';
+import { resolveWorkspaceId, workspaceIdToSlug  } from '../utils/workspaceId.js';
+import { pushBufferAttachment  } from '../utils/attachments.js';
+import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { sanitizeFilename  } from '../utils/text.js';
+import { createLogger  } from '../utils/logger.js';
+import { mimeForExtension  } from '../config/mimeExtensions.js';
+import { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath, MAX_VIDEO_BYTES  } from '../utils/aiFileDelivery.js';
+import { clearXaiUploadCache  } from '../utils/xaiUpload.js';
+import { isXaiFileDownloadError  } from '../utils/refreshXaiMessageUrls.js';
+import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
 
 const log = createLogger('ImagineGenerator');
 
@@ -548,7 +548,7 @@ async function _pollVideoResult(requestId) {
   throw new Error(`Timed out after ${Math.round(VIDEO_POLL_TIMEOUT_MS / 1000)}s waiting for the video.`);
 }
 
-module.exports = {
+export default {
   generateImage,
   generateVideo,
   MAX_REF_IMAGES_FOR_IMAGE,

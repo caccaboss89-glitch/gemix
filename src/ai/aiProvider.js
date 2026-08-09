@@ -1,20 +1,20 @@
-// src/ai/aiProvider.js
+﻿// src/ai/aiProvider.js
 //
 // Thin adapter for main-brain LLM calls on the direct xAI Responses
 // endpoint (`/v1/responses`). Accepts the usual chat-style messages + tools
 // and translates them through responsesAdapter + apiClient, then converts
 // the result back to the chat-completion shape expected by handler.js.
 
-const { GROK_MODEL, XAI_REASONING_REPLAY } = require('../config/env');
-const { MAX_TOKENS } = require('../config/constants');
-const { VALID_EFFORTS } = require('../utils/settingsStore');
-const { applyResponsesTextFormat } = require('./responseSchema');
-const {
+import { GROK_MODEL, XAI_REASONING_REPLAY  } from '../config/env.js';
+import { MAX_TOKENS  } from '../config/constants.js';
+import { VALID_EFFORTS  } from '../utils/settingsStore.js';
+import { applyResponsesTextFormat  } from './responseSchema.js';
+import {
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
   extractServerSearchStats
-} = require('./responsesAdapter');
-const { callResponsesWithStaleUrlRetry } = require('./responsesWithUrlRefresh');
+ } from './responsesAdapter.js';
+import { callResponsesWithStaleUrlRetry  } from './responsesWithUrlRefresh.js';
 
 /**
  * @param {object} body
@@ -79,4 +79,4 @@ async function callAI(messages, tools = null, opts = {}) {
   return { message, provider: 'Grok', model: GROK_MODEL, searchStats };
 }
 
-module.exports = { callAI };
+export default { callAI };

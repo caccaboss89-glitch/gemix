@@ -1,13 +1,13 @@
-// Atomic batch start: avoids race between hasPendingBatch and tryLock.
+﻿// Atomic batch start: avoids race between hasPendingBatch and tryLock.
 //
 // While GemiX is answering, new messages are NOT queued for a follow-up turn:
 // they are discarded (intentional). Only messages that arrive during the short
 // debounce window before the lock is taken are merged into the same batch.
 
-const { pushMessage, hasPendingBatch, peekPendingBatchLastEntry } = require('./messageBatcher');
-const responseLock = require('./responseLock');
+import { pushMessage, hasPendingBatch, peekPendingBatchLastEntry  } from './messageBatcher.js';
+import responseLock from './responseLock.js';
 
-const { BATCH_LOCK_TTL_MS } = require('../config/constants');
+import { BATCH_LOCK_TTL_MS  } from '../config/constants.js';
 
 function _wrapBatchHandler(batchKey, handler, log, discardLogLabel) {
   return async (entries) => {
@@ -44,7 +44,7 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) 
   return 'started';
 }
 
-module.exports = {
+export default {
   enqueueBatchedTurn,
   peekPendingBatchLastEntry
 };

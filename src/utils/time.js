@@ -1,4 +1,4 @@
-// src/utils/time.js
+﻿// src/utils/time.js
 //
 // Time utilities with strong focus on Europe/Rome timezone and DST handling.
 // Provides reliable ISO conversion, DST transition detection, and formatting
@@ -255,4 +255,4 @@ function convertRomeLocalToISO(localDatetime) {
   return `${localDatetime}${sign}${hh}:${mm}`;
 }
 
-module.exports = { getRomeTime, getRomeISO, getRomeParts, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour };
+export default { getRomeTime, getRomeISO, getRomeParts, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour };

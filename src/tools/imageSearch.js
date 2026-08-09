@@ -1,4 +1,4 @@
-// src/tools/imageSearch.js
+﻿// src/tools/imageSearch.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -10,15 +10,15 @@
 // model can see them — same multimodal tool-result pattern as read_sent_messages.
 // Config: IMAGE_SEARCH_BASE_URL (default http://127.0.0.1:8888).
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { IMAGE_SEARCH_BASE_URL } = require('../config/env');
-const { MAX_IMAGE_BYTES } = require('../config/constants');
-const { fetchWithTimeout, downloadPublicFile } = require('../utils/fetch');
-const { buildXaiFileParts } = require('../utils/aiFileDelivery');
-const { TEMP_DIR } = require('../utils/tempFileServer');
-const { createLogger } = require('../utils/logger');
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { IMAGE_SEARCH_BASE_URL  } from '../config/env.js';
+import { MAX_IMAGE_BYTES  } from '../config/constants.js';
+import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
+import { buildXaiFileParts  } from '../utils/aiFileDelivery.js';
+import { TEMP_DIR  } from '../utils/tempFileServer.js';
+import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('ImageSearch');
 
@@ -323,7 +323,7 @@ async function searchImages(args = {}) {
   return [{ type: 'text', text: JSON.stringify(payload) }, ...nativeParts];
 }
 
-module.exports = {
+export default {
   searchImages,
   DEFAULT_COUNT,
   MIN_COUNT,
