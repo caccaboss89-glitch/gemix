@@ -54,9 +54,10 @@ async function notifyAdmin(source, errorMessage) {
   }
 }
 
-export default {
+export {
   setAdminNotifierClient,
   notifyAdmin,
   ADMIN_NOTIFIED_SUFFIX,
   ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT
+
 };

@@ -90,10 +90,11 @@ function getHistoryDir(userCtx) {
   return r && path.join(r, 'history');
 }
 
-export default {
+export {
   resolvePersonalChatStorageId,
   resolveSettingsFileId,
   resolveStorageId,
   getUserRoot,
   getHistoryDir
+
 };

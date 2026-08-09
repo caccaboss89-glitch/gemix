@@ -71,4 +71,5 @@ async function callResponsesWithStaleUrlRetry(opts) {
   }
 }
 
-export default { callResponsesWithStaleUrlRetry, MAX_STALE_URL_REFRESHES };
+export { callResponsesWithStaleUrlRetry, MAX_STALE_URL_REFRESHES 
+};

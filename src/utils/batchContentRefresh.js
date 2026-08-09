@@ -144,7 +144,8 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
   return mergeBatchUnitsToContent(units, latest);
 }
 
-export default {
+export {
   materializeWhatsAppBatchContent,
   materializeDiscordBatchContent
+
 };

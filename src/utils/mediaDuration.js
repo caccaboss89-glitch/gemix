@@ -73,4 +73,5 @@ async function getMediaDurationSecFromPath(filePath) {
   }
 }
 
-export default { getMediaDurationSec, getMediaDurationSecFromPath };
+export { getMediaDurationSec, getMediaDurationSecFromPath 
+};

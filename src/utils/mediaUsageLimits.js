@@ -215,9 +215,10 @@ async function reserveGeneration(kind, userCtx) {
   };
 }
 
-export default {
+export {
   formatQuotaCounts,
   formatMediaQuotaResetLabel,
   clearMediaUsage,
   reserveGeneration
+
 };

@@ -168,8 +168,9 @@ function formatSpecialMessageText(msg) {
   return null;
 }
 
-export default {
+export {
   isSpecialNonMediaMessage,
   formatWhatsAppContactText,
   formatSpecialMessageText
+
 };

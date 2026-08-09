@@ -75,6 +75,7 @@ function formatWhatsAppPollText(msg, textBody) {
   return `${pollQuestion}\nOpzioni:\n${normalized}`.trim();
 }
 
-export default {
+export {
   formatWhatsAppPollText
+
 };

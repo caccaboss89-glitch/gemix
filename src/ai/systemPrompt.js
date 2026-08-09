@@ -365,8 +365,9 @@ function _macro(tag, blocks) {
   return `<${tag}>\n${body}\n</${tag}>`;
 }
 
-export default {
+export {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
   promptToolsFingerprint
+
 };

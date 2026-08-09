@@ -126,6 +126,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
   return false;
 }
 
-export default {
+export {
   sendIntermediateNotification
+
 };

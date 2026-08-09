@@ -33,8 +33,9 @@ function extractAttachmentTagPaths(text) {
   return paths;
 }
 
-export default {
+export {
   isSupportedMedia,
   buildAttachmentTag,
   extractAttachmentTagPaths
+
 };

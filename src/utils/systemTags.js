@@ -81,8 +81,9 @@ function wrapUserQuery(content) {
   return parts;
 }
 
-export default {
+export {
   wrapSystemNotification,
   wrapSystemReminder,
   wrapUserQuery
+
 };

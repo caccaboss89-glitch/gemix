@@ -279,4 +279,5 @@ async function buildTool(args, userCtx, responseCtx) {
   }
 }
 
-export default { buildTool };
+export { buildTool 
+};

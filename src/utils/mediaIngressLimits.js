@@ -55,7 +55,7 @@ async function resolveMediaDurationSec({ metadataSec = 0, buffer = null, extHint
   return 0;
 }
 
-export default {
+export {
   formatAudioTooLongNote,
   formatVideoTooLongNote,
   isAudioOverDurationLimit,
@@ -63,4 +63,5 @@ export default {
   resolveMediaDurationSec,
   MAX_AUDIO_DURATION_S,
   MAX_VIDEO_DURATION_S
+
 };

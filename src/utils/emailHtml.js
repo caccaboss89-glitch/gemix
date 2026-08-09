@@ -186,9 +186,10 @@ function buildNoticeBlock(text) {
     + `<div style="font-family:sans-serif;color:#555;">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
 }
 
-export default {
+export {
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,
   buildNoticeBlock
+
 };

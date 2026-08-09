@@ -206,8 +206,9 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
   return { attachments, missing };
 }
 
-export default {
+export {
   resolveDeliverySelection,
   resolveLocalFileEntry,
   resolveUrlEntry
+
 };

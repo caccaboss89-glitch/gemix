@@ -376,7 +376,7 @@ function resolveInsideWorkspace(workspaceId, relPath) {
   return abs;
 }
 
-export default {
+export {
   ensureWorkspace,
   ensureWorkspaceWritable,
   sandboxUserString,
@@ -387,4 +387,5 @@ export default {
   resolveInsideWorkspace,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile
+
 };

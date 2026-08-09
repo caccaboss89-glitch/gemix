@@ -157,8 +157,9 @@ function groupWhatsAppBatchEntries(entries) {
   return out;
 }
 
-export default {
+export {
   isPendingAlbumContinuation,
   groupWhatsAppMessages,
   groupWhatsAppBatchEntries
+
 };

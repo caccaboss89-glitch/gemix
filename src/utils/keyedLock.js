@@ -33,4 +33,5 @@ function withKeyedLock(locks, key, fn) {
   return current;
 }
 
-export default { withKeyedLock };
+export { withKeyedLock 
+};

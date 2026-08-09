@@ -94,4 +94,5 @@ async function modifyTaskFile(fileId, fn) {
   });
 }
 
-export default { readTaskFile, writeTaskFile, modifyTaskFile };
+export { readTaskFile, writeTaskFile, modifyTaskFile 
+};

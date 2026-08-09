@@ -82,4 +82,5 @@ function formatParticipantsForPrompt(participants, esc) {
     .join(', ');
 }
 
-export default { buildGroupParticipants, formatParticipantsForPrompt };
+export { buildGroupParticipants, formatParticipantsForPrompt 
+};

@@ -44,4 +44,5 @@ function formatTaskRecipient(destinations, { isAdmin = false, waJid = null, grou
   return label;
 }
 
-export default { formatTaskRecipient };
+export { formatTaskRecipient 
+};

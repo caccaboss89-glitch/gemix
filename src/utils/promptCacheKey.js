@@ -37,6 +37,7 @@ function generatePromptCacheKey(ctx) {
   return _capKey(_mainKeyFromParts(ctx.platform, Boolean(ctx.isGroup), storageId));
 }
 
-export default {
+export {
   generatePromptCacheKey
+
 };

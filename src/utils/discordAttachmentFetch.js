@@ -35,9 +35,10 @@ function formatDiscordOversizeNote(att) {
   return isDiscordAttachmentOversize(att) ? ' (over 25MB download limit)' : '';
 }
 
-export default {
+export {
   DISCORD_ATTACHMENT_MAX_BYTES,
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,
   formatDiscordOversizeNote
+
 };

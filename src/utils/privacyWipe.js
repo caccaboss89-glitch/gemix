@@ -139,4 +139,5 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   return { ok: failed.length === 0, failed };
 }
 
-export default { wipeWhatsAppUserData };
+export { wipeWhatsAppUserData 
+};

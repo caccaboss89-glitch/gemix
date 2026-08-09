@@ -79,4 +79,5 @@ async function callAI(messages, tools = null, opts = {}) {
   return { message, provider: 'Grok', model: GROK_MODEL, searchStats };
 }
 
-export default { callAI };
+export { callAI 
+};

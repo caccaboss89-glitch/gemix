@@ -411,9 +411,10 @@ function startTempFileServer() {
   log.info(`Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
 }
 
-export default {
+export {
   startTempFileServer,
   registerTempFile,
   tempDirForOwner,
   TEMP_DIR
+
 };

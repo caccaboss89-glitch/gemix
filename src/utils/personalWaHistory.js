@@ -101,6 +101,7 @@ function buildPersonalGemixFlags(messages) {
   return isGemix;
 }
 
-export default {
+export {
   buildPersonalGemixFlags
+
 };

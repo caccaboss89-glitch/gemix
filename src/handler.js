@@ -803,4 +803,5 @@ async function handleMessage(ctx) {
   }
 }
 
-export default { handleMessage };
+export { handleMessage 
+};

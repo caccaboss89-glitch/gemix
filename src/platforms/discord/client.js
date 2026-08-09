@@ -602,4 +602,5 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
   return { history, recentMessageIds };
 }
 
-export default { initDiscord };
+export { initDiscord 
+};

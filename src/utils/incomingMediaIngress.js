@@ -205,8 +205,9 @@ function capHistoryImageParts(historyMessages, maxImages, maxFiles) {
   }
 }
 
-export default {
+export {
   ingressWaMessageMedia,
   ingressDiscordAttachment,
   capHistoryImageParts
+
 };

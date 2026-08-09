@@ -96,10 +96,11 @@ async function sendWhatsAppAttachment(att, postMedia, sendOptions = {}) {
   await postMedia(media, options);
 }
 
-export default {
+export {
   PLATFORM,
   hasExternalUrl,
   partitionAttachments,
   applyBuildAgentFlags,
   sendWhatsAppAttachment
+
 };

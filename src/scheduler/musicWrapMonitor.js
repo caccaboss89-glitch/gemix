@@ -222,4 +222,5 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   return !anyFailed;
 }
 
-export default { checkAndSendMusicWrap };
+export { checkAndSendMusicWrap 
+};

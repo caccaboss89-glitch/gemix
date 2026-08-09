@@ -265,4 +265,5 @@ async function scheduleTasks(tasks, ctx) {
   return { success: true, tasks: results, ...(verifyNote ? { message: verifyNote } : {}) };
 }
 
-export default { scheduleTasks };
+export { scheduleTasks 
+};

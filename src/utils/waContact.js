@@ -52,4 +52,5 @@ async function resolveWaSender(msg) {
   return { senderJid, userName, phoneJid: normalizePhoneJid(phoneJid) };
 }
 
-export default { resolveWaSender, normalizePhoneJid, stripDeviceSuffix };
+export { resolveWaSender, normalizePhoneJid, stripDeviceSuffix 
+};

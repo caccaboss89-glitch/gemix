@@ -89,4 +89,5 @@ async function refreshHermesOAuth() {
   return _refreshInFlight;
 }
 
-export default { refreshHermesOAuth };
+export { refreshHermesOAuth 
+};

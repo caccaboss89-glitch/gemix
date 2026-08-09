@@ -309,11 +309,12 @@ function describeRecurrence(rec, lang = 'en') {
   return interval === 1 ? `${prefix} ${word}` : `${prefix} ${interval} ${word}`;
 }
 
-export default {
-  toRomeISO: _toRomeISO,
+export {
+  _toRomeISO as toRomeISO,
   parseRecurrenceRule,
   normalizePersistedRecurrence,
   advanceOccurrence,
   isDateSkipped,
   describeRecurrence
+
 };

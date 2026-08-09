@@ -221,4 +221,5 @@ export {
   buildPrivacyNoticeMessage,
   buildPrivacyWipeDoneMessage,
   isSystemMessage
+
 };

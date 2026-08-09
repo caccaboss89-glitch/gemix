@@ -493,7 +493,7 @@ function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
 
 _loadRecentVoiceEntries();
 
-export default {
+export {
   syncFileToHistory,
   resolveGemixVoiceTranscription,
   getStoredHistoryVoiceTranscription,
@@ -502,4 +502,5 @@ export default {
   pruneHistory,
   collectReferencedHistoryFilenames,
   DISCORD_MAX_AGE_MS
+
 };

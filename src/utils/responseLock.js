@@ -88,4 +88,5 @@ function unlock(key) {
   return true;
 }
 
-export default { tryLock, refresh, startAutoRenew, unlock };
+export { tryLock, refresh, startAutoRenew, unlock 
+};

@@ -103,8 +103,9 @@ const _cleanupTimer = setInterval(() => {
 }, 2 * 60 * 1000);
 _cleanupTimer.unref();
 
-export default {
+export {
   markNotifiedInCall,
   clearCallNotifications,
   buildEngineeringNotificationMessage
+
 };

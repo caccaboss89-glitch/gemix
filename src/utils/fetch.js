@@ -243,11 +243,11 @@ async function downloadPublicFileToDisk(url, destPath, opts = {}) {
   };
 }
 
-export default {
+export {
   fetchWithTimeout,
   fetchExternal,
   downloadPublicFile,
   downloadPublicFileToDisk,
-  readResponseBodyWithTimeout,
-  filenameFromPublicUrl: _filenameFromPublicUrl
+  readResponseBodyWithTimeout, _filenameFromPublicUrl as filenameFromPublicUrl
+
 };

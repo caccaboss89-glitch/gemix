@@ -331,7 +331,8 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
   return results;
 }
 
-export default {
+export {
   buildFallbackAttachmentMessage,
   sendAttachmentsWithFallback
+
 };

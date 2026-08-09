@@ -274,8 +274,9 @@ function parseStructuredReply(raw) {
   return { structured: true, text, title, attachments, voice };
 }
 
-export default {
+export {
   buildGemixResponseFormat,
   applyResponsesTextFormat,
   parseStructuredReply
+
 };

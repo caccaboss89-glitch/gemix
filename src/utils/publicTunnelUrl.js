@@ -29,4 +29,5 @@ function getPublicBaseUrl() {
   return LOCAL_FALLBACK;
 }
 
-export default { getPublicBaseUrl };
+export { getPublicBaseUrl 
+};

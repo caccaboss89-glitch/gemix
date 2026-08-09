@@ -36,4 +36,5 @@ async function mapWithConcurrency(items, limit, fn) {
   return results;
 }
 
-export default { mapWithConcurrency };
+export { mapWithConcurrency 
+};

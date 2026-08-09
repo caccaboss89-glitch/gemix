@@ -11,4 +11,5 @@ function resolveIngressFilename(givenName, mimetype, msgId = null) {
   return ext ? `${base}${ext}` : base;
 }
 
-export default { resolveIngressFilename };
+export { resolveIngressFilename 
+};

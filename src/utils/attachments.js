@@ -188,7 +188,7 @@ function hasExternalUrlOnly(att) {
   return typeof att?.externalUrl === 'string' && att.externalUrl.trim().length > 0;
 }
 
-export default {
+export {
   uniqueAttachmentName,
   pushBufferAttachment,
   readAttachmentBuffer,
@@ -199,4 +199,5 @@ export default {
   toEmailAttachment,
   toWhatsAppMediaArgs,
   toDiscordAttachmentArgs
+
 };

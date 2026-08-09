@@ -44,7 +44,8 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) 
   return 'started';
 }
 
-export default {
+export {
   enqueueBatchedTurn,
   peekPendingBatchLastEntry
+
 };

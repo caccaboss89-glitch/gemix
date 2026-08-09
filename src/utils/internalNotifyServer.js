@@ -65,4 +65,5 @@ function startInternalNotifyServer() {
   });
 }
 
-export default { startInternalNotifyServer };
+export { startInternalNotifyServer 
+};

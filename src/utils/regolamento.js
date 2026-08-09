@@ -48,4 +48,5 @@ function loadRegolamento() {
   }
 }
 
-export default { loadRegolamento };
+export { loadRegolamento 
+};

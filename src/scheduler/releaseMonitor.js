@@ -321,4 +321,5 @@ async function checkNewRelease(waClient) {
   }
 }
 
-export default { checkNewRelease };
+export { checkNewRelease 
+};

@@ -135,4 +135,5 @@ function formatStats(data) {
   return { success: true, message: output };
 }
 
-export default { readMusicStats };
+export { readMusicStats 
+};

@@ -122,4 +122,5 @@ function clearXaiUploadCache() {
   _pendingUploads.clear();
 }
 
-export default { uploadFileForXai, clearXaiUploadCache };
+export { uploadFileForXai, clearXaiUploadCache 
+};

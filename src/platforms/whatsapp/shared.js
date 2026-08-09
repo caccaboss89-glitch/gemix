@@ -651,11 +651,12 @@ function waMessageHasUsableContent(msg) {
   return false;
 }
 
-export default {
+export {
   buildWhatsAppHistory,
   buildIncomingContentPartsFromMessages,
   sendWhatsAppResponse,
   getRecentWhatsAppMessageIds,
   waMessageHasUsableContent,
   _waMessageKey
+
 };

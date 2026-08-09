@@ -84,8 +84,9 @@ function stripRedundantFilenameBesideAttachmentTag(textBody, tag, nameHints) {
   return textBody.trim();
 }
 
-export default {
+export {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
   stripRedundantFilenameBesideAttachmentTag
+
 };

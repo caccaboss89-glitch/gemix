@@ -39,4 +39,5 @@ function sanitizeDiscordThreadTitle(title, maxLen = 100) {
   return cleaned.trim().substring(0, maxLen);
 }
 
-export default { removeDiscordEmoji, sanitizeDiscordThreadTitle };
+export { removeDiscordEmoji, sanitizeDiscordThreadTitle 
+};

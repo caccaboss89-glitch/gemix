@@ -139,4 +139,5 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
   }
 }
 
-export default { sendWhatsAppTool };
+export { sendWhatsAppTool 
+};

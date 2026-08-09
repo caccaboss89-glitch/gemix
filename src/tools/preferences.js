@@ -102,4 +102,5 @@ async function managePreferences(args, settingsFileId) {
   };
 }
 
-export default { managePreferences };
+export { managePreferences 
+};

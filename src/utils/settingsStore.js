@@ -212,7 +212,7 @@ function resolveMemoryContent(existing, content, replace) {
   return { content: `${prior}\n${incoming.trim()}`, cleared: false };
 }
 
-export default {
+export {
   MAX_MEMORY_CHARS,
   DEFAULT_MEMORY,
   VOICES_MALE,
@@ -227,4 +227,5 @@ export default {
   isReviewDue,
   markReviewed,
   resolveMemoryContent
+
 };

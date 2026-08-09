@@ -141,6 +141,7 @@ function applyPastVoiceRepliesToHistory(history, storageId) {
   return { history: out, replacedCount };
 }
 
-export default {
+export {
   applyPastVoiceRepliesToHistory
+
 };

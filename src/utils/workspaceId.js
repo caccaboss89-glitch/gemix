@@ -77,9 +77,10 @@ function getBuildWorkspaceMetaDir(workspaceId) {
   return path.join(DATA_DIR, 'users', slug);
 }
 
-export default {
+export {
   resolveWorkspaceId,
   workspaceIdToSlug,
   getBuildWorkspacePath,
   getBuildWorkspaceMetaDir
+
 };

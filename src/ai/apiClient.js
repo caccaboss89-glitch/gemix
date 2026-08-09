@@ -502,10 +502,11 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   throw new Error('xAI authenticated fetch failed');
 }
 
-export default {
+export {
   callResponsesModel,
   callApiWithRetry,
   logApiResponse,
   fetchXaiWithOAuthRetry,
   isGrokCreditExhaustedError
+
 };

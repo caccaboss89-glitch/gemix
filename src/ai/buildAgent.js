@@ -309,8 +309,9 @@ async function runBuildAgent({
   };
 }
 
-export default {
+export {
   runBuildAgent,
   buildGrokRules,
   DELIVERY_SELECTION_NOTICE
+
 };

@@ -268,4 +268,5 @@ async function readSentMessages(args, userCtx) {
   return payload;
 }
 
-export default { readSentMessages };
+export { readSentMessages 
+};

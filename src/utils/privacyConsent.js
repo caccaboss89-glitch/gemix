@@ -115,4 +115,5 @@ async function forgetUser(waJid) {
   });
 }
 
-export default { consentKey, hasBeenInformed, markInformed, forgetUser };
+export { consentKey, hasBeenInformed, markInformed, forgetUser 
+};

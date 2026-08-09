@@ -152,4 +152,5 @@ async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
   }
 }
 
-export default { sendEmailTool };
+export { sendEmailTool 
+};

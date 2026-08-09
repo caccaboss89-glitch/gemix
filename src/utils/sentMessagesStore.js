@@ -247,9 +247,10 @@ function deleteSentMessages(senderKey) {
   });
 }
 
-export default {
+export {
   recordSentMessage,
   readSentRecords,
   resolveStoredAttachmentPath,
   deleteSentMessages
+
 };

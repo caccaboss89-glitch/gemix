@@ -235,4 +235,5 @@ async function _handlePersonalBatch(entries) {
   });
 }
 
-export default { initPersonalWhatsApp };
+export { initPersonalWhatsApp 
+};

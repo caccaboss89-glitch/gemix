@@ -354,7 +354,7 @@ const REPLY_OUTSIDE_HISTORY_PREFIX = '[In reply to: (message outside recent hist
 /** Prefix when a reply chain is deeper than MAX_REPLY_CHAIN_DEPTH. */
 const REPLY_CHAIN_TRUNCATED_PREFIX = '[In reply to: (reply chain truncated)]\n';
 
-export default {
+export {
   sanitizeFilename,
   stripVoiceTags,
   sanitizeVoiceMessageText,
@@ -366,4 +366,5 @@ export default {
   formatLabeledUserContent,
   REPLY_OUTSIDE_HISTORY_PREFIX,
   REPLY_CHAIN_TRUNCATED_PREFIX
+
 };

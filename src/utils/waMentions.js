@@ -224,7 +224,7 @@ function stripPhoneMentionTags(text) {
   return text.replace(LOOSE_OUT_MENTION_RE, '');
 }
 
-export default {
+export {
   replaceMentionsInBody,
   resolveMentionsForMessage,
   resolveLidTagsInBody,
@@ -233,4 +233,5 @@ export default {
   normalizeOutgoingMentionTags,
   containsMetaAiTag,
   collectMentionJids
+
 };

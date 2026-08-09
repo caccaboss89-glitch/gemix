@@ -302,6 +302,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
   return { toolCallId: toolCall.id, result: finalResult };
 }
 
-export default {
+export {
   executeTool
+
 };

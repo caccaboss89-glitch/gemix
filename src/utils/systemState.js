@@ -99,7 +99,8 @@ async function update(moduleName, newState) {
   });
 }
 
-export default {
+export {
   get,
   update
+
 };

@@ -531,7 +531,7 @@ async function deliverSyncedAttachment(opts) {
   };
 }
 
-export default {
+export {
   DELIVERY_MODE,
   XAI_IMAGE_EXTS,
   MAX_IMAGE_READS,
@@ -543,4 +543,5 @@ export default {
   exposeXaiUrlFromAbsPath,
   deliverSyncedAttachment,
   resolveHistoryAbsPath
+
 };

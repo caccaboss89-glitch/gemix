@@ -104,4 +104,5 @@ function getSubscribedChats() {
   return new Map(subscribedChats);
 }
 
-export default { toggleReleaseNotify, getSubscribedChats, enableReleaseNotify };
+export { toggleReleaseNotify, getSubscribedChats, enableReleaseNotify 
+};

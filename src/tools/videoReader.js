@@ -100,4 +100,5 @@ async function readVideo(args, userCtx) {
   return [{ type: 'text', text: JSON.stringify(payload) }, part];
 }
 
-export default { readVideo };
+export { readVideo 
+};

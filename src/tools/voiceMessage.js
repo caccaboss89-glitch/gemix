@@ -252,4 +252,5 @@ async function googleTranslateTTS(text, language, signal) {
   return convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
 }
 
-export default { generateVoice, convertMp3ToWhatsAppOpus };
+export { generateVoice, convertMp3ToWhatsAppOpus 
+};

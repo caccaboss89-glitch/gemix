@@ -76,8 +76,9 @@ function formatWaError(err) {
   return `${name}${msg}`;
 }
 
-export default {
+export {
   isWaPuppeteerTransientError,
   withWaPuppeteerRetry,
   formatWaError
+
 };

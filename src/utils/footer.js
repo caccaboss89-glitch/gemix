@@ -136,7 +136,7 @@ function appendResearchBadge(text, stats) {
   return appendBlock(text, `\n\n${badge}`);
 }
 
-export default {
+export {
   addFooter,
   removeFooter,
   hasFooter,
@@ -146,4 +146,5 @@ export default {
   removeScheduledFooter,
   buildResearchBadgeText,
   appendResearchBadge
+
 };

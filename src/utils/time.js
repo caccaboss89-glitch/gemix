@@ -255,4 +255,5 @@ function convertRomeLocalToISO(localDatetime) {
   return `${localDatetime}${sign}${hh}:${mm}`;
 }
 
-export default { getRomeTime, getRomeISO, getRomeParts, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour };
+export { getRomeTime, getRomeISO, getRomeParts, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour 
+};

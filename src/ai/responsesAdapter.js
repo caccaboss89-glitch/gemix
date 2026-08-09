@@ -503,9 +503,10 @@ function extractServerSearchStats(data) {
   return { webSources, xPosts };
 }
 
-export default {
+export {
   chatMessagesToResponsesInput,
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
   extractServerSearchStats
+
 };

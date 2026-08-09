@@ -323,9 +323,10 @@ async function searchImages(args = {}) {
   return [{ type: 'text', text: JSON.stringify(payload) }, ...nativeParts];
 }
 
-export default {
+export {
   searchImages,
   DEFAULT_COUNT,
   MIN_COUNT,
   MAX_COUNT
+
 };

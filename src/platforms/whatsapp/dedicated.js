@@ -225,4 +225,5 @@ function isDedicatedClientReady() {
   return Boolean(client?.info?.wid?._serialized);
 }
 
-export default { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady };
+export { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady 
+};

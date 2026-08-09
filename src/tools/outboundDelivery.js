@@ -63,8 +63,9 @@ function recordOutbound(entry) {
   }
 }
 
-export default {
+export {
   resolveOutboundAttachments,
   alreadyContactedError,
   recordOutbound
+
 };

@@ -284,4 +284,5 @@ async function checkAndExecuteTasks() {
   }
 }
 
-export default { startScheduler, setSchedulerWaClient };
+export { startScheduler, setSchedulerWaClient 
+};

@@ -105,4 +105,5 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
   };
 }
 
-export default { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept };
+export { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept 
+};

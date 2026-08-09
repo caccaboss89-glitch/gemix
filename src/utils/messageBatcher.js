@@ -99,4 +99,5 @@ function peekPendingBatchLastEntry(key) {
   return batch.messages[batch.messages.length - 1];
 }
 
-export default { pushMessage, hasPendingBatch, peekPendingBatchLastEntry };
+export { pushMessage, hasPendingBatch, peekPendingBatchLastEntry 
+};

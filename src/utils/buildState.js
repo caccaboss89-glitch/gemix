@@ -177,10 +177,11 @@ function listWorkspaceStates() {
   return out;
 }
 
-export default {
+export {
   touchActivity,
   acquireBuildLock,
   releaseBuildLock,
   renewBuildLock,
   listWorkspaceStates
+
 };

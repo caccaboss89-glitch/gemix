@@ -305,8 +305,9 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
   }
 }
 
-export default {
+export {
   processWhatsAppQuotedReply,
   processDiscordQuotedReply,
   MAX_REPLY_CHAIN_DEPTH
+
 };

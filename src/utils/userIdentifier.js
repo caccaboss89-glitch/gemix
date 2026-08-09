@@ -51,4 +51,5 @@ function getGroupTaskFileId(groupId) {
   return TASK_PREFIX_GROUP + groupId.replace('@g.us', '');
 }
 
-export default { identifyUser, getGroupTaskFileId };
+export { identifyUser, getGroupTaskFileId 
+};

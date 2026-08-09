@@ -32,9 +32,9 @@ import {
   VALID_LANGUAGES
  } from '../utils/settingsStore.js';
 import {
-  DEFAULT_COUNT: WEB_IMAGE_SEARCH_DEFAULT_COUNT,
-  MIN_COUNT: WEB_IMAGE_SEARCH_MIN_COUNT,
-  MAX_COUNT: WEB_IMAGE_SEARCH_MAX_COUNT
+  DEFAULT_COUNT as WEB_IMAGE_SEARCH_DEFAULT_COUNT,
+  MIN_COUNT as WEB_IMAGE_SEARCH_MIN_COUNT,
+  MAX_COUNT as WEB_IMAGE_SEARCH_MAX_COUNT
  } from '../tools/imageSearch.js';
 import {
   MAX_REF_IMAGES_FOR_IMAGE,
@@ -844,10 +844,11 @@ function getToolAccessError(toolName, allowedRoundNames, unavailableMessage) {
   return `Tool "${toolName}" is not available in the current context.`;
 }
 
-export default {
+export {
   getToolsForUser,
   getToolAccessError,
   syncProfileToolSets,
   toolNamesToSet,
   validateToolArgs
+
 };
