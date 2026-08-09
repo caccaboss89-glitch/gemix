@@ -26,7 +26,8 @@ const { getXaiAuth } = require('../config/xaiAuth');
 const { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry } = require('../ai/apiClient');
 const { fetchWithTimeout, readResponseBodyWithTimeout } = require('../utils/fetch');
 const { tempDirForOwner } = require('../utils/tempFileServer');
-const { getHistoryDir, resolveStorageId } = require('../utils/userPaths');
+const { resolveStorageId } = require('../utils/userPaths');
+const { resolveLocalFileEntry } = require('../utils/deliverySelection');
 const { resolveWorkspaceId, workspaceIdToSlug } = require('../utils/workspaceId');
 const { pushBufferAttachment } = require('../utils/attachments');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
@@ -95,45 +96,6 @@ function _cleanPrompt(prompt) {
 }
 
 /**
- * Locate a reference-image file by filename, mirroring the build tool's
- * resolution policy:
- *   1. delivery buffer (responseCtx.attachments[]) by name
- *   2. chat history for this user
- *
- * Returns { filePath } | { buffer, name } on hit, null on miss. Only the
- * basename is honoured - the model passes plain filenames, never paths.
- */
-function _findReferenceFile(filename, userCtx, responseCtx) {
-  if (typeof filename !== 'string' || !filename.trim()) return null;
-  const target = path.basename(filename.trim());
-
-  if (Array.isArray(responseCtx && responseCtx.attachments)) {
-    const buf = responseCtx.attachments.find(
-      a => a && a.name && path.basename(a.name) === target,
-    );
-    if (buf) {
-      if (buf.filePath && fs.existsSync(buf.filePath)) {
-        return { filePath: buf.filePath, name: path.basename(buf.name) };
-      }
-      if (Buffer.isBuffer(buf.buffer)) {
-        return { buffer: buf.buffer, name: path.basename(buf.name) };
-      }
-    }
-  }
-
-  const historyDir = getHistoryDir(userCtx);
-  if (historyDir) {
-    const candidate = path.join(historyDir, target);
-    try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-        return { filePath: candidate, name: target };
-      }
-    } catch { /* ignore */ }
-  }
-  return null;
-}
-
-/**
  * Persist a buffer-sourced reference image to the caller's private temp subdir
  * so it can be uploaded. Per-user isolation: files for one user never share a
  * directory with another's.
@@ -171,7 +133,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, op
       continue;
     }
 
-    const found = _findReferenceFile(entry, userCtx, responseCtx);
+    const found = resolveLocalFileEntry(entry, userCtx, responseCtx);
     if (!found) {
       return { ok: false, reason: `Reference image "${entry}" not found in the delivery buffer or chat history.` };
     }

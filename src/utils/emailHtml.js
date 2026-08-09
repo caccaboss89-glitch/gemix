@@ -187,9 +187,6 @@ function buildNoticeBlock(text) {
 }
 
 module.exports = {
-  looksLikeHtml,
-  escapeHtml,
-  sanitizeEmailHtml,
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,

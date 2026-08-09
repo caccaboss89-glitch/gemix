@@ -68,17 +68,6 @@ async function _collectWhatsAppReactions(counts, msg) {
 }
 
 /**
- * Reaction tag for one WhatsApp message.
- * @param {object} msg - whatsapp-web.js Message
- * @returns {Promise<string>}
- */
-async function whatsAppReactionTag(msg) {
-  const counts = new Map();
-  await _collectWhatsAppReactions(counts, msg);
-  return _formatCounts(counts);
-}
-
-/**
  * Merged reaction tag across several WhatsApp messages (one logical turn, e.g.
  * a multi-attach album where a reaction may sit on any item).
  * @param {object[]} msgs
@@ -122,20 +111,7 @@ function discordReactionTag(msg) {
   }
 }
 
-/**
- * Merge a reaction tag into existing message text (space-separated, trimmed).
- * @param {string} text
- * @param {string} tag
- * @returns {string}
- */
-function appendReactionTag(text, tag) {
-  if (!tag) return text;
-  return `${text || ''} ${tag}`.trim();
-}
-
 module.exports = {
-  whatsAppReactionTag,
   whatsAppReactionTagForMessages,
   discordReactionTag,
-  appendReactionTag,
 };

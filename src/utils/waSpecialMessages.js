@@ -11,13 +11,6 @@
 
 const { formatTimestamp } = require('./time');
 
-/** Message types whose payload is data, not media or plain text. */
-const SPECIAL_NON_MEDIA_TYPES = new Set([
-  'location',
-  'scheduled_event_creation',
-  'event_creation',
-]);
-
 /** WA may emit either type string for group events. */
 const EVENT_MESSAGE_TYPES = new Set(['scheduled_event_creation', 'event_creation']);
 
@@ -52,11 +45,6 @@ function isWhatsAppEventMessage(msg) {
   if (!msg) return false;
   if (EVENT_MESSAGE_TYPES.has(_messageType(msg))) return true;
   return _hasEventPayload(msg._data);
-}
-
-/** True when the message is a special type with no real media to ingest. */
-function isSpecialNonMediaType(type) {
-  return SPECIAL_NON_MEDIA_TYPES.has(type);
 }
 
 /** True when the message object is a special non-media payload (location/event). */
@@ -181,11 +169,7 @@ function formatSpecialMessageText(msg) {
 }
 
 module.exports = {
-  isSpecialNonMediaType,
   isSpecialNonMediaMessage,
-  isWhatsAppEventMessage,
-  formatWhatsAppLocationText,
-  formatWhatsAppEventText,
   formatWhatsAppContactText,
   formatSpecialMessageText,
 };

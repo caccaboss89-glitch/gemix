@@ -200,33 +200,6 @@ function registerTempFile(filePath, originalName, opts = {}) {
 }
 
 /**
- * Emit a public temporary download link for a user (delivery fallback).
- * The function always returns an HTTPS URL from
- * GEMIX_PUBLIC_ATTACHMENT_BASE_URL (Caddy → this server).
- *
- * @param {string} filePath - Absolute path to the file.
- * @param {string} originalName - Display name (used in URL and headers).
- * @param {object} [opts]
- * @param {'history'|'temp'} [opts.kind='temp'] - Picks the default TTL:
- *   'history' - 24h (file lives on disk indefinitely, may be re-fetched),
- *   'temp'    - 1h  (one-shot generated asset or freshly-downloaded media).
- * @param {number} [opts.ttlMs] - Explicit override (takes precedence over kind).
- * @param {string} [opts.mimetype] - Force-override the detected MIME.
- * @returns {{url: string, token: string, expiresAt: number, mimetype: string}}
- */
-function getPublicAttachmentUrl(filePath, originalName, opts = {}) {
-  const kind = opts.kind === 'history' ? 'history' : 'temp';
-  const ttlMs = Number.isFinite(opts.ttlMs) && opts.ttlMs > 0
-    ? opts.ttlMs
-    : (kind === 'history' ? TUNNEL_TOKEN_TTL_HISTORY_MS : TUNNEL_TOKEN_TTL_TEMP_MS);
-  return registerTempFile(filePath, originalName, {
-    ttlMs,
-    mimetype: opts.mimetype,
-    disposition: opts.disposition,
-  });
-}
-
-/**
  * Cleanup expired tokens.
  *
  * Two layers:
@@ -438,80 +411,9 @@ function startTempFileServer() {
   log.info(`Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
 }
 
-/**
- * Stop the temporary file server
- */
-function stopTempFileServer() {
-  if (_server) {
-    _server.close();
-    _server = null;
-  }
-  if (_cleanupInterval) {
-    clearInterval(_cleanupInterval);
-    _cleanupInterval = null;
-  }
-  log.info('Temp file server stopped');
-}
-
-/**
- * Get stats about registered temp files
- */
-function getTempFileStats() {
-  const now = Date.now();
-  let activeCount = 0;
-  let expiredCount = 0;
-  let totalBytes = 0;
-
-  for (const [token, entry] of fileRegistry.entries()) {
-    if (entry.expiresAt > now) {
-      activeCount++;
-      try {
-        if (fs.existsSync(entry.filePath)) {
-          const stat = fs.statSync(entry.filePath);
-          totalBytes += stat.size;
-        }
-      } catch { /* ignore */ }
-    } else {
-      expiredCount++;
-    }
-  }
-
-  return {
-    active: activeCount,
-    expired: expiredCount,
-    totalBytes,
-    tempDirSize: getDirectorySize(TEMP_DIR),
-  };
-}
-
-/**
- * Get size of a directory recursively
- */
-function getDirectorySize(dir) {
-  if (!fs.existsSync(dir)) return 0;
-  let size = 0;
-  try {
-    const files = fs.readdirSync(dir, { recursive: true });
-    for (const file of files) {
-      const filePath = path.join(dir, file);
-      try {
-        const stat = fs.statSync(filePath);
-        if (stat.isFile()) {
-          size += stat.size;
-        }
-      } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
-  return size;
-}
-
 module.exports = {
   startTempFileServer,
-  stopTempFileServer,
   registerTempFile,
-  getPublicAttachmentUrl,
   tempDirForOwner,
-  getTempFileStats,
-  cleanupExpiredFiles,
   TEMP_DIR,
 };

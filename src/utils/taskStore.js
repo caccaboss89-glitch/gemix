@@ -8,25 +8,16 @@ const fs = require('fs');
 const fsPromises = require('fs').promises;
 const path = require('path');
 const { TASKS_DIR } = require('../config/constants');
+const { withKeyedLock } = require('./keyedLock');
 
 if (!fs.existsSync(TASKS_DIR)) {
   fs.mkdirSync(TASKS_DIR, { recursive: true });
 }
 
 // Per-file async lock to prevent concurrent read-modify-write race conditions.
-// Uses a Promise chain: each caller waits for the previous one to finish before starting.
 const _locks = new Map();
 
-function _withLock(fileId, fn) {
-  const prev = _locks.get(fileId) || Promise.resolve();
-  let release;
-  const current = new Promise(r => { release = r; });
-  _locks.set(fileId, current);
-  return prev.then(fn).finally(() => {
-    release();
-    if (_locks.get(fileId) === current) _locks.delete(fileId);
-  });
-}
+const _withLock = (fileId, fn) => withKeyedLock(_locks, fileId, fn);
 
 /**
  * Read task data from a task file.

@@ -484,12 +484,8 @@ _reaper.unref();
 cleanupOrphanBuildSandboxes().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
 
 module.exports = {
-  getOrCreate,
   execGrokBuild,
   buildGrokExecSpec,
   shutdown,
   shutdownAll,
-  cleanupOrphanBuildSandboxes,
-  // Diagnostics
-  _pool,
 };

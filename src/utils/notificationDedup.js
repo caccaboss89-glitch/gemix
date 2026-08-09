@@ -6,8 +6,9 @@
 // each round that triggers a slow operation (image_gen, video_gen, build)
 // would fire the same "please wait" banner repeatedly.
 //
-// This module tracks which (call, kind) pairs have already been notified and
-// exposes the message builders for every notification kind.
+// This module tracks which (call, kind) pairs have already been notified. Most
+// banners are one fixed line written at the call site in tools/index.js; the
+// build one is built here because it is also referenced elsewhere.
 //
 // Usage pattern (handler.js):
 //   ctx.requestId = <unique id generated once per handleMessage invocation>
@@ -15,6 +16,7 @@
 //   clearCallNotifications(ctx)       - called in the finally block of handleMessage
 
 const { createLogger } = require('./logger');
+const { PLATFORM_DISCORD, isWhatsAppPlatform } = require('../config/constants');
 
 const log = createLogger('NotificationDedup');
 
@@ -33,8 +35,8 @@ const _notified = new Set();
  */
 function getChatKey(ctx) {
   if (!ctx) return 'unknown:unknown';
-  if (ctx.platform === 'discord') return `discord:${ctx.chatId || 'unknown'}`;
-  if (ctx.platform && ctx.platform.startsWith('whatsapp')) {
+  if (ctx.platform === PLATFORM_DISCORD) return `${PLATFORM_DISCORD}:${ctx.chatId || 'unknown'}`;
+  if (isWhatsAppPlatform(ctx.platform)) {
     return `${ctx.platform}:${ctx.chatId || ctx.groupId || ctx.userId || 'unknown'}`;
   }
   return `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}`;
@@ -102,7 +104,6 @@ const _cleanupTimer = setInterval(() => {
 _cleanupTimer.unref();
 
 module.exports = {
-  getChatKey,
   markNotifiedInCall,
   clearCallNotifications,
   buildEngineeringNotificationMessage,

@@ -82,9 +82,6 @@ function wrapUserQuery(content) {
 }
 
 module.exports = {
-  SYSTEM_NOTIFICATION_TAG,
-  SYSTEM_REMINDER_TAG,
-  USER_QUERY_TAG,
   wrapSystemNotification,
   wrapSystemReminder,
   wrapUserQuery,

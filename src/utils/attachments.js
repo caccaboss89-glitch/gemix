@@ -3,7 +3,7 @@
 // An attachment is: { name, mimetype, buffer?, filePath?, externalUrl?, waTempLinkPreferred? }
 //   - buffer:   Buffer already in memory (small/in-flight files: voice, formal PDF, generated media)
 //   - filePath: absolute path on disk (build workspace harvest, history, large files)
-//   - externalUrl: source link when the file cannot be hosted (e.g. URL >100 MB)
+//   - externalUrl: source link when the file is too large even to stage on disk
 //   - waTempLinkPreferred: build-agent audio/video only (normal delivery uses size only)
 //
 // At least one of buffer, filePath, or externalUrl must be set. Helper functions handle
@@ -149,8 +149,8 @@ function isWhatsAppOversizedAttachment(att) {
 }
 
 /**
- * Prefer public temp download link before attempting direct WA media send.
- * - Oversized files (>100 MB) — all sources, all types
+ * Prefer a public temp download link over attempting a direct WA media send.
+ * - files over WA_DIRECT_MAX_BYTES (16 MB) — all sources, all types
  * - waTempLinkPreferred: build-agent audio/video only
  * Failed direct sends still fall back to temp links.
  */
@@ -189,7 +189,6 @@ function hasExternalUrlOnly(att) {
 }
 
 module.exports = {
-  isValidAttachment,
   uniqueAttachmentName,
   pushBufferAttachment,
   readAttachmentBuffer,

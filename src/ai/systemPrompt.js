@@ -9,25 +9,20 @@
 // buildDynamicRuntimeContext is a role:user item built once per turn and placed
 // right after the current user message (never a second system message: xAI folds
 // multi-system into the head, which moves it and busts the prefix cache). Time,
-// delivery buffer, workspace, quotas, settings, caller and turn-varying platform
-// fields live there. The Discord statute is conversation-stable, so it stays in
-// the static prefix.
+// workspace, quotas, settings, caller and turn-varying platform fields live
+// there. The Discord statute is conversation-stable, so it stays in the static
+// prefix. The delivery buffer is deliberately absent: it is always empty when
+// this block is built, and each tool result names the file it added — which is
+// what the model reads for the rest of the turn.
 
 const { getRomeTime, formatTimestamp } = require('../utils/time');
 const { ACTIVE_MEMBERS } = require('../config/members');
 const { ADMIN_NAME, GROK_MODEL } = require('../config/env');
 const { getModelDisplayName } = require('../utils/footer');
 const { defaultSettings, customizedFields } = require('../utils/settingsStore');
-const { PLATFORM_WA_PERSONAL, BUILD_WORKSPACE_TTL_MS } = require('../config/constants');
+const { PLATFORM_WA_PERSONAL, BUILD_WORKSPACE_TTL_LABEL } = require('../config/constants');
 const { PRIVACY_WIPE_COMMAND } = require('../config/systemMessages');
 
-/** Human-readable build workspace TTL (from BUILD_WORKSPACE_TTL_MS). */
-const BUILD_WORKSPACE_TTL_LABEL = (() => {
-  const hours = BUILD_WORKSPACE_TTL_MS / (60 * 60 * 1000);
-  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
-  const mins = Math.round(BUILD_WORKSPACE_TTL_MS / (60 * 1000));
-  return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
-})();
 const { formatParticipantsForPrompt } = require('../utils/waParticipants');
 const {
   PROFILE,
@@ -39,7 +34,7 @@ const {
   getCapabilities,
   profileHasMediaQuota,
 } = require('../config/platformCapabilities');
-const { getToolsForUser } = require('./tools');
+const { getToolsForUser, toolNamesToSet } = require('./tools');
 const { formatQuotaCounts, formatMediaQuotaResetLabel } = require('../utils/mediaUsageLimits');
 const { escapeXml } = require('../utils/xmlEscape');
 
@@ -72,18 +67,11 @@ function _indentLines(text, depth) {
 }
 
 function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
-  const userCtx = {
+  const tools = getToolsForUser(isActiveMember, isAdmin, {
     platform: ctx.platform,
     isGroup: ctx.isGroup,
-    chatId: ctx.chatId,
-  };
-  const tools = getToolsForUser(isActiveMember, isAdmin, userCtx);
-  const toolNames = new Set();
-  for (const t of tools) {
-    if (t?.function?.name) toolNames.add(t.function.name);
-    else if (typeof t?.type === 'string' && t.type !== 'function') toolNames.add(t.type);
-  }
-  return { toolNames };
+  });
+  return { toolNames: toolNamesToSet(tools) };
 }
 
 /** Stable fingerprint of live tool names for mid-turn static rebuild detection. */
@@ -271,7 +259,6 @@ function buildDynamicRuntimeContext(ctx) {
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
-  const delivery = ctx.deliveryState || { bufferFiles: [] };
   const promptOpts = { isActiveMember };
 
   const blocks = [];
@@ -292,11 +279,6 @@ function buildDynamicRuntimeContext(ctx) {
     if (roster.length > 0) {
       blocks.push(`Participants: ${formatParticipantsForPrompt(roster, escapeXml)}`);
     }
-  }
-
-  const bufferFiles = Array.isArray(delivery.bufferFiles) ? delivery.bufferFiles : [];
-  if (bufferFiles.length > 0) {
-    blocks.push(`<DeliveryBuffer>${escapeXml(bufferFiles.join(', '))}</DeliveryBuffer>`);
   }
 
   if (cap.buildWorkspace) {

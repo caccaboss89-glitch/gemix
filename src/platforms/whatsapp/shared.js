@@ -186,63 +186,37 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
   // fetch timeout when many recent messages carried media.
   // Scheduled + registry system messages carry no sender label: they are
   // rendered as <system-notification> turns, which already say who wrote them.
-  async function resolveHistorySenderMeta(msg, mi) {
-    let senderName = null;
-    let isGemiX = false;
-    let isScheduled = false;
-    let isSystem = false;
+  const _meta = ({ senderName = null, isGemiX = false, isScheduled = false, isSystem = false }) => ({
+    senderName,
+    isGemiX,
+    isScheduled,
+    isSystem,
+    isFromBot: isGemiX || isScheduled || isSystem,
+    isSystemEvent: isScheduled || isSystem,
+  });
 
-    if (platform === PLATFORM_WA_PERSONAL) {
-      if (msg.fromMe) {
-        // Admin-sent system prefixes (release, music wrap, temp links, errors, …)
-        // are always GemiX system — never Account Owner (admin will not type them).
-        if (hasScheduledFooter(msg.body)) {
-          isScheduled = true;
-        } else if (isSystemMessage(msg.body)) {
-          isSystem = true;
-        } else if (personalGemixFlags[mi]) {
-          senderName = 'GemiX';
-          isGemiX = true;
-        } else {
-          senderName = 'Account Owner';
-        }
-      } else {
-        try {
-          const contact = await msg.getContact();
-          senderName = contact.pushname || contact.name || msg.from;
-        } catch {
-          senderName = msg.from || 'Unknown';
-        }
-      }
-    } else {
-      // Dedicated: every fromMe is bot (music wrap, release, temp links, …).
-      if (msg.fromMe) {
-        if (hasScheduledFooter(msg.body)) {
-          isScheduled = true;
-        } else if (isSystemMessage(msg.body)) {
-          isSystem = true;
-        } else {
-          senderName = 'GemiX';
-          isGemiX = true;
-        }
-      } else {
-        try {
-          const contact = await msg.getContact();
-          senderName = contact.pushname || contact.name || msg.from;
-        } catch {
-          senderName = msg.from || 'Unknown';
-        }
+  /**
+   * Who wrote a history message. The two accounts differ in one place only:
+   * on the personal account a fromMe message that GemiX did not write is the
+   * admin typing (Account Owner); on the dedicated account every fromMe is ours.
+   * Program notices (release, music wrap, temp links, errors) are never the
+   * admin — they carry a system prefix or the scheduled footer either way.
+   */
+  async function resolveHistorySenderMeta(msg, mi) {
+    if (!msg.fromMe) {
+      try {
+        const contact = await msg.getContact();
+        return _meta({ senderName: contact.pushname || contact.name || msg.from });
+      } catch {
+        return _meta({ senderName: msg.from || 'Unknown' });
       }
     }
-
-    return {
-      senderName,
-      isGemiX,
-      isScheduled,
-      isSystem,
-      isFromBot: isGemiX || isScheduled || isSystem,
-      isSystemEvent: isScheduled || isSystem,
-    };
+    if (hasScheduledFooter(msg.body)) return _meta({ isScheduled: true });
+    if (isSystemMessage(msg.body)) return _meta({ isSystem: true });
+    if (platform === PLATFORM_WA_PERSONAL && !personalGemixFlags[mi]) {
+      return _meta({ senderName: 'Account Owner' });
+    }
+    return _meta({ senderName: 'GemiX', isGemiX: true });
   }
 
   async function processHistoryGroup(group) {
@@ -379,25 +353,6 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 }
 
 /**
- * Extract quoted message content if this message is a reply.
- * Walks the reply chain (up to MAX_REPLY_CHAIN_DEPTH) and concatenates
- * [In reply to: ...] prefixes root-first. Uses recentMessageIds to decide
- * whether each hop is still inside the loaded history window (outside →
- * REPLY_OUTSIDE_HISTORY_PREFIX).
- * @param {object} msg - The whatsapp-web.js message object
- * @param {string} chatId - The chat's serialized ID (for voice cache lookup)
- * @param {string} userId - storage id for media sync
- * @param {Set<string>} recentMessageIds - keys of recent messages (quote window)
- * @param {boolean} [isGroup=false] - whether the chat is a group (affects mention resolution)
- * @param {string} [platform]
- * @param {{ maxChainDepth?: number, includeQuotedMedia?: boolean }} [options]
- * @returns {Promise<object>} { prefix: string, mediaParts: array }
- */
-async function extractQuotedMessageContent(msg, chatId, userId, recentMessageIds, isGroup = false, platform = PLATFORM_WA_DEDICATED, options = {}) {
-  return processWhatsAppQuotedReply(msg, chatId, userId, recentMessageIds, isGroup, platform, options);
-}
-
-/**
  * Send plain text to a WhatsApp chat with chunking and retry.
  * @param {object} chat
  * @param {string} text
@@ -497,7 +452,7 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
     const result = await sendAttachmentsWithFallback(
       responseData.attachments,
       sendAttachment,
-      { platform: 'whatsapp' },
+      { platform: PLATFORM.WHATSAPP },
     );
 
     log.info(`Attachment delivery: ${result.sent.length} direct, ${result.linkFallback.length} via link`);
@@ -632,7 +587,7 @@ async function buildIncomingContentPartsFromMessages(
   const recentIds = recentMessageIds
     || await getRecentWhatsAppMessageIds(quoteMsg || primaryMsg);
   if (quoteMsg) {
-    const quotedContent = await extractQuotedMessageContent(
+    const quotedContent = await processWhatsAppQuotedReply(
       quoteMsg, chatId, userId, recentIds, isGroup, platform,
       { includeQuotedMedia },
     );
@@ -690,16 +645,6 @@ async function buildIncomingContentPartsFromMessages(
   return contentParts;
 }
 
-/**
- * Build the contentParts array for an incoming WhatsApp message (single).
- * @see buildIncomingContentPartsFromMessages for multi-attach albums.
- */
-async function buildIncomingContentParts(msg, chatId, userId, isGroup = false, senderName = 'Unknown', platform = PLATFORM_WA_DEDICATED, recentMessageIds = null) {
-  return buildIncomingContentPartsFromMessages(
-    msg, chatId, userId, isGroup, senderName, platform, recentMessageIds,
-  );
-}
-
 /** True when the message should enter the batch pipeline (incl. quote-only, like Discord). */
 function waMessageHasUsableContent(msg) {
   if (!msg) return false;
@@ -713,7 +658,6 @@ function waMessageHasUsableContent(msg) {
 
 module.exports = {
   buildWhatsAppHistory,
-  buildIncomingContentParts,
   buildIncomingContentPartsFromMessages,
   sendWhatsAppResponse,
   getRecentWhatsAppMessageIds,

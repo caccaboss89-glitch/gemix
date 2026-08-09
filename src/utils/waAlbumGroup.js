@@ -76,15 +76,6 @@ function canExtendAlbum(first, prev, next) {
 }
 
 /**
- * @deprecated Prefer canExtendAlbum(first, prev, next). Kept for call sites that
- * only compare two consecutive media messages (uses next as both prev-context
- * via treating `a` as first and prev).
- */
-function isSameAlbumItem(a, b) {
-  return canExtendAlbum(a, a, b);
-}
-
-/**
  * Partition an ordered message list into singles and album groups.
  * @param {object[]} messages - oldest → newest
  * @param {{ isBotAt?: (msg: object, index: number) => boolean }} [opts]
@@ -167,14 +158,6 @@ function groupWhatsAppBatchEntries(entries) {
 }
 
 module.exports = {
-  ALBUM_MAX_GAP_SEC,
-  ALBUM_MAX_SPAN_SEC,
-  waSenderKey,
-  waTimestampSec,
-  hasAlbumCaptionBody,
-  isAlbumMediaMessage,
-  canExtendAlbum,
-  isSameAlbumItem,
   isPendingAlbumContinuation,
   groupWhatsAppMessages,
   groupWhatsAppBatchEntries,

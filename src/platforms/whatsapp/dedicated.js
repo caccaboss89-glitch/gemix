@@ -5,25 +5,20 @@
 // and delegates to the shared WhatsApp handler + batcher.
 // Only one instance (the "dedicated" client).
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } = require('./shared');
+const { createWhatsAppClient, isWaClientReady } = require('./client');
+const { resolveWaSender } = require('../../utils/waContact');
 const { materializeWhatsAppBatchContent } = require('../../utils/batchContentRefresh');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { setDedicatedClient } = require('../../tools/whatsappSender');
-const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_DEDICATED, META_AI_NUMBER } = require('../../config/constants');
-const { CHROMIUM_PATH } = require('../../config/env');
+const { PLATFORM_WA_DEDICATED, META_AI_NUMBER } = require('../../config/constants');
 const { containsMetaAiTag } = require('../../utils/waMentions');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
 const { pickLatestBatchEntry } = require('../../utils/batchContext');
 const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
-const {
-  isWaPuppeteerTransientError,
-  withWaPuppeteerRetry,
-  formatWaError,
-} = require('../../utils/waPuppeteer');
+const { withWaPuppeteerRetry } = require('../../utils/waPuppeteer');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
 const { runTurnPipeline } = require('../../utils/turnPipeline');
 const { WhatsAppPresence } = require('../../utils/presence');
@@ -33,106 +28,25 @@ const { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } = require('./priva
 const log = createLogger('WA-DEDICATED');
 
 let client;
-let _reconnectAttempts = 0;
-let _reconnectTimer = null;
-let _initializeInProgress = false;
-const MAX_RECONNECT_DELAY_MS = 60_000;
 
 /**
- * Initialize dedicated WhatsApp account client.
- * Sets up event handlers for QR code, ready state, auth failure, disconnection, and incoming messages.
+ * Initialize dedicated WhatsApp account client. Listens to `message` only:
+ * this account's own sends are GemiX replies and must not re-enter the loop.
  * @returns {object} The whatsapp-web.js Client instance
  */
 function initDedicatedWhatsApp() {
-  client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'dedicated' }),
-    puppeteer: {
-      executablePath: CHROMIUM_PATH,
-      headless: true,
-      args: PUPPETEER_ARGS,
-      protocolTimeout: 120000,
-    },
-    qr_timeout: WA_QR_TIMEOUT,
+  client = createWhatsAppClient({
+    clientId: 'dedicated',
+    log,
+    messageEvent: 'message',
+    onMessage: onDedicatedMessage,
+    onReady: (c) => setDedicatedClient(c),
   });
-
-  const watchdog = setTimeout(() => {
-    if (!client?.info?.wid?._serialized) {
-      log.error('Dedicated WhatsApp client init timeout (5 min). Forcing process exit to restart.');
-      process.exit(1);
-    }
-  }, 5 * 60 * 1000);
-  watchdog.unref();
-
-  client.on('qr', (qr) => {
-    log.info('Scan QR code:');
-    qrcode.generate(qr, { small: true });
-  });
-
-  client.on('ready', () => {
-    clearTimeout(watchdog);
-    if (_reconnectTimer) {
-      clearTimeout(_reconnectTimer);
-      _reconnectTimer = null;
-    }
-    _initializeInProgress = false;
-    log.info('Client ready:', client.info.wid._serialized);
-    _reconnectAttempts = 0;
-    setDedicatedClient(client);
-  });
-
-  client.on('auth_failure', (msg) => {
-    log.error('Auth failure:', msg);
-    log.error('Exiting so PM2 can restart with a fresh session (re-scan QR if needed).');
-    setTimeout(() => process.exit(1), 2000);
-  });
-
-  client.on('disconnected', (reason) => {
-    log.warn('Disconnected:', reason);
-    _initializeInProgress = false;
-    if (_reconnectTimer) {
-      clearTimeout(_reconnectTimer);
-      _reconnectTimer = null;
-    }
-    _reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, _reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
-    log.info(`Reconnect attempt ${_reconnectAttempts} in ${delay / 1000}s...`);
-    _reconnectTimer = setTimeout(() => {
-      _reconnectTimer = null;
-      if (_initializeInProgress) {
-        log.info('Initialize already in progress — skipping stacked reconnect');
-        return;
-      }
-      _initializeInProgress = true;
-      Promise.resolve(client.initialize())
-        .catch((err) => {
-          log.error(`Reconnect initialize failed: ${err?.message || err}`);
-        })
-        .finally(() => {
-          _initializeInProgress = false;
-        });
-    }, delay);
-  });
-
-  client.on('message', async (msg) => {
-    try {
-      await onDedicatedMessage(msg);
-    } catch (err) {
-      if (isWaPuppeteerTransientError(err)) {
-        log.warn(`Transient Puppeteer/WA Web error (message dropped): ${formatWaError(err)}`);
-        return;
-      }
-      log.error(`\nCritical error:`);
-      log.error(`   ${formatWaError(err)}`);
-      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 5).join('\n   ') || '(no stack)'}`);
-    }
-  });
-
-  client.initialize();
   return client;
 }
 
 async function onDedicatedMessage(msg) {
-  if (!client?.info?.wid?._serialized) {
+  if (!isWaClientReady(client)) {
     log.warn('Dedicated client not ready — ignoring message (not queued)');
     return;
   }
@@ -184,23 +98,7 @@ async function onDedicatedMessage(msg) {
     }
   }
 
-  let senderJid = msg.author || msg.from;
-  if (typeof senderJid === 'string' && senderJid.includes(':')) {
-    senderJid = senderJid.replace(/:[0-9]+@/, '@');
-  }
-  let userName = senderJid;
-  let phoneJid = senderJid;
-  try {
-    const contact = await msg.getContact();
-    userName = contact.pushname || contact.name || senderJid;
-    
-    // PRIORITY: Use contact.id.user first (most reliable), fallback to contact.number
-    if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
-      phoneJid = contact.id.user + '@c.us';
-    } else if (contact.number) {
-      phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
-    }
-  } catch { }
+  const { senderJid, userName, phoneJid } = await resolveWaSender(msg);
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_DEDICATED,

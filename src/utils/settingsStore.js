@@ -13,6 +13,7 @@ const path = require('path');
 const { DATA_DIR } = require('../config/constants');
 const { XAI_TTS_VOICE } = require('../config/env');
 const { getRomeISO } = require('./time');
+const { withKeyedLock } = require('./keyedLock');
 
 const SETTINGS_DIR = path.join(DATA_DIR, 'memories');
 const MAX_MEMORY_CHARS = 1000;
@@ -61,16 +62,7 @@ if (!fs.existsSync(SETTINGS_DIR)) {
 // Per-file async lock to prevent concurrent read-modify-write race conditions.
 const _locks = new Map();
 
-function _withLock(fileId, fn) {
-  const prev = _locks.get(fileId) || Promise.resolve();
-  let release;
-  const current = new Promise(r => { release = r; });
-  _locks.set(fileId, current);
-  return prev.then(fn).finally(() => {
-    release();
-    if (_locks.get(fileId) === current) _locks.delete(fileId);
-  });
-}
+const _withLock = (fileId, fn) => withKeyedLock(_locks, fileId, fn);
 
 function _filePath(fileId) {
   return path.join(SETTINGS_DIR, `${fileId}.json`);
@@ -222,7 +214,6 @@ function resolveMemoryContent(existing, content, replace) {
 
 module.exports = {
   MAX_MEMORY_CHARS,
-  SETTINGS_REVIEW_INTERVAL_MS,
   DEFAULT_MEMORY,
   VOICES_MALE,
   VOICES_FEMALE,
@@ -233,7 +224,6 @@ module.exports = {
   readSettings,
   updateSettings,
   customizedFields,
-  hasCustomSettings,
   isReviewDue,
   markReviewed,
   resolveMemoryContent,

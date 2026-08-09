@@ -11,6 +11,7 @@ const { DATA_DIR } = require('../config/constants');
 const { createLogger } = require('./logger');
 const { sanitizeFilename } = require('./text');
 const { extractAttachmentTagPaths } = require('./media');
+const { withKeyedLock } = require('./keyedLock');
 
 const log = createLogger('HistorySync');
 
@@ -29,17 +30,7 @@ let recentVoiceEntries = [];
 /** Per-user chain so concurrent syncFileToHistory RMW on history_meta.json cannot clobber. */
 const _syncLocks = new Map();
 
-function _withSyncLock(userId, fn) {
-  const prev = _syncLocks.get(userId) || Promise.resolve();
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const current = prev.catch(() => {}).then(() => gate);
-  _syncLocks.set(userId, current);
-  return prev.catch(() => {}).then(fn).finally(() => {
-    release();
-    if (_syncLocks.get(userId) === current) _syncLocks.delete(userId);
-  });
-}
+const _withSyncLock = (userId, fn) => withKeyedLock(_syncLocks, userId, fn);
 
 /**
  * Get the history directory and meta file for a user.
@@ -504,10 +495,8 @@ _loadRecentVoiceEntries();
 
 module.exports = {
   syncFileToHistory,
-  getUserHistoryPaths,
   resolveGemixVoiceTranscription,
   getStoredHistoryVoiceTranscription,
-  storeHistoryVoiceTranscription,
   storeRecentVoiceText,
   forgetRecentVoiceText,
   pruneHistory,

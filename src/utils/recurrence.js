@@ -310,14 +310,10 @@ function describeRecurrence(rec, lang = 'en') {
 }
 
 module.exports = {
-  VALID_FREQS,
-  WEEKDAY_CODES,
   toRomeISO: _toRomeISO,
   parseRecurrenceRule,
   normalizePersistedRecurrence,
-  computeNextOccurrence,
   advanceOccurrence,
   isDateSkipped,
   describeRecurrence,
-  romeDateString,
 };

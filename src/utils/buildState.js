@@ -77,14 +77,6 @@ function touchActivity(workspaceId) {
 }
 
 /**
- * Read last activity timestamp (ms) or 0 if unknown.
- */
-function getLastActivityAt(workspaceId) {
-  const state = _readState(workspaceId);
-  return Number(state.lastActivityAt) || 0;
-}
-
-/**
  * Try to acquire the build lock for this workspace, polling up to
  * BUILD_LOCK_WAIT_MS. Returns the owner id on success or throws on timeout.
  *
@@ -187,7 +179,6 @@ function listWorkspaceStates() {
 
 module.exports = {
   touchActivity,
-  getLastActivityAt,
   acquireBuildLock,
   releaseBuildLock,
   renewBuildLock,

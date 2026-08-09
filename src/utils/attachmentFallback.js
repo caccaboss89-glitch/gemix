@@ -34,7 +34,12 @@ function formatExpiryItalian(minutes) {
   return `${hPart} e ${remPart}`;
 }
 
-/** Prevent WhatsApp from wrapping https URLs at hyphen boundaries (e.g. gemix-allegati). */
+/**
+ * Prevent WhatsApp from wrapping https URLs at hyphen boundaries (e.g.
+ * gemix-allegati) by inserting word joiners. WhatsApp only: the joiners are
+ * invisible but real characters, and they break autolinking in an email client
+ * or in Discord, so every other platform gets the URL untouched.
+ */
 function formatUrlForWhatsApp(url) {
   if (typeof url !== 'string' || !url) return url;
   return url.replace(/-/g, '-\u2060');
@@ -44,9 +49,13 @@ function formatUrlForWhatsApp(url) {
  * Build an Italian system message with temp hosted links and/or passthrough source URLs.
  *
  * @param {Array<object>} linkFallbackAttachments - Policy-routed or send-failed attachments
+ * @param {object} [opts]
+ * @param {'whatsapp'|'discord'|'email'} [opts.platform] - Destination; only
+ *   'whatsapp' gets the anti-wrap URL treatment.
  * @returns {{ message: string, fallbackLinks: Array<{name: string, url: string, size: number, expiresInMinutes: number|null, external?: boolean}>, totalSize: number }}
  */
-function buildFallbackAttachmentMessage(linkFallbackAttachments) {
+function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
+  const formatUrl = opts.platform === PLATFORM.WHATSAPP ? formatUrlForWhatsApp : (u) => u;
   if (!Array.isArray(linkFallbackAttachments) || linkFallbackAttachments.length === 0) {
     throw new Error('No link-fallback attachments provided');
   }
@@ -133,12 +142,12 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments) {
     const link = fallbackLinks[0];
     const sizeMB = link.size > 0 ? (link.size / 1048576).toFixed(2) : null;
     const sizeLabel = sizeMB ? ` (${sizeMB} MB)` : '';
-    messageText += `📄 ${link.name}${sizeLabel}\n${formatUrlForWhatsApp(link.url)}`;
+    messageText += `📄 ${link.name}${sizeLabel}\n${formatUrl(link.url)}`;
   } else {
     messageText += fallbackLinks.map((link, idx) => {
       const sizeMB = link.size > 0 ? (link.size / 1048576).toFixed(2) : null;
       const sizeLabel = sizeMB ? ` (${sizeMB} MB)` : '';
-      return `${idx + 1}. ${link.name}${sizeLabel}\n${formatUrlForWhatsApp(link.url)}`;
+      return `${idx + 1}. ${link.name}${sizeLabel}\n${formatUrl(link.url)}`;
     }).join('\n\n');
   }
 
@@ -194,16 +203,21 @@ async function _createZipArchive(zipPath, entries) {
   }
 }
 
-/** Collapse multiple hostable WA temp-link files into one zip when possible. */
+/**
+ * Collapse multiple hostable WA temp-link files into one zip when possible.
+ * Entries that only carry a source URL cannot be zipped and are passed through
+ * alongside the bundle, never dropped.
+ */
 async function bundleWhatsAppTempLinkAttachments(attachments) {
   if (!Array.isArray(attachments) || attachments.length <= 1) return attachments;
 
+  const passthrough = [];
   const entries = [];
   const usedNames = [];
   for (const att of attachments) {
-    if (hasExternalUrl(att)) continue;
+    if (hasExternalUrl(att)) { passthrough.push(att); continue; }
     const p = _materializeAttachmentPath(att);
-    if (!p) continue;
+    if (!p) { passthrough.push(att); continue; }
     const name = uniqueAttachmentName(
       usedNames.map(n => ({ name: n })),
       att.name || path.basename(p),
@@ -219,11 +233,10 @@ async function bundleWhatsAppTempLinkAttachments(attachments) {
     const ok = await _createZipArchive(zipPath, entries);
     if (ok) {
       log.info(`Bundled ${entries.length} WhatsApp temp-link attachment(s) into ${WA_BUNDLE_ZIP_NAME}`);
-      return [{
-        name: WA_BUNDLE_ZIP_NAME,
-        mimetype: 'application/zip',
-        filePath: zipPath,
-      }];
+      return [
+        ...passthrough,
+        { name: WA_BUNDLE_ZIP_NAME, mimetype: 'application/zip', filePath: zipPath },
+      ];
     }
   } catch (err) {
     log.warn(`Zip bundle failed (${entries.length} files), using separate temp links: ${err.message}`);
@@ -265,12 +278,9 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
     const { direct, linkOnly } = partitionAttachments(attachments, PLATFORM.WHATSAPP);
     toTry = direct;
     if (linkOnly.length > 0) {
-      const external = linkOnly.filter(hasExternalUrl);
-      const hostable = linkOnly.filter(a => !hasExternalUrl(a));
-      linkRouted = [
-        ...external,
-        ...(await bundleWhatsAppTempLinkAttachments(hostable)),
-      ];
+      // Not bundled here: the single pass below covers these plus any direct
+      // send that fails. Zipping twice nested one bundle inside the next.
+      linkRouted = linkOnly;
       for (const att of linkOnly) {
         const label = att.name || 'unknown';
         if (hasExternalUrl(att)) {
@@ -295,6 +305,9 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
     }
   }
 
+  // Single bundling pass over everything that ends up on a link: policy-routed
+  // files and direct sends that failed, collapsed into one zip when there are
+  // several hostable ones.
   let linkFallback = [...linkRouted, ...sendFailed];
   if (options.platform === PLATFORM.WHATSAPP && linkFallback.length > 0) {
     linkFallback = await bundleWhatsAppTempLinkAttachments(linkFallback);

@@ -147,6 +147,4 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
 module.exports = {
   materializeWhatsAppBatchContent,
   materializeDiscordBatchContent,
-  finalizeBatchContentParts,
-  mergeBatchUnitsToContent,
 };

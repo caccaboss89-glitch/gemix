@@ -138,16 +138,6 @@ function findMemberByDiscord(username, displayName, nickname) {
 }
 
 /**
- * Find a member by name query (see resolveActiveMemberByName).
- * @param {string} name
- * @returns {object|null}
- */
-function findMemberByName(name) {
-  const resolved = resolveActiveMemberByName(name);
-  return resolved.ok ? resolved.member : null;
-}
-
-/**
  * Find a member by email address (case-insensitive).
  * @param {string} email
  * @returns {object|null} The member object or null if not found
@@ -172,7 +162,6 @@ module.exports = {
   ACTIVE_MEMBERS,
   findMemberByWa,
   findMemberByDiscord,
-  findMemberByName,
   findMemberByEmail,
   resolveActiveMemberByName,
   isAdmin,

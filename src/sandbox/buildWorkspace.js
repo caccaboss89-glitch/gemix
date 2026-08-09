@@ -379,9 +379,7 @@ function resolveInsideWorkspace(workspaceId, relPath) {
 module.exports = {
   ensureWorkspace,
   ensureWorkspaceWritable,
-  hostSandboxIds,
   sandboxUserString,
-  workspaceSizeBytes,
   listWorkspaceFiles,
   stageAttachmentBuffer,
   stageAttachmentFromPath,
@@ -389,5 +387,4 @@ module.exports = {
   resolveInsideWorkspace,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile,
-  QUOTA_BYTES,
 };

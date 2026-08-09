@@ -50,7 +50,6 @@ async function fetchHistoryWithTimeout(buildFn, log, label) {
 }
 
 module.exports = {
-  HISTORY_FETCH_TIMEOUT_MS,
   fetchHistoryWithTimeout,
   normalizeHistoryLoad,
 };

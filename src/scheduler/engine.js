@@ -13,7 +13,7 @@ const { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped } = requi
 const { addScheduledFooter } = require('../utils/footer');
 const { checkAndSendMusicWrap } = require('./musicWrapMonitor');
 const { checkNewRelease } = require('./releaseMonitor');
-const { modifyTaskFile } = require('../utils/taskStore');
+const { modifyTaskFile, readTaskFile } = require('../utils/taskStore');
 const { createLogger } = require('../utils/logger');
 const { stripVoiceTags, normalizeMarkdown, stripOutgoingDeliveryArtifacts } = require('../utils/text');
 const { sendWhatsAppDirect } = require('../tools/whatsappSender');
@@ -245,20 +245,15 @@ async function checkAndExecuteTasks() {
     return;
   }
 
+  const nowTime = now.getTime();
   for (const file of files) {
     const fileId = file.replace('.json', '');
-    let dueTasks = [];
-    try {
-      await modifyTaskFile(fileId, async (data) => {
-        if (!data || !data.tasks || data.tasks.length === 0) return data;
-        const nowTime = now.getTime();
-        dueTasks = data.tasks.filter(t => _taskIsDue(t, nowTime));
-        return data;
-      });
-    } catch (err) {
-      log.error(`Task file read error ${fileId}:`, err.message);
-      continue;
-    }
+    // Plain read: taking the write lock here rewrote every task file on every
+    // tick, for nothing. The finalize pass below is the only writer.
+    const data = await readTaskFile(fileId);
+    const dueTasks = Array.isArray(data?.tasks)
+      ? data.tasks.filter(t => _taskIsDue(t, nowTime))
+      : [];
 
     if (!dueTasks.length) continue;
 

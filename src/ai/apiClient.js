@@ -338,6 +338,9 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         try {
           await refreshHermesOAuth();
           forceTokenReload = true;
+          // A successful refresh is not a failed attempt: give back the budget
+          // so the retry happens even when the 401 landed on the last one.
+          attempt--;
           log.info('   Retrying API call with refreshed OAuth credentials...');
           continue;
         } catch (refreshErr) {
@@ -373,6 +376,9 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
     }
   }
+  // Unreachable: every path above returns or throws. Guards against a future
+  // `continue` leaking out of the loop and handing callers an undefined Response.
+  throw new Error(`${modelName} API unreachable: retry loop exhausted`);
 }
 
 /**
@@ -498,9 +504,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
 module.exports = {
   callResponsesModel,
   callApiWithRetry,
-  logApiRequest,
   logApiResponse,
   fetchXaiWithOAuthRetry,
   isGrokCreditExhaustedError,
-  GROK_CREDIT_EXHAUSTED_CODE,
 };

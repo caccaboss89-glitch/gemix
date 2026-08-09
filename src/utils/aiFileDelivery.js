@@ -410,8 +410,11 @@ function _durationSkipResult(tag, kind, durationSec) {
  *   history entries, whose role cannot carry input parts).
  * @param {boolean} [opts.deferVideo] - history builders: leave videos as a tag
  *   pointing at read_video instead of attaching them.
- * @returns {Promise<{ tag: string, contentParts: object[], textFragment: string,
- *   overDurationLimit?: string, durationNote?: string }>}
+ * @returns {Promise<{ tag: string, syncedPath: string|null, contentParts: object[],
+ *   textFragment: string, overDurationLimit?: string, durationNote?: string,
+ *   bumpImageCount?: boolean }>} `syncedPath` is the history-relative filename the
+ *   file ended up under (it can be assigned during this call, when the upload
+ *   happened before the history sync).
  */
 async function deliverSyncedAttachment(opts) {
   const {

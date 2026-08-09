@@ -1,11 +1,14 @@
 // src/config/systemMessages.js
 //
 // Central registry of all GemiX-generated WhatsApp system messages.
-// Every entry has two synced parts: the exact text sent + the regex used by
-// isSystemMessage() to recognise a message as program-generated. History builders
-// (whatsapp/shared.js, discord/client.js) render every match as a
-// <system-notification> user turn instead of one of GemiX's own replies.
-// Change one -> update the other. This is the single source of truth.
+//
+// Every message is declared once, as the literal prefix that opens it, and
+// listed in SYSTEM_MESSAGE_PREFIXES. isSystemMessage() recognises a
+// program-generated message by matching those prefixes against the start of the
+// body, so adding a message here is the only step needed — there is no second,
+// hand-synced pattern to keep in step. History builders (whatsapp/shared.js,
+// discord/client.js) render every match as a <system-notification> user turn
+// instead of one of GemiX's own replies.
 
 // -- Release notification --------------------------------------------------
 
@@ -13,28 +16,18 @@
  * Prefix used in every new-release notification.
  * releaseMonitor.js constructs the full message as:
  *   `🚀 *Nuova release GemiX: ${title}*\n\n${cleanBody}`.trim()
- * The regex matches on the fixed prefix.
  */
 const RELEASE_NOTIFICATION_PREFIX = '🚀 *Nuova release GemiX:';
-const RELEASE_NOTIFICATION_REGEX  = /^\uD83D\uDE80 \*Nuova release GemiX:/;
 
 // -- Music wrap ------------------------------------------------------------
 
-/**
- * Music wrap monthly notification sent to all active members.
- * The full text is built dynamically (month name varies) so we match on prefix.
- */
+/** Music wrap monthly notification sent to all active members (the month varies). */
 const MUSIC_WRAP_PREFIX = '🎵 *Wrap di';
-const MUSIC_WRAP_REGEX  = /^\uD83C\uDFB5 \*Wrap di /;
 
 // -- Admin error notifications ---------------------------------------------
 
-/**
- * Admin API error alert. Full text: `⚠️ *ERRORE API - ${source}*\n\n...` (em-dash in actual message)
- * The regex matches messages sent by adminNotifier.js.
- */
+/** Admin API error alert from adminNotifier.js: `⚠️ *ERRORE API — ${source}*\n\n...`. */
 const ADMIN_ERROR_PREFIX = '⚠️ *ERRORE API —';
-const ADMIN_ERROR_REGEX  = /^\u26A0\uFE0F \*ERRORE API \u2014/;
 
 // -- Maintenance -----------------------------------------------------------
 
@@ -43,23 +36,18 @@ const ADMIN_ERROR_REGEX  = /^\u26A0\uFE0F \*ERRORE API \u2014/;
  * Defined in constants.js (MAINTENANCE_USER_MESSAGE) - matched here by prefix.
  */
 const MAINTENANCE_PREFIX = '🌙 GemiX è temporaneamente in manutenzione';
-const MAINTENANCE_REGEX  = /^\uD83C\uDF19 GemiX è temporaneamente in manutenzione/;
 
 // -- Release-notify subscription confirmations -----------------------------
 
 /**
  * Sent by handler.js when a user subscribes to release notifications during maintenance.
  */
-const RELEASE_NOTIFY_ENABLED_PREFIX  = '🔔 Le notifiche degli aggiornamenti di GemiX sono state attivate.';
-const RELEASE_NOTIFY_ENABLED_REGEX   = /^\uD83D\uDD14 Le notifiche degli aggiornamenti di GemiX/;
-
-const RELEASE_NOTIFY_ALREADY_PREFIX  = 'ℹ️ Le notifiche degli aggiornamenti di GemiX sono già attive.';
-const RELEASE_NOTIFY_ALREADY_REGEX   = /^\u2139\uFE0F Le notifiche degli aggiornamenti di GemiX/;
+const RELEASE_NOTIFY_ENABLED_PREFIX = '🔔 Le notifiche degli aggiornamenti di GemiX sono state attivate.';
+const RELEASE_NOTIFY_ALREADY_PREFIX = 'ℹ️ Le notifiche degli aggiornamenti di GemiX sono già attive.';
 
 // -- Fallback Errors -------------------------------------------------------
 
 const FALLBACK_ERROR_PREFIX = '⚠️ GemiX: Generazione della risposta fallita. Riprova tra poco.';
-const FALLBACK_ERROR_REGEX  = /^\u26A0\uFE0F GemiX: Generazione della risposta fallita\./;
 
 // -- Grok credit exhaustion (user-facing) -----------------------------------
 
@@ -68,12 +56,11 @@ const FALLBACK_ERROR_REGEX  = /^\u26A0\uFE0F GemiX: Generazione della risposta f
  * (SuperGrok weekly credit cap). Built as a full message (not only a prefix)
  * so handler.js never hardcodes copy. Detection of the *error* is in
  * apiClient.isGrokCreditExhaustedError; this entry is for send + history tag.
- * Format mirrors adminNotifier admin-error lines for consistency.
+ * It opens with ADMIN_ERROR_PREFIX, which is what makes it a system message.
  */
 const GROK_CREDIT_EXHAUSTED_MESSAGE =
-  '⚠️ *ERRORE API — API (Grok)*\n\nScusa ma i crediti sono finiti al momento, tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶';
-const GROK_CREDIT_EXHAUSTED_REGEX =
-  /^\u26A0\uFE0F \*ERRORE API \u2014 API \(Grok\)\*\n\nScusa ma i crediti sono finiti al momento/;
+  `${ADMIN_ERROR_PREFIX} API (Grok)*\n\nScusa ma i crediti sono finiti al momento, `
+  + 'tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶';
 
 // -- Temporary attachment links --------------------------------------------
 
@@ -81,10 +68,8 @@ const GROK_CREDIT_EXHAUSTED_REGEX =
  * System message indicating that some attachments couldn't be sent directly
  * and are available via temporary download links instead.
  * Dynamic expiry text is appended after this prefix (see attachmentFallback.js).
- * The regex matches on the fixed emoji prefix.
  */
 const TEMP_ATTACHMENT_PREFIX = '📥 Allegat';
-const TEMP_ATTACHMENT_REGEX  = /^\uD83D\uDCE5 Allegat/;
 
 /**
  * Last-resort text when link fallback generation itself fails
@@ -92,8 +77,6 @@ const TEMP_ATTACHMENT_REGEX  = /^\uD83D\uDCE5 Allegat/;
  */
 const ATTACHMENT_FALLBACK_FAILED_MESSAGE =
   '⚠️ I seguenti allegati non hanno potuto essere inviati e non è possibile creare un link di download temporaneo. Riprova più tardi.';
-const ATTACHMENT_FALLBACK_FAILED_REGEX =
-  /^\u26A0\uFE0F I seguenti allegati non hanno potuto essere inviati/;
 
 // -- Privacy: first-contact notice and data wipe ---------------------------
 
@@ -110,17 +93,14 @@ const PRIVACY_WIPE_COMMAND = '/clear';
  * been told what happens to it.
  */
 const PRIVACY_NOTICE_PREFIX = '🔒 *Informativa privacy GemiX*';
-const PRIVACY_NOTICE_REGEX  = /^🔒 \*Informativa privacy GemiX\*/;
 
 /** Confirmation sent once PRIVACY_WIPE_COMMAND erased everything. */
 const PRIVACY_WIPE_DONE_PREFIX = '🗑️ *Dati eliminati*';
-const PRIVACY_WIPE_DONE_REGEX  = /^🗑️ \*Dati eliminati\*/;
 
 /** Sent when the chat clear or one of the deletions failed. */
 const PRIVACY_WIPE_FAILED_MESSAGE =
   '⚠️ *Eliminazione non riuscita*\n\nNon è stato possibile eliminare tutti i tuoi dati per un errore tecnico. '
   + 'Contatta l\'amministratore.';
-const PRIVACY_WIPE_FAILED_REGEX = /^⚠️ \*Eliminazione non riuscita\*/;
 
 /** Active members keep their registry entry: only the admin can remove it. */
 const PRIVACY_MEMBER_CONTACT_NOTE =
@@ -183,46 +163,49 @@ function buildPrivacyWipeDoneMessage(opts = {}) {
   return lines.join('\n');
 }
 
-// -- Error / alert patterns ----------------------------------------------
-// These regexes detect error, avviso, and reminder messages.
-const LEGACY_ERROR_REGEX  = /^\u274C \*ERRORE/;   // ❌ *ERRORE
-const LEGACY_AVVISO_REGEX = /^⚠️ \*AVVISO/;        // ⚠️ *AVVISO
-const LEGACY_REMINDER_REGEX = /^🔔 \*Promemoria/;  // 🔔 *Promemoria
+// -- Detection -------------------------------------------------------------
 
-// -- Utility: ordered list of all system-message regexes -------------------
-// Used by isSystemMessage() in shared.js for a single authoritative check.
-const ALL_SYSTEM_MESSAGE_REGEXES = [
-  RELEASE_NOTIFICATION_REGEX,
-  MUSIC_WRAP_REGEX,
-  ADMIN_ERROR_REGEX,
-  MAINTENANCE_REGEX,
-  RELEASE_NOTIFY_ENABLED_REGEX,
-  RELEASE_NOTIFY_ALREADY_REGEX,
-  FALLBACK_ERROR_REGEX,
-  GROK_CREDIT_EXHAUSTED_REGEX,
-  TEMP_ATTACHMENT_REGEX,
-  ATTACHMENT_FALLBACK_FAILED_REGEX,
-  PRIVACY_NOTICE_REGEX,
-  PRIVACY_WIPE_DONE_REGEX,
-  PRIVACY_WIPE_FAILED_REGEX,
-  LEGACY_ERROR_REGEX,
-  LEGACY_AVVISO_REGEX,
-  LEGACY_REMINDER_REGEX,
+/** Every message GemiX still sends. Add a new one here and detection follows. */
+const SYSTEM_MESSAGE_PREFIXES = [
+  RELEASE_NOTIFICATION_PREFIX,
+  MUSIC_WRAP_PREFIX,
+  // Also covers GROK_CREDIT_EXHAUSTED_MESSAGE, which opens with it.
+  ADMIN_ERROR_PREFIX,
+  MAINTENANCE_PREFIX,
+  RELEASE_NOTIFY_ENABLED_PREFIX,
+  RELEASE_NOTIFY_ALREADY_PREFIX,
+  FALLBACK_ERROR_PREFIX,
+  TEMP_ATTACHMENT_PREFIX,
+  ATTACHMENT_FALLBACK_FAILED_MESSAGE,
+  PRIVACY_NOTICE_PREFIX,
+  PRIVACY_WIPE_DONE_PREFIX,
+  PRIVACY_WIPE_FAILED_MESSAGE,
 ];
 
 /**
- * Returns true if `body` matches any known GemiX-generated system message.
+ * Shapes GemiX no longer produces, still sitting in old chat history. Kept so a
+ * rebuilt window classifies them as program notices rather than as GemiX's own
+ * replies; safe to drop once no live chat reaches back that far.
+ */
+const LEGACY_SYSTEM_MESSAGE_PREFIXES = [
+  '❌ *ERRORE',
+  '⚠️ *AVVISO',
+  '🔔 *Promemoria',
+];
+
+/**
+ * Returns true if `body` starts with any known GemiX-generated system message.
  * Use this as the single source of truth for system-message detection.
  * @param {string} body
  * @returns {boolean}
  */
 function isSystemMessage(body) {
-  if (!body) return false;
-  return ALL_SYSTEM_MESSAGE_REGEXES.some(rx => rx.test(body));
+  if (typeof body !== 'string' || !body) return false;
+  return SYSTEM_MESSAGE_PREFIXES.some(p => body.startsWith(p))
+    || LEGACY_SYSTEM_MESSAGE_PREFIXES.some(p => body.startsWith(p));
 }
 
 module.exports = {
-  // text helpers (for sending)
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
   ADMIN_ERROR_PREFIX,
@@ -234,28 +217,8 @@ module.exports = {
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   PRIVACY_WIPE_COMMAND,
-  PRIVACY_NOTICE_PREFIX,
-  PRIVACY_WIPE_DONE_PREFIX,
   PRIVACY_WIPE_FAILED_MESSAGE,
   buildPrivacyNoticeMessage,
   buildPrivacyWipeDoneMessage,
-  // individual regexes (for targeted checks)
-  RELEASE_NOTIFICATION_REGEX,
-  MUSIC_WRAP_REGEX,
-  ADMIN_ERROR_REGEX,
-  MAINTENANCE_REGEX,
-  RELEASE_NOTIFY_ENABLED_REGEX,
-  RELEASE_NOTIFY_ALREADY_REGEX,
-  FALLBACK_ERROR_REGEX,
-  GROK_CREDIT_EXHAUSTED_REGEX,
-  TEMP_ATTACHMENT_REGEX,
-  ATTACHMENT_FALLBACK_FAILED_REGEX,
-  PRIVACY_NOTICE_REGEX,
-  PRIVACY_WIPE_DONE_REGEX,
-  PRIVACY_WIPE_FAILED_REGEX,
-  LEGACY_ERROR_REGEX,
-  LEGACY_AVVISO_REGEX,
-  LEGACY_REMINDER_REGEX,
-  // canonical detector
   isSystemMessage,
 };

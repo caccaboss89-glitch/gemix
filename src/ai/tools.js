@@ -18,8 +18,9 @@ const {
   MAX_VIDEO_DURATION_S,
   VIDEO_GEN_DURATION_S,
   VIDEO_GEN_RESOLUTION,
-  BUILD_WORKSPACE_TTL_MS,
+  BUILD_WORKSPACE_TTL_LABEL,
   BUILD_WORKSPACE_QUOTA_MB,
+  isWhatsAppPlatform,
 } = require('../config/constants');
 const { LEGAL_NAME } = require('../config/env');
 const {
@@ -39,14 +40,6 @@ const {
   MAX_REF_IMAGES_FOR_IMAGE,
   MAX_REF_IMAGES_FOR_VIDEO,
 } = require('../tools/imagineGenerator');
-
-/** Human-readable build workspace TTL for tool/prompt text (from BUILD_WORKSPACE_TTL_MS). */
-const BUILD_WORKSPACE_TTL_LABEL = (() => {
-  const hours = BUILD_WORKSPACE_TTL_MS / (60 * 60 * 1000);
-  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
-  const mins = Math.round(BUILD_WORKSPACE_TTL_MS / (60 * 1000));
-  return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
-})();
 
 // -- Helpers -------------------------------------------------------------
 
@@ -742,8 +735,8 @@ function buildBuildTool(isGroup) {
 // -- Main builder: constructs tool list in a single pass -------------------
 
 function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
-  const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
-  const isWhatsAppGroup = isWhatsApp && userCtx.isGroup;
+  const isWhatsApp = isWhatsAppPlatform(userCtx.platform);
+  const isWhatsAppGroup = isWhatsApp && Boolean(userCtx.isGroup);
   const isDiscord = userCtx.platform === PLATFORM_DISCORD;
 
   const tools = [];
@@ -801,14 +794,6 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   return tools;
 }
 
-/** Whether the tool is in the live list for this user (same rules as the model schema). */
-function isToolAllowedForUser(toolName, userCtx) {
-  const isActiveMember = Boolean(userCtx?.isActiveMember);
-  const isAdmin = Boolean(userCtx?.isAdmin);
-  const tools = getToolsForUser(isActiveMember, isAdmin, userCtx);
-  return tools.some(t => t?.function?.name === toolName);
-}
-
 /**
  * Collect function tool names plus native server-side tool types for prompt caps.
  * @param {Array} tools
@@ -824,20 +809,10 @@ function toolNamesToSet(tools) {
 }
 
 /**
- * Build userCtx for a platform profile (member + admin tools included).
- * @param {object} cap - CAPS[profile] entry
- * @param {object} [overrides]
- */
-function userCtxForProfile(cap, overrides = {}) {
-  return {
-    platform: cap.platform,
-    isGroup: Boolean(cap.isGroup),
-    chatId: overrides.chatId ?? null,
-  };
-}
-
-/**
- * Sync CAPS[].tools from getToolsForUser so static caps cannot drift from the registry.
+ * Fill CAPS[].tools from getToolsForUser so the static profile capability sets
+ * are always the registry's own answer, never a hand-kept copy of it. Resolved
+ * for an active non-admin member: the widest set a profile can expose short of
+ * admin-only tools.
  * @param {object} caps - CAPS map from platformCapabilities
  * @param {object} profileEnum - PROFILE enum from platformCapabilities
  */
@@ -845,35 +820,28 @@ function syncProfileToolSets(caps, profileEnum) {
   for (const profile of Object.values(profileEnum)) {
     const cap = caps[profile];
     if (!cap) continue;
-    const tools = getToolsForUser(true, false, userCtxForProfile(cap));
+    const tools = getToolsForUser(true, false, {
+      platform: cap.platform,
+      isGroup: Boolean(cap.isGroup),
+    });
     cap.tools = toolNamesToSet(tools);
   }
 }
 
 /**
- * Unified tool gate: optional per-round name subset, then live schema check.
+ * Tool gate. `allowedRoundNames` is the set the model was actually offered this
+ * round, built once by the handler from getToolsForUser — so membership in it is
+ * the whole permission check, and there is nothing to re-derive per call.
+ *
  * @param {string} toolName
- * @param {object} userCtx
- * @param {object} [opts]
- * @param {Set<string>|null} [opts.allowedRoundNames] - names exposed to the model this round
- * @param {Function} [opts.unavailableMessage] - (toolName, userCtx) => string
+ * @param {Set<string>} allowedRoundNames - names exposed to the model this round
+ * @param {Function} [unavailableMessage] - (toolName) => string, for a reason the model can act on
  * @returns {string|null} Error message when blocked, else null.
  */
-function getToolAccessError(toolName, userCtx, opts = {}) {
-  const allowedRound = opts.allowedRoundNames;
-  if (allowedRound && !allowedRound.has(toolName)) {
-    if (typeof opts.unavailableMessage === 'function') {
-      return opts.unavailableMessage(toolName, userCtx);
-    }
-    return `Tool "${toolName}" is not available in the current round.`;
-  }
-  if (!isToolAllowedForUser(toolName, userCtx)) {
-    if (typeof opts.unavailableMessage === 'function') {
-      return opts.unavailableMessage(toolName, userCtx);
-    }
-    return `Tool "${toolName}" is not available in the current context.`;
-  }
-  return null;
+function getToolAccessError(toolName, allowedRoundNames, unavailableMessage) {
+  if (allowedRoundNames.has(toolName)) return null;
+  if (typeof unavailableMessage === 'function') return unavailableMessage(toolName);
+  return `Tool "${toolName}" is not available in the current context.`;
 }
 
 module.exports = {

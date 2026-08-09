@@ -15,9 +15,8 @@
 // Build trees live under user_* / group_* (see workspaceId.js, buildWorkspace.js).
 // This module only manages <storageId>/ history paths.
 
-const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL } = require('../config/constants');
+const { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, isWhatsAppPlatform } = require('../config/constants');
 const { getGroupTaskFileId } = require('./userIdentifier');
 
 /** Prefix for on-disk history of admin↔user personal-account chats (shared pair). */
@@ -44,7 +43,7 @@ function resolvePersonalChatStorageId(chatId) {
 }
 
 /** Persistent settings file id for a WA personal pair chat (shared by both users). */
-function resolvePersonalMemoryFileId(chatId) {
+function _resolvePersonalMemoryFileId(chatId) {
   const storageId = resolvePersonalChatStorageId(chatId);
   return storageId ? `memory_${storageId}` : null;
 }
@@ -58,9 +57,10 @@ function resolvePersonalMemoryFileId(chatId) {
  */
 function resolveSettingsFileId(ctx, ui) {
   if (ctx.platform === PLATFORM_DISCORD) return null;
-  const isWhatsAppGroup = ctx.isGroup && ctx.platform && ctx.platform.startsWith('whatsapp');
-  if (isWhatsAppGroup) return 'memory_' + getGroupTaskFileId(ctx.groupId);
-  if (ctx.platform === PLATFORM_WA_PERSONAL && ctx.chatId) return resolvePersonalMemoryFileId(ctx.chatId);
+  if (ctx.isGroup && isWhatsAppPlatform(ctx.platform)) {
+    return 'memory_' + getGroupTaskFileId(ctx.groupId);
+  }
+  if (ctx.platform === PLATFORM_WA_PERSONAL && ctx.chatId) return _resolvePersonalMemoryFileId(ctx.chatId);
   return 'memory_' + ui.taskFileId;
 }
 
@@ -90,33 +90,10 @@ function getHistoryDir(userCtx) {
   return r && path.join(r, 'history');
 }
 
-// -- Skeleton creation -----------------------------------------------------
-
-function ensureDir(p) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-}
-
-/**
- * Create the per-user folders if missing. Idempotent.
- *
- * Just history now - every other zone the bot writes (build workspace,
- * etc.) materializes its own dirs on demand.
- */
-function ensureUserSkeleton(userCtx) {
-  const root = getUserRoot(userCtx);
-  if (!root) return false;
-  ensureDir(root);
-  ensureDir(getHistoryDir(userCtx));
-  return true;
-}
-
 module.exports = {
   resolvePersonalChatStorageId,
-  resolvePersonalMemoryFileId,
   resolveSettingsFileId,
   resolveStorageId,
   getUserRoot,
   getHistoryDir,
-  ensureUserSkeleton,
-  PERSONAL_CHAT_STORAGE_PREFIX,
 };

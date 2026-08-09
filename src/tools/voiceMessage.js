@@ -17,9 +17,8 @@ const { fetchWithTimeout, readResponseBodyWithTimeout } = require('../utils/fetc
 const { fetchXaiWithOAuthRetry } = require('../ai/apiClient');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
-const { XAI_TTS_ENABLED, XAI_TTS_VOICE } = require('../config/constants');
 const { defaultSettings } = require('../utils/settingsStore');
-const { FFMPEG_PATH } = require('../config/env');
+const { FFMPEG_PATH, XAI_TTS_ENABLED, XAI_TTS_VOICE } = require('../config/env');
 const { getXaiAuth } = require('../config/xaiAuth');
 
 const log = createLogger('TTS');

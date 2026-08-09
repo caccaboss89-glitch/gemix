@@ -1,0 +1,70 @@
+// src/tools/outboundDelivery.js
+//
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are plain objects the dispatcher serializes into the
+// fixed `{ success, message?, error?, ... }` envelope.
+//
+// What send_email and send_whatsapp_message share: one message per destination
+// per turn, the same attachment resolution, and an audit entry so the caller can
+// later ask what GemiX sent on their behalf.
+//
+// The one-per-destination reservation is taken only once delivery has actually
+// happened, so a send that failed outright can be retried, while a send that
+// half-succeeded (text out, attachments not) cannot blast the text twice.
+
+const { resolveDeliverySelection } = require('../utils/deliverySelection');
+const { recordSentMessage } = require('../utils/sentMessagesStore');
+const { createLogger } = require('../utils/logger');
+
+const log = createLogger('OutboundDelivery');
+
+/**
+ * Resolve the files the model listed, and the note to append when some of them
+ * could not be found.
+ *
+ * @param {string[]|undefined} entries
+ * @param {object} responseCtx
+ * @param {object} userCtx
+ * @returns {Promise<{ attachments: object[], missingNote: string }>}
+ */
+async function resolveOutboundAttachments(entries, responseCtx, userCtx) {
+  const selection = await resolveDeliverySelection(entries, responseCtx, userCtx);
+  const missingNote = selection.missing.length > 0
+    ? ` Attachment(s) not resolved and NOT sent: ${selection.missing.join(', ')}.`
+    : '';
+  return { attachments: selection.attachments, missingNote };
+}
+
+/**
+ * True when this destination already got a message in this turn.
+ * @param {Set<string>} contacted
+ * @param {string} key
+ * @param {'email'|'WhatsApp message'} what
+ * @returns {object|null} the tool error to return, or null when clear
+ */
+function alreadyContactedError(contacted, key, what) {
+  if (!contacted.has(key)) return null;
+  return {
+    success: false,
+    error: `You have already sent ${what === 'email' ? 'an email' : 'a WhatsApp message'} to this `
+      + `${what === 'email' ? 'address' : 'number'}. Each one can only receive 1 message per request.`,
+  };
+}
+
+/**
+ * Write the audit entry read back by read_sent_messages. Never throws: losing
+ * the log entry must not turn a delivered message into a reported failure.
+ */
+function recordOutbound(entry) {
+  try {
+    recordSentMessage(entry);
+  } catch (err) {
+    log.error(`Failed to record sent message (${entry.channel}): ${err.message}`);
+  }
+}
+
+module.exports = {
+  resolveOutboundAttachments,
+  alreadyContactedError,
+  recordOutbound,
+};

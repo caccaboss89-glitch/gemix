@@ -6,24 +6,19 @@
 // per chat pair (not per caller). History: footer text opens a GemiX block; following
 // attachment-only fromMe messages stay GemiX until the other user writes or admin interrupts.
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } = require('./shared');
+const { createWhatsAppClient } = require('./client');
 const { materializeWhatsAppBatchContent } = require('../../utils/batchContentRefresh');
 const { getDedicatedClient, isDedicatedClientReady } = require('./dedicated');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { addFooter, removeFooter, getModelDisplayName, hasFooter } = require('../../utils/footer');
-const { PUPPETEER_ARGS, WA_QR_TIMEOUT, PLATFORM_WA_PERSONAL } = require('../../config/constants');
-const { CHROMIUM_PATH } = require('../../config/env');
+const { PLATFORM_WA_PERSONAL } = require('../../config/constants');
 const { createLogger } = require('../../utils/logger');
 const { enqueueBatchedTurn, peekPendingBatchLastEntry } = require('../../utils/batchIngress');
 const { isPendingAlbumContinuation } = require('../../utils/waAlbumGroup');
-const {
-  isWaPuppeteerTransientError,
-  withWaPuppeteerRetry,
-  formatWaError,
-} = require('../../utils/waPuppeteer');
+const { withWaPuppeteerRetry } = require('../../utils/waPuppeteer');
+const { resolveWaSender, normalizePhoneJid } = require('../../utils/waContact');
 
 const { resolvePersonalChatStorageId } = require('../../utils/userPaths');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
@@ -34,102 +29,20 @@ const { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } = require('./priva
 const log = createLogger('WA-PERSONAL');
 
 let client;
-let _reconnectAttempts = 0;
-let _reconnectTimer = null;
-let _initializeInProgress = false;
-const MAX_RECONNECT_DELAY_MS = 60_000;
 
 /**
- * Initialize personal WhatsApp account client.
- * Sets up event handlers for QR code, ready state, auth failure, disconnection, and incoming messages.
+ * Initialize personal WhatsApp account client. Listens to `message_create`:
+ * on this account the owner's own messages are user turns, so outgoing ones
+ * must be seen too (GemiX's own replies are filtered by their footer).
  * @returns {object} The whatsapp-web.js Client instance
  */
 function initPersonalWhatsApp() {
-  client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'personal' }),
-    puppeteer: {
-      executablePath: CHROMIUM_PATH,
-      headless: true,
-      args: PUPPETEER_ARGS,
-      protocolTimeout: 120000,
-    },
-    qr_timeout: WA_QR_TIMEOUT,
+  client = createWhatsAppClient({
+    clientId: 'personal',
+    log,
+    messageEvent: 'message_create',
+    onMessage: onPersonalMessage,
   });
-
-  const watchdog = setTimeout(() => {
-    if (!client?.info?.wid?._serialized) {
-      log.error('Personal WhatsApp client init timeout (5 min). Forcing process exit to restart.');
-      process.exit(1);
-    }
-  }, 5 * 60 * 1000);
-  watchdog.unref();
-
-  client.on('qr', (qr) => {
-    log.info('Scan QR code:');
-    qrcode.generate(qr, { small: true });
-  });
-
-  client.on('ready', () => {
-    clearTimeout(watchdog);
-    if (_reconnectTimer) {
-      clearTimeout(_reconnectTimer);
-      _reconnectTimer = null;
-    }
-    _initializeInProgress = false;
-    log.info('Client ready:', client.info.wid._serialized);
-    _reconnectAttempts = 0;
-  });
-
-  client.on('auth_failure', (msg) => {
-    log.error('Auth failure:', msg);
-    log.error('Exiting so PM2 can restart with a fresh session (re-scan QR if needed).');
-    setTimeout(() => process.exit(1), 2000);
-  });
-
-  client.on('disconnected', (reason) => {
-    log.warn('Disconnected:', reason);
-    _initializeInProgress = false;
-    if (_reconnectTimer) {
-      clearTimeout(_reconnectTimer);
-      _reconnectTimer = null;
-    }
-    _reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, _reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
-    log.info(`Reconnect attempt ${_reconnectAttempts} in ${delay / 1000}s...`);
-    _reconnectTimer = setTimeout(() => {
-      _reconnectTimer = null;
-      if (_initializeInProgress) {
-        log.info('Initialize already in progress — skipping stacked reconnect');
-        return;
-      }
-      _initializeInProgress = true;
-      Promise.resolve(client.initialize())
-        .catch((err) => {
-          log.error(`Reconnect initialize failed: ${err?.message || err}`);
-        })
-        .finally(() => {
-          _initializeInProgress = false;
-        });
-    }, delay);
-  });
-
-  client.on('message_create', async (msg) => {
-    try {
-      await onPersonalMessage(msg);
-    } catch (err) {
-      // WA Web / Puppeteer often throws minified "r: r" when the page context
-      // reloads mid-evaluate (getChat). Transient — do not treat as fatal.
-      if (isWaPuppeteerTransientError(err)) {
-        log.warn(`Transient Puppeteer/WA Web error (message dropped): ${formatWaError(err)}`);
-        return;
-      }
-      log.error(`\nCritical error:`);
-      log.error(`   ${formatWaError(err)}`);
-      log.error(`   Stack: ${err.stack?.split('\n').slice(0, 5).join('\n   ') || '(no stack)'}`);
-    }
-  });
-
-  client.initialize();
   return client;
 }
 
@@ -139,8 +52,13 @@ async function onPersonalMessage(msg) {
 
   if (chat.isGroup) return;
 
-  const dedicatedClient = getDedicatedClient();
-  const dedicatedJid = dedicatedClient?.info?.wid?._serialized;
+  // Intentional: no queue until dedicated client is ready (pair-chat routing
+  // needs the bot JID). Checked before any contact lookup, which would be work
+  // thrown away.
+  if (!isDedicatedClientReady()) {
+    log.info('   Skipping personal message during startup until dedicated client identity is ready (not queued)');
+    return;
+  }
 
   const normalizeDigits = (jidOrPhone) => {
     if (!jidOrPhone) return null;
@@ -148,28 +66,18 @@ async function onPersonalMessage(msg) {
     return digits || null;
   };
 
-  const dedicatedDigits = normalizeDigits(dedicatedJid);
+  const dedicatedDigits = normalizeDigits(getDedicatedClient()?.info?.wid?._serialized);
 
   let otherDigits = null;
   try {
     const otherContact = await chat.getContact();
     if (otherContact) {
-      if (otherContact.number) {
-        otherDigits = normalizeDigits(otherContact.number);
-      } else if (otherContact.id && otherContact.id.user) {
-        otherDigits = normalizeDigits(otherContact.id.user);
-      }
+      otherDigits = normalizeDigits(otherContact.number || otherContact.id?.user);
     }
   } catch { }
 
-  if (!otherDigits && chat.id && chat.id._serialized) {
-    otherDigits = normalizeDigits(chat.id._serialized);
-  }
-
-  // Intentional: no queue until dedicated client is ready (pair-chat routing needs bot JID).
-  if (!isDedicatedClientReady()) {
-    log.info('   Skipping personal message during startup until dedicated client identity is ready (not queued)');
-    return;
+  if (!otherDigits) {
+    otherDigits = normalizeDigits(chat.id?._serialized);
   }
 
   if (dedicatedDigits && otherDigits && dedicatedDigits === otherDigits) {
@@ -191,42 +99,16 @@ async function onPersonalMessage(msg) {
 
   if (msg.fromMe && hasFooter(msg.body || '')) return;
 
-  let senderJid = msg.author || msg.from;
-  if (typeof senderJid === 'string' && senderJid.includes(':')) {
-    senderJid = senderJid.replace(/:[0-9]+@/, '@');
-  }
-  let userName = senderJid;
-  let phoneJid = senderJid;
-
-  // When the message is from us (the admin account) in this personal chat, it
-  // is always the Account Owner — match the label history uses, regardless of
-  // whether client.info.wid is populated yet.
+  // A message from us in this personal chat is always the Account Owner — match
+  // the label history uses, regardless of whether client.info.wid is populated
+  // yet. Everyone else resolves through their contact card.
+  let userName;
+  let phoneJid;
   if (msg.fromMe) {
     userName = 'Account Owner';
-    if (client.info && client.info.wid) {
-      phoneJid = client.info.wid._serialized;
-    }
+    phoneJid = normalizePhoneJid(client.info?.wid?._serialized || msg.from);
   } else {
-    // For messages from other users, extract from contact
-    try {
-      const contact = await msg.getContact();
-      userName = contact.pushname || contact.name || senderJid;
-      // PRIORITY: Use contact.id.user first (most reliable), fallback to contact.number
-      if (contact.id && contact.id.user && !contact.id.user.includes(':') && /^\d+$/.test(contact.id.user)) {
-        phoneJid = contact.id.user + '@c.us';
-      } else if (contact.number) {
-        phoneJid = contact.number.replace(/\D/g, '') + '@c.us';
-      }
-    } catch { }
-  }
-
-  // Final fallback: if phoneJid still isn't in correct format, extract digits
-  if (!phoneJid.match(/^\d+@c\.us$/)) {
-    const match = phoneJid.match(/^(\d+)/);
-    const digits = match ? match[1] : phoneJid.replace(/\D/g, '');
-    if (digits) {
-      phoneJid = digits + '@c.us';
-    }
+    ({ userName, phoneJid } = await resolveWaSender(msg));
   }
 
   const userIdentity = identifyUser({

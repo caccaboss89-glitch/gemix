@@ -16,20 +16,34 @@
 const path = require('path');
 const { MAINTENANCE_PREFIX } = require('./systemMessages');
 
-const { MAINTENANCE_MODE, XAI_TTS_ENABLED, XAI_TTS_VOICE } = require('./env');
 const MAINTENANCE_RELEASE_NOTIFY_COMMAND = '/updates';
+
+const PLATFORM_DISCORD = 'discord';
+const PLATFORM_WA_DEDICATED = 'whatsapp_dedicated';
+const PLATFORM_WA_PERSONAL = 'whatsapp_personal';
+
+/** True for either WhatsApp account. Use this instead of matching the string prefix. */
+function isWhatsAppPlatform(platform) {
+  return platform === PLATFORM_WA_DEDICATED || platform === PLATFORM_WA_PERSONAL;
+}
+
+const BUILD_WORKSPACE_TTL_MS = 4 * 60 * 60 * 1000;
+
+/** Human-readable duration for prompt and tool text (e.g. "4h", "90m"). */
+function formatDurationLabel(ms) {
+  const hours = ms / (60 * 60 * 1000);
+  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
+  const mins = Math.round(ms / (60 * 1000));
+  return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
+}
 
 module.exports = {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
 
-  // Maintenance mode
-  MAINTENANCE_MODE,
+  // Maintenance mode (MAINTENANCE_MODE itself is a deployment flag: read it from env.js)
   MAINTENANCE_ADMIN_ONLY: true,
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
 
-  // TTS engine selection
-  XAI_TTS_ENABLED,
-  XAI_TTS_VOICE,
   MAINTENANCE_USER_MESSAGE:
     MAINTENANCE_PREFIX +
     `Se vuoi essere avvisato non appena escono nuovi aggiornamenti, scrivi: \`${MAINTENANCE_RELEASE_NOTIFY_COMMAND}\`.\n\n` +
@@ -78,7 +92,9 @@ module.exports = {
   //   - MAX_ROUNDS: passed to Grok as --max-turns.
   //   - HARD_TIMEOUT_MS: in-container timeout + host stream backstop.
   //   - LOCK_WAIT_MS: wait for per-workspace lock before "build busy".
-  BUILD_WORKSPACE_TTL_MS: 4 * 60 * 60 * 1000,
+  BUILD_WORKSPACE_TTL_MS,
+  // Same TTL as prose, for the prompt and the tool descriptions that quote it.
+  BUILD_WORKSPACE_TTL_LABEL: formatDurationLabel(BUILD_WORKSPACE_TTL_MS),
   BUILD_WORKSPACE_QUOTA_MB: 500,
   BUILD_MAX_ROUNDS: 60,
   BUILD_HARD_TIMEOUT_MS: 10 * 60 * 1000,
@@ -93,15 +109,15 @@ module.exports = {
   MAX_VIDEO_DURATION_S: 120,
 
   // Platforms
-  PLATFORM_DISCORD: 'discord',
-  PLATFORM_WA_DEDICATED: 'whatsapp_dedicated',
-  PLATFORM_WA_PERSONAL: 'whatsapp_personal',
+  PLATFORM_DISCORD,
+  PLATFORM_WA_DEDICATED,
+  PLATFORM_WA_PERSONAL,
+  isWhatsAppPlatform,
 
   // Meta AI: WhatsApp's built-in assistant (@13135550002). Users may summon it;
   // GemiX must never tag it (stripped on outgoing messages). Not listed in the
   // system prompt — inferred from chat history when users reference it.
   META_AI_NUMBER: '13135550002',
-  META_AI_NAME: 'Meta AI',
 
   // Task file prefixes
   TASK_PREFIX_MEMBER: 'member_',

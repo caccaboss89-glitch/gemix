@@ -252,5 +252,4 @@ module.exports = {
   readSentRecords,
   resolveStoredAttachmentPath,
   deleteSentMessages,
-  MAX_SENT_MESSAGES,
 };

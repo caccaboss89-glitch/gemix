@@ -47,11 +47,11 @@ const {
   MAX_TTS_CHARS,
   PLATFORM_DISCORD,
   PLATFORM_WA_DEDICATED,
-  MAINTENANCE_MODE,
   MAINTENANCE_ADMIN_ONLY,
   MAINTENANCE_USER_MESSAGE,
   MAINTENANCE_RELEASE_NOTIFY_COMMAND,
 } = require('./config/constants');
+const { MAINTENANCE_MODE } = require('./config/env');
 const { createLogger } = require('./utils/logger');
 const { appendResearchBadge, buildResearchBadgeText } = require('./utils/footer');
 
@@ -267,12 +267,6 @@ async function handleMessage(ctx) {
       }
     }
 
-    // Seed deliveryState for the Runtime block (buffer). The Discord title
-    // field lives in text.format; the current Thread title is only in Runtime.
-    ctx.deliveryState = {
-      bufferFiles: (responseCtx.attachments || []).map(a => a.name).filter(Boolean),
-    };
-
     // Static system first (only role:system — keep it that way for prefix
     // cache). Then history, the current user message, and the Runtime block.
     // Rebuilt static only if the live tool fingerprint changes mid-turn (rare).
@@ -324,9 +318,9 @@ async function handleMessage(ctx) {
     // actually holds (87-89% within a turn).
     // Must not use role:system either: xAI merges extra system messages into the
     // leading system block, which moves them and busts the prefix for good.
-    // What it states can move during the turn (delivery buffer, build workspace,
-    // quota counts, preferences); the tool results that cause those changes
-    // report them, so the frozen snapshot stays truthful about turn start.
+    // What it states can move during the turn (build workspace, quota counts,
+    // preferences); the tool results that cause those changes report them, so
+    // the frozen snapshot stays truthful about turn start.
     messages.push({ role: 'user', content: buildDynamicRuntimeContext(ctx) });
 
     /** Keep messages[0] in sync if the static prefix is rebuilt mid-turn. */
@@ -361,10 +355,11 @@ async function handleMessage(ctx) {
       log.warn(`pruneHistory setup failed: ${pruneErr.message}`);
     }
 
+    // One outbound message per destination per turn (per-round tool caps are
+    // enforced upstream by perRoundCappedDuplicateIds).
     const deliveryCtx = {
       contactedWA: new Set(),
       contactedEmail: new Set(),
-      roundToolCounts: new Map(),
     };
 
     let rounds = 0;
@@ -529,13 +524,39 @@ async function handleMessage(ctx) {
         }
         messages.push(assistantMsg);
 
-        // Reset per-round tool caps (build, read_music_stats).
-        deliveryCtx.roundToolCounts = new Map();
-
         const orderedCalls = assistantMsg.tool_calls;
+        // The set the model was actually offered this round: membership in it is
+        // the whole permission check (see ai/tools.js getToolAccessError).
         const allowedToolNames = new Set(roundTools.map(t => t.function?.name).filter(Boolean));
         const phases = partitionHandlerToolCalls(orderedCalls);
         const resultsById = new Map();
+
+        const recordToolResult = async (tc, blockedOncePerRound) => {
+          if (blockedOncePerRound.has(tc.id)) {
+            const name = tc.function?.name || 'tool';
+            const cap = PER_ROUND_TOOL_LIMITS[name];
+            log.warn(`   Tool "${name}" blocked: per-round cap (${cap}) exceeded in same model turn`);
+            return {
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: perRoundCapErrorPayload(name, cap),
+            };
+          }
+          const toolBlock = getToolAccessError(
+            tc.function.name,
+            allowedToolNames,
+            (name) => _toolNotAvailableMessage(name, ctx),
+          );
+          if (toolBlock) {
+            log.warn(`   Tool "${tc.function.name}" blocked: ${toolBlock}`);
+            return {
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ success: false, error: toolBlock }),
+            };
+          }
+          return runToolCall(tc);
+        };
 
         const runPhase = async (batch, parallel) => {
           const blockedOncePerRound = perRoundCappedDuplicateIds(batch, PER_ROUND_TOOL_LIMITS);
@@ -548,32 +569,6 @@ async function handleMessage(ctx) {
               resultsById.set(tc.id, await recordToolResult(tc, blockedOncePerRound));
             }
           }
-        };
-
-        const recordToolResult = async (tc, blockedOncePerRound = new Set()) => {
-          if (blockedOncePerRound.has(tc.id)) {
-            const name = tc.function?.name || 'tool';
-            const cap = PER_ROUND_TOOL_LIMITS[name];
-            log.warn(`   Tool "${name}" blocked: per-round cap (${cap}) exceeded in same model turn`);
-            return {
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: perRoundCapErrorPayload(name, cap),
-            };
-          }
-          const toolBlock = getToolAccessError(tc.function.name, userCtx, {
-            allowedRoundNames: allowedToolNames,
-            unavailableMessage: (name) => _toolNotAvailableMessage(name, ctx),
-          });
-          if (toolBlock) {
-            log.warn(`   Tool "${tc.function.name}" blocked: ${toolBlock}`);
-            return {
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: JSON.stringify({ success: false, error: toolBlock }),
-            };
-          }
-          return runToolCall(tc);
         };
 
         await runPhase(phases.phase1, true);

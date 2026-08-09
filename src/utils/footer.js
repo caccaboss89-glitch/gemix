@@ -137,11 +137,9 @@ function appendResearchBadge(text, stats) {
 }
 
 module.exports = {
-  appendBlock,
   addFooter,
   removeFooter,
   hasFooter,
-  buildScheduledFooter,
   addScheduledFooter,
   getModelDisplayName,
   hasScheduledFooter,

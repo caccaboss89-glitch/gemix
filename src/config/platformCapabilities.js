@@ -40,6 +40,9 @@ const TOOL = {
   BUG_REPORT: 'bug_report',
 };
 
+// `tools` is not written here: syncProfileToolSets() fills it at the bottom of
+// this file straight from the tool registry, so a profile's capability set can
+// never drift from what getToolsForUser actually returns.
 const CAPS = {
   [PROFILE.WA_PERSONAL]: {
     platform: PLATFORM_WA_PERSONAL,
@@ -50,14 +53,7 @@ const CAPS = {
     buildWorkspace: true,
     historyTranscriptionNote: false,
     voiceReply: false,
-    tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO, TOOL.GENERATE_MUSIC,
-      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
-      TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
-      TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
-      TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
-      TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
-    ]),
+    tools: null,
   },
   [PROFILE.WA_DEDICATED_PRIVATE]: {
     platform: PLATFORM_WA_DEDICATED,
@@ -68,14 +64,7 @@ const CAPS = {
     buildWorkspace: true,
     historyTranscriptionNote: true,
     voiceReply: true,
-    tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO, TOOL.GENERATE_MUSIC,
-      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
-      TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
-      TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
-      TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
-      TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
-    ]),
+    tools: null,
   },
   [PROFILE.WA_DEDICATED_GROUP]: {
     platform: PLATFORM_WA_DEDICATED,
@@ -86,14 +75,7 @@ const CAPS = {
     buildWorkspace: true,
     historyTranscriptionNote: true,
     voiceReply: true,
-    tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO, TOOL.GENERATE_MUSIC,
-      TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
-      TOOL.BUILD, TOOL.SCHEDULE, TOOL.READ_TASKS,
-      TOOL.REMOVE_TASKS, TOOL.MANAGE_PREFERENCES, TOOL.TOGGLE_RELEASE,
-      TOOL.READ_MUSIC_STATS, TOOL.BUG_REPORT,
-      TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
-    ]),
+    tools: null,
   },
   [PROFILE.DISCORD_THREAD]: {
     platform: PLATFORM_DISCORD,
@@ -104,11 +86,7 @@ const CAPS = {
     buildWorkspace: false,
     historyTranscriptionNote: false,
     voiceReply: false,
-    tools: new Set([
-      TOOL.WEB_SEARCH, TOOL.X_SEARCH, TOOL.WEB_IMAGE_SEARCH, TOOL.READ_VIDEO,
-      TOOL.FORMAL_PDF, TOOL.BUG_REPORT,
-      TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL,
-    ]),
+    tools: null,
   },
 };
 
@@ -307,10 +285,13 @@ function buildAnswerLines(profile, opts = {}) {
 }
 
 /**
- * Body of "Sending files". States the mechanism the tool descriptions cannot:
- * the program does the fetching, so a URL in `attachments` is the whole job.
- * Without this, media already sitting on a CDN gets routed through the build
- * sandbox, or the model claims it cannot download anything at all.
+ * Body of "Sending files". States the two mechanisms the tool descriptions
+ * cannot: the program does the fetching, so a URL in `attachments` is the whole
+ * job; and the delivery buffer is where every file a tool produces waits.
+ * Without the first, media already sitting on a CDN gets routed through the
+ * build sandbox, or the model claims it cannot download anything at all.
+ * Without the second, files that were generated this turn are never sent, or
+ * are regenerated to be sent.
  */
 function buildSendingFilesLines(profile, opts = {}) {
   const cap = CAPS[profile];
@@ -320,6 +301,9 @@ function buildSendingFilesLines(profile, opts = {}) {
     'Whatever you list in `attachments` is fetched and delivered by the program: a filename from this chat or '
     + 'from the delivery buffer, or a direct https link to the file itself. You never download anything yourself '
     + 'and you never need a tool to do it for you — the link is enough.',
+    'The delivery buffer holds every file your tools produce during this turn. Each one tells you the exact name '
+    + 'it was stored under; that name is what you list in `attachments` to send it, or pass to another tool to '
+    + 'work from it. Nothing leaves the buffer unless you list it, and the buffer is gone once the turn ends.',
   ];
   if (has(TOOL.X_SEARCH)) {
     let x = 'So when someone wants a photo or a video from an X post, open that post with the X tools, take the '

@@ -6,17 +6,14 @@
 //   - delivery-buffer filenames -> the buffered attachment (by basename)
 //   - public https URLs        -> downloaded into memory or disk
 // Only listed files ship; everything else stays in the buffer.
-// Oversized URL payloads (>100 MB hosted) use source-link delivery on failure.
+// A URL payload too big even for disk staging is delivered as a source link.
 
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { downloadPublicFile, downloadPublicFileToDisk, filenameFromPublicUrl } = require('./fetch');
 const { sanitizeFilename } = require('./text');
-const {
-  uniqueAttachmentName,
-  WA_DIRECT_MAX_BYTES,
-} = require('./attachments');
+const { uniqueAttachmentName } = require('./attachments');
 const { applyBuildAgentFlags } = require('./attachmentDelivery');
 const { getHistoryDir } = require('./userPaths');
 const { mimeForExtension } = require('../config/mimeExtensions');
@@ -25,15 +22,20 @@ const { createLogger } = require('./logger');
 
 const log = createLogger('DeliverySelection');
 
-const DEFAULT_URL_MAX_BYTES = 60 * 1024 * 1024;
+// Download caps. These bound what we are willing to pull off the network, and
+// are deliberately unrelated to any platform's *send* cap: a file too large to
+// attach on WhatsApp is still worth downloading, because it ships as a link.
+const DEFAULT_URL_MAX_BYTES = 60 * 1024 * 1024;   // straight into memory
+const DISK_URL_MAX_BYTES = 200 * 1024 * 1024;     // staged on disk instead
 
 function _isFileTooLargeError(err) {
   return err && typeof err.message === 'string' && /File too large/i.test(err.message);
 }
 
 /**
- * Download a public URL into an attachment object. Retries with a higher cap
- * and disk storage when the default in-memory limit is exceeded.
+ * Download a public URL into an attachment object. Over the in-memory limit it
+ * retries onto disk with the larger DISK_URL_MAX_BYTES cap; only past that does
+ * it give up and let the caller fall back to a source link.
  *
  * @param {string} url
  * @param {Array<object>} existing - attachments already resolved (for name dedup)
@@ -50,7 +52,7 @@ async function resolvePublicUrlAttachment(url, existing = []) {
     if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
     const safeStem = sanitizeFilename(filenameFromPublicUrl(clean)) || 'file';
     const destPath = path.join(TEMP_DIR, `dl_${crypto.randomBytes(12).toString('hex')}_${safeStem}`);
-    const disk = await downloadPublicFileToDisk(clean, destPath, { maxBytes: WA_DIRECT_MAX_BYTES });
+    const disk = await downloadPublicFileToDisk(clean, destPath, { maxBytes: DISK_URL_MAX_BYTES });
     dl = {
       filePath: disk.filePath,
       mimetype: disk.mimetype,
@@ -105,6 +107,51 @@ async function resolveUrlEntry(url, existing = [], opts = {}) {
 }
 
 /**
+ * Locate a file the model named by filename, in the one order every caller
+ * uses: the delivery buffer first (what this turn produced), then the chat
+ * history on disk. Only the basename is honoured — the model passes plain
+ * filenames, never paths.
+ *
+ * A buffer hit also returns the buffered attachment itself (`att`), which
+ * already carries its mimetype and delivery flags; a stale entry (filePath gone,
+ * no buffer) falls through to history.
+ *
+ * @param {string} entry - filename with extension
+ * @param {object} userCtx - resolves the history dir
+ * @param {object} [responseCtx] - holds the delivery buffer
+ * @returns {{ source: 'buffer'|'history', name: string, filePath?: string, buffer?: Buffer, att?: object }|null}
+ */
+function resolveLocalFileEntry(entry, userCtx, responseCtx) {
+  if (typeof entry !== 'string' || !entry.trim()) return null;
+  const target = path.basename(entry.trim());
+
+  const buffered = Array.isArray(responseCtx?.attachments)
+    ? responseCtx.attachments.find(a => a && a.name && path.basename(a.name) === target)
+    : null;
+  if (buffered) {
+    const name = path.basename(buffered.name);
+    if (buffered.filePath && fs.existsSync(buffered.filePath)) {
+      return { source: 'buffer', name, filePath: buffered.filePath, att: buffered };
+    }
+    if (Buffer.isBuffer(buffered.buffer)) {
+      return { source: 'buffer', name, buffer: buffered.buffer, att: buffered };
+    }
+  }
+
+  let historyDir = null;
+  try { historyDir = getHistoryDir(userCtx); } catch { historyDir = null; }
+  if (historyDir) {
+    const candidate = path.join(historyDir, target);
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return { source: 'history', name: target, filePath: candidate };
+      }
+    } catch { /* unreadable → treated as missing */ }
+  }
+  return null;
+}
+
+/**
  * @param {string[]} entries - Buffer filenames and/or public https URLs.
  * @param {object} responseCtx - Holds the delivery buffer (responseCtx.attachments).
  * @param {object} [userCtx] - When provided, unresolved filenames are looked up
@@ -116,11 +163,6 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
   const attachments = [];
   const missing = [];
   if (!Array.isArray(entries) || entries.length === 0) return { attachments, missing };
-
-  let historyDir = null;
-  if (userCtx) {
-    try { historyDir = getHistoryDir(userCtx); } catch { historyDir = null; }
-  }
 
   const seen = new Set();
   for (const raw of entries) {
@@ -142,27 +184,23 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
       continue;
     }
 
-    const target = path.basename(entry);
-    const found = Array.isArray(responseCtx?.attachments)
-      ? responseCtx.attachments.find(a => a && a.name && path.basename(a.name) === target)
+    const local = userCtx || responseCtx
+      ? resolveLocalFileEntry(entry, userCtx, responseCtx)
       : null;
-    if (found) {
-      attachments.push(found);
+    if (!local) {
+      missing.push(entry);
       continue;
     }
-
-    if (historyDir) {
-      const candidate = path.join(historyDir, target);
-      try {
-        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-          const name = uniqueAttachmentName(attachments, target);
-          attachments.push({ name, filePath: candidate, mimetype: mimeForExtension(path.extname(target)) });
-          continue;
-        }
-      } catch { /* fall through to missing */ }
+    if (local.att) {
+      // Already a well-formed attachment (mimetype + delivery flags): ship it.
+      attachments.push(local.att);
+      continue;
     }
-
-    missing.push(entry);
+    attachments.push({
+      name: uniqueAttachmentName(attachments, local.name),
+      filePath: local.filePath,
+      mimetype: mimeForExtension(path.extname(local.name)),
+    });
   }
 
   return { attachments, missing };
@@ -170,6 +208,6 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
 
 module.exports = {
   resolveDeliverySelection,
-  resolvePublicUrlAttachment,
+  resolveLocalFileEntry,
   resolveUrlEntry,
 };

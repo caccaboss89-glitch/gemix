@@ -106,6 +106,8 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   }
 
   try {
+    // No step() here: clearMediaUsage resolves to void, so the only signal it
+    // can give is the throw handled below.
     await clearMediaUsage(taskFileId);
   } catch (err) {
     log.warn(`clearMediaUsage failed for ${taskFileId}: ${err.message}`);

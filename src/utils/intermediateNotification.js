@@ -128,5 +128,4 @@ async function sendIntermediateNotification(ctx, kind, message) {
 
 module.exports = {
   sendIntermediateNotification,
-  resolveIntermediateNotificationTarget,
 };

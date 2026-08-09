@@ -32,27 +32,17 @@ const {
 } = require('../sandbox/buildWorkspace');
 const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
 const { runBuildAgent, DELIVERY_SELECTION_NOTICE } = require('../ai/buildAgent');
-const { getUserHistoryPaths } = require('../utils/historySync');
-const { resolveStorageId } = require('../utils/userPaths');
-const { resolveUrlEntry } = require('../utils/deliverySelection');
+const { resolveUrlEntry, resolveLocalFileEntry } = require('../utils/deliverySelection');
 const { applyBuildAgentFlags } = require('../utils/attachmentDelivery');
 const { pushBufferAttachment } = require('../utils/attachments');
 const { createLogger } = require('../utils/logger');
 
 const log = createLogger('BuildTool');
 
-function _historyDirFor(userCtx) {
-  const storageId = resolveStorageId(userCtx);
-  if (!storageId) return null;
-  try { return getUserHistoryPaths(storageId).historyDir; }
-  catch { return null; }
-}
-
 /**
- * Resolve an attachment entry:
+ * Resolve an attachment entry to stage into the workspace:
  *   1. Public https URLs
- *   2. Delivery buffer by basename
- *   3. Chat history for this user
+ *   2. Delivery buffer, then chat history (resolveLocalFileEntry)
  */
 async function _resolveAttachment(entry, userCtx, responseCtx) {
   if (typeof entry !== 'string' || !entry.trim()) return null;
@@ -75,28 +65,7 @@ async function _resolveAttachment(entry, userCtx, responseCtx) {
     };
   }
 
-  const target = path.basename(trimmed);
-
-  if (Array.isArray(responseCtx?.attachments)) {
-    const buf = responseCtx.attachments.find(a => a && a.name && path.basename(a.name) === target);
-    if (buf) {
-      if (buf.filePath && fs.existsSync(buf.filePath)) {
-        return { source: 'buffer', filePath: buf.filePath, name: buf.name };
-      }
-      if (Buffer.isBuffer(buf.buffer)) {
-        return { source: 'buffer', buffer: buf.buffer, name: buf.name };
-      }
-    }
-  }
-
-  const historyDir = _historyDirFor(userCtx);
-  if (historyDir) {
-    const candidate = path.join(historyDir, target);
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return { source: 'history', filePath: candidate, name: target };
-    }
-  }
-  return null;
+  return resolveLocalFileEntry(trimmed, userCtx, responseCtx);
 }
 
 function _stageOne(attachment, workspaceId) {

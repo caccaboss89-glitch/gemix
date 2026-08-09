@@ -60,7 +60,6 @@ module.exports = {
   formatVideoTooLongNote,
   isAudioOverDurationLimit,
   isVideoOverDurationLimit,
-  durationSecFromHistoryFile,
   resolveMediaDurationSec,
   MAX_AUDIO_DURATION_S,
   MAX_VIDEO_DURATION_S,

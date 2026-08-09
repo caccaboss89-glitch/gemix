@@ -308,7 +308,5 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
 module.exports = {
   processWhatsAppQuotedReply,
   processDiscordQuotedReply,
-  formatWhatsAppQuotedLevel,
-  formatDiscordQuotedLevel,
   MAX_REPLY_CHAIN_DEPTH,
 };

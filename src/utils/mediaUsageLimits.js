@@ -216,17 +216,8 @@ async function reserveGeneration(kind, userCtx) {
 }
 
 module.exports = {
-  MEDIA_WEEKLY_LIMITS,
-  RESET_WEEKDAY,
-  RESET_HOUR,
-  RESET_MINUTE,
-  currentPeriodKey,
-  getMediaUsage,
   formatQuotaCounts,
   formatMediaQuotaResetLabel,
-  limitReachedError,
-  reserveMediaQuota,
-  refundMediaQuota,
   clearMediaUsage,
   reserveGeneration,
 };

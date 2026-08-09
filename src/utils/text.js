@@ -315,14 +315,6 @@ function cleanAssistantResponse(text) {
 }
 
 /**
- * Clean up any incoming message text from chat history/replies before feeding to the LLM context.
- * Applies incoming filters:
- * 1. Strips any GemiX footer (e.g. "--GemiX • ...")
- * 2. Strips any scheduled message footer
- * @param {string} text
- * @returns {string} Cleaned text
- */
-/**
  * Prefix user message text for LLM context (history and current turn).
  * @param {number} timestampMs - Unix ms
  * @param {string} senderName - Display name
@@ -337,6 +329,13 @@ function formatLabeledUserContent(timestampMs, senderName, textBody) {
   return `[${ts}] ${name}: ${textBody}`;
 }
 
+/**
+ * Clean up any incoming message text from chat history/replies before feeding it
+ * to the LLM context. Strips the GemiX and scheduled-message footers, voice
+ * effect tags, past-voice transcript blocks, research badges and reply headers.
+ * @param {string} text
+ * @returns {string} Cleaned text
+ */
 function cleanIncomingText(text) {
   if (!text || typeof text !== 'string') return '';
   // Lazy require to avoid circular dependencies
@@ -364,12 +363,8 @@ module.exports = {
   stripVoiceTags,
   sanitizeVoiceMessageText,
   normalizeMarkdown,
-  stripMarkdownLinks,
   renderInlineCitations,
-  stripHistoryPrefixes,
-  stripSystemMessages,
   stripOutgoingDeliveryArtifacts,
-  stripPastVoiceReplyTags,
   cleanAssistantResponse,
   cleanIncomingText,
   formatLabeledUserContent,

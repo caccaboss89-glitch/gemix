@@ -7,7 +7,7 @@
 
 const { Client, GatewayIntentBits, Partials, AttachmentBuilder, Events } = require('discord.js');
 const { BOT_TOKEN, GUILD_ID } = require('../../config/env');
-const { DISCORD_THREAD_NAME, MAX_HISTORY } = require('../../config/constants');
+const { DISCORD_THREAD_NAME, MAX_HISTORY, PLATFORM_DISCORD } = require('../../config/constants');
 
 const { identifyUser } = require('../../utils/userIdentifier');
 const { formatTimestamp } = require('../../utils/time');
@@ -238,7 +238,7 @@ async function onDiscordMessage(msg) {
   }
 
   const userIdentity = identifyUser({
-    platform: 'discord',
+    platform: PLATFORM_DISCORD,
     userId: msg.author.id,
     discordUsername: msg.author.username,
     discordDisplayName: msg.author.displayName || msg.author.globalName,
@@ -305,7 +305,7 @@ async function _discordGuildExtras(guild) {
 async function _sendDiscordLinkFallback(channel, attachments) {
   if (!Array.isArray(attachments) || attachments.length === 0) return;
   try {
-    const fallbackData = buildFallbackAttachmentMessage(attachments, { platform: 'discord' });
+    const fallbackData = buildFallbackAttachmentMessage(attachments, { platform: PLATFORM.DISCORD });
     await channel.send({ content: fallbackData.message });
     log.info(`   Sent Discord fallback links for ${attachments.length} attachment(s)`);
   } catch (err) {
@@ -323,6 +323,18 @@ async function deliverDiscordResponse(channel, response) {
     return new AttachmentBuilder(a.data, { name: a.name });
   });
 
+  /** One batch send failed: retry the files one by one, then link what still won't go. */
+  const sendFilesIndividually = async () => {
+    const result = await sendAttachmentsWithFallback(hostable, async (att) => {
+      const a = toDiscordAttachmentArgs(att);
+      if (!a) throw new Error('Invalid attachment');
+      await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
+    }, { platform: PLATFORM.DISCORD });
+    if (result.fallbackMessage) {
+      await channel.send({ content: result.fallbackMessage });
+    }
+  };
+
   if (finalText) {
     const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
     if (chunks.length > 1) log.info(`   Message split into ${chunks.length} parts`);
@@ -336,14 +348,7 @@ async function deliverDiscordResponse(channel, response) {
         } catch (err) {
           log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
           await channel.send({ content: chunks[i] });
-          const result = await sendAttachmentsWithFallback(hostable, async (att) => {
-            const a = toDiscordAttachmentArgs(att);
-            if (!a) throw new Error('Invalid attachment');
-            await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
-          }, { platform: 'discord' });
-          if (result.fallbackMessage) {
-            await channel.send({ content: result.fallbackMessage });
-          }
+          await sendFilesIndividually();
         }
       } else {
         await channel.send({ content: chunks[i] });
@@ -355,14 +360,7 @@ async function deliverDiscordResponse(channel, response) {
       log.info('   Discord files sent');
     } catch (err) {
       log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
-      const result = await sendAttachmentsWithFallback(hostable, async (att) => {
-        const a = toDiscordAttachmentArgs(att);
-        if (!a) throw new Error('Invalid attachment');
-        await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
-      }, { platform: 'discord' });
-      if (result.fallbackMessage) {
-        await channel.send({ content: result.fallbackMessage });
-      }
+      await sendFilesIndividually();
     }
   } else {
     log.warn('   No content or files to send');
@@ -385,22 +383,25 @@ async function deliverDiscordResponse(channel, response) {
 async function _handleDiscordBatch(entries) {
   const first = entries[0];
   const { channel, starterMessageId, historyStorageId, guild, stopLockRenew } = first;
+  // One fetch per turn, shared by the history build and the quote window.
+  // Closed over rather than stashed on a batch entry, which is not a channel
+  // the pipeline declares.
+  let messageWindow = null;
 
   await runTurnPipeline({
     log,
     lockKey: `discord:${channel.id}`,
-    platform: 'discord',
+    platform: PLATFORM_DISCORD,
     stopLockRenew,
     entries,
     discardLogLabel: `thread ${channel.id}`,
-    loadHistory: async ({ entries: ents, first }) => {
+    loadHistory: async ({ entries: ents }) => {
       const excludeMessageIds = new Set(ents.map(e => e.messageId).filter(Boolean));
       return fetchHistoryWithTimeout(
         async () => {
-          const window = await fetchDiscordMessageWindow(channel, starterMessageId);
-          if (first) first._discordWindow = window;
+          messageWindow = await fetchDiscordMessageWindow(channel, starterMessageId);
           const built = await buildDiscordHistory(
-            channel, starterMessageId, historyStorageId, excludeMessageIds, window,
+            channel, starterMessageId, historyStorageId, excludeMessageIds, messageWindow,
           );
           return built.history;
         },
@@ -412,8 +413,9 @@ async function _handleDiscordBatch(entries) {
       try { await channel.sendTyping(); } catch { /* ignore */ }
       return {};
     },
-    buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest, first }) => {
-      const recentMessageIds = first?._discordWindow?.recentMessageIds
+    buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
+      // Only missing if the history fetch above timed out before it landed.
+      const recentMessageIds = messageWindow?.recentMessageIds
         || (await fetchDiscordMessageWindow(channel, starterMessageId)).recentMessageIds;
       // Same contract as WhatsApp: the whole burst fuses into one role:user item.
       // Multi-attach on a single Discord message is already one unit natively.
@@ -427,7 +429,7 @@ async function _handleDiscordBatch(entries) {
       const lat = latestEntry || latest || ents[0];
       const extras = await _discordGuildExtras(guild);
       return {
-        platform: 'discord',
+        platform: PLATFORM_DISCORD,
         isGroup: false,
         groupId: null,
         groupName: null,
@@ -468,9 +470,8 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
   const window = prefetched || (await fetchDiscordMessageWindow(channel, starterMessageId));
   const raw = window.raw;
   // Quote window from fetchDiscordMessageWindow (starter id is excluded there so
-  // reply-to-starter is treated as outside recent model history). Fallback: all raw ids.
-  const recentMessageIds = window.recentMessageIds
-    || new Set([...raw.values()].map(m => m.id));
+  // reply-to-starter is treated as outside recent model history).
+  const recentMessageIds = window.recentMessageIds;
   const messageById = new Map([...raw.values()].map(m => [m.id, m]));
 
   const exclude = excludeMessageIds instanceof Set

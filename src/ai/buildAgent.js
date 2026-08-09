@@ -10,15 +10,8 @@ const {
   BUILD_HARD_TIMEOUT_MS,
   BUILD_MAX_ROUNDS,
   BUILD_WORKSPACE_QUOTA_MB,
-  BUILD_WORKSPACE_TTL_MS,
+  BUILD_WORKSPACE_TTL_LABEL,
 } = require('../config/constants');
-
-const BUILD_WORKSPACE_TTL_LABEL = (() => {
-  const hours = BUILD_WORKSPACE_TTL_MS / (60 * 60 * 1000);
-  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
-  const mins = Math.round(BUILD_WORKSPACE_TTL_MS / (60 * 1000));
-  return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
-})();
 const { renewBuildLock } = require('../utils/buildState');
 const {
   listWorkspaceFiles,
@@ -319,9 +312,5 @@ async function runBuildAgent({
 module.exports = {
   runBuildAgent,
   buildGrokRules,
-  collectAllWorkspaceDeliverablePaths,
-  collectWorkspaceDeltaPaths,
-  snapshotWorkspaceFiles,
-  buildBuildToolPayload,
   DELIVERY_SELECTION_NOTICE,
 };
