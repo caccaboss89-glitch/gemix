@@ -1,5 +1,6 @@
 # IDE
 .grok/
+.claude/
 graphify-out/
 AGENTS.md
 GROK.md
@@ -17,10 +18,7 @@ __pycache__/
 bin/
 src/logs/
 src/data/**
-!src/data/skills/
-!src/data/skills/**
 .tempfiles/
-_tmp_grok_build
 
 # Dev test scripts
 scripts/
@@ -29,3 +27,4 @@ scripts/
 .env
 package-lock.json
 SERVER_SETUP.md
+sandbox/README.md

@@ -1,7 +1,7 @@
-# === Ignora TUTTO tranne sandbox/ ===
-# Solo sandbox/ viene copiato nell'immagine Docker
-# Tutto il resto viene montato come volume al runtime
+# Ignore the whole project except the sandbox directory
+# Only the sandbox/ tree is copied into the Docker image
+# The rest of the repository is mounted at runtime
 
-# === Tutto il progetto ===
+# Include the entire repository context, then whitelist the sandbox subtree
 *
 !sandbox/

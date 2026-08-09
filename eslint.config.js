@@ -2,7 +2,21 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['node_modules/', '.git/', '.grok/', '.wwebjs_auth/', 'graphify-out/']
+    ignores: [
+      '.grok/',
+      '.claude/',
+      'graphify-out/',
+      'node_modules/',
+      '.wwebjs_auth/',
+      '.wwebjs_cache/',
+      '.wwebjs_cache',
+      '__pycache__/',
+      '**/__pycache__/',
+      'bin/',
+      'src/logs/',
+      'src/data/',
+      '.tempfiles/'
+    ]
   },
   {
     files: ['**/*.js'],
