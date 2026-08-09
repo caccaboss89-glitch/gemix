@@ -5,8 +5,9 @@
 // with per-file async locking to prevent race conditions.
 
 import fs from 'fs';
-const fsPromises = require('fs').promises;
 import path from 'path';
+
+const fsPromises = fs.promises;
 import constants from '../config/constants.js';
 import { withKeyedLock  } from './keyedLock.js';
 

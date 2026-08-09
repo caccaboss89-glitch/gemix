@@ -33,15 +33,14 @@ import { getGroupTaskFileId } from '../utils/userIdentifier.js';
 import { sanitizeFilename } from '../utils/text.js';
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
-import adminNotifierExport from '../utils/adminNotifier.js';
-import { buildEngineeringNotificationMessage } from '../utils/notificationDedup.js';
-
-const { isWhatsAppPlatform } = constants;
-const {
+import {
   notifyAdmin,
   ADMIN_NOTIFIED_SUFFIX,
   ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT
-} = adminNotifierExport;
+} from '../utils/adminNotifier.js';
+import { buildEngineeringNotificationMessage } from '../utils/notificationDedup.js';
+
+const { isWhatsAppPlatform } = constants;
 const log = createLogger('Tools');
 
 /**

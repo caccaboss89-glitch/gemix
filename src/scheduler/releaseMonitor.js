@@ -12,7 +12,8 @@ import envConfig from '../config/env.js';
 import { getSubscribedChats } from '../tools/releaseNotify.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
 import { createLogger } from '../utils/logger.js';
-import { MessageMedia } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { MessageMedia } = pkg;
 import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
 import { RELEASE_NOTIFICATION_PREFIX } from '../config/systemMessages.js';
 

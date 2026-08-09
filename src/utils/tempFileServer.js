@@ -19,12 +19,15 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { createLogger  } from './logger.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { getPublicBaseUrl  } from './publicTunnelUrl.js';
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const log = createLogger('TempFileServer');
 
 // Configuration

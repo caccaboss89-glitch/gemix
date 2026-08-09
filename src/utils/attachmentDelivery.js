@@ -12,7 +12,8 @@ import {
   WA_DIRECT_MAX_BYTES
 } from './attachments.js';
 import { DISCORD_ATTACHMENT_MAX_BYTES } from './discordAttachmentFetch.js';
-import { MessageMedia } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { MessageMedia } = pkg;
 
 const PLATFORM = {
   WHATSAPP: 'whatsapp',

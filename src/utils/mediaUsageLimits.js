@@ -15,7 +15,7 @@
 // Callers reserve a slot up-front (so parallel tool calls in one round cannot
 // exceed the cap) and refund it if the generation fails.
 
-import systemState from './systemState.js';
+import * as systemState from './systemState.js';
 import { getRomeParts  } from './time.js';
 import { createLogger  } from './logger.js';
 import envConfig from '../config/env.js';

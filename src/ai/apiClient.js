@@ -7,7 +7,11 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { getXaiAuth  } from '../config/xaiAuth.js';

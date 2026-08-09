@@ -5,8 +5,9 @@
 // and runs background sweeps (idle build workspaces, daily music wrap, release checks).
 // Uses per-file locking via taskStore.
 
-const fsPromises = require('fs').promises;
 import fs from 'fs';
+
+const fsPromises = fs.promises;
 import constants from '../config/constants.js';
 import { getRomeISO  } from '../utils/time.js';
 import { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped  } from '../utils/recurrence.js';

@@ -40,10 +40,13 @@ const PROXY_PORT = envConfig.GEMIX_SANDBOX_PROXY_PORT;
 const _pool = new Map();
 
 let _docker = null;
-function _getDocker() {
+async function _getDocker() {
   if (_docker) return _docker;
   let Docker;
-  try { Docker = require('dockerode'); }
+  try {
+    const dockerodeModule = await import('dockerode');
+    Docker = dockerodeModule.default;
+  }
   catch {
     throw new Error('dockerode is not installed. Run `npm install` first.');
   }
@@ -66,7 +69,7 @@ async function _spawnContainer(workspaceId) {
   const containerName = `gemix-bw-${slug}-${crypto.randomBytes(3).toString('hex')}`
     .toLowerCase().replace(/[^a-z0-9_.-]/g, '-').slice(0, 63);
 
-  const docker = _getDocker();
+  const docker = await _getDocker();
   const memBytes = constants.SANDBOX_MEMORY_MB * 1024 * 1024;
 
   const binds = [
@@ -424,7 +427,7 @@ async function shutdownAll() {
  */
 async function cleanupOrphanBuildSandboxes() {
   let docker;
-  try { docker = _getDocker(); }
+  try { docker = await _getDocker(); }
   catch (err) { log.debug(`Orphan cleanup skipped: ${err.message}`); return; }
 
   try {

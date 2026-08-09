@@ -11,7 +11,6 @@
 
 import path from 'path';
 import constants from '../config/constants.js';
-import { PLATFORM_WA_PERSONAL  } from '../config/constants.js';
 import { resolveStorageId  } from './userPaths.js';
 
 /**
@@ -25,7 +24,7 @@ function resolveWorkspaceId(ctx) {
   if (isWhatsApp && ctx.isGroup && ctx.groupId) {
     return `group:${ctx.groupId}`;
   }
-  if (ctx.platform === PLATFORM_WA_PERSONAL) {
+  if (ctx.platform === constants.PLATFORM_WA_PERSONAL) {
     return ctx.chatId ? `group:personal:${ctx.chatId}` : null;
   }
   const storageId = resolveStorageId(ctx);

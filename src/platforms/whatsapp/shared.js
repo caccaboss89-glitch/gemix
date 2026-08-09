@@ -6,7 +6,8 @@
 // WA dedicated, plus file attachments). Central place for WhatsApp-specific
 // formatting and media handling.
 
-import { MessageMedia } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { MessageMedia } = pkg;
 import constants from '../../config/constants.js';
 import { formatWhatsAppPollText } from '../../utils/pollParser.js';
 import { isSpecialNonMediaMessage, formatSpecialMessageText, formatWhatsAppContactText } from '../../utils/waSpecialMessages.js';

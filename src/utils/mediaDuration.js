@@ -3,7 +3,7 @@
 // Used to enforce video / audio duration caps when the platform layer
 // does not expose duration metadata (e.g. Discord video uploads).
 
-const fs = require('fs').promises;
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn  } from 'child_process';
@@ -47,15 +47,15 @@ function _runFfprobe(filePath) {
 async function getMediaDurationSec(buffer, extHint = '') {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) return null;
   const ext = (extHint || 'bin').replace(/^\.+/, '').toLowerCase() || 'bin';
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gemix-mdur-'));
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gemix-mdur-'));
   const file = path.join(dir, `probe.${ext}`);
   try {
-    await fs.writeFile(file, buffer);
+    await fs.promises.writeFile(file, buffer);
     return await _runFfprobe(file);
   } catch {
     return null;
   } finally {
-    fs.rm(dir, { recursive: true, force: true }).catch(() => { });
+    fs.promises.rm(dir, { recursive: true, force: true }).catch(() => { });
   }
 }
 

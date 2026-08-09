@@ -10,7 +10,8 @@
 // `ready` exits the process so PM2 restarts it clean, while a disconnect is
 // retried in-process (WhatsApp Web drops sessions routinely).
 
-import { Client, LocalAuth  } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
 import constants from '../../config/constants.js';
 import envConfig from '../../config/env.js';
