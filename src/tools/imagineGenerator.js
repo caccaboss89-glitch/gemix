@@ -19,7 +19,7 @@ const path = require('path');
 const crypto = require('crypto');
 const {
   IMAGE_GEN_MODEL,
-  VIDEO_GEN_MODEL,
+  VIDEO_GEN_MODEL
 } = require('../config/env');
 const { VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION, MAX_IMAGE_BYTES } = require('../config/constants');
 const { getXaiAuth } = require('../config/xaiAuth');
@@ -51,11 +51,11 @@ const VIDEO_POLL_FETCH_TIMEOUT_MS = 60_000;
 const VIDEO_DOWNLOAD_TIMEOUT_MS = 120_000;
 const MAX_CONSECUTIVE_429_POLLS = 5;
 const VIDEO_IN_PROGRESS_STATUSES = new Set([
-  '', 'pending', 'processing', 'queued', 'running', 'in_progress', 'in progress',
+  '', 'pending', 'processing', 'queued', 'running', 'in_progress', 'in progress'
 ]);
 // "expired" is documented alongside "failed" as a terminal poll status.
 const VIDEO_TERMINAL_FAILURE_STATUSES = new Set([
-  'failed', 'expired', 'error', 'rejected', 'cancelled', 'canceled',
+  'failed', 'expired', 'error', 'rejected', 'cancelled', 'canceled'
 ]);
 
 // Cap on the prompt to keep request payloads reasonable.
@@ -83,7 +83,7 @@ const GENERATED_MEDIA_MAX_BYTES = MAX_VIDEO_BYTES;
 function _cleanPrompt(prompt) {
   if (typeof prompt !== 'string') return { prompt: '', truncated: false };
   let p = prompt
-    // eslint-disable-next-line no-control-regex
+
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -142,7 +142,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, op
     if (!XAI_IMAGE_EXTS.has(ext)) {
       return {
         ok: false,
-        reason: `Reference "${entry}" is not a supported image type (allowed: ${[...XAI_IMAGE_EXTS].join(', ')}).`,
+        reason: `Reference "${entry}" is not a supported image type (allowed: ${[...XAI_IMAGE_EXTS].join(', ')}).`
       };
     }
 
@@ -169,7 +169,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, op
 
     const exposed = await exposeXaiUrlFromAbsPath(diskPath, found.name || `ref${ext}`, {
       mimetype: mimeForExtension(ext),
-      forceRefresh: opts.forceRefresh === true,
+      forceRefresh: opts.forceRefresh === true
     });
     if (!exposed.success) {
       return { ok: false, reason: exposed.error || `Cannot expose reference "${entry}" publicly.` };
@@ -202,7 +202,7 @@ function _hasLocalRefEntries(refList) {
  * POST to Imagine image/video endpoints; on stale local ref URLs, refresh upload once.
  */
 async function _xaiImagineSubmitWithRefRefresh({
-  label, timeoutMs, refList, maxRefs, userCtx, responseCtx, buildRequest,
+  label, timeoutMs, refList, maxRefs, userCtx, responseCtx, buildRequest
 }) {
   let refs = await _resolveReferenceImageUrls(refList, maxRefs, userCtx, responseCtx);
   if (!refs.ok) return { ok: false, reason: refs.reason };
@@ -239,20 +239,6 @@ function _pushGeneratedMedia(responseCtx, prompt, buffer, ext, fallbackBase) {
   const desiredName = `${baseName}_${Date.now()}.${ext}`;
   const mimetype = mimeForExtension(`.${ext}`);
   return pushBufferAttachment(responseCtx, { name: desiredName, buffer, mimetype });
-}
-
-function _parseApiErrorBody(errBody) {
-  if (!errBody || typeof errBody !== 'string') return '';
-  const trimmed = errBody.trim();
-  if (!trimmed) return '';
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed.error === 'string' && parsed.error) return parsed.error;
-    if (parsed.error?.message) return String(parsed.error.message);
-    if (parsed.message) return String(parsed.message);
-    if (parsed.detail) return String(parsed.detail);
-  } catch { /* not JSON */ }
-  return trimmed.slice(0, 300);
 }
 
 /** HTTP statuses worth retrying during async job polling (transient server / rate limit). */
@@ -314,7 +300,7 @@ async function generateImage(args, userCtx, responseCtx) {
   if (refList.length === 0 && aspect !== null && !ALLOWED_IMAGE_ASPECT_RATIOS.has(aspect)) {
     return {
       success: false,
-      error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_IMAGE_ASPECT_RATIOS].join(', ')}.`,
+      error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_IMAGE_ASPECT_RATIOS].join(', ')}.`
     };
   }
 
@@ -339,7 +325,7 @@ async function generateImage(args, userCtx, responseCtx) {
         const body = {
           model: IMAGE_GEN_MODEL,
           prompt,
-          response_format: 'url',
+          response_format: 'url'
         };
         if (urls.length === 0) {
           if (aspect !== null) body.aspect_ratio = aspect;
@@ -351,7 +337,7 @@ async function generateImage(args, userCtx, responseCtx) {
           body.images = urls.map(url => ({ type: 'image_url', url }));
         }
         return { endpointPath: '/images/edits', body };
-      },
+      }
     });
     if (!submit.ok) {
       return { success: false, error: `Image generation failed: ${submit.reason}` };
@@ -385,7 +371,7 @@ async function generateImage(args, userCtx, responseCtx) {
       success: true,
       filename,
       message: `Image generated successfully and pushed to the delivery buffer as "${filename}".${refNote} `
-        + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`,
+        + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`
     };
   } finally {
     await quota.release();
@@ -423,7 +409,7 @@ async function generateVideo(args, userCtx, responseCtx) {
   if (refList.length === 0 && !ALLOWED_VIDEO_ASPECT_RATIOS.has(aspect)) {
     return {
       success: false,
-      error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_VIDEO_ASPECT_RATIOS].join(', ')}.`,
+      error: `Invalid aspect_ratio "${aspect}". Allowed: ${[...ALLOWED_VIDEO_ASPECT_RATIOS].join(', ')}.`
     };
   }
 
@@ -447,7 +433,7 @@ async function generateVideo(args, userCtx, responseCtx) {
           model: VIDEO_GEN_MODEL,
           prompt,
           duration: VIDEO_GEN_DURATION_S,
-          resolution: VIDEO_GEN_RESOLUTION,
+          resolution: VIDEO_GEN_RESOLUTION
         };
         if (urls.length === 0) {
           body.aspect_ratio = aspect;
@@ -457,7 +443,7 @@ async function generateVideo(args, userCtx, responseCtx) {
           body.reference_images = urls.map(url => ({ type: 'image_url', url }));
         }
         return { endpointPath: '/videos/generations', body };
-      },
+      }
     });
     if (!submitResult.ok) {
       return { success: false, error: `Video generation failed: ${submitResult.reason}` };
@@ -498,7 +484,7 @@ async function generateVideo(args, userCtx, responseCtx) {
     return {
       success: true,
       filename,
-      message: `Video generated successfully (${VIDEO_GEN_DURATION_S}s, ${VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`,
+      message: `Video generated successfully (${VIDEO_GEN_DURATION_S}s, ${VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`
     };
   } finally {
     await quota.release();
@@ -521,7 +507,7 @@ async function _pollVideoResult(requestId) {
     let data;
     try {
       const res = await fetchXaiWithOAuthRetry(url, { method: 'GET' }, {
-        timeoutMs: VIDEO_POLL_FETCH_TIMEOUT_MS,
+        timeoutMs: VIDEO_POLL_FETCH_TIMEOUT_MS
       });
       consecutive429 = 0;
       data = await res.json();
@@ -566,5 +552,5 @@ module.exports = {
   generateImage,
   generateVideo,
   MAX_REF_IMAGES_FOR_IMAGE,
-  MAX_REF_IMAGES_FOR_VIDEO,
+  MAX_REF_IMAGES_FOR_VIDEO
 };

@@ -8,7 +8,7 @@ const { syncFileToHistory } = require('./historySync');
 const {
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,
-  formatDiscordOversizeNote,
+  formatDiscordOversizeNote
 } = require('./discordAttachmentFetch');
 
 function createMemoizedFetchBuffer(fetchOnce) {
@@ -46,7 +46,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
       mimetype: mimetypeHint,
       filename: waFilename,
       unsupported: true,
-      fetchBuffer: null,
+      fetchBuffer: null
     };
   }
 
@@ -60,7 +60,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
       mimetype: mimetypeHint,
       filename: waFilename,
       unsupported: true,
-      fetchBuffer: null,
+      fetchBuffer: null
     };
   }
   const filename = resolveIngressFilename(waFilename, mimetypeHint, msgId);
@@ -89,7 +89,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     ownerKey: historyStorageId,
     tagOnly: options.tagOnly === true,
     deferVideo: options.deferVideo === true,
-    platformAttachmentId: msgId,
+    platformAttachmentId: msgId
   });
 
   return {
@@ -101,7 +101,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     filename,
     overDurationLimit: ingress.overDurationLimit || null,
     durationNote: ingress.durationNote || null,
-    fetchBuffer,
+    fetchBuffer
   };
 }
 
@@ -118,7 +118,7 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
       textFragment: `${tag}${formatDiscordOversizeNote(att)} `,
       contentParts: [],
       syncedPath: null,
-      oversize: true,
+      oversize: true
     };
   }
 
@@ -139,7 +139,7 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     ownerKey: historyStorageId,
     tagOnly,
     deferVideo,
-    platformAttachmentId: att.id,
+    platformAttachmentId: att.id
   });
 
   return {
@@ -147,7 +147,7 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     textFragment: ingress.textFragment,
     contentParts: ingress.contentParts,
     syncedPath: ingress.syncedPath ?? syncedPath,
-    name: ingressName,
+    name: ingressName
   };
 }
 
@@ -208,5 +208,5 @@ function capHistoryImageParts(historyMessages, maxImages, maxFiles) {
 module.exports = {
   ingressWaMessageMedia,
   ingressDiscordAttachment,
-  capHistoryImageParts,
+  capHistoryImageParts
 };

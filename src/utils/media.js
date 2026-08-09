@@ -36,5 +36,5 @@ function extractAttachmentTagPaths(text) {
 module.exports = {
   isSupportedMedia,
   buildAttachmentTag,
-  extractAttachmentTagPaths,
+  extractAttachmentTagPaths
 };

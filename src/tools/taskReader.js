@@ -39,7 +39,7 @@ function _formatTask(t, i, ctx, showRecipient) {
     const recipient = formatTaskRecipient(t.destinations, {
       isAdmin: ctx.isAdmin,
       waJid: ctx.waJid,
-      groupWord: 'group',
+      groupWord: 'group'
     });
     if (recipient) line += ` | recipient: ${recipient}`;
   }
@@ -62,16 +62,16 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
 
   const personalData = await readTaskFile(taskFileId);
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
-    result += `Your personal reminders:\n`;
+    result += 'Your personal reminders:\n';
     result += personalData.tasks.map((t, i) => _formatTask(t, i, ctx, true)).join('\n');
   } else {
-    result += `No personal reminders scheduled.`;
+    result += 'No personal reminders scheduled.';
   }
 
   if (includeGroup && groupTaskFileId) {
     const groupData = await readTaskFile(groupTaskFileId);
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
-      result += `\n\nGroup reminders:\n`;
+      result += '\n\nGroup reminders:\n';
       result += groupData.tasks.map((t, i) => _formatTask(t, i, ctx, false)).join('\n');
     }
   }

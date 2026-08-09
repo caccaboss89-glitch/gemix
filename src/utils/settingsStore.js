@@ -32,7 +32,7 @@ const VALID_EFFORTS = ['low', 'medium', 'high'];
 /** Supported reply/TTS languages (BCP-47-ish codes accepted by xAI TTS). */
 const VALID_LANGUAGES = [
   'en', 'ar-EG', 'ar-SA', 'ar-AE', 'bn', 'zh', 'fr', 'de', 'hi', 'id', 'it',
-  'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'es-MX', 'es-ES', 'tr', 'vi',
+  'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'es-MX', 'es-ES', 'tr', 'vi'
 ];
 
 /** Default free-text memory: the voice-vs-text guidance every chat starts with. */
@@ -51,7 +51,7 @@ function defaultSettings() {
     voice: XAI_TTS_VOICE,
     effort: 'high',
     language: 'it',
-    memory: DEFAULT_MEMORY,
+    memory: DEFAULT_MEMORY
   };
 }
 
@@ -109,7 +109,7 @@ function readSettings(fileId) {
     language: VALID_LANGUAGES.includes(stored.language) ? stored.language : defaults.language,
     memory: typeof stored.memory === 'string' && stored.memory.trim() ? stored.memory : defaults.memory,
     updatedAt: stored.updatedAt || null,
-    reviewedAt: stored.reviewedAt || null,
+    reviewedAt: stored.reviewedAt || null
   };
 }
 
@@ -226,5 +226,5 @@ module.exports = {
   customizedFields,
   isReviewDue,
   markReviewed,
-  resolveMemoryContent,
+  resolveMemoryContent
 };

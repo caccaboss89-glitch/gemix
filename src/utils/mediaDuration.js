@@ -22,10 +22,9 @@ function _runFfprobe(filePath) {
       return resolve(null);
     }
     let stdout = '';
-    let stderr = '';
     const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { } }, FFPROBE_TIMEOUT_MS);
     child.stdout.on('data', d => { stdout += d.toString(); });
-    child.stderr.on('data', d => { stderr += d.toString(); });
+    child.stderr.on('data', () => { /* consume stderr for the process to stay healthy */ });
     child.on('error', () => { clearTimeout(killer); resolve(null); });
     child.on('close', (code) => {
       clearTimeout(killer);

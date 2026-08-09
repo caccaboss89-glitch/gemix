@@ -52,7 +52,7 @@ async function runTurnPipeline(opts) {
     interceptTurn,
     transformResponse,
     deliver,
-    onDeliverError,
+    onDeliverError
   } = opts;
 
   /** Transform, send, and report whether it went out. @returns {Promise<boolean>} */
@@ -119,7 +119,7 @@ async function runTurnPipeline(opts) {
     }
 
     let ctx = buildHandlerCtx({
-      entries, history, historyLoadIncomplete, latest, first, session,
+      entries, history, historyLoadIncomplete, latest, first, session
     });
     if (ctx && typeof ctx.then === 'function') ctx = await ctx;
     const { handleMessage } = require('../handler');

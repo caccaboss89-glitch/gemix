@@ -18,8 +18,8 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: BOT_EMAIL,
-    pass: BOT_PASS,
-  },
+    pass: BOT_PASS
+  }
 });
 
 /**
@@ -33,7 +33,7 @@ async function sendEmailDirect(toEmail, subject, body, attachments = []) {
     to: toEmail,
     subject,
     html: body,
-    attachments,
+    attachments
   });
 }
 

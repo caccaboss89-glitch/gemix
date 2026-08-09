@@ -55,7 +55,7 @@ async function readVideo(args, userCtx) {
     return {
       success: false,
       error: 'read_video only takes a filename from an [Attachment: ...] tag in this chat, not a URL. '
-        + 'Videos hosted elsewhere on the web cannot be opened.',
+        + 'Videos hosted elsewhere on the web cannot be opened.'
     };
   }
 
@@ -69,7 +69,7 @@ async function readVideo(args, userCtx) {
   if (!absPath) {
     return {
       success: false,
-      error: `No file named "${filename}" in this chat's history. Use the exact name shown inside its [Attachment: ...] tag.`,
+      error: `No file named "${filename}" in this chat's history. Use the exact name shown inside its [Attachment: ...] tag.`
     };
   }
 
@@ -77,7 +77,7 @@ async function readVideo(args, userCtx) {
   if (!isVideoAttachment(absPath, mimetype)) {
     return {
       success: false,
-      error: `"${filename}" is not a video. Files that are not videos are already attached to the conversation.`,
+      error: `"${filename}" is not a video. Files that are not videos are already attached to the conversation.`
     };
   }
 
@@ -95,7 +95,7 @@ async function readVideo(args, userCtx) {
   const payload = {
     success: true,
     filename: path.basename(absPath),
-    message: `Video "${path.basename(absPath)}" is attached to this turn (max ${MAX_VIDEO_DURATION_S}s). Watch it and answer.`,
+    message: `Video "${path.basename(absPath)}" is attached to this turn (max ${MAX_VIDEO_DURATION_S}s). Watch it and answer.`
   };
   return [{ type: 'text', text: JSON.stringify(payload) }, part];
 }

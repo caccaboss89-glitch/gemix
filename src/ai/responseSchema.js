@@ -75,14 +75,14 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
 
   properties.response = {
     type: 'string',
-    description: allowVoice ? VOICE_RESPONSE_FIELD_DESC : RESPONSE_FIELD_DESC,
+    description: allowVoice ? VOICE_RESPONSE_FIELD_DESC : RESPONSE_FIELD_DESC
   };
   required.push('response');
 
   properties.attachments = {
     type: 'array',
     items: { type: 'string' },
-    description: GEMIX_ATTACHMENTS_FIELD_DESC,
+    description: GEMIX_ATTACHMENTS_FIELD_DESC
   };
 
   if (includeTitle) {
@@ -98,8 +98,8 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
       type: 'object',
       properties,
       required,
-      additionalProperties: false,
-    },
+      additionalProperties: false
+    }
   };
 }
 
@@ -277,5 +277,5 @@ function parseStructuredReply(raw) {
 module.exports = {
   buildGemixResponseFormat,
   applyResponsesTextFormat,
-  parseStructuredReply,
+  parseStructuredReply
 };

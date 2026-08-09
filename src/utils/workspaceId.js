@@ -81,5 +81,5 @@ module.exports = {
   resolveWorkspaceId,
   workspaceIdToSlug,
   getBuildWorkspacePath,
-  getBuildWorkspaceMetaDir,
+  getBuildWorkspaceMetaDir
 };

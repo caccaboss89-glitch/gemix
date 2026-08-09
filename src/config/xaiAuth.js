@@ -19,7 +19,7 @@ const {
   XAI_USE_API_KEY,
   XAI_API_KEY,
   XAI_AUTH_FILE,
-  XAI_BASE_URL,
+  XAI_BASE_URL
 } = require('./env');
 
 const DEFAULT_BASE_URL = 'https://api.x.ai/v1';

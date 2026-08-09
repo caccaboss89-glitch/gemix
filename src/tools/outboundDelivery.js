@@ -47,7 +47,7 @@ function alreadyContactedError(contacted, key, what) {
   return {
     success: false,
     error: `You have already sent ${what === 'email' ? 'an email' : 'a WhatsApp message'} to this `
-      + `${what === 'email' ? 'address' : 'number'}. Each one can only receive 1 message per request.`,
+      + `${what === 'email' ? 'address' : 'number'}. Each one can only receive 1 message per request.`
   };
 }
 
@@ -66,5 +66,5 @@ function recordOutbound(entry) {
 module.exports = {
   resolveOutboundAttachments,
   alreadyContactedError,
-  recordOutbound,
+  recordOutbound
 };

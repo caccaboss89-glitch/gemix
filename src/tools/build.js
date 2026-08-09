@@ -28,7 +28,7 @@ const {
   stageAttachmentFromPath,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile,
-  resolveInsideWorkspace,
+  resolveInsideWorkspace
 } = require('../sandbox/buildWorkspace');
 const { acquireBuildLock, releaseBuildLock } = require('../utils/buildState');
 const { runBuildAgent, DELIVERY_SELECTION_NOTICE } = require('../ai/buildAgent');
@@ -61,7 +61,7 @@ async function _resolveAttachment(entry, userCtx, responseCtx) {
       source: 'url',
       name: resolved.att.name,
       buffer: resolved.att.buffer,
-      filePath: resolved.att.filePath,
+      filePath: resolved.att.filePath
     };
   }
 
@@ -159,7 +159,7 @@ async function buildTool(args, userCtx, responseCtx) {
   if (userCtx.platform === PLATFORM_DISCORD) {
     return {
       success: false,
-      error: toolUnavailableMessage(TOOL.BUILD, resolveProfile(userCtx)),
+      error: toolUnavailableMessage(TOOL.BUILD, resolveProfile(userCtx))
     };
   }
   const prompt = args && typeof args.prompt === 'string' ? args.prompt.trim() : '';
@@ -189,7 +189,7 @@ async function buildTool(args, userCtx, responseCtx) {
   if (notFound.length > 0 && resolved.length === 0) {
     return {
       success: false,
-      error: `Cannot resolve requested attachment(s): ${notFound.join(', ')}. Tell the user which file is missing or retry without those attachments.`,
+      error: `Cannot resolve requested attachment(s): ${notFound.join(', ')}. Tell the user which file is missing or retry without those attachments.`
     };
   }
 
@@ -198,7 +198,7 @@ async function buildTool(args, userCtx, responseCtx) {
     lockOwnerId = await acquireBuildLock(workspaceId, {
       ownerId: userCtx.requestId
         ? `${userCtx.requestId}:build`
-        : crypto.randomBytes(8).toString('hex'),
+        : crypto.randomBytes(8).toString('hex')
     });
   } catch (err) {
     if (err.code === 'EBUILDBUSY') {
@@ -233,7 +233,7 @@ async function buildTool(args, userCtx, responseCtx) {
       _rollbackStaged(workspaceId, stagedNames);
       return {
         success: false,
-        error: `Failed to stage attachments: ${stagingErrors.join('; ')}`,
+        error: `Failed to stage attachments: ${stagingErrors.join('; ')}`
       };
     }
 
@@ -243,7 +243,7 @@ async function buildTool(args, userCtx, responseCtx) {
       renamedAttachments,
       stagedNames,
       externalUrls,
-      lockOwnerId,
+      lockOwnerId
     });
 
     const harvestList = Array.isArray(agentResult.delivered) ? agentResult.delivered : [];
@@ -258,7 +258,7 @@ async function buildTool(args, userCtx, responseCtx) {
       attachments_renamed: renamedAttachments.map(r => `${r.requested} -> ${r.actual}`),
       rounds_used: agentResult.roundsUsed,
       timed_out: agentResult.timed_out,
-      exit_code: agentResult.exit_code,
+      exit_code: agentResult.exit_code
     };
 
     // Success follows Grok process outcome only (not "files already on disk").
@@ -266,13 +266,13 @@ async function buildTool(args, userCtx, responseCtx) {
       return {
         success: false,
         error: agentResult.error || 'build agent failed without a clear error.',
-        ...base,
+        ...base
       };
     }
 
     return {
       success: true,
-      ...base,
+      ...base
     };
   } finally {
     releaseBuildLock(workspaceId, lockOwnerId);

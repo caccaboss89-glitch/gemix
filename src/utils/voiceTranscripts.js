@@ -57,7 +57,7 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
     // Match [Attachment: name] and optional [Attachment (expired): name]
     const re = new RegExp(
       `\\[Attachment(?:\\s*\\(expired\\))?:\\s*${_escapeRegExp(name)}\\]`,
-      'g',
+      'g'
     );
     const before = next;
     next = next.replace(re, past);
@@ -73,7 +73,7 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
     if (literalPath && literalPath !== name) {
       const pathRe = new RegExp(
         `\\[Attachment(?:\\s*\\(expired\\))?:\\s*${_escapeRegExp(literalPath)}\\]`,
-        'g',
+        'g'
       );
       const beforePath = next;
       next = next.replace(pathRe, past);
@@ -110,7 +110,7 @@ function applyPastVoiceRepliesToHistory(history, storageId) {
       const { content, replaced } = _replaceVoiceAttachmentsInAssistantContent(
         msg.content,
         storageId,
-        seen,
+        seen
       );
       if (replaced === 0) return msg;
       replacedCount += replaced;
@@ -125,7 +125,7 @@ function applyPastVoiceRepliesToHistory(history, storageId) {
         const { content, replaced } = _replaceVoiceAttachmentsInAssistantContent(
           part.text,
           storageId,
-          seen,
+          seen
         );
         if (replaced === 0) return part;
         replacedCount += replaced;
@@ -142,5 +142,5 @@ function applyPastVoiceRepliesToHistory(history, storageId) {
 }
 
 module.exports = {
-  applyPastVoiceRepliesToHistory,
+  applyPastVoiceRepliesToHistory
 };

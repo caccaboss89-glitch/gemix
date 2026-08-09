@@ -76,5 +76,5 @@ function formatWhatsAppPollText(msg, textBody) {
 }
 
 module.exports = {
-  formatWhatsAppPollText,
+  formatWhatsAppPollText
 };

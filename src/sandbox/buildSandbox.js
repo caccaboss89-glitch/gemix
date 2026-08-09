@@ -26,13 +26,13 @@ const {
   SANDBOX_MEMORY_MB,
   SANDBOX_IDLE_TTL_MS,
   BUILD_HARD_TIMEOUT_MS,
-  BUILD_MAX_ROUNDS,
+  BUILD_MAX_ROUNDS
 } = require('../config/constants');
 const {
   GEMIX_SANDBOX_IMAGE,
   GEMIX_SANDBOX_NETWORK,
   GEMIX_SANDBOX_PROXY_HOST,
-  GEMIX_SANDBOX_PROXY_PORT,
+  GEMIX_SANDBOX_PROXY_PORT
 } = require('../config/env');
 
 const { workspaceIdToSlug } = require('../utils/workspaceId');
@@ -54,7 +54,7 @@ function _getDocker() {
   if (_docker) return _docker;
   let Docker;
   try { Docker = require('dockerode'); }
-  catch (e) {
+  catch {
     throw new Error('dockerode is not installed. Run `npm install` first.');
   }
   _docker = new Docker();
@@ -80,7 +80,7 @@ async function _spawnContainer(workspaceId) {
   const memBytes = SANDBOX_MEMORY_MB * 1024 * 1024;
 
   const binds = [
-    `${workspaceDir}:/workspace:rw`,
+    `${workspaceDir}:/workspace:rw`
   ];
 
   // HOME/GROK_HOME on rootfs (not /tmp): Docker tmpfs defaults to noexec, which
@@ -96,7 +96,7 @@ async function _spawnContainer(workspaceId) {
     `HTTPS_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
     `http_proxy=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
     `https_proxy=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
-    'NO_PROXY=localhost,127.0.0.1',
+    'NO_PROXY=localhost,127.0.0.1'
   ];
 
   const hostConfig = {
@@ -111,7 +111,7 @@ async function _spawnContainer(workspaceId) {
     // exec required if anything stages binaries under /tmp
     Tmpfs: { '/tmp': 'size=256m,exec,mode=1777' },
     Binds: binds,
-    RestartPolicy: { Name: 'no' },
+    RestartPolicy: { Name: 'no' }
   };
 
 
@@ -128,8 +128,8 @@ async function _spawnContainer(workspaceId) {
     HostConfig: hostConfig,
     Labels: {
       'gemix.kind': 'build-workspace',
-      'gemix.workspaceId': workspaceId,
-    },
+      'gemix.workspaceId': workspaceId
+    }
   };
 
   const container = await docker.createContainer(createOpts);
@@ -140,7 +140,7 @@ async function _spawnContainer(workspaceId) {
     container,
     containerId: container.id,
     containerName,
-    lastUsedAt: Date.now(),
+    lastUsedAt: Date.now()
   };
 }
 
@@ -238,7 +238,7 @@ async function _killGrokProcesses(entry) {
       AttachStdout: false,
       AttachStderr: false,
       User: sandboxUserString(),
-      WorkingDir: '/tmp',
+      WorkingDir: '/tmp'
     });
     const s = await exec.start({ hijack: true, stdin: false });
     await new Promise((resolve) => {
@@ -276,7 +276,7 @@ function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns 
   }
   const timeout = Math.max(
     5_000,
-    Math.min(Number(timeoutMs) || BUILD_HARD_TIMEOUT_MS, BUILD_HARD_TIMEOUT_MS),
+    Math.min(Number(timeoutMs) || BUILD_HARD_TIMEOUT_MS, BUILD_HARD_TIMEOUT_MS)
   );
   const turns = Math.max(1, Math.min(Number(maxTurns) || BUILD_MAX_ROUNDS, BUILD_MAX_ROUNDS));
   const rulesText = typeof rules === 'string' ? rules : '';
@@ -292,7 +292,7 @@ function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns 
     '--always-approve',
     '--no-subagents',
     '--no-auto-update',
-    '--max-turns', String(turns),
+    '--max-turns', String(turns)
   ];
   if (rulesText.trim()) {
     cmd.push('--rules', rulesText);
@@ -308,7 +308,7 @@ function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns 
     `HTTPS_PROXY=${proxyUrl}`,
     `http_proxy=${proxyUrl}`,
     `https_proxy=${proxyUrl}`,
-    'NO_PROXY=localhost,127.0.0.1',
+    'NO_PROXY=localhost,127.0.0.1'
   ];
   if (typeof baseUrl === 'string' && baseUrl.trim()) {
     const base = baseUrl.trim().replace(/\/+$/, '');
@@ -341,7 +341,7 @@ async function execGrokBuild(workspaceId, opts = {}) {
     AttachStderr: true,
     User: sandboxUserString(),
     WorkingDir: '/workspace',
-    Env: env,
+    Env: env
   });
 
   const startedAt = Date.now();
@@ -399,7 +399,7 @@ async function execGrokBuild(workspaceId, opts = {}) {
     stderr: _capBufferChunks(stderrBuf),
     timedOut,
     durationMs,
-    cmd: cmd.map((c, i) => (i > 0 && cmd[i - 1] === '--rules' ? '[rules]' : c)),
+    cmd: cmd.map((c, i) => (i > 0 && cmd[i - 1] === '--rules' ? '[rules]' : c))
   };
 }
 
@@ -487,5 +487,5 @@ module.exports = {
   execGrokBuild,
   buildGrokExecSpec,
   shutdown,
-  shutdownAll,
+  shutdownAll
 };

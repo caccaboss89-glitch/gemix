@@ -16,7 +16,7 @@ const {
   PRIVACY_WIPE_COMMAND,
   PRIVACY_WIPE_FAILED_MESSAGE,
   buildPrivacyNoticeMessage,
-  buildPrivacyWipeDoneMessage,
+  buildPrivacyWipeDoneMessage
 } = require('../../config/systemMessages');
 const { hasBeenInformed, markInformed } = require('../../utils/privacyConsent');
 const { wipeWhatsAppUserData } = require('../../utils/privacyWipe');
@@ -49,7 +49,7 @@ function _systemReply(text) {
     attachments: [],
     discordTitle: '',
     modelUsed: null,
-    systemMessage: true,
+    systemMessage: true
   };
 }
 
@@ -79,14 +79,14 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
           isGroup,
           groupId: isGroup ? chat.id._serialized : null,
           chatId: chat.id._serialized,
-          waJid,
+          waJid
         },
-        taskFileId: identity.taskFileId,
+        taskFileId: identity.taskFileId
       });
       return {
         response: _systemReply(
-          ok ? buildPrivacyWipeDoneMessage({ isActiveMember }) : PRIVACY_WIPE_FAILED_MESSAGE,
-        ),
+          ok ? buildPrivacyWipeDoneMessage({ isActiveMember }) : PRIVACY_WIPE_FAILED_MESSAGE
+        )
       };
     }
 
@@ -100,7 +100,7 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
       response: _systemReply(buildPrivacyNoticeMessage({ isActiveMember, hasAttachments })),
       // Only after the notice is really on its way: a delivery failure must
       // leave the person un-informed so the next message shows it again.
-      onDelivered: () => markInformed(waJid),
+      onDelivered: () => markInformed(waJid)
     };
   };
 }

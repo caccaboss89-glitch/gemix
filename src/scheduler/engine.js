@@ -113,7 +113,7 @@ function _taskIsDue(task, nowTime) {
  */
 async function _deliverTask(task) {
   let messageText = stripOutgoingDeliveryArtifacts(
-    stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, '')),
+    stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, ''))
   );
   messageText = normalizeMarkdown(messageText);
   messageText = addScheduledFooter(messageText, task.createdAt || getRomeISO());

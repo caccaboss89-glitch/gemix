@@ -79,7 +79,7 @@ async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(
       () => reject(new Error(`Body read timeout (${timeoutMs / 1000}s)`)),
-      timeoutMs,
+      timeoutMs
     );
   });
   try {
@@ -165,8 +165,8 @@ async function downloadPublicFile(url, opts = {}) {
   const res = await fetchWithTimeout(clean, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-      'Accept': '*/*',
-    },
+      'Accept': '*/*'
+    }
   }, timeoutMs);
   if (!res.ok) {
     throw new Error(`Download failed: HTTP ${res.status} (${clean.slice(0, 120)})`);
@@ -219,8 +219,8 @@ async function downloadPublicFileToDisk(url, destPath, opts = {}) {
   const res = await fetchWithTimeout(clean, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-      'Accept': '*/*',
-    },
+      'Accept': '*/*'
+    }
   }, timeoutMs);
   if (!res.ok) {
     throw new Error(`Download failed: HTTP ${res.status} (${clean.slice(0, 120)})`);
@@ -239,7 +239,7 @@ async function downloadPublicFileToDisk(url, destPath, opts = {}) {
     filePath: destPath,
     mimetype,
     filename: _filenameFromPublicUrl(clean),
-    size,
+    size
   };
 }
 
@@ -249,5 +249,5 @@ module.exports = {
   downloadPublicFile,
   downloadPublicFileToDisk,
   readResponseBodyWithTimeout,
-  filenameFromPublicUrl: _filenameFromPublicUrl,
+  filenameFromPublicUrl: _filenameFromPublicUrl
 };

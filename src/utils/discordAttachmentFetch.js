@@ -17,7 +17,7 @@ function createDiscordAttachmentBufferFetcher(att) {
         }
         // Timeout + res.ok + runtime byte cap (covers understated att.size).
         const { buffer } = await downloadPublicFile(att.url, {
-          maxBytes: DISCORD_ATTACHMENT_MAX_BYTES,
+          maxBytes: DISCORD_ATTACHMENT_MAX_BYTES
         });
         return buffer;
       })();
@@ -39,5 +39,5 @@ module.exports = {
   DISCORD_ATTACHMENT_MAX_BYTES,
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,
-  formatDiscordOversizeNote,
+  formatDiscordOversizeNote
 };

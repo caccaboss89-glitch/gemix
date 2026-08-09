@@ -35,7 +35,7 @@ const REQUIRED = [
   'GITHUB_REPO',
   'GEMIX_NOTIFY_URL',
   'GEMIX_PUBLIC_ATTACHMENT_BASE_URL',
-  'GEMIX_TEMP_FILE_PORT',
+  'GEMIX_TEMP_FILE_PORT'
 ];
 const missing = REQUIRED.filter((k) => !process.env[k] || !String(process.env[k]).trim());
 if (XAI_USE_API_KEY) {
@@ -44,7 +44,7 @@ if (XAI_USE_API_KEY) {
   }
 }
 if (missing.length > 0) {
-  // eslint-disable-next-line no-console
+
   console.error(`\n❌ Missing required env variables: ${missing.join(', ')}.\n   Define them in .env before starting GemiX.\n`);
   process.exit(1);
 }
@@ -120,5 +120,5 @@ module.exports = {
   CHROMIUM_PATH: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
 
   // Hermes CLI binary used to refresh ~/.hermes/auth.json when OAuth tokens expire.
-  HERMES_BIN: process.env.HERMES_BIN || 'hermes',
+  HERMES_BIN: process.env.HERMES_BIN || 'hermes'
 };

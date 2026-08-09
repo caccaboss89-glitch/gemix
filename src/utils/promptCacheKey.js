@@ -38,5 +38,5 @@ function generatePromptCacheKey(ctx) {
 }
 
 module.exports = {
-  generatePromptCacheKey,
+  generatePromptCacheKey
 };

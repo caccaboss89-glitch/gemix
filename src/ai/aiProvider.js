@@ -12,7 +12,7 @@ const { applyResponsesTextFormat } = require('./responseSchema');
 const {
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
-  extractServerSearchStats,
+  extractServerSearchStats
 } = require('./responsesAdapter');
 const { callResponsesWithStaleUrlRetry } = require('./responsesWithUrlRefresh');
 
@@ -46,7 +46,7 @@ async function callAI(messages, tools = null, opts = {}) {
     max_output_tokens: MAX_TOKENS,
     // Per-chat setting (manage_preferences), 'high' when unset.
     reasoning: { effort: VALID_EFFORTS.includes(opts.reasoningEffort) ? opts.reasoningEffort : 'high' },
-    store: false,
+    store: false
   };
   _applyPromptCacheKey(body, opts.promptCacheKey);
 
@@ -71,7 +71,7 @@ async function callAI(messages, tools = null, opts = {}) {
     messages,
     body,
     logExtra,
-    historyStorageId: opts.historyStorageId || null,
+    historyStorageId: opts.historyStorageId || null
   });
 
   const message = responsesToAssistantMessage(data);

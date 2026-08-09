@@ -21,7 +21,7 @@ const { createLogger } = require('./logger');
 const {
   MEDIA_WEEKLY_RESET_WEEKDAY,
   MEDIA_WEEKLY_RESET_HOUR,
-  MEDIA_WEEKLY_RESET_MINUTE,
+  MEDIA_WEEKLY_RESET_MINUTE
 } = require('../config/env');
 
 const log = createLogger('MediaLimits');
@@ -39,7 +39,7 @@ const RESET_MINUTE = MEDIA_WEEKLY_RESET_MINUTE;
 const RESET_MINUTES_OF_DAY = RESET_HOUR * 60 + RESET_MINUTE;
 
 const WEEKDAY_NAMES_EN = [
-  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 ];
 
 /**
@@ -211,7 +211,7 @@ async function reserveGeneration(kind, userCtx) {
       } catch (err) {
         log.warn(`quota refund failed (${kind}, ${userKey}): ${err.message}`);
       }
-    },
+    }
   };
 }
 
@@ -219,5 +219,5 @@ module.exports = {
   formatQuotaCounts,
   formatMediaQuotaResetLabel,
   clearMediaUsage,
-  reserveGeneration,
+  reserveGeneration
 };

@@ -12,7 +12,7 @@ const { notifyAdmin } = require('./adminNotifier');
 const env = require('../config/env');
 
 const log = createLogger('InternalNotify');
- 
+
 // Extract port from URL (e.g. http://172.17.0.1:9999/notify -> 9999)
 let PORT = 9999;
 if (env.GEMIX_NOTIFY_URL) {

@@ -39,7 +39,7 @@ function loadMonitorState() {
       return oldState;
     } catch { }
   }
-  
+
   return { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
 }
 
@@ -61,7 +61,7 @@ function getPreviousMonthName() {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Rome',
     year: 'numeric',
-    month: 'numeric',
+    month: 'numeric'
   });
   const parts = Object.fromEntries(
     formatter.formatToParts(now).map(p => [p.type, p.value])
@@ -79,7 +79,7 @@ function getItalyDateString() {
     timeZone: 'Europe/Rome',
     year: 'numeric',
     month: '2-digit',
-    day: '2-digit',
+    day: '2-digit'
   });
   const parts = Object.fromEntries(
     formatter.formatToParts(new Date()).map(p => [p.type, p.value])
@@ -95,7 +95,7 @@ function isFirstOfMonth() {
   const now = new Date();
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Rome',
-    day: 'numeric',
+    day: 'numeric'
   });
   const day = parseInt(formatter.format(now), 10);
   log.info(`isFirstOfMonth check: day=${day} (${now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' })})`);
@@ -109,7 +109,7 @@ function isFirstOfMonth() {
 async function checkStatsFileUpdate() {
   try {
     const response = await fetchExternal(MUSIC_STATS_URL, {
-      headers: { 'User-Agent': 'GemiX-MusicWrapMonitor/1.0' },
+      headers: { 'User-Agent': 'GemiX-MusicWrapMonitor/1.0' }
     }, 'Music Stats Check');
 
     if (!response.ok) {

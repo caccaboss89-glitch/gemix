@@ -7,14 +7,14 @@ const { PLATFORM_WA_DEDICATED } = require('../config/constants');
 const {
   REPLY_OUTSIDE_HISTORY_PREFIX,
   REPLY_CHAIN_TRUNCATED_PREFIX,
-  cleanIncomingText,
+  cleanIncomingText
 } = require('./text');
 const { replaceMentionsInBody, resolveMentionsForMessage, resolveLidTagsInBody } = require('./waMentions');
 const { formatSpecialMessageText, formatWhatsAppContactText } = require('./waSpecialMessages');
 const { formatWhatsAppPollText } = require('./pollParser');
 const {
   ingressWaMessageMedia,
-  ingressDiscordAttachment,
+  ingressDiscordAttachment
 } = require('./incomingMediaIngress');
 const { createLogger } = require('./logger');
 
@@ -51,7 +51,7 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
   if (quoted.type === 'vcard' || quoted.type === 'multi_vcard') {
     return {
       prefix: `[In reply to: ${formatWhatsAppContactText(quoted.body || '')}]\n`,
-      mediaParts: [],
+      mediaParts: []
     };
   }
   if (quoted.type === 'poll_creation') {
@@ -75,7 +75,7 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
 
   if (quoted.hasMedia) {
     const ingress = await ingressWaMessageMedia(quoted, historyStorageId, {
-      tagOnly: !includeMedia,
+      tagOnly: !includeMedia
     });
     const inner = ingress.textFragment.trim();
     const mediaParts = includeMedia ? (ingress.contentParts || []) : [];
@@ -83,12 +83,12 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
     if (quotedText) {
       return {
         prefix: `[In reply to: ${inner}]\n[In reply to: ${quotedText}]\n`,
-        mediaParts,
+        mediaParts
       };
     }
     return {
       prefix: `[In reply to: ${inner}]\n`,
-      mediaParts,
+      mediaParts
     };
   }
 
@@ -118,7 +118,7 @@ async function processWhatsAppQuotedReply(
   recentMessageIds,
   isGroup = false,
   platform = PLATFORM_WA_DEDICATED,
-  options = {},
+  options = {}
 ) {
   void chatId;
   void platform;
@@ -166,7 +166,7 @@ async function processWhatsAppQuotedReply(
       const level = await formatWhatsAppQuotedLevel(quoted, {
         isGroup,
         historyStorageId,
-        includeMedia: includeQuotedMedia && depth === 0,
+        includeMedia: includeQuotedMedia && depth === 0
       });
       levels.push(level);
       if (level.mediaParts?.length) mediaParts.push(...level.mediaParts);
@@ -203,7 +203,7 @@ async function formatDiscordQuotedLevel(quotedMsg, historyStorageId, includeMedi
     for (const att of quotedMsg.attachments.values()) {
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         metadataDurationSec: Number(att.duration || 0),
-        tagOnly: !includeMedia,
+        tagOnly: !includeMedia
       });
       if (includeMedia) mediaParts.push(...ingress.contentParts);
       prefix += `[In reply to: ${ingress.textFragment.trim()}]\n`;
@@ -217,7 +217,7 @@ async function formatDiscordQuotedLevel(quotedMsg, historyStorageId, includeMedi
   if (quotedMsg.content) {
     return {
       prefix: `[In reply to: ${cleanIncomingText(quotedMsg.content)}]\n`,
-      mediaParts: [],
+      mediaParts: []
     };
   }
 
@@ -281,7 +281,7 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
       const level = await formatDiscordQuotedLevel(
         quotedMsg,
         historyStorageId,
-        includeQuotedMedia && depth === 0,
+        includeQuotedMedia && depth === 0
       );
       levels.push(level);
       if (level.mediaParts?.length) mediaParts.push(...level.mediaParts);
@@ -308,5 +308,5 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
 module.exports = {
   processWhatsAppQuotedReply,
   processDiscordQuotedReply,
-  MAX_REPLY_CHAIN_DEPTH,
+  MAX_REPLY_CHAIN_DEPTH
 };

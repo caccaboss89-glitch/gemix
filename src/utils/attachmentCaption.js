@@ -87,5 +87,5 @@ function stripRedundantFilenameBesideAttachmentTag(textBody, tag, nameHints) {
 module.exports = {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
-  stripRedundantFilenameBesideAttachmentTag,
+  stripRedundantFilenameBesideAttachmentTag
 };

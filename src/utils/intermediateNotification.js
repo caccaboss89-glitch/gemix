@@ -16,7 +16,7 @@
 const {
   PLATFORM_DISCORD,
   PLATFORM_WA_PERSONAL,
-  PLATFORM_WA_DEDICATED,
+  PLATFORM_WA_DEDICATED
 } = require('../config/constants');
 const { markNotifiedInCall } = require('./notificationDedup');
 const { sendWhatsAppDirect } = require('../tools/whatsappSender');
@@ -94,7 +94,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
     log.warn(
       `   ${kind} notification not sent: no delivery target (platform=${ctx?.platform}, `
       + `chatId=${ctx?.chatId || 'n/a'}, hasDiscord=${Boolean(ctx?.discordChannel)}, `
-      + `hasPresenceChat=${Boolean(ctx?.presence?.chat)})`,
+      + `hasPresenceChat=${Boolean(ctx?.presence?.chat)})`
     );
     return false;
   }
@@ -102,7 +102,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
   try {
     if (target.channel === 'discord') {
       await target.discordChannel.send({
-        content: stripOutgoingDeliveryArtifacts(removeDiscordEmoji(message)),
+        content: stripOutgoingDeliveryArtifacts(removeDiscordEmoji(message))
       });
       log.info(`   ${kind} notification - Discord: ${message}`);
       return true;
@@ -127,5 +127,5 @@ async function sendIntermediateNotification(ctx, kind, message) {
 }
 
 module.exports = {
-  sendIntermediateNotification,
+  sendIntermediateNotification
 };

@@ -93,7 +93,7 @@ function _toolContentToResponsesOutput(content) {
   if (head && head.type === 'text' && typeof head.text === 'string') {
     return {
       output: head.text,
-      extraUserParts: _userContentToInputParts(content.slice(1)),
+      extraUserParts: _userContentToInputParts(content.slice(1))
     };
   }
 
@@ -119,7 +119,7 @@ function _toolContentToResponsesOutput(content) {
 /** xAI server-side tool output items replayed on the next request (in-order). */
 const SERVER_SIDE_OUTPUT_TYPES = new Set([
   'web_search_call',
-  'custom_tool_call',
+  'custom_tool_call'
 ]);
 
 function _cloneOutputItem(item) {
@@ -164,7 +164,7 @@ function _pushFunctionCallInput(input, item) {
     name: item.name,
     arguments: typeof item.arguments === 'string'
       ? item.arguments
-      : JSON.stringify(item.arguments ?? {}),
+      : JSON.stringify(item.arguments ?? {})
   });
 }
 
@@ -211,81 +211,81 @@ function chatMessagesToResponsesInput(messages, opts = {}) {
     if (!msg || typeof msg !== 'object') continue;
 
     switch (msg.role) {
-      case 'system': {
-        let text = '';
-        if (typeof msg.content === 'string') {
-          text = msg.content;
-        } else if (Array.isArray(msg.content)) {
-          text = msg.content
-            .filter(p => p && (p.type === 'text' || p.type === 'input_text') && typeof p.text === 'string')
-            .map(p => p.text)
-            .join('\n');
-        }
-        if (text) {
-          // Keep system items in input[] order (prefer a single static head).
-          input.push({ role: 'system', content: text });
-        }
-        break;
+    case 'system': {
+      let text = '';
+      if (typeof msg.content === 'string') {
+        text = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        text = msg.content
+          .filter(p => p && (p.type === 'text' || p.type === 'input_text') && typeof p.text === 'string')
+          .map(p => p.text)
+          .join('\n');
       }
-
-      case 'user': {
-        const content = _userContentToInputParts(msg.content);
-        if (content.length > 0) {
-          input.push({ role: 'user', content });
-        }
-        break;
+      if (text) {
+        // Keep system items in input[] order (prefer a single static head).
+        input.push({ role: 'system', content: text });
       }
+      break;
+    }
 
-      case 'assistant': {
-        const storedOutput = msg._responsesOutput;
-        if (Array.isArray(storedOutput) && storedOutput.length > 0) {
-          _replayStoredOutput(input, storedOutput);
-          // Rare API shape: visible text only in output_text, not as a message item.
-          const hasMessageItem = storedOutput.some((i) => i && i.type === 'message');
-          if (!hasMessageItem) {
-            const text = _assistantContentToText(msg.content);
-            if (text && text.length > 0) {
-              input.push({ role: 'assistant', content: text });
-            }
-          }
-        } else {
+    case 'user': {
+      const content = _userContentToInputParts(msg.content);
+      if (content.length > 0) {
+        input.push({ role: 'user', content });
+      }
+      break;
+    }
+
+    case 'assistant': {
+      const storedOutput = msg._responsesOutput;
+      if (Array.isArray(storedOutput) && storedOutput.length > 0) {
+        _replayStoredOutput(input, storedOutput);
+        // Rare API shape: visible text only in output_text, not as a message item.
+        const hasMessageItem = storedOutput.some((i) => i && i.type === 'message');
+        if (!hasMessageItem) {
           const text = _assistantContentToText(msg.content);
           if (text && text.length > 0) {
             input.push({ role: 'assistant', content: text });
           }
-          if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-            for (const tc of msg.tool_calls) {
-              if (!tc || tc.type !== 'function' || !tc.function) continue;
-              input.push({
-                type: 'function_call',
-                call_id: tc.id,
-                name: tc.function.name,
-                arguments: typeof tc.function.arguments === 'string'
-                  ? tc.function.arguments
-                  : JSON.stringify(tc.function.arguments ?? {}),
-              });
-            }
+        }
+      } else {
+        const text = _assistantContentToText(msg.content);
+        if (text && text.length > 0) {
+          input.push({ role: 'assistant', content: text });
+        }
+        if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+          for (const tc of msg.tool_calls) {
+            if (!tc || tc.type !== 'function' || !tc.function) continue;
+            input.push({
+              type: 'function_call',
+              call_id: tc.id,
+              name: tc.function.name,
+              arguments: typeof tc.function.arguments === 'string'
+                ? tc.function.arguments
+                : JSON.stringify(tc.function.arguments ?? {})
+            });
           }
         }
-        break;
       }
+      break;
+    }
 
-      case 'tool': {
-        if (!msg.tool_call_id) break;
-        const { output, extraUserParts } = _toolContentToResponsesOutput(msg.content);
-        input.push({
-          type: 'function_call_output',
-          call_id: msg.tool_call_id,
-          output,
-        });
-        if (extraUserParts.length > 0) {
-          input.push({ role: 'user', content: extraUserParts });
-        }
-        break;
+    case 'tool': {
+      if (!msg.tool_call_id) break;
+      const { output, extraUserParts } = _toolContentToResponsesOutput(msg.content);
+      input.push({
+        type: 'function_call_output',
+        call_id: msg.tool_call_id,
+        output
+      });
+      if (extraUserParts.length > 0) {
+        input.push({ role: 'user', content: extraUserParts });
       }
+      break;
+    }
 
-      default:
-        break;
+    default:
+      break;
     }
   }
 
@@ -303,7 +303,7 @@ function chatToolsToResponsesTools(tools) {
         type: 'function',
         name: fn.name,
         description: fn.description,
-        parameters: fn.parameters || { type: 'object', properties: {} },
+        parameters: fn.parameters || { type: 'object', properties: {} }
       });
       continue;
     }
@@ -391,8 +391,8 @@ function responsesToAssistantMessage(data) {
             name: item.name,
             arguments: typeof item.arguments === 'string'
               ? item.arguments
-              : JSON.stringify(item.arguments ?? {}),
-          },
+              : JSON.stringify(item.arguments ?? {})
+          }
         });
         if (_shouldStoreOutputItem(item)) responsesOutput.push(_cloneOutputItem(item));
         continue;
@@ -432,11 +432,11 @@ const _X_CUSTOM_TOOL_ESTIMATE = {
   x_semantic_search: (input) => _limitFromCustomToolInput(input),
   x_user_search: () => 1,
   x_thread_fetch: () => 1,
-  view_x_video: () => 1,
+  view_x_video: () => 1
 };
 
 function _parseCustomToolInput(raw) {
-  if (raw == null) return null;
+  if (raw === null || raw === undefined) return null;
   if (typeof raw === 'object') return raw;
   if (typeof raw !== 'string') return null;
   try {
@@ -507,5 +507,5 @@ module.exports = {
   chatMessagesToResponsesInput,
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
-  extractServerSearchStats,
+  extractServerSearchStats
 };

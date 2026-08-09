@@ -51,7 +51,7 @@ const MIME_EXTENSION_MAP = {
   'application/vnd.ms-powerpoint': 'ppt',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx'
 };
 
 function mimeBase(mime) {
@@ -81,7 +81,7 @@ const EXT_TO_MIME_PREFER = {
   '.jpeg': 'image/jpeg',
   '.zip': 'application/zip',
   '.opus': 'audio/opus',
-  '.tif': 'image/tiff',
+  '.tif': 'image/tiff'
 };
 
 /** Extensions absent from MIME_EXTENSION_MAP or needing a specific MIME. */
@@ -90,7 +90,7 @@ const EXT_TO_MIME_ALIASES = {
   '.oga': 'audio/ogg',
   '.yaml': 'application/x-yaml',
   '.yml': 'application/x-yaml',
-  '.htm': 'text/html',
+  '.htm': 'text/html'
 };
 
 function _buildExtToMimeMap() {
@@ -130,5 +130,5 @@ function mimeForExtension(ext, fallback = 'application/octet-stream', contentTyp
 module.exports = {
   mimeBase,
   dottedExtensionForMime,
-  mimeForExtension,
+  mimeForExtension
 };

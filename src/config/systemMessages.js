@@ -127,7 +127,7 @@ function buildPrivacyNoticeMessage(opts = {}) {
     + 'potenzialmente accedere alle conversazioni complete.',
     '- Gli allegati restano sul server finché compaiono nella finestra di messaggi recenti che uso per '
     + 'rispondere: quando ne escono vengono eliminati, così come i file che genero, dopo qualche ora di inattività.',
-    '- Non scrivermi mai dati sensibili, credenziali o informazioni private.',
+    '- Non scrivermi mai dati sensibili, credenziali o informazioni private.'
   ];
   if (opts.hasAttachments) {
     lines.push('- Gli allegati che hai inviato insieme a questo primo messaggio non sono stati scaricati né salvati.');
@@ -137,7 +137,7 @@ function buildPrivacyNoticeMessage(opts = {}) {
     `Se continui a scrivere accetti queste condizioni. Se non le accetti, scrivi \`${PRIVACY_WIPE_COMMAND}\` da `
     + 'solo, senza altro testo: svuoto questa chat, cancello anche il messaggio che hai appena inviato ed elimino '
     + 'dal server tutti i tuoi dati — messaggi, allegati, trascrizioni dei miei vocali, preferenze, promemoria '
-    + 'programmati e file generati. Puoi usarlo in qualunque momento.',
+    + 'programmati e file generati. Puoi usarlo in qualunque momento.'
   );
   if (opts.isActiveMember) {
     lines.push('', PRIVACY_MEMBER_CONTACT_NOTE);
@@ -155,7 +155,7 @@ function buildPrivacyWipeDoneMessage(opts = {}) {
     PRIVACY_WIPE_DONE_PREFIX,
     '',
     'Ho svuotato questa chat ed eliminato dal server tutti i tuoi dati: cronologia, allegati, trascrizioni dei '
-    + 'miei messaggi vocali, preferenze salvate, promemoria programmati e file generati.',
+    + 'miei messaggi vocali, preferenze salvate, promemoria programmati e file generati.'
   ];
   if (opts.isActiveMember) {
     lines.push('', PRIVACY_MEMBER_CONTACT_NOTE);
@@ -179,7 +179,7 @@ const SYSTEM_MESSAGE_PREFIXES = [
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   PRIVACY_NOTICE_PREFIX,
   PRIVACY_WIPE_DONE_PREFIX,
-  PRIVACY_WIPE_FAILED_MESSAGE,
+  PRIVACY_WIPE_FAILED_MESSAGE
 ];
 
 /**
@@ -190,7 +190,7 @@ const SYSTEM_MESSAGE_PREFIXES = [
 const LEGACY_SYSTEM_MESSAGE_PREFIXES = [
   '❌ *ERRORE',
   '⚠️ *AVVISO',
-  '🔔 *Promemoria',
+  '🔔 *Promemoria'
 ];
 
 /**
@@ -220,5 +220,5 @@ module.exports = {
   PRIVACY_WIPE_FAILED_MESSAGE,
   buildPrivacyNoticeMessage,
   buildPrivacyWipeDoneMessage,
-  isSystemMessage,
+  isSystemMessage
 };

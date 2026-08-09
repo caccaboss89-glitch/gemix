@@ -132,7 +132,7 @@ module.exports = {
     '--disable-dev-shm-usage',
     '--disable-gpu',
     '--no-zygote',
-    '--single-process',
+    '--single-process'
   ],
-  WA_QR_TIMEOUT: 120_000,
+  WA_QR_TIMEOUT: 120_000
 };

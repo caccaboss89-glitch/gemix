@@ -42,9 +42,9 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
       executablePath: CHROMIUM_PATH,
       headless: true,
       args: PUPPETEER_ARGS,
-      protocolTimeout: PROTOCOL_TIMEOUT_MS,
+      protocolTimeout: PROTOCOL_TIMEOUT_MS
     },
-    qr_timeout: WA_QR_TIMEOUT,
+    qr_timeout: WA_QR_TIMEOUT
   });
 
   let reconnectAttempts = 0;

@@ -113,5 +113,5 @@ function discordReactionTag(msg) {
 
 module.exports = {
   whatsAppReactionTagForMessages,
-  discordReactionTag,
+  discordReactionTag
 };

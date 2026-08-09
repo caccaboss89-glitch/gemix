@@ -179,12 +179,12 @@ function recordSentMessage(entry) {
         recipient: {
           phone: (entry.recipient && entry.recipient.phone) || null,
           email: (entry.recipient && entry.recipient.email) || null,
-          display: (entry.recipient && entry.recipient.display) || null,
+          display: (entry.recipient && entry.recipient.display) || null
         },
         text: entry.text || '',
         subject: entry.subject || '',
         body: entry.body || '',
-        attachments: retained,
+        attachments: retained
       });
 
       const kept = records.slice(-MAX_SENT_MESSAGES);
@@ -251,5 +251,5 @@ module.exports = {
   recordSentMessage,
   readSentRecords,
   resolveStoredAttachmentPath,
-  deleteSentMessages,
+  deleteSentMessages
 };

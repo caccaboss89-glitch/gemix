@@ -4,7 +4,7 @@
 // Provides reliable ISO conversion, DST transition detection, and formatting
 // helpers used by the scheduler and other time-sensitive components.
 
- /**
+/**
  * Get current time in Rome (Europe/Rome timezone) as localized string.
  * @returns {string} Formatted time string (it-IT locale)
  */
@@ -27,7 +27,7 @@ function getRomeISO() {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false,
+    hour12: false
   });
 
   const parts = Object.fromEntries(
@@ -44,7 +44,7 @@ function getRomeISO() {
     parseInt(parts.day, 10),
     parseInt(hour, 10),
     parseInt(parts.minute, 10),
-    parseInt(parts.second, 10),
+    parseInt(parts.second, 10)
   );
   const offsetMins = Math.round((romeAsUTC - now.getTime()) / 60000);
 
@@ -74,7 +74,7 @@ function getRomeParts(date = new Date()) {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false,
+    hour12: false
   });
   const parts = Object.fromEntries(
     formatter.formatToParts(date).map(p => [p.type, p.value])
@@ -94,7 +94,7 @@ function getRomeParts(date = new Date()) {
     hour,
     minute: parseInt(parts.minute, 10),
     second: parseInt(parts.second, 10),
-    weekday,
+    weekday
   };
 }
 
@@ -108,7 +108,7 @@ function getRomeParts(date = new Date()) {
 function getLastSundayOfMonth(year, month) {
   // Start with the last day of the month
   const lastDay = new Date(year, month, 0).getDate();
-  
+
   // Find the last Sunday by checking backwards from the last day
   for (let day = lastDay; day >= 1; day--) {
     const date = new Date(year, month - 1, day);
@@ -116,7 +116,7 @@ function getLastSundayOfMonth(year, month) {
       return day;
     }
   }
-  
+
   // This should never happen - every month has at least one Sunday
   throw new Error(`getLastSundayOfMonth: No Sunday found in month ${month}/${year}. Data integrity issue.`);
 }
@@ -124,11 +124,11 @@ function getLastSundayOfMonth(year, month) {
 /**
  * Detect if a datetime falls during an ambiguous or non-existent hour during DST transitions.
  * Returns a warning message if applicable.
- * 
+ *
  * EU DST transitions happen on the last Sunday of March and October:
  * - Spring: Last Sunday of March at 02:00 - 03:00 (02:00-02:59:59 doesn't exist)
  * - Fall: Last Sunday of October at 03:00 - 02:00 (02:00-02:59:59 exists twice)
- * 
+ *
  * @param {string} localDatetime - ISO datetime without offset (Roma local): "2026-03-29T02:30:00"
  * @returns {string|null} Warning message if hour is ambiguous, null otherwise
  */
@@ -171,10 +171,10 @@ function formatTimestamp(date) {
  * Convert a Rome local datetime (without offset) to ISO 8601 with correct DST-aware offset.
  * This ensures that regardless of DST status, the offset is calculated correctly for that specific date.
  * Handles DST transitions correctly by finding the UTC time that maps to the desired Rome local time.
- * 
+ *
  * @param {string} localDatetime - ISO datetime WITHOUT offset (Rome local): "2026-04-17T16:30:00"
  * @returns {string|null} ISO 8601 with offset (e.g., "2026-04-17T16:30:00+02:00") or null if invalid
- * 
+ *
  * @example
  * convertRomeLocalToISO("2026-04-17T16:30:00") // -> "2026-04-17T16:30:00+02:00" (DST)
  * convertRomeLocalToISO("2026-01-15T16:30:00") // -> "2026-01-15T16:30:00+01:00" (Standard time)
@@ -209,7 +209,7 @@ function convertRomeLocalToISO(localDatetime) {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: false,
+      hour12: false
     });
     const parts = Object.fromEntries(
       formatter.formatToParts(utcDate).map(p => [p.type, p.value])
@@ -220,7 +220,7 @@ function convertRomeLocalToISO(localDatetime) {
       day: parseInt(parts.day, 10),
       hour: parts.hour === '24' ? 0 : parseInt(parts.hour, 10),
       minute: parseInt(parts.minute, 10),
-      second: parseInt(parts.second, 10),
+      second: parseInt(parts.second, 10)
     };
   }
 
@@ -228,7 +228,7 @@ function convertRomeLocalToISO(localDatetime) {
   let bestUtcDate = null;
   let bestMatch = null;
 
-  for (let offsetMins of [60, 120]) {
+  for (const offsetMins of [60, 120]) {
     const testUtcDate = new Date(Date.UTC(year, month - 1, day, hour - Math.floor(offsetMins / 60), minute, second, 0));
     const testRomeTime = getRomeLocalTime(testUtcDate);
 

@@ -121,7 +121,7 @@ async function _recoverAttachment(senderKey, stored, imagesReadCount) {
 
     const built = await buildXaiFileParts(absPath, stored.originalName || 'file', {
       mimetype: stored.mimetype,
-      imagesReadCount,
+      imagesReadCount
     });
     if (!built.success) return { part: null };
     const part = built.parts.find(p => p.type === 'input_file' || p.type === 'input_image') || null;
@@ -196,7 +196,7 @@ async function readSentMessages(args, userCtx) {
     return {
       success: true,
       message: `No ${channelLabel} messages were found among your last 10 outgoing messages${scope}.`,
-      recipients: [],
+      recipients: []
     };
   }
 
@@ -216,7 +216,7 @@ async function readSentMessages(args, userCtx) {
         recipient: rec.display || (rec.phone ? `+${rec.phone}` : rec.email) || 'unknown',
         phone: rec.phone || null,
         email: rec.email || null,
-        messages: [],
+        messages: []
       });
     }
     const group = groups.get(key);
@@ -224,7 +224,7 @@ async function readSentMessages(args, userCtx) {
     const msgOut = {
       channel: r.channel,
       // Europe/Rome, DST-aware — same formatting as reminders/history (never UTC).
-      sentAt: formatTimestamp(r.ts),
+      sentAt: formatTimestamp(r.ts)
     };
     if (r.channel === 'email') {
       msgOut.subject = r.subject || '';

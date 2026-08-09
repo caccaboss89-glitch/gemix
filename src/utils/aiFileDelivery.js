@@ -25,7 +25,7 @@ const {
   DATA_DIR,
   MAX_IMAGE_BYTES,
   MAX_HISTORY_MEDIA_IMAGES,
-  MAX_HISTORY_MEDIA_FILES,
+  MAX_HISTORY_MEDIA_FILES
 } = require('../config/constants');
 const { mimeForExtension, mimeBase } = require('../config/mimeExtensions');
 const { isNonReadableExt } = require('../config/nonReadableExts');
@@ -38,7 +38,7 @@ const {
   formatVideoTooLongNote,
   isAudioOverDurationLimit,
   isVideoOverDurationLimit,
-  resolveMediaDurationSec,
+  resolveMediaDurationSec
 } = require('./mediaIngressLimits');
 const { getMediaDurationSecFromPath } = require('./mediaDuration');
 const { createLogger } = require('./logger');
@@ -48,21 +48,21 @@ const log = createLogger('AiFileDelivery');
 const DELIVERY_MODE = {
   IMAGE: 'image',     // input_image (xAI-supported image types only)
   FILE: 'file',       // input_file (documents, code, PDF, Office, archives, audio, video)
-  TAG_ONLY: 'tag_only', // raw binaries - [Attachment] tag only
+  TAG_ONLY: 'tag_only' // raw binaries - [Attachment] tag only
 };
 
 /** Image types accepted by xAI as input_image. Everything else goes input_file. */
 const XAI_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.ico']);
 const XAI_IMAGE_MIMES = new Set([
   'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
-  'image/x-icon', 'image/vnd.microsoft.icon',
+  'image/x-icon', 'image/vnd.microsoft.icon'
 ]);
 
 const AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a', '.flac', '.aac']);
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi']);
 const OFFICE_ARCHIVE_EXTS = new Set([
   '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt',
-  '.zip', '.jar', '.7z', '.rar', '.tar', '.gz',
+  '.zip', '.jar', '.7z', '.rar', '.tar', '.gz'
 ]);
 
 const TEXT_FILE_EXTS = new Set([
@@ -74,7 +74,7 @@ const TEXT_FILE_EXTS = new Set([
   '.swift', '.m', '.mm', '.dart', '.lua', '.pl', '.r', '.jl',
   '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
   '.sql', '.graphql', '.gql',
-  '.patch', '.diff',
+  '.patch', '.diff'
 ]);
 
 const TEXT_MIME_PREFIXES = ['text/'];
@@ -85,7 +85,7 @@ const TEXT_MIME_EXTRA = new Set([
   'application/x-yaml',
   'application/x-sh',
   'application/x-httpd-php',
-  'application/x-shellscript',
+  'application/x-shellscript'
 ]);
 
 // Per-call caps on history files re-attached natively to the turn.
@@ -219,7 +219,7 @@ async function validateXaiFile(absPath, displayPath, opts = {}) {
     if (isAudioOverDurationLimit(audioDur)) {
       return {
         ok: false,
-        error: `Audio exceeds the duration limit (${Math.round(audioDur)}s). Tell the user the clip is too long for native playback in chat.`,
+        error: `Audio exceeds the duration limit (${Math.round(audioDur)}s). Tell the user the clip is too long for native playback in chat.`
       };
     }
     return { ok: true };
@@ -233,7 +233,7 @@ async function validateXaiFile(absPath, displayPath, opts = {}) {
     if (isVideoOverDurationLimit(videoDur)) {
       return {
         ok: false,
-        error: `Video exceeds the duration limit (${Math.round(videoDur)}s). Tell the user the clip is too long for native playback in chat.`,
+        error: `Video exceeds the duration limit (${Math.round(videoDur)}s). Tell the user the clip is too long for native playback in chat.`
       };
     }
     return { ok: true };
@@ -277,7 +277,7 @@ async function buildXaiFileParts(absPath, displayPath, opts = {}) {
   let url;
   try {
     url = await uploadFileForXai(absPath, path.basename(displayPath || absPath), mimetype, {
-      forceRefresh: opts.forceRefresh === true,
+      forceRefresh: opts.forceRefresh === true
     });
   } catch (err) {
     log.warn(`Upload failed for ${displayPath}: ${err.message}`);
@@ -292,9 +292,9 @@ async function buildXaiFileParts(absPath, displayPath, opts = {}) {
     url,
     parts: [
       { type: 'text', text: `[Attachment: ${displayPath}]` },
-      nativePart,
+      nativePart
     ],
-    bumpImageCount: gate.bumpImageCount,
+    bumpImageCount: gate.bumpImageCount
   };
 }
 
@@ -339,14 +339,14 @@ async function _resolveIngressTarget(opts) {
     contentType = '',
     historyStorageId,
     fetchBuffer,
-    ownerKey = null,
+    ownerKey = null
   } = opts;
 
   const ext = _extOf(name);
   const mimetype = mimeForExtension(
     ext,
     mimeBase(contentType) || 'application/octet-stream',
-    contentType,
+    contentType
   );
   const displayName = path.basename(syncedPath || name || 'file');
 
@@ -391,7 +391,7 @@ function _durationSkipResult(tag, kind, durationSec) {
     contentParts: [],
     textFragment: `${tag}${note} `,
     overDurationLimit: kind,
-    durationNote: note.trim(),
+    durationNote: note.trim()
   };
 }
 
@@ -424,7 +424,7 @@ async function deliverSyncedAttachment(opts) {
     fetchBuffer,
     metadataDurationSec = 0,
     tagOnly = false,
-    deferVideo = false,
+    deferVideo = false
   } = opts;
 
   const tag = buildAttachmentTag(syncedPath, name);
@@ -451,7 +451,7 @@ async function deliverSyncedAttachment(opts) {
         metadataSec: metadataDurationSec,
         buffer: probeBuffer,
         extHint: _extOf(name).slice(1),
-        historyAbsPath,
+        historyAbsPath
       });
       if (kind === 'audio' && isAudioOverDurationLimit(dur)) {
         return { ..._durationSkipResult(tag, 'audio', dur), syncedPath: syncedPath || null };
@@ -478,7 +478,7 @@ async function deliverSyncedAttachment(opts) {
       tag,
       syncedPath,
       contentParts: [],
-      textFragment: `${tag} (not loaded — read_video with this filename to watch it) `,
+      textFragment: `${tag} (not loaded — read_video with this filename to watch it) `
     };
   }
 
@@ -489,7 +489,7 @@ async function deliverSyncedAttachment(opts) {
 
   const built = await buildXaiFileParts(resolved.absPath, resolved.displayName, {
     mimetype: resolved.mimetype,
-    imagesReadCount: opts.imagesReadCount ?? 0,
+    imagesReadCount: opts.imagesReadCount ?? 0
   });
   if (!built.success) {
     log.warn(`xAI ingestion skipped for ${resolved.displayName}: ${built.error}`);
@@ -504,7 +504,7 @@ async function deliverSyncedAttachment(opts) {
         opts.historyStorageId,
         opts.platformAttachmentId,
         async () => fs.readFileSync(resolved.absPath),
-        resolved.displayName,
+        resolved.displayName
       );
       if (saved) finalSyncedPath = saved;
     } catch (err) {
@@ -527,7 +527,7 @@ async function deliverSyncedAttachment(opts) {
     syncedPath: finalSyncedPath || null,
     contentParts: filePart ? [filePart] : [],
     textFragment: `${finalTag} `,
-    bumpImageCount: built.bumpImageCount,
+    bumpImageCount: built.bumpImageCount
   };
 }
 
@@ -542,5 +542,5 @@ module.exports = {
   buildXaiFileParts,
   exposeXaiUrlFromAbsPath,
   deliverSyncedAttachment,
-  resolveHistoryAbsPath,
+  resolveHistoryAbsPath
 };

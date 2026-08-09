@@ -93,7 +93,7 @@ function convertMp3ToWhatsAppOpus(mp3Buffer, opts = {}) {
       'voip',
       '-f',
       'ogg',
-      'pipe:1',
+      'pipe:1'
     ];
 
     const ffmpegCmd = FFMPEG_PATH;
@@ -216,8 +216,8 @@ async function xaiTTS(text, voiceId, language) {
       text,
       voice_id: voiceId,
       language,
-      output_format: TTS_OUTPUT_FORMAT,
-    }),
+      output_format: TTS_OUTPUT_FORMAT
+    })
   }, { timeoutMs: TTS_REQUEST_TIMEOUT_MS, maxAttempts: 2 });
 
   const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), TTS_REQUEST_TIMEOUT_MS));
@@ -236,7 +236,7 @@ async function googleTranslateTTS(text, language, signal) {
   const urls = googleTTS.getAllAudioUrls(text, {
     lang: _baseLanguage(language),
     slow: false,
-    host: 'https://translate.google.com',
+    host: 'https://translate.google.com'
   });
 
   const buffers = await Promise.all(

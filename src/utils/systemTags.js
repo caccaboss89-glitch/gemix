@@ -84,5 +84,5 @@ function wrapUserQuery(content) {
 module.exports = {
   wrapSystemNotification,
   wrapSystemReminder,
-  wrapUserQuery,
+  wrapUserQuery
 };

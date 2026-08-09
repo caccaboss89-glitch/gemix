@@ -18,14 +18,14 @@ const {
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,
-  buildNoticeBlock,
+  buildNoticeBlock
 } = require('../utils/emailHtml');
 const { notifyAdmin, ADMIN_NOTIFIED_SUFFIX } = require('../utils/adminNotifier');
 const { createLogger } = require('../utils/logger');
 const {
   resolveOutboundAttachments,
   alreadyContactedError,
-  recordOutbound,
+  recordOutbound
 } = require('./outboundDelivery');
 
 const log = createLogger('SendEmail');
@@ -69,7 +69,7 @@ function _sentRecipient(target) {
   return {
     phone: digits || null,
     email: target.email || null,
-    display: target.display || target.email || 'unknown',
+    display: target.display || target.email || 'unknown'
   };
 }
 
@@ -88,7 +88,7 @@ async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
   if (contacted) return contacted;
 
   const { attachments, missingNote } = await resolveOutboundAttachments(
-    args.attachments, responseCtx, userCtx,
+    args.attachments, responseCtx, userCtx
   );
   const subject = stripOutgoingDeliveryArtifacts(args.subject || '');
 
@@ -128,12 +128,12 @@ async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
       recipient: _sentRecipient(target),
       subject,
       body: stripOutgoingDeliveryArtifacts(args.body || ''),
-      attachments,
+      attachments
     });
 
     const counts = [
       attached.length > 0 ? ` with ${attached.length} attachment(s)` : '',
-      linkOnly.length > 0 ? ` (${linkOnly.length} via links)` : '',
+      linkOnly.length > 0 ? ` (${linkOnly.length} via links)` : ''
     ].join('');
     const inlineNote = inlineResult.inline.length > 0
       ? ` ${inlineResult.inline.length} image(s) embedded in the body.`
@@ -144,7 +144,7 @@ async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
 
     return {
       success: true,
-      message: `Email sent successfully to ${target.display}${counts}.${inlineNote}${unresolvedNote}${missingNote}`,
+      message: `Email sent successfully to ${target.display}${counts}.${inlineNote}${unresolvedNote}${missingNote}`
     };
   } catch (err) {
     await notifyAdmin('Email Tool', `Failed to send email to ${target.email}: ${err.message}`);

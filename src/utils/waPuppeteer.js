@@ -79,5 +79,5 @@ function formatWaError(err) {
 module.exports = {
   isWaPuppeteerTransientError,
   withWaPuppeteerRetry,
-  formatWaError,
+  formatWaError
 };

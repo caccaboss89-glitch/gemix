@@ -43,13 +43,13 @@ function _writeRaw(state) {
   const tempFile = STATE_FILE + '.tmp';
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    
+
     // Write to a temporary file first
     fs.writeFileSync(tempFile, JSON.stringify(state, null, 2), 'utf-8');
-    
+
     // Rename to the actual file (atomic operation on most filesystems)
     fs.renameSync(tempFile, STATE_FILE);
-    
+
     return true;
   } catch (err) {
     log.error(`Failed to write systemState.json: ${err.message}`);
@@ -82,14 +82,14 @@ async function update(moduleName, newState) {
   return _withLock(async () => {
     const state = _readRaw();
     const current = state[moduleName] || {};
-    
+
     let next;
     if (typeof newState === 'function') {
       next = await newState(current);
     } else {
       next = { ...current, ...newState };
     }
-    
+
     state[moduleName] = next;
     const ok = _writeRaw(state);
     if (!ok) {
@@ -101,5 +101,5 @@ async function update(moduleName, newState) {
 
 module.exports = {
   get,
-  update,
+  update
 };

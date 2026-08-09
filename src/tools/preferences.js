@@ -19,7 +19,7 @@ const {
   VALID_VOICES,
   VALID_EFFORTS,
   VALID_LANGUAGES,
-  DEFAULT_MEMORY,
+  DEFAULT_MEMORY
 } = require('../utils/settingsStore');
 
 /**
@@ -76,7 +76,7 @@ async function managePreferences(args, settingsFileId) {
       if (resolved.content.length > MAX_MEMORY_CHARS) {
         return {
           success: false,
-          error: `Memory exceeds the ${MAX_MEMORY_CHARS} character limit (${resolved.content.length} chars).`,
+          error: `Memory exceeds the ${MAX_MEMORY_CHARS} character limit (${resolved.content.length} chars).`
         };
       }
       patch.memory = resolved.content;
@@ -98,7 +98,7 @@ async function managePreferences(args, settingsFileId) {
   return {
     success: true,
     message: `Preferences updated (${changes.join(', ')}).${memoryNote} `
-      + 'The new values are active from your next reply.',
+      + 'The new values are active from your next reply.'
   };
 }
 

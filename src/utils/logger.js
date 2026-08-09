@@ -54,7 +54,7 @@ function createLogger(prefix = '') {
     log: (...args) => {
       if (!shouldLog('info')) return;
       console.log(...format(args));
-    },
+    }
   };
 }
 

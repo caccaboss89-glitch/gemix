@@ -82,7 +82,7 @@ log.info('GemiX - Avvio in corso...\n');
     const timer = setTimeout(() => ctrl.abort(), 3000);
     const res = await fetch(`${baseUrl}/models`, {
       headers: { 'Authorization': `Bearer ${token}` },
-      signal: ctrl.signal,
+      signal: ctrl.signal
     }).catch(() => null);
     clearTimeout(timer);
     if (res && res.ok) {

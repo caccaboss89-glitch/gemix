@@ -16,7 +16,7 @@ const {
   MAX_FILE_READS,
   classifyAiFileDelivery,
   isVideoAttachment,
-  DELIVERY_MODE,
+  DELIVERY_MODE
 } = require('../../utils/aiFileDelivery');
 const { isDiscordAttachmentOversize } = require('../../utils/discordAttachmentFetch');
 const { ingressDiscordAttachment, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
@@ -27,7 +27,7 @@ const { pickLatestBatchEntry } = require('../../utils/batchContext');
 const {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
-  stripRedundantFilenameBesideAttachmentTag,
+  stripRedundantFilenameBesideAttachmentTag
 } = require('../../utils/attachmentCaption');
 const { createLogger } = require('../../utils/logger');
 const { toDiscordAttachmentArgs } = require('../../utils/attachments');
@@ -36,7 +36,7 @@ const { partitionAttachments, PLATFORM } = require('../../utils/attachmentDelive
 const {
   stripOutgoingDeliveryArtifacts,
   cleanIncomingText,
-  formatLabeledUserContent,
+  formatLabeledUserContent
 } = require('../../utils/text');
 const { sanitizeDiscordThreadTitle } = require('../../utils/discord');
 const { fetchHistoryWithTimeout } = require('../../utils/historyFetch');
@@ -67,9 +67,9 @@ function initDiscord() {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.GuildMembers,
-      GatewayIntentBits.GuildScheduledEvents,
+      GatewayIntentBits.GuildScheduledEvents
     ],
-    partials: [Partials.Message, Partials.Channel],
+    partials: [Partials.Message, Partials.Channel]
   });
 
   discordClient.on(Events.ClientReady, () => {
@@ -80,7 +80,7 @@ function initDiscord() {
     try {
       await onDiscordMessage(msg);
     } catch (err) {
-      log.error(`\nCritical error:`);
+      log.error('\nCritical error:');
       log.error(`   ${err.message}`);
       log.error(`   Stack: ${err.stack?.split('\n').slice(0, 3).join('\n   ')}`);
     }
@@ -152,7 +152,7 @@ async function fetchDiscordMessageWindow(channel, starterMessageId) {
       .filter(m => !starterMessageId || m.id !== starterMessageId)
       .reverse()
       .slice(-MAX_HISTORY)
-      .map(m => m.id),
+      .map(m => m.id)
   );
   return { raw, recentMessageIds };
 }
@@ -164,7 +164,7 @@ async function fetchDiscordMessageWindow(channel, starterMessageId) {
 async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, recentMessageIds, senderName) {
   let textBody = msg.content || '';
   const { prefix, mediaParts: quotedMediaParts } = await processDiscordQuotedReply(
-    msg, channel, historyStorageId, recentMessageIds, { includeQuotedMedia: true },
+    msg, channel, historyStorageId, recentMessageIds, { includeQuotedMedia: true }
   );
   textBody = prefix + textBody;
 
@@ -173,7 +173,7 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
 
   for (const att of msg.attachments.values()) {
     const ingress = await ingressDiscordAttachment(att, historyStorageId, {
-      metadataDurationSec: Number(att.duration || 0),
+      metadataDurationSec: Number(att.duration || 0)
     });
     if (ingress.oversize) {
       attachmentTags.push({ tag: ingress.tag, name: att.name, syncedPath: null });
@@ -242,7 +242,7 @@ async function onDiscordMessage(msg) {
     userId: msg.author.id,
     discordUsername: msg.author.username,
     discordDisplayName: msg.author.displayName || msg.author.globalName,
-    discordNickname: guildMember?.nickname,
+    discordNickname: guildMember?.nickname
   });
 
   if (!discordMessageHasUsableContent(msg)) return;
@@ -262,7 +262,7 @@ async function onDiscordMessage(msg) {
     guildMember,
     userIdentity,
     userName: senderName,
-    stopLockRenew: null,
+    stopLockRenew: null
   };
 
   const status = enqueueBatchedTurn({
@@ -270,7 +270,7 @@ async function onDiscordMessage(msg) {
     entry: batchEntry,
     handler: _handleDiscordBatch,
     log,
-    discardLogLabel: `thread ${channel.id}`,
+    discardLogLabel: `thread ${channel.id}`
   });
   if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);
@@ -314,7 +314,7 @@ async function _sendDiscordLinkFallback(channel, attachments) {
 }
 
 async function deliverDiscordResponse(channel, response) {
-  let finalText = stripOutgoingDeliveryArtifacts(response.text || '');
+  const finalText = stripOutgoingDeliveryArtifacts(response.text || '');
   const newTitle = response.discordTitle || '';
 
   const { direct: hostable, linkOnly } = partitionAttachments(response.attachments, PLATFORM.DISCORD);
@@ -401,12 +401,12 @@ async function _handleDiscordBatch(entries) {
         async () => {
           messageWindow = await fetchDiscordMessageWindow(channel, starterMessageId);
           const built = await buildDiscordHistory(
-            channel, starterMessageId, historyStorageId, excludeMessageIds, messageWindow,
+            channel, starterMessageId, historyStorageId, excludeMessageIds, messageWindow
           );
           return built.history;
         },
         log,
-        'DISCORD',
+        'DISCORD'
       );
     },
     prepareSession: async () => {
@@ -422,9 +422,9 @@ async function _handleDiscordBatch(entries) {
       const { content, latestEntry } = await materializeDiscordBatchContent(
         ents,
         async (ent, ids) => buildDiscordIncomingContentParts(
-          ent.msg, channel, historyStorageId, ids, ent.userName || 'Unknown',
+          ent.msg, channel, historyStorageId, ids, ent.userName || 'Unknown'
         ),
-        { recentMessageIds, pickLatest: latest || pickLatestBatchEntry(ents) },
+        { recentMessageIds, pickLatest: latest || pickLatestBatchEntry(ents) }
       );
       const lat = latestEntry || latest || ents[0];
       const extras = await _discordGuildExtras(guild);
@@ -444,7 +444,7 @@ async function _handleDiscordBatch(entries) {
         availableEmojis: extras.availableEmojis,
         serverEvents: extras.serverEvents,
         waJid: lat.userIdentity.member ? lat.userIdentity.member.wa : null,
-        discordChannel: channel,
+        discordChannel: channel
       };
     },
     deliver: async (_ctx, response) => {
@@ -458,7 +458,7 @@ async function _handleDiscordBatch(entries) {
       try {
         await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });
       } catch { /* ignore */ }
-    },
+    }
   });
 }
 
@@ -529,7 +529,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         tagOnly: isBot || overBudget,
         deferVideo: true,
-        metadataDurationSec: Number(att.duration || 0),
+        metadataDurationSec: Number(att.duration || 0)
       });
       if (ingress.oversize) {
         textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
@@ -540,7 +540,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
       textContent = stripRedundantFilenameBesideAttachmentTag(
         textContent,
         ingress.tag,
-        captionHints,
+        captionHints
       );
       textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
       if (overBudget && !ingress.oversize && !textContent.includes('not shown this turn')) {
@@ -555,8 +555,8 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
         const quoted = await processDiscordQuotedReply(
           m, channel, historyStorageId, recentMessageIds, {
             includeQuotedMedia: false,
-            messageById,
-          },
+            messageById
+          }
         );
         if (quoted.prefix) {
           textContent = `${quoted.prefix}${textContent || ''}`.trimEnd();
@@ -586,7 +586,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
       role: isBot && !isSystemNotice ? 'assistant' : 'user',
       content: mediaParts.length > 0
         ? [{ type: 'text', text: finalText }, ...mediaParts]
-        : finalText,
+        : finalText
     };
   }
 

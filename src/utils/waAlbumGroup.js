@@ -151,7 +151,7 @@ function groupWhatsAppBatchEntries(entries) {
     const slice = withMsg.slice(g.start, g.end);
     out.push({
       entries: slice,
-      messages: slice.map((e) => e.msg),
+      messages: slice.map((e) => e.msg)
     });
   }
   return out;
@@ -160,5 +160,5 @@ function groupWhatsAppBatchEntries(entries) {
 module.exports = {
   isPendingAlbumContinuation,
   groupWhatsAppMessages,
-  groupWhatsAppBatchEntries,
+  groupWhatsAppBatchEntries
 };

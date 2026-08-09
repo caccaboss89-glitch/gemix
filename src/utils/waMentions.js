@@ -232,5 +232,5 @@ module.exports = {
   stripPhoneMentionTags,
   normalizeOutgoingMentionTags,
   containsMetaAiTag,
-  collectMentionJids,
+  collectMentionJids
 };

@@ -22,7 +22,7 @@ const EVENT_DATA_KEYS = [
   'eventEndTimeTs',
   'eventDescription',
   'eventLocation',
-  'eventJoinLink',
+  'eventJoinLink'
 ];
 
 function _messageType(msg) {
@@ -33,7 +33,7 @@ function _hasEventPayload(data) {
   if (!data || typeof data !== 'object') return false;
   for (const key of EVENT_DATA_KEYS) {
     const value = data[key];
-    if (value == null) continue;
+    if (value === null || value === undefined) continue;
     if (typeof value === 'string' && !value.trim()) continue;
     return true;
   }
@@ -171,5 +171,5 @@ function formatSpecialMessageText(msg) {
 module.exports = {
   isSpecialNonMediaMessage,
   formatWhatsAppContactText,
-  formatSpecialMessageText,
+  formatSpecialMessageText
 };

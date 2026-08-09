@@ -23,7 +23,7 @@ function _runHermesRefresh() {
     '--quiet',
     '--ignore-user-config',
     '--ignore-rules',
-    '--max-turns', '1',
+    '--max-turns', '1'
   ];
 
   return new Promise((resolve, reject) => {
@@ -31,7 +31,7 @@ function _runHermesRefresh() {
     try {
       child = spawn(HERMES_BIN, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: process.env,
+        env: process.env
       });
     } catch (err) {
       return reject(new Error(`Cannot start ${HERMES_BIN}: ${err.message}`));

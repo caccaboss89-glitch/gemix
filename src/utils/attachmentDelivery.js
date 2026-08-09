@@ -9,14 +9,14 @@ const {
   toEmailAttachment,
   isWhatsAppAudioVideoAttachment,
   toWhatsAppMediaArgs,
-  WA_DIRECT_MAX_BYTES,
+  WA_DIRECT_MAX_BYTES
 } = require('./attachments');
 const { DISCORD_ATTACHMENT_MAX_BYTES } = require('./discordAttachmentFetch');
 
 const PLATFORM = {
   WHATSAPP: 'whatsapp',
   DISCORD: 'discord',
-  EMAIL: 'email',
+  EMAIL: 'email'
 };
 
 /** Direct email attach cap (nodemailer / provider comfort). */
@@ -101,5 +101,5 @@ module.exports = {
   hasExternalUrl,
   partitionAttachments,
   applyBuildAgentFlags,
-  sendWhatsAppAttachment,
+  sendWhatsAppAttachment
 };

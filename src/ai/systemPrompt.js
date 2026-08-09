@@ -32,7 +32,7 @@ const {
   buildVisibilityLines,
   buildAudienceLines,
   getCapabilities,
-  profileHasMediaQuota,
+  profileHasMediaQuota
 } = require('../config/platformCapabilities');
 const { getToolsForUser, toolNamesToSet } = require('./tools');
 const { formatQuotaCounts, formatMediaQuotaResetLabel } = require('../utils/mediaUsageLimits');
@@ -69,7 +69,7 @@ function _indentLines(text, depth) {
 function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
   const tools = getToolsForUser(isActiveMember, isAdmin, {
     platform: ctx.platform,
-    isGroup: ctx.isGroup,
+    isGroup: ctx.isGroup
   });
   return { toolNames: toolNamesToSet(tools) };
 }
@@ -119,7 +119,7 @@ function buildStaticInstructions(ctx) {
   if (cap.isDiscord && ctx.rulesContext) {
     sections.push(_section('Server statute', [
       'The Statuto Albertino as it stands right now:',
-      `<Statute>${escapeXml(ctx.rulesContext)}</Statute>`,
+      `<Statute>${escapeXml(ctx.rulesContext)}</Statute>`
     ]));
   }
 
@@ -143,7 +143,7 @@ function _buildChatLines(ctx, cap, profile) {
     return [
       'A forum thread in the "gemix" channel. You are here to help with the Statute (Statuto Albertino) '
       + 'and to produce Art. 6 formal PDF requests.',
-      'Markdown renders here, tables aside.',
+      'Markdown renders here, tables aside.'
     ];
   }
 
@@ -159,21 +159,21 @@ function _buildChatLines(ctx, cap, profile) {
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
       + 'name. Your own replies carry no speaker prefix.',
       'You cannot mention anyone in this chat, neither the other person nor yourself: mentions only work '
-      + 'in groups. Name people plainly.',
+      + 'in groups. Name people plainly.'
     );
   } else if (ctx.isGroup) {
     lines.push(
       `The group "${escapeXml(ctx.groupName) || 'unknown'}" on the dedicated GemiX account. Reply when you are `
       + '@mentioned, or when someone replies to one of your messages.',
       'When you name another member in a reply — anyone other than the person writing — you must mention them '
-      + 'as @<phone digits>: no plus sign, and no display name after the @.',
+      + 'as @<phone digits>: no plus sign, and no display name after the @.'
     );
   } else {
     lines.push(
       'A private chat on the dedicated GemiX account. Reply to every message.',
       `In the chat: just you and ${escapeXml(ctx.userName)}.`,
       'You cannot mention anyone in a private chat, neither the user nor yourself: mentions only work '
-      + 'in groups. Name people plainly.',
+      + 'in groups. Name people plainly.'
     );
   }
 
@@ -187,7 +187,7 @@ function _buildChatLines(ctx, cap, profile) {
     'Never add a footer or a signature: the system appends those itself when they are needed. '
     + 'The sources you mark with render_inline_citation arrive here as [[1]](url) markers, and the system '
     + 'turns them into numbered markers with a "Fonti:" list under the reply — so keep citing, and never '
-    + 'write that list yourself.',
+    + 'write that list yourself.'
   );
   // The gate that owns the command runs before this prompt is even built, so
   // anything the model can read has already been through it.
@@ -196,7 +196,7 @@ function _buildChatLines(ctx, cap, profile) {
     + 'from the server, at any moment; that message is handled before you and never reaches you. So an attempt at '
     + 'it that you can read is one that failed because the message carried something else too — tell them to send '
     + 'it on its own. And a request reaching you at all means they accepted the privacy notice they were shown '
-    + 'before their first one: never bring that up yourself.',
+    + 'before their first one: never bring that up yourself.'
   );
   return lines;
 }
@@ -226,7 +226,7 @@ function _buildAudienceLines(ctx, cap, profile, promptOpts, isAdmin) {
           + 'reach destinations outside this thread.'
         : 'Address them by the phone number or email in that list. send_whatsapp_message and send_email only '
           + 'reach destinations outside this chat; schedule_tasks with no destination means the current chat, '
-          + 'and takes a recipient when the reminder is for someone else.',
+          + 'and takes a recipient when the reminder is for someone else.'
     );
   } else {
     lines.push(`<ActiveMembers>${ACTIVE_MEMBERS.map(m => escapeXml(m.name)).join(', ')}</ActiveMembers>`);
@@ -235,13 +235,13 @@ function _buildAudienceLines(ctx, cap, profile, promptOpts, isAdmin) {
 
   lines.push(
     'Whenever you write to someone else through those tools, open by saying on whose behalf you are writing, '
-    + 'e.g. "Marco mi ha chiesto di dirti...".',
+    + 'e.g. "Marco mi ha chiesto di dirti...".'
   );
   if (!cap.isDiscord) {
     // read_server_rules is gone: the statute only reaches the model on Discord.
     lines.push(
       'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server) '
-      + 'belong to the gemix thread on Discord: send the user there rather than answering from memory.',
+      + 'belong to the gemix thread on Discord: send the user there rather than answering from memory.'
     );
   }
   return lines;
@@ -292,7 +292,7 @@ function buildDynamicRuntimeContext(ctx) {
     blocks.push(
       `Weekly generation quota for this user — ${counts} `
       + `(resets ${formatMediaQuotaResetLabel()}). At the cap the tool returns an error; `
-      + 'if the user asks, tell them what is left.',
+      + 'if the user asks, tell them what is left.'
     );
   }
 
@@ -322,7 +322,7 @@ function _renderCurrentSettings(ctx) {
     `Effort: ${settings.effort} (${mark('effort')})`,
     `Language: ${settings.language} (${mark('language')})`,
     `Memory: ${escapeXml(settings.memory)} (${mark('memory')})`,
-    `Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`,
+    `Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`
   ];
   const body = _indentLines(lines.join('\n'), 1);
   return `<CurrentSettings scope="${scope}">\n${body}\n</CurrentSettings>`;
@@ -368,5 +368,5 @@ function _macro(tag, blocks) {
 module.exports = {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
-  promptToolsFingerprint,
+  promptToolsFingerprint
 };

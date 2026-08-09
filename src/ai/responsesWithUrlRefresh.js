@@ -31,7 +31,7 @@ async function callResponsesWithStaleUrlRetry(opts) {
     logExtra = {},
     timeoutMs,
     historyStorageId = null,
-    allowStaleUrlRefresh = false,
+    allowStaleUrlRefresh = false
   } = opts;
 
   const canRefresh = allowStaleUrlRefresh || Boolean(historyStorageId);
@@ -50,7 +50,7 @@ async function callResponsesWithStaleUrlRetry(opts) {
       return await callResponsesModel(modelName, body, {
         ...logExtra,
         deferStaleFileUrlError: canRefresh && staleRefreshCount < MAX_STALE_URL_REFRESHES,
-        timeoutMs,
+        timeoutMs
       });
     } catch (err) {
       if (err.code !== 'XAI_STALE_FILE_URL' || !canRefresh || !Array.isArray(messages)) {

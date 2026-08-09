@@ -31,19 +31,19 @@ const FREQ_WORDS = {
     HOURLY: ['hour', 'hours'],
     DAILY: ['day', 'days'],
     WEEKLY: ['week', 'weeks'],
-    MONTHLY: ['month', 'months'],
+    MONTHLY: ['month', 'months']
   },
   it: {
     HOURLY: ['ora', 'ore'],
     DAILY: ['giorno', 'giorni'],
     WEEKLY: ['settimana', 'settimane'],
-    MONTHLY: ['mese', 'mesi'],
-  },
+    MONTHLY: ['mese', 'mesi']
+  }
 };
 
 const WEEKDAY_NAMES = {
   en: { SU: 'Sun', MO: 'Mon', TU: 'Tue', WE: 'Wed', TH: 'Thu', FR: 'Fri', SA: 'Sat' },
-  it: { SU: 'dom', MO: 'lun', TU: 'mar', WE: 'mer', TH: 'gio', FR: 'ven', SA: 'sab' },
+  it: { SU: 'dom', MO: 'lun', TU: 'mar', WE: 'mer', TH: 'gio', FR: 'ven', SA: 'sab' }
 };
 
 /**
@@ -129,7 +129,7 @@ function parseRecurrenceRule(rule) {
 
   return {
     ok: true,
-    value: { freq, interval, byday, exdate, until: seen.get('UNTIL') || null },
+    value: { freq, interval, byday, exdate, until: seen.get('UNTIL') || null }
   };
 }
 
@@ -277,7 +277,7 @@ function normalizePersistedRecurrence(rec) {
     interval: Number.isInteger(rec.interval) && rec.interval >= 1 ? rec.interval : 1,
     byday: Array.isArray(rec.byday) ? rec.byday : [],
     exdate: Array.isArray(rec.exdate) ? rec.exdate : [],
-    until: rec.until || null,
+    until: rec.until || null
   };
 }
 
@@ -315,5 +315,5 @@ module.exports = {
   normalizePersistedRecurrence,
   advanceOccurrence,
   isDateSkipped,
-  describeRecurrence,
+  describeRecurrence
 };

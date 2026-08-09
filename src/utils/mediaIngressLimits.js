@@ -31,7 +31,7 @@ function isVideoOverDurationLimit(durationSec) {
 }
 
 /** Probe duration from a file already stored under data/users/.../history/. */
-async function durationSecFromHistoryFile(absPath, _extHint) {
+async function durationSecFromHistoryFile(absPath) {
   if (!absPath || !fs.existsSync(absPath)) return null;
   try {
     return await getMediaDurationSecFromPath(absPath);
@@ -46,11 +46,11 @@ async function resolveMediaDurationSec({ metadataSec = 0, buffer = null, extHint
   if (Number.isFinite(meta) && meta > 0) return meta;
   if (buffer && buffer.length) {
     const d = await getMediaDurationSec(buffer, extHint);
-    if (d != null && Number.isFinite(d)) return d;
+    if (d !== null && d !== undefined && Number.isFinite(d)) return d;
   }
   if (historyAbsPath) {
-    const d = await durationSecFromHistoryFile(historyAbsPath, extHint);
-    if (d != null && Number.isFinite(d)) return d;
+    const d = await durationSecFromHistoryFile(historyAbsPath);
+    if (d !== null && d !== undefined && Number.isFinite(d)) return d;
   }
   return 0;
 }
@@ -62,5 +62,5 @@ module.exports = {
   isVideoOverDurationLimit,
   resolveMediaDurationSec,
   MAX_AUDIO_DURATION_S,
-  MAX_VIDEO_DURATION_S,
+  MAX_VIDEO_DURATION_S
 };

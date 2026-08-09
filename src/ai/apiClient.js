@@ -109,7 +109,7 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
       model: modelName,
       apiUrl,
       requestBody: body,
-      ...extra,
+      ...extra
     };
     const serialized = JSON.stringify(entry, null, 2);
     const filePath = _getLogFilePath('api-request', now);
@@ -132,7 +132,7 @@ function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
       model: modelName,
       apiUrl,
       responseBody,
-      ...extra,
+      ...extra
     };
     const serialized = JSON.stringify(entry, null, 2);
     fs.writeFileSync(responseLogFile, serialized);
@@ -294,7 +294,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         || '';
       const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${token}`
       };
       if (convId) headers['x-grok-conv-id'] = convId;
 
@@ -302,7 +302,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: controller.signal
       });
       clearTimeout(timer);
       const duration = Date.now() - attemptStarted;
@@ -355,7 +355,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
           : '';
         log.warn(
           `   API attempt ${attempt}/${MAX_API_RETRIES} failed after ${Math.round(attemptMs / 1000)}s: ${errMsg}`
-          + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${MAX_API_RETRIES}${waitHint}...`,
+          + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${MAX_API_RETRIES}${waitHint}...`
         );
         await new Promise(r => setTimeout(r, delay));
         continue;
@@ -396,7 +396,8 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
 async function callResponsesModel(modelName, body, logExtra = {}) {
   const apiUrl = `${getXaiAuth().baseUrl}/responses`;
   const timeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : API_TIMEOUT_MS;
-  const { timeoutMs: _omit, ...requestLogExtra } = logExtra;
+  const requestLogExtra = { ...logExtra };
+  delete requestLogExtra.timeoutMs;
   const res = await callApiWithRetry(modelName, apiUrl, body, requestLogExtra, timeoutMs);
 
   let data;
@@ -458,9 +459,9 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
         ...options,
         headers: {
           ...(options.headers || {}),
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`
         },
-        signal: controller.signal,
+        signal: controller.signal
       });
       clearTimeout(timer);
 
@@ -506,5 +507,5 @@ module.exports = {
   callApiWithRetry,
   logApiResponse,
   fetchXaiWithOAuthRetry,
-  isGrokCreditExhaustedError,
+  isGrokCreditExhaustedError
 };

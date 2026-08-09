@@ -96,7 +96,7 @@ async function acquireBuildLock(workspaceId, opts = {}) {
       state.lock = {
         ownerId,
         acquiredAt: now,
-        expiresAt: now + LOCK_MAX_TTL_MS,
+        expiresAt: now + LOCK_MAX_TTL_MS
       };
       if (_writeState(workspaceId, state)) {
         // Re-read to confirm the lock is held by this ownerId after the write.
@@ -170,7 +170,7 @@ function listWorkspaceStates() {
         metaDir,
         workspaceDir: path.join(metaDir, 'build_workspace'),
         lastActivityAt: Number(raw && raw.lastActivityAt) || 0,
-        lock: raw && raw.lock ? raw.lock : null,
+        lock: raw && raw.lock ? raw.lock : null
       });
     } catch { /* skip corrupted state file */ }
   }
@@ -182,5 +182,5 @@ module.exports = {
   acquireBuildLock,
   releaseBuildLock,
   renewBuildLock,
-  listWorkspaceStates,
+  listWorkspaceStates
 };

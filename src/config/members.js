@@ -46,7 +46,7 @@ function _loadMembers() {
 
   log.error(
     `No members file found at ${MEMBERS_FILE}.\n` +
-    `The active members list must be provided in a JSON file (see src/data/members.json).`
+    'The active members list must be provided in a JSON file (see src/data/members.json).'
   );
 
   return [];
@@ -104,7 +104,7 @@ function resolveActiveMemberByName(query) {
     const names = matches.map((m) => m.name).join(', ');
     return {
       ok: false,
-      error: `Multiple members match "${trimmed}": ${names}. Specify a more precise name.`,
+      error: `Multiple members match "${trimmed}": ${names}. Specify a more precise name.`
     };
   }
   return { ok: true, member: matches[0] };
@@ -164,5 +164,5 @@ module.exports = {
   findMemberByDiscord,
   findMemberByEmail,
   resolveActiveMemberByName,
-  isAdmin,
+  isAdmin
 };

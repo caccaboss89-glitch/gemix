@@ -22,7 +22,7 @@ const {
   MAX_FILE_READS,
   classifyAiFileDelivery,
   isVideoAttachment,
-  DELIVERY_MODE,
+  DELIVERY_MODE
 } = require('../../utils/aiFileDelivery');
 const { resolveGemixVoiceTranscription, storeRecentVoiceText } = require('../../utils/historySync');
 const { ingressWaMessageMedia, capHistoryImageParts } = require('../../utils/incomingMediaIngress');
@@ -30,12 +30,12 @@ const {
   normalizeMarkdown,
   stripOutgoingDeliveryArtifacts,
   cleanIncomingText,
-  formatLabeledUserContent,
+  formatLabeledUserContent
 } = require('../../utils/text');
 const {
   attachmentFilenameHints: _attachmentFilenameHints,
   stripRedundantAttachmentCaption: _stripRedundantAttachmentCaption,
-  stripRedundantFilenameBesideAttachmentTag: _stripRedundantFilenameBesideAttachmentTag,
+  stripRedundantFilenameBesideAttachmentTag: _stripRedundantFilenameBesideAttachmentTag
 } = require('../../utils/attachmentCaption');
 
 const { sendAttachmentsWithFallback } = require('../../utils/attachmentFallback');
@@ -68,7 +68,7 @@ const {
   resolveLidTagsInBody: _resolveLidTagsInBody,
   stripDisallowedOutgoingMentions,
   normalizeOutgoingMentionTags,
-  collectMentionJids,
+  collectMentionJids
 } = require('../../utils/waMentions');
 const { processWhatsAppQuotedReply } = require('../../utils/quoteIngress');
 const { groupWhatsAppMessages } = require('../../utils/waAlbumGroup');
@@ -177,7 +177,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
   // → one history user turn with every tag + native part. Separate sends stay
   // separate role:user entries. Bot messages are never album-merged.
   const historyGroups = groupWhatsAppMessages(messages, {
-    isBotAt: (m, mi) => isHistoryBotMessage(m, mi),
+    isBotAt: (m, mi) => isHistoryBotMessage(m, mi)
   });
 
   // Build each history entry (including its xAI upload) in parallel with
@@ -192,7 +192,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     isScheduled,
     isSystem,
     isFromBot: isGemiX || isScheduled || isSystem,
-    isSystemEvent: isScheduled || isSystem,
+    isSystemEvent: isScheduled || isSystem
   });
 
   /**
@@ -256,7 +256,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       }
     }
 
-    let mediaParts = [];
+    const mediaParts = [];
     let anyOverBudget = false;
     // Multi-attach album: ingest every item's media into this single turn.
     for (let gi = 0; gi < groupMsgs.length; gi++) {
@@ -275,16 +275,16 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       if (overBudget) anyOverBudget = true;
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
         tagOnly: isFromBot || overBudget,
-        deferVideo: true,
+        deferVideo: true
       });
       if (platform !== PLATFORM_WA_PERSONAL && isGemiX
           && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {
         resolveGemixVoiceTranscription(
-          userId, mediaIngress.syncedPath, chat.id._serialized, (msg.timestamp || 0) * 1000,
+          userId, mediaIngress.syncedPath, chat.id._serialized, (msg.timestamp || 0) * 1000
         );
       }
       textContent = _stripRedundantFilenameBesideAttachmentTag(
-        textContent, mediaIngress.tag, allFilenameHints,
+        textContent, mediaIngress.tag, allFilenameHints
       );
       textContent = `${textContent} ${mediaIngress.textFragment.trim()}`.trim();
       if (!textContent) {
@@ -310,7 +310,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
           recentMessageIds,
           isGroup,
           platform,
-          { includeQuotedMedia: false },
+          { includeQuotedMedia: false }
         );
         if (quoted.prefix) {
           textContent = `${quoted.prefix}${textContent || ''}`.trimEnd();
@@ -339,7 +339,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       role: isFromBot && !isSystemEvent ? 'assistant' : 'user',
       content: mediaParts.length > 0
         ? [{ type: 'text', text: finalText }, ...mediaParts]
-        : finalText,
+        : finalText
     };
   }
 
@@ -427,7 +427,7 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
     if (responseData.voiceTranscriptText) {
       storeRecentVoiceText(
         responseData.voiceTranscriptChatId || chat.id?._serialized,
-        responseData.voiceTranscriptText,
+        responseData.voiceTranscriptText
       );
     }
     const researchFooter = typeof responseData.researchFooter === 'string'
@@ -452,7 +452,7 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
     const result = await sendAttachmentsWithFallback(
       responseData.attachments,
       sendAttachment,
-      { platform: PLATFORM.WHATSAPP },
+      { platform: PLATFORM.WHATSAPP }
     );
 
     log.info(`Attachment delivery: ${result.sent.length} direct, ${result.linkFallback.length} via link`);
@@ -492,7 +492,7 @@ async function processCurrentMedia(msg, userId) {
       skipped: true,
       tag: r.tag,
       fragment: r.textFragment.trim(),
-      overDurationLimit: r.overDurationLimit,
+      overDurationLimit: r.overDurationLimit
     };
   }
   if (r.contentParts.length > 0) {
@@ -502,7 +502,7 @@ async function processCurrentMedia(msg, userId) {
       filename: r.filename,
       syncedPath: r.syncedPath,
       tag: r.tag,
-      contentParts: r.contentParts,
+      contentParts: r.contentParts
     };
   }
   // Tag-only (raw binary) or ingestion failure: the fragment carries the
@@ -512,7 +512,7 @@ async function processCurrentMedia(msg, userId) {
     tag: r.tag,
     fragment: r.textFragment.trim(),
     filename: r.filename,
-    syncedPath: r.syncedPath,
+    syncedPath: r.syncedPath
   };
 }
 
@@ -540,7 +540,7 @@ async function buildIncomingContentPartsFromMessages(
   senderName = 'Unknown',
   platform = PLATFORM_WA_DEDICATED,
   recentMessageIds = null,
-  options = {},
+  options = {}
 ) {
   const messages = (Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs]).filter(Boolean);
   if (messages.length === 0) return [];
@@ -589,7 +589,7 @@ async function buildIncomingContentPartsFromMessages(
   if (quoteMsg) {
     const quotedContent = await processWhatsAppQuotedReply(
       quoteMsg, chatId, userId, recentIds, isGroup, platform,
-      { includeQuotedMedia },
+      { includeQuotedMedia }
     );
     if (quotedContent && quotedContent.prefix) {
       textBody = quotedContent.prefix + textBody;
@@ -638,7 +638,7 @@ async function buildIncomingContentPartsFromMessages(
     const tsMs = (primaryMsg.timestamp || 0) * 1000;
     contentParts.unshift({
       type: 'text',
-      text: formatLabeledUserContent(tsMs, senderName, textBody.trim()),
+      text: formatLabeledUserContent(tsMs, senderName, textBody.trim())
     });
   }
 
@@ -662,5 +662,5 @@ module.exports = {
   sendWhatsAppResponse,
   getRecentWhatsAppMessageIds,
   waMessageHasUsableContent,
-  _waMessageKey,
+  _waMessageKey
 };

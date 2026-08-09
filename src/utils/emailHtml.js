@@ -190,5 +190,5 @@ module.exports = {
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,
-  buildNoticeBlock,
+  buildNoticeBlock
 };

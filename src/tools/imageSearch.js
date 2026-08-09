@@ -37,7 +37,7 @@ const MAX_QUERY_LEN = 300;
 function _cleanQuery(raw) {
   if (typeof raw !== 'string') return '';
   return raw
-    // eslint-disable-next-line no-control-regex
+
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -131,7 +131,7 @@ async function _buildVisionPart(imgUrl, index) {
     if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
     const dl = await downloadPublicFile(imgUrl, {
       maxBytes: MAX_IMAGE_BYTES,
-      timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS,
+      timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS
     });
     const sniffed = _sniffImageType(dl.buffer);
     if (!sniffed) {
@@ -140,13 +140,13 @@ async function _buildVisionPart(imgUrl, index) {
     const name = `search_img_${index}${sniffed.ext}`;
     destPath = path.join(
       TEMP_DIR,
-      `imgsearch_${crypto.randomBytes(8).toString('hex')}_${name}`,
+      `imgsearch_${crypto.randomBytes(8).toString('hex')}_${name}`
     );
     fs.writeFileSync(destPath, dl.buffer);
 
     const built = await buildXaiFileParts(destPath, name, {
       mimetype: sniffed.mime,
-      imagesReadCount: index,
+      imagesReadCount: index
     });
     if (!built.success) {
       return { part: null, error: built.error || 'vision upload failed' };
@@ -187,7 +187,7 @@ async function searchImages(args = {}) {
   if (!base || !/^https?:\/\//i.test(base)) {
     return {
       success: false,
-      error: 'Image search is not configured (IMAGE_SEARCH_BASE_URL is invalid).',
+      error: 'Image search is not configured (IMAGE_SEARCH_BASE_URL is invalid).'
     };
   }
 
@@ -206,8 +206,8 @@ async function searchImages(args = {}) {
       method: 'GET',
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'GemiX-ImageSearch/1.0',
-      },
+        'User-Agent': 'GemiX-ImageSearch/1.0'
+      }
     }, SEARCH_TIMEOUT_MS);
 
     if (!res.ok) {
@@ -217,12 +217,12 @@ async function searchImages(args = {}) {
         return {
           success: false,
           error:
-            'Image search service rejected JSON format (enable "json" under search.formats in SearXNG settings.yml).',
+            'Image search service rejected JSON format (enable "json" under search.formats in SearXNG settings.yml).'
         };
       }
       return {
         success: false,
-        error: `Image search service returned HTTP ${res.status}. Is SearXNG running at ${base}?`,
+        error: `Image search service returned HTTP ${res.status}. Is SearXNG running at ${base}?`
       };
     }
 
@@ -232,7 +232,7 @@ async function searchImages(args = {}) {
       log.warn(`SearXNG invalid JSON: ${parseErr.message}`);
       return {
         success: false,
-        error: 'Image search service returned invalid JSON. Check SearXNG logs and that format=json is enabled.',
+        error: 'Image search service returned invalid JSON. Check SearXNG logs and that format=json is enabled.'
       };
     }
   } catch (err) {
@@ -241,7 +241,7 @@ async function searchImages(args = {}) {
       success: false,
       error:
         `Image search service unreachable at ${base}: ${err.message}. `
-        + 'Ensure the local SearXNG container (gemix-searxng) is running.',
+        + 'Ensure the local SearXNG container (gemix-searxng) is running.'
     };
   }
 
@@ -257,7 +257,7 @@ async function searchImages(args = {}) {
       url: imgUrl,
       title: typeof hit.title === 'string' ? hit.title.trim().slice(0, 200) : '',
       source_page: typeof hit.url === 'string' && hit.url !== imgUrl ? hit.url : undefined,
-      engine: typeof hit.engine === 'string' ? hit.engine : undefined,
+      engine: typeof hit.engine === 'string' ? hit.engine : undefined
     });
     if (images.length >= count) break;
   }
@@ -269,13 +269,13 @@ async function searchImages(args = {}) {
       count: 0,
       images: [],
       message:
-        'No direct image URLs found for this query. Try a different query; do not invent URLs.',
+        'No direct image URLs found for this query. Try a different query; do not invent URLs.'
     };
   }
 
   // Build vision previews in parallel (download + re-host for xAI).
   const visionSettled = await Promise.all(
-    images.map((img, i) => _buildVisionPart(img.url, i)),
+    images.map((img, i) => _buildVisionPart(img.url, i))
   );
 
   const nativeParts = [];
@@ -285,14 +285,14 @@ async function searchImages(args = {}) {
       index: i,
       url: img.url,
       title: img.title,
-      vision: Boolean(v && v.part),
+      vision: Boolean(v && v.part)
     };
     if (img.source_page) entry.source_page = img.source_page;
     if (img.engine) entry.engine = img.engine;
     if (v && v.part) {
       nativeParts.push(
         { type: 'text', text: `[web_image_search IMAGE_${i}]` },
-        v.part,
+        v.part
       );
     } else if (v && v.error) {
       entry.vision_error = String(v.error).slice(0, 160);
@@ -314,7 +314,7 @@ async function searchImages(args = {}) {
           + 'Only use these URLs — never invent ones or use render/citation component syntax.'
         : `Found ${imagesOut.length} image URL(s) but none could be loaded for vision. `
           + 'You may still put a `url` from the list in final `attachments` if appropriate, or retry with another query. '
-          + 'Never invent URLs or use render/citation component syntax.',
+          + 'Never invent URLs or use render/citation component syntax.'
   };
 
   if (nativeParts.length === 0) {
@@ -327,5 +327,5 @@ module.exports = {
   searchImages,
   DEFAULT_COUNT,
   MIN_COUNT,
-  MAX_COUNT,
+  MAX_COUNT
 };

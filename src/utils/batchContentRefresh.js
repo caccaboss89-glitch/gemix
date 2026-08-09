@@ -6,7 +6,7 @@
 const { pickLatestBatchEntry } = require('./batchContext');
 const {
   buildIncomingContentPartsFromMessages,
-  getRecentWhatsAppMessageIds,
+  getRecentWhatsAppMessageIds
 } = require('../platforms/whatsapp/shared');
 const { groupWhatsAppBatchEntries } = require('./waAlbumGroup');
 
@@ -58,7 +58,7 @@ function mergeBatchUnitsToContent(units, fallbackLatest = null) {
   const last = list[list.length - 1];
   return {
     content: finalizeBatchContentParts(parts),
-    latestEntry: last.entry || fallbackLatest,
+    latestEntry: last.entry || fallbackLatest
   };
 }
 
@@ -96,7 +96,7 @@ async function materializeWhatsAppBatchContent(entries, opts) {
       senderName,
       platform,
       recentMessageIds,
-      { includeQuotedMedia: true },
+      { includeQuotedMedia: true }
     );
     // Also stash on entries for any code that still reads contentParts
     if (g.entries.length === 1) {
@@ -106,7 +106,7 @@ async function materializeWhatsAppBatchContent(entries, opts) {
     }
     units.push({
       content: finalizeBatchContentParts(parts),
-      entry: g.entries[g.entries.length - 1],
+      entry: g.entries[g.entries.length - 1]
     });
   }
 
@@ -138,7 +138,7 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
     ent.contentParts = parts;
     units.push({
       content: finalizeBatchContentParts(parts),
-      entry: ent,
+      entry: ent
     });
   }
   return mergeBatchUnitsToContent(units, latest);
@@ -146,5 +146,5 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
 
 module.exports = {
   materializeWhatsAppBatchContent,
-  materializeDiscordBatchContent,
+  materializeDiscordBatchContent
 };

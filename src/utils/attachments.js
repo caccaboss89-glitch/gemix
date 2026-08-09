@@ -25,10 +25,10 @@ const { mimeBase } = require('../config/mimeExtensions');
 const WA_DIRECT_MAX_BYTES = 16 * 1024 * 1024;
 
 const WA_TEMP_LINK_AUDIO_EXTS = new Set([
-  '.mp3', '.mpeg', '.mpga', '.ogg', '.opus', '.oga', '.wav', '.m4a', '.flac', '.aac', '.webm',
+  '.mp3', '.mpeg', '.mpga', '.ogg', '.opus', '.oga', '.wav', '.m4a', '.flac', '.aac', '.webm'
 ]);
 const WA_TEMP_LINK_VIDEO_EXTS = new Set([
-  '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v',
+  '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v'
 ]);
 
 /**
@@ -50,7 +50,7 @@ function uniqueAttachmentName(existing, rawName) {
   const taken = new Set(
     (Array.isArray(existing) ? existing : [])
       .map(a => (a && a.name ? path.basename(a.name) : null))
-      .filter(Boolean),
+      .filter(Boolean)
   );
   if (!taken.has(base)) return base;
   const ext = path.extname(base);
@@ -198,5 +198,5 @@ module.exports = {
   WA_DIRECT_MAX_BYTES,
   toEmailAttachment,
   toWhatsAppMediaArgs,
-  toDiscordAttachmentArgs,
+  toDiscordAttachmentArgs
 };

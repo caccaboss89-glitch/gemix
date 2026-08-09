@@ -23,7 +23,7 @@ function getPublicBaseUrl() {
   if (!_missingWarned) {
     _missingWarned = true;
     log.warn(
-      'GEMIX_PUBLIC_ATTACHMENT_BASE_URL not set — attachment links use http://localhost:9998 (xAI cannot fetch)',
+      'GEMIX_PUBLIC_ATTACHMENT_BASE_URL not set — attachment links use http://localhost:9998 (xAI cannot fetch)'
     );
   }
   return LOCAL_FALLBACK;

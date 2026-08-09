@@ -105,7 +105,7 @@ async function scheduleTasks(tasks, ctx) {
         interval,
         until: untilISO,
         ...(byday.length ? { byday } : {}),
-        ...(exdate.length ? { exdate } : {}),
+        ...(exdate.length ? { exdate } : {})
       };
     }
 
@@ -141,7 +141,7 @@ async function scheduleTasks(tasks, ctx) {
         && (ctx.isAdmin || ctx.isActiveMember) && ctx.isGroup && !task.whatsapp.toGroup) {
       results.push({
         success: false,
-        error: 'toPrivate without a recipient: set whatsapp.recipient to remind a specific person, or whatsapp.toGroup to remind the current group.',
+        error: 'toPrivate without a recipient: set whatsapp.recipient to remind a specific person, or whatsapp.toGroup to remind the current group.'
       });
       continue;
     }
@@ -188,13 +188,13 @@ async function scheduleTasks(tasks, ctx) {
       } else if (ctx.waJid) {
         destinations.whatsapp = ctx.waJid;
       } else {
-        results.push({ success: false, error: `No valid destination for this task.` });
+        results.push({ success: false, error: 'No valid destination for this task.' });
         continue;
       }
     }
 
     const cleanContent = normalizeMarkdown(
-      stripOutgoingDeliveryArtifacts(task.content.replace(/^\[GemiX\]\s*/i, '')),
+      stripOutgoingDeliveryArtifacts(task.content.replace(/^\[GemiX\]\s*/i, ''))
     );
 
     const newTask = {
@@ -204,7 +204,7 @@ async function scheduleTasks(tasks, ctx) {
       createdAt: getRomeISO(),
       createdBy: ctx.userName || ctx.userId,
       destinations,
-      ...(recurrence && { recurrence }),
+      ...(recurrence && { recurrence })
     };
 
     await modifyTaskFile(fileId, async (fileData) => {
@@ -221,7 +221,7 @@ async function scheduleTasks(tasks, ctx) {
     const recipientLabel = formatTaskRecipient(destinations, {
       isAdmin: ctx.isAdmin,
       waJid: ctx.waJid,
-      groupWord: 'group',
+      groupWord: 'group'
     });
 
     let recLabel = '';
@@ -234,7 +234,7 @@ async function scheduleTasks(tasks, ctx) {
     const recipientLine = recipientLabel ? `\n  recipient: ${recipientLabel}` : '';
 
     let taskSummary =
-      `Task scheduled:\n` +
+      'Task scheduled:\n' +
       `  id: ${newTask.id}\n` +
       `  message: ${cleanContent.substring(0, 80)}${cleanContent.length > 80 ? '...' : ''}` +
       `\n  scheduledAt: ${scheduledAtRome}` +

@@ -44,7 +44,7 @@ const PER_ROUND_TOOL_LIMITS = {
   // A video costs ~1 frame per second of context; loading several at once is
   // the flood read_video exists to prevent.
   read_video: 1,
-  build: 1,
+  build: 1
 };
 
 /**
@@ -98,7 +98,7 @@ function perRoundCappedDuplicateIds(toolCalls, limits = PER_ROUND_TOOL_LIMITS) {
 function oncePerRoundErrorPayload(toolName) {
   return JSON.stringify({
     success: false,
-    error: `"${toolName}" ${ONCE_PER_ROUND_ERROR}`,
+    error: `"${toolName}" ${ONCE_PER_ROUND_ERROR}`
   });
 }
 
@@ -106,13 +106,13 @@ function perRoundCapErrorPayload(toolName, limit) {
   if (EXCLUSIVE_ROUND_TOOLS.has(toolName)) {
     return JSON.stringify({
       success: false,
-      error: `"${toolName}" ${EXCLUSIVE_ROUND_ERROR}`,
+      error: `"${toolName}" ${EXCLUSIVE_ROUND_ERROR}`
     });
   }
   if (limit === 1) return oncePerRoundErrorPayload(toolName);
   return JSON.stringify({
     success: false,
-    error: `"${toolName}" can only be called ${limit} time(s) per round. Use results from earlier calls in this round.`,
+    error: `"${toolName}" can only be called ${limit} time(s) per round. Use results from earlier calls in this round.`
   });
 }
 
@@ -120,5 +120,5 @@ module.exports = {
   partitionHandlerToolCalls,
   PER_ROUND_TOOL_LIMITS,
   perRoundCappedDuplicateIds,
-  perRoundCapErrorPayload,
+  perRoundCapErrorPayload
 };

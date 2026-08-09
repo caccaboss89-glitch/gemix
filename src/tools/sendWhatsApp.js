@@ -18,7 +18,7 @@ const { createLogger } = require('../utils/logger');
 const {
   resolveOutboundAttachments,
   alreadyContactedError,
-  recordOutbound,
+  recordOutbound
 } = require('./outboundDelivery');
 
 const log = createLogger('SendWhatsApp');
@@ -57,7 +57,7 @@ function _sentRecipient(target) {
   return {
     phone: digits || null,
     email: member ? member.email || null : null,
-    display: target.display || (digits ? `+${digits}` : 'unknown'),
+    display: target.display || (digits ? `+${digits}` : 'unknown')
   };
 }
 
@@ -83,7 +83,7 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
   if (contacted) return contacted;
 
   const { attachments, missingNote } = await resolveOutboundAttachments(
-    args.attachments, responseCtx, userCtx,
+    args.attachments, responseCtx, userCtx
   );
   const text = stripOutgoingDeliveryArtifacts(args.message);
 
@@ -92,7 +92,7 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
     channel: 'whatsapp',
     recipient: _sentRecipient(target),
     text,
-    attachments,
+    attachments
   });
 
   let textSent = false;
@@ -108,7 +108,7 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
       const result = await sendAttachmentsWithFallback(
         attachments,
         (att) => sendWhatsAppAttachment(att, (media, options) => sendWhatsAppDirect(target.jid, media, options)),
-        { platform: PLATFORM.WHATSAPP },
+        { platform: PLATFORM.WHATSAPP }
       );
       log.info(`WhatsApp delivery: ${result.sent.length} direct, ${result.linkFallback.length} via link`);
 
@@ -122,14 +122,14 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
       }
       counts = [
         result.sent.length > 0 ? ` with ${result.sent.length} attachment(s)` : '',
-        result.linkFallback.length > 0 ? ` (${result.linkFallback.length} via links)` : '',
+        result.linkFallback.length > 0 ? ` (${result.linkFallback.length} via links)` : ''
       ].join('');
     }
 
     audit();
     return {
       success: true,
-      message: `WhatsApp message sent successfully to ${target.display}${counts}.${missingNote}`,
+      message: `WhatsApp message sent successfully to ${target.display}${counts}.${missingNote}`
     };
   } catch (err) {
     // The text may already be out: log it so read_sent_messages still shows it.

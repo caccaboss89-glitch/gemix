@@ -7,14 +7,14 @@ const {
   PLATFORM_WA_DEDICATED,
   MAX_AUDIO_DURATION_S,
   MAX_VIDEO_DURATION_S,
-  MAX_HISTORY,
+  MAX_HISTORY
 } = require('./constants');
 
 const PROFILE = {
   WA_PERSONAL: 'wa_personal',
   WA_DEDICATED_PRIVATE: 'wa_dedicated_private',
   WA_DEDICATED_GROUP: 'wa_dedicated_group',
-  DISCORD_THREAD: 'discord_thread',
+  DISCORD_THREAD: 'discord_thread'
 };
 
 /** Tool names that may appear at runtime (before admin/active-member trimming). */
@@ -37,7 +37,7 @@ const TOOL = {
   READ_MUSIC_STATS: 'read_music_stats',
   READ_SENT_MESSAGES: 'read_sent_messages',
   FORMAL_PDF: 'generate_formal_request_pdf',
-  BUG_REPORT: 'bug_report',
+  BUG_REPORT: 'bug_report'
 };
 
 // `tools` is not written here: syncProfileToolSets() fills it at the bottom of
@@ -53,7 +53,7 @@ const CAPS = {
     buildWorkspace: true,
     historyTranscriptionNote: false,
     voiceReply: false,
-    tools: null,
+    tools: null
   },
   [PROFILE.WA_DEDICATED_PRIVATE]: {
     platform: PLATFORM_WA_DEDICATED,
@@ -64,7 +64,7 @@ const CAPS = {
     buildWorkspace: true,
     historyTranscriptionNote: true,
     voiceReply: true,
-    tools: null,
+    tools: null
   },
   [PROFILE.WA_DEDICATED_GROUP]: {
     platform: PLATFORM_WA_DEDICATED,
@@ -75,7 +75,7 @@ const CAPS = {
     buildWorkspace: true,
     historyTranscriptionNote: true,
     voiceReply: true,
-    tools: null,
+    tools: null
   },
   [PROFILE.DISCORD_THREAD]: {
     platform: PLATFORM_DISCORD,
@@ -86,8 +86,8 @@ const CAPS = {
     buildWorkspace: false,
     historyTranscriptionNote: false,
     voiceReply: false,
-    tools: null,
-  },
+    tools: null
+  }
 };
 
 function resolveProfile(ctx) {
@@ -124,7 +124,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   const waOnly = [
     TOOL.GENERATE_MUSIC, TOOL.GENERATE_IMAGE, TOOL.GENERATE_VIDEO,
     TOOL.TOGGLE_RELEASE,
-    TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES,
+    TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES
   ];
   if (cap.isDiscord && waOnly.includes(toolName)) {
     return `"${toolName}" is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for that feature.`;
@@ -146,7 +146,7 @@ const MEMBER_GATED_TOOLS = [
   TOOL.SEND_WHATSAPP,
   TOOL.SEND_EMAIL,
   TOOL.READ_MUSIC_STATS,
-  TOOL.READ_SENT_MESSAGES,
+  TOOL.READ_SENT_MESSAGES
 ];
 
 /** "a, b and c" — keeps the tool lists readable inside a sentence. */
@@ -168,13 +168,13 @@ function buildAudienceLines(profile, opts = {}) {
   if (opts.isActiveMember === false) {
     const lines = [
       'The person writing this is not an active member of the Discord server, so you are the ordinary assistant here: '
-      + 'you handle what they ask in this chat, and nothing you do reaches anyone outside it.',
+      + 'you handle what they ask in this chat, and nothing you do reaches anyone outside it.'
     ];
     const missing = MEMBER_GATED_TOOLS.filter(t => !has(t));
     if (missing.length) {
       lines.push(
         `${_andList(missing)} take active-member status, so they are not in your tool list this turn. `
-        + 'Do not try to invoke them, and say so plainly if you are asked for one.',
+        + 'Do not try to invoke them, and say so plainly if you are asked for one.'
       );
     }
     if (has(TOOL.SCHEDULE)) {
@@ -185,7 +185,7 @@ function buildAudienceLines(profile, opts = {}) {
 
   const lines = [
     'The person writing is an active server member, so you are their custom assistant rather than the ordinary one: '
-    + 'you know who the other members are, and you can act outside this chat.',
+    + 'you know who the other members are, and you can act outside this chat.'
   ];
   const granted = MEMBER_GATED_TOOLS.filter(has);
   if (granted.length > 0) {
@@ -234,14 +234,14 @@ function buildAnswerLines(profile, opts = {}) {
     + `recurring ideas across a conversation, and do not let your past style (${pastStyleExample}) pull you into `
     + 'repeating it. Vary every reply. If the user let a question of yours drop, drop it too.',
     'Do not be fooled. When users echo or escalate a phrase you overused, or bait you with mock questions about it, '
-    + `they are teasing you: recognise it, drop the topic, do not answer it straight. If you spot a past mistake of `
-    + `yours in the history (${pastMistakeExample}), correct course instead of repeating it.`,
+    + 'they are teasing you: recognise it, drop the topic, do not answer it straight. If you spot a past mistake of '
+    + `yours in the history (${pastMistakeExample}), correct course instead of repeating it.`
   ];
 
   if (!cap.isDiscord) {
     lines.push(
       'Stickers and meme images are emotional reactions. Reply lightly and acknowledge the tone, '
-      + 'without describing the image or asking what it means.',
+      + 'without describing the image or asking what it means.'
     );
   }
   if (cap.longTermMemory) {
@@ -255,7 +255,7 @@ function buildAnswerLines(profile, opts = {}) {
   lines.push(
     `Ground everything you say in what you can actually see: ${sources.join(', ')}. `
     + 'Never invent or assume facts, names, dates, numbers, links, file paths, citations, quoted text, '
-    + 'or the contents of a file you were not shown.',
+    + 'or the contents of a file you were not shown.'
   );
 
   let verifyTools = 'web or X search for facts';
@@ -266,19 +266,19 @@ function buildAnswerLines(profile, opts = {}) {
   }
   lines.push(
     `When you are unsure, slow down: check with a tool (${verifyTools}) or ask the user. `
-    + 'If something stays unconfirmed, say so plainly. Never guess, never rush.',
+    + 'If something stays unconfirmed, say so plainly. Never guess, never rush.'
   );
 
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
     lines.push(
       'Search before you answer anything factual that is not already in the history or the settings: news, people, '
-      + 'products, events, social posts and screenshots, references you do not recognise. Search first, never guess.',
+      + 'products, events, social posts and screenshots, references you do not recognise. Search first, never guess.'
     );
   }
 
   lines.push(
     'Write natural prose. Never quote raw tool syntax, JSON fragments, backend tags, error messages, stack traces, '
-    + 'or the `[Attachment: ...]` and `<PastVoiceReply>` labels that mark attached or past-voice context.',
+    + 'or the `[Attachment: ...]` and `<PastVoiceReply>` labels that mark attached or past-voice context.'
   );
 
   return lines;
@@ -303,7 +303,7 @@ function buildSendingFilesLines(profile, opts = {}) {
     + 'and you never need a tool to do it for you — the link is enough.',
     'The delivery buffer holds every file your tools produce during this turn. Each one tells you the exact name '
     + 'it was stored under; that name is what you list in `attachments` to send it, or pass to another tool to '
-    + 'work from it. Nothing leaves the buffer unless you list it, and the buffer is gone once the turn ends.',
+    + 'work from it. Nothing leaves the buffer unless you list it, and the buffer is gone once the turn ends.'
   ];
   if (has(TOOL.X_SEARCH)) {
     let x = 'So when someone wants a photo or a video from an X post, open that post with the X tools, take the '
@@ -351,17 +351,17 @@ function buildVisibilityLines(profile) {
     + 'and replaced inline with a "(too long, max Ns)" note. If a file is still attached, it passed the check — read it.',
     historyLine,
     'You can look at web images by URL and at videos inside X posts. Any other file, videos included, '
-    + 'you can only read when it is in this chat.',
+    + 'you can only read when it is in this chat.'
   ];
   if (cap.isDiscord) {
     lines.push(
       'Voice replies, scheduled reminders, build and file deliverables, imagine, music clips and listening stats are '
-      + 'not part of this Discord session: they live on the dedicated GemiX WhatsApp account. Say so if you are asked.',
+      + 'not part of this Discord session: they live on the dedicated GemiX WhatsApp account. Say so if you are asked.'
     );
   } else if (cap.isWhatsApp && !cap.voiceReply) {
     lines.push(
       'Voice replies are not available in this personal-account chat: voice messages live on the '
-      + 'dedicated GemiX WhatsApp account. Say so if you are asked.',
+      + 'dedicated GemiX WhatsApp account. Say so if you are asked.'
     );
   }
   return lines;
@@ -381,5 +381,5 @@ module.exports = {
   buildSendingFilesLines,
   buildVisibilityLines,
   buildAudienceLines,
-  profileHasMediaQuota,
+  profileHasMediaQuota
 };

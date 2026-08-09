@@ -37,7 +37,7 @@ const { createLogger } = require('../utils/logger');
 const {
   notifyAdmin,
   ADMIN_NOTIFIED_SUFFIX,
-  ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT,
+  ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT
 } = require('../utils/adminNotifier');
 const log = createLogger('Tools');
 
@@ -76,7 +76,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       if (validationError) {
         return {
           toolCallId: toolCall.id,
-          result: JSON.stringify({ success: false, error: validationError }),
+          result: JSON.stringify({ success: false, error: validationError })
         };
       }
     }
@@ -93,195 +93,195 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
 
     switch (name) {
-      case 'web_image_search': {
-        result = await searchImages(args);
-        break;
-      }
+    case 'web_image_search': {
+      result = await searchImages(args);
+      break;
+    }
 
-      case 'generate_image': {
-        if (typeof userCtx.sendIntermediateNotification === 'function') {
-          await userCtx.sendIntermediateNotification(
-            'image_gen',
-            '🎨 Sto generando l\'immagine, attendi un attimo...',
-          );
-        }
-        result = await generateImage(args, userCtx, responseCtx);
-        break;
+    case 'generate_image': {
+      if (typeof userCtx.sendIntermediateNotification === 'function') {
+        await userCtx.sendIntermediateNotification(
+          'image_gen',
+          '🎨 Sto generando l\'immagine, attendi un attimo...'
+        );
       }
+      result = await generateImage(args, userCtx, responseCtx);
+      break;
+    }
 
-      case 'generate_video': {
-        if (typeof userCtx.sendIntermediateNotification === 'function') {
-          await userCtx.sendIntermediateNotification(
-            'video_gen',
-            '🎬 Sto generando il video (può richiedere qualche minuto), attendi un attimo...',
-          );
-        }
-        result = await generateVideo(args, userCtx, responseCtx);
-        break;
+    case 'generate_video': {
+      if (typeof userCtx.sendIntermediateNotification === 'function') {
+        await userCtx.sendIntermediateNotification(
+          'video_gen',
+          '🎬 Sto generando il video (può richiedere qualche minuto), attendi un attimo...'
+        );
       }
+      result = await generateVideo(args, userCtx, responseCtx);
+      break;
+    }
 
-      case 'build': {
-        // Fire the "delegating to build team" banner once per AI call.
-        if (typeof userCtx.sendIntermediateNotification === 'function') {
-          const { buildEngineeringNotificationMessage } = require('../utils/notificationDedup');
-          await userCtx.sendIntermediateNotification('build', buildEngineeringNotificationMessage());
-        }
-        result = await buildTool(args, userCtx, responseCtx);
-        break;
+    case 'build': {
+      // Fire the "delegating to build team" banner once per AI call.
+      if (typeof userCtx.sendIntermediateNotification === 'function') {
+        const { buildEngineeringNotificationMessage } = require('../utils/notificationDedup');
+        await userCtx.sendIntermediateNotification('build', buildEngineeringNotificationMessage());
       }
+      result = await buildTool(args, userCtx, responseCtx);
+      break;
+    }
 
-      case 'schedule_tasks': {
-        const taskCtx = {
-          taskFileId: userCtx.taskFileId,
-          groupTaskFileId: userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null,
-          userId: userCtx.userId,
-          userName: userCtx.userName,
-          waJid: userCtx.waJid,
-          isActiveMember: userCtx.isActiveMember,
-          isAdmin: userCtx.isAdmin,
-          isGroup: userCtx.isGroup,
-          groupId: userCtx.groupId,
-        };
-        result = await scheduleTasks(args.tasks, taskCtx);
-        break;
-      }
+    case 'schedule_tasks': {
+      const taskCtx = {
+        taskFileId: userCtx.taskFileId,
+        groupTaskFileId: userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null,
+        userId: userCtx.userId,
+        userName: userCtx.userName,
+        waJid: userCtx.waJid,
+        isActiveMember: userCtx.isActiveMember,
+        isAdmin: userCtx.isAdmin,
+        isGroup: userCtx.isGroup,
+        groupId: userCtx.groupId
+      };
+      result = await scheduleTasks(args.tasks, taskCtx);
+      break;
+    }
 
-      case 'read_my_tasks': {
-        const groupFileId = userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null;
-        const includeGroup = Boolean(args.includeGroupTasks) && Boolean(userCtx.isGroup)
+    case 'read_my_tasks': {
+      const groupFileId = userCtx.isGroup ? getGroupTaskFileId(userCtx.groupId) : null;
+      const includeGroup = Boolean(args.includeGroupTasks) && Boolean(userCtx.isGroup)
           && isWhatsAppPlatform(userCtx.platform);
-        if (args.includeGroupTasks && !includeGroup) {
-          result = { success: false, error: 'includeGroupTasks not available: only in WhatsApp groups.' };
-          break;
-        }
-        result = await readTasks(userCtx.taskFileId, groupFileId, includeGroup, {
-          isAdmin: userCtx.isAdmin,
-          isActiveMember: userCtx.isActiveMember,
-          waJid: userCtx.waJid,
+      if (args.includeGroupTasks && !includeGroup) {
+        result = { success: false, error: 'includeGroupTasks not available: only in WhatsApp groups.' };
+        break;
+      }
+      result = await readTasks(userCtx.taskFileId, groupFileId, includeGroup, {
+        isAdmin: userCtx.isAdmin,
+        isActiveMember: userCtx.isActiveMember,
+        waJid: userCtx.waJid
+      });
+      break;
+    }
+
+    case 'remove_my_tasks': {
+      const allowGroup = Boolean(userCtx.isGroup) && isWhatsAppPlatform(userCtx.platform);
+      if (args.fromGroup && !allowGroup) {
+        result = {
+          success: false,
+          error: 'fromGroup is only available in WhatsApp group chats. Remove tasks from your personal task file instead.'
+        };
+        break;
+      }
+      const fileId = args.fromGroup && allowGroup
+        ? getGroupTaskFileId(userCtx.groupId)
+        : userCtx.taskFileId;
+      result = await removeTasks(args.taskIds, fileId);
+      break;
+    }
+
+    case 'generate_formal_request_pdf': {
+      try {
+        const formalPdfBuffer = await generateFormalRequestPdf({
+          fullName: args.fullName,
+          title: args.title,
+          motivation: args.motivation,
+          requesterSignature: args.requesterSignature,
+          legalSignature: args.legalSignature
         });
-        break;
-      }
-
-      case 'remove_my_tasks': {
-        const allowGroup = Boolean(userCtx.isGroup) && isWhatsAppPlatform(userCtx.platform);
-        if (args.fromGroup && !allowGroup) {
-          result = {
-            success: false,
-            error: 'fromGroup is only available in WhatsApp group chats. Remove tasks from your personal task file instead.',
-          };
-          break;
-        }
-        const fileId = args.fromGroup && allowGroup
-          ? getGroupTaskFileId(userCtx.groupId)
-          : userCtx.taskFileId;
-        result = await removeTasks(args.taskIds, fileId);
-        break;
-      }
-
-      case 'generate_formal_request_pdf': {
-        try {
-          const formalPdfBuffer = await generateFormalRequestPdf({
-            fullName: args.fullName,
-            title: args.title,
-            motivation: args.motivation,
-            requesterSignature: args.requesterSignature,
-            legalSignature: args.legalSignature,
-          });
-          const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
-          const formalFinalName = pushBufferAttachment(responseCtx, {
-            name: formalFileName,
-            buffer: formalPdfBuffer,
-            mimetype: 'application/pdf',
-          });
-          result = {
-            success: true,
-            filename: formalFinalName,
-            message: `Formal request PDF generated successfully and pushed to the delivery buffer as "${formalFinalName}".`,
-          };
-        } catch (err) {
-          await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
-          result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
-        }
-        break;
-      }
-
-      case 'send_email': {
-        result = await sendEmailTool(args, userCtx, responseCtx, deliveryCtx);
-        break;
-      }
-
-      case 'send_whatsapp_message': {
-        result = await sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx);
-        break;
-      }
-
-      case 'read_music_stats': {
-        result = await readMusicStats();
-        break;
-      }
-
-      case 'read_video': {
-        // May return content parts (text + the input_file for the clip) so the
-        // deferred history video is watchable this round.
-        result = await readVideo(args, userCtx);
-        break;
-      }
-
-      case 'read_sent_messages': {
-        // May return an array of content parts (text + recovered attachment
-        // previews) so any files sent earlier are viewable this round.
-        result = await readSentMessages(args, userCtx);
-        break;
-      }
-
-      case 'manage_preferences': {
-        result = await managePreferences(args, userCtx.settingsFileId);
-        break;
-      }
-
-      case 'generate_music': {
-        if (!args.prompt) {
-          result = { success: false, error: 'Missing prompt parameter in tool call arguments.' };
-          break;
-        }
-        const musicResult = await musicCreator(args.prompt, userCtx);
-        if (musicResult.attachments && musicResult.attachments.length > 0) {
-          // Every buffered file must be named back, or the model cannot send it.
-          const filenames = musicResult.attachments.map(att => pushBufferAttachment(responseCtx, att));
-          result = {
-            success: true,
-            filename: filenames[0],
-            message: `Song generated successfully and pushed to the delivery buffer as `
-              + `${filenames.map(f => `"${f}"`).join(', ')}.`,
-          };
-        } else {
-          result = musicResult.toolResult;
-        }
-        break;
-      }
-
-      case 'toggle_release_notify': {
-        const chatId = userCtx.chatId || userCtx.groupId || userCtx.waJid;
-        const waJid = userCtx.isGroup ? userCtx.groupId : (userCtx.waJid || (userCtx.member ? userCtx.member.wa : null));
-        result = await toggleReleaseNotify(Boolean(args.enabled), chatId, waJid);
-        break;
-      }
-      case 'bug_report': {
-        const bugDescription = String(args.description || '').trim().slice(0, 600);
-        if (!bugDescription) {
-          result = { success: false, error: 'Missing required argument "description".' };
-          break;
-        }
-        await notifyAdmin('Bug Report', bugDescription);
+        const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
+        const formalFinalName = pushBufferAttachment(responseCtx, {
+          name: formalFileName,
+          buffer: formalPdfBuffer,
+          mimetype: 'application/pdf'
+        });
         result = {
           success: true,
-          message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT}`,
+          filename: formalFinalName,
+          message: `Formal request PDF generated successfully and pushed to the delivery buffer as "${formalFinalName}".`
         };
+      } catch (err) {
+        await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
+        result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+      }
+      break;
+    }
+
+    case 'send_email': {
+      result = await sendEmailTool(args, userCtx, responseCtx, deliveryCtx);
+      break;
+    }
+
+    case 'send_whatsapp_message': {
+      result = await sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx);
+      break;
+    }
+
+    case 'read_music_stats': {
+      result = await readMusicStats();
+      break;
+    }
+
+    case 'read_video': {
+      // May return content parts (text + the input_file for the clip) so the
+      // deferred history video is watchable this round.
+      result = await readVideo(args, userCtx);
+      break;
+    }
+
+    case 'read_sent_messages': {
+      // May return an array of content parts (text + recovered attachment
+      // previews) so any files sent earlier are viewable this round.
+      result = await readSentMessages(args, userCtx);
+      break;
+    }
+
+    case 'manage_preferences': {
+      result = await managePreferences(args, userCtx.settingsFileId);
+      break;
+    }
+
+    case 'generate_music': {
+      if (!args.prompt) {
+        result = { success: false, error: 'Missing prompt parameter in tool call arguments.' };
         break;
       }
+      const musicResult = await musicCreator(args.prompt, userCtx);
+      if (musicResult.attachments && musicResult.attachments.length > 0) {
+        // Every buffered file must be named back, or the model cannot send it.
+        const filenames = musicResult.attachments.map(att => pushBufferAttachment(responseCtx, att));
+        result = {
+          success: true,
+          filename: filenames[0],
+          message: 'Song generated successfully and pushed to the delivery buffer as '
+              + `${filenames.map(f => `"${f}"`).join(', ')}.`
+        };
+      } else {
+        result = musicResult.toolResult;
+      }
+      break;
+    }
 
-      default:
-        result = { success: false, error: `Tool "${name}" not recognized.` };
+    case 'toggle_release_notify': {
+      const chatId = userCtx.chatId || userCtx.groupId || userCtx.waJid;
+      const waJid = userCtx.isGroup ? userCtx.groupId : (userCtx.waJid || (userCtx.member ? userCtx.member.wa : null));
+      result = await toggleReleaseNotify(Boolean(args.enabled), chatId, waJid);
+      break;
+    }
+    case 'bug_report': {
+      const bugDescription = String(args.description || '').trim().slice(0, 600);
+      if (!bugDescription) {
+        result = { success: false, error: 'Missing required argument "description".' };
+        break;
+      }
+      await notifyAdmin('Bug Report', bugDescription);
+      result = {
+        success: true,
+        message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT}`
+      };
+      break;
+    }
+
+    default:
+      result = { success: false, error: `Tool "${name}" not recognized.` };
     }
   } catch (err) {
     log.error(`   Unhandled tool error (${name}): ${err.message}`, err.stack);
@@ -301,5 +301,5 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 }
 
 module.exports = {
-  executeTool,
+  executeTool
 };

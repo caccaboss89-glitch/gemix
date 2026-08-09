@@ -2,10 +2,13 @@
   "name": "gemix",
   "version": "2.1.6",
   "description": "GemiX - AI Bot multipiattaforma WhatsApp & Discord",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "discord.js": "^14.16.3",
@@ -18,5 +21,9 @@
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "github:lindionez/whatsapp-web.js#ea60403",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "eslint": "^10.8.1",
+    "globals": "^17.9.0"
   }
 }

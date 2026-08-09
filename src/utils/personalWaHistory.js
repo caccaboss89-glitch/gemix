@@ -16,7 +16,7 @@ const { hasFooter, hasScheduledFooter } = require('./footer');
 const { isSystemMessage } = require('../config/systemMessages');
 const {
   attachmentFilenameHints,
-  stripRedundantAttachmentCaption,
+  stripRedundantAttachmentCaption
 } = require('./attachmentCaption');
 const { resolveIngressFilename } = require('./attachmentFilenames');
 
@@ -102,5 +102,5 @@ function buildPersonalGemixFlags(messages) {
 }
 
 module.exports = {
-  buildPersonalGemixFlags,
+  buildPersonalGemixFlags
 };

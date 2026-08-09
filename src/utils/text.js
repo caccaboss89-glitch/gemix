@@ -322,7 +322,7 @@ function cleanAssistantResponse(text) {
  * @returns {string}
  */
 function formatLabeledUserContent(timestampMs, senderName, textBody) {
-  if (textBody == null || !String(textBody).trim()) return textBody || '';
+  if (textBody === null || textBody === undefined || !String(textBody).trim()) return textBody || '';
   const { formatTimestamp } = require('./time');
   const ts = formatTimestamp(timestampMs);
   const name = (senderName || 'Unknown').trim() || 'Unknown';
@@ -369,5 +369,5 @@ module.exports = {
   cleanIncomingText,
   formatLabeledUserContent,
   REPLY_OUTSIDE_HISTORY_PREFIX,
-  REPLY_CHAIN_TRUNCATED_PREFIX,
+  REPLY_CHAIN_TRUNCATED_PREFIX
 };

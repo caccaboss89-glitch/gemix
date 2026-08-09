@@ -41,7 +41,7 @@ function initPersonalWhatsApp() {
     clientId: 'personal',
     log,
     messageEvent: 'message_create',
-    onMessage: onPersonalMessage,
+    onMessage: onPersonalMessage
   });
   return client;
 }
@@ -113,10 +113,10 @@ async function onPersonalMessage(msg) {
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_PERSONAL,
-    userId: phoneJid,
+    userId: phoneJid
   });
 
-  log.info(`\nIncoming message`);
+  log.info('\nIncoming message');
   log.info(`   User: ${userName}${msg.fromMe ? ' (YOU)' : ''}`);
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
@@ -132,7 +132,7 @@ async function onPersonalMessage(msg) {
     entry: { msg, chat, userName, phoneJid, userIdentity, messageKey },
     handler: _handlePersonalBatch,
     log,
-    discardLogLabel: chat.id._serialized,
+    discardLogLabel: chat.id._serialized
   });
   if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);
@@ -168,7 +168,7 @@ async function _handlePersonalBatch(entries) {
       chat,
       platform: PLATFORM_WA_PERSONAL,
       isGroup: false,
-      log,
+      log
     }),
     loadHistory: async ({ entries: ents }) => {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
@@ -178,10 +178,10 @@ async function _handlePersonalBatch(entries) {
           chat,
           PLATFORM_WA_PERSONAL,
           historyStorageId,
-          excludeKeys.size > 0 ? excludeKeys : null,
+          excludeKeys.size > 0 ? excludeKeys : null
         ),
         log,
-        'WA-PERSONAL',
+        'WA-PERSONAL'
       );
     },
     prepareSession: async () => {
@@ -195,7 +195,7 @@ async function _handlePersonalBatch(entries) {
         chat,
         historyStorageId,
         isGroup: false,
-        platform: PLATFORM_WA_PERSONAL,
+        platform: PLATFORM_WA_PERSONAL
       });
       const lat = latestEntry || latest || ents[0];
       const personalOtherUserName = await resolvePersonalChatOtherName(chat);
@@ -213,7 +213,7 @@ async function _handlePersonalBatch(entries) {
         history: Array.isArray(history) ? history : [],
         historyLoadIncomplete,
         waJid: lat.phoneJid,
-        presence: waPresence,
+        presence: waPresence
       };
     },
     transformResponse: (response) => {
@@ -231,7 +231,7 @@ async function _handlePersonalBatch(entries) {
     onDeliverError: async () => {
       const { notifyAdmin } = require('../../utils/adminNotifier');
       await notifyAdmin('WA Personal Chat Delivery', `Failed to send response to chat ${chat.id._serialized}`);
-    },
+    }
   });
 }
 

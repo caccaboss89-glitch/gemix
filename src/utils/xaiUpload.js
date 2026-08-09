@@ -47,7 +47,7 @@ async function _uploadBuffer(buffer, displayName, mimetype) {
     const res = await fetch(UPLOAD_URL, {
       method: 'POST',
       body: form,
-      signal: controller.signal,
+      signal: controller.signal
     });
     if (!res.ok) {
       throw new Error(`upload failed: HTTP ${res.status}`);
@@ -101,7 +101,7 @@ async function uploadFileForXai(absPath, displayName, mimetype, opts = {}) {
       mtimeMs: freshStat.mtimeMs,
       size: freshStat.size,
       url,
-      uploadedAt: Date.now(),
+      uploadedAt: Date.now()
     });
     log.info(`Uploaded for xAI: ${path.basename(displayName)} (${freshStat.size} bytes)${forceRefresh ? ' (refreshed)' : ''}`);
     return url;

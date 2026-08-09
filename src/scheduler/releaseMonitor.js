@@ -51,7 +51,7 @@ const HTML_IMG_SRC_RE = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*\/?>/gi;
 const MARKDOWN_IMG_RE = /!\[.*?\]\((https?:\/\/[^)\s]+)\)/g;
 const MARKDOWN_AUDIO_RE = new RegExp(
   `\\[([^\\]]+\\.${AUDIO_FILE_EXT})\\]\\((https?:\\/\\/[^)\\s]+)\\)`,
-  'gi',
+  'gi'
 );
 
 const EXT_AUDIO_MIME = {
@@ -63,7 +63,7 @@ const EXT_AUDIO_MIME = {
   m4a: 'audio/mp4',
   aac: 'audio/aac',
   flac: 'audio/flac',
-  webm: 'audio/webm',
+  webm: 'audio/webm'
 };
 
 /**
@@ -135,7 +135,7 @@ function _parseReleaseBody(body) {
   for (const img of _extractHtmlImageSources(body)) addImage(img.url, img.name);
   for (const track of _extractMarkdownAudioLinks(body)) addAudio(track.url, track.name);
 
-  let cleanBody = body
+  const cleanBody = body
     .replace(MARKDOWN_IMG_RE, '')
     .replace(HTML_IMG_SRC_RE, '')
     .replace(MARKDOWN_AUDIO_RE, '')
@@ -204,13 +204,13 @@ async function checkNewRelease(waClient) {
     const authHeaders = {
       Authorization: `Bearer ${GITHUB_TOKEN}`,
       Accept: 'application/vnd.github+json',
-      'User-Agent': 'GemiX-Bot',
+      'User-Agent': 'GemiX-Bot'
     };
 
     const res = await fetchWithTimeout(
       `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
       { headers: authHeaders },
-      15_000,
+      15_000
     );
 
     if (!res.ok) {
@@ -244,7 +244,7 @@ async function checkNewRelease(waClient) {
 
     const seenUrls = new Set([
       ...inlineImages.map(i => i.url),
-      ...inlineAudio.map(a => a.url),
+      ...inlineAudio.map(a => a.url)
     ]);
 
     const assetImages = [];
@@ -279,7 +279,7 @@ async function checkNewRelease(waClient) {
     const mediaCount = imageMediaItems.length + audioMediaItems.length;
     if (mediaCount > 0) {
       log.info(
-        `${imageMediaItems.length} image(s), ${audioMediaItems.length} audio file(s) for release ${title}`,
+        `${imageMediaItems.length} image(s), ${audioMediaItems.length} audio file(s) for release ${title}`
       );
     }
 

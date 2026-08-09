@@ -12,7 +12,7 @@ const { uploadFileForXai } = require('./xaiUpload');
 const {
   classifyAiFileDelivery,
   DELIVERY_MODE,
-  resolveHistoryAbsPath,
+  resolveHistoryAbsPath
 } = require('./aiFileDelivery');
 
 const log = createLogger('XaiUrlRefresh');
@@ -34,7 +34,7 @@ function _partHasUrl(part) {
 }
 
 function _resolveAbsPathForPart(part, storageId, tagPaths, usedTagIndices) {
-  let absPath = typeof part._xaiSourcePath === 'string' ? part._xaiSourcePath : null;
+  const absPath = typeof part._xaiSourcePath === 'string' ? part._xaiSourcePath : null;
   if (absPath && fs.existsSync(absPath)) return absPath;
 
   if (storageId && tagPaths.length > 0) {

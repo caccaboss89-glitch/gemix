@@ -56,7 +56,7 @@ async function resolvePublicUrlAttachment(url, existing = []) {
     dl = {
       filePath: disk.filePath,
       mimetype: disk.mimetype,
-      filename: disk.filename,
+      filename: disk.filename
     };
   }
 
@@ -79,7 +79,7 @@ function createExternalUrlAttachment(url, existing = []) {
   return {
     name,
     mimetype: mimeForExtension(ext),
-    externalUrl: clean,
+    externalUrl: clean
   };
 }
 
@@ -199,7 +199,7 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
     attachments.push({
       name: uniqueAttachmentName(attachments, local.name),
       filePath: local.filePath,
-      mimetype: mimeForExtension(path.extname(local.name)),
+      mimetype: mimeForExtension(path.extname(local.name))
     });
   }
 
@@ -209,5 +209,5 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
 module.exports = {
   resolveDeliverySelection,
   resolveLocalFileEntry,
-  resolveUrlEntry,
+  resolveUrlEntry
 };

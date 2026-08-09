@@ -20,7 +20,7 @@ const {
   VIDEO_GEN_RESOLUTION,
   BUILD_WORKSPACE_TTL_LABEL,
   BUILD_WORKSPACE_QUOTA_MB,
-  isWhatsAppPlatform,
+  isWhatsAppPlatform
 } = require('../config/constants');
 const { LEGAL_NAME } = require('../config/env');
 const {
@@ -29,16 +29,16 @@ const {
   VOICES_MALE,
   VOICES_FEMALE,
   VALID_EFFORTS,
-  VALID_LANGUAGES,
+  VALID_LANGUAGES
 } = require('../utils/settingsStore');
 const {
   DEFAULT_COUNT: WEB_IMAGE_SEARCH_DEFAULT_COUNT,
   MIN_COUNT: WEB_IMAGE_SEARCH_MIN_COUNT,
-  MAX_COUNT: WEB_IMAGE_SEARCH_MAX_COUNT,
+  MAX_COUNT: WEB_IMAGE_SEARCH_MAX_COUNT
 } = require('../tools/imageSearch');
 const {
   MAX_REF_IMAGES_FOR_IMAGE,
-  MAX_REF_IMAGES_FOR_VIDEO,
+  MAX_REF_IMAGES_FOR_VIDEO
 } = require('../tools/imagineGenerator');
 
 // -- Helpers -------------------------------------------------------------
@@ -51,9 +51,9 @@ function makeTool({ name, description, properties = {}, required = [] }) {
       description,
       parameters: {
         type: 'object',
-        properties,
-      },
-    },
+        properties
+      }
+    }
   };
   if (required.length > 0) {
     tool.function.parameters.required = required;
@@ -72,13 +72,13 @@ function makeTool({ name, description, properties = {}, required = [] }) {
 function _matchesType(value, schemaType) {
   if (!schemaType) return true; // unconstrained property
   switch (schemaType) {
-    case 'string': return typeof value === 'string';
-    case 'number': return typeof value === 'number' && Number.isFinite(value);
-    case 'integer': return typeof value === 'number' && Number.isInteger(value);
-    case 'boolean': return typeof value === 'boolean';
-    case 'array': return Array.isArray(value);
-    case 'object': return value !== null && typeof value === 'object' && !Array.isArray(value);
-    default: return true;
+  case 'string': return typeof value === 'string';
+  case 'number': return typeof value === 'number' && Number.isFinite(value);
+  case 'integer': return typeof value === 'number' && Number.isInteger(value);
+  case 'boolean': return typeof value === 'boolean';
+  case 'array': return Array.isArray(value);
+  case 'object': return value !== null && typeof value === 'object' && !Array.isArray(value);
+  default: return true;
   }
 }
 
@@ -208,14 +208,14 @@ const TOOL_WEB_SEARCH_NATIVE = {
   // Turning enable_image_search on also injects a `search_images` tool and a
   // `render_searched_image` component (verified by probe), so it is not a
   // free-standing switch.
-  enable_image_search: false,
+  enable_image_search: false
 };
 
 const TOOL_X_SEARCH_NATIVE = {
   type: 'x_search',
   limit: 5,
   enable_image_understanding: true,
-  enable_video_understanding: true,
+  enable_video_understanding: true
 };
 
 // -- Static tool definitions (schema never varies) -------------------------
@@ -231,16 +231,16 @@ const TOOL_WEB_IMAGE_SEARCH = makeTool({
   properties: {
     query: {
       type: 'string',
-      description: 'Image search query.',
+      description: 'Image search query.'
     },
     count: {
       type: 'integer',
       description:
         `How many image results to return (${WEB_IMAGE_SEARCH_MIN_COUNT}–${WEB_IMAGE_SEARCH_MAX_COUNT}, `
-        + `default ${WEB_IMAGE_SEARCH_DEFAULT_COUNT}).`,
-    },
+        + `default ${WEB_IMAGE_SEARCH_DEFAULT_COUNT}).`
+    }
   },
-  required: ['query'],
+  required: ['query']
 });
 
 const TOOL_READ_VIDEO = makeTool({
@@ -253,16 +253,16 @@ const TOOL_READ_VIDEO = makeTool({
   properties: {
     filename: {
       type: 'string',
-      description: 'Exact filename from the [Attachment: ...] tag in this chat. Not a URL: videos hosted elsewhere on the web cannot be opened.',
-    },
+      description: 'Exact filename from the [Attachment: ...] tag in this chat. Not a URL: videos hosted elsewhere on the web cannot be opened.'
+    }
   },
-  required: ['filename'],
+  required: ['filename']
 });
 
 const TOOL_READ_MUSIC_STATS = makeTool({
   name: 'read_music_stats',
   description: 'Read music listening statistics.',
-  properties: {},
+  properties: {}
 });
 
 function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
@@ -281,17 +281,17 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
         enum: VALID_VOICES,
         description: `Voice used for spoken replies (default ${defaults.voice}). `
           + `Male: ${VOICES_MALE.join(', ')}. Female: ${VOICES_FEMALE.join(', ')}. `
-          + 'Pick the one matching the gender and character the user asks for.',
+          + 'Pick the one matching the gender and character the user asks for.'
       },
       effort: {
         type: 'string',
         enum: VALID_EFFORTS,
-        description: `How much reasoning you spend per reply (default ${defaults.effort}): low = fastest, high = most thorough.`,
+        description: `How much reasoning you spend per reply (default ${defaults.effort}): low = fastest, high = most thorough.`
       },
       language: {
         type: 'string',
         enum: VALID_LANGUAGES,
-        description: `Language you reply and speak in (default ${defaults.language}). Main codes: it, en, es-ES, fr, de, pt-BR, zh, ja, ru, ar-SA.`,
+        description: `Language you reply and speak in (default ${defaults.language}). Main codes: it, en, es-ES, fr, de, pt-BR, zh, ja, ru, ar-SA.`
       },
       memory: {
         type: 'string',
@@ -299,13 +299,13 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
         description: 'Free-text custom instructions, for anything not covered by the fields above: '
           + 'e.g. speak with a certain slang, use lots of emoji, always prefer text or voice replies, or what the user is working on in this period '
           + '(ideas/projects that stay relevant for days, weeks or months — never a one-off question or transient context). '
-          + `Max 1000 chars, always in English; empty resets it to the default. Do not write timestamps: the system tracks them.`,
+          + 'Max 1000 chars, always in English; empty resets it to the default. Do not write timestamps: the system tracks them.'
       },
       replace: {
         type: 'boolean',
-        description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.',
-      },
-    },
+        description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.'
+      }
+    }
   });
 }
 
@@ -315,10 +315,10 @@ const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
   properties: {
     enabled: {
       type: 'boolean',
-      description: 'true=enable, false=disable',
-    },
+      description: 'true=enable, false=disable'
+    }
   },
-  required: ['enabled'],
+  required: ['enabled']
 });
 
 const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
@@ -329,9 +329,9 @@ const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
     title: { type: 'string', description: 'Request title' },
     motivation: { type: 'string', description: 'Detailed and well-argued motivation' },
     requesterSignature: { type: 'string', description: 'Requester signature' },
-    legalSignature: { type: 'string', description: `Legal advisor signature ("${LEGAL_NAME}" if requested by him in person, or "Nessuno")` },
+    legalSignature: { type: 'string', description: `Legal advisor signature ("${LEGAL_NAME}" if requested by him in person, or "Nessuno")` }
   },
-  required: ['fullName', 'title', 'motivation', 'requesterSignature'],
+  required: ['fullName', 'title', 'motivation', 'requesterSignature']
 });
 
 const TOOL_GENERATE_MUSIC = makeTool({
@@ -340,10 +340,10 @@ const TOOL_GENERATE_MUSIC = makeTool({
   properties: {
     prompt: {
       type: 'string',
-      description: 'Detailed description of style, instruments, and mood.',
-    },
+      description: 'Detailed description of style, instruments, and mood.'
+    }
   },
-  required: ['prompt'],
+  required: ['prompt']
 });
 
 // -- Grok Imagine - image and video generation ---------------------------
@@ -364,7 +364,7 @@ const TOOL_GENERATE_IMAGE = makeTool({
       type: 'string',
       description:
         'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them '
-        + 'ALWAYS as <IMAGE_0>, <IMAGE_1>, … in array order - never by filename.',
+        + 'ALWAYS as <IMAGE_0>, <IMAGE_1>, … in array order - never by filename.'
     },
     reference_images: {
       type: 'array',
@@ -372,15 +372,15 @@ const TOOL_GENERATE_IMAGE = makeTool({
       description:
         `Up to ${MAX_REF_IMAGES_FOR_IMAGE}. Each entry: filename with extension from the delivery buffer or chat history, `
         + 'or a public https URL. Order matters (<IMAGE_0> = first). 1 = edit/transform; 2+ = combine or style transfer. '
-        + 'Omit for pure text-to-image.',
+        + 'Omit for pure text-to-image.'
     },
     aspect_ratio: {
       type: 'string',
       enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
-      description: 'Aspect ratio for pure text-to-image. Omit for automatic. Ignored with reference images (output follows the input image).',
-    },
+      description: 'Aspect ratio for pure text-to-image. Omit for automatic. Ignored with reference images (output follows the input image).'
+    }
   },
-  required: ['prompt'],
+  required: ['prompt']
 });
 
 const TOOL_GENERATE_VIDEO = makeTool({
@@ -389,22 +389,22 @@ const TOOL_GENERATE_VIDEO = makeTool({
   properties: {
     prompt: {
       type: 'string',
-      description: 'Video description: subject, action, camera movement, style, lighting. When passing reference images, refer to them ALWAYS as <IMAGE_0>, <IMAGE_1>, ... in array order - never by filename.',
+      description: 'Video description: subject, action, camera movement, style, lighting. When passing reference images, refer to them ALWAYS as <IMAGE_0>, <IMAGE_1>, ... in array order - never by filename.'
     },
     reference_images: {
       type: 'array',
       items: { type: 'string' },
       description:
         `Up to ${MAX_REF_IMAGES_FOR_VIDEO}. Each entry: filename with extension from the delivery buffer or chat history, `
-        + 'or a public https URL. 1 = animate as first frame; 2+ = style/subject guides. Omit for pure text-to-video.',
+        + 'or a public https URL. 1 = animate as first frame; 2+ = style/subject guides. Omit for pure text-to-video.'
     },
     aspect_ratio: {
       type: 'string',
       enum: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'],
-      description: 'Aspect ratio. Default 16:9. With a single reference image, omit to respect the input image.',
-    },
+      description: 'Aspect ratio. Default 16:9. With a single reference image, omit to respect the input image.'
+    }
   },
-  required: ['prompt'],
+  required: ['prompt']
 });
 
 // -- Dynamic tool builders (schema varies by grade/platform) -------------
@@ -414,7 +414,7 @@ const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string' },
   description:
-    'OPTIONAL. Same entry types as reply attachments: buffer/history filename or direct https file URL. Omit if none.',
+    'OPTIONAL. Same entry types as reply attachments: buffer/history filename or direct https file URL. Omit if none.'
 };
 
 function buildWhatsAppTool(isAdmin) {
@@ -425,12 +425,12 @@ function buildWhatsAppTool(isAdmin) {
   if (isAdmin) {
     recipientProps.phone = {
       type: 'string',
-      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user. Required — external number only.',
+      description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user. Required — external number only.'
     };
   } else {
     recipientProps.name = {
       type: 'string',
-      description: 'Recipient active member name (not yourself).',
+      description: 'Recipient active member name (not yourself).'
     };
   }
 
@@ -442,16 +442,16 @@ function buildWhatsAppTool(isAdmin) {
         ? 'Target recipient (phone). Required — external number only; never the current chat.'
         : 'Target active member. Required — never the current chat.',
       properties: recipientProps,
-      required: isAdmin ? ['phone'] : ['name'],
+      required: isAdmin ? ['phone'] : ['name']
     },
-    attachments: DELIVERY_ATTACHMENTS_PROP,
+    attachments: DELIVERY_ATTACHMENTS_PROP
   };
 
   return makeTool({
     name: 'send_whatsapp_message',
     description: 'Delivery tool — send a message to a specific phone number. Never for intermediate updates in the current chat. Start by saying on whose behalf you\'re writing. Messages can end up in spam, so suggest the user check there if needed.',
     properties,
-    required: ['recipient', 'message'],
+    required: ['recipient', 'message']
   });
 }
 
@@ -460,12 +460,12 @@ function buildEmailTool(isAdmin) {
   if (isAdmin) {
     recipientProps.email = {
       type: 'string',
-      description: 'Recipient email address, from the ActiveMembers roster or given by the user.',
+      description: 'Recipient email address, from the ActiveMembers roster or given by the user.'
     };
   } else {
     recipientProps.name = {
       type: 'string',
-      description: 'Member name (email resolved from name)',
+      description: 'Member name (email resolved from name)'
     };
   }
 
@@ -475,15 +475,15 @@ function buildEmailTool(isAdmin) {
       type: 'string',
       description: 'HTML body (no markdown), rendered as real HTML by the mail client — inline CSS styling, tables and colors are supported. '
         + 'To show an image INSIDE the body, list it in attachments[] and reference it as &lt;img src="cid:FILENAME"&gt; with its exact filename; '
-        + 'files not referenced this way are sent as normal attachments.',
+        + 'files not referenced this way are sent as normal attachments.'
     },
     recipient: {
       type: 'object',
       description: isAdmin ? 'Target recipient (email).' : 'Recipient',
       properties: recipientProps,
-      required: isAdmin ? ['email'] : ['name'],
+      required: isAdmin ? ['email'] : ['name']
     },
-    attachments: DELIVERY_ATTACHMENTS_PROP,
+    attachments: DELIVERY_ATTACHMENTS_PROP
   };
 
   return makeTool({
@@ -493,7 +493,7 @@ function buildEmailTool(isAdmin) {
       + 'To review what GemiX already sent on their behalf, use read_sent_messages. '
       + 'If on behalf of someone else, start by saying on whose behalf you\'re writing.',
     properties,
-    required: ['recipient', 'subject', 'body'],
+    required: ['recipient', 'subject', 'body']
   });
 }
 
@@ -514,27 +514,27 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       properties: {
         phone: {
           type: 'string',
-          description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user.',
-        },
-      },
+          description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user.'
+        }
+      }
     };
   } else {
     if (isWhatsAppGroup) {
       waProps.toGroup = {
         type: 'boolean',
-        description: 'Send this reminder to the current group.',
+        description: 'Send this reminder to the current group.'
       };
     }
 
     if (isActiveMember) {
       waProps.toPrivate = {
         type: 'boolean',
-        description: 'Send this reminder as a private message (to recipient if set, otherwise to the current user).',
+        description: 'Send this reminder as a private message (to recipient if set, otherwise to the current user).'
       };
     } else if (isWhatsAppGroup) {
       waProps.toPrivate = {
         type: 'boolean',
-        description: 'Deliver as a private DM to you instead of in the group.',
+        description: 'Deliver as a private DM to you instead of in the group.'
       };
     }
 
@@ -548,9 +548,9 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
         properties: {
           name: {
             type: 'string',
-            description: 'Active member name to remind.',
-          },
-        },
+            description: 'Active member name to remind.'
+          }
+        }
       };
     }
   }
@@ -571,11 +571,11 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   const taskItemProps = {
     content: {
       type: 'string',
-      description: contentDesc,
+      description: contentDesc
     },
     scheduledAt: {
       type: 'string',
-      description: 'Execution time in ISO 8601 (e.g. 2026-06-05T14:30:00). System uses the correct timezone.',
+      description: 'Execution time in ISO 8601 (e.g. 2026-06-05T14:30:00). System uses the correct timezone.'
     },
     repeat: {
       type: 'string',
@@ -584,8 +584,8 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
         + 'BYDAY=MO,TU,WE,TH,FR,SA,SU (weekly only), UNTIL=YYYY-MM-DDTHH:MM:SS (default: the 1-year limit), '
         + 'EXDATE=YYYY-MM-DD,… (dates to skip). '
         + 'Examples: "FREQ=DAILY;INTERVAL=2" every 2 days; "FREQ=WEEKLY;BYDAY=MO,FR" every Monday and Friday; '
-        + '"FREQ=MONTHLY;INTERVAL=3;EXDATE=2026-12-25" every 3 months except that date.',
-    },
+        + '"FREQ=MONTHLY;INTERVAL=3;EXDATE=2026-12-25" every 3 months except that date.'
+    }
   };
 
   if (canTargetOthers || isWhatsAppGroup) {
@@ -598,7 +598,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
             ? 'Destination. Omit = current group. For a private reminder set toPrivate; add recipient to send it to someone else (without recipient it goes to the current user).'
             : 'Destination. Omit = current chat. To remind someone else, set toPrivate and add recipient.')
           : 'Omit = current group. Set toPrivate for a reminder to you only (private DM).'),
-      properties: waProps,
+      properties: waProps
     };
   }
 
@@ -615,11 +615,11 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
         items: {
           type: 'object',
           properties: taskItemProps,
-          required: ['content', 'scheduledAt'],
-        },
-      },
+          required: ['content', 'scheduledAt']
+        }
+      }
     },
-    required: ['tasks'],
+    required: ['tasks']
   });
 }
 
@@ -628,13 +628,13 @@ function buildReadMyTasksTool(isWhatsAppGroup) {
   if (isWhatsAppGroup) {
     properties.includeGroupTasks = {
       type: 'boolean',
-      description: 'Include group tasks',
+      description: 'Include group tasks'
     };
   }
   return makeTool({
     name: 'read_my_tasks',
     description: 'Show scheduled reminders.',
-    properties,
+    properties
   });
 }
 
@@ -643,20 +643,20 @@ function buildRemoveMyTasksTool(isWhatsAppGroup) {
     taskIds: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Task IDs to remove',
-    },
+      description: 'Task IDs to remove'
+    }
   };
   if (isWhatsAppGroup) {
     properties.fromGroup = {
       type: 'boolean',
-      description: 'Remove from group instead of personal',
+      description: 'Remove from group instead of personal'
     };
   }
   return makeTool({
     name: 'remove_my_tasks',
     description: 'Remove scheduled reminders.',
     properties,
-    required: ['taskIds'],
+    required: ['taskIds']
   });
 }
 
@@ -672,16 +672,16 @@ function buildReadSentMessagesTool(isAdmin) {
       channel: {
         type: 'string',
         enum: ['whatsapp', 'email', 'both'],
-        description: 'Which channel to inspect. Omit or use "both" to include both.',
+        description: 'Which channel to inspect. Omit or use "both" to include both.'
       },
       recipients: {
         type: 'array',
         items: { type: 'string' },
         description: isAdmin
           ? 'OPTIONAL filter, any mix of phone numbers (with country code, e.g. +393XXXXXXXXX) and/or email addresses, from the ActiveMembers roster or given by the user. A phone matches WhatsApp messages, an email matches email messages. Omit to list every recipient.'
-          : 'OPTIONAL filter by active member name(s) — mapped to their WhatsApp number and email. Omit to list every recipient.',
-      },
-    },
+          : 'OPTIONAL filter by active member name(s) — mapped to their WhatsApp number and email. Omit to list every recipient.'
+      }
+    }
   });
 }
 
@@ -691,10 +691,10 @@ const TOOL_BUG_REPORT = makeTool({
   properties: {
     description: {
       type: 'string',
-      description: 'Brief but clear description of the problem (what failed, where, and any relevant context).',
-    },
+      description: 'Brief but clear description of the problem (what failed, where, and any relevant context).'
+    }
   },
-  required: ['description'],
+  required: ['description']
 });
 
 // -- Build sub-agent (build tool) ------------------------------------
@@ -719,16 +719,16 @@ function buildBuildTool(isGroup) {
     properties: {
       prompt: {
         type: 'string',
-        description: 'Brief for the sub-agent: deliverable, format, naming, and constraints.',
+        description: 'Brief for the sub-agent: deliverable, format, naming, and constraints.'
       },
       attachments: {
         type: 'array',
         items: { type: 'string' },
         description:
-          'Each entry: buffer/history filename or public https URL. Omit if already in workspace or not needed.',
-      },
+          'Each entry: buffer/history filename or public https URL. Omit if already in workspace or not needed.'
+      }
     },
-    required: ['prompt'],
+    required: ['prompt']
   });
 }
 
@@ -822,7 +822,7 @@ function syncProfileToolSets(caps, profileEnum) {
     if (!cap) continue;
     const tools = getToolsForUser(true, false, {
       platform: cap.platform,
-      isGroup: Boolean(cap.isGroup),
+      isGroup: Boolean(cap.isGroup)
     });
     cap.tools = toolNamesToSet(tools);
   }
@@ -849,5 +849,5 @@ module.exports = {
   getToolAccessError,
   syncProfileToolSets,
   toolNamesToSet,
-  validateToolArgs,
+  validateToolArgs
 };

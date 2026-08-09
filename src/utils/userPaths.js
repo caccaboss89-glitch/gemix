@@ -95,5 +95,5 @@ module.exports = {
   resolveSettingsFileId,
   resolveStorageId,
   getUserRoot,
-  getHistoryDir,
+  getHistoryDir
 };

@@ -46,5 +46,5 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) 
 
 module.exports = {
   enqueueBatchedTurn,
-  peekPendingBatchLastEntry,
+  peekPendingBatchLastEntry
 };

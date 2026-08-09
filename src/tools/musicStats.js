@@ -19,7 +19,7 @@ const { MUSIC_STATS_URL } = require('../config/env');
 async function readMusicStats() {
   try {
     const res = await fetchExternal(MUSIC_STATS_URL, {
-      headers: { 'User-Agent': 'GemiX-MusicStats/1.0' },
+      headers: { 'User-Agent': 'GemiX-MusicStats/1.0' }
     }, 'Music Stats');
 
     if (!res.ok) {

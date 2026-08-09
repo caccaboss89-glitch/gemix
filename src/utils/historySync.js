@@ -222,8 +222,8 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
     ...target.entry,
     voiceTranscription: {
       text: String(text).trim(),
-      updatedAt: Date.now(),
-    },
+      updatedAt: Date.now()
+    }
   };
   return _saveMeta(metaFile, meta, userId);
 }
@@ -300,7 +300,7 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     }
 
     // Sanitize name: remove leading dots for security, keep alphanumerics
-    let cleanName = sanitizeFilename(originalName || 'file').replace(/^\.+/, '') || 'file';
+    const cleanName = sanitizeFilename(originalName || 'file').replace(/^\.+/, '') || 'file';
 
     const extMatch = cleanName.match(/\.([^.]+)$/);
     const ext = extMatch ? `.${extMatch[1]}` : '';
@@ -501,5 +501,5 @@ module.exports = {
   forgetRecentVoiceText,
   pruneHistory,
   collectReferencedHistoryFilenames,
-  DISCORD_MAX_AGE_MS,
+  DISCORD_MAX_AGE_MS
 };

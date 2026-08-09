@@ -40,7 +40,7 @@ function initDedicatedWhatsApp() {
     log,
     messageEvent: 'message',
     onMessage: onDedicatedMessage,
-    onReady: (c) => setDedicatedClient(c),
+    onReady: (c) => setDedicatedClient(c)
   });
   return client;
 }
@@ -79,7 +79,7 @@ async function onDedicatedMessage(msg) {
     // the open debounce batch (mention is only on the first album item).
     const albumContinuation = isPendingAlbumContinuation(
       msg,
-      peekPendingBatchLastEntry(batchKey),
+      peekPendingBatchLastEntry(batchKey)
     );
     // The privacy wipe command has to work everywhere, so it comes through
     // without a mention. It never starts an AI call (see privacyGate).
@@ -102,12 +102,12 @@ async function onDedicatedMessage(msg) {
 
   const userIdentity = identifyUser({
     platform: PLATFORM_WA_DEDICATED,
-    userId: phoneJid,
+    userId: phoneJid
   });
 
   log.debug(`   JID: ${senderJid} -> phoneJid: ${phoneJid}`);
 
-  log.info(`\nIncoming message`);
+  log.info('\nIncoming message');
   log.info(`   User: ${userName}${isGroup ? ` (Group: ${chat.name})` : ''}`);
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
@@ -120,11 +120,11 @@ async function onDedicatedMessage(msg) {
   const status = enqueueBatchedTurn({
     batchKey,
     entry: {
-      msg, chat, senderJid, userName, phoneJid, userIdentity, isGroup, messageKey,
+      msg, chat, senderJid, userName, phoneJid, userIdentity, isGroup, messageKey
     },
     handler: _handleDedicatedBatch,
     log,
-    discardLogLabel: chat.id._serialized,
+    discardLogLabel: chat.id._serialized
   });
   if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);
@@ -151,7 +151,7 @@ async function _handleDedicatedBatch(entries) {
       chat,
       platform: PLATFORM_WA_DEDICATED,
       isGroup,
-      log,
+      log
     }),
     loadHistory: async ({ entries: ents }) => {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
@@ -161,10 +161,10 @@ async function _handleDedicatedBatch(entries) {
           chat,
           PLATFORM_WA_DEDICATED,
           historyUserId,
-          excludeKeys.size > 0 ? excludeKeys : null,
+          excludeKeys.size > 0 ? excludeKeys : null
         ),
         log,
-        'WA-DEDICATED',
+        'WA-DEDICATED'
       );
     },
     prepareSession: async () => {
@@ -178,7 +178,7 @@ async function _handleDedicatedBatch(entries) {
         chat,
         historyStorageId: historyUserId,
         isGroup,
-        platform: PLATFORM_WA_DEDICATED,
+        platform: PLATFORM_WA_DEDICATED
       });
       const lat = latestEntry || latest || ents[0];
       let groupParticipants = null;
@@ -203,7 +203,7 @@ async function _handleDedicatedBatch(entries) {
         history: Array.isArray(history) ? history : [],
         historyLoadIncomplete,
         waJid: lat.phoneJid,
-        presence: waPresence,
+        presence: waPresence
       };
     },
     deliver: async (_ctx, response) => {
@@ -212,7 +212,7 @@ async function _handleDedicatedBatch(entries) {
     onDeliverError: async () => {
       const { notifyAdmin } = require('../../utils/adminNotifier');
       await notifyAdmin('WA Dedicated Chat Delivery', `Failed to send response to chat ${chat.id._serialized}`);
-    },
+    }
   });
 }
 

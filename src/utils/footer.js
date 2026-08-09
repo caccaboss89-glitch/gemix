@@ -92,7 +92,7 @@ function buildScheduledFooter(createdAt) {
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit',
+    minute: '2-digit'
   });
   return `${GEMIX_FOOTER_PREFIX}Messaggio Programmato il ${formatted}`;
 }
@@ -145,5 +145,5 @@ module.exports = {
   hasScheduledFooter,
   removeScheduledFooter,
   buildResearchBadgeText,
-  appendResearchBadge,
+  appendResearchBadge
 };

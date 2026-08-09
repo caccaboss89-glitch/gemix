@@ -58,5 +58,5 @@ module.exports = {
   setAdminNotifierClient,
   notifyAdmin,
   ADMIN_NOTIFIED_SUFFIX,
-  ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT,
+  ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT
 };

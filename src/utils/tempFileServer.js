@@ -26,7 +26,7 @@ const { GEMIX_TEMP_FILE_PORT } = require('../config/env');
 const {
   DATA_DIR,
   TUNNEL_TOKEN_TTL_HISTORY_MS,
-  TUNNEL_TOKEN_TTL_TEMP_MS,
+  TUNNEL_TOKEN_TTL_TEMP_MS
 } = require('../config/constants');
 
 const log = createLogger('TempFileServer');
@@ -96,10 +96,10 @@ function _isAllowedPath(target) {
     const absTarget = path.resolve(target).toLowerCase().replace(/\\/g, '/');
     const absTemp = path.resolve(TEMP_DIR).toLowerCase().replace(/\\/g, '/');
     const absData = path.resolve(DATA_DIR).toLowerCase().replace(/\\/g, '/');
-    
+
     const isUnderTemp = absTarget === absTemp || absTarget.startsWith(absTemp + '/');
     const isUnderData = absTarget === absData || absTarget.startsWith(absData + '/');
-    
+
     return isUnderTemp || isUnderData;
   } catch {
     return false;
@@ -148,7 +148,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
       throw new Error(`File not found: ${filePath}`);
     }
     if (!_isAllowedPath(filePath)) {
-      throw new Error(`Security check failed: path traversal attempt refused`);
+      throw new Error('Security check failed: path traversal attempt refused');
     }
 
     const stat = fs.statSync(filePath);
@@ -175,7 +175,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
       originalName: finalName,
       mimetype,
       disposition,
-      requestCount: 0,
+      requestCount: 0
     });
 
     const publicUrl = getPublicBaseUrl();
@@ -191,7 +191,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
       url,
       expiresAt,
       expiresInMinutes,
-      mimetype,
+      mimetype
     };
   } catch (err) {
     log.error(`Failed to register temp file: ${err.message}`);
@@ -366,7 +366,7 @@ function startTempFileServer() {
           // Discourage search engines and link-preview crawlers from indexing
           // accidentally-leaked links.
           'X-Robots-Tag': 'noindex, nofollow, noarchive',
-          'Referrer-Policy': 'no-referrer',
+          'Referrer-Policy': 'no-referrer'
         });
 
         const stream = fs.createReadStream(filePath);
@@ -415,5 +415,5 @@ module.exports = {
   startTempFileServer,
   registerTempFile,
   tempDirForOwner,
-  TEMP_DIR,
+  TEMP_DIR
 };

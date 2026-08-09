@@ -106,5 +106,5 @@ _cleanupTimer.unref();
 module.exports = {
   markNotifiedInCall,
   clearCallNotifications,
-  buildEngineeringNotificationMessage,
+  buildEngineeringNotificationMessage
 };

@@ -30,9 +30,9 @@ async function fetchHistoryWithTimeout(buildFn, log, label) {
       new Promise((_, reject) => {
         timer = setTimeout(
           () => reject(new Error('History fetch timeout')),
-          HISTORY_FETCH_TIMEOUT_MS,
+          HISTORY_FETCH_TIMEOUT_MS
         );
-      }),
+      })
     ]);
     let history = [];
     let incomplete = false;
@@ -51,5 +51,5 @@ async function fetchHistoryWithTimeout(buildFn, log, label) {
 
 module.exports = {
   fetchHistoryWithTimeout,
-  normalizeHistoryLoad,
+  normalizeHistoryLoad
 };

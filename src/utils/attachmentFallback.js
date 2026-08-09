@@ -12,7 +12,7 @@ const { registerTempFile, TEMP_DIR } = require('./tempFileServer');
 const { createLogger } = require('./logger');
 const {
   TEMP_ATTACHMENT_PREFIX,
-  ATTACHMENT_FALLBACK_FAILED_MESSAGE,
+  ATTACHMENT_FALLBACK_FAILED_MESSAGE
 } = require('../config/systemMessages');
 const { shouldWhatsAppUseTempLink, readAttachmentBuffer, uniqueAttachmentName } = require('./attachments');
 const { partitionAttachments, PLATFORM, hasExternalUrl } = require('./attachmentDelivery');
@@ -28,7 +28,7 @@ function formatExpiryItalian(minutes) {
   if (m < 60) return m === 1 ? '1 minuto' : `${m} minuti`;
   const h = Math.floor(m / 60);
   const rem = m % 60;
-  const hPart = h === 1 ? "un'ora" : `${h} ore`;
+  const hPart = h === 1 ? 'un\'ora' : `${h} ore`;
   if (rem === 0) return hPart;
   const remPart = rem === 1 ? '1 minuto' : `${rem} minuti`;
   return `${hPart} e ${remPart}`;
@@ -73,7 +73,7 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
           url: att.externalUrl.trim(),
           size: 0,
           expiresInMinutes: null,
-          external: true,
+          external: true
         });
         continue;
       }
@@ -104,7 +104,7 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
         token,
         url,
         size: stat.size,
-        expiresInMinutes,
+        expiresInMinutes
       });
 
       totalSize += stat.size;
@@ -127,7 +127,9 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
   const expiryMin = hasHosted
     ? (fallbackLinks.find(l => !l.external)?.expiresInMinutes ?? 60)
     : null;
-  const expiryLabel = expiryMin != null ? formatExpiryItalian(expiryMin) : null;
+  const expiryLabel = expiryMin !== null && expiryMin !== undefined
+    ? formatExpiryItalian(expiryMin)
+    : null;
 
   let messageText = `${TEMP_ATTACHMENT_PREFIX}${allegatiSuffix} non ${disponibiliText} sulla piattaforma.\n\n`;
   if (hasHosted && !hasExternal) {
@@ -158,7 +160,7 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
   return {
     message: messageText,
     fallbackLinks,
-    totalSize,
+    totalSize
   };
 }
 
@@ -187,11 +189,11 @@ async function _createZipArchive(zipPath, entries) {
       fs.copyFileSync(e.path, dest);
     }
     if (process.platform === 'win32') {
-      const psPath = staging.replace(/'/g, "''");
-      const psZip = zipPath.replace(/'/g, "''");
+      const psPath = staging.replace(/'/g, '\'\'');
+      const psZip = zipPath.replace(/'/g, '\'\'');
       await execFileAsync('powershell', [
         '-NoProfile', '-Command',
-        `Compress-Archive -Path '${psPath}\\*' -DestinationPath '${psZip}' -Force`,
+        `Compress-Archive -Path '${psPath}\\*' -DestinationPath '${psZip}' -Force`
       ], { timeout: 120000 });
     } else {
       const stagedPaths = entries.map(e => path.join(staging, e.name));
@@ -220,7 +222,7 @@ async function bundleWhatsAppTempLinkAttachments(attachments) {
     if (!p) { passthrough.push(att); continue; }
     const name = uniqueAttachmentName(
       usedNames.map(n => ({ name: n })),
-      att.name || path.basename(p),
+      att.name || path.basename(p)
     );
     usedNames.push(name);
     entries.push({ path: p, name });
@@ -235,7 +237,7 @@ async function bundleWhatsAppTempLinkAttachments(attachments) {
       log.info(`Bundled ${entries.length} WhatsApp temp-link attachment(s) into ${WA_BUNDLE_ZIP_NAME}`);
       return [
         ...passthrough,
-        { name: WA_BUNDLE_ZIP_NAME, mimetype: 'application/zip', filePath: zipPath },
+        { name: WA_BUNDLE_ZIP_NAME, mimetype: 'application/zip', filePath: zipPath }
       ];
     }
   } catch (err) {
@@ -268,7 +270,7 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
     sent: [],
     linkFallback: [],
     fallbackMessage: null,
-    fallbackLinks: [],
+    fallbackLinks: []
   };
 
   let toTry = attachments;
@@ -331,5 +333,5 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
 
 module.exports = {
   buildFallbackAttachmentMessage,
-  sendAttachmentsWithFallback,
+  sendAttachmentsWithFallback
 };

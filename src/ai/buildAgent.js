@@ -10,14 +10,14 @@ const {
   BUILD_HARD_TIMEOUT_MS,
   BUILD_MAX_ROUNDS,
   BUILD_WORKSPACE_QUOTA_MB,
-  BUILD_WORKSPACE_TTL_LABEL,
+  BUILD_WORKSPACE_TTL_LABEL
 } = require('../config/constants');
 const { renewBuildLock } = require('../utils/buildState');
 const {
   listWorkspaceFiles,
   ensureWorkspaceWritable,
   normalizeWorkspaceRelPath,
-  resolveWorkspaceDeliveryFile,
+  resolveWorkspaceDeliveryFile
 } = require('../sandbox/buildWorkspace');
 const buildSandbox = require('../sandbox/buildSandbox');
 const { getRomeTime } = require('../utils/time');
@@ -54,7 +54,7 @@ function buildGrokRules({ renamedAttachments, stagedNames, externalUrls } = {}) 
     'Use your built-in Grok skills and tools as needed.',
     'IMPORTANT delivery contract: after you finish, the host harvests new/modified files under /workspace/ (and may harvest all files on a successful no-change run, e.g. resend). Write a clear free-text summary of what you did and what files matter; GemiX-Main will select what to send the user.',
     'If GemiX-Main only asks to send/resend files already present: confirm they are under /workspace/ (do not recreate them unless missing) and reply briefly — the host harvests them and forwards to GemiX-Main automatically; you do not list JSON attachments.',
-    'Language: write documents in the user\'s language (Italian default). No emojis in your reply or generated files unless the brief asks for them.',
+    'Language: write documents in the user\'s language (Italian default). No emojis in your reply or generated files unless the brief asks for them.'
   ];
 
   if (Array.isArray(stagedNames) && stagedNames.length > 0) {
@@ -69,7 +69,7 @@ function buildGrokRules({ renamedAttachments, stagedNames, externalUrls } = {}) 
   if (Array.isArray(externalUrls) && externalUrls.length > 0) {
     lines.push(
       'These inputs are only available as public URLs (too large to stage). Download them into /workspace/ if needed: '
-      + externalUrls.join(' | '),
+      + externalUrls.join(' | ')
     );
   }
   return lines.join('\n');
@@ -153,7 +153,7 @@ function buildBuildToolPayload({ agentMessage, delivered }) {
   return {
     message,
     delivery_note: DELIVERY_SELECTION_NOTICE,
-    delivered: list,
+    delivered: list
   };
 }
 
@@ -176,7 +176,7 @@ async function runBuildAgent({
   externalUrls,
   lockOwnerId,
   getToken,
-  execGrok,
+  execGrok
 } = {}) {
   const startedAt = Date.now();
   ensureWorkspaceWritable(workspaceId);
@@ -193,7 +193,7 @@ async function runBuildAgent({
       error: `Cannot load xAI credentials for build: ${err.message}`,
       roundsUsed: 0,
       delivered: [],
-      delivery_note: DELIVERY_SELECTION_NOTICE,
+      delivery_note: DELIVERY_SELECTION_NOTICE
     };
   }
   if (typeof token !== 'string' || !token.trim()) {
@@ -202,7 +202,7 @@ async function runBuildAgent({
       error: 'Cannot load xAI credentials for build: empty token.',
       roundsUsed: 0,
       delivered: [],
-      delivery_note: DELIVERY_SELECTION_NOTICE,
+      delivery_note: DELIVERY_SELECTION_NOTICE
     };
   }
 
@@ -229,7 +229,7 @@ async function runBuildAgent({
       token: token.trim(),
       baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
       timeoutMs: BUILD_HARD_TIMEOUT_MS,
-      maxTurns: BUILD_MAX_ROUNDS,
+      maxTurns: BUILD_MAX_ROUNDS
     });
   } catch (err) {
     clearInterval(renewIv);
@@ -240,7 +240,7 @@ async function runBuildAgent({
       error: `Grok Build failed to start or run: ${err.message}`,
       roundsUsed: 0,
       delivered: partial,
-      delivery_note: DELIVERY_SELECTION_NOTICE,
+      delivery_note: DELIVERY_SELECTION_NOTICE
     };
   } finally {
     clearInterval(renewIv);
@@ -269,7 +269,7 @@ async function runBuildAgent({
 
   const payload = buildBuildToolPayload({
     agentMessage,
-    delivered: deliveredPaths,
+    delivered: deliveredPaths
   });
 
   const durationMs = Date.now() - startedAt;
@@ -277,7 +277,7 @@ async function runBuildAgent({
   if (!execOk) {
     log.warn(
       `build failed: rc=${execResult.rc} timedOut=${execResult.timedOut} `
-      + `files=${deliveredPaths.length} durationMs=${durationMs} stderr=${stderr.slice(0, 400)}`,
+      + `files=${deliveredPaths.length} durationMs=${durationMs} stderr=${stderr.slice(0, 400)}`
     );
     return {
       success: false,
@@ -290,12 +290,12 @@ async function runBuildAgent({
       roundsUsed: 1,
       timed_out: Boolean(execResult.timedOut),
       exit_code: execResult.rc,
-      duration_ms: durationMs,
+      duration_ms: durationMs
     };
   }
 
   log.info(
-    `build finished: rc=${execResult.rc} files=${deliveredPaths.length} durationMs=${durationMs}`,
+    `build finished: rc=${execResult.rc} files=${deliveredPaths.length} durationMs=${durationMs}`
   );
   return {
     success: true,
@@ -305,12 +305,12 @@ async function runBuildAgent({
     roundsUsed: 1,
     timed_out: false,
     exit_code: execResult.rc,
-    duration_ms: durationMs,
+    duration_ms: durationMs
   };
 }
 
 module.exports = {
   runBuildAgent,
   buildGrokRules,
-  DELIVERY_SELECTION_NOTICE,
+  DELIVERY_SELECTION_NOTICE
 };

@@ -47,7 +47,7 @@ function hostSandboxIds() {
 /** Docker `User` string for container create / exec (fallback 1000:1000 off Linux). */
 function sandboxUserString() {
   const { uid, gid } = hostSandboxIds();
-  if (uid == null || gid == null) return '1000:1000';
+  if (uid === null || uid === undefined || gid === null || gid === undefined) return '1000:1000';
   return `${uid}:${gid}`;
 }
 
@@ -62,7 +62,7 @@ function ensureWorkspaceWritable(workspaceId) {
   if (process.platform !== 'linux') return;
 
   const { uid, gid } = hostSandboxIds();
-  if (uid == null || gid == null) return;
+  if (uid === null || uid === undefined || gid === null || gid === undefined) return;
 
   const isRoot = process.getuid && process.getuid() === 0;
 
@@ -349,7 +349,7 @@ function resolveWorkspaceDeliveryFile(workspaceId, wsRel) {
 
   const baseLower = path.basename(normalized).toLowerCase();
   const caseMatches = files.filter(
-    f => path.basename(f.relPath).normalize('NFC').toLowerCase() === baseLower,
+    f => path.basename(f.relPath).normalize('NFC').toLowerCase() === baseLower
   );
   if (caseMatches.length === 1) return tryRel(caseMatches[0].relPath);
 
@@ -386,5 +386,5 @@ module.exports = {
   wipeWorkspace,
   resolveInsideWorkspace,
   normalizeWorkspaceRelPath,
-  resolveWorkspaceDeliveryFile,
+  resolveWorkspaceDeliveryFile
 };

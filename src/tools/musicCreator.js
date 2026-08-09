@@ -22,7 +22,7 @@ const pendingGenerations = new Set();
 async function callLyriaStreaming(model, apiUrl, body, apiKey) {
   const timeoutMs = 180000;
 
-  let audioChunks = [];
+  const audioChunks = [];
   let buffer = '';
 
   try {
@@ -34,9 +34,9 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
         'HTTP-Referer': OPENROUTER_HTTP_REFERER,
-        'X-Title': 'GemiX Music Tool',
+        'X-Title': 'GemiX Music Tool'
       },
-      body: JSON.stringify({ ...body, stream: true }),
+      body: JSON.stringify({ ...body, stream: true })
     }, timeoutMs);
 
     if (!res.ok) {
@@ -106,9 +106,9 @@ async function musicCreator(prompt, userCtx) {
     return {
       toolResult: {
         success: false,
-        error: 'A music generation is already running for this user. Wait for it to finish before starting another.',
+        error: 'A music generation is already running for this user. Wait for it to finish before starting another.'
       },
-      attachments: [],
+      attachments: []
     };
   }
 
@@ -145,13 +145,13 @@ async function musicCreator(prompt, userCtx) {
       messages: [
         {
           role: 'user',
-          content: [{ type: 'text', text: prompt.trim() }],
-        },
+          content: [{ type: 'text', text: prompt.trim() }]
+        }
       ],
       modalities: ['audio'],
       ...(model.includes('lyria') ? {} : {
-        audio: { voice: 'alloy', format: 'mp3' },
-      }),
+        audio: { voice: 'alloy', format: 'mp3' }
+      })
     };
 
     const result = await callLyriaStreaming(model, apiUrl, body, apiKey);
@@ -169,9 +169,9 @@ async function musicCreator(prompt, userCtx) {
         return {
           toolResult: {
             success: false,
-            error: `Music generated but WhatsApp audio conversion failed: ${err.message}`,
+            error: `Music generated but WhatsApp audio conversion failed: ${err.message}`
           },
-          attachments: [],
+          attachments: []
         };
       }
       const filename = `song_${Date.now()}.ogg`;
@@ -180,7 +180,7 @@ async function musicCreator(prompt, userCtx) {
 
       return {
         toolResult: { success: true },
-        attachments: [{ name: filename, buffer, mimetype: 'audio/ogg', sendAudioAsVoice: true }],
+        attachments: [{ name: filename, buffer, mimetype: 'audio/ogg', sendAudioAsVoice: true }]
       };
     }
 
@@ -188,9 +188,9 @@ async function musicCreator(prompt, userCtx) {
     return {
       toolResult: {
         success: false,
-        error: 'Music generation did not return audio. Try again with a different prompt.',
+        error: 'Music generation did not return audio. Try again with a different prompt.'
       },
-      attachments: [],
+      attachments: []
     };
 
   } catch (err) {
@@ -199,9 +199,9 @@ async function musicCreator(prompt, userCtx) {
     return {
       toolResult: {
         success: false,
-        error: `Music generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}`,
+        error: `Music generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}`
       },
-      attachments: [],
+      attachments: []
     };
   } finally {
     await quota.release();

@@ -32,7 +32,7 @@ const { callAI } = require('./ai/aiProvider');
 const {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
-  promptToolsFingerprint,
+  promptToolsFingerprint
 } = require('./ai/systemPrompt');
 const { getToolsForUser, getToolAccessError } = require('./ai/tools');
 const { buildGemixResponseFormat, parseStructuredReply } = require('./ai/responseSchema');
@@ -49,7 +49,7 @@ const {
   PLATFORM_WA_DEDICATED,
   MAINTENANCE_ADMIN_ONLY,
   MAINTENANCE_USER_MESSAGE,
-  MAINTENANCE_RELEASE_NOTIFY_COMMAND,
+  MAINTENANCE_RELEASE_NOTIFY_COMMAND
 } = require('./config/constants');
 const { MAINTENANCE_MODE } = require('./config/env');
 const { createLogger } = require('./utils/logger');
@@ -71,14 +71,14 @@ const {
   partitionHandlerToolCalls,
   perRoundCappedDuplicateIds,
   perRoundCapErrorPayload,
-  PER_ROUND_TOOL_LIMITS,
+  PER_ROUND_TOOL_LIMITS
 } = require('./utils/toolCallExecution');
 const { sendIntermediateNotification } = require('./utils/intermediateNotification');
 const {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
-  GROK_CREDIT_EXHAUSTED_MESSAGE,
+  GROK_CREDIT_EXHAUSTED_MESSAGE
 } = require('./config/systemMessages');
 const { isGrokCreditExhaustedError } = require('./ai/apiClient');
 const { clearCallNotifications } = require('./utils/notificationDedup');
@@ -120,7 +120,7 @@ function buildMaintenanceReleaseAlreadyEnabledMessage() {
 
 function _toolNotAvailableMessage(toolName, ctx) {
   return toolUnavailableMessage(toolName, resolveProfile(ctx), {
-    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
+    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember)
   });
 }
 
@@ -135,7 +135,7 @@ async function handleMessage(ctx) {
     discordTitle: '',
     // Accumulated stats from native server-side web/X searches (main brain
     // and build sub-agent) - used for the badge appended to the reply.
-    researchStats: null,
+    researchStats: null
   };
 
   let pruneAfterTurn = null;
@@ -144,7 +144,7 @@ async function handleMessage(ctx) {
     const isActiveMember = ui.isActiveMember;
     const userIsAdmin = Boolean(ui.isAdmin);
     let maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
-    
+
     // Extract command from formatted message: [DATE, TIME] UserName: /command ...
     // Find the LAST colon (after the username) and extract the first token after it
     const lastColonIdx = maintenanceCommand.lastIndexOf(':');
@@ -155,7 +155,7 @@ async function handleMessage(ctx) {
         maintenanceCommand = firstToken;
       }
     }
-    
+
     const releaseNotifyTarget = getReleaseNotifyTarget(ctx, ui);
 
     // -- Maintenance gate --
@@ -181,7 +181,7 @@ async function handleMessage(ctx) {
           attachments: [],
           discordTitle: '',
           modelUsed: null,
-          systemMessage: true,
+          systemMessage: true
         };
       }
       log.info(`   Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
@@ -192,7 +192,7 @@ async function handleMessage(ctx) {
         attachments: [],
         discordTitle: '',
         modelUsed: null,
-        systemMessage: true,
+        systemMessage: true
       };
     }
 
@@ -236,7 +236,7 @@ async function handleMessage(ctx) {
       // Bound helper for tools that want to fire an intermediate notification
       // (e.g. build - "Sto delegando il lavoro al coder agent...").
       // Dedup is enforced per (call, kind) inside sendIntermediateNotification.
-      sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message),
+      sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message)
     };
 
     // ctx.requestId is set here so that sendIntermediateNotification (which
@@ -259,7 +259,7 @@ async function handleMessage(ctx) {
           ctx.userWorkspace = {
             total: listing.total,
             files: listing.files,
-            more: !!listing.more,
+            more: !!listing.more
           };
         }
       } catch (e) {
@@ -275,7 +275,7 @@ async function handleMessage(ctx) {
     const messages = [{
       role: 'system',
       content: staticInstructions,
-      _staticPrefix: true,
+      _staticPrefix: true
     }];
 
     // GemiX voice in history is [Attachment] on assistant (no native audio parts).
@@ -286,7 +286,7 @@ async function handleMessage(ctx) {
       try {
         const { history: patched, replacedCount } = applyPastVoiceRepliesToHistory(
           historyForApi,
-          resolveStorageId(ctx),
+          resolveStorageId(ctx)
         );
         historyForApi = patched;
         if (replacedCount > 0) {
@@ -331,7 +331,7 @@ async function handleMessage(ctx) {
         messages.unshift({
           role: 'system',
           content: staticInstructions,
-          _staticPrefix: true,
+          _staticPrefix: true
         });
       }
     };
@@ -343,7 +343,7 @@ async function handleMessage(ctx) {
           pruneAfterTurn = {
             historyUserId,
             referenced: new Set(),
-            opts: { maxAgeMs: DISCORD_MAX_AGE_MS, ageOnly: true },
+            opts: { maxAgeMs: DISCORD_MAX_AGE_MS, ageOnly: true }
           };
         } else {
           const referenced = collectReferencedHistoryFilenames(ctx.history, ctx.content);
@@ -359,7 +359,7 @@ async function handleMessage(ctx) {
     // enforced upstream by perRoundCappedDuplicateIds).
     const deliveryCtx = {
       contactedWA: new Set(),
-      contactedEmail: new Set(),
+      contactedEmail: new Set()
     };
 
     let rounds = 0;
@@ -415,14 +415,14 @@ async function handleMessage(ctx) {
         return {
           role: 'tool',
           tool_call_id: toolCallId,
-          content: result,
+          content: result
         };
       } catch (toolErr) {
         log.error(`   ❌ Tool error "${tc.function.name}": ${toolErr.message}`);
         return {
           role: 'tool',
           tool_call_id: tc.id,
-          content: JSON.stringify({ success: false, error: `Execution error: ${toolErr.message}` }),
+          content: JSON.stringify({ success: false, error: `Execution error: ${toolErr.message}` })
         };
       }
     };
@@ -463,7 +463,7 @@ async function handleMessage(ctx) {
         modelUsed: lastModelUsed,
         voiceTranscriptText: spoken,
         voiceTranscriptChatId: ctx.chatId || ctx.groupId || null,
-        researchFooter,
+        researchFooter
       };
     };
 
@@ -499,7 +499,7 @@ async function handleMessage(ctx) {
       // omit it so the model cannot rename mid-conversation.
       const responseFormat = buildGemixResponseFormat({
         includeTitle: isDiscord,
-        allowVoice,
+        allowVoice
       });
       const callOpts = {
         maxTurns: MAX_TOOL_ROUNDS,
@@ -507,7 +507,7 @@ async function handleMessage(ctx) {
         responseFormat,
         historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
-        reasoningEffort: ctx.settings?.effort,
+        reasoningEffort: ctx.settings?.effort
       };
 
       const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
@@ -539,20 +539,20 @@ async function handleMessage(ctx) {
             return {
               role: 'tool',
               tool_call_id: tc.id,
-              content: perRoundCapErrorPayload(name, cap),
+              content: perRoundCapErrorPayload(name, cap)
             };
           }
           const toolBlock = getToolAccessError(
             tc.function.name,
             allowedToolNames,
-            (name) => _toolNotAvailableMessage(name, ctx),
+            (name) => _toolNotAvailableMessage(name, ctx)
           );
           if (toolBlock) {
             log.warn(`   Tool "${tc.function.name}" blocked: ${toolBlock}`);
             return {
               role: 'tool',
               tool_call_id: tc.id,
-              content: JSON.stringify({ success: false, error: toolBlock }),
+              content: JSON.stringify({ success: false, error: toolBlock })
             };
           }
           return runToolCall(tc);
@@ -628,8 +628,8 @@ async function handleMessage(ctx) {
         if (emptyOutputRetries < MAX_EMPTY_OUTPUT_RETRIES && rounds < MAX_TOOL_ROUNDS) {
           emptyOutputRetries += 1;
           log.warn(
-            `   Empty model output (no tool call, no structured reply) — one retry `
-            + `(${emptyOutputRetries}/${MAX_EMPTY_OUTPUT_RETRIES})`,
+            '   Empty model output (no tool call, no structured reply) — one retry '
+            + `(${emptyOutputRetries}/${MAX_EMPTY_OUTPUT_RETRIES})`
           );
           if (Array.isArray(assistantMsg._responsesOutput) && assistantMsg._responsesOutput.length > 0) {
             messages.push(assistantMsg);
@@ -639,15 +639,15 @@ async function handleMessage(ctx) {
             content: wrapSystemReminder(
               'Your previous output was empty: no tool call and no structured reply. '
               + 'Immediately call any tools you need (e.g. web_image_search for web photos) '
-              + 'or send a valid structured reply. Never leave the reply empty.',
-            ),
+              + 'or send a valid structured reply. Never leave the reply empty.'
+            )
           });
           continue;
         }
         log.warn(
           emptyOutputRetries > 0
             ? '   Empty AI response after retry, sending fallback'
-            : '   Empty AI response, sending fallback',
+            : '   Empty AI response, sending fallback'
         );
         return {
           text: FALLBACK_ERROR_PREFIX,
@@ -656,7 +656,7 @@ async function handleMessage(ctx) {
           attachments: [],
           discordTitle: responseCtx.discordTitle || '',
           modelUsed: lastModelUsed,
-          systemMessage: true,
+          systemMessage: true
         };
       }
 
@@ -678,7 +678,7 @@ async function handleMessage(ctx) {
         isVoiceOnly: false,
         attachments: finalAttachments,
         discordTitle: responseCtx.discordTitle || '',
-        modelUsed: lastModelUsed,
+        modelUsed: lastModelUsed
       };
     }
 
@@ -701,14 +701,14 @@ async function handleMessage(ctx) {
       }
       const responseFormat = buildGemixResponseFormat({
         includeTitle: isDiscord,
-        allowVoice,
+        allowVoice
       });
       const wrapUpNote = sessionDurationLimitReached
         ? 'This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
       messages.push({
         role: 'user',
-        content: wrapSystemReminder(wrapUpNote),
+        content: wrapSystemReminder(wrapUpNote)
       });
       const { message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
         toolChoice: 'none',
@@ -716,7 +716,7 @@ async function handleMessage(ctx) {
         responseFormat,
         historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
-        reasoningEffort: ctx.settings?.effort,
+        reasoningEffort: ctx.settings?.effort
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
@@ -749,7 +749,7 @@ async function handleMessage(ctx) {
       attachments: wrapUpAttachments,
       discordTitle: responseCtx.discordTitle || '',
       modelUsed: lastModelUsed,
-      systemMessage: !wrapUpText.trim(),
+      systemMessage: !wrapUpText.trim()
     };
 
   } catch (err) {
@@ -769,7 +769,7 @@ async function handleMessage(ctx) {
         attachments: [],
         discordTitle: responseCtx.discordTitle || '',
         modelUsed: null,
-        systemMessage: true,
+        systemMessage: true
       };
     }
 
@@ -784,7 +784,7 @@ async function handleMessage(ctx) {
       attachments: [],
       discordTitle: responseCtx.discordTitle || '',
       modelUsed: null,
-      systemMessage: true,
+      systemMessage: true
     };
   } finally {
     if (pruneAfterTurn) {

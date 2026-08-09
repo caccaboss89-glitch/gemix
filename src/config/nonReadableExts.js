@@ -6,7 +6,7 @@
 // input_file / input_image public URLs (see utils/aiFileDelivery.js).
 
 const NON_READABLE_EXTS = new Set([
-  '.exe', '.dll', '.so', '.bin', '.iso', '.dmg', '.lnk',
+  '.exe', '.dll', '.so', '.bin', '.iso', '.dmg', '.lnk'
 ]);
 
 function isNonReadableExt(ext) {
@@ -16,5 +16,5 @@ function isNonReadableExt(ext) {
 }
 
 module.exports = {
-  isNonReadableExt,
+  isNonReadableExt
 };
