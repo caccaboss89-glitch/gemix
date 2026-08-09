@@ -3,9 +3,9 @@ import globals from 'globals';
 export default [
   {
     ignores: [
+      '.git/',
       '.grok/',
       '.claude/',
-      'graphify-out/',
       'node_modules/',
       '.wwebjs_auth/',
       '.wwebjs_cache/',
