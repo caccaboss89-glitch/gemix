@@ -8,8 +8,8 @@
 import fs from 'fs';
 import path from 'path';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
-import { MAX_API_RETRIES, API_TIMEOUT_MS  } from '../config/constants.js';
-import { XAI_USE_API_KEY  } from '../config/env.js';
+import constants from '../config/constants.js';
+import envConfig from '../config/env.js';
 import { getXaiAuth  } from '../config/xaiAuth.js';
 import { createLogger  } from '../utils/logger.js';
 import { refreshHermesOAuth  } from '../utils/hermesAuthRefresh.js';
@@ -274,11 +274,11 @@ function isGrokCreditExhaustedError(errOrMsg) {
  * @param {object} body - Request body
  * @returns {Promise<Response>} The raw fetch Response
  */
-async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutMs = API_TIMEOUT_MS) {
+async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutMs = constants.API_TIMEOUT_MS) {
   logApiRequest(modelName, apiUrl, body, logExtra);
   let forceTokenReload = false;
   let hermesRefreshAttempted = false;
-  for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= constants.MAX_API_RETRIES; attempt++) {
     let timer;
     const attemptStarted = Date.now();
     try {
@@ -333,7 +333,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         ? `Timeout (request aborted after ${timeoutMs / 1000}s)`
         : err.message;
 
-      if (!XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
+      if (!envConfig.XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
         hermesRefreshAttempted = true;
         try {
           await refreshHermesOAuth();
@@ -348,14 +348,14 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         }
       }
 
-      if (isRetryable && attempt < MAX_API_RETRIES) {
+      if (isRetryable && attempt < constants.MAX_API_RETRIES) {
         const delay = attempt * 3000;
         const waitHint = is429
           ? ' (rate limit — check Retry-After / xAI console for quota reset)'
           : '';
         log.warn(
-          `   API attempt ${attempt}/${MAX_API_RETRIES} failed after ${Math.round(attemptMs / 1000)}s: ${errMsg}`
-          + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${MAX_API_RETRIES}${waitHint}...`
+          `   API attempt ${attempt}/${constants.MAX_API_RETRIES} failed after ${Math.round(attemptMs / 1000)}s: ${errMsg}`
+          + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${constants.MAX_API_RETRIES}${waitHint}...`
         );
         await new Promise(r => setTimeout(r, delay));
         continue;
@@ -395,7 +395,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
  */
 async function callResponsesModel(modelName, body, logExtra = {}) {
   const apiUrl = `${getXaiAuth().baseUrl}/responses`;
-  const timeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : API_TIMEOUT_MS;
+  const timeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : constants.API_TIMEOUT_MS;
   const requestLogExtra = { ...logExtra };
   delete requestLogExtra.timeoutMs;
   const res = await callApiWithRetry(modelName, apiUrl, body, requestLogExtra, timeoutMs);
@@ -442,8 +442,8 @@ async function callResponsesModel(modelName, body, logExtra = {}) {
  * Used by TTS, video poll, and other non-Responses endpoints.
  */
 async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
-  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : API_TIMEOUT_MS;
-  const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : MAX_API_RETRIES;
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : constants.API_TIMEOUT_MS;
+  const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : constants.MAX_API_RETRIES;
   let forceTokenReload = false;
   let hermesRefreshAttempted = false;
 
@@ -471,7 +471,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
         const errMsg = `HTTP ${res.status}: ${shortErr}`;
         if (res.status === 401) forceTokenReload = true;
 
-        if (!XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
+        if (!envConfig.XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
           hermesRefreshAttempted = true;
           try {
             await refreshHermesOAuth();

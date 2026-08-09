@@ -5,29 +5,29 @@
 // Discord downloads: 25 MB (discordAttachmentFetch.js).
 
 import fs from 'fs';
-import { MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { getMediaDurationSec, getMediaDurationSecFromPath  } from './mediaDuration.js';
 
 function formatAudioTooLongNote(durationSec) {
   const d = Number(durationSec);
-  if (!Number.isFinite(d) || d <= MAX_AUDIO_DURATION_S) return '';
-  return ` (audio too long: ${Math.round(d)}s, max ${MAX_AUDIO_DURATION_S}s)`;
+  if (!Number.isFinite(d) || d <= constants.MAX_AUDIO_DURATION_S) return '';
+  return ` (audio too long: ${Math.round(d)}s, max ${constants.MAX_AUDIO_DURATION_S}s)`;
 }
 
 function formatVideoTooLongNote(durationSec) {
   const d = Number(durationSec);
-  if (!Number.isFinite(d) || d <= MAX_VIDEO_DURATION_S) return '';
-  return ` (video too long: ${Math.round(d)}s, max ${MAX_VIDEO_DURATION_S}s)`;
+  if (!Number.isFinite(d) || d <= constants.MAX_VIDEO_DURATION_S) return '';
+  return ` (video too long: ${Math.round(d)}s, max ${constants.MAX_VIDEO_DURATION_S}s)`;
 }
 
 function isAudioOverDurationLimit(durationSec) {
   const d = Number(durationSec);
-  return Number.isFinite(d) && d > MAX_AUDIO_DURATION_S;
+  return Number.isFinite(d) && d > constants.MAX_AUDIO_DURATION_S;
 }
 
 function isVideoOverDurationLimit(durationSec) {
   const d = Number(durationSec);
-  return Number.isFinite(d) && d > MAX_VIDEO_DURATION_S;
+  return Number.isFinite(d) && d > constants.MAX_VIDEO_DURATION_S;
 }
 
 /** Probe duration from a file already stored under data/users/.../history/. */
@@ -60,8 +60,7 @@ export {
   formatVideoTooLongNote,
   isAudioOverDurationLimit,
   isVideoOverDurationLimit,
-  resolveMediaDurationSec,
-  MAX_AUDIO_DURATION_S,
-  MAX_VIDEO_DURATION_S
-
+  resolveMediaDurationSec
 };
+
+export const { MAX_AUDIO_DURATION_S, MAX_VIDEO_DURATION_S } = constants;

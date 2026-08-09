@@ -10,7 +10,7 @@
 // The `group:` / `user:` prefix provides filesystem-safe disambiguation.
 
 import path from 'path';
-import { DATA_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { PLATFORM_WA_PERSONAL  } from '../config/constants.js';
 import { resolveStorageId  } from './userPaths.js';
 
@@ -64,7 +64,7 @@ function workspaceIdToSlug(workspaceId) {
 function getBuildWorkspacePath(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);
   if (!slug) return null;
-  return path.join(DATA_DIR, 'users', slug, 'build_workspace');
+  return path.join(constants.DATA_DIR, 'users', slug, 'build_workspace');
 }
 
 /**
@@ -74,7 +74,7 @@ function getBuildWorkspacePath(workspaceId) {
 function getBuildWorkspaceMetaDir(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);
   if (!slug) return null;
-  return path.join(DATA_DIR, 'users', slug);
+  return path.join(constants.DATA_DIR, 'users', slug);
 }
 
 export {

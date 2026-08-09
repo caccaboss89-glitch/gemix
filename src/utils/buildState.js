@@ -17,14 +17,14 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { getBuildWorkspaceMetaDir  } from './workspaceId.js';
-import { BUILD_LOCK_WAIT_MS, BUILD_HARD_TIMEOUT_MS, DATA_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 
 const log = createLogger('BuildState');
 
 const STATE_FILENAME = '.build_state.json';
-// Hard ceiling for a held lock: BUILD_HARD_TIMEOUT_MS + 60s margin.
-const LOCK_MAX_TTL_MS = BUILD_HARD_TIMEOUT_MS + 60_000;
+// Hard ceiling for a held lock: constants.BUILD_HARD_TIMEOUT_MS + 60s margin.
+const LOCK_MAX_TTL_MS = constants.BUILD_HARD_TIMEOUT_MS + 60_000;
 
 function _stateFile(workspaceId) {
   const metaDir = getBuildWorkspaceMetaDir(workspaceId);
@@ -78,13 +78,13 @@ function touchActivity(workspaceId) {
 
 /**
  * Try to acquire the build lock for this workspace, polling up to
- * BUILD_LOCK_WAIT_MS. Returns the owner id on success or throws on timeout.
+ * constants.BUILD_LOCK_WAIT_MS. Returns the owner id on success or throws on timeout.
  *
  * Stale locks (held longer than LOCK_MAX_TTL_MS) are reaped automatically.
  */
 async function acquireBuildLock(workspaceId, opts = {}) {
   const ownerId = opts.ownerId || crypto.randomBytes(8).toString('hex');
-  const waitMs = Number.isFinite(opts.waitMs) ? opts.waitMs : BUILD_LOCK_WAIT_MS;
+  const waitMs = Number.isFinite(opts.waitMs) ? opts.waitMs : constants.BUILD_LOCK_WAIT_MS;
   const start = Date.now();
 
   while (true) {
@@ -144,12 +144,12 @@ function renewBuildLock(workspaceId, ownerId) {
 }
 
 /**
- * Iterate over every workspace_meta dir under DATA_DIR/users/ that has a
+ * Iterate over every workspace_meta dir under constants.DATA_DIR/users/ that has a
  * build_state file. Returns [{ workspaceSlug, workspaceId, metaDir, workspaceDir, lastActivityAt, lock }].
  * Used by the cron sweeper to find stale workspaces to wipe.
  */
 function listWorkspaceStates() {
-  const usersDir = path.join(DATA_DIR, 'users');
+  const usersDir = path.join(constants.DATA_DIR, 'users');
   if (!fs.existsSync(usersDir)) return [];
 
   const out = [];

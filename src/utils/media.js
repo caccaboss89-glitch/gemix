@@ -2,10 +2,10 @@
 //
 // Helpers for attachment tags and supported WhatsApp media types.
 
-import { SUPPORTED_MEDIA  } from '../config/constants.js';
+import constants from '../config/constants.js';
 
 function isSupportedMedia(type) {
-  return SUPPORTED_MEDIA.includes(type);
+  return constants.SUPPORTED_MEDIA.includes(type);
 }
 
 /**

@@ -7,7 +7,7 @@
 
 const fsPromises = require('fs').promises;
 import fs from 'fs';
-import { TASKS_DIR, SCHEDULER_INTERVAL_MS, BUILD_WORKSPACE_TTL_MS  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { getRomeISO  } from '../utils/time.js';
 import { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped  } from '../utils/recurrence.js';
 import { addScheduledFooter  } from '../utils/footer.js';
@@ -33,7 +33,7 @@ let _cycleInFlight = false;
 /**
  * Periodic sweeper for the build sub-agent's per-workspace tree.
  * Wipes any workspace whose user has not interacted with GemiX for
- * BUILD_WORKSPACE_TTL_MS, and shuts down the matching sandbox container.
+ * constants.BUILD_WORKSPACE_TTL_MS, and shuts down the matching sandbox container.
  * The metadata file (.build_state.json) is left in place.
  */
 async function _sweepBuildWorkspaces() {
@@ -41,7 +41,7 @@ async function _sweepBuildWorkspaces() {
   const now = Date.now();
   for (const s of states) {
     if (!s.lastActivityAt) continue;
-    if (now - s.lastActivityAt < BUILD_WORKSPACE_TTL_MS) continue;
+    if (now - s.lastActivityAt < constants.BUILD_WORKSPACE_TTL_MS) continue;
 
     const workspaceId = s.workspaceId;
     if (!workspaceId) {
@@ -70,11 +70,11 @@ function setSchedulerWaClient(client) {
  * Also triggers daily music wrap monitoring and hourly build-workspace sweep.
  */
 function startScheduler() {
-  if (!fs.existsSync(TASKS_DIR)) {
-    fs.mkdirSync(TASKS_DIR, { recursive: true });
+  if (!fs.existsSync(constants.TASKS_DIR)) {
+    fs.mkdirSync(constants.TASKS_DIR, { recursive: true });
   }
 
-  log.info('Started. Checking every', SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
+  log.info('Started. Checking every', constants.SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
 
   const schedulerInterval = setInterval(async () => {
     if (_cycleInFlight) {
@@ -89,7 +89,7 @@ function startScheduler() {
     } finally {
       _cycleInFlight = false;
     }
-  }, SCHEDULER_INTERVAL_MS);
+  }, constants.SCHEDULER_INTERVAL_MS);
   schedulerInterval.unref();
 
   // Hourly: wipe idle build workspaces past the TTL.
@@ -240,7 +240,7 @@ async function checkAndExecuteTasks() {
 
   let files;
   try {
-    files = (await fsPromises.readdir(TASKS_DIR)).filter(f => f.endsWith('.json'));
+    files = (await fsPromises.readdir(constants.TASKS_DIR)).filter(f => f.endsWith('.json'));
   } catch {
     return;
   }

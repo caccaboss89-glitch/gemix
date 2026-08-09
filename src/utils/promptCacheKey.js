@@ -4,7 +4,7 @@
 // input[], append-only history, and a per-turn Runtime role:user block (not a
 // second system). Exact prefix match is still required; this key only sticky-routes.
 
-import { PLATFORM_DISCORD, PLATFORM_WA_PERSONAL  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { resolveStorageId  } from './userPaths.js';
 
 const MAX_KEY_LEN = 128;
@@ -15,8 +15,8 @@ function _sanitize(part) {
 
 function _mainKeyFromParts(platform, isGroup, storageId) {
   const safe = _sanitize(storageId);
-  if (platform === PLATFORM_DISCORD) return `dc_${safe}`;
-  if (platform === PLATFORM_WA_PERSONAL) return `wa_personal_${safe}`;
+  if (platform === constants.PLATFORM_DISCORD) return `dc_${safe}`;
+  if (platform === constants.PLATFORM_WA_PERSONAL) return `wa_personal_${safe}`;
   if (isGroup) return `wa_group_${safe}`;
   return `wa_priv_${safe}`;
 }

@@ -18,14 +18,14 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { DATA_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { readAttachmentBuffer, attachmentSize  } from './attachments.js';
 import { sanitizeFilename  } from './text.js';
 import { createLogger  } from './logger.js';
 
 const log = createLogger('SentMessages');
 
-const SENT_ROOT = path.join(DATA_DIR, 'sent_messages');
+const SENT_ROOT = path.join(constants.DATA_DIR, 'sent_messages');
 
 /** Shared cap across WhatsApp + email, per sender. */
 const MAX_SENT_MESSAGES = 10;

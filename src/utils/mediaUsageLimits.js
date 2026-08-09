@@ -18,11 +18,7 @@
 import systemState from './systemState.js';
 import { getRomeParts  } from './time.js';
 import { createLogger  } from './logger.js';
-import {
-  MEDIA_WEEKLY_RESET_WEEKDAY,
-  MEDIA_WEEKLY_RESET_HOUR,
-  MEDIA_WEEKLY_RESET_MINUTE
- } from '../config/env.js';
+import envConfig from '../config/env.js';
 
 const log = createLogger('MediaLimits');
 
@@ -33,9 +29,9 @@ const STATE_MODULE = 'mediaWeeklyUsage';
 const MEDIA_WEEKLY_LIMITS = { image: 5, video: 2, song: 2 };
 
 /** Weekly reset boundary from env (weekday 0=Sun…6=Sat; hour/minute Europe/Rome). */
-const RESET_WEEKDAY = MEDIA_WEEKLY_RESET_WEEKDAY;
-const RESET_HOUR = MEDIA_WEEKLY_RESET_HOUR;
-const RESET_MINUTE = MEDIA_WEEKLY_RESET_MINUTE;
+const RESET_WEEKDAY = envConfig.MEDIA_WEEKLY_RESET_WEEKDAY;
+const RESET_HOUR = envConfig.MEDIA_WEEKLY_RESET_HOUR;
+const RESET_MINUTE = envConfig.MEDIA_WEEKLY_RESET_MINUTE;
 const RESET_MINUTES_OF_DAY = RESET_HOUR * 60 + RESET_MINUTE;
 
 const WEEKDAY_NAMES_EN = [

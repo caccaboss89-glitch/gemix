@@ -6,13 +6,13 @@
 
 import fs from 'fs';
 import path from 'path';
-import { FETCH_TIMEOUT_MS  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from './adminNotifier.js';
 
 function _downloadTimeoutMs(maxBytes, optsTimeout) {
   if (Number.isFinite(optsTimeout)) return optsTimeout;
   const minBytesPerSec = 256 * 1024;
-  return Math.max(FETCH_TIMEOUT_MS, Math.ceil(maxBytes / minBytesPerSec) * 1000);
+  return Math.max(constants.FETCH_TIMEOUT_MS, Math.ceil(maxBytes / minBytesPerSec) * 1000);
 }
 
 /**
@@ -91,13 +91,13 @@ async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
 
 /**
  * Fetch with automatic timeout via AbortController.
- * Wraps native fetch with a configurable timeout (default: FETCH_TIMEOUT_MS from constants).
+ * Wraps native fetch with a configurable timeout (default: constants.FETCH_TIMEOUT_MS from constants).
  * @param {string} url - The URL to fetch
  * @param {object} [options={}] - Standard fetch options (method, headers, body, etc.)
- * @param {number} [timeoutMs] - Custom timeout in milliseconds (default: FETCH_TIMEOUT_MS)
+ * @param {number} [timeoutMs] - Custom timeout in milliseconds (default: constants.FETCH_TIMEOUT_MS)
  * @returns {Promise<Response>} The fetch Response object
  */
-async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = constants.FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -123,7 +123,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS)
  * @param {number} [timeoutMs] - Custom timeout in ms
  * @returns {Promise<Response>} The fetch Response object
  */
-async function fetchExternal(url, options = {}, source = null, timeoutMs = FETCH_TIMEOUT_MS) {
+async function fetchExternal(url, options = {}, source = null, timeoutMs = constants.FETCH_TIMEOUT_MS) {
   try {
     const res = await fetchWithTimeout(url, options, timeoutMs);
     if (!res.ok && source) {

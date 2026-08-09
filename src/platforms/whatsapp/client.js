@@ -12,8 +12,8 @@
 
 import { Client, LocalAuth  } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
-import { PUPPETEER_ARGS, WA_QR_TIMEOUT  } from '../../config/constants.js';
-import { CHROMIUM_PATH  } from '../../config/env.js';
+import constants from '../../config/constants.js';
+import envConfig from '../../config/env.js';
 import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppeteer.js';
 
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
@@ -39,12 +39,12 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   const client = new Client({
     authStrategy: new LocalAuth({ clientId }),
     puppeteer: {
-      executablePath: CHROMIUM_PATH,
+      executablePath: envConfig.CHROMIUM_PATH,
       headless: true,
-      args: PUPPETEER_ARGS,
+      args: constants.PUPPETEER_ARGS,
       protocolTimeout: PROTOCOL_TIMEOUT_MS
     },
-    qr_timeout: WA_QR_TIMEOUT
+    qr_timeout: constants.WA_QR_TIMEOUT
   });
 
   let reconnectAttempts = 0;

@@ -18,7 +18,7 @@ import { fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 import { createLogger  } from '../utils/logger.js';
 import { defaultSettings  } from '../utils/settingsStore.js';
-import { FFMPEG_PATH, XAI_TTS_ENABLED, XAI_TTS_VOICE  } from '../config/env.js';
+import envConfig from '../config/env.js';
 import { getXaiAuth  } from '../config/xaiAuth.js';
 
 const log = createLogger('TTS');
@@ -31,7 +31,7 @@ const VOICE_GENERATION_TIMEOUT_MS = 120 * 1000;
 
 // Fixed xAI TTS output format (transcoded to OGG/Opus for WhatsApp below).
 // Voice id and language come from the per-chat settings, falling back to the
-// deployment defaults (XAI_TTS_VOICE in .env, Italian).
+// deployment defaults (envConfig.XAI_TTS_VOICE in .env, Italian).
 const TTS_OUTPUT_FORMAT = { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 };
 
 /** Language passed to the Google Translate fallback (which takes a bare code). */
@@ -96,7 +96,7 @@ function convertMp3ToWhatsAppOpus(mp3Buffer, opts = {}) {
       'pipe:1'
     ];
 
-    const ffmpegCmd = FFMPEG_PATH;
+    const ffmpegCmd = envConfig.FFMPEG_PATH;
     const ffmpeg = spawn(ffmpegCmd, ffmpegArgs);
     const chunks = [];
     let stderr = '';
@@ -165,11 +165,11 @@ async function generateVoice(text, settings = {}) {
 
 async function _generateVoice(text, settings, signal) {
   const defaults = defaultSettings();
-  const voiceId = settings?.voice || defaults.voice || XAI_TTS_VOICE;
+  const voiceId = settings?.voice || defaults.voice || envConfig.XAI_TTS_VOICE;
   const language = settings?.language || defaults.language;
 
   // Try the direct xAI TTS endpoint first (only if enabled).
-  if (XAI_TTS_ENABLED) {
+  if (envConfig.XAI_TTS_ENABLED) {
     try {
       if (signal?.aborted) throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
       const mp3Buffer = await xaiTTS(text, voiceId, language);
@@ -192,7 +192,7 @@ async function _generateVoice(text, settings, signal) {
     return await googleTranslateTTS(cleanText, language, signal);
   } catch (err) {
     if (signal?.aborted) throw err;
-    if (!XAI_TTS_ENABLED) {
+    if (!envConfig.XAI_TTS_ENABLED) {
       // Notify admin on Google TTS failure when xAI TTS is disabled.
       await notifyAdmin('Google TTS (Primary)', err.message);
       throw new Error(`TTS failed: Google Translate service error. xAI TTS is currently DISABLED by Admin.${ADMIN_NOTIFIED_SUFFIX}`);

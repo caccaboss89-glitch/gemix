@@ -3,10 +3,10 @@
 // Utilities for adding/removing the standard GemiX footer and for
 // formatting model names. Also handles scheduled message footers.
 
-import { GEMIX_FOOTER_PREFIX  } from '../config/constants.js';
+import constants from '../config/constants.js';
 
 /**
- * Append a suffix that starts with a blank line (e.g. GEMIX_FOOTER_PREFIX).
+ * Append a suffix that starts with a blank line (e.g. constants.GEMIX_FOOTER_PREFIX).
  * Strips trailing whitespace on the body so the suffix never lands on the same line.
  */
 function appendBlock(body, suffix) {
@@ -36,7 +36,7 @@ function getModelDisplayName(modelId) {
  */
 function addFooter(text, modelName) {
   const body = removeScheduledFooter(removeFooter(text || ''));
-  return appendBlock(body, `${GEMIX_FOOTER_PREFIX}${modelName}`);
+  return appendBlock(body, `${constants.GEMIX_FOOTER_PREFIX}${modelName}`);
 }
 
 /**
@@ -94,7 +94,7 @@ function buildScheduledFooter(createdAt) {
     hour: '2-digit',
     minute: '2-digit'
   });
-  return `${GEMIX_FOOTER_PREFIX}Messaggio Programmato il ${formatted}`;
+  return `${constants.GEMIX_FOOTER_PREFIX}Messaggio Programmato il ${formatted}`;
 }
 
 /**

@@ -9,18 +9,18 @@
 // The agent sees `/workspace` as a single flat zone. Attachments staged
 // by the `build` tool and anything the agent writes live in the same tree.
 //
-// Quota: BUILD_WORKSPACE_QUOTA_MB. Enforced on writes and on attachment staging.
+// Quota: constants.BUILD_WORKSPACE_QUOTA_MB. Enforced on writes and on attachment staging.
 
 import fs from 'fs';
 import path from 'path';
-import { BUILD_WORKSPACE_QUOTA_MB  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { getBuildWorkspacePath  } from '../utils/workspaceId.js';
 import { sanitizeFilename  } from '../utils/text.js';
 import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('BuildWorkspace');
 
-const QUOTA_BYTES = BUILD_WORKSPACE_QUOTA_MB * 1024 * 1024;
+const QUOTA_BYTES = constants.BUILD_WORKSPACE_QUOTA_MB * 1024 * 1024;
 
 /**
  * Ensure the workspace directory exists for `workspaceId`. Returns the
@@ -200,7 +200,7 @@ function stageAttachmentBuffer(workspaceId, desiredName, buffer) {
   // Quota check after compute, before write.
   const sizeBefore = workspaceSizeBytes(workspaceId);
   if (sizeBefore + buffer.length > QUOTA_BYTES) {
-    const err = new Error(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
+    const err = new Error(`Workspace quota would be exceeded (${constants.BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
     err.code = 'EQUOTA';
     throw err;
   }
@@ -241,7 +241,7 @@ function stageAttachmentFromPath(workspaceId, desiredName, srcPath) {
 
   const sizeBefore = workspaceSizeBytes(workspaceId);
   if (sizeBefore + stat.size > QUOTA_BYTES) {
-    const err = new Error(`Workspace quota would be exceeded (${BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
+    const err = new Error(`Workspace quota would be exceeded (${constants.BUILD_WORKSPACE_QUOTA_MB} MB cap).`);
     err.code = 'EQUOTA';
     throw err;
   }

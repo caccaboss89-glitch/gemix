@@ -17,11 +17,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import {
-  IMAGE_GEN_MODEL,
-  VIDEO_GEN_MODEL
- } from '../config/env.js';
-import { VIDEO_GEN_DURATION_S, VIDEO_GEN_RESOLUTION, MAX_IMAGE_BYTES  } from '../config/constants.js';
+import envConfig from '../config/env.js';
+import constants from '../config/constants.js';
 import { getXaiAuth  } from '../config/xaiAuth.js';
 import { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
 import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
@@ -149,8 +146,8 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, op
     let diskPath = found.filePath || null;
     if (!diskPath) {
       if (found.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-      if (found.buffer.length > MAX_IMAGE_BYTES) {
-        return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
+      if (found.buffer.length > constants.MAX_IMAGE_BYTES) {
+        return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
       }
       try {
         diskPath = _materializeRefToTemp(found.buffer, found.name, ownerKey);
@@ -161,7 +158,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, op
       try {
         const sz = fs.statSync(diskPath).size;
         if (sz === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-        if (sz > MAX_IMAGE_BYTES) return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
+        if (sz > constants.MAX_IMAGE_BYTES) return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
       } catch (err) {
         return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
       }
@@ -281,7 +278,7 @@ async function _xaiJsonRequest(label, endpointPath, body, timeoutMs) {
  * @returns {Promise<{ success: boolean, message?: string, filename?: string, error?: string }>}
  */
 async function generateImage(args, userCtx, responseCtx) {
-  if (!IMAGE_GEN_MODEL) return { success: false, error: 'IMAGE_GEN_MODEL is not configured.' };
+  if (!envConfig.IMAGE_GEN_MODEL) return { success: false, error: 'envConfig.IMAGE_GEN_MODEL is not configured.' };
 
   const { prompt, truncated } = _cleanPrompt(args && args.prompt);
   if (!prompt || prompt.length < 3) {
@@ -323,7 +320,7 @@ async function generateImage(args, userCtx, responseCtx) {
       responseCtx,
       buildRequest: (urls) => {
         const body = {
-          model: IMAGE_GEN_MODEL,
+          model: envConfig.IMAGE_GEN_MODEL,
           prompt,
           response_format: 'url'
         };
@@ -390,7 +387,7 @@ async function generateImage(args, userCtx, responseCtx) {
  * @returns {Promise<{ success: boolean, message?: string, filename?: string, error?: string }>}
  */
 async function generateVideo(args, userCtx, responseCtx) {
-  if (!VIDEO_GEN_MODEL) return { success: false, error: 'VIDEO_GEN_MODEL is not configured.' };
+  if (!envConfig.VIDEO_GEN_MODEL) return { success: false, error: 'envConfig.VIDEO_GEN_MODEL is not configured.' };
 
   const { prompt, truncated } = _cleanPrompt(args && args.prompt);
   if (!prompt || prompt.length < 3) {
@@ -430,10 +427,10 @@ async function generateVideo(args, userCtx, responseCtx) {
       responseCtx,
       buildRequest: (urls) => {
         const body = {
-          model: VIDEO_GEN_MODEL,
+          model: envConfig.VIDEO_GEN_MODEL,
           prompt,
-          duration: VIDEO_GEN_DURATION_S,
-          resolution: VIDEO_GEN_RESOLUTION
+          duration: constants.VIDEO_GEN_DURATION_S,
+          resolution: constants.VIDEO_GEN_RESOLUTION
         };
         if (urls.length === 0) {
           body.aspect_ratio = aspect;
@@ -484,7 +481,7 @@ async function generateVideo(args, userCtx, responseCtx) {
     return {
       success: true,
       filename,
-      message: `Video generated successfully (${VIDEO_GEN_DURATION_S}s, ${VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`
+      message: `Video generated successfully (${constants.VIDEO_GEN_DURATION_S}s, ${constants.VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`
     };
   } finally {
     await quota.release();

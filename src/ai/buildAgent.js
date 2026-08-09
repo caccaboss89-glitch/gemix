@@ -6,12 +6,7 @@
 // No host-side write_file/edit_file/bash tool loop and no structured attachments JSON.
 
 import { getXaiAuth  } from '../config/xaiAuth.js';
-import {
-  BUILD_HARD_TIMEOUT_MS,
-  BUILD_MAX_ROUNDS,
-  BUILD_WORKSPACE_QUOTA_MB,
-  BUILD_WORKSPACE_TTL_LABEL
- } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { renewBuildLock  } from '../utils/buildState.js';
 import {
   listWorkspaceFiles,
@@ -48,7 +43,7 @@ function buildGrokRules({ renamedAttachments, stagedNames, externalUrls } = {}) 
     'You are GemiX-Build: complete the task brief inside this isolated container.',
     `Time (Europe/Rome): ${getRomeTime()}.`,
     'Filesystem: work only under /workspace/ (writable). Do not rely on host paths outside it.',
-    `Quota: keep the workspace under about ${BUILD_WORKSPACE_QUOTA_MB} MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~${BUILD_WORKSPACE_TTL_LABEL} TTL managed by the host).`,
+    `Quota: keep the workspace under about ${constants.BUILD_WORKSPACE_QUOTA_MB} MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~${constants.BUILD_WORKSPACE_TTL_LABEL} TTL managed by the host).`,
     'Network: HTTP/HTTPS egress already uses HTTP_PROXY/HTTPS_PROXY (residential), including API calls to xAI. Do not pass --proxy to yt-dlp/curl. On proxy 502, CONNECT errors, timeouts, or DNS failures: internet is down — stop, do not retry loops, explain the system outage in your reply.',
     'Toolchain: Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, zip/unzip, curl/wget. Runtime pip/npm/apt are disabled — do not attempt package installs.',
     'Use your built-in Grok skills and tools as needed.',
@@ -228,8 +223,8 @@ async function runBuildAgent({
       rules,
       token: token.trim(),
       baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
-      timeoutMs: BUILD_HARD_TIMEOUT_MS,
-      maxTurns: BUILD_MAX_ROUNDS
+      timeoutMs: constants.BUILD_HARD_TIMEOUT_MS,
+      maxTurns: constants.BUILD_MAX_ROUNDS
     });
   } catch (err) {
     clearInterval(renewIv);
@@ -282,7 +277,7 @@ async function runBuildAgent({
     return {
       success: false,
       error: execResult.timedOut
-        ? `Build hard timeout (${BUILD_HARD_TIMEOUT_MS / 1000}s).`
+        ? `Build hard timeout (${constants.BUILD_HARD_TIMEOUT_MS / 1000}s).`
         : (stderr.slice(0, 1500) || `Grok Build exited with code ${execResult.rc}.`),
       message: payload.message,
       delivered: payload.delivered,

@@ -19,7 +19,7 @@ import path from 'path';
 import { buildXaiFileParts, isVideoAttachment  } from '../utils/aiFileDelivery.js';
 import { getHistoryDir  } from '../utils/userPaths.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
-import { MAX_VIDEO_DURATION_S  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('VideoReader');
@@ -95,7 +95,7 @@ async function readVideo(args, userCtx) {
   const payload = {
     success: true,
     filename: path.basename(absPath),
-    message: `Video "${path.basename(absPath)}" is attached to this turn (max ${MAX_VIDEO_DURATION_S}s). Watch it and answer.`
+    message: `Video "${path.basename(absPath)}" is attached to this turn (max ${constants.MAX_VIDEO_DURATION_S}s). Watch it and answer.`
   };
   return [{ type: 'text', text: JSON.stringify(payload) }, part];
 }

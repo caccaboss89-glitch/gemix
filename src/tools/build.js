@@ -18,7 +18,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { PLATFORM_DISCORD  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { resolveWorkspaceId  } from '../utils/workspaceId.js';
 import { resolveProfile, toolUnavailableMessage, TOOL  } from '../config/platformCapabilities.js';
@@ -156,7 +156,7 @@ async function _attachDelivered(workspaceId, delivered, responseCtx) {
  * @param {object} responseCtx
  */
 async function buildTool(args, userCtx, responseCtx) {
-  if (userCtx.platform === PLATFORM_DISCORD) {
+  if (userCtx.platform === constants.PLATFORM_DISCORD) {
     return {
       success: false,
       error: toolUnavailableMessage(TOOL.BUILD, resolveProfile(userCtx))

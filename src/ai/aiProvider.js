@@ -5,8 +5,8 @@
 // and translates them through responsesAdapter + apiClient, then converts
 // the result back to the chat-completion shape expected by handler.js.
 
-import { GROK_MODEL, XAI_REASONING_REPLAY  } from '../config/env.js';
-import { MAX_TOKENS  } from '../config/constants.js';
+import envConfig from '../config/env.js';
+import constants from '../config/constants.js';
 import { VALID_EFFORTS  } from '../utils/settingsStore.js';
 import { applyResponsesTextFormat  } from './responseSchema.js';
 import {
@@ -42,15 +42,15 @@ async function callAI(messages, tools = null, opts = {}) {
   const logExtra = opts.requestId ? { requestId: opts.requestId } : {};
 
   const body = {
-    model: GROK_MODEL,
-    max_output_tokens: MAX_TOKENS,
+    model: envConfig.GROK_MODEL,
+    max_output_tokens: constants.MAX_TOKENS,
     // Per-chat setting (manage_preferences), 'high' when unset.
     reasoning: { effort: VALID_EFFORTS.includes(opts.reasoningEffort) ? opts.reasoningEffort : 'high' },
     store: false
   };
   _applyPromptCacheKey(body, opts.promptCacheKey);
 
-  if (XAI_REASONING_REPLAY) {
+  if (envConfig.XAI_REASONING_REPLAY) {
     body.include = ['reasoning.encrypted_content'];
   }
 
@@ -76,7 +76,7 @@ async function callAI(messages, tools = null, opts = {}) {
 
   const message = responsesToAssistantMessage(data);
   const searchStats = extractServerSearchStats(data);
-  return { message, provider: 'Grok', model: GROK_MODEL, searchStats };
+  return { message, provider: 'Grok', model: envConfig.GROK_MODEL, searchStats };
 }
 
 export { callAI 

@@ -12,17 +12,8 @@
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
 // The build tool description is generic and does not expose sub-agent internals.
 
-import {
-  PLATFORM_DISCORD,
-  PLATFORM_WA_PERSONAL,
-  MAX_VIDEO_DURATION_S,
-  VIDEO_GEN_DURATION_S,
-  VIDEO_GEN_RESOLUTION,
-  BUILD_WORKSPACE_TTL_LABEL,
-  BUILD_WORKSPACE_QUOTA_MB,
-  isWhatsAppPlatform
- } from '../config/constants.js';
-import { LEGAL_NAME  } from '../config/env.js';
+import constants from '../config/constants.js';
+import envConfig from '../config/env.js';
 import {
   defaultSettings,
   VALID_VOICES,
@@ -249,7 +240,7 @@ const TOOL_READ_VIDEO = makeTool({
     'Watch a video that is already in this chat but was not loaded this turn. '
     + 'Videos in the message you are answering (and in the message it replies to) are attached automatically — never call this for those. '
     + 'Older ones show up as "[Attachment: name.mp4] (not loaded...)": pass that exact filename here to load one. '
-    + `Videos over ${MAX_VIDEO_DURATION_S}s are never available. One video per round: pick the one the user is actually asking about.`,
+    + `Videos over ${constants.MAX_VIDEO_DURATION_S}s are never available. One video per round: pick the one the user is actually asking about.`,
   properties: {
     filename: {
       type: 'string',
@@ -329,7 +320,7 @@ const TOOL_GENERATE_FORMAL_REQUEST_PDF = makeTool({
     title: { type: 'string', description: 'Request title' },
     motivation: { type: 'string', description: 'Detailed and well-argued motivation' },
     requesterSignature: { type: 'string', description: 'Requester signature' },
-    legalSignature: { type: 'string', description: `Legal advisor signature ("${LEGAL_NAME}" if requested by him in person, or "Nessuno")` }
+    legalSignature: { type: 'string', description: `Legal advisor signature ("${envConfig.LEGAL_NAME}" if requested by him in person, or "Nessuno")` }
   },
   required: ['fullName', 'title', 'motivation', 'requesterSignature']
 });
@@ -385,7 +376,7 @@ const TOOL_GENERATE_IMAGE = makeTool({
 
 const TOOL_GENERATE_VIDEO = makeTool({
   name: 'generate_video',
-  description: `Generate a ${VIDEO_GEN_DURATION_S}-second ${VIDEO_GEN_RESOLUTION} video from a textual prompt, optionally guided by reference images. It can NOT modify or extend an existing video - only reference IMAGES are accepted. Result is pushed to the delivery buffer.`,
+  description: `Generate a ${constants.VIDEO_GEN_DURATION_S}-second ${constants.VIDEO_GEN_RESOLUTION} video from a textual prompt, optionally guided by reference images. It can NOT modify or extend an existing video - only reference IMAGES are accepted. Result is pushed to the delivery buffer.`,
   properties: {
     prompt: {
       type: 'string',
@@ -715,7 +706,7 @@ function buildBuildTool(isGroup) {
       + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from generate_music, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
       + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
       + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
-      + `Workspace for ${scope}, ${BUILD_WORKSPACE_TTL_LABEL} TTL, ${BUILD_WORKSPACE_QUOTA_MB} MB, once per main-brain round.`,
+      + `Workspace for ${scope}, ${constants.BUILD_WORKSPACE_TTL_LABEL} TTL, ${constants.BUILD_WORKSPACE_QUOTA_MB} MB, once per main-brain round.`,
     properties: {
       prompt: {
         type: 'string',
@@ -735,9 +726,9 @@ function buildBuildTool(isGroup) {
 // -- Main builder: constructs tool list in a single pass -------------------
 
 function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
-  const isWhatsApp = isWhatsAppPlatform(userCtx.platform);
+  const isWhatsApp = constants.isWhatsAppPlatform(userCtx.platform);
   const isWhatsAppGroup = isWhatsApp && Boolean(userCtx.isGroup);
-  const isDiscord = userCtx.platform === PLATFORM_DISCORD;
+  const isDiscord = userCtx.platform === constants.PLATFORM_DISCORD;
 
   const tools = [];
 
@@ -776,7 +767,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
 
   // 6) Preferences & meta (no persistent settings on Discord).
   if (!isDiscord) {
-    const isPersonalChat = userCtx.platform === PLATFORM_WA_PERSONAL;
+    const isPersonalChat = userCtx.platform === constants.PLATFORM_WA_PERSONAL;
     tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }

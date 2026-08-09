@@ -5,7 +5,7 @@
 // and the canonical taskFileId (WhatsApp memory, scheduled reminders, etc.).
 
 import { findMemberByWa, findMemberByDiscord, isAdmin  } from '../config/members.js';
-import { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_WA, TASK_PREFIX_GROUP  } from '../config/constants.js';
+import constants from '../config/constants.js';
 
 /**
  * Identifies a user across platforms and returns unified identity info.
@@ -20,7 +20,7 @@ import { PLATFORM_DISCORD, TASK_PREFIX_MEMBER, TASK_PREFIX_DISCORD, TASK_PREFIX_
 function identifyUser(ctx) {
   let member = null;
 
-  if (ctx.platform === PLATFORM_DISCORD) {
+  if (ctx.platform === constants.PLATFORM_DISCORD) {
     member = findMemberByDiscord(ctx.discordUsername, ctx.discordDisplayName, ctx.discordNickname);
   } else {
     const jid = ctx.userId.includes('@') ? ctx.userId : ctx.userId + '@c.us';
@@ -28,15 +28,15 @@ function identifyUser(ctx) {
   }
 
   // On Discord, all users are active members by definition (server is private).
-  const isActiveMember = ctx.platform === PLATFORM_DISCORD || member !== null;
+  const isActiveMember = ctx.platform === constants.PLATFORM_DISCORD || member !== null;
 
   let taskFileId;
   if (member) {
-    taskFileId = TASK_PREFIX_MEMBER + member.name.toLowerCase().replace(/\s+/g, '_');
-  } else if (ctx.platform === PLATFORM_DISCORD) {
-    taskFileId = TASK_PREFIX_DISCORD + ctx.userId;
+    taskFileId = constants.TASK_PREFIX_MEMBER + member.name.toLowerCase().replace(/\s+/g, '_');
+  } else if (ctx.platform === constants.PLATFORM_DISCORD) {
+    taskFileId = constants.TASK_PREFIX_DISCORD + ctx.userId;
   } else {
-    taskFileId = TASK_PREFIX_WA + ctx.userId.replace('@c.us', '');
+    taskFileId = constants.TASK_PREFIX_WA + ctx.userId.replace('@c.us', '');
   }
 
   return { member, isActiveMember, isAdmin: isAdmin(member), taskFileId };
@@ -48,7 +48,7 @@ function identifyUser(ctx) {
  * @returns {string} Normalized group task file ID (e.g., 'group_123456789-1234567890')
  */
 function getGroupTaskFileId(groupId) {
-  return TASK_PREFIX_GROUP + groupId.replace('@g.us', '');
+  return constants.TASK_PREFIX_GROUP + groupId.replace('@g.us', '');
 }
 
 export { identifyUser, getGroupTaskFileId 

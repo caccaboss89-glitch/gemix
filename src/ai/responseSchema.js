@@ -15,7 +15,7 @@
 // cost the whole cached prompt. `required` only means the key must be present —
 // "" is a valid value and parseStructuredReply reads it as "no rename".
 //
-import { MAX_TTS_CHARS  } from '../config/constants.js';
+import constants from '../config/constants.js';
 
 // Which markup actually renders is stated once, in the "This chat" section of
 // the system prompt — not restated here.
@@ -32,7 +32,7 @@ const VOICE_FLAG_DESC =
 const VOICE_RESPONSE_FIELD_DESC =
   'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY spoken words plus '
   + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
-  + `Keep it under ${MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags `
+  + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags `
   + 'for a human result, even if your recent text replies had none. When `voice` is '
   + 'false write plain text and DO NOT use any voice tag. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '

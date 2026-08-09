@@ -12,7 +12,7 @@
 //
 // Each token is 128-bit random (crypto.randomBytes(16)). Listing is
 // disabled (regex match on /temp/<32hex>/<name> only). Path traversal is
-// blocked (registered files must live under DATA_DIR or TEMP_DIR). Per-token
+// blocked (registered files must live under constants.DATA_DIR or TEMP_DIR). Per-token
 // rate limit caps abuse from leaked links.
 
 import http from 'http';
@@ -22,22 +22,18 @@ import crypto from 'crypto';
 import { createLogger  } from './logger.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { getPublicBaseUrl  } from './publicTunnelUrl.js';
-import { GEMIX_TEMP_FILE_PORT  } from '../config/env.js';
-import {
-  DATA_DIR,
-  TUNNEL_TOKEN_TTL_HISTORY_MS,
-  TUNNEL_TOKEN_TTL_TEMP_MS
- } from '../config/constants.js';
+import envConfig from '../config/env.js';
+import constants from '../config/constants.js';
 
 const log = createLogger('TempFileServer');
 
 // Configuration
-const PORT = GEMIX_TEMP_FILE_PORT
-  ? parseInt(String(GEMIX_TEMP_FILE_PORT), 10) || 9998
+const PORT = envConfig.GEMIX_TEMP_FILE_PORT
+  ? parseInt(String(envConfig.GEMIX_TEMP_FILE_PORT), 10) || 9998
   : 9998;
 // Default TTL kept for backward compatibility (existing fallback callers
-// did not pass ttlMs). Equivalent to TUNNEL_TOKEN_TTL_TEMP_MS.
-const DEFAULT_EXPIRATION_MS = TUNNEL_TOKEN_TTL_TEMP_MS;
+// did not pass ttlMs). Equivalent to constants.TUNNEL_TOKEN_TTL_TEMP_MS.
+const DEFAULT_EXPIRATION_MS = constants.TUNNEL_TOKEN_TTL_TEMP_MS;
 // Cleanup runs every 5 minutes regardless of TTL kind: a 24h token still
 // needs deletion soon after its window closes.
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -95,7 +91,7 @@ function _isAllowedPath(target) {
   try {
     const absTarget = path.resolve(target).toLowerCase().replace(/\\/g, '/');
     const absTemp = path.resolve(TEMP_DIR).toLowerCase().replace(/\\/g, '/');
-    const absData = path.resolve(DATA_DIR).toLowerCase().replace(/\\/g, '/');
+    const absData = path.resolve(constants.DATA_DIR).toLowerCase().replace(/\\/g, '/');
 
     const isUnderTemp = absTarget === absTemp || absTarget.startsWith(absTemp + '/');
     const isUnderData = absTarget === absData || absTarget.startsWith(absData + '/');
@@ -131,11 +127,11 @@ function _detectDisposition(mimetype) {
 /**
  * Register a file for temporary public hosting via the tunnel.
  *
- * @param {string} filePath - Absolute path to a file under DATA_DIR or TEMP_DIR.
+ * @param {string} filePath - Absolute path to a file under constants.DATA_DIR or TEMP_DIR.
  * @param {string} originalName - Filename to expose in the URL and Content-Disposition.
  * @param {object} [opts]
  * @param {number} [opts.ttlMs] - Override default TTL (default
- *   TUNNEL_TOKEN_TTL_TEMP_MS = 1h). Pass TUNNEL_TOKEN_TTL_HISTORY_MS for files
+ *   constants.TUNNEL_TOKEN_TTL_TEMP_MS = 1h). Pass constants.TUNNEL_TOKEN_TTL_HISTORY_MS for files
  *   from chat history that may be re-fetched across multiple turns.
  * @param {string} [opts.mimetype] - Override auto-detected MIME (rare; the
  *   default detection from extension is usually correct).
@@ -205,7 +201,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
  * Two layers:
  *   1. Drop expired entries from the in-memory registry. If the registered
  *      file lives under TEMP_DIR (one-shot artefact, not user-history) we
- *      also unlink it from disk; files anywhere else (DATA_DIR/users/.../history,
+ *      also unlink it from disk; files anywhere else (constants.DATA_DIR/users/.../history,
  *      ...) are left intact because their lifecycle is owned by the history
  *      pruner / project sweeper, not us.
  *   2. Sweep TEMP_DIR for orphan files older than the longest possible TTL
@@ -243,7 +239,7 @@ function cleanupExpiredFiles() {
 
   if (fs.existsSync(TEMP_DIR)) {
     try {
-      const orphanThresholdMs = TUNNEL_TOKEN_TTL_HISTORY_MS;
+      const orphanThresholdMs = constants.TUNNEL_TOKEN_TTL_HISTORY_MS;
       // Recurse one level deep: temp files now live either in TEMP_DIR root
       // (legacy callers) or in TEMP_DIR/<owner>/ (per-user isolation). Sweep
       // both, and drop owner subdirs once they go empty.
@@ -394,8 +390,8 @@ function startTempFileServer() {
   });
 
   _server.listen(PORT, '0.0.0.0', () => {
-    const tempH = Math.round(TUNNEL_TOKEN_TTL_TEMP_MS / 60000);
-    const histH = Math.round(TUNNEL_TOKEN_TTL_HISTORY_MS / 3600000);
+    const tempH = Math.round(constants.TUNNEL_TOKEN_TTL_TEMP_MS / 60000);
+    const histH = Math.round(constants.TUNNEL_TOKEN_TTL_HISTORY_MS / 3600000);
     log.info(`Temp file server listening on 0.0.0.0:${PORT} (TTL: ${tempH}min temp / ${histH}h history)`);
   });
 

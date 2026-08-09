@@ -6,10 +6,10 @@
 // The success `message` is formatted by the dispatcher with the final filename.
 //
 // Music generation via Lyria on OpenRouter (SSE streaming).
-// Uses dedicated OPENROUTER_API_KEY and MUSIC_MODEL environment variables
+// Uses dedicated envConfig.OPENROUTER_API_KEY and envConfig.MUSIC_MODEL environment variables
 // (Lyria is not available via xAI/Grok).
 import { createLogger  } from '../utils/logger.js';
-import { MUSIC_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_HTTP_REFERER  } from '../config/env.js';
+import envConfig from '../config/env.js';
 import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
 import { fetchWithTimeout  } from '../utils/fetch.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
@@ -33,7 +33,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': OPENROUTER_HTTP_REFERER,
+        'HTTP-Referer': envConfig.OPENROUTER_HTTP_REFERER,
         'X-Title': 'GemiX Music Tool'
       },
       body: JSON.stringify({ ...body, stream: true })
@@ -116,18 +116,18 @@ async function musicCreator(prompt, userCtx) {
     return { toolResult: { success: false, error: 'Prompt missing or too short.' }, attachments: [] };
   }
 
-  const apiKey = OPENROUTER_API_KEY;
-  const model = MUSIC_MODEL;
-  const apiUrl = `${OPENROUTER_BASE_URL}/chat/completions`;
+  const apiKey = envConfig.OPENROUTER_API_KEY;
+  const model = envConfig.MUSIC_MODEL;
+  const apiUrl = `${envConfig.OPENROUTER_BASE_URL}/chat/completions`;
 
   if (!apiKey) {
-    return { toolResult: { success: false, error: 'OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).' }, attachments: [] };
+    return { toolResult: { success: false, error: 'envConfig.OPENROUTER_API_KEY is missing in environment (required for Lyria music generation).' }, attachments: [] };
   }
   if (!model) {
-    return { toolResult: { success: false, error: 'MUSIC_MODEL is missing in environment (required for Lyria music generation).' }, attachments: [] };
+    return { toolResult: { success: false, error: 'envConfig.MUSIC_MODEL is missing in environment (required for Lyria music generation).' }, attachments: [] };
   }
-  if (!OPENROUTER_BASE_URL) {
-    return { toolResult: { success: false, error: 'OPENROUTER_BASE_URL is missing in environment.' }, attachments: [] };
+  if (!envConfig.OPENROUTER_BASE_URL) {
+    return { toolResult: { success: false, error: 'envConfig.OPENROUTER_BASE_URL is missing in environment.' }, attachments: [] };
   }
 
   // Weekly per-user quota (max 2 songs/week; reset from MEDIA_WEEKLY_RESET_*; admins exempt).

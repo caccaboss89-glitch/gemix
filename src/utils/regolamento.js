@@ -9,12 +9,12 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 
 const log = createLogger('Regolamento');
 
-const REGOLAMENTO_PATH = path.join(DATA_DIR, 'regolamento.txt');
+const REGOLAMENTO_PATH = path.join(constants.DATA_DIR, 'regolamento.txt');
 const REGOLAMENTO_UNAVAILABLE_PLACEHOLDER =
   '[Statuto Albertino unavailable: regolamento.txt could not be loaded on the server. '
   + 'Do not invent articles or rules; tell the user the official statute text is not available in this session.]';

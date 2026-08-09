@@ -21,12 +21,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import {
-  DATA_DIR,
-  MAX_IMAGE_BYTES,
-  MAX_HISTORY_MEDIA_IMAGES,
-  MAX_HISTORY_MEDIA_FILES
- } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { mimeForExtension, mimeBase  } from '../config/mimeExtensions.js';
 import { isNonReadableExt  } from '../config/nonReadableExts.js';
 import { tempDirForOwner  } from './tempFileServer.js';
@@ -91,8 +86,8 @@ const TEXT_MIME_EXTRA = new Set([
 // Per-call caps on history files re-attached natively to the turn.
 //   - images: vision-processed every call (expensive)
 //   - files:  documents/audio/video (input_file).
-const MAX_IMAGE_READS = MAX_HISTORY_MEDIA_IMAGES;
-const MAX_FILE_READS = MAX_HISTORY_MEDIA_FILES;
+const MAX_IMAGE_READS = constants.MAX_HISTORY_MEDIA_IMAGES;
+const MAX_FILE_READS = constants.MAX_HISTORY_MEDIA_FILES;
 // Size caps for xAI ingestion.
 const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
@@ -187,8 +182,8 @@ async function validateXaiFile(absPath, displayPath, opts = {}) {
     if (count >= MAX_IMAGE_READS) {
       return { ok: false, error: `Image limit reached. You can only read up to ${MAX_IMAGE_READS} images per call.` };
     }
-    if (fileSize > MAX_IMAGE_BYTES) {
-      return { ok: false, error: `Image "${displayPath}" exceeds the size limit (${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB).` };
+    if (fileSize > constants.MAX_IMAGE_BYTES) {
+      return { ok: false, error: `Image "${displayPath}" exceeds the size limit (${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB).` };
     }
     return { ok: true, bumpImageCount: true };
   }
@@ -319,7 +314,7 @@ function resolveHistoryAbsPath(historyUserId, historyPath) {
   const cleanRel = rel.replace(/^history\//, '').replace(/^\/+/, '');
   if (cleanRel.includes('..') || path.isAbsolute(cleanRel)) return null;
 
-  const abs = path.join(DATA_DIR, 'users', safeUserId, 'history', cleanRel);
+  const abs = path.join(constants.DATA_DIR, 'users', safeUserId, 'history', cleanRel);
   return fs.existsSync(abs) ? abs : null;
 }
 

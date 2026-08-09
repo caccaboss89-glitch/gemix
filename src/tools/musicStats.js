@@ -9,7 +9,7 @@
 // read_music_stats tool. Pure formatting + fetch.
 
 import { fetchExternal  } from '../utils/fetch.js';
-import { MUSIC_STATS_URL  } from '../config/env.js';
+import envConfig from '../config/env.js';
 
 /**
  * Fetch and summarize music bot stats from the stats URL.
@@ -18,7 +18,7 @@ import { MUSIC_STATS_URL  } from '../config/env.js';
  */
 async function readMusicStats() {
   try {
-    const res = await fetchExternal(MUSIC_STATS_URL, {
+    const res = await fetchExternal(envConfig.MUSIC_STATS_URL, {
       headers: { 'User-Agent': 'GemiX-MusicStats/1.0' }
     }, 'Music Stats');
 

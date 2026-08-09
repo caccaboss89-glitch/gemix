@@ -13,11 +13,7 @@
 //   WA personal      → ctx.presence.chat.sendMessage (personal client only)
 //   WA dedicated DM/group → ctx.presence.chat.sendMessage, else dedicated JID fallback
 
-import {
-  PLATFORM_DISCORD,
-  PLATFORM_WA_PERSONAL,
-  PLATFORM_WA_DEDICATED
- } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { markNotifiedInCall  } from './notificationDedup.js';
 import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
 import { removeDiscordEmoji  } from './discord.js';
@@ -30,7 +26,7 @@ const log = createLogger('IntermediateNotification');
 function formatWhatsAppIntermediateText(message, platform) {
   let text = normalizeMarkdown(stripOutgoingDeliveryArtifacts(message));
   // Personal WA history treats footer-bearing fromMe text as start of a GemiX block.
-  if (platform === PLATFORM_WA_PERSONAL) {
+  if (platform === constants.PLATFORM_WA_PERSONAL) {
     text = addFooter(text, 'GemiX');
   }
   return text;
@@ -55,7 +51,7 @@ function formatWhatsAppIntermediateText(message, platform) {
 function resolveIntermediateNotificationTarget(ctx) {
   if (!ctx?.platform) return null;
 
-  if (ctx.platform === PLATFORM_DISCORD) {
+  if (ctx.platform === constants.PLATFORM_DISCORD) {
     if (ctx.discordChannel && typeof ctx.discordChannel.send === 'function') {
       return { channel: 'discord', discordChannel: ctx.discordChannel };
     }
@@ -68,11 +64,11 @@ function resolveIntermediateNotificationTarget(ctx) {
   }
 
   // Personal WA must use the personal client's Chat — never the dedicated bot JID.
-  if (ctx.platform === PLATFORM_WA_PERSONAL) {
+  if (ctx.platform === constants.PLATFORM_WA_PERSONAL) {
     return null;
   }
 
-  if (ctx.platform === PLATFORM_WA_DEDICATED || ctx.platform.startsWith('whatsapp')) {
+  if (ctx.platform === constants.PLATFORM_WA_DEDICATED || ctx.platform.startsWith('whatsapp')) {
     const jid = ctx.chatId || ctx.groupId || ctx.waJid;
     if (jid) return { channel: 'wa_dedicated_jid', jid };
   }

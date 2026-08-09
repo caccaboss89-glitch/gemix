@@ -5,7 +5,7 @@
 // (`/v1/responses` with `input[]`, flat tools, typed items like
 // function_call / function_call_output). Static system lives in input[0].
 
-import { XAI_REASONING_REPLAY  } from '../config/env.js';
+import envConfig from '../config/env.js';
 
 /** Strip internal-only fields before sending parts to xAI. */
 function _toWireUserPart(part) {
@@ -399,7 +399,7 @@ function responsesToAssistantMessage(data) {
       }
 
       if (item.type === 'reasoning') {
-        if (XAI_REASONING_REPLAY && _shouldStoreOutputItem(item)) {
+        if (envConfig.XAI_REASONING_REPLAY && _shouldStoreOutputItem(item)) {
           responsesOutput.push(_cloneOutputItem(item));
         }
         continue;

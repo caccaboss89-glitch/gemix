@@ -15,13 +15,13 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 import { getRomeISO  } from './time.js';
 
 const log = createLogger('PrivacyConsent');
 
-const CONSENT_FILE = path.join(DATA_DIR, 'privacyConsent.json');
+const CONSENT_FILE = path.join(constants.DATA_DIR, 'privacyConsent.json');
 
 // Serializes the read-modify-write cycle, like the other small JSON stores.
 let _lock = Promise.resolve();

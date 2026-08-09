@@ -5,20 +5,20 @@
 // serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
 //
 // Direct email sender using nodemailer + Gmail.
-// Credentials are loaded exclusively from centralized env.js (BOT_EMAIL / BOT_PASS).
+// Credentials are loaded exclusively from centralized env.js (envConfig.BOT_EMAIL / envConfig.BOT_PASS).
 // Strips Discord emoji from subject and body via the discord util before delivery
 // (keeps email text clean; Discord emoji are not desired in formal email output).
 // Used by the email recipient tool and formal request flows.
 
 import nodemailer from 'nodemailer';
-import { BOT_EMAIL, BOT_PASS  } from '../config/env.js';
+import envConfig from '../config/env.js';
 import { removeDiscordEmoji  } from '../utils/discord.js';
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: BOT_EMAIL,
-    pass: BOT_PASS
+    user: envConfig.BOT_EMAIL,
+    pass: envConfig.BOT_PASS
   }
 });
 
@@ -29,7 +29,7 @@ async function sendEmailDirect(toEmail, subject, body, attachments = []) {
   subject = removeDiscordEmoji(subject);
   body = removeDiscordEmoji(body);
   await transporter.sendMail({
-    from: `GemiX <${BOT_EMAIL}>`,
+    from: `GemiX <${envConfig.BOT_EMAIL}>`,
     to: toEmail,
     subject,
     html: body,

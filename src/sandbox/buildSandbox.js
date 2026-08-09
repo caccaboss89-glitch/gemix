@@ -4,7 +4,7 @@
 //
 // One container per `workspaceId`, lazily started on first use, reused as
 // long as the user keeps interacting (sandboxes that stay idle past
-// SANDBOX_IDLE_TTL_MS are reaped). Bind mounts:
+// constants.SANDBOX_IDLE_TTL_MS are reaped). Bind mounts:
 //
 //   /workspace/  -> host build_workspace dir for this workspaceId  (rw)
 //
@@ -22,18 +22,8 @@
 import crypto from 'crypto';
 import stream from 'stream';
 
-import {
-  SANDBOX_MEMORY_MB,
-  SANDBOX_IDLE_TTL_MS,
-  BUILD_HARD_TIMEOUT_MS,
-  BUILD_MAX_ROUNDS
- } from '../config/constants.js';
-import {
-  GEMIX_SANDBOX_IMAGE,
-  GEMIX_SANDBOX_NETWORK,
-  GEMIX_SANDBOX_PROXY_HOST,
-  GEMIX_SANDBOX_PROXY_PORT
- } from '../config/env.js';
+import constants from '../config/constants.js';
+import envConfig from '../config/env.js';
 
 import { workspaceIdToSlug  } from '../utils/workspaceId.js';
 import { ensureWorkspace, ensureWorkspaceWritable, sandboxUserString  } from './buildWorkspace.js';
@@ -41,10 +31,10 @@ import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('BuildSandbox');
 
-const SANDBOX_IMAGE = GEMIX_SANDBOX_IMAGE;
-const SANDBOX_NETWORK = GEMIX_SANDBOX_NETWORK;
-const PROXY_HOSTNAME = GEMIX_SANDBOX_PROXY_HOST;
-const PROXY_PORT = GEMIX_SANDBOX_PROXY_PORT;
+const SANDBOX_IMAGE = envConfig.GEMIX_SANDBOX_IMAGE;
+const SANDBOX_NETWORK = envConfig.GEMIX_SANDBOX_NETWORK;
+const PROXY_HOSTNAME = envConfig.GEMIX_SANDBOX_PROXY_HOST;
+const PROXY_PORT = envConfig.GEMIX_SANDBOX_PROXY_PORT;
 
 /** Map<workspaceId, BuildSandboxEntry> */
 const _pool = new Map();
@@ -77,7 +67,7 @@ async function _spawnContainer(workspaceId) {
     .toLowerCase().replace(/[^a-z0-9_.-]/g, '-').slice(0, 63);
 
   const docker = _getDocker();
-  const memBytes = SANDBOX_MEMORY_MB * 1024 * 1024;
+  const memBytes = constants.SANDBOX_MEMORY_MB * 1024 * 1024;
 
   const binds = [
     `${workspaceDir}:/workspace:rw`
@@ -276,9 +266,9 @@ function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns 
   }
   const timeout = Math.max(
     5_000,
-    Math.min(Number(timeoutMs) || BUILD_HARD_TIMEOUT_MS, BUILD_HARD_TIMEOUT_MS)
+    Math.min(Number(timeoutMs) || constants.BUILD_HARD_TIMEOUT_MS, constants.BUILD_HARD_TIMEOUT_MS)
   );
-  const turns = Math.max(1, Math.min(Number(maxTurns) || BUILD_MAX_ROUNDS, BUILD_MAX_ROUNDS));
+  const turns = Math.max(1, Math.min(Number(maxTurns) || constants.BUILD_MAX_ROUNDS, constants.BUILD_MAX_ROUNDS));
   const rulesText = typeof rules === 'string' ? rules : '';
   // Free-text stdout (no --output-format json). timeout(1) enforces hard kill.
   const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
@@ -472,7 +462,7 @@ const _reaper = setInterval(() => {
   const now = Date.now();
   for (const [workspaceId, entry] of _pool.entries()) {
     if (!entry.lastUsedAt) continue;
-    if (now - entry.lastUsedAt > SANDBOX_IDLE_TTL_MS) {
+    if (now - entry.lastUsedAt > constants.SANDBOX_IDLE_TTL_MS) {
       log.info(`reaping idle build sandbox ${workspaceId} (idle ${(now - entry.lastUsedAt) / 1000 | 0}s)`);
       _pool.delete(workspaceId);
       _killEntry(entry).catch(err => log.warn(`reap kill failed: ${err.message}`));

@@ -7,11 +7,11 @@
 import fs from 'fs';
 const fsPromises = require('fs').promises;
 import path from 'path';
-import { TASKS_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { withKeyedLock  } from './keyedLock.js';
 
-if (!fs.existsSync(TASKS_DIR)) {
-  fs.mkdirSync(TASKS_DIR, { recursive: true });
+if (!fs.existsSync(constants.TASKS_DIR)) {
+  fs.mkdirSync(constants.TASKS_DIR, { recursive: true });
 }
 
 // Per-file async lock to prevent concurrent read-modify-write race conditions.
@@ -25,7 +25,7 @@ const _withLock = (fileId, fn) => withKeyedLock(_locks, fileId, fn);
  * @returns {Promise<{ tasks: Array }|null>} Parsed task data or null if file doesn't exist / is corrupt
  */
 async function readTaskFile(fileId) {
-  const filePath = path.join(TASKS_DIR, `${fileId}.json`);
+  const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
   try {
     const raw = await fsPromises.readFile(filePath, 'utf-8');
     return JSON.parse(raw);
@@ -43,7 +43,7 @@ async function readTaskFile(fileId) {
  */
 async function writeTaskFile(fileId, data) {
   return _withLock(fileId, async () => {
-    const filePath = path.join(TASKS_DIR, `${fileId}.json`);
+    const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
     if (!data.tasks || data.tasks.length === 0) {
       try { await fsPromises.unlink(filePath); } catch { }
       return;
@@ -69,7 +69,7 @@ async function writeTaskFile(fileId, data) {
  */
 async function modifyTaskFile(fileId, fn) {
   return _withLock(fileId, async () => {
-    const filePath = path.join(TASKS_DIR, `${fileId}.json`);
+    const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
     let data;
     try {
       const raw = await fsPromises.readFile(filePath, 'utf-8');

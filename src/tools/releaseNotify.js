@@ -11,7 +11,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
 
 /** @type {Map<string, string>} chatId -> waJid (delivery target) */
@@ -25,7 +25,7 @@ function _load() {
   }
 
   // Fallback: try loading from JSON file if systemState entry missing
-  const OLD_FILE = path.join(DATA_DIR, 'releaseNotifyChats.json');
+  const OLD_FILE = path.join(constants.DATA_DIR, 'releaseNotifyChats.json');
   if (fs.existsSync(OLD_FILE)) {
     try {
       const raw = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));

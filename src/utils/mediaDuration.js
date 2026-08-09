@@ -7,13 +7,13 @@ const fs = require('fs').promises;
 import os from 'os';
 import path from 'path';
 import { spawn  } from 'child_process';
-import { FFPROBE_PATH  } from '../config/env.js';
+import envConfig from '../config/env.js';
 
 const FFPROBE_TIMEOUT_MS = 10_000;
 
 function _runFfprobe(filePath) {
   return new Promise((resolve) => {
-    const cmd = FFPROBE_PATH;
+    const cmd = envConfig.FFPROBE_PATH;
     const args = ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath];
     let child;
     try {

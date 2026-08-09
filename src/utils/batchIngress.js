@@ -7,12 +7,12 @@
 import { pushMessage, hasPendingBatch, peekPendingBatchLastEntry  } from './messageBatcher.js';
 import responseLock from './responseLock.js';
 
-import { BATCH_LOCK_TTL_MS  } from '../config/constants.js';
+import constants from '../config/constants.js';
 
 function _wrapBatchHandler(batchKey, handler, log, discardLogLabel) {
   return async (entries) => {
-    if (!responseLock.refresh(batchKey, BATCH_LOCK_TTL_MS)) {
-      if (!responseLock.tryLock(batchKey, BATCH_LOCK_TTL_MS)) {
+    if (!responseLock.refresh(batchKey, constants.BATCH_LOCK_TTL_MS)) {
+      if (!responseLock.tryLock(batchKey, constants.BATCH_LOCK_TTL_MS)) {
         if (log && typeof log.warn === 'function') {
           log.warn(`   Batch handler skipped for ${discardLogLabel}: lock not held (not queued)`);
         }
@@ -33,13 +33,13 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) 
     pushMessage(batchKey, entry, wrappedHandler);
     return 'batched';
   }
-  if (!responseLock.tryLock(batchKey, BATCH_LOCK_TTL_MS)) {
+  if (!responseLock.tryLock(batchKey, constants.BATCH_LOCK_TTL_MS)) {
     if (log && typeof log.warn === 'function') {
       log.warn(`   Ignoring message for ${discardLogLabel}: GemiX is already responding (not queued)`);
     }
     return 'discarded';
   }
-  const stopLockRenew = responseLock.startAutoRenew(batchKey, BATCH_LOCK_TTL_MS);
+  const stopLockRenew = responseLock.startAutoRenew(batchKey, constants.BATCH_LOCK_TTL_MS);
   pushMessage(batchKey, { ...entry, stopLockRenew }, wrappedHandler);
   return 'started';
 }

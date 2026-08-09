@@ -17,7 +17,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR, TASKS_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 import { getUserRoot, resolveSettingsFileId  } from './userPaths.js';
 import { resolveWorkspaceId, getBuildWorkspaceMetaDir  } from './workspaceId.js';
@@ -32,12 +32,12 @@ const log = createLogger('PrivacyWipe');
 
 /** Guard against a malformed chat id turning a recursive delete loose. */
 function _isInsideDataDir(target) {
-  const rel = path.relative(DATA_DIR, path.resolve(target));
+  const rel = path.relative(constants.DATA_DIR, path.resolve(target));
   return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /**
- * Recursively remove a path under DATA_DIR. A missing path counts as removed,
+ * Recursively remove a path under constants.DATA_DIR. A missing path counts as removed,
  * and so does a null one: nothing is stored where an id does not resolve.
  * @param {string|null} target
  * @param {string} label - what it holds, for the log line
@@ -86,7 +86,7 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
 
   const settingsFileId = resolveSettingsFileId(ctx, { taskFileId });
   if (settingsFileId) {
-    step('settings', _removeTree(path.join(DATA_DIR, 'memories', `${settingsFileId}.json`), 'saved preferences'));
+    step('settings', _removeTree(path.join(constants.DATA_DIR, 'memories', `${settingsFileId}.json`), 'saved preferences'));
   }
 
   // In a group the shared reminder file goes too: it belongs to the very
@@ -95,7 +95,7 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   if (ctx.isGroup && ctx.groupId) taskFileIds.push(getGroupTaskFileId(ctx.groupId));
   for (const fileId of taskFileIds) {
     if (!fileId) continue;
-    step(`tasks:${fileId}`, _removeTree(path.join(TASKS_DIR, `${fileId}.json`), 'scheduled reminders'));
+    step(`tasks:${fileId}`, _removeTree(path.join(constants.TASKS_DIR, `${fileId}.json`), 'scheduled reminders'));
   }
 
   try {

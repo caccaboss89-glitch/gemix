@@ -7,8 +7,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR } from '../config/constants.js';
-import { GITHUB_TOKEN, GITHUB_REPO } from '../config/env.js';
+import constants from '../config/constants.js';
+import envConfig from '../config/env.js';
 import { getSubscribedChats } from '../tools/releaseNotify.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
 import { createLogger } from '../utils/logger.js';
@@ -28,7 +28,7 @@ function _loadState() {
   }
 
 
-  const OLD_FILE = path.join(DATA_DIR, 'releaseMonitor.json');
+  const OLD_FILE = path.join(constants.DATA_DIR, 'releaseMonitor.json');
   if (fs.existsSync(OLD_FILE)) {
     try {
       const oldState = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
@@ -196,18 +196,18 @@ async function _fetchReleaseMedia(url, name, headers, kind) {
  * @param {object} waClient - whatsapp-web.js Client instance
  */
 async function checkNewRelease(waClient) {
-  if (!GITHUB_TOKEN || !GITHUB_REPO) return;
+  if (!envConfig.GITHUB_TOKEN || !envConfig.GITHUB_REPO) return;
   if (!waClient) return;
 
   try {
     const authHeaders = {
-      Authorization: `Bearer ${GITHUB_TOKEN}`,
+      Authorization: `Bearer ${envConfig.GITHUB_TOKEN}`,
       Accept: 'application/vnd.github+json',
       'User-Agent': 'GemiX-Bot'
     };
 
     const res = await fetchWithTimeout(
-      `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+      `https://api.github.com/repos/${envConfig.GITHUB_REPO}/releases/latest`,
       { headers: authHeaders },
       15_000
     );

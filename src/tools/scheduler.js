@@ -10,7 +10,7 @@
 // human-readable confirmation messages with recipient/recurrence details.
 
 import crypto from 'crypto';
-import { MAX_TASK_DAYS  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { getRomeISO, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour  } from '../utils/time.js';
 import { resolveActiveMemberByName  } from '../config/members.js';
 import { normalizePhoneToJid  } from './whatsappSender.js';
@@ -34,7 +34,7 @@ import { formatTaskRecipient  } from '../utils/taskRecipient.js';
 async function scheduleTasks(tasks, ctx) {
   const now = new Date();
   const nowTime = now.getTime();
-  const maxDateMs = nowTime + MAX_TASK_DAYS * 24 * 60 * 60 * 1000;
+  const maxDateMs = nowTime + constants.MAX_TASK_DAYS * 24 * 60 * 60 * 1000;
   const results = [];
 
   for (const task of tasks) {

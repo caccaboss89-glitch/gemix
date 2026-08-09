@@ -8,13 +8,13 @@
 // Returns direct https image file URLs for delivery through final `attachments`,
 // and attaches each found image as native vision content (input_image) so the
 // model can see them — same multimodal tool-result pattern as read_sent_messages.
-// Config: IMAGE_SEARCH_BASE_URL (default http://127.0.0.1:8888).
+// Config: envConfig.IMAGE_SEARCH_BASE_URL (default http://127.0.0.1:8888).
 
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { IMAGE_SEARCH_BASE_URL  } from '../config/env.js';
-import { MAX_IMAGE_BYTES  } from '../config/constants.js';
+import envConfig from '../config/env.js';
+import constants from '../config/constants.js';
 import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
 import { buildXaiFileParts  } from '../utils/aiFileDelivery.js';
 import { TEMP_DIR  } from '../utils/tempFileServer.js';
@@ -130,7 +130,7 @@ async function _buildVisionPart(imgUrl, index) {
   try {
     if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
     const dl = await downloadPublicFile(imgUrl, {
-      maxBytes: MAX_IMAGE_BYTES,
+      maxBytes: constants.MAX_IMAGE_BYTES,
       timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS
     });
     const sniffed = _sniffImageType(dl.buffer);
@@ -183,11 +183,11 @@ async function searchImages(args = {}) {
   }
 
   const count = _clampCount(args.count);
-  const base = String(IMAGE_SEARCH_BASE_URL || '').replace(/\/+$/, '');
+  const base = String(envConfig.IMAGE_SEARCH_BASE_URL || '').replace(/\/+$/, '');
   if (!base || !/^https?:\/\//i.test(base)) {
     return {
       success: false,
-      error: 'Image search is not configured (IMAGE_SEARCH_BASE_URL is invalid).'
+      error: 'Image search is not configured (envConfig.IMAGE_SEARCH_BASE_URL is invalid).'
     };
   }
 

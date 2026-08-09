@@ -5,11 +5,11 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 
 const log = createLogger('SystemState');
-const STATE_FILE = path.join(DATA_DIR, 'systemState.json');
+const STATE_FILE = path.join(constants.DATA_DIR, 'systemState.json');
 
 // In-memory lock to ensure atomic read-modify-write
 let _lockPromise = Promise.resolve();
@@ -42,7 +42,7 @@ function _readRaw() {
 function _writeRaw(state) {
   const tempFile = STATE_FILE + '.tmp';
   try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(constants.DATA_DIR)) fs.mkdirSync(constants.DATA_DIR, { recursive: true });
 
     // Write to a temporary file first
     fs.writeFileSync(tempFile, JSON.stringify(state, null, 2), 'utf-8');

@@ -10,12 +10,12 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR  } from '../config/constants.js';
-import { XAI_TTS_VOICE  } from '../config/env.js';
+import constants from '../config/constants.js';
+import envConfig from '../config/env.js';
 import { getRomeISO  } from './time.js';
 import { withKeyedLock  } from './keyedLock.js';
 
-const SETTINGS_DIR = path.join(DATA_DIR, 'memories');
+const SETTINGS_DIR = path.join(constants.DATA_DIR, 'memories');
 const MAX_MEMORY_CHARS = 1000;
 
 /** Interval after which GemiX asks the user to confirm custom preferences. */
@@ -42,13 +42,13 @@ const DEFAULT_MEMORY =
   + 'Use emojis sometimes.';
 
 /**
- * Program defaults. The voice comes from .env (XAI_TTS_VOICE) so the
+ * Program defaults. The voice comes from .env (envConfig.XAI_TTS_VOICE) so the
  * deployment decides the starting voice.
  * @returns {{ voice: string, effort: string, language: string, memory: string }}
  */
 function defaultSettings() {
   return {
-    voice: XAI_TTS_VOICE,
+    voice: envConfig.XAI_TTS_VOICE,
     effort: 'high',
     language: 'it',
     memory: DEFAULT_MEMORY

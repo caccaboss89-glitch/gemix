@@ -8,11 +8,11 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { ACTIVE_MEMBERS } from '../config/members.js';
 import { createLogger } from '../utils/logger.js';
 import { normalizeMarkdown } from '../utils/text.js';
-import { MUSIC_WRAP_PASSWORD, MUSIC_STATS_URL, MUSIC_WRAP_URL } from '../config/env.js';
+import envConfig from '../config/env.js';
 import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
 import { fetchExternal } from '../utils/fetch.js';
 import { MUSIC_WRAP_PREFIX } from '../config/systemMessages.js';
@@ -29,7 +29,7 @@ function loadMonitorState() {
   if (state) return state;
 
 
-  const OLD_FILE = path.join(DATA_DIR, 'musicWrapMonitor.json');
+  const OLD_FILE = path.join(constants.DATA_DIR, 'musicWrapMonitor.json');
   if (fs.existsSync(OLD_FILE)) {
     try {
       const oldState = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
@@ -106,7 +106,7 @@ function isFirstOfMonth() {
  */
 async function checkStatsFileUpdate() {
   try {
-    const response = await fetchExternal(MUSIC_STATS_URL, {
+    const response = await fetchExternal(envConfig.MUSIC_STATS_URL, {
       headers: { 'User-Agent': 'GemiX-MusicWrapMonitor/1.0' }
     }, 'Music Stats Check');
 
@@ -196,8 +196,8 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     try {
       const monthName = getPreviousMonthName();
       const capitalizedMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
-      const password = MUSIC_WRAP_PASSWORD || 'N/D';
-      const message = normalizeMarkdown(`${MUSIC_WRAP_PREFIX} ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`);
+      const password = envConfig.MUSIC_WRAP_PASSWORD || 'N/D';
+      const message = normalizeMarkdown(`${MUSIC_WRAP_PREFIX} ${capitalizedMonth} aggiornato!* 🎵\n\nÈ disponibile il tuo wrap musicale aggiornato del mese precedente:\n\n🔗 ${envConfig.MUSIC_WRAP_URL}\nPassword: "${password}". \n\nGoditi le tue statistiche! 🎧📊`);
       await dedicatedClient.sendMessage(member.wa, message);
       log.info(`Message sent to ${member.name}`);
       state.lastSentDate[member.wa] = today;

@@ -7,7 +7,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 import { sanitizeFilename  } from './text.js';
 import { extractAttachmentTagPaths  } from './media.js';
@@ -19,7 +19,7 @@ const log = createLogger('HistorySync');
 // (history fetch timeout/incomplete). Files older than this TTL are removed;
 // the next successful history rebuild re-syncs media from the last MAX_HISTORY messages.
 const DISCORD_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
-const GEMIX_VOICE_TEXT_CACHE_FILE = path.join(DATA_DIR, 'gemixVoiceTextCache.json');
+const GEMIX_VOICE_TEXT_CACHE_FILE = path.join(constants.DATA_DIR, 'gemixVoiceTextCache.json');
 const RECENT_VOICE_MAX_ENTRIES = 200;
 /** Match cache entry to history message time (voice sent vs history rebuild delay). */
 const RECENT_VOICE_MATCH_TOLERANCE_MS = 120_000;
@@ -38,7 +38,7 @@ const _withSyncLock = (userId, fn) => withKeyedLock(_syncLocks, userId, fn);
  * @returns {object} { historyDir, metaFile }
  */
 function getUserHistoryPaths(userId) {
-  const userDir = path.join(DATA_DIR, 'users', userId);
+  const userDir = path.join(constants.DATA_DIR, 'users', userId);
   const historyDir = path.join(userDir, 'history');
   const metaFile = path.join(userDir, 'history_meta.json');
   return { historyDir, metaFile };

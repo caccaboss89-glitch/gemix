@@ -16,7 +16,7 @@
 // This module only manages <storageId>/ history paths.
 
 import path from 'path';
-import { DATA_DIR, PLATFORM_DISCORD, PLATFORM_WA_PERSONAL, isWhatsAppPlatform  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import { getGroupTaskFileId  } from './userIdentifier.js';
 
 /** Prefix for on-disk history of admin↔user personal-account chats (shared pair). */
@@ -56,20 +56,20 @@ function _resolvePersonalMemoryFileId(chatId) {
  * @returns {string|null}
  */
 function resolveSettingsFileId(ctx, ui) {
-  if (ctx.platform === PLATFORM_DISCORD) return null;
-  if (ctx.isGroup && isWhatsAppPlatform(ctx.platform)) {
+  if (ctx.platform === constants.PLATFORM_DISCORD) return null;
+  if (ctx.isGroup && constants.isWhatsAppPlatform(ctx.platform)) {
     return 'memory_' + getGroupTaskFileId(ctx.groupId);
   }
-  if (ctx.platform === PLATFORM_WA_PERSONAL && ctx.chatId) return _resolvePersonalMemoryFileId(ctx.chatId);
+  if (ctx.platform === constants.PLATFORM_WA_PERSONAL && ctx.chatId) return _resolvePersonalMemoryFileId(ctx.chatId);
   return 'memory_' + ui.taskFileId;
 }
 
 function resolveStorageId(userCtx) {
   if (!userCtx) return null;
-  if (userCtx.platform === PLATFORM_DISCORD) {
+  if (userCtx.platform === constants.PLATFORM_DISCORD) {
     return userCtx.chatId ? String(userCtx.chatId) : null;
   }
-  if (userCtx.platform === PLATFORM_WA_PERSONAL && userCtx.chatId) {
+  if (userCtx.platform === constants.PLATFORM_WA_PERSONAL && userCtx.chatId) {
     return resolvePersonalChatStorageId(userCtx.chatId);
   }
   if (userCtx.isGroup) return userCtx.groupId ? String(userCtx.groupId) : null;
@@ -82,7 +82,7 @@ function resolveStorageId(userCtx) {
 function getUserRoot(userCtx) {
   const id = resolveStorageId(userCtx);
   if (!id) return null;
-  return path.join(DATA_DIR, 'users', id);
+  return path.join(constants.DATA_DIR, 'users', id);
 }
 
 function getHistoryDir(userCtx) {

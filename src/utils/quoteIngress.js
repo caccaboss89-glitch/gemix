@@ -3,7 +3,7 @@
 // [In reply to: ...] prefixes so the model keeps cross-message context in both
 // the current turn and rebuilt history.
 
-import { PLATFORM_WA_DEDICATED  } from '../config/constants.js';
+import constants from '../config/constants.js';
 import {
   REPLY_OUTSIDE_HISTORY_PREFIX,
   REPLY_CHAIN_TRUNCATED_PREFIX,
@@ -117,7 +117,7 @@ async function processWhatsAppQuotedReply(
   historyStorageId,
   recentMessageIds,
   isGroup = false,
-  platform = PLATFORM_WA_DEDICATED,
+  platform = constants.PLATFORM_WA_DEDICATED,
   options = {}
 ) {
   void chatId;

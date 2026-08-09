@@ -42,16 +42,8 @@ import { generateVoice  } from './tools/voiceMessage.js';
 import { sanitizeVoiceMessageText  } from './utils/text.js';
 import { getCapabilities, resolveProfile, toolUnavailableMessage  } from './config/platformCapabilities.js';
 import { executeTool } from './tools/index.js';
-import {
-  MAX_TOOL_ROUNDS,
-  MAX_TTS_CHARS,
-  PLATFORM_DISCORD,
-  PLATFORM_WA_DEDICATED,
-  MAINTENANCE_ADMIN_ONLY,
-  MAINTENANCE_USER_MESSAGE,
-  MAINTENANCE_RELEASE_NOTIFY_COMMAND
- } from './config/constants.js';
-import { MAINTENANCE_MODE  } from './config/env.js';
+import constants from './config/constants.js';
+import envConfig from './config/env.js';
 import { createLogger  } from './utils/logger.js';
 import { appendResearchBadge, buildResearchBadgeText  } from './utils/footer.js';
 
@@ -98,7 +90,7 @@ function extractPlainTextContent(content) {
 
 /** Re-read the persisted preferences so a manage_preferences call takes effect at once. */
 function reloadSettings(ctx, ui) {
-  if (ctx.platform === PLATFORM_DISCORD) return;
+  if (ctx.platform === constants.PLATFORM_DISCORD) return;
   ctx.settings = readSettings(resolveSettingsFileId(ctx, ui));
 }
 
@@ -160,14 +152,14 @@ async function handleMessage(ctx) {
 
     // -- Maintenance gate --
     // Blocks every non-admin request with a fixed message. Admins always pass.
-    if (MAINTENANCE_MODE && MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
-      if (maintenanceCommand === MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
+    if (envConfig.MAINTENANCE_MODE && constants.MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
+      if (maintenanceCommand === constants.MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
         const enableResult = enableReleaseNotify(releaseNotifyTarget.chatId, releaseNotifyTarget.waJid);
         const alreadyEnabled = Boolean(enableResult.alreadyEnabled);
         const text = alreadyEnabled
           ? buildMaintenanceReleaseAlreadyEnabledMessage()
           : buildMaintenanceReleaseEnabledMessage();
-        if (ctx.platform === PLATFORM_DISCORD && releaseNotifyTarget.waJid) {
+        if (ctx.platform === constants.PLATFORM_DISCORD && releaseNotifyTarget.waJid) {
           try {
             await sendWhatsAppDirect(releaseNotifyTarget.waJid, text);
           } catch (err) {
@@ -186,7 +178,7 @@ async function handleMessage(ctx) {
       }
       log.info(`   Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
       return {
-        text: MAINTENANCE_USER_MESSAGE,
+        text: constants.MAINTENANCE_USER_MESSAGE,
         voiceBuffer: null,
         isVoiceOnly: false,
         attachments: [],
@@ -196,7 +188,7 @@ async function handleMessage(ctx) {
       };
     }
 
-    const isDiscord = ctx.platform === PLATFORM_DISCORD;
+    const isDiscord = ctx.platform === constants.PLATFORM_DISCORD;
     // Voice replies are a structured-reply flag (WhatsApp dedicated only),
     // never a tool. The model sets `voice:true` and writes `response` with TTS tags.
     const allowVoice = Boolean(getCapabilities(ctx).voiceReply);
@@ -434,8 +426,8 @@ async function handleMessage(ctx) {
       const spoken = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
       if (!spoken.trim()) return null;
 
-      if (spoken.length > MAX_TTS_CHARS) {
-        log.warn(`   Voice text too long (${spoken.length} > ${MAX_TTS_CHARS}); replying as text`);
+      if (spoken.length > constants.MAX_TTS_CHARS) {
+        log.warn(`   Voice text too long (${spoken.length} > ${constants.MAX_TTS_CHARS}); replying as text`);
         return null;
       }
 
@@ -450,7 +442,7 @@ async function handleMessage(ctx) {
         return null;
       }
 
-      const researchFooter = ctx.platform === PLATFORM_WA_DEDICATED
+      const researchFooter = ctx.platform === constants.PLATFORM_WA_DEDICATED
         ? buildResearchBadgeText(responseCtx.researchStats)
         : null;
       log.info(`   Voice reply ready (${voiceBuffer.length} bytes)`);
@@ -467,7 +459,7 @@ async function handleMessage(ctx) {
       };
     };
 
-    while (rounds < MAX_TOOL_ROUNDS) {
+    while (rounds < constants.MAX_TOOL_ROUNDS) {
       rounds++;
 
       if (Date.now() - sessionStartTime > SESSION_MAX_DURATION_MS) {
@@ -477,7 +469,7 @@ async function handleMessage(ctx) {
       }
 
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
-      log.info(`[${pLabel}] AI call (round ${rounds}/${MAX_TOOL_ROUNDS})`);
+      log.info(`[${pLabel}] AI call (round ${rounds}/${constants.MAX_TOOL_ROUNDS})`);
 
       // Pick up a manage_preferences change for this call's reasoning effort.
       // Static prefix stays byte-identical unless the tool fingerprint changes.
@@ -502,7 +494,7 @@ async function handleMessage(ctx) {
         allowVoice
       });
       const callOpts = {
-        maxTurns: MAX_TOOL_ROUNDS,
+        maxTurns: constants.MAX_TOOL_ROUNDS,
         requestId: ctx.requestId,
         responseFormat,
         historyStorageId: resolveStorageId(ctx) || null,
@@ -623,9 +615,9 @@ async function handleMessage(ctx) {
       // xAI occasionally returns status=completed with only a reasoning item
       // (no function_call, no message/output_text). At most one retry; if it
       // still returns empty (or the API is 503-flaky), fall back immediately —
-      // do not spin through all MAX_TOOL_ROUNDS.
+      // do not spin through all constants.MAX_TOOL_ROUNDS.
       if (!text.trim() && finalAttachments.length === 0) {
-        if (emptyOutputRetries < MAX_EMPTY_OUTPUT_RETRIES && rounds < MAX_TOOL_ROUNDS) {
+        if (emptyOutputRetries < MAX_EMPTY_OUTPUT_RETRIES && rounds < constants.MAX_TOOL_ROUNDS) {
           emptyOutputRetries += 1;
           log.warn(
             '   Empty model output (no tool call, no structured reply) — one retry '
@@ -685,7 +677,7 @@ async function handleMessage(ctx) {
     // ── Forced text wrap-up (session wall clock or tool-round budget) ───
     const wrapUpReason = sessionDurationLimitReached
       ? 'session time limit (10 minutes)'
-      : `tool-round budget (${MAX_TOOL_ROUNDS})`;
+      : `tool-round budget (${constants.MAX_TOOL_ROUNDS})`;
     log.warn(`   Forcing final answer (${wrapUpReason}, tool_choice:none)`);
     let wrapUpText = '';
     let wrapUpAttachments = [];

@@ -16,7 +16,7 @@
 //   clearCallNotifications(ctx)       - called in the finally block of handleMessage
 
 import { createLogger  } from './logger.js';
-import { PLATFORM_DISCORD, isWhatsAppPlatform  } from '../config/constants.js';
+import constants from '../config/constants.js';
 
 const log = createLogger('NotificationDedup');
 
@@ -35,8 +35,8 @@ const _notified = new Set();
  */
 function getChatKey(ctx) {
   if (!ctx) return 'unknown:unknown';
-  if (ctx.platform === PLATFORM_DISCORD) return `${PLATFORM_DISCORD}:${ctx.chatId || 'unknown'}`;
-  if (isWhatsAppPlatform(ctx.platform)) {
+  if (ctx.platform === constants.PLATFORM_DISCORD) return `${constants.PLATFORM_DISCORD}:${ctx.chatId || 'unknown'}`;
+  if (constants.isWhatsAppPlatform(ctx.platform)) {
     return `${ctx.platform}:${ctx.chatId || ctx.groupId || ctx.userId || 'unknown'}`;
   }
   return `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}`;

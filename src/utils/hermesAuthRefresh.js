@@ -5,7 +5,7 @@
 
 import { spawn  } from 'child_process';
 import { createLogger  } from './logger.js';
-import { HERMES_BIN  } from '../config/env.js';
+import envConfig from '../config/env.js';
 
 const log = createLogger('Hermes');
 
@@ -29,12 +29,12 @@ function _runHermesRefresh() {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn(HERMES_BIN, args, {
+      child = spawn(envConfig.HERMES_BIN, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: process.env
       });
     } catch (err) {
-      return reject(new Error(`Cannot start ${HERMES_BIN}: ${err.message}`));
+      return reject(new Error(`Cannot start ${envConfig.HERMES_BIN}: ${err.message}`));
     }
 
     let stdout = '';
@@ -78,7 +78,7 @@ async function refreshHermesOAuth() {
   if (_refreshInFlight) return _refreshInFlight;
 
   _refreshInFlight = (async () => {
-    log.warn(`Invoking Hermes OAuth refresh (${HERMES_BIN} chat -q "${HERMES_REFRESH_QUERY}")...`);
+    log.warn(`Invoking Hermes OAuth refresh (${envConfig.HERMES_BIN} chat -q "${HERMES_REFRESH_QUERY}")...`);
     const reply = await _runHermesRefresh();
     log.info('Hermes OAuth refresh completed — auth file should be updated.');
     return reply;
