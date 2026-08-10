@@ -1,4 +1,4 @@
-﻿// Personal-account (admin) WhatsApp: GemiX vs Account Owner vs system notices in history.
+// Personal-account (admin) WhatsApp: GemiX vs Account Owner vs system notices in history.
 //
 // GemiX conversational block (chronological):
 //   1. Starts with a fromMe text message that contains the GemiX footer.
@@ -17,7 +17,7 @@ import { isSystemMessage  } from '../config/systemMessages.js';
 import {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption
- } from './attachmentCaption.js';
+} from './attachmentCaption.js';
 import { resolveIngressFilename  } from './attachmentFilenames.js';
 
 function isPersonalGemixTextReply(msg) {

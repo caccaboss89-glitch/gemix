@@ -33,10 +33,10 @@ export default [
     },
     rules: {
       'indent': ['error', 2],
-      'linebreak-style': ['error', 'unix'],
       'quotes': ['error', 'single'],
       'semi': ['error', 'always'],
       'no-unused-vars': ['warn'],
+      'no-undef': 'error',
       'no-console': 'off',
       'eqeqeq': ['error', 'always'],
       'prefer-const': 'warn',

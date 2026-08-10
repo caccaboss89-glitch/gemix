@@ -1,4 +1,4 @@
-﻿// src/ai/responsesAdapter.js
+// src/ai/responsesAdapter.js
 //
 // Bidirectional adapter between chat-completions style messages and tools
 // (used by handler, tools, history) and xAI Responses API wire format

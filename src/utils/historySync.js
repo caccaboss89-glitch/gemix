@@ -1,4 +1,4 @@
-﻿// src/utils/historySync.js
+// src/utils/historySync.js
 //
 // Handles persistent storage of user/group chat history files, deterministic
 // pruning of unreferenced attachments, and metadata for GemiX voice
@@ -281,10 +281,8 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
           log.warn(`History cache for ${uniqueId} is empty (${existingName}), re-downloading`);
           try { fs.unlinkSync(existingPath); } catch { /* ignore */ }
         } catch { /* re-download below */ }
-        delete meta[uniqueId];
-        _saveMeta(metaFile, meta, userId);
       }
-      // Entry missing on disk, clear from meta and re-save
+      // Stale entry: empty/unreadable file above, or missing from disk entirely.
       delete meta[uniqueId];
       _saveMeta(metaFile, meta, userId);
     }

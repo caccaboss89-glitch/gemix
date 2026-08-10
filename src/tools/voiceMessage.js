@@ -1,4 +1,4 @@
-﻿// src/tools/voiceMessage.js
+// src/tools/voiceMessage.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -252,5 +252,5 @@ async function googleTranslateTTS(text, language, signal) {
   return convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
 }
 
-export { generateVoice, convertMp3ToWhatsAppOpus 
+export { generateVoice, convertMp3ToWhatsAppOpus
 };

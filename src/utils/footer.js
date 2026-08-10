@@ -1,4 +1,4 @@
-﻿// src/utils/footer.js
+// src/utils/footer.js
 //
 // Utilities for adding/removing the standard GemiX footer and for
 // formatting model names. Also handles scheduled message footers.
@@ -111,7 +111,7 @@ function addScheduledFooter(text, createdAt) {
 /**
  * Build the server-side research badge line (web/X counts).
  * @param {{ webSources?: number, xPosts?: number }|null} stats
- * @returns {string|null} e.g. "🌐: 3 sources. 𝕏: 2 posts." or null when no badge applies
+ * @returns {string|null} e.g. "🌐: 3 sources. 𝕏: 1 post." or null when no badge applies
  */
 function buildResearchBadgeText(stats) {
   if (!stats) return null;
@@ -119,8 +119,8 @@ function buildResearchBadgeText(stats) {
   const xPosts = stats.xPosts || 0;
   if (webSources <= 0 && xPosts <= 0) return null;
   const parts = [];
-  if (webSources > 0) parts.push(`🌐: ${webSources} sources`);
-  if (xPosts > 0) parts.push(`𝕏: ${xPosts} posts`);
+  if (webSources > 0) parts.push(`🌐: ${webSources} source${webSources === 1 ? '' : 's'}`);
+  if (xPosts > 0) parts.push(`𝕏: ${xPosts} post${xPosts === 1 ? '' : 's'}`);
   return `${parts.join('. ')}.`;
 }
 

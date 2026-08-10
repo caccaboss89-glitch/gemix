@@ -1,4 +1,4 @@
-﻿// src/tools/sendWhatsApp.js
+// src/tools/sendWhatsApp.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and the result is a plain object the dispatcher serializes into the
@@ -19,7 +19,7 @@ import {
   resolveOutboundAttachments,
   alreadyContactedError,
   recordOutbound
- } from './outboundDelivery.js';
+} from './outboundDelivery.js';
 
 const log = createLogger('SendWhatsApp');
 
@@ -139,5 +139,5 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
   }
 }
 
-export { sendWhatsAppTool 
+export { sendWhatsAppTool
 };

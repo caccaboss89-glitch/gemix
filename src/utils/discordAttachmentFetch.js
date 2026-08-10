@@ -1,4 +1,4 @@
-﻿// src/utils/discordAttachmentFetch.js
+// src/utils/discordAttachmentFetch.js
 //
 // Safe Discord attachment download helpers (25 MB cap, shared by incoming
 // message handling and history rebuild).

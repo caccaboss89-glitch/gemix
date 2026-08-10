@@ -1,4 +1,4 @@
-﻿// src/utils/waSpecialMessages.js
+// src/utils/waSpecialMessages.js
 //
 // Recognize and parse the WhatsApp "special" message types whatsapp-web.js
 // surfaces with non-textual payloads:

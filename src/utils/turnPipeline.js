@@ -1,8 +1,7 @@
-﻿// Shared batch→history→handleMessage→deliver sequence for all platforms.
+// Shared batch→history→handleMessage→deliver sequence for all platforms.
 
 import responseLock from './responseLock.js';
 import { pickLatestBatchEntry, filterBatchToTriggerSpeaker } from './batchContext.js';
-import { normalizeHistoryLoad } from './historyFetch.js';
 import constants from '../config/constants.js';
 import { handleMessage } from '../handler.js';
 
@@ -29,7 +28,9 @@ function _ensurePipelineLock(lockKey, stopLockRenew) {
  * @param {Function|null} opts.stopLockRenew
  * @param {Array} opts.entries - batch entries (narrowed to the trigger speaker)
  * @param {string} opts.discardLogLabel - chat id for discard warning
- * @param {Function} opts.loadHistory - async ({ entries, latest, first }) => history array
+ * @param {Function} opts.loadHistory - async ({ entries, latest, first }) => { history, incomplete }
+ *   (all current callers wrap utils/historyFetch.js's fetchHistoryWithTimeout, which already
+ *   returns this normalized shape)
  * @param {Function} opts.buildHandlerCtx - ({ entries, history, latest, first }) => handler ctx
  * @param {Function} [opts.prepareSession] - async () => { stop?: Function } (typing/presence)
  * @param {Function} [opts.interceptTurn] - async ({ entries, latest, first }) =>
@@ -111,8 +112,7 @@ async function runTurnPipeline(opts) {
       }
     }
 
-    const historyPayload = await loadHistory({ entries, latest, first });
-    const { history, incomplete: historyLoadIncomplete } = normalizeHistoryLoad(historyPayload);
+    const { history, incomplete: historyLoadIncomplete } = await loadHistory({ entries, latest, first });
 
     if (typeof prepareSession === 'function') {
       try {
@@ -141,5 +141,5 @@ async function runTurnPipeline(opts) {
   }
 }
 
-export { runTurnPipeline 
+export { runTurnPipeline
 };

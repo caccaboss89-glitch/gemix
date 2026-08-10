@@ -1,4 +1,4 @@
-﻿// src/utils/xmlEscape.js
+// src/utils/xmlEscape.js
 //
 // Shared XML escape utility used when building structured prompts
 // (especially for the build sub-agent and other XML-tagged contexts).
@@ -14,5 +14,5 @@ function escapeXml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-export { escapeXml 
+export { escapeXml
 };

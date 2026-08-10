@@ -1,4 +1,4 @@
-﻿// src/utils/presence.js
+// src/utils/presence.js
 //
 // Manages WhatsApp presence indicators (typing / recording) with automatic
 // refresh. WhatsApp automatically clears these states after ~25 seconds, so
@@ -147,5 +147,5 @@ class WhatsAppPresence {
   }
 }
 
-export { WhatsAppPresence 
+export { WhatsAppPresence
 };

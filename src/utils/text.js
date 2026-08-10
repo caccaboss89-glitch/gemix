@@ -1,4 +1,4 @@
-﻿// src/utils/text.js
+// src/utils/text.js
 //
 // Collection of text utilities used throughout GemiX:
 // - Filename sanitization for safe storage
@@ -60,10 +60,11 @@ function stripVoiceTags(text) {
 }
 
 // Characters that are not read aloud cleanly by TTS and must be removed from
-// voice text (emoji, underscores, quotes, backslashes, markdown symbols, …).
-// Allowed: letters (incl. accented), digits, whitespace, and the readable
-// punctuation . , ! ? ' — everything else is dropped. Voice effect tags
-// ([pause], <soft>, …) are protected and restored around the cleanup.
+// voice text (emoji, underscores, straight quotes, backslashes, markdown symbols, …).
+// Allowed: letters (incl. accented), digits, whitespace, the readable
+// punctuation . , ! ? ' (straight) and ’ (typographic apostrophe), and a
+// hyphen — everything else is dropped. Voice effect tags ([pause], <soft>, …)
+// are protected and restored around the cleanup.
 const VOICE_ALLOWED_RE = /[^\p{L}\p{N}\s.,!?'’-]/gu;
 
 /**
@@ -286,15 +287,15 @@ function stripHistoryPrefixes(text) {
 
 /**
  * Clean up the final assistant response text before any platform processing.
- * Applies outgoing filters:
- * 1. Strips voice effect tags (e.g. [pause], <soft>)
- * 2. Strips any duplicated history conversation prefixes (e.g. "[timestamp] GemiX:")
- * 3. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N posts.")
- * 4. Strips any accidental footers (e.g. "--GemiX • ...")
- * 5. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
+ * Applies outgoing filters, in this order:
+ * 1. Strips [Attachment: ...], <PastVoiceReply> and <system-notification>/<system-reminder> echoes
+ * 2. Strips voice effect tags (e.g. [pause], <soft>)
+ * 3. Strips any duplicated history conversation prefixes (e.g. "[timestamp] GemiX:")
+ * 4. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
+ * 5. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N posts.")
  * 6. Strips any GemiX system-message lines accidentally echoed by the AI
  *    (release banners, maintenance, temp-attachment notice, fallback error...)
- * 7. Strips [Attachment: ...] and <PastVoiceReply> echoes
+ * 7. Strips any accidental footers (e.g. "--GemiX • ...")
  * @param {string} text
  * @returns {string} Cleaned response text
  */

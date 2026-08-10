@@ -1,4 +1,4 @@
-﻿// src/scheduler/musicWrapMonitor.js
+// src/scheduler/musicWrapMonitor.js
 //
 // Monitors GitHub music stats for updates and sends monthly wrap notifications
 // to active members only on the 1st of each month. On that day also requires a
@@ -222,5 +222,5 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   return !anyFailed;
 }
 
-export { checkAndSendMusicWrap 
+export { checkAndSendMusicWrap
 };

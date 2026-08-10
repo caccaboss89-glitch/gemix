@@ -1,4 +1,4 @@
-﻿// src/utils/tempFileServer.js
+// src/utils/tempFileServer.js
 // HTTP server that hosts temporary files with expiration.
 //
 // Serves the temporary download links sent to USERS when WhatsApp/Discord
@@ -30,10 +30,8 @@ import constants from '../config/constants.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const log = createLogger('TempFileServer');
 
-// Configuration
-const PORT = envConfig.GEMIX_TEMP_FILE_PORT
-  ? parseInt(String(envConfig.GEMIX_TEMP_FILE_PORT), 10) || 9998
-  : 9998;
+// Configuration (GEMIX_TEMP_FILE_PORT is required — env.js fails fast if unset).
+const PORT = parseInt(envConfig.GEMIX_TEMP_FILE_PORT, 10);
 // Default TTL kept for backward compatibility (existing fallback callers
 // did not pass ttlMs). Equivalent to constants.TUNNEL_TOKEN_TTL_TEMP_MS.
 const DEFAULT_EXPIRATION_MS = constants.TUNNEL_TOKEN_TTL_TEMP_MS;
@@ -51,9 +49,9 @@ const TEMP_DIR = path.join(__dirname, '..', '..', '.tempfiles');
 const fileRegistry = new Map();
 
 // Per-token request counter to mitigate token-reuse abuse / scraping.
-// xAI fetches the file once or twice (initial download + occasional re-fetch),
-// the user downloads it once or twice from a leaked link before we'd notice,
-// so 20 is generous without being permissive.
+// A legitimate recipient downloads a link once or twice (initial open +
+// occasional retry) before we'd notice a problem, so 20 is generous without
+// being permissive.
 const MAX_TOKEN_REQUESTS = 20;
 
 let _server = null;
@@ -351,7 +349,7 @@ function startTempFileServer() {
 
         // Build Content-Disposition with quote escaping + RFC 5987 UTF-8.
         // Disposition mode (inline vs attachment) was decided at registration:
-        //   - inline for media xAI ingests (PDF/audio/video/image/text),
+        //   - inline for media a browser can preview (PDF/audio/video/image/text),
         //   - attachment for unknown types (download dialog, defensive).
         const escapedName = entry.originalName.replace(/"/g, '\\"');
         const encodedName = encodeURIComponent(entry.originalName);

@@ -1,4 +1,4 @@
-﻿// src/sandbox/buildSandbox.js
+// src/sandbox/buildSandbox.js
 //
 // Per-workspace docker container manager for the `build` sub-agent.
 //

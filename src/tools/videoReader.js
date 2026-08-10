@@ -1,4 +1,4 @@
-﻿// src/tools/videoReader.js
+// src/tools/videoReader.js
 //
 // read_video: load one video that is already in this chat's history.
 //
@@ -100,5 +100,5 @@ async function readVideo(args, userCtx) {
   return [{ type: 'text', text: JSON.stringify(payload) }, part];
 }
 
-export { readVideo 
+export { readVideo
 };

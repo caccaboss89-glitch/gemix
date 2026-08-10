@@ -1,4 +1,4 @@
-﻿// src/tools/whatsappSender.js
+// src/tools/whatsappSender.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -77,5 +77,5 @@ async function sendWhatsAppDirect(chatId, message, options = {}) {
   await dedicatedClient.sendMessage(chatId, message, sendOptions);
 }
 
-export { sendWhatsAppDirect, setDedicatedClient, normalizePhoneToJid 
+export { sendWhatsAppDirect, setDedicatedClient, normalizePhoneToJid
 };

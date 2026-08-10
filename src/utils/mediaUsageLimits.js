@@ -1,4 +1,4 @@
-﻿// src/utils/mediaUsageLimits.js
+// src/utils/mediaUsageLimits.js
 //
 // Per-user WEEKLY generation quota for images, videos and songs.
 //
@@ -87,13 +87,13 @@ function getMediaUsage(userKey) {
 /**
  * Format the usage counts for the Runtime trailer weekly quota line.
  * @param {string} userKey
- * @returns {string} e.g. "Video: 1/2 Immagini 3/5 Canzoni 0/2"
+ * @returns {string} e.g. "Video: 1/2 · Immagini: 3/5 · Canzoni: 0/2"
  */
 function formatQuotaCounts(userKey) {
   const u = getMediaUsage(userKey);
-  return `Video: ${u.video}/${MEDIA_WEEKLY_LIMITS.video} `
-    + `Immagini ${u.image}/${MEDIA_WEEKLY_LIMITS.image} `
-    + `Canzoni ${u.song}/${MEDIA_WEEKLY_LIMITS.song}`;
+  return `Video: ${u.video}/${MEDIA_WEEKLY_LIMITS.video} · `
+    + `Immagini: ${u.image}/${MEDIA_WEEKLY_LIMITS.image} · `
+    + `Canzoni: ${u.song}/${MEDIA_WEEKLY_LIMITS.song}`;
 }
 
 /**

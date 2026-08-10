@@ -1,4 +1,4 @@
-﻿// Transient Puppeteer / whatsapp-web.js evaluate failures.
+// Transient Puppeteer / whatsapp-web.js evaluate failures.
 // WhatsApp Web often minifies thrown errors to "r: r" when the page context
 // is destroyed or mid-reload (see wwebjs issues on getChatById after WA updates).
 

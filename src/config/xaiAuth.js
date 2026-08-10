@@ -100,5 +100,5 @@ function describeXaiAuthSource() {
   return `oauth file (${XAI_AUTH_FILE})`;
 }
 
-export { getXaiAuth, describeXaiAuthSource 
+export { getXaiAuth, describeXaiAuthSource
 };

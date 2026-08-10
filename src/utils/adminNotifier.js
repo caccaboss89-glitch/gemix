@@ -1,4 +1,4 @@
-﻿// src/utils/adminNotifier.js
+// src/utils/adminNotifier.js
 //
 // Forwards critical errors from the bot and the sandbox proxy to the
 // administrator via WhatsApp. Uses a per-source cooldown.
@@ -33,24 +33,29 @@ function setAdminNotifierClient(waClient) {
  * Uses a per-source cooldown.
  * @param {string} source - Error source (e.g., 'API (Grok)', 'WhatsApp Delivery')
  * @param {string} errorMessage - Error details
+ * @returns {Promise<boolean>} true only when the WhatsApp message was actually
+ *   sent — false on no client, no admin on file, an active cooldown for this
+ *   source, or a send failure. Callers that promise the user "the admin has
+ *   been notified" must check this instead of assuming every call succeeds.
  */
 async function notifyAdmin(source, errorMessage) {
-  if (!client) return;
+  if (!client) return false;
 
   const lastNotified = cooldowns.get(source) || 0;
-  if (Date.now() - lastNotified < COOLDOWN_MS) return;
+  if (Date.now() - lastNotified < COOLDOWN_MS) return false;
   cooldowns.set(source, Date.now());
 
   const admin = ACTIVE_MEMBERS.find(m => m.admin);
-  if (!admin) return;
+  if (!admin) return false;
 
   const timestamp = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
   const message = `${ADMIN_ERROR_PREFIX} ${source}*\n\n${errorMessage}\n\n_${timestamp}_`;
 
   try {
     await client.sendMessage(admin.wa, message);
+    return true;
   } catch {
-    // Ignore send errors
+    return false;
   }
 }
 

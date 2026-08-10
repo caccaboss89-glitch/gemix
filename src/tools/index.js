@@ -1,4 +1,4 @@
-﻿// src/tools/index.js
+// src/tools/index.js
 //
 // Tool directives: all tool-facing text (including the envelopes hand-written
 // inline by this dispatcher) is in English, uses no emojis, no XML wrappers,
@@ -273,10 +273,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
         result = { success: false, error: 'Missing required argument "description".' };
         break;
       }
-      await notifyAdmin('Bug Report', bugDescription);
+      const notified = await notifyAdmin('Bug Report', bugDescription);
       result = {
         success: true,
-        message: `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT}`
+        message: notified
+          ? `Bug report sent successfully.${ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT}`
+          : 'Bug report recorded, but the admin notification could not be sent right now '
+            + '(another report went out in the last few minutes, or the admin channel is unavailable). '
+            + 'In your final text response, tell the user the problem was logged but do NOT claim the admin has been notified.'
       };
       break;
     }

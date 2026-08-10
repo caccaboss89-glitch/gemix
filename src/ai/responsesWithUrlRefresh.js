@@ -1,4 +1,4 @@
-﻿// src/ai/responsesWithUrlRefresh.js
+// src/ai/responsesWithUrlRefresh.js
 //
 // Shared callResponsesModel wrapper: on xAI "failed to download file from URL"
 // errors, refresh tmpfile.link URLs from disk and retry (no admin notify).
@@ -71,5 +71,5 @@ async function callResponsesWithStaleUrlRetry(opts) {
   }
 }
 
-export { callResponsesWithStaleUrlRetry, MAX_STALE_URL_REFRESHES 
+export { callResponsesWithStaleUrlRetry
 };

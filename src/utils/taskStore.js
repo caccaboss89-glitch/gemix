@@ -1,4 +1,4 @@
-﻿// src/utils/taskStore.js
+// src/utils/taskStore.js
 //
 // Persistent storage layer for scheduled reminders (reminders).
 // Handles read/write/modify operations on per-user/group task files
@@ -36,31 +36,6 @@ async function readTaskFile(fileId) {
 }
 
 /**
- * Write task data to a task file. Deletes the file if tasks array is empty.
- * Serialized via per-file lock to prevent concurrent write conflicts.
- * @param {string} fileId - The task file ID
- * @param {{ tasks: Array }} data - Task data to write
- * @returns {Promise<void>}
- */
-async function writeTaskFile(fileId, data) {
-  return _withLock(fileId, async () => {
-    const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
-    if (!data.tasks || data.tasks.length === 0) {
-      try { await fsPromises.unlink(filePath); } catch { }
-      return;
-    }
-    const tempPath = filePath + '.tmp';
-    try {
-      await fsPromises.writeFile(tempPath, JSON.stringify(data, null, 2));
-      await fsPromises.rename(tempPath, filePath);
-    } catch (err) {
-      try { await fsPromises.unlink(tempPath); } catch { /* best effort */ }
-      throw err;
-    }
-  });
-}
-
-/**
  * Atomically read, modify, and write a task file under a per-file lock.
  * Guarantees no other read-modify-write can interleave, even across async operations.
  * @param {string} fileId - The task file ID
@@ -95,5 +70,5 @@ async function modifyTaskFile(fileId, fn) {
   });
 }
 
-export { readTaskFile, writeTaskFile, modifyTaskFile 
+export { readTaskFile, modifyTaskFile
 };

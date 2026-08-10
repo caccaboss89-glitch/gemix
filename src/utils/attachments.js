@@ -1,4 +1,4 @@
-﻿// src/utils/attachments.js
+// src/utils/attachments.js
 // Unified attachment shape used across responseCtx.
 // An attachment is: { name, mimetype, buffer?, filePath?, externalUrl?, waTempLinkPreferred? }
 //   - buffer:   Buffer already in memory (small/in-flight files: voice, formal PDF, generated media)
@@ -103,7 +103,7 @@ function isValidAttachment(att) {
  */
 function readAttachmentBuffer(att) {
   if (!isValidAttachment(att)) return null;
-  if (hasExternalUrlOnly(att)) return null;
+  if (hasExternalUrl(att)) return null;
   if (Buffer.isBuffer(att.buffer)) return att.buffer;
   try {
     return fs.readFileSync(att.filePath);
@@ -178,13 +178,13 @@ function toWhatsAppMediaArgs(att) {
  * @returns {{ data: Buffer|string, name: string } | null}
  */
 function toDiscordAttachmentArgs(att) {
-  if (hasExternalUrlOnly(att)) return null;
+  if (hasExternalUrl(att)) return null;
   if (!isValidAttachment(att)) return null;
   if (typeof att.filePath === 'string') return { data: att.filePath, name: att.name };
   return { data: att.buffer, name: att.name };
 }
 
-function hasExternalUrlOnly(att) {
+function hasExternalUrl(att) {
   return typeof att?.externalUrl === 'string' && att.externalUrl.trim().length > 0;
 }
 
@@ -197,6 +197,7 @@ export {
   isWhatsAppAudioVideoAttachment,
   WA_DIRECT_MAX_BYTES,
   toEmailAttachment,
+  hasExternalUrl,
   toWhatsAppMediaArgs,
   toDiscordAttachmentArgs
 

@@ -1,4 +1,4 @@
-﻿// src/ai/aiProvider.js
+// src/ai/aiProvider.js
 //
 // Thin adapter for main-brain LLM calls on the direct xAI Responses
 // endpoint (`/v1/responses`). Accepts the usual chat-style messages + tools
@@ -13,7 +13,7 @@ import {
   chatToolsToResponsesTools,
   responsesToAssistantMessage,
   extractServerSearchStats
- } from './responsesAdapter.js';
+} from './responsesAdapter.js';
 import { callResponsesWithStaleUrlRetry  } from './responsesWithUrlRefresh.js';
 
 /**
@@ -79,5 +79,5 @@ async function callAI(messages, tools = null, opts = {}) {
   return { message, provider: 'Grok', model: envConfig.GROK_MODEL, searchStats };
 }
 
-export { callAI 
+export { callAI
 };

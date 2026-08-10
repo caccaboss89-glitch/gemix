@@ -1,4 +1,4 @@
-﻿// src/utils/media.js
+// src/utils/media.js
 //
 // Helpers for attachment tags and supported WhatsApp media types.
 

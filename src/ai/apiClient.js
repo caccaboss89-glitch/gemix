@@ -1,4 +1,4 @@
-﻿// src/ai/apiClient.js
+// src/ai/apiClient.js
 //
 // Centralized API client for all direct xAI LLM calls (`/v1/responses`).
 // Reads the OAuth token from config/xaiAuth.js on every attempt (the auth
@@ -27,12 +27,24 @@ const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total l
 
 import crypto from 'crypto';
 
+// Throttle window for _enforceLogDirQuota: the scan itself is O(n) (readdir +
+// one statSync per file), so running it on every single log write — up to
+// twice per round, MAX_TOOL_ROUNDS rounds per turn — would scan a directory
+// that can hold thousands of files 100 times over. The 200 MB cap is a soft
+// backstop (cleanupOldLogs() also runs hourly on an age basis), so skipping a
+// scan for a few seconds under load is harmless.
+const LOG_QUOTA_CHECK_INTERVAL_MS = 30_000;
+let _lastQuotaCheckAt = 0;
+
 /**
  * Enforce a total size quota on the log directory by deleting the oldest
- * files until the total size drops below LOG_DIR_QUOTA_BYTES.
- * Cheap to call before every write because it short-circuits when below cap.
+ * files until the total size drops below LOG_DIR_QUOTA_BYTES. Throttled to
+ * at most once per LOG_QUOTA_CHECK_INTERVAL_MS — see comment above.
  */
 function _enforceLogDirQuota() {
+  const now = Date.now();
+  if (now - _lastQuotaCheckAt < LOG_QUOTA_CHECK_INTERVAL_MS) return;
+  _lastQuotaCheckAt = now;
   try {
     if (!fs.existsSync(apiLogDir)) return;
     const files = fs.readdirSync(apiLogDir).filter(f => f.endsWith('.json'));

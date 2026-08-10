@@ -1,4 +1,4 @@
-﻿// Atomic batch start: avoids race between hasPendingBatch and tryLock.
+// Atomic batch start: avoids race between hasPendingBatch and tryLock.
 //
 // While GemiX is answering, new messages are NOT queued for a follow-up turn:
 // they are discarded (intentional). Only messages that arrive during the short

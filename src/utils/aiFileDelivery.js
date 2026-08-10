@@ -1,4 +1,4 @@
-﻿// Central policy for how files reach xAI on /v1/responses.
+// Central policy for how files reach xAI on /v1/responses.
 //
 // Every supported file is exposed through a public URL (tmpfile.link upload,
 // see utils/xaiUpload.js) and attached natively:
@@ -34,7 +34,7 @@ import {
   isAudioOverDurationLimit,
   isVideoOverDurationLimit,
   resolveMediaDurationSec
- } from './mediaIngressLimits.js';
+} from './mediaIngressLimits.js';
 import { getMediaDurationSecFromPath  } from './mediaDuration.js';
 import { createLogger  } from './logger.js';
 

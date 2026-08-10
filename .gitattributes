@@ -1,3 +1,7 @@
+# Normalize all text files to LF on checkout/commit (repo is edited on
+# Windows but deployed to a Linux VPS).
+* text=auto eol=lf
+
 # Force LF line endings for shell scripts.
 # These scripts run on the production Linux VPS - keep LF on commit so
 # checkouts on any platform don't break the shebang line.

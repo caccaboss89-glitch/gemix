@@ -1,4 +1,4 @@
-﻿// src/ai/systemPrompt.js — static system prefix + the per-turn Runtime block.
+// src/ai/systemPrompt.js — static system prefix + the per-turn Runtime block.
 //
 // Live path (handler): byte-stable buildStaticInstructions as the only input[]
 // role:system (first item), written as prose under "## " headings. XML is
@@ -33,7 +33,7 @@ import {
   buildAudienceLines,
   getCapabilities,
   profileHasMediaQuota
- } from '../config/platformCapabilities.js';
+} from '../config/platformCapabilities.js';
 import { getToolsForUser, toolNamesToSet  } from './tools.js';
 import { formatQuotaCounts, formatMediaQuotaResetLabel  } from '../utils/mediaUsageLimits.js';
 import { escapeXml  } from '../utils/xmlEscape.js';

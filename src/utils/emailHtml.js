@@ -1,4 +1,4 @@
-﻿// src/utils/emailHtml.js
+// src/utils/emailHtml.js
 //
 // Email body preparation for the send_email tool.
 //

@@ -1,4 +1,4 @@
-﻿// src/utils/xaiUpload.js
+// src/utils/xaiUpload.js
 //
 // Public file hosting for xAI ingestion (input_file / input_image and
 // image/video reference URLs). Files are uploaded to tmpfile.link and the
@@ -31,8 +31,14 @@ const _pendingUploads = new Map();
 function _cacheGet(absPath, stat) {
   const hit = _urlCache.get(absPath);
   if (!hit) return null;
-  if (hit.mtimeMs !== stat.mtimeMs || hit.size !== stat.size) return null;
-  if (Date.now() - hit.uploadedAt > URL_CACHE_TTL_MS) return null;
+  if (hit.mtimeMs !== stat.mtimeMs || hit.size !== stat.size) {
+    _urlCache.delete(absPath);
+    return null;
+  }
+  if (Date.now() - hit.uploadedAt > URL_CACHE_TTL_MS) {
+    _urlCache.delete(absPath);
+    return null;
+  }
   return hit.url;
 }
 
@@ -108,11 +114,13 @@ async function uploadFileForXai(absPath, displayName, mimetype, opts = {}) {
   })();
 
   _pendingUploads.set(absPath, uploadPromise);
-  uploadPromise.finally(() => {
-    if (_pendingUploads.get(absPath) === uploadPromise) {
-      _pendingUploads.delete(absPath);
-    }
-  });
+  uploadPromise
+    .finally(() => {
+      if (_pendingUploads.get(absPath) === uploadPromise) {
+        _pendingUploads.delete(absPath);
+      }
+    })
+    .catch(() => { /* the caller awaiting uploadPromise itself handles the error */ });
   return uploadPromise;
 }
 
@@ -122,5 +130,5 @@ function clearXaiUploadCache() {
   _pendingUploads.clear();
 }
 
-export { uploadFileForXai, clearXaiUploadCache 
+export { uploadFileForXai, clearXaiUploadCache
 };

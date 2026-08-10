@@ -1,4 +1,4 @@
-﻿// src/utils/attachmentCaption.js
+// src/utils/attachmentCaption.js
 //
 // Strip auto-filled attachment filenames from message bodies (WhatsApp puts
 // the document name in .body when there is no caption; Discord rarely does).

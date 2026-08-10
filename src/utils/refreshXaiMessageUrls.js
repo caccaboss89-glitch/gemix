@@ -1,4 +1,4 @@
-﻿// src/utils/refreshXaiMessageUrls.js
+// src/utils/refreshXaiMessageUrls.js
 //
 // When xAI rejects a request because a tmpfile.link URL expired, rebuild
 // fresh public URLs from the on-disk source files still referenced in messages.
@@ -13,7 +13,7 @@ import {
   classifyAiFileDelivery,
   DELIVERY_MODE,
   resolveHistoryAbsPath
- } from './aiFileDelivery.js';
+} from './aiFileDelivery.js';
 
 const log = createLogger('XaiUrlRefresh');
 
@@ -140,5 +140,5 @@ async function refreshXaiUrlsInMessages(messages, storageId) {
   return count;
 }
 
-export { isXaiFileDownloadError, refreshXaiUrlsInMessages 
+export { isXaiFileDownloadError, refreshXaiUrlsInMessages
 };

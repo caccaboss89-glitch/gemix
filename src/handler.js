@@ -1,4 +1,4 @@
-﻿// src/handler.js
+// src/handler.js
 //
 // Main message handler.
 //
@@ -33,7 +33,7 @@ import {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
   promptToolsFingerprint
- } from './ai/systemPrompt.js';
+} from './ai/systemPrompt.js';
 import { getToolsForUser, getToolAccessError  } from './ai/tools.js';
 import { buildGemixResponseFormat, parseStructuredReply  } from './ai/responseSchema.js';
 import { resolveDeliverySelection  } from './utils/deliverySelection.js';
@@ -64,14 +64,14 @@ import {
   perRoundCappedDuplicateIds,
   perRoundCapErrorPayload,
   PER_ROUND_TOOL_LIMITS
- } from './utils/toolCallExecution.js';
+} from './utils/toolCallExecution.js';
 import { sendIntermediateNotification  } from './utils/intermediateNotification.js';
 import {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
   GROK_CREDIT_EXHAUSTED_MESSAGE
- } from './config/systemMessages.js';
+} from './config/systemMessages.js';
 import { isGrokCreditExhaustedError  } from './ai/apiClient.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
 import { wrapSystemReminder, wrapUserQuery  } from './utils/systemTags.js';
@@ -138,10 +138,14 @@ async function handleMessage(ctx) {
     let maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
 
     // Extract command from formatted message: [DATE, TIME] UserName: /command ...
-    // Find the LAST colon (after the username) and extract the first token after it
-    const lastColonIdx = maintenanceCommand.lastIndexOf(':');
-    if (lastColonIdx !== -1) {
-      const afterColon = maintenanceCommand.substring(lastColonIdx + 1).trim();
+    // Find the colon right after the "]" (the username separator, not one that
+    // may appear inside the message body itself) and extract the first token after it.
+    const bracketEndIdx = maintenanceCommand.indexOf(']');
+    const separatorColonIdx = bracketEndIdx !== -1
+      ? maintenanceCommand.indexOf(':', bracketEndIdx)
+      : -1;
+    if (separatorColonIdx !== -1) {
+      const afterColon = maintenanceCommand.substring(separatorColonIdx + 1).trim();
       const firstToken = afterColon.split(/\s+/)[0];
       if (firstToken) {
         maintenanceCommand = firstToken;
@@ -795,5 +799,5 @@ async function handleMessage(ctx) {
   }
 }
 
-export { handleMessage 
+export { handleMessage
 };

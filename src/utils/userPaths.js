@@ -1,4 +1,4 @@
-﻿// src/utils/userPaths.js
+// src/utils/userPaths.js
 //
 // Filesystem helpers for per-user storage.
 //

@@ -1,4 +1,4 @@
-﻿// src/utils/toolCallExecution.js
+// src/utils/toolCallExecution.js
 //
 // Shared helpers for ordering and batching tool calls within one model turn.
 

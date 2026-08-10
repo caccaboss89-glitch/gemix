@@ -1,4 +1,4 @@
-﻿// src/tools/musicCreator.js
+// src/tools/musicCreator.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -10,6 +10,7 @@
 // (Lyria is not available via xAI/Grok).
 import { createLogger  } from '../utils/logger.js';
 import envConfig from '../config/env.js';
+import constants from '../config/constants.js';
 import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
 import { fetchWithTimeout  } from '../utils/fetch.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
@@ -93,7 +94,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
 }
 
 async function musicCreator(prompt, userCtx) {
-  const isWhatsApp = userCtx.platform && userCtx.platform.startsWith('whatsapp');
+  const isWhatsApp = constants.isWhatsAppPlatform(userCtx.platform);
   if (!isWhatsApp) {
     return { toolResult: { success: false, error: 'This tool is only available on WhatsApp.' }, attachments: [] };
   }
@@ -209,5 +210,5 @@ async function musicCreator(prompt, userCtx) {
   }
 }
 
-export { musicCreator 
+export { musicCreator
 };

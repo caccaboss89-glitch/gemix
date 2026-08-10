@@ -1,4 +1,4 @@
-﻿// src/platforms/whatsapp/dedicated.js
+// src/platforms/whatsapp/dedicated.js
 //
 // Dedicated WhatsApp account client (primary number).
 // Handles QR auth, reconnection, message routing (personal + group mentions/replies),
@@ -225,5 +225,5 @@ function isDedicatedClientReady() {
   return Boolean(client?.info?.wid?._serialized);
 }
 
-export { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady 
+export { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady
 };

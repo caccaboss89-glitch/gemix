@@ -17,11 +17,6 @@ const MEMBERS_FILE = path.join(DATA_DIR, 'members.json');
 
 const log = createLogger('Members');
 
-// Fallback members list.
-// Empty because active members are loaded from src/data/members.json.
-// Supports fallback in the loading logic.
-const _LEGACY_HARDCODED_MEMBERS = [];
-
 function _loadMembers() {
   try {
     if (fs.existsSync(MEMBERS_FILE)) {
@@ -38,12 +33,6 @@ function _loadMembers() {
     }
   } catch (err) {
     log.error(`Failed to read members file at ${MEMBERS_FILE}: ${err.message}`);
-  }
-
-  // No valid members file found
-  if (_LEGACY_HARDCODED_MEMBERS.length > 0) {
-    log.warn('Falling back to legacy hardcoded members list (not recommended for production).');
-    return _LEGACY_HARDCODED_MEMBERS;
   }
 
   log.error(

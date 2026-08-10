@@ -1,4 +1,4 @@
-﻿// src/utils/messageBatcher.js
+// src/utils/messageBatcher.js
 // Debounce-based message batcher: accumulates rapid-fire messages from the
 // same chat into a single batch before triggering the AI handler. This solves
 // the multi-file problem where each attachment arrives as a separate WhatsApp/
@@ -99,5 +99,5 @@ function peekPendingBatchLastEntry(key) {
   return batch.messages[batch.messages.length - 1];
 }
 
-export { pushMessage, hasPendingBatch, peekPendingBatchLastEntry 
+export { pushMessage, hasPendingBatch, peekPendingBatchLastEntry
 };

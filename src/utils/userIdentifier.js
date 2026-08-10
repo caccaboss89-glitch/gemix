@@ -1,4 +1,4 @@
-﻿// src/utils/userIdentifier.js
+// src/utils/userIdentifier.js
 //
 // Resolves a user across platforms (WhatsApp / Discord) into a unified
 // identity object containing the member record (if active), active status,
@@ -51,5 +51,5 @@ function getGroupTaskFileId(groupId) {
   return constants.TASK_PREFIX_GROUP + groupId.replace('@g.us', '');
 }
 
-export { identifyUser, getGroupTaskFileId 
+export { identifyUser, getGroupTaskFileId
 };

@@ -1,4 +1,4 @@
-﻿// src/utils/recurrence.js
+// src/utils/recurrence.js
 //
 // Recurrence model for scheduled reminders, expressed with a compact RRULE
 // string (RFC 5545 subset) so the model writes one short parameter instead of a

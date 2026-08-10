@@ -1,4 +1,4 @@
-﻿// src/utils/responseLock.js
+// src/utils/responseLock.js
 //
 // Simple in-memory per-chat lock to prevent the bot from generating
 // multiple concurrent responses for the same chat. Used by the handler
@@ -87,7 +87,5 @@ function unlock(key) {
   locks.delete(key);
   return true;
 }
-
-export { tryLock, refresh, startAutoRenew, unlock };
 
 export default { tryLock, refresh, startAutoRenew, unlock };

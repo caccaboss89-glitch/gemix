@@ -1,4 +1,4 @@
-﻿// src/utils/sentMessagesStore.js
+// src/utils/sentMessagesStore.js
 //
 // Persistent log of the messages GemiX delivered to OTHER users on a sender's
 // behalf (send_whatsapp_message / send_email). Only the last N outgoing
@@ -22,6 +22,7 @@ import constants from '../config/constants.js';
 import { readAttachmentBuffer, attachmentSize  } from './attachments.js';
 import { sanitizeFilename  } from './text.js';
 import { createLogger  } from './logger.js';
+import { withKeyedLock  } from './keyedLock.js';
 
 const log = createLogger('SentMessages');
 
@@ -33,17 +34,7 @@ const MAX_SENT_MESSAGES = 10;
 // Per-senderKey async lock to prevent concurrent load→mutate→save races.
 const _locks = new Map();
 
-function _withLock(senderKey, fn) {
-  const key = String(senderKey || '');
-  const prev = _locks.get(key) || Promise.resolve();
-  let release;
-  const current = new Promise((r) => { release = r; });
-  _locks.set(key, current);
-  return prev.then(fn).finally(() => {
-    release();
-    if (_locks.get(key) === current) _locks.delete(key);
-  });
-}
+const _withLock = (senderKey, fn) => withKeyedLock(_locks, String(senderKey || ''), fn);
 
 /** Above this size a file is not retained (it could not be re-shown anyway). */
 const MAX_RETAINED_ATTACHMENT_BYTES = 50 * 1024 * 1024;

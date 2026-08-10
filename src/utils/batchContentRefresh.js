@@ -1,4 +1,4 @@
-﻿// Rebuild incoming content parts at batch fire (fresh quote window, same media).
+// Rebuild incoming content parts at batch fire (fresh quote window, same media).
 // The whole burst becomes ONE role:user item: the handler wraps it in
 // <user_query>, and a request split across several sends has to arrive as a
 // single request, not as one message preceded by its own history.
@@ -7,7 +7,7 @@ import { pickLatestBatchEntry  } from './batchContext.js';
 import {
   buildIncomingContentPartsFromMessages,
   getRecentWhatsAppMessageIds
- } from '../platforms/whatsapp/shared.js';
+} from '../platforms/whatsapp/shared.js';
 import { groupWhatsAppBatchEntries  } from './waAlbumGroup.js';
 
 /**

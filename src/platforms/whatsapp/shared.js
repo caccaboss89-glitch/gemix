@@ -1,4 +1,4 @@
-﻿// src/platforms/whatsapp/shared.js
+// src/platforms/whatsapp/shared.js
 //
 // Shared WhatsApp logic used by both dedicated.js and personal.js.
 // Builds history, handles incoming media/quoted messages, processes
@@ -38,7 +38,7 @@ import {
   stripRedundantFilenameBesideAttachmentTag as _stripRedundantFilenameBesideAttachmentTag
 } from '../../utils/attachmentCaption.js';
 import { sendAttachmentsWithFallback } from '../../utils/attachmentFallback.js';
-import { sendWhatsAppAttachment } from '../../utils/attachmentDelivery.js';
+import { sendWhatsAppAttachment, PLATFORM } from '../../utils/attachmentDelivery.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { withWaPuppeteerRetry, formatWaError } from '../../utils/waPuppeteer.js';
 import { createLogger } from '../../utils/logger.js';

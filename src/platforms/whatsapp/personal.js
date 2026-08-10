@@ -1,4 +1,4 @@
-﻿// src/platforms/whatsapp/personal.js
+// src/platforms/whatsapp/personal.js
 //
 // Personal WhatsApp account client (secondary number).
 // Admin WhatsApp account: 2-participant chats (admin + one user). GemiX runs only
@@ -235,5 +235,5 @@ async function _handlePersonalBatch(entries) {
   });
 }
 
-export { initPersonalWhatsApp 
+export { initPersonalWhatsApp
 };

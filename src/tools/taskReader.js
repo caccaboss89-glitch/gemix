@@ -1,4 +1,4 @@
-﻿// src/tools/taskReader.js
+// src/tools/taskReader.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -79,5 +79,5 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
   return { success: true, message: result || 'No reminders scheduled.' };
 }
 
-export { readTasks 
+export { readTasks
 };

@@ -1,4 +1,4 @@
-﻿// src/utils/internalNotifyServer.js
+// src/utils/internalNotifyServer.js
 // Tiny internal HTTP server - receives error notifications from the sandbox
 // proxy container (which cannot call WhatsApp directly) and forwards them
 // to the admin via notifyAdmin().
@@ -65,5 +65,5 @@ function startInternalNotifyServer() {
   });
 }
 
-export { startInternalNotifyServer 
+export { startInternalNotifyServer
 };

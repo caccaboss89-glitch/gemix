@@ -1,4 +1,4 @@
-﻿// src/tools/preferences.js
+// src/tools/preferences.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -20,7 +20,7 @@ import {
   VALID_EFFORTS,
   VALID_LANGUAGES,
   DEFAULT_MEMORY
- } from '../utils/settingsStore.js';
+} from '../utils/settingsStore.js';
 
 /**
  * Apply a preferences update for the current chat.
@@ -102,5 +102,5 @@ async function managePreferences(args, settingsFileId) {
   };
 }
 
-export { managePreferences 
+export { managePreferences
 };

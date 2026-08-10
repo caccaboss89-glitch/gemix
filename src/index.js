@@ -1,4 +1,4 @@
-﻿// src/index.js
+// src/index.js
 //
 // Main entry point for GemiX. Handles startup (directory creation, optional
 // system cleanup), initializes all platforms (WhatsApp dedicated/personal +
@@ -9,59 +9,6 @@ import { execSync } from 'child_process';
 import constants from './config/constants.js';
 import { createLogger } from './utils/logger.js';
 import envConfig from './config/env.js';
-
-const { TASKS_DIR, DATA_DIR } = constants;
-const { STARTUP_SYSTEM_CLEANUP } = envConfig;
-
-const log = createLogger('GemiX');
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
-
-// System cleanup on startup (opt-in via STARTUP_SYSTEM_CLEANUP).
-// See env.js for flag definition and SERVER_SETUP.md for operational notes.
-if (STARTUP_SYSTEM_CLEANUP && process.platform === 'linux') {
-  try {
-    log.info('Running system cleanup on startup (STARTUP_SYSTEM_CLEANUP=true)...');
-
-    // 1. Crash dumps (Chromium/Puppeteer)
-    const apportSize = execSync('du -sh /var/lib/apport 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
-    const crashSize = execSync('du -sh /var/crash 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
-    log.info(`   Crash dumps: apport=${apportSize.split('\t')[0]}, crash=${crashSize.split('\t')[0]}`);
-
-    execSync('sudo rm -rf /var/lib/apport/* 2>/dev/null || true', { encoding: 'utf-8' });
-    execSync('sudo rm -rf /var/crash/* 2>/dev/null || true', { encoding: 'utf-8' });
-
-    // 2. Docker cleanup (safe: only stopped containers and dangling images)
-    try {
-      execSync('sudo docker container prune -f 2>/dev/null || true', { encoding: 'utf-8' });
-      execSync('sudo docker image prune -f 2>/dev/null || true', { encoding: 'utf-8' });
-      log.info('   Docker cleaned (stopped containers, dangling images)');
-    } catch (err) {
-      log.debug(`   Docker cleanup skipped: ${err.message}`);
-    }
-
-    // 3. User cache directories
-    try {
-      const homeCacheSize = execSync('du -sh ~/.cache 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
-      log.info(`   ~/.cache: ${homeCacheSize.split('\t')[0]}`);
-      execSync('rm -rf ~/.cache/* 2>/dev/null || true', { encoding: 'utf-8' });
-
-      const pipCacheSize = execSync('pip cache info 2>/dev/null | grep "Total" || echo "0"', { encoding: 'utf-8' }).trim();
-      log.info(`   pip cache: ${pipCacheSize}`);
-      execSync('pip cache purge 2>/dev/null || true', { encoding: 'utf-8' });
-    } catch (err) {
-      log.debug(`   Cache cleanup skipped: ${err.message}`);
-    }
-
-    log.info('System cleanup completed');
-  } catch (err) {
-    log.warn(`System cleanup failed: ${err.message}`);
-  }
-} else {
-  log.debug('System cleanup skipped (set STARTUP_SYSTEM_CLEANUP=true to enable)');
-}
-
 import { initDedicatedWhatsApp } from './platforms/whatsapp/dedicated.js';
 import { initPersonalWhatsApp } from './platforms/whatsapp/personal.js';
 import { initDiscord } from './platforms/discord/client.js';
@@ -72,9 +19,68 @@ import { startInternalNotifyServer } from './utils/internalNotifyServer.js';
 import { startTempFileServer } from './utils/tempFileServer.js';
 import { getXaiAuth, describeXaiAuthSource } from './config/xaiAuth.js';
 
-const { GROK_MODEL } = envConfig;
+const { TASKS_DIR, DATA_DIR } = constants;
+const { STARTUP_SYSTEM_CLEANUP, GROK_MODEL } = envConfig;
+
+const log = createLogger('GemiX');
+
+/**
+ * Create the data directories GemiX needs and, if opted in, run the Linux
+ * host cleanup (crash dumps, dangling Docker images, caches). Runs before
+ * anything else so later steps never race a missing directory.
+ */
+function runStartupCleanup() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+
+  // System cleanup on startup (opt-in via STARTUP_SYSTEM_CLEANUP).
+  // See env.js for flag definition and SERVER_SETUP.md for operational notes.
+  if (STARTUP_SYSTEM_CLEANUP && process.platform === 'linux') {
+    try {
+      log.info('Running system cleanup on startup (STARTUP_SYSTEM_CLEANUP=true)...');
+
+      // 1. Crash dumps (Chromium/Puppeteer)
+      const apportSize = execSync('du -sh /var/lib/apport 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
+      const crashSize = execSync('du -sh /var/crash 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
+      log.info(`   Crash dumps: apport=${apportSize.split('\t')[0]}, crash=${crashSize.split('\t')[0]}`);
+
+      execSync('sudo rm -rf /var/lib/apport/* 2>/dev/null || true', { encoding: 'utf-8' });
+      execSync('sudo rm -rf /var/crash/* 2>/dev/null || true', { encoding: 'utf-8' });
+
+      // 2. Docker cleanup (safe: only stopped containers and dangling images)
+      try {
+        execSync('sudo docker container prune -f 2>/dev/null || true', { encoding: 'utf-8' });
+        execSync('sudo docker image prune -f 2>/dev/null || true', { encoding: 'utf-8' });
+        log.info('   Docker cleaned (stopped containers, dangling images)');
+      } catch (err) {
+        log.debug(`   Docker cleanup skipped: ${err.message}`);
+      }
+
+      // 3. User cache directories
+      try {
+        const homeCacheSize = execSync('du -sh ~/.cache 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
+        log.info(`   ~/.cache: ${homeCacheSize.split('\t')[0]}`);
+        execSync('rm -rf ~/.cache/* 2>/dev/null || true', { encoding: 'utf-8' });
+
+        const pipCacheSize = execSync('pip cache info 2>/dev/null | grep "Total" || echo "0"', { encoding: 'utf-8' }).trim();
+        log.info(`   pip cache: ${pipCacheSize}`);
+        execSync('pip cache purge 2>/dev/null || true', { encoding: 'utf-8' });
+      } catch (err) {
+        log.debug(`   Cache cleanup skipped: ${err.message}`);
+      }
+
+      log.info('System cleanup completed');
+    } catch (err) {
+      log.warn(`System cleanup failed: ${err.message}`);
+    }
+  } else {
+    log.debug('System cleanup skipped (set STARTUP_SYSTEM_CLEANUP=true to enable)');
+  }
+}
 
 log.info('GemiX - Avvio in corso...\n');
+
+runStartupCleanup();
 
 // Soft preflight: validate the xAI credentials file and ping the API at
 // startup without blocking initialization. A warning is logged on failure.

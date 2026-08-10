@@ -1,4 +1,4 @@
-﻿// src/utils/systemState.js
+// src/utils/systemState.js
 //
 // Persistent key-value store for system-wide state (media quotas, monitors, …).
 // Provides atomic read-modify-write operations via an in-memory lock.

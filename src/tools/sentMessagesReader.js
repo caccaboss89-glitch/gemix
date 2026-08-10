@@ -1,4 +1,4 @@
-﻿// src/tools/sentMessagesReader.js
+// src/tools/sentMessagesReader.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -268,5 +268,5 @@ async function readSentMessages(args, userCtx) {
   return payload;
 }
 
-export { readSentMessages 
+export { readSentMessages
 };

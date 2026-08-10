@@ -1,4 +1,4 @@
-﻿// Build the roster of a WhatsApp group (name + phone number per member) so the
+// Build the roster of a WhatsApp group (name + phone number per member) so the
 // prompt can show GemiX who is in the chat and let it tag them with
 // @<phone-number>. GemiX itself is always included for context.
 
@@ -82,5 +82,5 @@ function formatParticipantsForPrompt(participants, esc) {
     .join(', ');
 }
 
-export { buildGroupParticipants, formatParticipantsForPrompt 
+export { buildGroupParticipants, formatParticipantsForPrompt
 };

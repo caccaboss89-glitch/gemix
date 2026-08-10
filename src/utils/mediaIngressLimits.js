@@ -1,4 +1,4 @@
-﻿// src/utils/mediaIngressLimits.js
+// src/utils/mediaIngressLimits.js
 //
 // Shared duration caps for media entering the model (current message,
 // chat history). Byte caps live in aiFileDelivery.js.

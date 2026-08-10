@@ -1,4 +1,4 @@
-﻿// src/utils/fetch.js
+// src/utils/fetch.js
 //
 // Wrapper around native fetch that adds reliable timeout handling and
 // optional automatic admin notification on failures. Used for external
@@ -177,11 +177,7 @@ async function downloadPublicFile(url, opts = {}) {
   }
   const buffer = await _consumeResponseBodyCapped(res, maxBytes, timeoutMs);
   const mimetype = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
-  let filename = 'file';
-  try {
-    const segment = decodeURIComponent(new URL(clean).pathname.split('/').filter(Boolean).pop() || '');
-    if (segment) filename = segment;
-  } catch { /* keep fallback */ }
+  const filename = _filenameFromPublicUrl(clean);
   return { buffer, mimetype, filename };
 }
 

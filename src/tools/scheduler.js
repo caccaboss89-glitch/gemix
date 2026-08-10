@@ -1,4 +1,4 @@
-﻿// src/tools/scheduler.js
+// src/tools/scheduler.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -167,8 +167,11 @@ async function scheduleTasks(tasks, ctx) {
             continue;
           }
           destinations.whatsapp = resolved.member.wa;
+        } else if (ctx.waJid) {
+          destinations.whatsapp = ctx.waJid;
         } else {
-          destinations.whatsapp = ctx.waJid || null;
+          results.push({ success: false, error: 'No WhatsApp number available for a private reminder.' });
+          continue;
         }
       } catch (err) {
         results.push({ success: false, error: err.message });
@@ -176,7 +179,11 @@ async function scheduleTasks(tasks, ctx) {
       }
     }
     if (isGroupTask) {
-      destinations.whatsappGroup = ctx.groupId || null;
+      if (!ctx.groupId) {
+        results.push({ success: false, error: 'No group id available for a group reminder.' });
+        continue;
+      }
+      destinations.whatsappGroup = ctx.groupId;
     }
 
     if (Object.keys(destinations).length === 0) {
@@ -254,7 +261,7 @@ async function scheduleTasks(tasks, ctx) {
   // Single verification note (pluralized) instead of repeating it per task.
   // Only the time is checked: the message is meant to read as the reminder that
   // arrives then, not as a copy of the words the user used to ask for it.
-  const okCount = results.filter(r => r.success && !r.warning).length;
+  const okCount = results.filter(r => r.success).length;
   let verifyNote = null;
   if (okCount === 1) {
     verifyNote = 'Verify scheduledAt is the moment the user asked for. If it is wrong, remove the task by its ID and recreate it.';
@@ -265,5 +272,5 @@ async function scheduleTasks(tasks, ctx) {
   return { success: true, tasks: results, ...(verifyNote ? { message: verifyNote } : {}) };
 }
 
-export { scheduleTasks 
+export { scheduleTasks
 };

@@ -1,4 +1,4 @@
-﻿// src/tools/build.js
+// src/tools/build.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -29,7 +29,7 @@ import {
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile,
   resolveInsideWorkspace
- } from '../sandbox/buildWorkspace.js';
+} from '../sandbox/buildWorkspace.js';
 import { acquireBuildLock, releaseBuildLock  } from '../utils/buildState.js';
 import { runBuildAgent, DELIVERY_SELECTION_NOTICE  } from '../ai/buildAgent.js';
 import { resolveUrlEntry, resolveLocalFileEntry  } from '../utils/deliverySelection.js';
@@ -99,7 +99,7 @@ async function _attachDelivered(workspaceId, delivered, responseCtx) {
   const attached = [];
   const missing = [];
   if (!Array.isArray(delivered) || delivered.length === 0) return { attached, missing };
-  if (!responseCtx || !Array.isArray(responseCtx.attachments)) return { attached, missing };
+  if (!responseCtx) return { attached, missing };
 
   const seenSources = new Set();
 
@@ -279,5 +279,5 @@ async function buildTool(args, userCtx, responseCtx) {
   }
 }
 
-export { buildTool 
+export { buildTool
 };

@@ -1,4 +1,4 @@
-﻿// src/tools/emailSender.js
+// src/tools/emailSender.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -37,5 +37,5 @@ async function sendEmailDirect(toEmail, subject, body, attachments = []) {
   });
 }
 
-export { sendEmailDirect 
+export { sendEmailDirect
 };

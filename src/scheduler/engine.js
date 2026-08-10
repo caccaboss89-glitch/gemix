@@ -1,4 +1,4 @@
-﻿// src/scheduler/engine.js
+// src/scheduler/engine.js
 //
 // Core periodic scheduler: executes due tasks from per-user/group JSON files,
 // advances recurring tasks, delivers via WhatsApp (using dedicated client),
@@ -285,5 +285,5 @@ async function checkAndExecuteTasks() {
   }
 }
 
-export { startScheduler, setSchedulerWaClient 
+export { startScheduler, setSchedulerWaClient
 };

@@ -1,4 +1,4 @@
-﻿// Quote/reply handling when the referenced message is inside or outside MAX_HISTORY.
+// Quote/reply handling when the referenced message is inside or outside MAX_HISTORY.
 // Walks reply chains (A replies to B replies to C) and emits concatenated
 // [In reply to: ...] prefixes so the model keeps cross-message context in both
 // the current turn and rebuilt history.
@@ -8,14 +8,14 @@ import {
   REPLY_OUTSIDE_HISTORY_PREFIX,
   REPLY_CHAIN_TRUNCATED_PREFIX,
   cleanIncomingText
- } from './text.js';
+} from './text.js';
 import { replaceMentionsInBody, resolveMentionsForMessage, resolveLidTagsInBody  } from './waMentions.js';
 import { formatSpecialMessageText, formatWhatsAppContactText  } from './waSpecialMessages.js';
 import { formatWhatsAppPollText  } from './pollParser.js';
 import {
   ingressWaMessageMedia,
   ingressDiscordAttachment
- } from './incomingMediaIngress.js';
+} from './incomingMediaIngress.js';
 import { createLogger  } from './logger.js';
 
 const log = createLogger('QuoteIngress');

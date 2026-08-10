@@ -1,10 +1,12 @@
-﻿// src/utils/batchContext.js
+// src/utils/batchContext.js
 //
 // The debounce window is per chat, so anything anyone sends while it is open
 // used to be merged into the same turn. filterBatchToTriggerSpeaker narrows a
 // fired batch back to the participant it was opened for; the helpers below then
 // resolve handler context (who is "the user" for permissions and tools) from
 // that participant's own burst.
+
+import constants from '../config/constants.js';
 
 /**
  * @param {Array<object>} entries - Batch entries oldest-first
@@ -17,7 +19,7 @@ function pickLatestBatchEntry(entries) {
 
 function getBatchSpeakerKey(entry, platform) {
   if (!entry) return null;
-  if (platform === 'discord' || entry.authorUserId) {
+  if (platform === constants.PLATFORM_DISCORD || entry.authorUserId) {
     return entry.authorUserId || null;
   }
   if (entry.isGroup && entry.senderJid) return entry.senderJid;
@@ -51,5 +53,5 @@ function filterBatchToTriggerSpeaker(entries, platform) {
   return { entries: kept, dropped: list.length - kept.length };
 }
 
-export { pickLatestBatchEntry, filterBatchToTriggerSpeaker 
+export { pickLatestBatchEntry, filterBatchToTriggerSpeaker
 };

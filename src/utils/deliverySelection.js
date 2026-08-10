@@ -1,4 +1,4 @@
-﻿// src/utils/deliverySelection.js
+// src/utils/deliverySelection.js
 //
 // Resolve the attachment entries the model selected for delivery (in the
 // structured final reply or in a delivery tool's `attachments` parameter)

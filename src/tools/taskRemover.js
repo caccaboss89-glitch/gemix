@@ -1,4 +1,4 @@
-﻿// src/tools/taskRemover.js
+// src/tools/taskRemover.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -38,5 +38,5 @@ async function removeTasks(taskIds, fileId) {
   return result;
 }
 
-export { removeTasks 
+export { removeTasks
 };

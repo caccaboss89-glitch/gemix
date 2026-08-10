@@ -1,4 +1,4 @@
-﻿// src/utils/notificationDedup.js
+// src/utils/notificationDedup.js
 //
 // Per-call intermediate notification dedup.
 //
@@ -64,6 +64,21 @@ function markNotifiedInCall(ctx, kind) {
 }
 
 /**
+ * Undo a markNotifiedInCall for one (call, kind) pair. Used when the send
+ * itself failed (no delivery target, or the platform call threw), so a later
+ * tool call within the same AI invocation can still try to deliver the banner
+ * instead of the failed attempt permanently silencing it for the rest of the call.
+ *
+ * @param {object} ctx - Handler context; must have `requestId` set.
+ * @param {string} kind
+ */
+function unmarkNotifiedInCall(ctx, kind) {
+  const callId = ctx?.requestId || ctx?.chatId || ctx?.userId || 'unknown';
+  const key = `${getChatKey(ctx)}:${callId}:${kind}`;
+  _notified.delete(key);
+}
+
+/**
  * Remove all dedup entries for the given AI call.
  * Must be called in the `finally` block of `handleMessage` so the next
  * independent call can fire notifications again.
@@ -105,6 +120,7 @@ _cleanupTimer.unref();
 
 export {
   markNotifiedInCall,
+  unmarkNotifiedInCall,
   clearCallNotifications,
   buildEngineeringNotificationMessage
 

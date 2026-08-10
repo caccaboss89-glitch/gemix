@@ -1,4 +1,4 @@
-﻿// src/utils/privacyWipe.js
+// src/utils/privacyWipe.js
 //
 // Erases everything GemiX persists about one WhatsApp conversation and about
 // the person who asked for it: chat history and its attachments (the voice
@@ -139,5 +139,5 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   return { ok: failed.length === 0, failed };
 }
 
-export { wipeWhatsAppUserData 
+export { wipeWhatsAppUserData
 };

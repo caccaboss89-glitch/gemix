@@ -1,4 +1,4 @@
-﻿// src/utils/voiceTranscripts.js
+// src/utils/voiceTranscripts.js
 //
 // GemiX voice messages appear in chat history as [Attachment: …] tags on
 // assistant turns (assistant role cannot carry native audio parts). Before the

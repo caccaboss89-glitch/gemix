@@ -1,4 +1,4 @@
-﻿// WhatsApp @mention handling.
+// WhatsApp @mention handling.
 //
 // Incoming: rewrite the @<id> tags WhatsApp encodes in a message body into
 // @<phone-number> so GemiX never sees raw @lid values and can recognise who

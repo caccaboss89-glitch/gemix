@@ -1,4 +1,4 @@
-﻿// src/ai/buildAgent.js
+// src/ai/buildAgent.js
 //
 // Build sub-agent runner: Grok Build CLI inside the per-workspace Docker sandbox.
 // Host: immutable --rules, auth via getXaiAuth (token + baseUrl) as process env,
@@ -13,7 +13,7 @@ import {
   ensureWorkspaceWritable,
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile
- } from '../sandbox/buildWorkspace.js';
+} from '../sandbox/buildWorkspace.js';
 import buildSandbox from '../sandbox/buildSandbox.js';
 import { getRomeTime  } from '../utils/time.js';
 import { createLogger  } from '../utils/logger.js';
@@ -227,7 +227,6 @@ async function runBuildAgent({
       maxTurns: constants.BUILD_MAX_ROUNDS
     });
   } catch (err) {
-    clearInterval(renewIv);
     log.error(`Grok Build exec failed: ${err.message}`);
     const partial = collectWorkspaceDeltaPaths(workspaceId, beforeSnapshot);
     return {

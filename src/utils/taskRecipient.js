@@ -1,4 +1,4 @@
-﻿// src/utils/taskRecipient.js
+// src/utils/taskRecipient.js
 //
 // Human-readable recipient label for a scheduled reminder's destinations,
 // rendered from the caller's perspective. Shared by the scheduler confirmation
@@ -44,5 +44,5 @@ function formatTaskRecipient(destinations, { isAdmin = false, waJid = null, grou
   return label;
 }
 
-export { formatTaskRecipient 
+export { formatTaskRecipient
 };

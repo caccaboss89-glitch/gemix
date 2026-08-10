@@ -1,4 +1,4 @@
-﻿// src/utils/buildState.js
+// src/utils/buildState.js
 //
 // Per-workspace activity tracking and locking for the `build` sub-agent.
 //
@@ -145,7 +145,7 @@ function renewBuildLock(workspaceId, ownerId) {
 
 /**
  * Iterate over every workspace_meta dir under constants.DATA_DIR/users/ that has a
- * build_state file. Returns [{ workspaceSlug, workspaceId, metaDir, workspaceDir, lastActivityAt, lock }].
+ * build_state file. Returns [{ workspaceSlug, workspaceId, metaDir, lastActivityAt, lock }].
  * Used by the cron sweeper to find stale workspaces to wipe.
  */
 function listWorkspaceStates() {
@@ -168,7 +168,6 @@ function listWorkspaceStates() {
         workspaceSlug: e.name,
         workspaceId: raw && typeof raw.workspaceId === 'string' ? raw.workspaceId : null,
         metaDir,
-        workspaceDir: path.join(metaDir, 'build_workspace'),
         lastActivityAt: Number(raw && raw.lastActivityAt) || 0,
         lock: raw && raw.lock ? raw.lock : null
       });

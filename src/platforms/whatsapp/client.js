@@ -1,4 +1,4 @@
-﻿// src/platforms/whatsapp/client.js
+// src/platforms/whatsapp/client.js
 //
 // Shared lifecycle for both WhatsApp accounts (dedicated + personal): QR auth,
 // the startup watchdog, and reconnection with exponential backoff. The two
@@ -127,7 +127,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   return client;
 }
 
-export { createWhatsAppClient 
+export { createWhatsAppClient
 };
-export { _isReady as isWaClientReady 
+export { _isReady as isWaClientReady
 };

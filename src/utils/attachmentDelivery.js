@@ -1,4 +1,4 @@
-﻿// Platform delivery policy and attachment partitioning for outbound files.
+// Platform delivery policy and attachment partitioning for outbound files.
 // Normal delivery: link only when too heavy for the platform (or externalUrl).
 // Build agent sets waTempLinkPreferred on audio/video via applyBuildAgentFlags().
 
@@ -9,7 +9,8 @@ import {
   toEmailAttachment,
   isWhatsAppAudioVideoAttachment,
   toWhatsAppMediaArgs,
-  WA_DIRECT_MAX_BYTES
+  WA_DIRECT_MAX_BYTES,
+  hasExternalUrl
 } from './attachments.js';
 import { DISCORD_ATTACHMENT_MAX_BYTES } from './discordAttachmentFetch.js';
 import pkg from 'whatsapp-web.js';
@@ -23,10 +24,6 @@ const PLATFORM = {
 
 /** Direct email attach cap (nodemailer / provider comfort). */
 const EMAIL_DIRECT_MAX_BYTES = 15 * 1024 * 1024;
-
-function hasExternalUrl(att) {
-  return typeof att?.externalUrl === 'string' && att.externalUrl.trim().length > 0;
-}
 
 function isOversizedForPlatform(att, platform) {
   const size = attachmentSize(att);

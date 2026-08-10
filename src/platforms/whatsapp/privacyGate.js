@@ -1,4 +1,4 @@
-﻿// src/platforms/whatsapp/privacyGate.js
+// src/platforms/whatsapp/privacyGate.js
 //
 // What runs before an AI turn on WhatsApp, once the debounce window has closed
 // so a burst of files counts as the single message it was meant to be:
@@ -17,7 +17,7 @@ import {
   PRIVACY_WIPE_FAILED_MESSAGE,
   buildPrivacyNoticeMessage,
   buildPrivacyWipeDoneMessage
- } from '../../config/systemMessages.js';
+} from '../../config/systemMessages.js';
 import { hasBeenInformed, markInformed  } from '../../utils/privacyConsent.js';
 import { wipeWhatsAppUserData  } from '../../utils/privacyWipe.js';
 
@@ -105,5 +105,5 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
   };
 }
 
-export { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept 
+export { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept
 };

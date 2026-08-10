@@ -1,4 +1,4 @@
-﻿// src/utils/intermediateNotification.js
+// src/utils/intermediateNotification.js
 //
 // Delivers "please wait" banners for slow tools to the active conversation.
 // Used by the main brain via userCtx.sendIntermediateNotification.
@@ -14,7 +14,7 @@
 //   WA dedicated DM/group → ctx.presence.chat.sendMessage, else dedicated JID fallback
 
 import constants from '../config/constants.js';
-import { markNotifiedInCall  } from './notificationDedup.js';
+import { markNotifiedInCall, unmarkNotifiedInCall  } from './notificationDedup.js';
 import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
 import { removeDiscordEmoji  } from './discord.js';
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from './text.js';
@@ -68,7 +68,7 @@ function resolveIntermediateNotificationTarget(ctx) {
     return null;
   }
 
-  if (ctx.platform === constants.PLATFORM_WA_DEDICATED || ctx.platform.startsWith('whatsapp')) {
+  if (constants.isWhatsAppPlatform(ctx.platform)) {
     const jid = ctx.chatId || ctx.groupId || ctx.waJid;
     if (jid) return { channel: 'wa_dedicated_jid', jid };
   }
@@ -83,6 +83,11 @@ function resolveIntermediateNotificationTarget(ctx) {
  * @returns {Promise<boolean>} true if delivered
  */
 async function sendIntermediateNotification(ctx, kind, message) {
+  // Marked synchronously (before any await) so two tool calls of the same kind
+  // in the same parallel round cannot both pass the check and double-send.
+  // Unmarked again on every failure path below, so a delivery that didn't
+  // actually go out doesn't permanently silence the banner for the rest of
+  // this AI call — a later round can still retry it.
   if (!markNotifiedInCall(ctx, kind)) return false;
 
   const target = resolveIntermediateNotificationTarget(ctx);
@@ -92,6 +97,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
       + `chatId=${ctx?.chatId || 'n/a'}, hasDiscord=${Boolean(ctx?.discordChannel)}, `
       + `hasPresenceChat=${Boolean(ctx?.presence?.chat)})`
     );
+    unmarkNotifiedInCall(ctx, kind);
     return false;
   }
 
@@ -119,6 +125,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
   } catch (err) {
     log.warn(`Failed to send ${kind} notification (${ctx.platform}): ${err.message}`);
   }
+  unmarkNotifiedInCall(ctx, kind);
   return false;
 }
 

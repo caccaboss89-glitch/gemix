@@ -1,4 +1,4 @@
-﻿// src/scheduler/releaseMonitor.js
+// src/scheduler/releaseMonitor.js
 //
 // Monitors GitHub releases and notifies subscribed chats (via releaseNotify)
 // with release notes; inline HTML/markdown images and audio links are stripped
@@ -322,5 +322,5 @@ async function checkNewRelease(waClient) {
   }
 }
 
-export { checkNewRelease 
+export { checkNewRelease
 };

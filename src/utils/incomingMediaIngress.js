@@ -1,4 +1,4 @@
-﻿// Shared ingress helpers: classify attachments and turn synced history files
+// Shared ingress helpers: classify attachments and turn synced history files
 // into native content parts + attachment-tag text (Discord + WA quote/current).
 
 import { buildAttachmentTag, isSupportedMedia  } from './media.js';
@@ -9,7 +9,7 @@ import {
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,
   formatDiscordOversizeNote
- } from './discordAttachmentFetch.js';
+} from './discordAttachmentFetch.js';
 
 function createMemoizedFetchBuffer(fetchOnce) {
   let promise = null;

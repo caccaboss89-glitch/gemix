@@ -1,4 +1,4 @@
-﻿// src/utils/reactions.js
+// src/utils/reactions.js
 //
 // Read-only rendering of emoji reactions attached to a chat message, so GemiX
 // can SEE reactions on both user and its own (bot) messages — in the current

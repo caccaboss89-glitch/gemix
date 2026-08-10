@@ -1,4 +1,4 @@
-﻿// src/ai/responseSchema.js
+// src/ai/responseSchema.js
 //
 // Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
 //

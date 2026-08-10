@@ -1,4 +1,4 @@
-﻿// src/utils/keyedLock.js
+// src/utils/keyedLock.js
 //
 // Per-key async mutex, used wherever a read-modify-write on a per-user or
 // per-file JSON store must not interleave with itself (chat history metadata,
@@ -33,5 +33,5 @@ function withKeyedLock(locks, key, fn) {
   return current;
 }
 
-export { withKeyedLock 
+export { withKeyedLock
 };

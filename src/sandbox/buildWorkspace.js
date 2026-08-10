@@ -1,4 +1,4 @@
-﻿// src/sandbox/buildWorkspace.js
+// src/sandbox/buildWorkspace.js
 //
 // Filesystem-side helpers for the build sub-agent's workspace.
 //
@@ -129,18 +129,18 @@ function workspaceSizeBytes(workspaceId) {
  */
 function listWorkspaceFiles(workspaceId, limit = 200) {
   const root = getBuildWorkspacePath(workspaceId);
-  if (!root || !fs.existsSync(root)) return { files: [], total: 0 };
+  if (!root || !fs.existsSync(root)) return { files: [], total: 0, more: false };
 
   const out = [];
+  let total = 0;
   const stack = [root];
-  while (stack.length && out.length < limit + 1) {
+  while (stack.length) {
     const cur = stack.pop();
     let entries;
     try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
     catch { continue; }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const e of entries) {
-      if (out.length >= limit + 1) break;
       const full = path.join(cur, e.name);
       try {
         if (e.isSymbolicLink()) continue;
@@ -149,17 +149,17 @@ function listWorkspaceFiles(workspaceId, limit = 200) {
           continue;
         }
         if (!e.isFile()) continue;
-        const st = fs.statSync(full);
-        const rel = path.relative(root, full).split(path.sep).join('/');
-        out.push({ relPath: rel, size: st.size, mtimeMs: st.mtimeMs });
+        total++;
+        if (out.length < limit) {
+          const st = fs.statSync(full);
+          const rel = path.relative(root, full).split(path.sep).join('/');
+          out.push({ relPath: rel, size: st.size, mtimeMs: st.mtimeMs });
+        }
       } catch { /* skip */ }
     }
   }
 
-  if (out.length > limit) {
-    return { files: out.slice(0, limit), total: out.length, more: true };
-  }
-  return { files: out, total: out.length, more: false };
+  return { files: out, total, more: total > limit };
 }
 
 /**

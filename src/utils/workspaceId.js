@@ -1,4 +1,4 @@
-﻿// src/utils/workspaceId.js
+// src/utils/workspaceId.js
 //
 // Computes the canonical workspace identifier for the build sub-agent
 // based on the current user/group context:
@@ -20,7 +20,7 @@ import { resolveStorageId  } from './userPaths.js';
  */
 function resolveWorkspaceId(ctx) {
   if (!ctx) return null;
-  const isWhatsApp = typeof ctx.platform === 'string' && ctx.platform.startsWith('whatsapp');
+  const isWhatsApp = constants.isWhatsAppPlatform(ctx.platform);
   if (isWhatsApp && ctx.isGroup && ctx.groupId) {
     return `group:${ctx.groupId}`;
   }

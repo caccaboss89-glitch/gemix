@@ -120,5 +120,8 @@ export default {
   CHROMIUM_PATH: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
 
   // Hermes CLI binary used to refresh ~/.hermes/auth.json when OAuth tokens expire.
-  HERMES_BIN: process.env.HERMES_BIN || 'hermes'
+  HERMES_BIN: process.env.HERMES_BIN || 'hermes',
+  HERMES_REFRESH_TIMEOUT_MS: Number(process.env.HERMES_REFRESH_TIMEOUT_MS) || 120_000,
+  HERMES_REFRESH_QUERY: process.env.HERMES_REFRESH_QUERY || 'ciao',
+  HERMES_REFRESH_PROVIDER: process.env.HERMES_REFRESH_PROVIDER || 'xai-oauth'
 };

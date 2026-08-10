@@ -1,4 +1,4 @@
-﻿// src/tools/musicStats.js
+// src/tools/musicStats.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -135,5 +135,5 @@ function formatStats(data) {
   return { success: true, message: output };
 }
 
-export { readMusicStats 
+export { readMusicStats
 };

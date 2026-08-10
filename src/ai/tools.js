@@ -1,4 +1,4 @@
-﻿// src/ai/tools.js
+// src/ai/tools.js
 //
 // Tool directives: all tool-facing text (name, description, parameter
 // descriptions, and the result strings produced in src/tools/*.js) is in
@@ -21,16 +21,16 @@ import {
   VOICES_FEMALE,
   VALID_EFFORTS,
   VALID_LANGUAGES
- } from '../utils/settingsStore.js';
+} from '../utils/settingsStore.js';
 import {
   DEFAULT_COUNT as WEB_IMAGE_SEARCH_DEFAULT_COUNT,
   MIN_COUNT as WEB_IMAGE_SEARCH_MIN_COUNT,
   MAX_COUNT as WEB_IMAGE_SEARCH_MAX_COUNT
- } from '../tools/imageSearch.js';
+} from '../tools/imageSearch.js';
 import {
   MAX_REF_IMAGES_FOR_IMAGE,
   MAX_REF_IMAGES_FOR_VIDEO
- } from '../tools/imagineGenerator.js';
+} from '../tools/imagineGenerator.js';
 
 // -- Helpers -------------------------------------------------------------
 
@@ -74,6 +74,30 @@ function _matchesType(value, schemaType) {
 }
 
 /**
+ * One level of nested `required` fields on an object-typed property (e.g. the
+ * `recipient` object inside a tool's top-level args). Not recursive beyond
+ * this one level — see validateToolArgs below for what deeper nesting is left to.
+ * @param {object} value - The nested object value to check.
+ * @param {object} propSchema - Its declared schema (object type + properties/required).
+ * @param {string} pathPrefix - Dotted path used in the returned error message.
+ * @returns {string|null}
+ */
+function _validateObjectRequired(value, propSchema, pathPrefix) {
+  if (propSchema.type !== 'object' || typeof value !== 'object' || Array.isArray(value)) return null;
+  const nestedRequired = Array.isArray(propSchema.required) ? propSchema.required : [];
+  const nestedProps = propSchema.properties || {};
+  for (const nestedKey of nestedRequired) {
+    const nestedSchema = nestedProps[nestedKey];
+    const allowEmpty = Boolean(nestedSchema && nestedSchema.allowEmpty);
+    const nestedVal = value[nestedKey];
+    if (nestedVal === undefined || nestedVal === null || (nestedVal === '' && !allowEmpty)) {
+      return `Missing required argument "${pathPrefix}.${nestedKey}".`;
+    }
+  }
+  return null;
+}
+
+/**
  * Validate parsed args against the tool's JSON-schema-style parameters.
  * Returns null on success or a human-readable error string on failure.
  *
@@ -94,21 +118,6 @@ function _matchesType(value, schemaType) {
  * @param {object} toolDef - Tool definition (as returned by makeTool).
  * @returns {string|null}
  */
-function _validateObjectRequired(value, propSchema, pathPrefix) {
-  if (propSchema.type !== 'object' || typeof value !== 'object' || Array.isArray(value)) return null;
-  const nestedRequired = Array.isArray(propSchema.required) ? propSchema.required : [];
-  const nestedProps = propSchema.properties || {};
-  for (const nestedKey of nestedRequired) {
-    const nestedSchema = nestedProps[nestedKey];
-    const allowEmpty = Boolean(nestedSchema && nestedSchema.allowEmpty);
-    const nestedVal = value[nestedKey];
-    if (nestedVal === undefined || nestedVal === null || (nestedVal === '' && !allowEmpty)) {
-      return `Missing required argument "${pathPrefix}.${nestedKey}".`;
-    }
-  }
-  return null;
-}
-
 function validateToolArgs(args, toolDef) {
   if (!toolDef || !toolDef.function || !toolDef.function.parameters) return null;
   const params = toolDef.function.parameters;

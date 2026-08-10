@@ -1,4 +1,4 @@
-﻿// src/utils/settingsStore.js
+// src/utils/settingsStore.js
 //
 // Persistent per-chat preferences (users and groups), stored as one small JSON
 // file per chat under data/memories/. Holds the TTS voice, reasoning effort,

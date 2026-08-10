@@ -1,4 +1,4 @@
-﻿// src/platforms/discord/client.js
+// src/platforms/discord/client.js
 //
 // Discord platform adapter: initializes the discord.js client, handles
 // messageCreate events in forum threads, builds multimodal history,
@@ -321,10 +321,10 @@ async function deliverDiscordResponse(channel, response) {
   const newTitle = response.discordTitle || '';
 
   const { direct: hostable, linkOnly } = partitionAttachments(response.attachments, PLATFORM.DISCORD);
-  const files = hostable.map((att) => {
-    const a = toDiscordAttachmentArgs(att);
-    return new AttachmentBuilder(a.data, { name: a.name });
-  });
+  const files = hostable
+    .map((att) => toDiscordAttachmentArgs(att))
+    .filter(Boolean)
+    .map((a) => new AttachmentBuilder(a.data, { name: a.name }));
 
   /** One batch send failed: retry the files one by one, then link what still won't go. */
   const sendFilesIndividually = async () => {
@@ -602,5 +602,5 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
   return { history, recentMessageIds };
 }
 
-export { initDiscord 
+export { initDiscord
 };

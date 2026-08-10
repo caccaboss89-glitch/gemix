@@ -1,4 +1,4 @@
-﻿// src/tools/sendEmail.js
+// src/tools/sendEmail.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and the result is a plain object the dispatcher serializes into the
@@ -19,14 +19,14 @@ import {
   resolveInlineImages,
   appendHtmlBlock,
   buildNoticeBlock
- } from '../utils/emailHtml.js';
+} from '../utils/emailHtml.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 import { createLogger  } from '../utils/logger.js';
 import {
   resolveOutboundAttachments,
   alreadyContactedError,
   recordOutbound
- } from './outboundDelivery.js';
+} from './outboundDelivery.js';
 
 const log = createLogger('SendEmail');
 
@@ -152,5 +152,5 @@ async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
   }
 }
 
-export { sendEmailTool 
+export { sendEmailTool
 };

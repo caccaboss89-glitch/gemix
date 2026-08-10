@@ -1,4 +1,4 @@
-﻿// src/utils/attachmentFallback.js
+// src/utils/attachmentFallback.js
 // Link-fallback delivery for attachments that cannot be sent directly on a platform,
 // or are routed to link delivery by platform policy (oversized, build audio/video,
 // externalUrl). Hosts files on the temp server and builds Italian download messages.
@@ -13,7 +13,7 @@ import { createLogger  } from './logger.js';
 import {
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE
- } from '../config/systemMessages.js';
+} from '../config/systemMessages.js';
 import { shouldWhatsAppUseTempLink, readAttachmentBuffer, uniqueAttachmentName  } from './attachments.js';
 import { partitionAttachments, PLATFORM, hasExternalUrl  } from './attachmentDelivery.js';
 

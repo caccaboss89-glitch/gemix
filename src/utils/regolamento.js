@@ -1,4 +1,4 @@
-﻿// src/utils/regolamento.js
+// src/utils/regolamento.js
 //
 // Single-source loader for the Discord server rules (Statuto Albertino).
 // Full text is injected into Discord static instructions as free-form
@@ -48,5 +48,5 @@ function loadRegolamento() {
   }
 }
 
-export { loadRegolamento 
+export { loadRegolamento
 };

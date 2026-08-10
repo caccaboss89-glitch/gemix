@@ -1,4 +1,4 @@
-﻿// src/utils/privacyConsent.js
+// src/utils/privacyConsent.js
 //
 // Registry of everyone who has already been shown the privacy notice, stored
 // as one JSON file keyed by the sender's WhatsApp number:
@@ -115,5 +115,5 @@ async function forgetUser(waJid) {
   });
 }
 
-export { consentKey, hasBeenInformed, markInformed, forgetUser 
+export { hasBeenInformed, markInformed, forgetUser
 };

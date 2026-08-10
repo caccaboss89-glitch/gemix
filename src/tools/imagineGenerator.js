@@ -1,4 +1,4 @@
-﻿// src/tools/imagineGenerator.js
+// src/tools/imagineGenerator.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -204,6 +204,8 @@ async function _xaiImagineSubmitWithRefRefresh({
   let refs = await _resolveReferenceImageUrls(refList, maxRefs, userCtx, responseCtx);
   if (!refs.ok) return { ok: false, reason: refs.reason };
 
+  // Exactly two attempts: the retry only fires once (attempt 0, stale local ref
+  // URL), so attempt 1 always returns from inside the loop — nothing follows it.
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const { endpointPath, body } = buildRequest(refs.urls);
@@ -219,7 +221,6 @@ async function _xaiImagineSubmitWithRefRefresh({
       log.info(`   ${label}: stale ref URL(s), re-uploaded and retrying...`);
     }
   }
-  return { ok: false, reason: 'Imagine submit failed after stale ref refresh' };
 }
 
 function _extFromGeneratedMedia(url, mimeType, fallbackExt) {
