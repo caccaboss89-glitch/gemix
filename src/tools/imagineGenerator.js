@@ -12,7 +12,8 @@
 // Reference images are passed as public HTTPS URLs: entries that are already
 // URLs go straight through; local filenames (delivery buffer or chat history)
 // are uploaded via utils/xaiUpload.js first. The generated media URL is
-// downloaded and stored as a buffered attachment for delivery.
+// downloaded, stored as a buffered attachment for delivery, and re-uploaded
+// so the model can see/watch its own output this turn (utils/aiFileDelivery.js).
 
 import fs from 'fs';
 import path from 'path';
@@ -31,7 +32,7 @@ import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 import { sanitizeFilename  } from '../utils/text.js';
 import { createLogger  } from '../utils/logger.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
-import { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath, MAX_VIDEO_BYTES  } from '../utils/aiFileDelivery.js';
+import { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath, buildXaiPartFromBuffer, MAX_VIDEO_BYTES  } from '../utils/aiFileDelivery.js';
 import { clearXaiUploadCache  } from '../utils/xaiUpload.js';
 import { isXaiFileDownloadError  } from '../utils/refreshXaiMessageUrls.js';
 import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
@@ -105,6 +106,11 @@ function _materializeRefToTemp(buffer, name, ownerKey) {
   return filePath;
 }
 
+/** Per-user isolation key for temp files staged from this user's context. */
+function _ownerKeyFor(userCtx) {
+  return workspaceIdToSlug(resolveWorkspaceId(userCtx)) || resolveStorageId(userCtx) || null;
+}
+
 /**
  * Resolve reference-image entries (public HTTPS URLs or local filenames) into
  * public HTTPS URLs xAI can fetch. Validates count, extension, and size.
@@ -116,7 +122,7 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, op
     return { ok: false, reason: `Too many reference images (${refList.length}). Max allowed: ${max}.` };
   }
   // Per-user temp subdir so buffer-materialized references stay isolated.
-  const ownerKey = workspaceIdToSlug(resolveWorkspaceId(userCtx)) || resolveStorageId(userCtx) || null;
+  const ownerKey = _ownerKeyFor(userCtx);
   const urls = [];
   for (const raw of refList) {
     if (typeof raw !== 'string' || !raw.trim()) {
@@ -358,19 +364,23 @@ async function generateImage(args, userCtx, responseCtx) {
     }
 
     const ext = _extFromGeneratedMedia(item.url, item.mime_type, 'jpg');
+    const mimetype = mimeForExtension(`.${ext}`);
     const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'image');
+    const visionPart = await buildXaiPartFromBuffer(buffer, filename, mimetype, _ownerKeyFor(userCtx));
 
     const truncNote = truncated ? ' (prompt was truncated)' : '';
     const refNote = refsForNote.urls.length > 0
       ? ` Used ${refsForNote.urls.length} reference image(s).`
       : '';
     quota.commit();
-    return {
+    const payload = {
       success: true,
       filename,
       message: `Image generated successfully and pushed to the delivery buffer as "${filename}".${refNote} `
         + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`
+        + (visionPart ? ' Attached below so you can see it.' : '')
     };
+    return visionPart ? [{ type: 'text', text: JSON.stringify(payload) }, visionPart] : payload;
   } finally {
     await quota.release();
   }
@@ -472,18 +482,26 @@ async function generateVideo(args, userCtx, responseCtx) {
     }
 
     const ext = _extFromGeneratedMedia(videoUrl, null, 'mp4');
+    const mimetype = mimeForExtension(`.${ext}`);
     const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'video');
+    const videoPart = await buildXaiPartFromBuffer(buffer, filename, mimetype, _ownerKeyFor(userCtx));
 
     const truncNote = truncated ? ' (prompt was truncated)' : '';
     const refNote = refsForNote.urls.length > 0
       ? ` Used ${refsForNote.urls.length} reference image(s).`
       : '';
     quota.commit();
-    return {
+    const watchNote = videoPart
+      ? ' Attached below so you can watch it. If it has no speech, only music or ambient sound, '
+        + 'you will not get a transcript of dialogue for it — that does not mean the video is silent, '
+        + 'only that there is no speech to transcribe.'
+      : '';
+    const payload = {
       success: true,
       filename,
-      message: `Video generated successfully (${constants.VIDEO_GEN_DURATION_S}s, ${constants.VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}`
+      message: `Video generated successfully (${constants.VIDEO_GEN_DURATION_S}s, ${constants.VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}${watchNote}`
     };
+    return videoPart ? [{ type: 'text', text: JSON.stringify(payload) }, videoPart] : payload;
   } finally {
     await quota.release();
   }

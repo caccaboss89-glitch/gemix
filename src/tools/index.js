@@ -27,10 +27,13 @@ import { managePreferences } from './preferences.js';
 import { toggleReleaseNotify } from './releaseNotify.js';
 import { buildTool } from './build.js';
 import { pushBufferAttachment } from '../utils/attachments.js';
+import { buildXaiPartFromBuffer } from '../utils/aiFileDelivery.js';
 import { musicCreator } from './musicCreator.js';
 import { searchImages } from './imageSearch.js';
 import { getGroupTaskFileId } from '../utils/userIdentifier.js';
 import { sanitizeFilename } from '../utils/text.js';
+import { resolveStorageId } from '../utils/userPaths.js';
+import { resolveWorkspaceId, workspaceIdToSlug } from '../utils/workspaceId.js';
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
 import {
@@ -194,11 +197,15 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           buffer: formalPdfBuffer,
           mimetype: 'application/pdf'
         });
-        result = {
+        const ownerKey = workspaceIdToSlug(resolveWorkspaceId(userCtx)) || resolveStorageId(userCtx) || null;
+        const pdfPart = await buildXaiPartFromBuffer(formalPdfBuffer, formalFinalName, 'application/pdf', ownerKey);
+        const pdfPayload = {
           success: true,
           filename: formalFinalName,
           message: `Formal request PDF generated successfully and pushed to the delivery buffer as "${formalFinalName}".`
+            + (pdfPart ? ' Attached below so you can check its content.' : '')
         };
+        result = pdfPart ? [{ type: 'text', text: JSON.stringify(pdfPayload) }, pdfPart] : pdfPayload;
       } catch (err) {
         await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
         result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -253,7 +260,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           success: true,
           filename: filenames[0],
           message: 'Song generated successfully and pushed to the delivery buffer as '
-              + `${filenames.map(f => `"${f}"`).join(', ')}.`
+              + `${filenames.map(f => `"${f}"`).join(', ')}. `
+              + 'You cannot listen to it yourself, but you can still use it or send it to the user.'
         };
       } else {
         result = musicResult.toolResult;

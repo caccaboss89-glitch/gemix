@@ -294,6 +294,40 @@ async function buildXaiFileParts(absPath, displayPath, opts = {}) {
 }
 
 /**
+ * Stage an in-memory buffer to a temp file, upload it, and return the native
+ * xAI content part (input_image/input_file) - or null on any failure. Used to
+ * feed a freshly generated file (image, video, PDF, ...) back to the model so
+ * it can see/watch what it just produced, the way web_image_search does for
+ * search hits. Best-effort: the caller falls back to a text-only tool result
+ * on null, the file is still delivered to the user regardless.
+ *
+ * @param {Buffer} buffer
+ * @param {string} filename
+ * @param {string} mimetype
+ * @param {string|null} [ownerKey] - temp-dir isolation key (see tempDirForOwner).
+ * @returns {Promise<object|null>}
+ */
+async function buildXaiPartFromBuffer(buffer, filename, mimetype, ownerKey = null) {
+  const dir = tempDirForOwner(ownerKey);
+  const safe = (filename || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const tempPath = path.join(dir, `genfeedback_${crypto.randomBytes(8).toString('hex')}_${safe}`);
+  try {
+    fs.writeFileSync(tempPath, buffer);
+    const built = await buildXaiFileParts(tempPath, filename, { mimetype });
+    if (!built.success) {
+      log.warn(`Could not attach generated file "${filename}" for the model to see: ${built.error}`);
+      return null;
+    }
+    return built.parts.find(p => p.type === 'input_image' || p.type === 'input_file') || null;
+  } catch (err) {
+    log.warn(`Could not attach generated file "${filename}" for the model to see: ${err.message}`);
+    return null;
+  } finally {
+    try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+  }
+}
+
+/**
  * Validate + upload a file on disk and return its public URL only (image/video
  * generation references, build round-1 ingestion).
  */
@@ -535,6 +569,7 @@ export {
   classifyAiFileDelivery,
   isVideoAttachment,
   buildXaiFileParts,
+  buildXaiPartFromBuffer,
   exposeXaiUrlFromAbsPath,
   deliverSyncedAttachment,
   resolveHistoryAbsPath
