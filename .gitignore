@@ -19,8 +19,7 @@ src/logs/
 src/data/**
 .tempfiles/
 
-# Generated prompt dumps: rendered live from src/data/members.json, so they
-# contain real member names/phone numbers/emails and must never be committed.
+# Dev scripts
 scripts/output-regenerate-prompt-dumps/
 
 # Configuration
@@ -28,3 +27,4 @@ scripts/output-regenerate-prompt-dumps/
 package-lock.json
 SERVER_SETUP.md
 sandbox/README.md
+docs/
