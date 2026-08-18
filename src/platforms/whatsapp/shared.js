@@ -276,7 +276,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       if (platform !== PLATFORM_WA_PERSONAL && isGemiX
           && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {
         resolveGemixVoiceTranscription(
-          userId, mediaIngress.syncedPath, chat.id._serialized, (msg.timestamp || 0) * 1000
+          userId, mediaIngress.syncedPath, chat.id._serialized, (msg.timestamp || 0) * 1000, msg.id?.id || null
         );
       }
       textContent = _stripRedundantFilenameBesideAttachmentTag(
@@ -419,11 +419,15 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
 
   if (hasVoice) {
     const media = new MessageMedia('audio/ogg', responseData.voiceBuffer.toString('base64'), 'voice.ogg');
-    await chat.sendMessage(media, { sendAudioAsVoice: true });
+    const sentVoice = await chat.sendMessage(media, { sendAudioAsVoice: true });
     if (responseData.voiceTranscriptText) {
+      // The message id ties the text to this exact audio, so no other audio the
+      // bot sends can pick it up later.
       storeRecentVoiceText(
         responseData.voiceTranscriptChatId || chat.id?._serialized,
-        responseData.voiceTranscriptText
+        responseData.voiceTranscriptText,
+        null,
+        sentVoice?.id?.id || null
       );
     }
     const researchFooter = typeof responseData.researchFooter === 'string'

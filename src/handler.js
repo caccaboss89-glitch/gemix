@@ -39,6 +39,7 @@ import { getToolsForUser, getToolAccessError  } from './ai/tools.js';
 import { buildGemixResponseFormat, parseStructuredReply  } from './ai/responseSchema.js';
 import { resolveDeliverySelection  } from './utils/deliverySelection.js';
 import { applyPastVoiceRepliesToHistory  } from './utils/voiceTranscripts.js';
+import { projectUserVoiceMessages  } from './utils/voiceMessageProjection.js';
 import { generateVoice  } from './tools/voiceMessage.js';
 import { sanitizeVoiceMessageText  } from './utils/text.js';
 import { getCapabilities, resolveProfile, toolUnavailableMessage  } from './config/platformCapabilities.js';
@@ -287,9 +288,11 @@ async function handleMessage(ctx) {
 
     // GemiX voice in history is [Attachment] on assistant (no native audio parts).
     // Replace those tags in-place with <PastVoiceReply> on the assistant messages
-    // (not on the current user turn). Voice platforms only (WA dedicated + personal).
+    // (not on the current user turn). Independent of allowVoice: the text is
+    // already known, so the model must still see what it said even when voice
+    // replies are momentarily unavailable.
     let historyForApi = Array.isArray(ctx.history) ? ctx.history : [];
-    if (allowVoice && historyForApi.length > 0) {
+    if (historyForApi.length > 0) {
       try {
         const { history: patched, replacedCount } = applyPastVoiceRepliesToHistory(
           historyForApi,
@@ -303,6 +306,28 @@ async function handleMessage(ctx) {
         log.warn(`PastVoiceReply history rewrite failed: ${txErr.message}`);
       }
     }
+
+    // Providers whose main model cannot hear audio read user voice notes as
+    // text. One transformation on the copy used for this call covers current,
+    // reply and history alike; the originals keep their [Attachment] tags, so
+    // pruning and the on-disk files are unaffected.
+    let currentContent = ctx.content;
+    if (getCapabilities(ctx).userVoiceTranscription) {
+      try {
+        const projected = await projectUserVoiceMessages(
+          { history: historyForApi, current: currentContent, storageId: resolveStorageId(ctx) },
+          { language: ctx.settings?.language }
+        );
+        historyForApi = projected.history;
+        currentContent = projected.current;
+        if (projected.projected > 0) {
+          log.info(`   Projected ${projected.projected} user voice note(s) as <VoiceMessage>`);
+        }
+      } catch (sttErr) {
+        log.warn(`Voice note projection failed: ${sttErr.message}`);
+      }
+    }
+
     if (historyForApi.length > 0) {
       messages.push(...historyForApi);
     }
@@ -312,7 +337,7 @@ async function handleMessage(ctx) {
     // break in the cross-turn prefix: next turn the history replays these same
     // messages untagged and separate, so the shared prefix now ends where this
     // turn's burst began instead of at the Runtime block below.
-    messages.push({ role: 'user', content: wrapUserQuery(ctx.content) });
+    messages.push({ role: 'user', content: wrapUserQuery(currentContent) });
 
     // Turn-varying program state: built once, placed right after the current
     // user message, and never moved again. Both constraints matter.

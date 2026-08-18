@@ -122,11 +122,24 @@ function _cleanupRecentVoiceEntries() {
   if (recentVoiceEntries.length < before) _saveRecentVoiceEntries();
 }
 
-function storeRecentVoiceText(chatId, text, msgTimestampMs = null) {
+/**
+ * Remember the text GemiX just spoke, so the next history rebuild can show it
+ * as <PastVoiceReply> instead of a bare [Attachment] tag.
+ *
+ * `messageId` is the platform id of the audio message that was actually sent.
+ * When it is known the association is exact, which is what keeps music or any
+ * other audio the bot sends from picking up a nearby voice reply's text.
+ *
+ * @param {string} chatId
+ * @param {string} text
+ * @param {number|null} [msgTimestampMs]
+ * @param {string|null} [messageId]
+ */
+function storeRecentVoiceText(chatId, text, msgTimestampMs = null, messageId = null) {
   if (!chatId || !text) return;
   _cleanupRecentVoiceEntries();
   const ts = Number(msgTimestampMs) > 0 ? Number(msgTimestampMs) : Date.now();
-  recentVoiceEntries.push({ chatId, ts, text });
+  recentVoiceEntries.push({ chatId, ts, text, messageId: messageId || null });
   if (recentVoiceEntries.length > RECENT_VOICE_MAX_ENTRIES) {
     recentVoiceEntries = recentVoiceEntries.slice(-RECENT_VOICE_MAX_ENTRIES);
   }
@@ -156,12 +169,22 @@ function forgetRecentVoiceText(chatId) {
   }
 }
 
-function retrieveRecentVoiceText(chatId, msgTimestampMs) {
-  if (!chatId || !msgTimestampMs) return null;
+function retrieveRecentVoiceText(chatId, msgTimestampMs, messageId = null) {
+  if (!chatId) return null;
+
+  // Exact match first: this audio message is the one that was sent.
+  if (messageId) {
+    const exact = recentVoiceEntries.find(e => e && e.chatId === chatId && e.messageId === messageId);
+    if (exact) return exact.text;
+  }
+
+  // Otherwise only entries whose message id was never available may be matched
+  // by time, so an entry that belongs to a known message is never borrowed.
+  if (!msgTimestampMs) return null;
   let bestIdx = -1;
   let bestDiff = Infinity;
   for (let i = 0; i < recentVoiceEntries.length; i++) {
-    if (recentVoiceEntries[i].chatId !== chatId) continue;
+    if (recentVoiceEntries[i].chatId !== chatId || recentVoiceEntries[i].messageId) continue;
     const diff = Math.abs(recentVoiceEntries[i].ts - msgTimestampMs);
     if (diff < bestDiff) {
       bestDiff = diff;
@@ -228,19 +251,97 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
   return _saveMeta(metaFile, meta, userId);
 }
 
+/** Transient STT outcomes are retried after this; stable ones are kept. */
+const USER_TRANSCRIPTION_RETRY_MS = 5 * 60 * 1000;
+const _TRANSIENT_STT_STATUSES = new Set(['timeout', 'error']);
+
+/**
+ * Cached transcription of a USER voice note.
+ *
+ * The key is the content hash plus the model that produced it, so re-encoding
+ * the same clip, or changing model, transcribes again instead of reusing a
+ * stale text. A transient failure is remembered only briefly, otherwise one
+ * network hiccup would silence the clip for as long as the file lives.
+ *
+ * @param {string} userId
+ * @param {string} historyFilename
+ * @param {string} contentHash
+ * @param {string} model
+ * @returns {{ text: string, status: string }|null}
+ */
+function getStoredUserTranscription(userId, historyFilename, contentHash, model) {
+  if (!userId || !historyFilename || !contentHash) return null;
+  const { metaFile } = getUserHistoryPaths(userId);
+  const normalized = _normalizeHistoryFilename(historyFilename);
+  if (!normalized) return null;
+
+  const meta = _loadMeta(metaFile, userId);
+  for (const entry of Object.values(meta)) {
+    if (_getEntryFilename(entry) !== normalized) continue;
+    const cached = entry && typeof entry === 'object' ? entry.userTranscription : null;
+    if (!cached || cached.contentHash !== contentHash || cached.model !== model) return null;
+    if (_TRANSIENT_STT_STATUSES.has(cached.status)
+      && Date.now() - (Number(cached.updatedAt) || 0) > USER_TRANSCRIPTION_RETRY_MS) {
+      return null;
+    }
+    return { text: typeof cached.text === 'string' ? cached.text : '', status: cached.status };
+  }
+  return null;
+}
+
+/**
+ * Persist a user voice-note transcription next to its file metadata, under the
+ * same per-user lock the history sync uses so a concurrent sync cannot clobber
+ * it.
+ *
+ * @param {string} userId
+ * @param {string} historyFilename
+ * @param {{ text: string, status: string, provider: string, model: string, contentHash: string }} record
+ * @returns {Promise<boolean>}
+ */
+async function storeUserTranscription(userId, historyFilename, record) {
+  if (!userId || !historyFilename || !record?.contentHash) return false;
+  return _withSyncLock(userId, async () => {
+    const { metaFile } = getUserHistoryPaths(userId);
+    const meta = _loadMeta(metaFile, userId);
+    const target = _upsertMetaEntry(meta, historyFilename);
+    if (!target.id || !target.normalized) return false;
+    meta[target.id] = {
+      ...target.entry,
+      userTranscription: {
+        text: typeof record.text === 'string' ? record.text : '',
+        status: record.status,
+        provider: record.provider,
+        model: record.model,
+        contentHash: record.contentHash,
+        updatedAt: Date.now()
+      }
+    };
+    return _saveMeta(metaFile, meta, userId);
+  });
+}
+
 /**
  * Transcription for GemiX (bot) voice messages in chat history only.
  * History shows them as [Attachment: …] tags (assistant role cannot load audio);
  * reads history_meta first, otherwise matches the short cache written when
  * a voice reply is generated, then persists into history_meta.
- * Never used for end-user voice notes.
+ *
+ * Never used for end-user voice notes: those are transcribed externally and
+ * projected as <VoiceMessage> on the user role (see voiceMessageProjection.js).
+ *
+ * @param {string} userId
+ * @param {string} syncedPath
+ * @param {string} chatId
+ * @param {number} msgTimestampMs
+ * @param {string|null} [messageId] - platform id of the audio message, when known
  */
-function resolveGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestampMs) {
+function resolveGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestampMs, messageId = null) {
   if (!userId || !syncedPath) return null;
   const stored = getStoredHistoryVoiceTranscription(userId, syncedPath);
   if (stored) return stored;
-  if (!chatId || !msgTimestampMs) return null;
-  const recent = retrieveRecentVoiceText(chatId, msgTimestampMs);
+  if (!chatId) return null;
+  const recent = retrieveRecentVoiceText(chatId, msgTimestampMs, messageId);
   if (!recent) return null;
   storeHistoryVoiceTranscription(userId, syncedPath, recent);
   return recent;
@@ -497,6 +598,8 @@ export {
   getStoredHistoryVoiceTranscription,
   storeRecentVoiceText,
   forgetRecentVoiceText,
+  getStoredUserTranscription,
+  storeUserTranscription,
   pruneHistory,
   collectReferencedHistoryFilenames,
   DISCORD_MAX_AGE_MS

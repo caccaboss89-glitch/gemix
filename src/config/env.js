@@ -141,11 +141,6 @@ export default {
   CLOUDFLARE_STT_MODEL: process.env.CLOUDFLARE_STT_MODEL || '@cf/openai/whisper-large-v3-turbo',
   CLOUDFLARE_IMAGE_MODEL: process.env.CLOUDFLARE_IMAGE_MODEL || '@cf/black-forest-labs/flux-2-klein-4b',
 
-  // Local whisper.cpp fallback used when Cloudflare is out of quota or down.
-  // Both paths must be set for the fallback to be attempted at all.
-  WHISPER_CPP_PATH: process.env.WHISPER_CPP_PATH || '',
-  WHISPER_CPP_MODEL_PATH: process.env.WHISPER_CPP_MODEL_PATH || '',
-
   GEMIX_SANDBOX_IMAGE: process.env.GEMIX_SANDBOX_IMAGE || 'gemix-sandbox:latest',
   GEMIX_SANDBOX_NETWORK: process.env.GEMIX_SANDBOX_NETWORK || 'gemix_sandbox_net',
   GEMIX_SANDBOX_PROXY_HOST: process.env.GEMIX_SANDBOX_PROXY_HOST || 'gemix-sandbox-proxy',
