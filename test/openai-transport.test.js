@@ -332,3 +332,31 @@ test('the budget aborts its signal and reports remaining time', async () => {
     late.dispose();
   }
 });
+
+// -- The unvalidated include --------------------------------------------------
+
+// Kept last on purpose: the downgrade below latches for the rest of the
+// process, so no test after it may depend on the include still being sent.
+test('a backend that refuses the source include degrades instead of failing', async () => {
+  // This include could never be exercised against the live route, and a 400 is
+  // not retryable, so without the downgrade every single request would fail.
+  const withInclude = { ...BODY, include: ['web_search_call.action.sources'] };
+  await withStub(
+    (url, init) => (JSON.parse(init.body).include !== undefined
+      ? new Response(JSON.stringify({ error: { message: 'Unknown parameter: \'include[0]\'.' } }), { status: 400 })
+      : sseResponse(DONE_STREAM)),
+    async (budget, stub) => {
+      const result = await callCodexResponses({ body: withInclude, budget });
+      assert.equal(stub.calls.length, 2, 'one refusal, then one request without the include');
+      assert.equal(JSON.parse(stub.calls[1].body).include, undefined);
+      assert.equal(result.response.status, 'completed', 'the user still gets a reply');
+    }
+  );
+
+  // Latched: the next call does not pay the refused round-trip again.
+  await withStub(() => sseResponse(DONE_STREAM), async (budget, stub) => {
+    await callCodexResponses({ body: withInclude, budget });
+    assert.equal(stub.calls.length, 1);
+    assert.equal(JSON.parse(stub.calls[0].body).include, undefined);
+  });
+});

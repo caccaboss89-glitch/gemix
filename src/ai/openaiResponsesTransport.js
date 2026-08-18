@@ -32,6 +32,17 @@ import { joinUrl, SseDecoder, ResponseAssembler } from './openaiResponsesProtoco
 
 const log = createLogger('OpenAI');
 
+
+/**
+ * Whether this backend accepts the `web_search_call.action.sources` include.
+ *
+ * It could not be exercised against the live route — the account hit its usage
+ * limit first — and a rejected include would otherwise fail every single
+ * request with an unretryable 400. So the first such refusal turns it off for
+ * the process and retries without it: the reply still arrives, only the badge
+ * loses its source count.
+ */
+let _includeSupported = true;
 /** Typed error categories used by the error policy, notifications and retries. */
 const OPENAI_ERROR = {
   AUTH: 'AUTH',
@@ -154,10 +165,11 @@ async function callCodexResponses({ body, budget, requestId = null }) {
     let res;
     let oauthResult;
     try {
+      const wireBody = _includeSupported ? body : { ...body, include: undefined };
       oauthResult = await fetchWithOpenAiOAuth(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(wireBody),
         signal: budget.signal
       }, {
         minRemainingMs: MIN_TOKEN_REMAINING_MS,
@@ -189,6 +201,17 @@ async function callCodexResponses({ body, budget, requestId = null }) {
       log.warn(`HTTP ${res.status} (${kind}) requestId=${upstreamRequestId ?? 'n/a'} gemixRequestId=${requestId ?? 'n/a'} — ${detail}`);
       if (oauthResult.refreshError) {
         log.error(`Hermes refresh failed: ${oauthResult.refreshError.message}`);
+      }
+
+      // A refused include is a body this deployment can simply stop sending;
+      // dropping it is not a failed attempt, so the budget is given back.
+      if (kind === OPENAI_ERROR.UNSUPPORTED_INPUT && _includeSupported
+        && Array.isArray(body.include) && /include/i.test(bodyText)) {
+        _includeSupported = false;
+        log.warn('this backend refused the web-search source include; continuing without it '
+          + '(replies are unaffected, the research badge loses its source count)');
+        attempt--;
+        continue;
       }
 
       const retryable = kind === OPENAI_ERROR.TRANSIENT || kind === OPENAI_ERROR.RATE_LIMIT;
