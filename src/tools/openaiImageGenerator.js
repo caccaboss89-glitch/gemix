@@ -6,25 +6,28 @@
 //
 // The `generate_image` adapter for the OpenAI profile.
 //
-// One logical tool, two back ends: gpt-image-2 on the Codex backend, and a
-// single Cloudflare FLUX attempt when — and only when — the primary failed in a
-// way a retry elsewhere could actually fix. Both return base64, never a URL, so
-// the artifact is decoded, checked against its own magic bytes, written
-// atomically and pushed to the delivery buffer here.
+// Images come from Cloudflare Workers AI (FLUX), never from the ChatGPT
+// backend: that route needs an API scope this deployment's OAuth credential
+// does not carry. The response is base64, never a URL, so the artifact is
+// decoded, checked against its own magic bytes, written atomically and pushed
+// to the delivery buffer here.
+//
+// Text-to-image only. The endpoint was probed with an input image under every
+// plausible field name, as a file part and as base64, and ignored all of them:
+// the output came back at the default size, byte-for-byte as unrelated as the
+// control field that certainly does not exist. So there is no editing and no
+// reference image to offer, and a call carrying one is refused rather than
+// silently downgraded. Width and height ARE honoured, which is what makes
+// aspect_ratio real.
 //
 // Nothing on this path touches xAI: no upload, no /files, no stale-URL refresh,
 // and no suggestion to hand the result to a video tool that does not exist on
-// this profile. Editing, reference images and aspect ratio were never validated
-// on gpt-image-2, so a call carrying them is refused rather than silently
-// downgraded to text-to-image.
+// this profile.
 
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import envConfig from '../config/env.js';
-import { getOpenAiAuth } from '../config/openaiAuth.js';
-import { joinUrl } from '../ai/openaiResponsesProtocol.js';
-import { OPENAI_ERROR, classifyHttpFailure, summarizeErrorBody } from '../ai/openaiResponsesTransport.js';
 import { profileFromContext } from '../ai/providers/providerProfile.js';
 import { mimeForExtension } from '../config/mimeExtensions.js';
 import { pushBufferAttachment } from '../utils/attachments.js';
@@ -46,24 +49,30 @@ const log = createLogger('OpenAiImageGen');
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 const IMAGE_TIMEOUT_MS = 3 * 60 * 1000;
-const FALLBACK_TIMEOUT_MS = 3 * 60 * 1000;
 const MAX_PROMPT_LEN = 2000;
 /** Bigger than any single generated still; the decode stops before this. */
 const MAX_IMAGE_BYTES = 24 * 1024 * 1024;
-/** Resolution the fallback is asked for, and what its neuron charge is based on. */
-const FALLBACK_SIZE = 512;
 
-/** Fields gpt-image-2 was never probed with; accepting them would be a promise. */
-const UNVALIDATED_FIELDS = ['reference_images', 'image', 'images', 'mask', 'aspect_ratio', 'size', 'quality'];
+/**
+ * Pixel sizes per aspect ratio. The endpoint honours width and height as given,
+ * so these are the real output dimensions; they stay modest because every tile
+ * is charged against the shared daily neuron allowance.
+ */
+const ASPECT_SIZES = Object.freeze({
+  '1:1': [1024, 1024],
+  '16:9': [1280, 720],
+  '9:16': [720, 1280],
+  '4:3': [1152, 864],
+  '3:4': [864, 1152]
+});
+const DEFAULT_ASPECT = '1:1';
 
-/** Primary failures where a second back end is worth trying. */
-const FALLBACK_WORTHY = new Set([
-  OPENAI_ERROR.RATE_LIMIT,
-  OPENAI_ERROR.SUBSCRIPTION_LIMIT,
-  OPENAI_ERROR.TRANSIENT,
-  OPENAI_ERROR.TIMEOUT,
-  OPENAI_ERROR.MALFORMED_RESPONSE
-]);
+/**
+ * Fields the model might reach for out of habit from the other profile. The
+ * endpoint ignores an input image entirely, so accepting any of these would
+ * quietly produce something unrelated to what was asked.
+ */
+const UNSUPPORTED_FIELDS = ['reference_images', 'image', 'images', 'mask', 'quality', 'size'];
 
 /** The image types the artifact check accepts, keyed by their real MIME. */
 const ACCEPTED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -158,84 +167,25 @@ function _ledgerFor(responseCtx) {
 }
 
 /**
- * gpt-image-2 on the Codex backend.
- * @param {string} prompt
- * @returns {Promise<{ ok: true, b64: string, meta: object } | { ok: false, kind: string, detail: string }>}
- */
-async function _generateWithCodex(prompt) {
-  let auth;
-  try {
-    auth = getOpenAiAuth();
-  } catch (err) {
-    return { ok: false, kind: OPENAI_ERROR.AUTH, detail: err.code || err.message };
-  }
-
-  const url = joinUrl(envConfig.OPENAI_BASE_URL, 'images/generations');
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${auth.accessToken}`,
-        'ChatGPT-Account-ID': auth.chatgptAccountId,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: envConfig.OPENAI_IMAGE_MODEL,
-        prompt,
-        n: 1
-      }),
-      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
-    });
-  } catch (err) {
-    const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError';
-    return {
-      ok: false,
-      kind: timedOut ? OPENAI_ERROR.TIMEOUT : OPENAI_ERROR.TRANSIENT,
-      detail: timedOut ? `no response within ${IMAGE_TIMEOUT_MS} ms` : err.message
-    };
-  }
-
-  const bodyText = await res.text();
-  if (!res.ok) {
-    return { ok: false, kind: classifyHttpFailure(res.status, bodyText), detail: summarizeErrorBody(bodyText) };
-  }
-
-  let payload;
-  try {
-    payload = JSON.parse(bodyText);
-  } catch {
-    return { ok: false, kind: OPENAI_ERROR.MALFORMED_RESPONSE, detail: 'the response was not JSON' };
-  }
-
-  const item = Array.isArray(payload?.data) ? payload.data[0] : null;
-  if (!item || typeof item.b64_json !== 'string') {
-    return { ok: false, kind: OPENAI_ERROR.MALFORMED_RESPONSE, detail: 'the response carried no b64_json entry' };
-  }
-  // The backend normalizes size and quality, so what it actually produced is
-  // read back from the response rather than assumed from the request.
-  return {
-    ok: true,
-    b64: item.b64_json,
-    meta: { size: payload.size || item.size || null, quality: payload.quality || item.quality || null }
-  };
-}
-
-/**
- * The single Cloudflare FLUX attempt. Charged on the shared neuron ledger
- * before the request goes out; refunded only when the request provably never
- * reached Cloudflare.
+ * Ask Cloudflare Workers AI for one image.
+ *
+ * Charged on the shared neuron ledger before the request goes out and refunded
+ * only when the request provably never reached Cloudflare, so a retry cannot
+ * overshoot the daily allowance.
+ *
+ * The endpoint takes multipart only — a JSON body is rejected outright — and
+ * answers `{ success, result: { image: <base64 JPEG> } }`.
  *
  * @param {string} prompt
- * @returns {Promise<{ ok: true, b64: string } | { ok: false, detail: string }>}
+ * @param {[number, number]} size - [width, height] in pixels
+ * @returns {Promise<{ ok: true, b64: string } | { ok: false, detail: string, quotaExhausted?: boolean }>}
  */
-async function _generateWithFlux(prompt) {
+async function _generateWithCloudflare(prompt, [width, height]) {
   if (!envConfig.CLOUDFLARE_AI_ACCOUNT_ID || !envConfig.CLOUDFLARE_AI_API_TOKEN) {
-    return { ok: false, detail: 'the fallback back end is not configured' };
+    return { ok: false, detail: 'the image back end is not configured' };
   }
 
-  const cost = neuronsForImage(FALLBACK_SIZE, FALLBACK_SIZE);
-  const reservation = await reserveNeurons(cost, 'image');
+  const reservation = await reserveNeurons(neuronsForImage(width, height), 'image');
   if (!reservation.ok) {
     return { ok: false, detail: IMAGE_DAILY_LIMIT_MESSAGE, quotaExhausted: true };
   }
@@ -243,8 +193,8 @@ async function _generateWithFlux(prompt) {
   const url = `${CLOUDFLARE_API_BASE}/${envConfig.CLOUDFLARE_AI_ACCOUNT_ID}/ai/run/${envConfig.CLOUDFLARE_IMAGE_MODEL}`;
   const form = new FormData();
   form.set('prompt', prompt);
-  form.set('width', String(FALLBACK_SIZE));
-  form.set('height', String(FALLBACK_SIZE));
+  form.set('width', String(width));
+  form.set('height', String(height));
 
   let res;
   try {
@@ -252,12 +202,12 @@ async function _generateWithFlux(prompt) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${envConfig.CLOUDFLARE_AI_API_TOKEN}` },
       body: form,
-      signal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS)
+      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
     });
   } catch (err) {
     // A failed fetch can still have reached Cloudflare. Keep the pessimistic
-    // charge so retrying the fallback cannot overshoot the shared allowance.
-    return { ok: false, detail: err.name === 'TimeoutError' ? 'the fallback timed out' : err.message };
+    // charge rather than refunding work that may well have been done.
+    return { ok: false, detail: err.name === 'TimeoutError' ? 'the request timed out' : err.message };
   }
 
   const bodyText = await res.text();
@@ -277,7 +227,7 @@ async function _generateWithFlux(prompt) {
 
   const b64 = payload?.result?.image;
   if (typeof b64 !== 'string' || !b64) {
-    return { ok: false, detail: 'the fallback returned no image' };
+    return { ok: false, detail: 'the back end returned no image' };
   }
   return { ok: true, b64 };
 }
@@ -287,6 +237,7 @@ async function _generateWithFlux(prompt) {
  *
  * @param {object} args
  * @param {string} args.prompt
+ * @param {string} [args.aspect_ratio] - one of ASPECT_SIZES; square when omitted
  * @param {object} userCtx
  * @param {object} responseCtx
  * @param {string} [callId] - the tool call this run belongs to (idempotency key)
@@ -297,16 +248,26 @@ async function generateImageOpenAi(args, userCtx, responseCtx, callId = null) {
   if (!profile.capabilities.generateImage) {
     return { success: false, error: 'Image generation is not available on this GemiX deployment.' };
   }
-  if (!envConfig.OPENAI_IMAGE_MODEL) {
-    return { success: false, error: 'envConfig.OPENAI_IMAGE_MODEL is not configured.' };
+  if (!envConfig.CLOUDFLARE_IMAGE_MODEL) {
+    return { success: false, error: 'envConfig.CLOUDFLARE_IMAGE_MODEL is not configured.' };
   }
 
-  const offered = UNVALIDATED_FIELDS.filter(field => args && args[field] !== undefined);
+  const offered = UNSUPPORTED_FIELDS.filter(field => args && args[field] !== undefined);
   if (offered.length > 0) {
     return {
       success: false,
-      error: `This image generator takes a prompt only: ${offered.join(', ')} ${offered.length === 1 ? 'is' : 'are'} not supported. `
-        + 'Describe what you want in the prompt instead.'
+      error: `This image generator takes a prompt and an aspect ratio only: ${offered.join(', ')} `
+        + `${offered.length === 1 ? 'is' : 'are'} not supported. It cannot edit an image or use one as reference — `
+        + 'describe everything you want in the prompt instead.'
+    };
+  }
+
+  const aspect = args?.aspect_ratio === undefined ? DEFAULT_ASPECT : args.aspect_ratio;
+  if (!Object.hasOwn(ASPECT_SIZES, aspect)) {
+    return {
+      success: false,
+      error: `Unsupported "aspect_ratio": ${JSON.stringify(args.aspect_ratio)}. `
+        + `Use one of: ${Object.keys(ASPECT_SIZES).join(', ')}.`
     };
   }
 
@@ -336,35 +297,19 @@ async function generateImageOpenAi(args, userCtx, responseCtx, callId = null) {
   if (!quota.ok) return { success: false, error: quota.error };
 
   try {
-    let usedFallback = false;
-    let meta = {};
-    const attempt = await _generateWithCodex(prompt);
-    let decoded = attempt.ok ? decodeImageBase64(attempt.b64) : null;
-    if (decoded?.ok) meta = attempt.meta || {};
+    const size = ASPECT_SIZES[aspect];
+    const attempt = await _generateWithCloudflare(prompt, size);
+    if (!attempt.ok) {
+      log.warn(`${envConfig.CLOUDFLARE_IMAGE_MODEL} failed: ${attempt.detail}`);
+      return {
+        success: false,
+        error: attempt.quotaExhausted ? attempt.detail : `Image generation failed: ${attempt.detail}.`
+      };
+    }
 
-    // The primary can let us down two ways: it refuses, or it answers with bytes
-    // that are not an image. Both earn one FLUX attempt — a result that does not
-    // decode is no more usable than no result at all.
-    if (!decoded?.ok) {
-      const why = attempt.ok
-        ? `unusable result: ${decoded.reason}`
-        : `${attempt.kind}: ${attempt.detail}`;
-      log.warn(`${envConfig.OPENAI_IMAGE_MODEL} failed (${why})`);
-      if (!attempt.ok && !FALLBACK_WORTHY.has(attempt.kind)) {
-        return { success: false, error: `Image generation failed: ${attempt.detail}` };
-      }
-      const fallback = await _generateWithFlux(prompt);
-      if (!fallback.ok) {
-        return {
-          success: false,
-          error: `Image generation failed: ${why}. The fallback did not run either: ${fallback.detail}.`
-        };
-      }
-      decoded = decodeImageBase64(fallback.b64);
-      if (!decoded.ok) {
-        return { success: false, error: `Image generation produced an unusable result: ${decoded.reason}.` };
-      }
-      usedFallback = true;
+    const decoded = decodeImageBase64(attempt.b64);
+    if (!decoded.ok) {
+      return { success: false, error: `Image generation produced an unusable result: ${decoded.reason}.` };
     }
 
     const filename = _artifactName(prompt, decoded.ext);
@@ -385,11 +330,9 @@ async function generateImageOpenAi(args, userCtx, responseCtx, callId = null) {
     });
     quota.commit();
 
-    const notes = [];
+    const notes = [`${size[0]}x${size[1]}`];
     if (truncated) notes.push('the prompt was truncated');
-    if (usedFallback) notes.push('the primary generator was unavailable, so a fallback produced this one');
-    if (meta.size) notes.push(`size ${meta.size}`);
-    const suffix = notes.length > 0 ? ` (${notes.join('; ')})` : '';
+    const suffix = ` (${notes.join('; ')})`;
 
     const result = await projectToolResult({
       payload: (attached) => ({
@@ -411,8 +354,8 @@ async function generateImageOpenAi(args, userCtx, responseCtx, callId = null) {
 
 export {
   MAX_IMAGE_BYTES,
-  UNVALIDATED_FIELDS,
-  FALLBACK_WORTHY,
+  ASPECT_SIZES,
+  UNSUPPORTED_FIELDS,
   decodeImageBase64,
   generateImageOpenAi
 };

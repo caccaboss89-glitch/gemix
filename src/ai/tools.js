@@ -380,17 +380,24 @@ const TOOL_GENERATE_MUSIC = makeTool({
 // buffer or chat history, or a public https URL. Filenames resolve buffer-first,
 // then history; local files are exposed as public URLs for xAI.
 
-// gpt-image-2 on the Codex path is text-to-image only as far as GemiX has
-// validated it: reference images, editing and aspect ratio were never probed on
-// that route, so the schema does not offer them and the handler rejects them.
+// On the OpenAI profile images come from Cloudflare Workers AI, which is
+// text-to-image only: the endpoint ignores an input image under every field
+// name it was probed with, so there is no editing and no reference image to
+// offer. Width and height are honoured, so aspect ratio is real here.
 const TOOL_GENERATE_IMAGE_OPENAI = makeTool({
   name: 'generate_image',
   description:
-    'Generate an image from a textual prompt. Result is pushed to the delivery buffer.',
+    'Generate an image from a textual prompt. It can NOT edit, extend or take an existing image as reference — '
+    + 'describe everything in the prompt. Result is pushed to the delivery buffer.',
   properties: {
     prompt: {
       type: 'string',
       description: 'Image description: subject, style, lighting, mood, composition.'
+    },
+    aspect_ratio: {
+      type: 'string',
+      enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+      description: 'Aspect ratio of the generated image. Omit for square.'
     }
   },
   required: ['prompt']

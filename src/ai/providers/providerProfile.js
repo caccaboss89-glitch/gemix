@@ -152,7 +152,7 @@ function _buildOpenaiProfile() {
     attachmentProjection: 'openai',
     toolResultProjection: 'openai',
     buildRunner: 'codex',
-    imageGenerator: 'gpt-image',
+    imageGenerator: 'cloudflare-flux',
     voiceProfile: Object.freeze({
       backend: 'google-translate',
       label: 'Google Translate',

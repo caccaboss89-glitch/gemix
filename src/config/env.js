@@ -77,7 +77,6 @@ export default {
   OPENAI_BASE_URL: (process.env.OPENAI_BASE_URL || 'https://chatgpt.com/backend-api/codex').replace(/\/+$/, ''),
   OPENAI_HERMES_REFRESH_PROVIDER: process.env.OPENAI_HERMES_REFRESH_PROVIDER || 'openai-codex',
   OPENAI_HERMES_REFRESH_MODEL: process.env.OPENAI_HERMES_REFRESH_MODEL || 'gpt-5.6-luna',
-  OPENAI_IMAGE_MODEL: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
 
   // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.
   XAI_USE_API_KEY,

@@ -1,12 +1,17 @@
 // test/openai-image-gen.test.js
 //
-// Phase 8: one logical generate_image, two back ends, and no way to end up
-// with two of anything.
+// generate_image on the OpenAI profile: one back end, Cloudflare Workers AI.
 //
-// The interesting cases are the ones where something goes wrong: a corrupt
-// payload, a replayed call_id, an argument the private gpt-image-2 route was
-// never validated with. In every one of them the user must not receive an
-// invented attachment and the weekly quota must not be spent.
+// The endpoint was probed with an input image under every plausible field name
+// and ignored all of them, so this profile is text-to-image only. The
+// interesting cases are the ones where something goes wrong — a corrupt
+// payload, a replayed call_id, an argument this generator cannot honour. In
+// every one of them the user must not receive an invented attachment and the
+// weekly quota must not be spent.
+//
+// This file charges the shared Cloudflare neuron ledger, which lives in the
+// real state file, so the suite runs with --test-concurrency=1 and the state is
+// put back byte for byte at the end.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,7 +30,8 @@ seedEnv({
 
 const {
   MAX_IMAGE_BYTES,
-  UNVALIDATED_FIELDS,
+  ASPECT_SIZES,
+  UNSUPPORTED_FIELDS,
   decodeImageBase64,
   generateImageOpenAi
 } = await import('../src/tools/openaiImageGenerator.js');
@@ -39,8 +45,6 @@ const { clearMediaUsage, formatQuotaCounts } = await import('../src/utils/mediaU
 
 const OPENAI = getProviderProfile(PROVIDER.OPENAI);
 
-// The fallback charges the shared neuron ledger, which lives in the real state
-// file: it is put back byte for byte when this file finishes.
 const STATE_FILE = path.join(constants.DATA_DIR, 'systemState.json');
 const STATE_BEFORE = fs.existsSync(STATE_FILE) ? fs.readFileSync(STATE_FILE) : null;
 
@@ -55,6 +59,9 @@ const PNG = Buffer.concat([
 ]);
 const PNG_B64 = PNG.toString('base64');
 const HTML = Buffer.from('<!doctype html><html><body>error</body></html>');
+
+/** The shape Cloudflare answers with on success. */
+const cfOk = (b64 = PNG_B64) => ({ success: true, result: { image: b64 } });
 
 /** A userCtx that resolves a storage id without touching a real chat. */
 function makeUserCtx() {
@@ -122,11 +129,11 @@ test('an oversized payload is refused before it is decoded', () => {
 
 // -- Argument contract --------------------------------------------------------
 
-test('the fields gpt-image-2 was never validated with are refused by name', async () => {
-  for (const field of UNVALIDATED_FIELDS) {
-    const stub = installFetchStub(() => {
-      throw new Error('must not reach the network');
-    });
+test('editing and reference arguments are refused by name, never downgraded', async () => {
+  // The back end ignores an input image instead of rejecting it, so accepting
+  // any of these would quietly return something unrelated to what was asked.
+  for (const field of UNSUPPORTED_FIELDS) {
+    const stub = installFetchStub(() => { throw new Error('must not reach the network'); });
     try {
       const result = await generateImageOpenAi(
         { prompt: 'un gatto astronauta', [field]: field === 'reference_images' ? ['a.png'] : 'x' },
@@ -135,6 +142,7 @@ test('the fields gpt-image-2 was never validated with are refused by name', asyn
       );
       assert.equal(result.success, false, `${field} should be refused`);
       assert.match(result.error, new RegExp(field));
+      assert.match(result.error, /cannot edit an image or use one as reference/);
       assert.equal(stub.calls.length, 0, `${field} must not reach the network`);
     } finally {
       stub.restore();
@@ -153,45 +161,83 @@ test('a missing or too-short prompt never reaches the network', async () => {
   }
 });
 
-// -- The primary path ---------------------------------------------------------
+test('an aspect ratio outside the enum is refused instead of silently squared', async () => {
+  const stub = installFetchStub(() => { throw new Error('must not reach the network'); });
+  try {
+    const result = await generateImageOpenAi(
+      { prompt: 'un gatto astronauta', aspect_ratio: '21:9' }, makeUserCtx(), makeResponseCtx()
+    );
+    assert.equal(result.success, false);
+    assert.match(result.error, /aspect_ratio/);
+    assert.equal(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
 
-test('a successful generation posts to the Codex image route and buffers one artifact', async () => {
+test('each aspect ratio asks for its own pixel size', async () => {
+  // Width and height are the parameters this back end really honours, so the
+  // ratio has to reach it as concrete pixels.
+  for (const [ratio, [w, h]] of Object.entries(ASPECT_SIZES)) {
+    await resetNeuronLedger();
+    const userCtx = makeUserCtx();
+    const stub = installFetchStub(() => cfOk());
+    try {
+      await generateImageOpenAi({ prompt: 'un gatto astronauta', aspect_ratio: ratio }, userCtx, makeResponseCtx());
+      assert.equal(stub.calls[0].body.get('width'), String(w), `${ratio} width`);
+      assert.equal(stub.calls[0].body.get('height'), String(h), `${ratio} height`);
+    } finally {
+      stub.restore();
+      cleanup(userCtx);
+    }
+  }
+});
+
+// -- The generation path ------------------------------------------------------
+
+test('a successful generation posts the probed multipart contract and buffers one artifact', async () => {
+  await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub(() => ({ data: [{ b64_json: PNG_B64 }], size: '1254x1254' }));
+  const stub = installFetchStub(() => cfOk());
   try {
-    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
-    const payload = payloadOf(result);
+    const payload = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx));
     assert.equal(payload.success, true);
 
     assert.equal(stub.calls.length, 1);
     const call = stub.calls[0];
-    assert.equal(call.url, `${envConfig.OPENAI_BASE_URL.replace(/\/+$/, '')}/images/generations`);
+    assert.equal(
+      call.url,
+      `https://api.cloudflare.com/client/v4/accounts/acct-test/ai/run/${envConfig.CLOUDFLARE_IMAGE_MODEL}`
+    );
     assert.equal(call.method, 'POST');
-    assert.equal(call.headers['ChatGPT-Account-ID'] !== undefined, true);
-    assert.equal(JSON.parse(call.body).model, envConfig.OPENAI_IMAGE_MODEL);
-    assert.equal(JSON.parse(call.body).prompt, 'un gatto astronauta');
+    assert.equal(call.headers['Authorization'], 'Bearer cf-test-token');
+    // The endpoint takes multipart only — a JSON body is rejected outright.
+    assert.equal(call.body instanceof FormData, true);
+    assert.equal(call.body.get('prompt'), 'un gatto astronauta');
+    assert.equal(call.body.get('width'), '1024');
+    assert.equal(call.body.get('height'), '1024');
 
     assert.equal(responseCtx.attachments.length, 1);
     const att = responseCtx.attachments[0];
     assert.equal(att.name, payload.filename);
     assert.equal(att.mimetype, 'image/png');
     assert.equal(fs.readFileSync(att.filePath).equals(PNG), true, 'the artifact is on disk');
-    // The size the backend actually produced is reported, not the one asked for.
-    assert.match(payload.message, /1254x1254/);
+    assert.match(payload.message, /1024x1024/);
   } finally {
     stub.restore();
     cleanup(userCtx);
   }
 });
 
-test('the result never points the model at a video tool it does not have', async () => {
+test('the result never points the model at a capability this profile lacks', async () => {
+  await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub(() => ({ data: [{ b64_json: PNG_B64 }] }));
+  const stub = installFetchStub(() => cfOk());
   try {
     const payload = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx));
-    assert.doesNotMatch(payload.message, /generate_video|reference image|x_search|Imagine/i);
+    assert.doesNotMatch(payload.message, /generate_video|reference image|x_search|Imagine|Grok/i);
   } finally {
     stub.restore();
     cleanup(userCtx);
@@ -199,9 +245,10 @@ test('the result never points the model at a video tool it does not have', async
 });
 
 test('a replayed call_id returns the first result without generating again', async () => {
+  await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub(() => ({ data: [{ b64_json: PNG_B64 }] }));
+  const stub = installFetchStub(() => cfOk());
   try {
     const first = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx, 'call_1'));
     const second = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx, 'call_1'));
@@ -215,11 +262,10 @@ test('a replayed call_id returns the first result without generating again', asy
 });
 
 test('an HTML error page dressed as an image never becomes an attachment', async () => {
-  // Both back ends answer with the same page, so neither produces an image and
-  // the failure has to surface instead of a zero-byte attachment.
+  await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub(() => ({ data: [{ b64_json: HTML.toString('base64') }] }));
+  const stub = installFetchStub(() => cfOk(HTML.toString('base64')));
   try {
     const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
     assert.equal(result.success, false);
@@ -231,86 +277,15 @@ test('an HTML error page dressed as an image never becomes an attachment', async
   }
 });
 
-test('a response with no b64_json entry is reported as a failure', async () => {
-  const userCtx = makeUserCtx();
-  const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) return { success: true, result: { image: PNG_B64 } };
-    return { data: [{ url: 'https://example.invalid/not-base64.png' }] };
-  });
-  try {
-    // MALFORMED_RESPONSE is fallback-worthy, so FLUX runs and the user still
-    // gets a real image rather than an error.
-    const payload = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx));
-    assert.equal(payload.success, true);
-    assert.equal(stub.calls.length, 2);
-    assert.match(stub.calls[1].url, /api\.cloudflare\.com/);
-  } finally {
-    stub.restore();
-    cleanup(userCtx);
-  }
-});
-
-// -- The fallback -------------------------------------------------------------
-
-test('a rate-limited primary falls back to FLUX exactly once', async () => {
+test('a success response carrying no image is reported as a failure', async () => {
   await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) return { success: true, result: { image: PNG_B64 } };
-    return new Response(JSON.stringify({ error: { message: 'slow down' } }), { status: 429 });
-  });
-  try {
-    const payload = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx));
-    assert.equal(payload.success, true);
-    assert.equal(stub.calls.length, 2, 'one primary attempt, one fallback attempt');
-    assert.match(stub.calls[1].url, new RegExp(envConfig.CLOUDFLARE_IMAGE_MODEL.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')));
-    assert.match(payload.message, /fallback/);
-    assert.equal(responseCtx.attachments.length, 1);
-  } finally {
-    stub.restore();
-    cleanup(userCtx);
-  }
-});
-
-test('a primary result that is not really an image falls back to FLUX', async () => {
-  // The call succeeded and carried a b64_json, so nothing upstream reports a
-  // failure — but the bytes are not an image. Before, this returned an error to
-  // the model with the fallback never attempted.
-  await resetNeuronLedger();
-  const userCtx = makeUserCtx();
-  const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) return { success: true, result: { image: PNG_B64 } };
-    return { data: [{ b64_json: Buffer.from('this is not an image at all').toString('base64') }] };
-  });
-  try {
-    const payload = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx));
-    assert.equal(payload.success, true);
-    assert.equal(stub.calls.length, 2, 'the corrupt primary result must trigger exactly one fallback');
-    assert.match(stub.calls[1].url, /api\.cloudflare\.com/);
-    assert.equal(responseCtx.attachments.length, 1);
-  } finally {
-    stub.restore();
-    cleanup(userCtx);
-  }
-});
-
-test('a corrupt fallback result is not retried a second time', async () => {
-  await resetNeuronLedger();
-  const userCtx = makeUserCtx();
-  const responseCtx = makeResponseCtx();
-  const corrupt = Buffer.from('still not an image').toString('base64');
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) return { success: true, result: { image: corrupt } };
-    return { data: [{ b64_json: corrupt }] };
-  });
+  const stub = installFetchStub(() => ({ success: true, result: {} }));
   try {
     const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
     assert.equal(result.success, false);
-    assert.match(result.error, /unusable result/);
-    assert.equal(stub.calls.length, 2, 'one primary, one fallback, then it gives up');
+    assert.match(result.error, /no image/);
     assert.equal(responseCtx.attachments.length, 0);
   } finally {
     stub.restore();
@@ -318,29 +293,27 @@ test('a corrupt fallback result is not retried a second time', async () => {
   }
 });
 
-test('an exhausted FLUX allowance returns the specific Italian image reset message', async () => {
+// -- Quota and the shared neuron ledger ---------------------------------------
+
+test('an exhausted allowance returns the specific Italian image reset message', async () => {
   await resetNeuronLedger();
   await neurons.openQuotaCircuit();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) throw new Error('the breaker must stop this request');
-    return new Response('{}', { status: 503 });
-  });
+  const stub = installFetchStub(() => cfOk());
   try {
     const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
     assert.equal(result.success, false);
     assert.match(result.error, /limite giornaliero di generazione immagini/i);
-    assert.match(result.error, /prossima mezzanotte \(Europe\/Rome\)/);
-    assert.equal(stub.calls.length, 1, 'only the primary request reaches the network');
-    assert.equal(responseCtx.attachments.length, 0);
+    assert.match(result.error, /mezzanotte/i);
+    assert.equal(stub.calls.length, 0, 'the breaker is checked before the network');
   } finally {
     stub.restore();
     cleanup(userCtx);
   }
 });
 
-test('a Cloudflare denial does not consume normal user image or song quota', async () => {
+test('a back-end denial does not consume normal user image or song quota', async () => {
   await resetNeuronLedger();
   await neurons.openQuotaCircuit();
   const userCtx = makeUserCtx();
@@ -361,19 +334,14 @@ test('a Cloudflare denial does not consume normal user image or song quota', asy
   }
 });
 
-test('a Cloudflare quota response opens the shared breaker and hides its raw error', async () => {
+test('a quota response opens the shared breaker and hides its raw error', async () => {
   await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) {
-      return new Response(JSON.stringify({
-        success: false,
-        errors: [{ code: 3036, message: 'neuron quota exceeded' }]
-      }), { status: 429 });
-    }
-    return new Response('{}', { status: 503 });
-  });
+  const stub = installFetchStub(() => new Response(JSON.stringify({
+    success: false,
+    errors: [{ code: 3036, message: 'neuron quota exceeded' }]
+  }), { status: 429 }));
   try {
     const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
     assert.equal(result.success, false);
@@ -386,93 +354,17 @@ test('a Cloudflare quota response opens the shared breaker and hides its raw err
   }
 });
 
-test('an ambiguous FLUX fetch failure stays charged for safe retries', async () => {
+test('an ambiguous fetch failure stays charged for safe retries', async () => {
+  // The request may well have reached Cloudflare and been billed, so the
+  // pessimistic charge stands rather than refunding work that may have run.
   await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) throw new TypeError('fetch failed');
-    return new Response('{}', { status: 503 });
-  });
+  const stub = installFetchStub(() => { throw new TypeError('fetch failed'); });
   try {
     const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
     assert.equal(result.success, false);
-    assert.equal(neurons.readNeuronLedger().used, neurons.neuronsForImage(512, 512));
-  } finally {
-    stub.restore();
-    cleanup(userCtx);
-  }
-});
-
-test('an unusable prompt rejected by the primary is not retried elsewhere', async () => {
-  const userCtx = makeUserCtx();
-  const responseCtx = makeResponseCtx();
-  const stub = installFetchStub(() => new Response(
-    JSON.stringify({ error: { message: 'prompt rejected by the safety system' } }),
-    { status: 400 }
-  ));
-  try {
-    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
-    assert.equal(result.success, false);
-    assert.equal(stub.calls.length, 1, 'UNSUPPORTED_INPUT is not fallback-worthy');
-    assert.match(result.error, /safety system/);
-    assert.equal(responseCtx.attachments.length, 0);
-  } finally {
-    stub.restore();
-    cleanup(userCtx);
-  }
-});
-
-test('an auth failure on the primary is not retried elsewhere either', async () => {
-  const userCtx = makeUserCtx();
-  const responseCtx = makeResponseCtx();
-  const stub = installFetchStub(() => new Response('{}', { status: 401 }));
-  try {
-    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
-    assert.equal(result.success, false);
-    assert.equal(stub.calls.length, 1);
-  } finally {
-    stub.restore();
-    cleanup(userCtx);
-  }
-});
-
-test('both back ends failing reports both reasons and delivers nothing', async () => {
-  const userCtx = makeUserCtx();
-  const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) {
-      return new Response(JSON.stringify({ success: false, errors: [{ code: 3000, message: 'capacity' }] }), { status: 500 });
-    }
-    return new Response('{}', { status: 503 });
-  });
-  try {
-    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
-    assert.equal(result.success, false);
-    assert.match(result.error, /fallback did not run either/);
-    assert.equal(responseCtx.attachments.length, 0);
-  } finally {
-    stub.restore();
-    cleanup(userCtx);
-  }
-});
-
-test('the fallback request carries the probed multipart contract', async () => {
-  const userCtx = makeUserCtx();
-  const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) return { success: true, result: { image: PNG_B64 } };
-    return new Response('{}', { status: 503 });
-  });
-  try {
-    await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
-    const call = stub.calls[1];
-    assert.equal(call.method, 'POST');
-    assert.equal(call.headers['Authorization'], 'Bearer cf-test-token');
-    assert.equal(call.body instanceof FormData, true);
-    assert.equal(call.body.get('prompt'), 'un gatto astronauta');
-    assert.equal(call.body.get('width'), '512');
-    assert.equal(call.body.get('height'), '512');
+    assert.equal(neurons.readNeuronLedger().used, neurons.neuronsForImage(1024, 1024));
   } finally {
     stub.restore();
     cleanup(userCtx);
@@ -481,17 +373,17 @@ test('the fallback request carries the probed multipart contract', async () => {
 
 // -- Provider isolation -------------------------------------------------------
 
-test('nothing on this path reaches an xAI host', async () => {
+test('nothing on this path reaches an xAI or ChatGPT host', async () => {
+  await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
-  const stub = installFetchStub((url) => {
-    if (String(url).includes('cloudflare')) return { success: true, result: { image: PNG_B64 } };
-    return new Response('{}', { status: 503 });
-  });
+  const stub = installFetchStub(() => cfOk());
   try {
     await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
+    assert.ok(stub.calls.length > 0, 'nothing was requested, so this proves nothing');
     for (const call of stub.calls) {
-      assert.doesNotMatch(call.url, /x\.ai|grok|imagine/i, `unexpected host: ${call.url}`);
+      assert.match(call.url, /^https:\/\/api\.cloudflare\.com\//, `unexpected host: ${call.url}`);
+      assert.doesNotMatch(call.url, /x\.ai|grok|imagine|chatgpt\.com/i, `unexpected host: ${call.url}`);
     }
   } finally {
     stub.restore();
@@ -499,8 +391,8 @@ test('nothing on this path reaches an xAI host', async () => {
   }
 });
 
-test('the OpenAI profile still names one image generator and no video one', () => {
-  assert.equal(OPENAI.imageGenerator, 'gpt-image');
+test('the OpenAI profile names one image generator and no video one', () => {
+  assert.equal(OPENAI.imageGenerator, 'cloudflare-flux');
   assert.equal(OPENAI.capabilities.generateImage, true);
   assert.equal(OPENAI.capabilities.generateVideo, false);
 });

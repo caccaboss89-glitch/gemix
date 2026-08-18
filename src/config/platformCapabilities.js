@@ -355,7 +355,9 @@ function buildAnswerLines(profile, opts = {}) {
   if (cap.providerId === PROVIDER.OPENAI) {
     lines.push(
       'If the user asks for X search or for video understanding or generation, explain that those features are '
-      + 'unavailable because the administrator configured GemiX with ChatGPT; users cannot change that setting.'
+      + 'unavailable because the administrator configured GemiX with ChatGPT; users cannot change that setting. '
+      + 'generate_image works from a written description only: it cannot edit, extend or take an existing image as '
+      + 'reference, so put every detail in the prompt and say plainly that editing an existing image is not possible here.'
     );
   }
 
