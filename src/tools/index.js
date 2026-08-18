@@ -28,9 +28,10 @@ import { toggleReleaseNotify } from './releaseNotify.js';
 import { buildTool } from './build.js';
 import { pushBufferAttachment } from '../utils/attachments.js';
 import { projectToolResult } from '../utils/aiFileDelivery.js';
-import { profileFromContext } from '../ai/providers/providerProfile.js';
+import { profileFromContext, PROVIDER } from '../ai/providers/providerProfile.js';
 import { musicCreator } from './musicCreator.js';
 import { searchImages } from './imageSearch.js';
+import { generateImageOpenAi } from './openaiImageGenerator.js';
 import { getGroupTaskFileId } from '../utils/userIdentifier.js';
 import { sanitizeFilename } from '../utils/text.js';
 import { resolveStorageId } from '../utils/userPaths.js';
@@ -111,7 +112,11 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           '🎨 Sto generando l\'immagine, attendi un attimo...'
         );
       }
-      result = await generateImage(args, userCtx, responseCtx);
+      // One logical tool, one adapter per profile: the runner is picked from
+      // the turn's profile, never from the shape of the arguments.
+      result = profileFromContext(userCtx).id === PROVIDER.OPENAI
+        ? await generateImageOpenAi(args, userCtx, responseCtx, toolCall.id)
+        : await generateImage(args, userCtx, responseCtx);
       break;
     }
 

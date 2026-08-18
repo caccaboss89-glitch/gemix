@@ -26,6 +26,13 @@ const MODULE = 'cloudflareNeurons';
 const DAILY_FREE_NEURONS = 10_000;
 /** Whisper Large v3 Turbo, measured per minute of audio. */
 const STT_NEURONS_PER_MINUTE = 46.63;
+/**
+ * One 512x512 tile of a FLUX generation. Workers AI bills image models by tile
+ * and step and GemiX has not metered a run, so this is a deliberate
+ * over-estimate: charging too much only makes the fallback stop early, while
+ * charging too little would let it run past the free allowance.
+ */
+const IMAGE_NEURONS_PER_TILE = 250;
 
 /** Reasons a reservation can be refused. */
 const NEURON_DENIAL = {
@@ -51,6 +58,18 @@ function _rollOver(state, period) {
     };
   }
   return { period, used: 0, circuitOpen: false, calls: 0 };
+}
+
+/**
+ * Neurons one generated image costs, by the tiles its resolution covers.
+ * @param {number} width
+ * @param {number} height
+ * @returns {number}
+ */
+function neuronsForImage(width, height) {
+  const w = Number(width) > 0 ? Number(width) : 512;
+  const h = Number(height) > 0 ? Number(height) : 512;
+  return Math.ceil(w / 512) * Math.ceil(h / 512) * IMAGE_NEURONS_PER_TILE;
 }
 
 /** Neurons one audio clip costs, rounded up so the estimate never runs short. */
@@ -142,9 +161,11 @@ function readNeuronLedger() {
 export {
   DAILY_FREE_NEURONS,
   STT_NEURONS_PER_MINUTE,
+  IMAGE_NEURONS_PER_TILE,
   NEURON_DENIAL,
   periodKey,
   neuronsForAudioSeconds,
+  neuronsForImage,
   reserveNeurons,
   refundNeurons,
   openQuotaCircuit,
