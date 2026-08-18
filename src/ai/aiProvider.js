@@ -1,83 +1,35 @@
 // src/ai/aiProvider.js
 //
-// Thin adapter for main-brain LLM calls on the direct xAI Responses
-// endpoint (`/v1/responses`). Accepts the usual chat-style messages + tools
-// and translates them through responsesAdapter + apiClient, then converts
-// the result back to the chat-completion shape expected by handler.js.
+// Router for main-brain LLM calls. It resolves nothing on its own: the caller
+// passes the turn's immutable ProviderProfile and this file only picks the
+// implementation that profile names.
+//
+// Both branches return the same shape — { message, provider, model,
+// searchStats, imageResults, citations } — so the handler loop never has to
+// know which back end answered.
 
-import envConfig from '../config/env.js';
-import constants from '../config/constants.js';
-import { VALID_EFFORTS  } from '../utils/settingsStore.js';
-import { applyResponsesTextFormat  } from './responseSchema.js';
-import {
-  chatToolsToResponsesTools,
-  responsesToAssistantMessage,
-  extractServerSearchStats
-} from './responsesAdapter.js';
-import { callResponsesWithStaleUrlRetry  } from './responsesWithUrlRefresh.js';
+import { PROVIDER, profileFromContext } from './providers/providerProfile.js';
+import { callAI as callXai } from './xaiProvider.js';
+import { callAI as callOpenAi } from './openaiProvider.js';
 
-/**
- * @param {object} body
- * @param {string|null|undefined} key
- */
-function _applyPromptCacheKey(body, key) {
-  if (key && typeof key === 'string') {
-    body.prompt_cache_key = key;
-  }
-}
+const IMPLEMENTATIONS = {
+  [PROVIDER.XAI]: callXai,
+  [PROVIDER.OPENAI]: callOpenAi
+};
 
 /**
- * Call Grok on the direct xAI Responses endpoint.
- * @param {Array} messages - Static system first (only role:system), then
- *   history, the user message and the Runtime block (both role:user), then
- *   tool items. xAI prefix-cache matches from the start of this list (`input[]`).
+ * Call the active provider's main brain.
+ * @param {Array} messages
  * @param {Array|null} tools
- * @param {object} [opts]
- * @param {string|null} [opts.historyStorageId] - Enables automatic refresh of
- *   expired tmpfile.link URLs referenced in messages before failing.
- * @param {string|null} [opts.promptCacheKey] - Stable per-conversation xAI cache id.
- * @param {string} [opts.reasoningEffort] - 'low' | 'medium' | 'high' (default 'high').
+ * @param {object} [opts] - carries providerProfile plus the per-call options
+ *   the selected implementation understands.
+ * @returns {Promise<{message: object, provider: string, model: string, searchStats: object, imageResults: Array, citations: Array}>}
  */
 async function callAI(messages, tools = null, opts = {}) {
-  const logExtra = opts.requestId ? { requestId: opts.requestId } : {};
-
-  const body = {
-    model: envConfig.GROK_MODEL,
-    max_output_tokens: constants.MAX_TOKENS,
-    // Per-chat setting (manage_preferences), 'high' when unset.
-    reasoning: { effort: VALID_EFFORTS.includes(opts.reasoningEffort) ? opts.reasoningEffort : 'high' },
-    store: false
-  };
-  _applyPromptCacheKey(body, opts.promptCacheKey);
-
-  if (envConfig.XAI_REASONING_REPLAY) {
-    body.include = ['reasoning.encrypted_content'];
-  }
-
-  if (Number.isFinite(opts.maxTurns)) {
-    body.max_turns = opts.maxTurns;
-  }
-
-  const adaptedTools = chatToolsToResponsesTools(tools);
-  if (adaptedTools) {
-    body.tools = adaptedTools;
-    body.tool_choice = opts.toolChoice || 'auto';
-  }
-
-  applyResponsesTextFormat(body, opts.responseFormat);
-
-  const data = await callResponsesWithStaleUrlRetry({
-    modelName: 'Grok',
-    messages,
-    body,
-    logExtra,
-    historyStorageId: opts.historyStorageId || null
-  });
-
-  const message = responsesToAssistantMessage(data);
-  const searchStats = extractServerSearchStats(data);
-  return { message, provider: 'Grok', model: envConfig.GROK_MODEL, searchStats };
+  const profile = profileFromContext(opts);
+  const impl = IMPLEMENTATIONS[profile.id];
+  if (!impl) throw new Error(`No main-brain implementation for provider "${profile.id}".`);
+  return impl(messages, tools, { ...opts, providerProfile: profile });
 }
 
-export { callAI
-};
+export { callAI };

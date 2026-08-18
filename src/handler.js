@@ -64,7 +64,8 @@ import {
   partitionHandlerToolCalls,
   perRoundCappedDuplicateIds,
   perRoundCapErrorPayload,
-  PER_ROUND_TOOL_LIMITS
+  PER_ROUND_TOOL_LIMITS,
+  ToolCallLedger
 } from './utils/toolCallExecution.js';
 import { sendIntermediateNotification  } from './utils/intermediateNotification.js';
 import {
@@ -410,7 +411,10 @@ async function handleMessage(ctx) {
     // buffer state is injected into the Runtime block, not into tool schemas).
     let currentRoundTools = [];
 
-    const runToolCall = async (tc) => {
+    // One tool call id executes once per turn, whatever brings it back.
+    const toolLedger = new ToolCallLedger();
+
+    const executeToolCall = async (tc) => {
       try {
         log.info(`   Executing: ${tc.function.name} args=${tc.function.arguments || '{}'}`);
         const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, currentRoundTools);
@@ -432,6 +436,8 @@ async function handleMessage(ctx) {
         };
       }
     };
+
+    const runToolCall = (tc) => toolLedger.run(tc, () => executeToolCall(tc), (why) => log.warn(`   ${why}`));
 
     // Generate a voice reply from the model's final `response` text when it set
     // `voice:true` (WhatsApp dedicated only). Returns a voice response object,

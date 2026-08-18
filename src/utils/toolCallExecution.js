@@ -116,10 +116,81 @@ function perRoundCapErrorPayload(toolName, limit) {
   });
 }
 
+/**
+ * Per-turn record of every tool call already dispatched, keyed by `call_id`.
+ *
+ * A model stream can be cut after a function call has been emitted and, on some
+ * paths, the same call can reach the dispatcher twice — from a truncated
+ * response that is still usable, or from a model that repeats an id across
+ * rounds. Re-running `send_email` or `build` in that situation would duplicate a
+ * real external effect, so a completed id replays its recorded result instead.
+ *
+ * Deduplication is strictly by `call_id`: two calls with the same name and the
+ * same arguments can be perfectly legitimate, and collapsing them would silently
+ * drop work the model asked for.
+ */
+class ToolCallLedger {
+  constructor() {
+    /** @type {Map<string, {name: string, promise: Promise<object>, done: boolean}>} */
+    this._entries = new Map();
+  }
+
+  /** Number of distinct calls dispatched this turn. */
+  get size() {
+    return this._entries.size;
+  }
+
+  /** True when this id already ran (or is running) in this turn. */
+  has(callId) {
+    return this._entries.has(callId);
+  }
+
+  /**
+   * Run a tool call once per turn.
+   *
+   * A second arrival of the same id waits for the first execution and receives
+   * the same result; the executor is never invoked twice.
+   *
+   * @param {object} toolCall - assistant tool call ({ id, function: { name } })
+   * @param {() => Promise<object>} executor - performs the call and returns its
+   *   tool message
+   * @param {(message: string) => void} [onDuplicate] - called when an id repeats
+   * @returns {Promise<object>} the tool message, cloned so later per-round
+   *   trimming of one copy cannot mutate the other
+   */
+  async run(toolCall, executor, onDuplicate = null) {
+    const callId = toolCall?.id;
+    const name = toolCall?.function?.name || 'tool';
+    // Without an id there is nothing to deduplicate against; the dispatcher
+    // already rejects such calls, so just run it.
+    if (!callId) return executor();
+
+    const existing = this._entries.get(callId);
+    if (existing) {
+      onDuplicate?.(
+        `Tool call id "${callId}" (${name}) already ${existing.done ? 'completed' : 'running'} this turn`
+        + `${existing.name === name ? '' : ` as "${existing.name}"`} — replaying its result instead of re-running it.`
+      );
+      return { ...(await existing.promise) };
+    }
+
+    const entry = { name, promise: null, done: false };
+    entry.promise = (async () => {
+      try {
+        return await executor();
+      } finally {
+        entry.done = true;
+      }
+    })();
+    this._entries.set(callId, entry);
+    return { ...(await entry.promise) };
+  }
+}
+
 export {
   partitionHandlerToolCalls,
   PER_ROUND_TOOL_LIMITS,
   perRoundCappedDuplicateIds,
-  perRoundCapErrorPayload
-
+  perRoundCapErrorPayload,
+  ToolCallLedger
 };

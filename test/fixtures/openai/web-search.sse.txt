@@ -1,0 +1,14 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_fixture_search","status":"in_progress"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"ws_fixture_1","type":"web_search_call","status":"completed","results":[{"type":"text_result","url":"https://example.invalid/alpha","title":"Alpha"},{"type":"text_result","url":"https://example.invalid/beta","title":"Beta"},{"type":"image_result","image_url":"https://cdn.example.invalid/one.webp","thumbnail_url":"https://cdn.example.invalid/one-thumb.webp","source_website_url":"https://example.invalid/gallery","caption":"Placeholder caption one"},{"type":"image_result","image_url":"https://cdn.example.invalid/one.webp","thumbnail_url":"https://cdn.example.invalid/one-thumb.webp","source_website_url":"https://example.invalid/gallery","caption":"Duplicate of the first hit"},{"type":"image_result","image_url":"https://cdn.example.invalid/two.webp","source_website_url":"https://example.invalid/other"}]}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_fixture_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"response\":\"placeholder reply\",\"attachments\":[]}","annotations":[{"type":"url_citation","url":"https://example.invalid/alpha","title":"Alpha","start_index":12,"end_index":22},{"type":"url_citation","url":"https://example.invalid/alpha","title":"Alpha duplicate","start_index":12,"end_index":22},{"type":"url_citation","url":"https://example.invalid/beta","title":"Beta out of range","start_index":9000,"end_index":9100}]}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_fixture_search","status":"completed","output":[{"id":"ws_fixture_1","type":"web_search_call","status":"completed"},{"id":"msg_fixture_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"response\":\"placeholder reply\",\"attachments\":[]}"}]}],"usage":{"input_tokens":210,"output_tokens":18,"total_tokens":228}}}
+
+data: [DONE]
+
