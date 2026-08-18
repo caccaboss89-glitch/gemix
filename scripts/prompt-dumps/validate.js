@@ -697,15 +697,7 @@ function _validateBuildToolDescription(platform, providerId) {
  */
 function validateBuildAgentDump(buildDump, platform, providerId) {
   const marker = '--- DEVELOPER INSTRUCTIONS ---';
-  // The dump is still written when the runner is gated off — it is how the
-  // gate itself is reviewed — but the tool must be absent from the schema.
   _validateBuildToolDescription(platform, providerId);
-  if (!getProviderProfile(providerId).capabilities.build) {
-    if (!/CODEX_BUILD_ENABLED/.test(buildDump)) {
-      ISSUES.push({ caseId: 'build', msg: 'a gated build dump must state which flag gates it' });
-    }
-    return;
-  }
   const rulesStart = buildDump.indexOf(marker);
   if (rulesStart < 0) {
     ISSUES.push({ caseId: 'build', msg: 'build dump missing the developer instructions section' });

@@ -10,11 +10,11 @@
 // both credential resolution and authenticated fetch without coupling them to
 // Responses or Build. Neither tokens nor account ids enter errors or logs.
 
-import envConfig from '../config/env.js';
 import {
   getOpenAiAuth,
   invalidateOpenAiAuthCache,
-  OPENAI_AUTH_FILE
+  OPENAI_AUTH_FILE,
+  OPENAI_HERMES_POOL
 } from '../config/openaiAuth.js';
 import { refreshHermesOAuth } from './hermesAuthRefresh.js';
 
@@ -52,8 +52,7 @@ async function refreshOpenAiOAuth({
   refreshState.refreshAttempted = true;
 
   try {
-    await refresh(envConfig.OPENAI_HERMES_REFRESH_PROVIDER, OPENAI_AUTH_FILE, {
-      model: envConfig.OPENAI_HERMES_REFRESH_MODEL,
+    await refresh(OPENAI_HERMES_POOL, OPENAI_AUTH_FILE, {
       requireAuthFileChange: true
     });
     invalidateOpenAiAuthCache();

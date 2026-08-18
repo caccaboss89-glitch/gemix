@@ -63,10 +63,10 @@ function _openaiCapabilities() {
     readVideo: false,
     generateImage: true,
     generateVideo: false,
-    // Codex Build stays off until the host-side auth broker has been verified
-    // on the VPS: without that boundary the CLI's own shell could read the
-    // bearer, and copying the token into the sandbox is not an option.
-    build: envConfig.CODEX_BUILD_ENABLED,
+    // Codex Build, same as Grok Build on the other profile. The CLI's own shell
+    // could read a bearer in its environment, so it never gets one: it uses a
+    // single-invocation ticket and the host-side broker attaches the credential.
+    build: true,
     voiceReply: true,
     // Google Translate TTS has no voice catalog, so no voice preference exists.
     namedVoices: false,
@@ -136,9 +136,7 @@ function _buildOpenaiProfile() {
     model: envConfig.OPENAI_MODEL,
     displayName: _openaiDisplayName(envConfig.OPENAI_MODEL),
     identity: 'ChatGPT',
-    defaultEffort: OPENAI_EFFORTS.includes(envConfig.OPENAI_REASONING_EFFORT)
-      ? envConfig.OPENAI_REASONING_EFFORT
-      : 'max',
+    defaultEffort: 'max',
     supportedEfforts: Object.freeze([...OPENAI_EFFORTS]),
     capabilities: Object.freeze(_openaiCapabilities()),
     transport: 'openai-codex-responses',
@@ -146,7 +144,7 @@ function _buildOpenaiProfile() {
       kind: 'hermes-oauth',
       hermesPool: 'openai-codex',
       authFile: envConfig.OPENAI_AUTH_FILE,
-      refreshProvider: envConfig.OPENAI_HERMES_REFRESH_PROVIDER
+      refreshProvider: 'openai-codex'
     }),
     preflight: 'openai-credentials',
     attachmentProjection: 'openai',

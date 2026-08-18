@@ -26,7 +26,7 @@ if (!AI_PROVIDERS.includes(AI_PROVIDER)) {
 // never required while another provider is active.
 const PROVIDER_REQUIRED = {
   xai: ['GROK_MODEL', 'IMAGE_GEN_MODEL', 'VIDEO_GEN_MODEL'],
-  openai: []
+  openai: ['OPENAI_MODEL']
 };
 
 // Every value below must be set in .env (no || null in exports).
@@ -69,14 +69,12 @@ export default {
 
   GROK_MODEL: process.env.GROK_MODEL,
 
-  // OpenAI/ChatGPT profile (AI_PROVIDER=openai). Auth is the Hermes
-  // `openai-codex` pool; the Codex Responses backend is the only proven path.
-  OPENAI_MODEL: process.env.OPENAI_MODEL || 'gpt-5.6-sol',
-  OPENAI_REASONING_EFFORT: process.env.OPENAI_REASONING_EFFORT || 'max',
+  // OpenAI/ChatGPT profile (AI_PROVIDER=openai). Same shape as the xAI keys
+  // above: the model is required, the auth file and base URL have defaults, and
+  // the Hermes pool is a constant in openaiAuth.js — not configuration.
+  OPENAI_MODEL: process.env.OPENAI_MODEL,
   OPENAI_AUTH_FILE: process.env.OPENAI_AUTH_FILE || path.join(os.homedir(), '.hermes', 'auth.json'),
   OPENAI_BASE_URL: (process.env.OPENAI_BASE_URL || 'https://chatgpt.com/backend-api/codex').replace(/\/+$/, ''),
-  OPENAI_HERMES_REFRESH_PROVIDER: process.env.OPENAI_HERMES_REFRESH_PROVIDER || 'openai-codex',
-  OPENAI_HERMES_REFRESH_MODEL: process.env.OPENAI_HERMES_REFRESH_MODEL || 'gpt-5.6-luna',
 
   // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.
   XAI_USE_API_KEY,
@@ -167,8 +165,6 @@ export default {
   // the backend through the container's egress proxy, and that the broker
   // boundary survives the non-exfiltrability test. While it is off the OpenAI
   // profile simply has no build tool.
-  CODEX_BUILD_ENABLED: process.env.CODEX_BUILD_ENABLED === 'true',
-  CODEX_BIN: process.env.CODEX_BIN || 'codex',
   CODEX_BROKER_HOST: process.env.CODEX_BROKER_HOST || 'gemix-codex-broker',
   CODEX_BROKER_PORT: Number(process.env.CODEX_BROKER_PORT) || 8081,
   CODEX_BROKER_BIND: process.env.CODEX_BROKER_BIND || '127.0.0.1'

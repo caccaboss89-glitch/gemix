@@ -20,8 +20,7 @@
 
 import crypto from 'crypto';
 import constants from '../config/constants.js';
-import envConfig from '../config/env.js';
-import { PROVIDER } from './providers/providerProfile.js';
+import { PROVIDER, getProviderProfile } from './providers/providerProfile.js';
 import { getXaiAuth } from '../config/xaiAuth.js';
 import { getOpenAiAuth } from '../config/openaiAuth.js';
 import { mintTicket, revokeTicket, startBroker } from '../sandbox/codexAuthBroker.js';
@@ -162,14 +161,15 @@ const CODEX_RUNNER = {
     getOpenAiAuth({ minRemainingMs: constants.BUILD_HARD_TIMEOUT_MS });
     await startBroker();
 
+    const profile = getProviderProfile(PROVIDER.OPENAI);
     const codexHome = `/var/lib/gemix-codex/run-${crypto.randomBytes(8).toString('hex')}`;
     const ticket = mintTicket({ ttlMs: constants.BUILD_HARD_TIMEOUT_MS + 60_000 });
     return {
       execOpts: {
         ticket,
         codexHome,
-        model: envConfig.OPENAI_MODEL,
-        effort: envConfig.OPENAI_REASONING_EFFORT
+        model: profile.model,
+        effort: profile.defaultEffort
       },
       cleanup: () => revokeTicket(ticket)
     };

@@ -370,7 +370,7 @@ function buildCodexExecSpec({
     'timeout',
     '--signal=KILL',
     `${timeoutSec}s`,
-    envConfig.CODEX_BIN,
+    'codex',
     'exec',
     '--cd', '/workspace',
     '--model', model || envConfig.OPENAI_MODEL,
@@ -384,7 +384,7 @@ function buildCodexExecSpec({
     '--config', `model_providers.gemix_broker.base_url="${brokerUrl}"`,
     '--config', 'model_providers.gemix_broker.env_key="CODEX_BROKER_TICKET"',
     '--config', 'model_providers.gemix_broker.wire_api="responses"',
-    '--config', `model_reasoning_effort="${effort || envConfig.OPENAI_REASONING_EFFORT}"`,
+    '--config', `model_reasoning_effort="${effort}"`,
     // An AGENTS.md staged as a build attachment is data, not instructions.
     '--config', 'project_doc_max_bytes=0',
     '--config', 'experimental_use_freeform_apply_patch=true'

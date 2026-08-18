@@ -444,7 +444,6 @@ function renderBuildAgentDump(providerId) {
 
   const hostContract = isCodex
     ? [
-      `- Availability: gated by CODEX_BUILD_ENABLED (currently ${profile.capabilities.build ? 'on' : 'off'}); while off the tool is absent from the OpenAI schema.`,
       '- Auth: the container holds only a single-invocation broker ticket. The real bearer and ChatGPT-Account-ID are attached host-side by the Codex broker and are unreadable from the sandbox shell, env, argv, /proc, workspace or logs.',
       '- CODEX_HOME is a throwaway directory outside /workspace, removed in finally; .codex state never enters the listing, snapshot or harvest.',
       '- After exit: harvest every regular file under /workspace/ into the delivery buffer.',
