@@ -239,26 +239,29 @@ const TOOL_OPENAI_WEB_SEARCH_HOSTED = {
 
 // Named web_image_search (not search_images): xAI reserves search_images for its
 // server-side image tool; reusing that name as a client function caused empty replies.
-const TOOL_WEB_IMAGE_SEARCH = makeTool({
-  name: 'web_image_search',
-  description:
-    'Search the web for existing images (provides direct image URLs). Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
-    + 'put chosen `url` values in final `attachments` to send them. '
-    + 'Prefer this over generate_image when a real web image is enough. Not for X/Twitter media.',
-  properties: {
-    query: {
-      type: 'string',
-      description: 'Image search query.'
+function buildWebImageSearchTool(provider) {
+  return makeTool({
+    name: 'web_image_search',
+    description:
+      'Search the web for existing images (provides direct image URLs). Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
+      + 'put chosen `url` values in final `attachments` to send them. '
+      + 'Prefer this over generate_image when a real web image is enough.'
+      + (provider.capabilities.xSearch ? ' Not for X/Twitter media.' : ''),
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Image search query.'
+      },
+      count: {
+        type: 'integer',
+        description:
+          `How many image results to return (${WEB_IMAGE_SEARCH_MIN_COUNT}–${WEB_IMAGE_SEARCH_MAX_COUNT}, `
+          + `default ${WEB_IMAGE_SEARCH_DEFAULT_COUNT}).`
+      }
     },
-    count: {
-      type: 'integer',
-      description:
-        `How many image results to return (${WEB_IMAGE_SEARCH_MIN_COUNT}–${WEB_IMAGE_SEARCH_MAX_COUNT}, `
-        + `default ${WEB_IMAGE_SEARCH_DEFAULT_COUNT}).`
-    }
-  },
-  required: ['query']
-});
+    required: ['query']
+  });
+}
 
 const TOOL_READ_VIDEO = makeTool({
   name: 'read_video',
@@ -804,7 +807,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // assistant history stays [Attachment] tags. The OpenAI profile has neither an
   // X corpus nor video understanding, so it stops after the first two.
   tools.push(can.hostedImageResults ? TOOL_OPENAI_WEB_SEARCH_HOSTED : TOOL_WEB_SEARCH_NATIVE);
-  tools.push(TOOL_WEB_IMAGE_SEARCH);
+  tools.push(buildWebImageSearchTool(provider));
   if (can.xSearch) tools.push(TOOL_X_SEARCH_NATIVE);
   if (can.readVideo) tools.push(TOOL_READ_VIDEO);
 

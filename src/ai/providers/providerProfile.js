@@ -58,7 +58,10 @@ function _openaiCapabilities() {
     readVideo: false,
     generateImage: true,
     generateVideo: false,
-    build: true,
+    // Codex Build stays off until the host-side auth broker has been verified
+    // on the VPS: without that boundary the CLI's own shell could read the
+    // bearer, and copying the token into the sandbox is not an option.
+    build: envConfig.CODEX_BUILD_ENABLED,
     voiceReply: true,
     // Google Translate TTS has no voice catalog, so no voice preference exists.
     namedVoices: false,

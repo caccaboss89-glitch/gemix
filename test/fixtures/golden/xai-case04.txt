@@ -1,4 +1,4 @@
-=== CASE 4 WA personal — custom shared settings (memory + language) ===
+=== CASE 4 WA personal — custom shared settings (memory + language) [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

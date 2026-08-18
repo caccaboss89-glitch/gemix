@@ -1,11 +1,11 @@
 // src/ai/buildAgent.js
 //
-// Build sub-agent runner: Grok Build CLI inside the per-workspace Docker sandbox.
+// Build sub-agent runner: the active provider's CLI inside the per-workspace
+// Docker sandbox (see ai/buildRunners.js for the two back ends).
 // Host: immutable --rules, auth via getXaiAuth (token + baseUrl) as process env,
 // hard timeout, harvest new/changed workspace files into the delivery path.
 // No host-side write_file/edit_file/bash tool loop and no structured attachments JSON.
 
-import { getXaiAuth  } from '../config/xaiAuth.js';
 import constants from '../config/constants.js';
 import { renewBuildLock  } from '../utils/buildState.js';
 import {
@@ -14,13 +14,13 @@ import {
   normalizeWorkspaceRelPath,
   resolveWorkspaceDeliveryFile
 } from '../sandbox/buildWorkspace.js';
-import buildSandbox from '../sandbox/buildSandbox.js';
-import { getRomeTime  } from '../utils/time.js';
+import { runnerForProfile  } from './buildRunners.js';
+import { profileFromContext  } from './providers/providerProfile.js';
 import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('BuildAgent');
 
-/** Cap free-text captured from Grok stdout/stderr (bytes). */
+/** Cap free-text captured from the runner's stdout/stderr (bytes). */
 const CAPTURE_MAX_BYTES = 200 * 1024;
 
 /** Notice on every build tool result for GemiX-Main. */
@@ -31,43 +31,22 @@ const DELIVERY_SELECTION_NOTICE =
   + 'intermediates, sources, logs, and scratch files unless the user asked for them.';
 
 /**
- * Immutable operational rules for Grok Build (--rules).
+ * Immutable operational rules handed to the build sub-agent.
+ *
+ * The text is the active runner's: byte-identical to what Grok Build has always
+ * received on the xAI profile, and free of any xAI tool, endpoint or capability
+ * on the Codex one (see ai/buildRunners.js).
+ *
  * @param {object} [opts]
  * @param {Array<{requested:string, actual:string}>} [opts.renamedAttachments]
  * @param {string[]} [opts.stagedNames]
  * @param {string[]} [opts.externalUrls]
+ * @param {object} [opts.providerProfile] - the turn's profile
  * @returns {string}
  */
-function buildGrokRules({ renamedAttachments, stagedNames, externalUrls } = {}) {
-  const lines = [
-    'You are GemiX-Build: complete the task brief inside this isolated container.',
-    `Time (Europe/Rome): ${getRomeTime()}.`,
-    'Filesystem: work only under /workspace/ (writable). Do not rely on host paths outside it.',
-    `Quota: keep the workspace under about ${constants.BUILD_WORKSPACE_QUOTA_MB} MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~${constants.BUILD_WORKSPACE_TTL_LABEL} TTL managed by the host).`,
-    'Network: HTTP/HTTPS egress already uses HTTP_PROXY/HTTPS_PROXY (residential), including API calls to xAI. Do not pass --proxy to yt-dlp/curl. On proxy 502, CONNECT errors, timeouts, or DNS failures: internet is down — stop, do not retry loops, explain the system outage in your reply.',
-    'Toolchain: Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, zip/unzip, curl/wget. Runtime pip/npm/apt are disabled — do not attempt package installs.',
-    'Use your built-in Grok skills and tools as needed.',
-    'IMPORTANT delivery contract: after you finish, the host harvests new/modified files under /workspace/ (and may harvest all files on a successful no-change run, e.g. resend). Write a clear free-text summary of what you did and what files matter; GemiX-Main will select what to send the user.',
-    'If GemiX-Main only asks to send/resend files already present: confirm they are under /workspace/ (do not recreate them unless missing) and reply briefly — the host harvests them and forwards to GemiX-Main automatically; you do not list JSON attachments.',
-    'Language: write documents in the user\'s language (Italian default). No emojis in your reply or generated files unless the brief asks for them.'
-  ];
-
-  if (Array.isArray(stagedNames) && stagedNames.length > 0) {
-    lines.push(`Staged inputs already under /workspace/: ${stagedNames.join(', ')}.`);
-  }
-  if (Array.isArray(renamedAttachments) && renamedAttachments.length > 0) {
-    const renames = renamedAttachments
-      .map(a => `"${a.requested}" → on disk "${a.actual}"`)
-      .join('; ');
-    lines.push(`Upload filename collisions (use the on-disk name): ${renames}.`);
-  }
-  if (Array.isArray(externalUrls) && externalUrls.length > 0) {
-    lines.push(
-      'These inputs are only available as public URLs (too large to stage). Download them into /workspace/ if needed: '
-      + externalUrls.join(' | ')
-    );
-  }
-  return lines.join('\n');
+function buildAgentRules({ renamedAttachments, stagedNames, externalUrls, providerProfile } = {}) {
+  return runnerForProfile(profileFromContext({ providerProfile }))
+    .rules({ renamedAttachments, stagedNames, externalUrls });
 }
 
 function _listWorkspaceFileEntries(workspaceId) {
@@ -160,8 +139,9 @@ function buildBuildToolPayload({ agentMessage, delivered }) {
  * @param {string[]} [args.stagedNames]
  * @param {string[]} [args.externalUrls]
  * @param {string} args.lockOwnerId
- * @param {function} [args.getToken]
- * @param {function} [args.execGrok]
+ * @param {function} [args.getToken] - xAI credential override (tests)
+ * @param {function} [args.execAgent] - runner override (tests)
+ * @param {object} [args.providerProfile] - the turn's profile
  */
 async function runBuildAgent({
   workspaceId,
@@ -171,37 +151,28 @@ async function runBuildAgent({
   externalUrls,
   lockOwnerId,
   getToken,
-  execGrok
+  execAgent,
+  providerProfile
 } = {}) {
   const startedAt = Date.now();
   ensureWorkspaceWritable(workspaceId);
 
-  let token;
-  let baseUrl;
+  const runner = runnerForProfile(profileFromContext({ providerProfile }));
+
+  let prepared;
   try {
-    const auth = typeof getToken === 'function' ? getToken() : getXaiAuth();
-    token = auth && auth.token;
-    baseUrl = auth && auth.baseUrl;
+    prepared = await runner.prepare({ getToken });
   } catch (err) {
     return {
       success: false,
-      error: `Cannot load xAI credentials for build: ${err.message}`,
-      roundsUsed: 0,
-      delivered: [],
-      delivery_note: DELIVERY_SELECTION_NOTICE
-    };
-  }
-  if (typeof token !== 'string' || !token.trim()) {
-    return {
-      success: false,
-      error: 'Cannot load xAI credentials for build: empty token.',
+      error: err.message.startsWith('Cannot load') ? err.message : runner.credentialError(err.message),
       roundsUsed: 0,
       delivered: [],
       delivery_note: DELIVERY_SELECTION_NOTICE
     };
   }
 
-  const rules = buildGrokRules({ renamedAttachments, stagedNames, externalUrls });
+  const rules = runner.rules({ renamedAttachments, stagedNames, externalUrls });
   const beforeSnapshot = snapshotWorkspaceFiles(workspaceId);
 
   const renewIv = setInterval(() => {
@@ -214,30 +185,33 @@ async function runBuildAgent({
   }, 30_000);
   renewIv.unref?.();
 
-  const runExec = typeof execGrok === 'function' ? execGrok : buildSandbox.execGrokBuild.bind(buildSandbox);
+  const runExec = typeof execAgent === 'function'
+    ? execAgent
+    : runner.exec.bind(runner);
   let execResult;
   try {
     renewBuildLock(workspaceId, lockOwnerId);
     execResult = await runExec(workspaceId, {
       prompt,
       rules,
-      token: token.trim(),
-      baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
       timeoutMs: constants.BUILD_HARD_TIMEOUT_MS,
-      maxTurns: constants.BUILD_MAX_ROUNDS
+      ...prepared.execOpts
     });
   } catch (err) {
-    log.error(`Grok Build exec failed: ${err.message}`);
+    log.error(`${runner.label} exec failed: ${err.message}`);
     const partial = collectWorkspaceDeltaPaths(workspaceId, beforeSnapshot);
     return {
       success: false,
-      error: `Grok Build failed to start or run: ${err.message}`,
+      error: `${runner.label} failed to start or run: ${err.message}`,
       roundsUsed: 0,
       delivered: partial,
       delivery_note: DELIVERY_SELECTION_NOTICE
     };
   } finally {
     clearInterval(renewIv);
+    // The ticket dies with the invocation and the throwaway CODEX_HOME goes
+    // with it, whatever the run did.
+    prepared.cleanup();
   }
 
   ensureWorkspaceWritable(workspaceId);
@@ -250,14 +224,14 @@ async function runBuildAgent({
     deliveredPaths = collectAllWorkspaceDeliverablePaths(workspaceId);
   }
 
-  const stdout = _clipCapture((execResult.stdout || '').trim());
+  const stdout = _clipCapture(runner.readOutput((execResult.stdout || '').trim()));
   const stderr = _clipCapture((execResult.stderr || '').trim());
   let agentMessage = stdout;
   if (!agentMessage) {
     if (execResult.timedOut) {
-      agentMessage = 'Build stopped: hard timeout reached before Grok Build finished.';
+      agentMessage = `Build stopped: hard timeout reached before ${runner.label} finished.`;
     } else if (!execOk && stderr) {
-      agentMessage = `Grok Build ended without stdout. stderr: ${stderr.slice(0, 2000)}`;
+      agentMessage = `${runner.label} ended without stdout. stderr: ${stderr.slice(0, 2000)}`;
     }
   }
 
@@ -277,7 +251,7 @@ async function runBuildAgent({
       success: false,
       error: execResult.timedOut
         ? `Build hard timeout (${constants.BUILD_HARD_TIMEOUT_MS / 1000}s).`
-        : (stderr.slice(0, 1500) || `Grok Build exited with code ${execResult.rc}.`),
+        : (stderr.slice(0, 1500) || `${runner.label} exited with code ${execResult.rc}.`),
       message: payload.message,
       delivered: payload.delivered,
       delivery_note: payload.delivery_note,
@@ -305,7 +279,7 @@ async function runBuildAgent({
 
 export {
   runBuildAgent,
-  buildGrokRules,
+  buildAgentRules,
   DELIVERY_SELECTION_NOTICE
 
 };

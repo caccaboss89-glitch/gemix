@@ -1,4 +1,4 @@
-=== CASE 18 Discord — non-admin active member (roster names only) ===
+=== CASE 18 Discord — non-admin active member (roster names only) [Grok 4.5] ===
 (delivery: discordTitleField=true)
 
 --- INPUT LAYOUT (handler.js) ---

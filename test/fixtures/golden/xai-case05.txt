@@ -1,4 +1,4 @@
-=== CASE 5 WA personal — build workspace listed ===
+=== CASE 5 WA personal — build workspace listed [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

@@ -9,9 +9,9 @@
 
 import constants from '../../src/config/constants.js';
 import { PRIVACY_WIPE_COMMAND } from '../../src/config/systemMessages.js';
-import envConfig from '../../src/config/env.js';
-import { getCapabilities } from '../../src/config/platformCapabilities.js';
-import { getModelDisplayName } from '../../src/utils/footer.js';
+import { getCapabilities, quotaKindsForProfile, resolveProfile } from '../../src/config/platformCapabilities.js';
+import { getProviderProfile, PROVIDER } from '../../src/ai/providers/providerProfile.js';
+import { formatQuotaCounts } from '../../src/utils/mediaUsageLimits.js';
 import { getToolsForUser } from '../../src/ai/tools.js';
 import { CASES } from './cases.js';
 
@@ -22,20 +22,31 @@ const ISSUES = [];
 // -- Case groupings, all derived from CASES --------------------------------
 
 const caseIds = Object.keys(CASES).map(Number);
-const _ctx = (id) => CASES[id].ctx;
-const _is = (pred) => caseIds.filter(i => pred(_ctx(i)));
+/** The case ctx as it renders under one provider. */
+const _ctx = (id, providerId) => ({ ...CASES[id].ctx, providerProfile: getProviderProfile(providerId) });
+const _is = (pred) => caseIds.filter(i => pred(CASES[i].ctx));
 
 const DISCORD_CASES = _is(c => c.platform === PLATFORM_DISCORD);
 const WHATSAPP_CASES = _is(c => c.platform !== PLATFORM_DISCORD);
 const NON_ACTIVE_CASES = _is(c => c.userIdentity?.isActiveMember === false);
 const NON_ADMIN_ACTIVE_CASES = _is(c => c.userIdentity?.isActiveMember !== false && !c.userIdentity?.isAdmin);
-const VOICE_CASES = caseIds.filter(i => getCapabilities(_ctx(i)).voiceReply);
-// Weekly quota: non-admin callers on a platform exposing all three generation tools.
-const QUOTA_CASES = WHATSAPP_CASES.filter(i => !_ctx(i).userIdentity?.isAdmin);
 const CUSTOM_SETTINGS_CASES = _is(c => c.settings !== undefined);
 const REVIEW_DUE_CASES = _is(c => c.settingsReviewDue === true);
 const WORKSPACE_CASES = _is(c => Boolean(c.userWorkspace));
 
+// Voice and quota depend on the provider as well as the platform, so they are
+// resolved per profile instead of once at module load.
+const _perProvider = new Map();
+function _groups(providerId) {
+  const cached = _perProvider.get(providerId);
+  if (cached) return cached;
+  const voice = caseIds.filter(i => getCapabilities(_ctx(i, providerId)).voiceReply);
+  // Weekly quota: non-admin callers on a platform that meters generation tools.
+  const quota = WHATSAPP_CASES.filter(i => !CASES[i].ctx.userIdentity?.isAdmin);
+  const groups = { voice, quota };
+  _perProvider.set(providerId, groups);
+  return groups;
+}
 // -- Implementation-leak sweep ---------------------------------------------
 
 /** Agent-facing prompts/tool text must not leak backend wiring. */
@@ -67,9 +78,94 @@ function validateToolDumpLeaks(dump, caseId) {
   validateNoImplLeaks(dump.slice(toolsStart), caseId, 'tool schema');
 }
 
+// -- Provider isolation ----------------------------------------------------
+
+/**
+ * Words that belong to exactly one profile.
+ *
+ * A dump that mentions the other provider's brand, tools or endpoints is a real
+ * defect: the model would be told about something it does not have, or told it
+ * is something it is not. The lists cover the indirect references too — a voice
+ * tag, an inline-citation directive or an "X post" aside leaks just as much as
+ * the brand name.
+ */
+const PROVIDER_DENY = {
+  [PROVIDER.XAI]: [
+    { re: /ChatGPT/i, label: 'ChatGPT' },
+    { re: /GPT-\d/i, label: 'a GPT model slug' },
+    { re: /Codex/i, label: 'Codex' },
+    { re: /Google Translate/i, label: 'Google Translate TTS' },
+    { re: /<VoiceMessage/i, label: '<VoiceMessage>' },
+    { re: /gpt-image/i, label: 'gpt-image' }
+  ],
+  [PROVIDER.OPENAI]: [
+    { re: /Grok/i, label: 'Grok' },
+    { re: /xAI/i, label: 'xAI' },
+    { re: /SuperGrok/i, label: 'SuperGrok' },
+    { re: /Imagine/i, label: 'Grok Imagine' },
+    { re: /render_inline_citation/i, label: 'render_inline_citation' },
+    { re: /web or X search/i, label: '"web or X search"' },
+    { re: /Not for X\/Twitter/i, label: '"Not for X/Twitter"' },
+    { re: /𝕏/, label: 'the X glyph' },
+    { re: /X post|X\/Twitter/i, label: 'an X post reference' },
+    { re: /\[pause\]|voice tags/i, label: 'xAI voice tags' }
+  ]
+};
+
+/** Tools that must not appear anywhere GemiX writes on that profile. */
+const MISSING_TOOL_NAMES = {
+  [PROVIDER.XAI]: [],
+  [PROVIDER.OPENAI]: ['x_search', 'read_video', 'generate_video']
+};
+
+/** Text every profile must state about itself. */
+function _identityRequirement(providerId) {
+  const profile = getProviderProfile(providerId);
+  return [
+    { re: new RegExp(`^You are ${profile.displayName} inside GemiX`, 'm'), label: `the "${profile.displayName}" identity opening` },
+    { re: /grew into SuperGrok and kept the name/, label: 'the shared GemiX origin sentence' }
+  ];
+}
+
+/**
+ * Assert one rendered dump belongs to its profile and to no other.
+ * @param {string} text - the whole dump
+ * @param {number|string} caseId
+ * @param {string} providerId
+ */
+function validateProviderIsolation(text, caseId, providerId) {
+  const scope = `${providerId}/${caseId}`;
+  // The opening states GemiX's shared origin — Gemini and Grok tools that grew
+  // into SuperGrok — on every profile by design. It is the only sanctioned
+  // cross-brand mention, so the sweep runs on everything except that line.
+  const body = text.replace(/^You are .*$/m, '');
+  for (const { re, label } of PROVIDER_DENY[providerId] || []) {
+    if (re.test(body)) {
+      ISSUES.push({ caseId: scope, msg: `dump mentions ${label}, which does not exist on this profile` });
+    }
+  }
+  // Tools the profile does not have may still be named in the "[not in this
+  // context]" errors — that text exists precisely to answer a call for one — but
+  // never in what GemiX sends unprompted.
+  const sent = text.split('--- TOOL ERRORS')[0];
+  for (const name of MISSING_TOOL_NAMES[providerId] || []) {
+    if (sent.includes(name)) {
+      ISSUES.push({ caseId: scope, msg: `"${name}" is offered or described on a profile that does not have it` });
+    }
+  }
+
+  // The build dump has no system prompt, so only the case dumps carry identity.
+  if (caseId === 'build') return;
+  for (const { re, label } of _identityRequirement(providerId)) {
+    if (!re.test(text)) {
+      ISSUES.push({ caseId: scope, msg: `dump is missing ${label}` });
+    }
+  }
+}
+
 // -- Structured output -----------------------------------------------------
 
-function validateResponseFormat(dump, caseId) {
+function validateResponseFormat(dump, caseId, providerId) {
   const fmtStart = dump.indexOf('--- STRUCTURED OUTPUT');
   if (fmtStart < 0) return;
   const fmtEnd = dump.indexOf('\n--- TOOL ERRORS', fmtStart);
@@ -78,10 +174,21 @@ function validateResponseFormat(dump, caseId) {
   const hasVoiceTagDesc = /voice tags below|\[pause\]/.test(fmt);
   const hasTitle = /conversation_title \(string, required\)/.test(fmt);
   const id = Number(caseId);
+  const wantsVoiceTags = getProviderProfile(providerId).voiceProfile.supportsVoiceTags;
 
-  if (VOICE_CASES.includes(id)) {
-    if (!hasVoice) ISSUES.push({ caseId, msg: 'WA dedicated case missing voice schema field' });
-    if (!hasVoiceTagDesc) ISSUES.push({ caseId, msg: 'WA dedicated case missing voice tag instructions in response schema' });
+  if (_groups(providerId).voice.includes(id)) {
+    if (!hasVoice) ISSUES.push({ caseId, msg: 'voice case missing the voice schema field' });
+    if (wantsVoiceTags && !hasVoiceTagDesc) {
+      ISSUES.push({ caseId, msg: 'voice case missing voice tag instructions in the response schema' });
+    }
+    if (!wantsVoiceTags) {
+      if (hasVoiceTagDesc) {
+        ISSUES.push({ caseId, msg: 'this voice backend has no tags — the schema must not describe them' });
+      }
+      if (!/Google Translate/.test(fmt)) {
+        ISSUES.push({ caseId, msg: 'voice schema must name the Google Translate backend on this profile' });
+      }
+    }
   } else {
     if (hasVoice) ISSUES.push({ caseId, msg: 'non-voice case must not expose voice schema field' });
     if (hasVoiceTagDesc) ISSUES.push({ caseId, msg: 'non-voice case must not expose voice tag instructions in response schema' });
@@ -109,7 +216,7 @@ function _promptSection(staticPart, heading) {
 }
 
 /** Prose shape, section order and the blocks retired by the prose rewrite. */
-function _validateStaticShape(staticPart, prompt, caseId) {
+function _validateStaticShape(staticPart, prompt, caseId, providerId) {
   // Prose sections, in order. XML is reserved for program data.
   const headings = [...staticPart.matchAll(/^## (.+)$/gm)].map(m => m[1]);
   const required = [
@@ -130,7 +237,7 @@ function _validateStaticShape(staticPart, prompt, caseId) {
   }
   // The opening carries the model name and the standing goal.
   const opening = staticPart.split('\n## ')[0];
-  const expectedModel = getModelDisplayName(envConfig.GROK_MODEL);
+  const expectedModel = getProviderProfile(providerId).displayName;
   if (!opening.includes(expectedModel)) {
     ISSUES.push({ caseId, msg: `opening missing model display name "${expectedModel}"` });
   }
@@ -349,7 +456,7 @@ function _validateAudience(staticPart, id, caseId) {
 }
 
 /** "What you can and cannot see" keeps the notations the history actually uses. */
-function _validateVisibility(staticPart, caseId) {
+function _validateVisibility(staticPart, caseId, providerId) {
   const visibility = _promptSection(staticPart, 'What you can and cannot see');
   if (!visibility) return;
   if (!visibility.includes('The user sees only the chat history and your final reply')) {
@@ -358,13 +465,13 @@ function _validateVisibility(staticPart, caseId) {
   if (!visibility.includes('[Reactions: emoji xN]')) {
     ISSUES.push({ caseId, msg: 'visibility section missing [Reactions: emoji xN] notation' });
   }
-  if (!/videos inside X posts/.test(visibility)) {
+  if (getProviderProfile(providerId).capabilities.xSearch && !/videos inside X posts/.test(visibility)) {
     ISSUES.push({ caseId, msg: 'visibility section missing the web-image / X-video capability line' });
   }
 }
 
 /** "This chat" is the only place that states what renders and what is appended. */
-function _validateThisChat(staticPart, id, caseId) {
+function _validateThisChat(staticPart, id, caseId, providerId) {
   const chat = _promptSection(staticPart, 'This chat');
   if (!chat) return;
   if (!WHATSAPP_CASES.includes(id)) {
@@ -384,9 +491,13 @@ function _validateThisChat(staticPart, id, caseId) {
   if (!/the system appends those itself/.test(chat)) {
     ISSUES.push({ caseId, msg: 'WhatsApp case missing the "system appends the footer" line' });
   }
-  // Citations must read as required, and must name the component that makes them.
-  if (!/sources you mark with render_inline_citation/.test(chat) || !/"Fonti:" list/.test(chat)) {
-    ISSUES.push({ caseId, msg: 'WhatsApp case must say to cite with render_inline_citation and let the system build the list' });
+  // Citations must read as required, and must name whatever produces them on
+  // this profile: the backend directive on xAI, the hosted search on OpenAI.
+  const citesMechanism = getProviderProfile(providerId).searchStatsExtractor === 'openai'
+    ? /sources behind a web search come back with the answer/.test(chat)
+    : /sources you mark with render_inline_citation/.test(chat);
+  if (!citesMechanism || !/"Fonti:" list/.test(chat)) {
+    ISSUES.push({ caseId, msg: 'WhatsApp case must say how sources are cited and let the system build the list' });
   }
   // Groups mention by phone digits; one-to-one chats have no mentions at all.
   const wantsMentions = _ctx(id).isGroup === true;
@@ -410,18 +521,28 @@ function _validateThisChat(staticPart, id, caseId) {
  * Weekly media generation quota line: shown to non-admin callers on platforms
  * exposing all three generation tools (WhatsApp); hidden for admins and Discord.
  */
-function _validateQuotaLine(dynamicPart, id, caseId) {
+function _validateQuotaLine(dynamicPart, id, caseId, providerId) {
   const hasQuotaLine = /Weekly generation quota for this user/.test(dynamicPart);
-  if (!QUOTA_CASES.includes(id)) {
+  const ctx = _ctx(id, providerId);
+  const kinds = quotaKindsForProfile(resolveProfile(ctx), ctx);
+  if (!_groups(providerId).quota.includes(id) || kinds.length === 0) {
     if (hasQuotaLine) {
-      ISSUES.push({ caseId, msg: 'weekly media quota line must not appear (admin or non-media platform)' });
+      ISSUES.push({ caseId, msg: 'weekly media quota line must not appear (admin, or nothing metered here)' });
     }
     return;
   }
   if (!hasQuotaLine) {
     ISSUES.push({ caseId, msg: 'missing weekly media quota line in Runtime (non-admin on a media platform)' });
-  } else if (!/Video: \d+\/2 · Immagini: \d+\/5 · Canzoni: \d+\/2/.test(dynamicPart)) {
-    ISSUES.push({ caseId, msg: 'weekly media quota line malformed (expected "Video: n/2 · Immagini: n/5 · Canzoni: n/2")' });
+    return;
+  }
+  // A counter the provider cannot generate is left out entirely, so losing
+  // video must never take the image or song counters with it.
+  const mask = (text) => text.replace(/: \d+\//g, ': N/');
+  const expected = mask(formatQuotaCounts('__validator__', kinds));
+  const found = dynamicPart.match(/(?:Video|Immagini|Canzoni): \d+\/\d+(?: · (?:Video|Immagini|Canzoni): \d+\/\d+)*/);
+  const actual = found ? mask(found[0]) : '(none)';
+  if (actual !== expected) {
+    ISSUES.push({ caseId, msg: `weekly media quota line is "${actual}", expected "${expected}"` });
   }
 }
 
@@ -469,7 +590,7 @@ function _validateSettingsBlocks(dynamicPart, prompt, id, caseId) {
  * @param {string} dynamicPart - the per-turn Runtime block
  * @param {string|number} caseId
  */
-function validatePrompt(staticPart, dynamicPart, caseId) {
+function validatePrompt(staticPart, dynamicPart, caseId, providerId) {
   const prompt = `${staticPart}\n${dynamicPart}`;
   const id = Number(caseId);
 
@@ -482,15 +603,15 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
     return;
   }
 
-  _validateStaticShape(staticPart, prompt, caseId);
+  _validateStaticShape(staticPart, prompt, caseId, providerId);
   _validateNoStaleClaims(staticPart, prompt, caseId);
   _validateStaticDynamicSplit(staticPart, dynamicPart, caseId);
   _validateBuildWorkspace(dynamicPart, id, caseId);
   _validateDiscordSplit(staticPart, dynamicPart, id, caseId);
   _validateAudience(staticPart, id, caseId);
-  _validateVisibility(staticPart, caseId);
-  _validateThisChat(staticPart, id, caseId);
-  _validateQuotaLine(dynamicPart, id, caseId);
+  _validateVisibility(staticPart, caseId, providerId);
+  _validateThisChat(staticPart, id, caseId, providerId);
+  _validateQuotaLine(dynamicPart, id, caseId, providerId);
   _validateSettingsBlocks(dynamicPart, prompt, id, caseId);
   validateNoImplLeaks(prompt, caseId, 'system prompt');
 }
@@ -525,9 +646,14 @@ function _validateBuildRules(rulesText) {
 }
 
 /** The main-brain `build` tool description, read off the live schema. */
-function _validateBuildToolDescription(platform) {
-  const tools = getToolsForUser(true, true, { platform, isGroup: false });
+function _validateBuildToolDescription(platform, providerId) {
+  const profile = getProviderProfile(providerId);
+  const tools = getToolsForUser(true, true, { platform, isGroup: false, providerProfile: profile });
   const desc = tools.find(t => t?.function?.name === 'build')?.function?.description || '';
+  if (!profile.capabilities.build) {
+    if (desc) ISSUES.push({ caseId: 'build', msg: 'build tool is exposed on a profile that has no build runner' });
+    return;
+  }
   if (!/delivery buffer/i.test(desc)) {
     ISSUES.push({ caseId: 'build', msg: 'main build tool description missing delivery buffer harvest wording' });
   }
@@ -540,8 +666,9 @@ function _validateBuildToolDescription(platform) {
   if (/&lt;BuildWorkspace&gt;/.test(desc)) {
     ISSUES.push({ caseId: 'build', msg: 'main build tool description should use raw <BuildWorkspace> not HTML entities' });
   }
-  if (!/resend|full Grok Build/i.test(desc)) {
-    ISSUES.push({ caseId: 'build', msg: 'main build tool description should note resend still runs full Grok Build' });
+  const runnerName = profile.id === PROVIDER.OPENAI ? 'Codex Build' : 'Grok Build';
+  if (!new RegExp(`resend|full ${runnerName}`, 'i').test(desc)) {
+    ISSUES.push({ caseId: 'build', msg: `main build tool description should note resend still runs full ${runnerName}` });
   }
 }
 
@@ -549,11 +676,20 @@ function _validateBuildToolDescription(platform) {
  * @param {string} buildDump - full build-agent-dump.txt text
  * @param {string} platform - platform to read the live `build` tool schema from
  */
-function validateBuildAgentDump(buildDump, platform) {
-  const marker = '--- GROK --rules ---';
+function validateBuildAgentDump(buildDump, platform, providerId) {
+  const marker = '--- DEVELOPER INSTRUCTIONS ---';
+  // The dump is still written when the runner is gated off — it is how the
+  // gate itself is reviewed — but the tool must be absent from the schema.
+  _validateBuildToolDescription(platform, providerId);
+  if (!getProviderProfile(providerId).capabilities.build) {
+    if (!/CODEX_BUILD_ENABLED/.test(buildDump)) {
+      ISSUES.push({ caseId: 'build', msg: 'a gated build dump must state which flag gates it' });
+    }
+    return;
+  }
   const rulesStart = buildDump.indexOf(marker);
   if (rulesStart < 0) {
-    ISSUES.push({ caseId: 'build', msg: 'build dump missing GROK --rules section' });
+    ISSUES.push({ caseId: 'build', msg: 'build dump missing the developer instructions section' });
   } else {
     const rulesEnd = buildDump.indexOf('\n--- EXEC', rulesStart);
     const slice = rulesEnd >= 0
@@ -561,7 +697,6 @@ function validateBuildAgentDump(buildDump, platform) {
       : buildDump.slice(rulesStart + marker.length);
     _validateBuildRules(slice.trim());
   }
-  _validateBuildToolDescription(platform);
   validateToolDumpLeaks(buildDump, 'build');
 }
 
@@ -570,5 +705,6 @@ export {
   validatePrompt,
   validateResponseFormat,
   validateToolDumpLeaks,
-  validateBuildAgentDump
+  validateBuildAgentDump,
+  validateProviderIsolation
 };

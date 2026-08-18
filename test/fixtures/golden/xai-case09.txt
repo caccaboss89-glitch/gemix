@@ -1,4 +1,4 @@
-=== CASE 9 WA dedicated group — active ===
+=== CASE 9 WA dedicated group — active [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

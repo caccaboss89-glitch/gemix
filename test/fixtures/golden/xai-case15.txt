@@ -1,4 +1,4 @@
-=== CASE 15 Discord — guild emojis line present ===
+=== CASE 15 Discord — guild emojis line present [Grok 4.5] ===
 (delivery: discordTitleField=true)
 
 --- INPUT LAYOUT (handler.js) ---

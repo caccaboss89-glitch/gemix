@@ -112,7 +112,7 @@ function buildStaticInstructions(ctx) {
 
   const sections = [_buildOpening(cap, provider)];
 
-  sections.push(_section('This chat', _buildChatLines(ctx, cap, profile)));
+  sections.push(_section('This chat', _buildChatLines(ctx, cap, profile, promptOpts)));
   sections.push(_section('Who you are talking to', _buildAudienceLines(ctx, cap, profile, promptOpts, isAdmin)));
   sections.push(_section('Program-owned turns', [PROGRAM_ITEMS_RULE]));
   sections.push(_section('What you can and cannot see', buildVisibilityLines(profile, promptOpts)));
@@ -150,7 +150,7 @@ function _buildOpening(cap, provider) {
 }
 
 /** Where this conversation happens: engagement rule, who is in it, formatting. */
-function _buildChatLines(ctx, cap, profile) {
+function _buildChatLines(ctx, cap, profile, promptOpts) {
   if (cap.isDiscord) {
     return [
       'A forum thread in the "gemix" channel. You are here to help with the Statute (Statuto Albertino) '
@@ -190,16 +190,24 @@ function _buildChatLines(ctx, cap, profile) {
   }
 
   lines.push(WA_FORMAT);
-  // Citations are not automatic: the backend's own directive makes the model
-  // cite with render_inline_citation, which reaches us as [[N]](url) markers in
-  // the text, and renderInlineCitations rewrites those. Saying "the system
-  // appends sources" would read as "you need not cite" and lose every source,
-  // so this names the mechanism instead of restating the backend's rule.
+  // Citations are not automatic, and how they are produced is provider-specific.
+  // On xAI the backend's own directive makes the model cite with
+  // render_inline_citation, which reaches us as [[N]](url) markers; naming that
+  // mechanism is what keeps the sources coming, since "the system appends
+  // sources" would read as "you need not cite". The hosted OpenAI search
+  // annotates the answer itself, so there the model is only told the list is
+  // rendered for it.
+  const footerLine = 'Never add a footer or a signature: the system appends those itself when they are needed. ';
   lines.push(
-    'Never add a footer or a signature: the system appends those itself when they are needed. '
-    + 'The sources you mark with render_inline_citation arrive here as [[1]](url) markers, and the system '
-    + 'turns them into numbered markers with a "Fonti:" list under the reply — so keep citing, and never '
-    + 'write that list yourself.'
+    promptOpts.providerProfile.searchStatsExtractor === 'openai'
+      ? footerLine
+        + 'The sources behind a web search come back with the answer, and the system turns them into '
+        + 'numbered markers with a "Fonti:" list under the reply — so keep citing what you used, and never '
+        + 'write that list yourself.'
+      : footerLine
+        + 'The sources you mark with render_inline_citation arrive here as [[1]](url) markers, and the system '
+        + 'turns them into numbered markers with a "Fonti:" list under the reply — so keep citing, and never '
+        + 'write that list yourself.'
   );
   // The gate that owns the command runs before this prompt is even built, so
   // anything the model can read has already been through it.

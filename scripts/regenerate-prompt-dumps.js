@@ -5,11 +5,12 @@
  * receives that turn:
  *   - the STATIC prefix (input[0], role:system);
  *   - the DYNAMIC Runtime block (per-turn role:user item, not system);
- *   - the full tool schema (function tools + native xAI tools) for that
- *     platform / membership;
+ *   - the full tool schema (function tools + the active provider's hosted
+ *     tools) for that platform / membership;
  *   - the structured-output (text.format) schema, when one applies.
- * A final build-agent-dump.txt mirrors the Grok Build --rules text and
- * host exec contract so prompts can be cross-checked in one place.
+ * Every case is rendered once per provider as `<provider>-caseNN-dump.txt`, and
+ * each provider also gets a `<provider>-build-agent-dump.txt` mirroring that
+ * profile's build sub-agent rules and host exec contract.
  *
  * The corpus lives in scripts/prompt-dumps/cases.js, the text generation in
  * render.js and every assertion in validate.js. This file only wires them
@@ -27,12 +28,14 @@ import { dirname } from 'path';
 import constants from '../src/config/constants.js';
 import { CASES } from './prompt-dumps/cases.js';
 import { renderCase, renderBuildAgentDump } from './prompt-dumps/render.js';
+import envConfig from '../src/config/env.js';
 import {
   ISSUES,
   validatePrompt,
   validateResponseFormat,
   validateToolDumpLeaks,
-  validateBuildAgentDump
+  validateBuildAgentDump,
+  validateProviderIsolation
 } from './prompt-dumps/validate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,25 +53,35 @@ if (fs.existsSync(OUT_DIR)) {
 }
 
 const ids = Object.keys(CASES).map(Number).sort((a, b) => a - b);
-for (const id of ids) {
-  const { staticPart, dynamicPart, dump } = renderCase(id);
-  const file = path.join(OUT_DIR, `case${String(id).padStart(2, '0')}-dump.txt`);
-  fs.writeFileSync(file, dump, 'utf8');
-  validatePrompt(staticPart, dynamicPart, id);
-  validateResponseFormat(dump, id);
-  validateToolDumpLeaks(dump, id);
-  console.log(`Wrote ${file}`);
-}
+let written = 0;
 
-const buildFile = path.join(OUT_DIR, 'build-agent-dump.txt');
-const buildDump = renderBuildAgentDump();
-fs.writeFileSync(buildFile, buildDump, 'utf8');
-validateBuildAgentDump(buildDump, PLATFORM_WA_DEDICATED);
-console.log(`Wrote ${buildFile}`);
+// The same case corpus is rendered once per provider: the two branches have to
+// be comparable side by side, and each is validated against its own profile.
+for (const providerId of envConfig.AI_PROVIDERS) {
+  for (const id of ids) {
+    const { staticPart, dynamicPart, dump } = renderCase(id, providerId);
+    const file = path.join(OUT_DIR, `${providerId}-case${String(id).padStart(2, '0')}-dump.txt`);
+    fs.writeFileSync(file, dump, 'utf8');
+    validatePrompt(staticPart, dynamicPart, id, providerId);
+    validateResponseFormat(dump, id, providerId);
+    validateToolDumpLeaks(dump, id, providerId);
+    validateProviderIsolation(dump, id, providerId);
+    written++;
+    console.log(`Wrote ${file}`);
+  }
+
+  const buildFile = path.join(OUT_DIR, `${providerId}-build-agent-dump.txt`);
+  const buildDump = renderBuildAgentDump(providerId);
+  fs.writeFileSync(buildFile, buildDump, 'utf8');
+  validateBuildAgentDump(buildDump, PLATFORM_WA_DEDICATED, providerId);
+  validateProviderIsolation(buildDump, 'build', providerId);
+  written++;
+  console.log(`Wrote ${buildFile}`);
+}
 
 if (ISSUES.length) {
   console.error('\nValidation issues:');
   for (const i of ISSUES) console.error(`  case ${i.caseId}: ${i.msg}`);
   process.exit(1);
 }
-console.log(`\nAll ${ids.length} dumps OK.`);
+console.log(`\nAll ${written} dumps OK.`);

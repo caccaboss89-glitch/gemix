@@ -20,9 +20,11 @@ import {
   perRoundCapErrorPayload
 } from '../../src/utils/toolCallExecution.js';
 import { formatMediaQuotaResetLabel } from '../../src/utils/mediaUsageLimits.js';
-import { buildGrokRules, DELIVERY_SELECTION_NOTICE } from '../../src/ai/buildAgent.js';
+import { DELIVERY_SELECTION_NOTICE } from '../../src/ai/buildAgent.js';
+import { runnerForProfile } from '../../src/ai/buildRunners.js';
 import buildSandbox from '../../src/sandbox/buildSandbox.js';
 import { CASES, DEFAULT_SETTINGS } from './cases.js';
+import { getProviderProfile, PROVIDER } from '../../src/ai/providers/providerProfile.js';
 
 // -- Schema rendering ------------------------------------------------------
 
@@ -282,7 +284,8 @@ function renderToolErrors(ctx, tools) {
     .map(n => ({
       name: n,
       msg: toolUnavailableMessage(n, profile, {
-        isActiveMember: identity.isActiveMember !== false
+        isActiveMember: identity.isActiveMember !== false,
+        providerProfile: ctx.providerProfile
       })
     }));
   if (unavailable.length) {
@@ -313,11 +316,13 @@ function renderInputLayout() {
 
 /**
  * @param {number} id - key into CASES
+ * @param {string} providerId - which ProviderProfile this case renders under
  * @returns {{ staticPart: string, dynamicPart: string, dump: string }}
  */
-function renderCase(id) {
+function renderCase(id, providerId) {
   const spec = CASES[id];
-  const ctx = { ...spec.ctx };
+  const providerProfile = getProviderProfile(providerId);
+  const ctx = { ...spec.ctx, providerProfile };
 
   // Cases without explicit settings render the program defaults, like a fresh chat.
   if (ctx.settings === undefined) ctx.settings = { ...DEFAULT_SETTINGS };
@@ -329,17 +334,19 @@ function renderCase(id) {
   const userCtx = {
     platform: ctx.platform,
     isGroup: ctx.isGroup,
-    chatId: ctx.chatId
+    chatId: ctx.chatId,
+    providerProfile
   };
   const tools = getToolsForUser(Boolean(identity.isActiveMember), Boolean(identity.isAdmin), userCtx);
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
   const responseFormat = buildGemixResponseFormat({
     includeTitle: isDiscord,
-    allowVoice: Boolean(getCapabilities(ctx).voiceReply)
+    allowVoice: Boolean(getCapabilities(ctx).voiceReply),
+    providerProfile
   });
 
   const dump = [
-    `=== CASE ${id} ${spec.label} ===`,
+    `=== CASE ${id} ${spec.label} [${providerProfile.displayName}] ===`,
     `(delivery: discordTitleField=${isDiscord})`,
     '',
     renderInputLayout(),
@@ -363,25 +370,65 @@ function renderCase(id) {
 
 // -- Build sub-agent dump --------------------------------------------------
 
-function renderBuildAgentDump() {
-  const rules = buildGrokRules({
+/**
+ * The build sub-agent contract for one provider: the operational rules it is
+ * given and the exact argv/env it runs under, with every secret redacted.
+ * @param {string} providerId
+ * @returns {string}
+ */
+function renderBuildAgentDump(providerId) {
+  const profile = getProviderProfile(providerId);
+  const runner = runnerForProfile(profile);
+  const rules = runner.rules({
     renamedAttachments: [{ requested: 'logo.png', actual: 'logo(1).png' }],
     stagedNames: ['logo(1).png']
   });
-  const spec = buildSandbox.buildGrokExecSpec({
-    prompt: 'Create a short hello.txt in /workspace/',
-    rules,
-    token: 'test-token-not-real',
-    maxTurns: BUILD_MAX_ROUNDS,
-    timeoutMs: BUILD_HARD_TIMEOUT_MS
-  });
+
+  const isCodex = profile.id === PROVIDER.OPENAI;
+  const spec = isCodex
+    ? buildSandbox.buildCodexExecSpec({
+      prompt: 'Create a short hello.txt in /workspace/',
+      rules,
+      ticket: 'ticket-placeholder-not-real',
+      codexHome: '/tmp/gemix-codex-XXXXXX',
+      instructionsFile: '/tmp/gemix-codex-XXXXXX/instructions.md',
+      timeoutMs: BUILD_HARD_TIMEOUT_MS
+    })
+    : buildSandbox.buildGrokExecSpec({
+      prompt: 'Create a short hello.txt in /workspace/',
+      rules,
+      token: 'test-token-not-real',
+      maxTurns: BUILD_MAX_ROUNDS,
+      timeoutMs: BUILD_HARD_TIMEOUT_MS
+    });
+
   const redactedEnv = (spec.env || []).map((e) => (
-    e.startsWith('XAI_API_KEY=') ? 'XAI_API_KEY=[REDACTED]' : e
+    /^(XAI_API_KEY|CODEX_BROKER_TICKET)=/.test(e)
+      ? `${e.split('=')[0]}=[REDACTED]`
+      : e
   ));
+
+  const hostContract = isCodex
+    ? [
+      `- Availability: gated by CODEX_BUILD_ENABLED (currently ${profile.capabilities.build ? 'on' : 'off'}); while off the tool is absent from the OpenAI schema.`,
+      '- Auth: the container holds only a single-invocation broker ticket. The real bearer and ChatGPT-Account-ID are attached host-side by the Codex broker and are unreadable from the sandbox shell, env, argv, /proc, workspace or logs.',
+      '- CODEX_HOME is a throwaway directory outside /workspace, removed in finally; .codex state never enters the listing, snapshot or harvest.',
+      '- After exit: harvest every regular file under /workspace/ into the delivery buffer.',
+      `- Tool result includes free-text agent reply + delivery_note: ${DELIVERY_SELECTION_NOTICE}`,
+      '- No structured JSON schema for build attachments; GemiX-Main selects final user files.'
+    ]
+    : [
+      '- Auth: host getXaiAuth().token injected as XAI_API_KEY for this exec only (no host ~/.hermes mount).',
+      '- After exit: harvest every regular file under /workspace/ into the delivery buffer.',
+      `- Tool result includes free-text agent reply + delivery_note: ${DELIVERY_SELECTION_NOTICE}`,
+      '- No structured JSON schema for build attachments; GemiX-Main selects final user files.'
+    ];
+
+  const credentialError = runner.credentialError('<reason>');
   return [
-    '=== BUILD SUB-AGENT (Grok Build in Docker: --rules + exec contract) ===',
+    `=== BUILD SUB-AGENT (${runner.label} in Docker: rules + exec contract) ===`,
     '',
-    '--- GROK --rules ---',
+    '--- DEVELOPER INSTRUCTIONS ---',
     rules,
     '',
     '--- EXEC (argv, secrets redacted) ---',
@@ -390,17 +437,14 @@ function renderBuildAgentDump() {
     `timeoutMs: ${spec.timeoutMs}`,
     '',
     '--- HOST CONTRACT ---',
-    '- Auth: host getXaiAuth().token injected as XAI_API_KEY for this exec only (no host ~/.hermes mount).',
-    '- After exit: harvest every regular file under /workspace/ into the delivery buffer.',
-    `- Tool result includes free-text agent reply + delivery_note: ${DELIVERY_SELECTION_NOTICE}`,
-    '- No structured JSON schema for build attachments; GemiX-Main selects final user files.',
+    ...hostContract,
     '',
     '--- TOOL ERRORS (host) ---',
     '    build:',
     '        - Cannot resolve requested attachment(s): <names>',
     '        - build is busy: another request is using this workspace.',
-    '        - Cannot load xAI credentials for build: <reason>',
-    '        - Grok Build failed to start or run: <reason>',
+    `        - ${credentialError}`,
+    `        - ${runner.label} failed to start or run: <reason>`,
     '        - Build hard timeout (<N>s).'
   ].join('\n');
 }

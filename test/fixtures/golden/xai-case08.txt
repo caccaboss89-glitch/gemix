@@ -1,4 +1,4 @@
-=== CASE 8 WA dedicated private — custom user settings (voice + effort + memory) ===
+=== CASE 8 WA dedicated private — custom user settings (voice + effort + memory) [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

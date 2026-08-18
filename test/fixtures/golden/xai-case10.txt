@@ -1,4 +1,4 @@
-=== CASE 10 WA dedicated group — non-active ===
+=== CASE 10 WA dedicated group — non-active [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

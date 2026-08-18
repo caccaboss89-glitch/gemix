@@ -1,4 +1,4 @@
-=== CASE 6 WA dedicated private — active ===
+=== CASE 6 WA dedicated private — active [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

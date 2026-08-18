@@ -4,6 +4,7 @@
 // formatting model names. Also handles scheduled message footers.
 
 import constants from '../config/constants.js';
+import { profileFromContext } from '../ai/providers/providerProfile.js';
 
 /**
  * Append a suffix that starts with a blank line (e.g. constants.GEMIX_FOOTER_PREFIX).
@@ -17,10 +18,15 @@ function appendBlock(body, suffix) {
 /**
  * Map model ID to human-readable display name.
  * @param {string} modelId - The model identifier (e.g., 'grok-4-latest')
+ * @param {object} [ctx] - anything carrying the turn's providerProfile
  * @returns {string} The human-readable model name or the original ID if not found
  */
-function getModelDisplayName(modelId) {
+function getModelDisplayName(modelId, ctx) {
   if (!modelId) return 'AI Model';
+  // The brand comes from the profile, never from the slug: "gpt-5.6-sol" would
+  // otherwise render as "Gpt 5.6 Sol" instead of the name the profile states.
+  const profile = profileFromContext(ctx);
+  if (modelId === profile.model) return profile.displayName;
   const slug = modelId.split('/').pop().split(':')[0];
   const grokVersion = slug.match(/^grok-(\d+(?:\.\d+)?)(?:-|$)/);
   if (grokVersion) return `Grok ${grokVersion[1]}`;

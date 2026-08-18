@@ -32,6 +32,7 @@ import {
 } from '../sandbox/buildWorkspace.js';
 import { acquireBuildLock, releaseBuildLock  } from '../utils/buildState.js';
 import { runBuildAgent, DELIVERY_SELECTION_NOTICE  } from '../ai/buildAgent.js';
+import { profileFromContext  } from '../ai/providers/providerProfile.js';
 import { resolveUrlEntry, resolveLocalFileEntry  } from '../utils/deliverySelection.js';
 import { applyBuildAgentFlags  } from '../utils/attachmentDelivery.js';
 import { pushBufferAttachment  } from '../utils/attachments.js';
@@ -243,7 +244,8 @@ async function buildTool(args, userCtx, responseCtx) {
       renamedAttachments,
       stagedNames,
       externalUrls,
-      lockOwnerId
+      lockOwnerId,
+      providerProfile: profileFromContext(userCtx)
     });
 
     const harvestList = Array.isArray(agentResult.delivered) ? agentResult.delivered : [];

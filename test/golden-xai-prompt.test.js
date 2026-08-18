@@ -13,6 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CASES } from '../scripts/prompt-dumps/cases.js';
 import { renderCase, renderBuildAgentDump } from '../scripts/prompt-dumps/render.js';
+import { PROVIDER } from '../src/ai/providers/providerProfile.js';
 import { assertGolden } from './helpers/goldenFile.js';
 
 const ids = Object.keys(CASES).map(Number).sort((a, b) => a - b);
@@ -23,11 +24,11 @@ test('xAI prompt-dump corpus is non-empty', () => {
 
 for (const id of ids) {
   test(`xAI golden — case ${id} (${CASES[id].label})`, () => {
-    const { dump } = renderCase(id);
+    const { dump } = renderCase(id, PROVIDER.XAI);
     assertGolden(`xai-case${String(id).padStart(2, '0')}.txt`, dump);
   });
 }
 
 test('xAI golden — build sub-agent contract', () => {
-  assertGolden('xai-build-agent.txt', renderBuildAgentDump());
+  assertGolden('xai-build-agent.txt', renderBuildAgentDump(PROVIDER.XAI));
 });

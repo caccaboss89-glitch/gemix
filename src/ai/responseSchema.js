@@ -48,11 +48,21 @@ const PLAIN_VOICE_RESPONSE_FIELD_DESC =
   + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. `
   + 'When `voice` is false write plain text as usual.';
 
-const GEMIX_ATTACHMENTS_FIELD_DESC =
-  'OPTIONAL. The ONLY way to send files in this chat. '
-  + 'Each entry: delivery-buffer or history filename, or a direct public https file URL (image/video/audio/PDF/etc. — never a page/article/post link; '
-  + 'for X media use x_search CDN URLs; for web images use the `url` fields from web_image_search). '
-  + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
+/**
+ * The attachments field, which has to name the tools that actually produce a
+ * usable file URL on this profile.
+ * @param {object} providerProfile
+ * @returns {string}
+ */
+function _attachmentsFieldDesc(providerProfile) {
+  const sources = [];
+  if (providerProfile.capabilities.xSearch) sources.push('for X media use x_search CDN URLs');
+  sources.push('for web images use the `url` fields from web_image_search');
+  return 'OPTIONAL. The ONLY way to send files in this chat. '
+    + 'Each entry: delivery-buffer or history filename, or a direct public https file URL (image/video/audio/PDF/etc. — never a page/article/post link; '
+    + `${sources.join('; ')}). `
+    + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
+}
 
 // Discord, every turn. Non-empty renames the thread, "" leaves it alone.
 const TITLE_FIELD_DESC =
@@ -76,7 +86,8 @@ const TITLE_FIELD_DESC =
  * @returns {object}
  */
 function buildGemixResponseFormat({ includeTitle = false, allowVoice = false, providerProfile } = {}) {
-  const voiceProfile = profileFromContext({ providerProfile }).voiceProfile;
+  const profile = profileFromContext({ providerProfile });
+  const voiceProfile = profile.voiceProfile;
   const properties = {};
   const required = [];
 
@@ -101,7 +112,7 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false, pr
   properties.attachments = {
     type: 'array',
     items: { type: 'string' },
-    description: GEMIX_ATTACHMENTS_FIELD_DESC
+    description: _attachmentsFieldDesc(profile)
   };
 
   if (includeTitle) {

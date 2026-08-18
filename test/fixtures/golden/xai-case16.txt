@@ -1,4 +1,4 @@
-=== CASE 16 WA dedicated private — non-admin active (media quota, no phone field) ===
+=== CASE 16 WA dedicated private — non-admin active (media quota, no phone field) [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

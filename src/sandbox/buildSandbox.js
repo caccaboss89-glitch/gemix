@@ -223,11 +223,17 @@ function _capBufferChunks(chunks, maxBytes = CAPTURE_MAX_BYTES) {
 /**
  * Best-effort kill leftover grok processes inside the sandbox after timeout.
  */
-async function _killGrokProcesses(entry) {
+/**
+ * Kill whatever the runner left behind, by argv pattern. The bracket trick keeps
+ * pkill from matching its own command line.
+ * @param {object} entry - pool entry
+ * @param {string} pattern - already bracketed, e.g. '[g]rok'
+ */
+async function _killRunnerProcesses(entry, pattern) {
   if (!entry || !entry.container) return;
   try {
     const exec = await entry.container.exec({
-      Cmd: ['/bin/bash', '-lc', 'pkill -9 -f "[g]rok" 2>/dev/null || true'],
+      Cmd: ['/bin/bash', '-lc', `pkill -9 -f "${pattern}" 2>/dev/null || true`],
       AttachStdout: false,
       AttachStderr: false,
       User: sandboxUserString(),
@@ -241,7 +247,7 @@ async function _killGrokProcesses(entry) {
       setTimeout(resolve, 3000).unref?.();
     });
   } catch (err) {
-    log.debug(`pkill grok: ${err.message}`);
+    log.debug(`pkill ${pattern}: ${err.message}`);
   }
 }
 
@@ -311,20 +317,115 @@ function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns 
 }
 
 /**
- * Run Grok Build CLI inside the workspace sandbox (one-shot docker exec).
- * Auth is process-env only for this exec — never host auth mounts.
+ * Build argv + env for an in-container Codex Build run (pure; testable without
+ * Docker).
+ *
+ * The credential is deliberately absent. The CLI receives an opaque ticket and
+ * a base URL that points at the host-side broker (see codexAuthBroker.js): the
+ * real bearer and account id are attached outside the container, where the
+ * model-controlled shell cannot reach them. Nothing in `cmd` or `env` below is
+ * a secret, which is the property the security test asserts.
+ *
+ * `CODEX_HOME` is a throwaway directory outside /workspace, so config, auth
+ * state and session files never appear in the workspace listing, the snapshot
+ * or the harvest. The internal sandbox is switched off only because the whole
+ * process already runs inside the Docker jail, on an internal network whose
+ * single exit is the egress proxy.
+ *
+ * @param {object} opts
+ * @param {string} opts.prompt - the user's brief, kept separate from the rules
+ * @param {string} opts.rules - build instructions, passed as developer instructions
+ * @param {string} opts.ticket - single-invocation broker ticket (not a credential)
+ * @param {string} opts.codexHome - throwaway CODEX_HOME outside /workspace
+ * @param {string} [opts.instructionsFile] - path inside codexHome holding the rules
+ * @param {string} [opts.model]
+ * @param {string} [opts.effort]
+ * @param {number} [opts.timeoutMs]
+ * @returns {{ cmd: string[], env: string[], timeoutMs: number }}
+ */
+function buildCodexExecSpec({
+  prompt, rules, ticket, codexHome, instructionsFile, model, effort, timeoutMs
+} = {}) {
+  if (typeof ticket !== 'string' || !ticket.trim()) {
+    throw new Error('buildCodexExecSpec: missing broker ticket');
+  }
+  if (typeof prompt !== 'string' || !prompt.trim()) {
+    throw new Error('buildCodexExecSpec: missing prompt');
+  }
+  if (typeof codexHome !== 'string' || !codexHome.trim() || codexHome.startsWith('/workspace')) {
+    throw new Error('buildCodexExecSpec: CODEX_HOME must be set and live outside /workspace');
+  }
+
+  const timeout = Math.max(
+    5_000,
+    Math.min(Number(timeoutMs) || constants.BUILD_HARD_TIMEOUT_MS, constants.BUILD_HARD_TIMEOUT_MS)
+  );
+  const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
+  const brokerUrl = `http://${envConfig.CODEX_BROKER_HOST}:${envConfig.CODEX_BROKER_PORT}`;
+
+  const cmd = [
+    'timeout',
+    '--signal=KILL',
+    `${timeoutSec}s`,
+    envConfig.CODEX_BIN,
+    'exec',
+    '--cd', '/workspace',
+    '--model', model || envConfig.OPENAI_MODEL,
+    '--json',
+    '--skip-git-repo-check',
+    // Every request is authenticated by the broker, never by the CLI itself.
+    '--config', 'model_provider="gemix_broker"',
+    '--config', 'model_providers.gemix_broker.name="GemiX broker"',
+    '--config', `model_providers.gemix_broker.base_url="${brokerUrl}/v1"`,
+    '--config', 'model_providers.gemix_broker.env_key="CODEX_BROKER_TICKET"',
+    '--config', 'model_providers.gemix_broker.wire_api="responses"',
+    '--config', `model_reasoning_effort="${effort || envConfig.OPENAI_REASONING_EFFORT}"`,
+    // An AGENTS.md staged as a build attachment is data, not instructions.
+    '--config', 'project_doc_max_bytes=0',
+    '--config', 'experimental_use_freeform_apply_patch=true'
+  ];
+  if (typeof instructionsFile === 'string' && instructionsFile.trim()) {
+    cmd.push('--config', `experimental_instructions_file="${instructionsFile.trim()}"`);
+  }
+  // Already inside a locked-down container with no default route; a second
+  // sandbox on top of it only breaks the tools the build is meant to use.
+  cmd.push('--config', 'sandbox_mode="danger-full-access"');
+  cmd.push(prompt.trim());
+
+  const proxyUrl = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
+  const env = [
+    `CODEX_BROKER_TICKET=${ticket.trim()}`,
+    `CODEX_HOME=${codexHome}`,
+    'HOME=/var/lib/gemix-codex',
+    'GEMIX_BUILD=1',
+    `HTTP_PROXY=${proxyUrl}`,
+    `HTTPS_PROXY=${proxyUrl}`,
+    `http_proxy=${proxyUrl}`,
+    `https_proxy=${proxyUrl}`,
+    'NO_PROXY=localhost,127.0.0.1'
+  ];
+
+  // `rules` travels as developer instructions in a file the CLI reads, never on
+  // the command line where it would sit next to the user's brief.
+  return { cmd, env, timeoutMs: timeout, rules: typeof rules === 'string' ? rules : '' };
+}
+
+/**
+ * Run one build CLI inside the workspace sandbox (one-shot docker exec).
+ *
+ * Shared by both runners: only the spec, the kill pattern and how the argv is
+ * redacted for logging differ between them.
  *
  * @param {string} workspaceId
- * @param {object} opts
- * @param {string} opts.prompt
- * @param {string} opts.rules
- * @param {string} opts.token
- * @param {number} [opts.timeoutMs]
- * @param {number} [opts.maxTurns]
+ * @param {object} spec - { cmd, env, timeoutMs } from a runner's exec spec
+ * @param {object} [opts]
+ * @param {string} [opts.killPattern] - bracketed pkill pattern for a timeout
+ * @param {(cmd: string[]) => string[]} [opts.redactCmd] - argv as it may be logged
  * @returns {Promise<{rc:number,stdout:string,stderr:string,timedOut:boolean,durationMs:number,cmd:string[]}>}
  */
-async function execGrokBuild(workspaceId, opts = {}) {
-  const { cmd, env, timeoutMs } = buildGrokExecSpec(opts);
+async function _execBuildRunner(workspaceId, spec, opts = {}) {
+  const { cmd, env, timeoutMs } = spec;
+  const killPattern = opts.killPattern || '[g]rok';
   const entry = await getOrCreate(workspaceId);
   entry.lastUsedAt = Date.now();
 
@@ -380,7 +481,7 @@ async function execGrokBuild(workspaceId, opts = {}) {
   if (rc === 124 || rc === 137) timedOut = true;
 
   if (timedOut) {
-    await _killGrokProcesses(entry);
+    await _killRunnerProcesses(entry, killPattern);
   }
 
   const durationMs = Date.now() - startedAt;
@@ -392,8 +493,43 @@ async function execGrokBuild(workspaceId, opts = {}) {
     stderr: _capBufferChunks(stderrBuf),
     timedOut,
     durationMs,
-    cmd: cmd.map((c, i) => (i > 0 && cmd[i - 1] === '--rules' ? '[rules]' : c))
+    cmd: typeof opts.redactCmd === 'function' ? opts.redactCmd(cmd) : cmd
   };
+}
+
+/**
+ * Run Grok Build CLI inside the workspace sandbox.
+ * Auth is process-env only for this exec — never host auth mounts.
+ *
+ * @param {string} workspaceId
+ * @param {object} opts - see buildGrokExecSpec
+ * @returns {Promise<{rc:number,stdout:string,stderr:string,timedOut:boolean,durationMs:number,cmd:string[]}>}
+ */
+async function execGrokBuild(workspaceId, opts = {}) {
+  return _execBuildRunner(workspaceId, buildGrokExecSpec(opts), {
+    killPattern: '[g]rok',
+    redactCmd: (cmd) => cmd.map((c, i) => (i > 0 && cmd[i - 1] === '--rules' ? '[rules]' : c))
+  });
+}
+
+/**
+ * Run the Codex CLI inside the workspace sandbox.
+ *
+ * The credential lives on the host: the container only ever holds the broker
+ * ticket, and the ticket is redacted out of anything that could be logged. The
+ * throwaway CODEX_HOME is created and removed by the caller.
+ *
+ * @param {string} workspaceId
+ * @param {object} opts - see buildCodexExecSpec
+ * @returns {Promise<{rc:number,stdout:string,stderr:string,timedOut:boolean,durationMs:number,cmd:string[]}>}
+ */
+async function execCodexBuild(workspaceId, opts = {}) {
+  return _execBuildRunner(workspaceId, buildCodexExecSpec(opts), {
+    killPattern: '[c]odex',
+    // The brief is the last argument and the ticket never appears in argv, but
+    // the prompt itself is user content and does not belong in a log line.
+    redactCmd: (cmd) => cmd.map((c, i) => (i === cmd.length - 1 ? '[prompt]' : c))
+  });
 }
 
 async function _killEntry(entry) {
@@ -478,7 +614,9 @@ cleanupOrphanBuildSandboxes().catch(err => log.error(`Background orphan cleanup 
 
 export default {
   execGrokBuild,
+  execCodexBuild,
   buildGrokExecSpec,
+  buildCodexExecSpec,
   shutdown,
   shutdownAll
 };

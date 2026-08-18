@@ -1,4 +1,4 @@
-=== CASE 3 WA personal — non-admin active caller (roster names only) ===
+=== CASE 3 WA personal — non-admin active caller (roster names only) [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---

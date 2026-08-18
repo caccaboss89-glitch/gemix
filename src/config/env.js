@@ -162,7 +162,13 @@ export default {
   // Codex Build (AI_PROVIDER=openai): CLI baked into the sandbox image, and the
   // host-side broker that swaps the sandbox's single-use ticket for the real
   // bearer so the model-controlled shell never sees a credential.
+  //
+  // Off until both infrastructure gates pass on the VPS: that the CLI reaches
+  // the backend through the container's egress proxy, and that the broker
+  // boundary survives the non-exfiltrability test. While it is off the OpenAI
+  // profile simply has no build tool.
+  CODEX_BUILD_ENABLED: process.env.CODEX_BUILD_ENABLED === 'true',
   CODEX_BIN: process.env.CODEX_BIN || 'codex',
   CODEX_BROKER_HOST: process.env.CODEX_BROKER_HOST || 'gemix-codex-broker',
-  CODEX_BROKER_PORT: process.env.CODEX_BROKER_PORT || '8081'
+  CODEX_BROKER_PORT: Number(process.env.CODEX_BROKER_PORT) || 8081
 };

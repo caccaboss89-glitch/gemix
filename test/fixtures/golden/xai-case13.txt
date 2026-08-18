@@ -1,4 +1,4 @@
-=== CASE 13 Discord — after GemiX replied (thread title set) ===
+=== CASE 13 Discord — after GemiX replied (thread title set) [Grok 4.5] ===
 (delivery: discordTitleField=true)
 
 --- INPUT LAYOUT (handler.js) ---

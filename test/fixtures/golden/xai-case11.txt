@@ -1,4 +1,4 @@
-=== CASE 11 WA dedicated group — non-admin active (roster names only) ===
+=== CASE 11 WA dedicated group — non-admin active (roster names only) [Grok 4.5] ===
 (delivery: discordTitleField=false)
 
 --- INPUT LAYOUT (handler.js) ---
