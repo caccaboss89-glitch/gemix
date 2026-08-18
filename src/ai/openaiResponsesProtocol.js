@@ -596,8 +596,14 @@ function collectImageResults(response) {
  * `url_citation` annotations from the message items, in document order and
  * deduplicated by URL. Out-of-range or malformed offsets are dropped rather
  * than trusted, so a bad annotation can never corrupt the reply text.
+ *
+ * `quote` is the cited span itself. Offsets index the raw output text, which
+ * under structured output is the JSON document rather than the reply the user
+ * reads, so the span is what the citation renderer anchors on (see
+ * utils/text.js applyCitationAnnotations).
+ *
  * @param {object} response
- * @returns {Array<{url: string, title: string|null, start: number|null, end: number|null}>}
+ * @returns {Array<{url: string, title: string|null, start: number|null, end: number|null, quote: string|null}>}
  */
 function collectCitations(response) {
   const out = [];
@@ -619,7 +625,8 @@ function collectCitations(response) {
           url,
           title: typeof annotation.title === 'string' ? annotation.title : null,
           start: inRange ? start : null,
-          end: inRange ? end : null
+          end: inRange ? end : null,
+          quote: inRange && end > start ? part.text.slice(start, end) : null
         });
       }
     }

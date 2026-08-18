@@ -34,6 +34,9 @@ function _xaiCapabilities() {
     xSearch: true,
     imageSearch: true,
     hostedImageResults: false,
+    // X media URLs come back inside a hosted search whose results GemiX never
+    // sees, so there is nothing to build an allowlist from.
+    imageAllowlist: false,
     readVideo: true,
     generateImage: true,
     generateVideo: true,
@@ -55,6 +58,9 @@ function _openaiCapabilities() {
     imageSearch: true,
     // Structured `image_result` entries come back on the hosted web_search call.
     hostedImageResults: true,
+    // Every deliverable image is therefore one this turn's structured results
+    // named, or one the user wrote themselves.
+    imageAllowlist: true,
     readVideo: false,
     generateImage: true,
     generateVideo: false,

@@ -17,6 +17,8 @@ import { uniqueAttachmentName  } from './attachments.js';
 import { applyBuildAgentFlags  } from './attachmentDelivery.js';
 import { getHistoryDir  } from './userPaths.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
+import { checkImageDelivery  } from './imageRegistry.js';
+import { profileFromContext  } from '../ai/providers/providerProfile.js';
 import { TEMP_DIR  } from './tempFileServer.js';
 import { createLogger  } from './logger.js';
 
@@ -39,7 +41,7 @@ function _isFileTooLargeError(err) {
  *
  * @param {string} url
  * @param {Array<object>} existing - attachments already resolved (for name dedup)
- * @returns {Promise<object>}
+ * @returns {Promise<{ att: object, finalUrl: string }>}
  */
 async function resolvePublicUrlAttachment(url, existing = []) {
   const clean = String(url || '').trim();
@@ -64,7 +66,7 @@ async function resolvePublicUrlAttachment(url, existing = []) {
   const att = { name, mimetype: dl.mimetype };
   if (dl.buffer) att.buffer = dl.buffer;
   if (dl.filePath) att.filePath = dl.filePath;
-  return att;
+  return { att, finalUrl: dl.finalUrl || clean };
 }
 
 /**
@@ -90,14 +92,14 @@ function createExternalUrlAttachment(url, existing = []) {
  * @param {string} url
  * @param {Array<object>} existing
  * @param {{ forBuild?: boolean }} [opts]
- * @returns {Promise<{ att: object|null, missing: boolean }>}
+ * @returns {Promise<{ att: object|null, missing: boolean, finalUrl?: string }>}
  */
 async function resolveUrlEntry(url, existing = [], opts = {}) {
   const clean = String(url || '').trim();
   try {
-    const att = await resolvePublicUrlAttachment(clean, existing);
+    const { att, finalUrl } = await resolvePublicUrlAttachment(clean, existing);
     if (opts.forBuild) applyBuildAgentFlags(att);
-    return { att, missing: false };
+    return { att, missing: false, finalUrl };
   } catch (err) {
     if (_isFileTooLargeError(err)) {
       return { att: createExternalUrlAttachment(clean, existing), missing: false };
@@ -164,6 +166,10 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
   const missing = [];
   if (!Array.isArray(entries) || entries.length === 0) return { attachments, missing };
 
+  // Profiles that opt in only ship images their own structured results named,
+  // so a URL read off a page or written from memory cannot become an attachment.
+  const allowlistImages = profileFromContext(responseCtx || userCtx).capabilities.imageAllowlist;
+
   const seen = new Set();
   for (const raw of entries) {
     const entry = String(raw || '').trim();
@@ -173,6 +179,18 @@ async function resolveDeliverySelection(entries, responseCtx, userCtx = null) {
     if (/^https?:\/\//i.test(entry)) {
       const resolved = await resolveUrlEntry(entry, attachments);
       if (resolved.att) {
+        if (allowlistImages) {
+          const check = checkImageDelivery(responseCtx.imageRegistry, {
+            url: entry,
+            finalUrl: resolved.finalUrl,
+            att: resolved.att
+          });
+          if (!check.ok) {
+            log.warn(`refused image URL (${check.reason}): ${entry.slice(0, 100)}`);
+            missing.push(entry);
+            continue;
+          }
+        }
         attachments.push(resolved.att);
         if (resolved.att.externalUrl) {
           log.warn(`delivery URL too large to host; will send source link (${entry.slice(0, 100)})`);

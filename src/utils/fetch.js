@@ -153,7 +153,7 @@ async function fetchExternal(url, options = {}, source = null, timeoutMs = const
  * @param {object} [opts]
  * @param {number} [opts.maxBytes=62914560] - 60 MB default cap.
  * @param {number} [opts.timeoutMs]
- * @returns {Promise<{ buffer: Buffer, mimetype: string, filename: string }>}
+ * @returns {Promise<{ buffer: Buffer, mimetype: string, filename: string, finalUrl: string }>}
  */
 async function downloadPublicFile(url, opts = {}) {
   const maxBytes = Number.isFinite(opts.maxBytes) ? opts.maxBytes : 60 * 1024 * 1024;
@@ -178,7 +178,9 @@ async function downloadPublicFile(url, opts = {}) {
   const buffer = await _consumeResponseBodyCapped(res, maxBytes, timeoutMs);
   const mimetype = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
   const filename = _filenameFromPublicUrl(clean);
-  return { buffer, mimetype, filename };
+  // `finalUrl` is where the redirect chain ended, which is the URL callers that
+  // vet what they download have to judge — not the one they asked for.
+  return { buffer, mimetype, filename, finalUrl: res.url || clean };
 }
 
 function _filenameFromPublicUrl(url) {

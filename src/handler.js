@@ -24,9 +24,10 @@
 //      plus conversation_title on Discord first turn only, plus a `voice`
 //      flag on WA dedicated) enforced via text.format.
 //      When `voice:true` (WA dedicated only), `response` is spoken via TTS.
-//   5. Off Discord, turn xAI's inline citations into a plain source list
-//      (WhatsApp renders no anchor text), apply the research badge (real web/X
-//      search counts), and ship the reply back to the platform.
+//   5. Project the turn's citations into the shared inline shape, off Discord
+//      turn them into a plain source list (WhatsApp renders no anchor text),
+//      apply the research badge (real search counts), and ship the reply back
+//      to the platform.
 
 import { callAI  } from './ai/aiProvider.js';
 import { resolveProviderProfile  } from './ai/providers/providerProfile.js';
@@ -38,6 +39,7 @@ import {
 import { getToolsForUser, getToolAccessError  } from './ai/tools.js';
 import { buildGemixResponseFormat, parseStructuredReply  } from './ai/responseSchema.js';
 import { resolveDeliverySelection  } from './utils/deliverySelection.js';
+import { createImageRegistry, registerImageResults, registerUserUrls, IMAGE_SOURCE  } from './utils/imageRegistry.js';
 import { applyPastVoiceRepliesToHistory  } from './utils/voiceTranscripts.js';
 import { projectUserVoiceMessages  } from './utils/voiceMessageProjection.js';
 import { generateVoice  } from './tools/voiceMessage.js';
@@ -53,7 +55,7 @@ import { resolveWorkspaceId  } from './utils/workspaceId.js';
 import { touchActivity  } from './utils/buildState.js';
 import { listWorkspaceFiles  } from './sandbox/buildWorkspace.js';
 import { readSettings, isReviewDue, markReviewed  } from './utils/settingsStore.js';
-import { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, renderInlineCitations  } from './utils/text.js';
+import { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, applyCitationAnnotations, renderInlineCitations  } from './utils/text.js';
 import { sanitizeDiscordThreadTitle  } from './utils/discord.js';
 import { loadRegolamento  } from './utils/regolamento.js';
 import { resolveStorageId, resolveSettingsFileId  } from './utils/userPaths.js';
@@ -136,6 +138,10 @@ async function handleMessage(ctx) {
     attachments: [],
     discordTitle: '',
     providerProfile,
+    // Allowlist of the image URLs this turn is allowed to deliver. Filled from
+    // structured search results and from what the user wrote, never from text
+    // the model produced.
+    imageRegistry: createImageRegistry(),
     // Accumulated stats from server-side web (and, on xAI, X) searches — main
     // brain and build sub-agent — used for the badge appended to the reply.
     researchStats: null
@@ -339,6 +345,10 @@ async function handleMessage(ctx) {
     // turn's burst began instead of at the Runtime block below.
     messages.push({ role: 'user', content: wrapUserQuery(currentContent) });
 
+    // A link the user sent themselves stays deliverable under the normal
+    // attachment contract, so it joins the allowlist alongside search results.
+    registerUserUrls(responseCtx.imageRegistry, extractPlainTextContent(currentContent));
+
     // Turn-varying program state: built once, placed right after the current
     // user message, and never moved again. Both constraints matter.
     //   - after the user message, so that nothing turn-varying lands where the
@@ -400,6 +410,8 @@ async function handleMessage(ctx) {
     let emptyOutputRetries = 0;
     const MAX_EMPTY_OUTPUT_RETRIES = 1;
     let lastModelUsed = null;
+    // Citations of the round that produced the reply the user actually reads.
+    let roundCitations = [];
     const sessionStartTime = Date.now();
     let sessionDurationLimitReached = false;
     const promptCacheKey = generatePromptCacheKey(userCtx);
@@ -422,6 +434,14 @@ async function handleMessage(ctx) {
         log.warn(`   Final reply attachments not resolved: ${missing.join(', ')}`);
       }
       return attachments;
+    };
+
+    // Providers that report citations as annotations instead of writing them
+    // into the reply get them projected into the shared inline shape here,
+    // before the reply splits into the voice and text branches. No citations
+    // (the xAI path, which renders its own) leaves the text untouched.
+    const applyParsedCitations = (parsed) => {
+      parsed.text = applyCitationAnnotations(parsed.text || '', roundCitations);
     };
 
     // Non-empty conversation_title → rename; "" / missing → leave thread name as-is.
@@ -549,9 +569,11 @@ async function handleMessage(ctx) {
         reasoningEffort: ctx.settings?.effort
       };
 
-      const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
+      const { message: assistantMsg, provider, model, searchStats, citations, imageResults } = await callAI(messages, roundTools, callOpts);
       lastModelUsed = model;
       accumulateSearchStats(searchStats);
+      roundCitations = Array.isArray(citations) ? citations : [];
+      registerImageResults(responseCtx.imageRegistry, imageResults, IMAGE_SOURCE.HOSTED);
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
@@ -645,6 +667,7 @@ async function handleMessage(ctx) {
         log.warn('   Structured reply expected but content was not valid JSON; using raw text');
       }
       applyParsedTitle(parsed);
+      applyParsedCitations(parsed);
       const finalAttachments = await resolveFinalAttachments(parsed);
 
       // Voice reply (WhatsApp dedicated only): speak `response` (with TTS tags)
@@ -750,7 +773,7 @@ async function handleMessage(ctx) {
         role: 'user',
         content: wrapSystemReminder(wrapUpNote)
       });
-      const { message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
+      const { message: finalMsg, model: finalModel, searchStats, citations, imageResults } = await callAI(messages, wrapUpTools, {
         providerProfile,
         toolChoice: 'none',
         requestId: ctx.requestId,
@@ -761,8 +784,11 @@ async function handleMessage(ctx) {
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
+      roundCitations = Array.isArray(citations) ? citations : [];
+      registerImageResults(responseCtx.imageRegistry, imageResults, IMAGE_SOURCE.HOSTED);
       const parsed = parseStructuredReply(finalMsg.content || '');
       applyParsedTitle(parsed);
+      applyParsedCitations(parsed);
       wrapUpAttachments = await resolveFinalAttachments(parsed);
       wrapUpVoice = Boolean(allowVoice && parsed.voice);
       wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanAssistantResponse(parsed.text || '');

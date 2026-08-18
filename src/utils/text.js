@@ -156,6 +156,57 @@ function renderInlineCitations(text) {
 }
 
 /**
+ * Write structured citation annotations into the reply as inline citations.
+ *
+ * xAI writes `[[N]](url)` into the text itself; other providers return the
+ * citations as separate annotations instead. This turns those annotations into
+ * the same inline shape, so everything downstream — the Discord clickable
+ * markers, the WhatsApp source list, the voice sanitizer that strips them —
+ * keeps working on one format. Called with no citations the text is returned
+ * unchanged, which is what the xAI path always does.
+ *
+ * The annotation offsets index the raw model output, which under structured
+ * output is the JSON document and not this text, so the cited span is what the
+ * marker is anchored on. The search advances with the citations, so repeated
+ * spans stay in document order; a span that cannot be found (rewritten,
+ * escaped, or out of range) puts its marker at the end rather than at a wrong
+ * place. Duplicate URLs are already collapsed upstream.
+ *
+ * @param {string} text - the reply text
+ * @param {Array<{url: string, quote: string|null}>} citations - document order
+ * @returns {string}
+ */
+function applyCitationAnnotations(text, citations) {
+  if (!text || typeof text !== 'string') return text;
+  if (!Array.isArray(citations) || citations.length === 0) return text;
+
+  const pieces = [];
+  const trailing = [];
+  let cursor = 0;
+  let n = 0;
+
+  for (const citation of citations) {
+    const url = typeof citation?.url === 'string' ? citation.url.trim() : '';
+    if (!url) continue;
+    n++;
+    const marker = `[[${n}]](${url})`;
+    const quote = typeof citation.quote === 'string' ? citation.quote : '';
+    const at = quote ? text.indexOf(quote, cursor) : -1;
+    if (at < 0) {
+      trailing.push(marker);
+      continue;
+    }
+    const end = at + quote.length;
+    pieces.push(text.slice(cursor, end), marker);
+    cursor = end;
+  }
+  if (n === 0) return text;
+
+  pieces.push(text.slice(cursor));
+  return pieces.join('').replace(/\s+$/u, '') + trailing.join('');
+}
+
+/**
  * Normalize Markdown for WhatsApp (which has limited MD support).
  * - ### - removed (headings not supported)
  * - * bullet points - - bullet points (better compatibility)
@@ -360,6 +411,7 @@ export {
   stripVoiceTags,
   sanitizeVoiceMessageText,
   normalizeMarkdown,
+  applyCitationAnnotations,
   renderInlineCitations,
   stripOutgoingDeliveryArtifacts,
   cleanAssistantResponse,

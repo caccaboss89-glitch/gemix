@@ -100,7 +100,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
     switch (name) {
     case 'web_image_search': {
-      result = await searchImages(args, userCtx);
+      result = await searchImages(args, userCtx, responseCtx);
       break;
     }
 

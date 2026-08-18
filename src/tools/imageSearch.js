@@ -17,6 +17,7 @@ import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
 import { buildProviderFileParts  } from '../utils/aiFileDelivery.js';
+import { IMAGE_SOURCE, registerImageResults, sniffImageType  } from '../utils/imageRegistry.js';
 import { profileFromContext  } from '../ai/providers/providerProfile.js';
 import { TEMP_DIR  } from '../utils/tempFileServer.js';
 import { createLogger  } from '../utils/logger.js';
@@ -90,39 +91,6 @@ function _pickImageUrl(hit) {
 }
 
 /**
- * Detect image type from magic bytes. Rejects HTML/error bodies hotlinked as images.
- * @param {Buffer} buffer
- * @returns {{ ext: string, mime: string }|null}
- */
-function _sniffImageType(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return null;
-  // JPEG
-  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
-    return { ext: '.jpg', mime: 'image/jpeg' };
-  }
-  // PNG
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
-    return { ext: '.png', mime: 'image/png' };
-  }
-  // GIF
-  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
-    return { ext: '.gif', mime: 'image/gif' };
-  }
-  // WEBP (RIFF....WEBP)
-  if (
-    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46
-    && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
-  ) {
-    return { ext: '.webp', mime: 'image/webp' };
-  }
-  // ICO
-  if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01 && buffer[3] === 0x00) {
-    return { ext: '.ico', mime: 'image/x-icon' };
-  }
-  return null;
-}
-
-/**
  * Download one search hit and build a native input_image part for the model.
  * @param {string} imgUrl
  * @param {number} index - position in the result list, also the image budget cursor
@@ -137,7 +105,7 @@ async function _buildVisionPart(imgUrl, index, ctx) {
       maxBytes: constants.MAX_IMAGE_BYTES,
       timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS
     });
-    const sniffed = _sniffImageType(dl.buffer);
+    const sniffed = sniffImageType(dl.buffer);
     if (!sniffed) {
       return { part: null, error: 'Downloaded body is not a recognized image (JPEG/PNG/WEBP/GIF/ICO).' };
     }
@@ -179,9 +147,11 @@ async function _buildVisionPart(imgUrl, index, ctx) {
  * @param {object} args
  * @param {string} args.query
  * @param {number} [args.count]
+ * @param {object} [ctx] - carries the turn's providerProfile
+ * @param {object} [responseCtx] - holds the turn's image allowlist registry
  * @returns {Promise<object|Array>}
  */
-async function searchImages(args = {}, ctx = null) {
+async function searchImages(args = {}, ctx = null, responseCtx = null) {
   const query = _cleanQuery(args.query);
   if (!query) {
     return { success: false, error: 'Missing required argument "query".' };
@@ -277,6 +247,10 @@ async function searchImages(args = {}, ctx = null) {
         'No direct image URLs found for this query. Try a different query; do not invent URLs.'
     };
   }
+
+  // Only these hits may become attachments later: the registry is built from
+  // the structured results, never from a URL that turns up in the model's text.
+  registerImageResults(responseCtx?.imageRegistry, images, IMAGE_SOURCE.SEARCH);
 
   // Build vision previews in parallel (download + re-host for xAI).
   const visionSettled = await Promise.all(
