@@ -20,11 +20,12 @@ import {
   perRoundCapErrorPayload
 } from '../../src/utils/toolCallExecution.js';
 import { formatMediaQuotaResetLabel } from '../../src/utils/mediaUsageLimits.js';
+import { defaultSettings, effortsForProvider, visibleSettingFields } from '../../src/utils/settingsStore.js';
 import { DELIVERY_SELECTION_NOTICE } from '../../src/ai/buildAgent.js';
 import { runnerForProfile } from '../../src/ai/buildRunners.js';
 import buildSandbox from '../../src/sandbox/buildSandbox.js';
-import { CASES, DEFAULT_SETTINGS } from './cases.js';
-import { getProviderProfile, PROVIDER } from '../../src/ai/providers/providerProfile.js';
+import { CASES, BASE_SETTINGS } from './cases.js';
+import { getProviderProfile, profileFromContext, PROVIDER } from '../../src/ai/providers/providerProfile.js';
 
 // -- Schema rendering ------------------------------------------------------
 
@@ -108,9 +109,66 @@ function renderResponseFormat(fmt) {
 
 // Deterministic per-tool runtime errors the system can return, mirroring the
 // tool implementations (tools/index.js, scheduler.js, imagineGenerator.js,
-// build.js, preferences.js). Kept here as an audit catalog; update it when a
-// tool's error strings change. Only entries for tools live in the case are dumped.
-const TOOL_RUNTIME_ERRORS = {
+// openaiImageGenerator.js, build.js, preferences.js). Kept here as an audit
+// catalog; update it when a tool's error strings change. Only entries for tools
+// live in the case are dumped, and the entries that differ per back end are
+// built from the profile so a dump never shows the other one's wording.
+function buildToolRuntimeErrors(profile) {
+  const runner = runnerForProfile(profile);
+  const efforts = effortsForProvider(profile);
+  const fields = visibleSettingFields(profile);
+  const generateImage = profile.id === PROVIDER.OPENAI
+    ? [
+      'This image generator takes a prompt only: <fields> are not supported. Describe what you want in the prompt instead.',
+      'Missing or too short "prompt": describe the image to generate.',
+      'Image generation failed: <reason>',
+      'Image generation produced an unusable result: <reason>.',
+      'Image could not be stored: <reason>.',
+      `Weekly image generation limit reached (5 per week). It resets every ${formatMediaQuotaResetLabel()}.`
+    ]
+    : [
+      'Reference image "<name>" not found in the delivery buffer or chat history.',
+      'Too many reference images (<n>). Max allowed: 3.',
+      'Each reference image must be a filename or a public https URL.',
+      `Weekly image generation limit reached (5 per week). It resets every ${formatMediaQuotaResetLabel()}.`
+    ];
+  const preferences = [
+    'Unable to identify the settings file for this chat.',
+    `Nothing to update: pass at least one of ${fields.join(', ')}.`
+  ];
+  if (fields.includes('voice')) {
+    preferences.push('Invalid voice: "<value>". Available voices: <list>.');
+  } else {
+    preferences.push(`There is no voice setting in this chat: pass one of ${fields.join(', ')}.`);
+  }
+  preferences.push(
+    `Invalid effort: "<value>". Use one of: ${efforts.join(', ')}.`,
+    'Invalid language: "<value>". Use one of: <list>.',
+    'Memory exceeds the 1000 character limit (<n> chars).'
+  );
+
+  return {
+    ...STATIC_TOOL_RUNTIME_ERRORS,
+    generate_image: generateImage,
+    manage_preferences: preferences,
+    build: [
+      'build is busy: another request is using this workspace.',
+      'Missing required argument "prompt".',
+      'Cannot resolve workspace id for this context.',
+      'Cannot ensure workspace directory.',
+      'Cannot resolve requested attachment(s): <names>. Tell the user which file is missing or retry without those attachments.',
+      'Failed to stage attachments: <reasons>',
+      runner.credentialError('<reason>'),
+      `${runner.label} failed to start or run: <reason>`,
+      'Build hard timeout (<N>s).',
+      'build agent failed without a clear error.',
+      'Error executing build: <reason>' + ADMIN_NOTIFIED_SUFFIX
+    ]
+  };
+}
+
+/** The entries that read the same on every back end. */
+const STATIC_TOOL_RUNTIME_ERRORS = {
   send_whatsapp_message: [
     'Missing "message" parameter. You must provide the text message to send.',
     'Missing recipient. send_whatsapp_message targets a specific phone number; use your structured reply for the current chat, not this tool.',
@@ -172,12 +230,6 @@ const TOOL_RUNTIME_ERRORS = {
     'Multiple members match "<name>": <names>. Specify a more precise name.',
     'Invalid phone number: use country code and 8–15 digits (e.g. +393331234567).'
   ],
-  generate_image: [
-    'Reference image "<name>" not found in the delivery buffer or chat history.',
-    'Too many reference images (<n>). Max allowed: 3.',
-    'Each reference image must be a filename or a public https URL.',
-    `Weekly image generation limit reached (5 per week). It resets every ${formatMediaQuotaResetLabel()}.`
-  ],
   generate_video: [
     'Reference image "<name>" not found in the delivery buffer or chat history.',
     'Too many reference images (<n>). Max allowed: 7.',
@@ -188,32 +240,11 @@ const TOOL_RUNTIME_ERRORS = {
     'A music generation is already in progress...',
     `Weekly song generation limit reached (2 per week). It resets every ${formatMediaQuotaResetLabel()}.`
   ],
-  build: [
-    'build is busy: another request is using this workspace.',
-    'Missing required argument "prompt".',
-    'Cannot resolve workspace id for this context.',
-    'Cannot ensure workspace directory.',
-    'Cannot resolve requested attachment(s): <names>. Tell the user which file is missing or retry without those attachments.',
-    'Failed to stage attachments: <reasons>',
-    'Cannot load xAI credentials for build: <reason>',
-    'Grok Build failed to start or run: <reason>',
-    'Build hard timeout (<N>s).',
-    'build agent failed without a clear error.',
-    'Error executing build: <reason>' + ADMIN_NOTIFIED_SUFFIX
-  ],
   generate_formal_request_pdf: [
     'Error generating formal request PDF: <reason> (admin notified).'
   ],
   bug_report: [
     'Missing required argument "description".'
-  ],
-  manage_preferences: [
-    'Unable to identify the settings file for this chat.',
-    'Nothing to update: pass at least one of voice, effort, language, memory.',
-    'Invalid voice: "<value>". Available voices: <list>.',
-    'Invalid effort: "<value>". Use one of: low, medium, high.',
-    'Invalid language: "<value>". Use one of: <list>.',
-    'Memory exceeds the 1000 character limit (<n> chars).'
   ],
   web_image_search: [
     'Missing required argument "query".',
@@ -244,6 +275,7 @@ const ALL_TOOL_NAMES = [
  */
 function renderToolErrors(ctx, tools) {
   const profile = resolveProfile(ctx);
+  const runtimeErrors = buildToolRuntimeErrors(profileFromContext(ctx));
   const identity = ctx.userIdentity || {};
   const liveNames = new Set(
     tools.map(t => t.function?.name || (t.type !== 'function' ? t.type : null)).filter(Boolean)
@@ -268,14 +300,14 @@ function renderToolErrors(ctx, tools) {
   }
 
   // Per-tool runtime errors (only tools live in this case).
-  const runtimeNames = Object.keys(TOOL_RUNTIME_ERRORS)
+  const runtimeNames = Object.keys(runtimeErrors)
     .filter(n => liveNames.has(n))
     .sort();
   if (runtimeNames.length) {
     out.push('[runtime, per tool]');
     for (const name of runtimeNames) {
       out.push(`    ${name}:`);
-      for (const msg of TOOL_RUNTIME_ERRORS[name]) out.push(`        - ${msg}`);
+      for (const msg of runtimeErrors[name]) out.push(`        - ${msg}`);
     }
   }
 
@@ -324,8 +356,10 @@ function renderCase(id, providerId) {
   const providerProfile = getProviderProfile(providerId);
   const ctx = { ...spec.ctx, providerProfile };
 
-  // Cases without explicit settings render the program defaults, like a fresh chat.
-  if (ctx.settings === undefined) ctx.settings = { ...DEFAULT_SETTINGS };
+  // A case declares only the preferences it deliberately changed; everything
+  // else is this provider's own default, so a case that edits nothing renders
+  // like a fresh chat on either profile.
+  ctx.settings = { ...defaultSettings(providerProfile), ...BASE_SETTINGS, ...(spec.ctx.settings || {}) };
 
   const staticPart = buildStaticInstructions(ctx);
   const dynamicPart = buildDynamicRuntimeContext(ctx);

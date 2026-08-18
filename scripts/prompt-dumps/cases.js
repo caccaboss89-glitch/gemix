@@ -12,13 +12,15 @@
 
 import constants from '../../src/config/constants.js';
 import envConfig from '../../src/config/env.js';
-import { defaultSettings } from '../../src/utils/settingsStore.js';
-
 const { PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED, PLATFORM_DISCORD } = constants;
 const ADMIN_FIRST_NAME = (envConfig.ADMIN_NAME || 'Test Admin').split(/\s+/)[0];
 
-/** Baseline settings for the dump cases (all program defaults, never edited). */
-const DEFAULT_SETTINGS = { ...defaultSettings(), updatedAt: null, reviewedAt: null };
+/**
+ * The never-edited baseline. The preference values themselves are the running
+ * profile's own defaults, which differ between providers, so the renderer
+ * merges them in per dump; a case only declares what it deliberately changes.
+ */
+const BASE_SETTINGS = { updatedAt: null, reviewedAt: null };
 
 const ACTIVE = {
   isActiveMember: true,
@@ -89,7 +91,6 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        ...DEFAULT_SETTINGS,
         language: 'es-ES',
         memory: 'Rispondi sempre in spagnolo per test.',
         updatedAt: '2026-07-20T10:00:00+02:00'
@@ -143,7 +144,6 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        ...DEFAULT_SETTINGS,
         voice: 'carina',
         effort: 'low',
         memory: 'Preferisci risposte brevi.',
@@ -270,7 +270,6 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        ...DEFAULT_SETTINGS,
         voice: 'luna',
         memory: 'Sto pianificando il piano di allenamento del mese.',
         updatedAt: '2026-06-01T09:00:00+02:00',
@@ -299,4 +298,4 @@ const CASES = {
   }
 };
 
-export { CASES, DEFAULT_SETTINGS };
+export { CASES, BASE_SETTINGS };

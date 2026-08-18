@@ -9,34 +9,45 @@
 // reply language, and the free-text custom memory).
 //
 // Only the fields the model actually passes are changed; the `updatedAt` stamp
-// is written by the system, never by the model.
+// is written by the system, never by the model. Which fields exist and which
+// values they accept come from the running profile, so a preference the back
+// end does not have cannot be set and its levels cannot be borrowed.
 
 import {
   updateSettings,
   readSettings,
   resolveMemoryContent,
+  effortsForProvider,
+  visibleSettingFields,
   MAX_MEMORY_CHARS,
   VALID_VOICES,
-  VALID_EFFORTS,
   VALID_LANGUAGES,
   DEFAULT_MEMORY
 } from '../utils/settingsStore.js';
+import { profileFromContext } from '../ai/providers/providerProfile.js';
 
 /**
  * Apply a preferences update for the current chat.
  * @param {object} args - { voice?, effort?, language?, memory?, replace? }
  * @param {string} settingsFileId - Settings file ID for this chat.
+ * @param {object} [ctx] - carries the turn's providerProfile
  * @returns {Promise<{ success: boolean, message?: string, error?: string }>}
  */
-async function managePreferences(args, settingsFileId) {
+async function managePreferences(args, settingsFileId, ctx = null) {
   if (!settingsFileId) {
     return { success: false, error: 'Unable to identify the settings file for this chat.' };
   }
 
+  const provider = profileFromContext(ctx);
+  const fields = visibleSettingFields(provider);
+  const efforts = effortsForProvider(provider);
   const patch = {};
   const changes = [];
 
   if (args.voice !== undefined && args.voice !== null && args.voice !== '') {
+    if (!fields.includes('voice')) {
+      return { success: false, error: `There is no voice setting in this chat: pass one of ${fields.join(', ')}.` };
+    }
     const voice = String(args.voice).trim().toLowerCase();
     if (!VALID_VOICES.includes(voice)) {
       return { success: false, error: `Invalid voice: "${args.voice}". Available voices: ${VALID_VOICES.join(', ')}.` };
@@ -47,8 +58,8 @@ async function managePreferences(args, settingsFileId) {
 
   if (args.effort !== undefined && args.effort !== null && args.effort !== '') {
     const effort = String(args.effort).trim().toLowerCase();
-    if (!VALID_EFFORTS.includes(effort)) {
-      return { success: false, error: `Invalid effort: "${args.effort}". Use one of: ${VALID_EFFORTS.join(', ')}.` };
+    if (!efforts.includes(effort)) {
+      return { success: false, error: `Invalid effort: "${args.effort}". Use one of: ${efforts.join(', ')}.` };
     }
     patch.effort = effort;
     changes.push(`effort=${effort}`);
@@ -66,7 +77,7 @@ async function managePreferences(args, settingsFileId) {
 
   let memoryNote = '';
   if (args.memory !== undefined && args.memory !== null) {
-    const current = readSettings(settingsFileId);
+    const current = readSettings(settingsFileId, provider);
     const resolved = resolveMemoryContent(current.memory, args.memory, args.replace !== false);
     if (resolved.cleared) {
       // Clearing restores the default guidance rather than leaving it empty.
@@ -87,10 +98,10 @@ async function managePreferences(args, settingsFileId) {
   }
 
   if (Object.keys(patch).length === 0) {
-    return { success: false, error: 'Nothing to update: pass at least one of voice, effort, language, memory.' };
+    return { success: false, error: `Nothing to update: pass at least one of ${fields.join(', ')}.` };
   }
 
-  const written = await updateSettings(settingsFileId, patch);
+  const written = await updateSettings(settingsFileId, patch, provider);
   if (!written.success) {
     return { success: false, error: written.error };
   }

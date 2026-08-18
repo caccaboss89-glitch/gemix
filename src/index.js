@@ -1,8 +1,9 @@
 // src/index.js
 //
 // Main entry point for GemiX. Handles startup (directory creation, optional
-// system cleanup), initializes all platforms (WhatsApp dedicated/personal +
-// Discord), starts schedulers, internal servers, and the attachment tunnel.
+// system cleanup), resolves the AI provider and runs its preflight, initializes
+// all platforms (WhatsApp dedicated/personal + Discord), starts schedulers,
+// internal servers, and the attachment tunnel.
 
 import fs from 'fs';
 import { execSync } from 'child_process';
@@ -17,10 +18,11 @@ import { setAdminNotifierClient } from './utils/adminNotifier.js';
 import buildSandbox from './sandbox/buildSandbox.js';
 import { startInternalNotifyServer } from './utils/internalNotifyServer.js';
 import { startTempFileServer } from './utils/tempFileServer.js';
-import { getXaiAuth, describeXaiAuthSource } from './config/xaiAuth.js';
+import { resolveProviderProfile } from './ai/providers/providerProfile.js';
+import { runProviderPreflight } from './ai/providers/preflight.js';
 
 const { TASKS_DIR, DATA_DIR } = constants;
-const { STARTUP_SYSTEM_CLEANUP, GROK_MODEL } = envConfig;
+const { STARTUP_SYSTEM_CLEANUP } = envConfig;
 
 const log = createLogger('GemiX');
 
@@ -82,27 +84,14 @@ log.info('GemiX - Avvio in corso...\n');
 
 runStartupCleanup();
 
-// Soft preflight: validate the xAI credentials file and ping the API at
-// startup without blocking initialization. A warning is logged on failure.
+// The provider is resolved once here, before anything can ask for it: every
+// turn reads this same frozen profile. Its soft preflight follows — a failure
+// is logged and startup continues.
+const providerProfile = resolveProviderProfile();
+log.info(`Provider: ${providerProfile.displayName} (AI_PROVIDER=${providerProfile.id})`);
+
 (async () => {
-  try {
-    const { token, baseUrl } = getXaiAuth();
-    log.info(`   xAI API: ${baseUrl} (model: ${GROK_MODEL}, auth: ${describeXaiAuthSource()})`);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3000);
-    const res = await fetch(`${baseUrl}/models`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-      signal: ctrl.signal
-    }).catch(() => null);
-    clearTimeout(timer);
-    if (res && res.ok) {
-      log.info('   xAI API reachable');
-    } else {
-      log.warn(`   xAI preflight returned status ${res ? res.status : 'no-response'} - first AI call may fail`);
-    }
-  } catch (err) {
-    log.warn(`   xAI auth preflight failed (${err.message}) - check XAI_USE_API_KEY / XAI_API_KEY or auth file`);
-  }
+  await runProviderPreflight(providerProfile);
 
   const dedicatedWa = initDedicatedWhatsApp();
 

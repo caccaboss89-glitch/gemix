@@ -62,6 +62,26 @@ const GROK_CREDIT_EXHAUSTED_MESSAGE =
   `${ADMIN_ERROR_PREFIX} API (Grok)*\n\nScusa ma i crediti sono finiti al momento, `
   + 'tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶';
 
+// -- Provider limits, provider-neutral (user-facing) -------------------------
+
+/**
+ * Shown when the back end refuses the turn for a reason the user can only wait
+ * out: plan quota spent, or too many requests right now. Deliberately names no
+ * provider, model or renewal schedule — those belong to one back end and this
+ * message is sent by whichever one is running.
+ */
+const PROVIDER_LIMIT_MESSAGE =
+  `${ADMIN_ERROR_PREFIX} API*\n\nScusa, al momento ho esaurito la disponibilità del servizio. `
+  + 'Riprova tra un po\' 💤';
+
+/**
+ * Shown when the back end rejects GemiX's own credentials. Nothing the user can
+ * do, so it says only that and does not leak which credential failed.
+ */
+const PROVIDER_AUTH_MESSAGE =
+  `${ADMIN_ERROR_PREFIX} API*\n\nScusa, al momento non riesco ad autenticarmi al servizio. `
+  + 'Ci sto lavorando, riprova più tardi 🔧';
+
 // -- Temporary attachment links --------------------------------------------
 
 /**
@@ -169,7 +189,8 @@ function buildPrivacyWipeDoneMessage(opts = {}) {
 const SYSTEM_MESSAGE_PREFIXES = [
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
-  // Also covers GROK_CREDIT_EXHAUSTED_MESSAGE, which opens with it.
+  // Also covers GROK_CREDIT_EXHAUSTED_MESSAGE, PROVIDER_LIMIT_MESSAGE and
+  // PROVIDER_AUTH_MESSAGE, which all open with it.
   ADMIN_ERROR_PREFIX,
   MAINTENANCE_PREFIX,
   RELEASE_NOTIFY_ENABLED_PREFIX,
@@ -214,6 +235,8 @@ export {
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
   GROK_CREDIT_EXHAUSTED_MESSAGE,
+  PROVIDER_LIMIT_MESSAGE,
+  PROVIDER_AUTH_MESSAGE,
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   PRIVACY_WIPE_COMMAND,

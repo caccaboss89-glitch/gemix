@@ -37,7 +37,9 @@ const { TEMP_DIR } = await import('../src/utils/tempFileServer.js');
 const OPENAI = getProviderProfile(PROVIDER.OPENAI);
 
 // The fallback charges the shared neuron ledger, which lives in the real state
-// file: it is put back byte for byte when this file finishes.
+// file: it is put back byte for byte when this file finishes. That file is also
+// why `npm test` runs one test file at a time — the voice suite charges the
+// same ledger, and in parallel processes the two would race over it.
 const STATE_FILE = path.join(constants.DATA_DIR, 'systemState.json');
 const STATE_BEFORE = fs.existsSync(STATE_FILE) ? fs.readFileSync(STATE_FILE) : null;
 

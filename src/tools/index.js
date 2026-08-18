@@ -252,7 +252,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
 
     case 'manage_preferences': {
-      result = await managePreferences(args, userCtx.settingsFileId);
+      result = await managePreferences(args, userCtx.settingsFileId, userCtx);
       break;
     }
 

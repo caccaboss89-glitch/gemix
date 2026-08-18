@@ -206,6 +206,10 @@ function resolveProviderProfile() {
  */
 function profileFromContext(ctx) {
   if (ctx && typeof ctx === 'object') {
+    // A profile handed straight in. Without this a caller that already resolved
+    // one and passes it along would fall through to the active profile, which
+    // is silently wrong whenever the two differ (the dump generator, tests).
+    if (typeof ctx.id === 'string' && ctx.capabilities && BUILDERS[ctx.id]) return ctx;
     if (ctx.providerProfile && typeof ctx.providerProfile === 'object') return ctx.providerProfile;
     if (typeof ctx.providerId === 'string' && ctx.providerId) return getProviderProfile(ctx.providerId);
   }
