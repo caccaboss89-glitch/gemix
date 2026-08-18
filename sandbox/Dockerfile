@@ -3,7 +3,8 @@
 # Run: managed by src/sandbox/buildSandbox.js, which boots the container with
 #      Cmd: ['sleep', 'infinity'] and attaches per-call via `docker exec`.
 #      Bind mounts: /workspace (rw, per-workspaceId build dir).
-#      Grok Build CLI is baked into the image; GemiX skill packs are not mounted.
+#      Both build sub-agent CLIs (grok, codex) are baked into the image; GemiX
+#      skill packs are not mounted.
 
 FROM python:3.12-slim-bookworm
 
@@ -68,16 +69,18 @@ RUN pip install --no-cache-dir --retries 5 --timeout 120 unoserver
 # (residential IP), so anti-datacenter blocks are bypassed like any other host.
 RUN pip install --no-cache-dir --retries 5 --timeout 120 yt-dlp
 
-# -- Node.js + Grok Build CLI + common JS tooling --------------------------
-# Grok Build (`grok`) is the in-container build sub-agent runtime (baked into
-# the image once — not reinstalled on each container create). Host GemiX only
-# needs Docker; operators rebuild this image to upgrade the CLI.
+# -- Node.js + build sub-agent CLIs + common JS tooling ---------------------
+# One CLI per provider profile: `grok` on xAI, `codex` on OpenAI. Both are baked
+# into the image once (not reinstalled on each container create) because the
+# sandbox has no package installs at runtime; operators rebuild this image to
+# upgrade either. Host GemiX only needs Docker.
 # pptxgenjs / docx stack remain available for ad-hoc scripts under /workspace.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g --no-fund --no-audit \
         @xai-official/grok \
+        @openai/codex \
         pptxgenjs \
         react-icons \
         react \
@@ -89,13 +92,19 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
         angular-expressions@1.5.5 \
     && npm cache clean --force \
     && command -v grok >/dev/null \
-    && grok version
+    && grok version \
+    && command -v codex >/dev/null \
+    && codex --version
 
-# Writable exec-capable home for the Grok CLI (downloads ~/.grok/bin/grok here).
-# Must NOT be a noexec tmpfs mount — see buildSandbox.js Tmpfs/HOME notes.
-RUN mkdir -p /var/lib/gemix-grok \
-    && chmod 1777 /var/lib/gemix-grok
+# Writable exec-capable homes, one per CLI (the Grok wrapper downloads
+# ~/.grok/bin/grok into its own). Must NOT be noexec tmpfs mounts — see the
+# buildSandbox.js Tmpfs/HOME notes. Codex additionally gets a throwaway
+# CODEX_HOME per invocation, created on the host outside /workspace.
+RUN mkdir -p /var/lib/gemix-grok /var/lib/gemix-codex \
+    && chmod 1777 /var/lib/gemix-grok /var/lib/gemix-codex
 
+# HOME is the Grok one here because the model preload below caches under it;
+# each runner overrides HOME for its own exec (see buildSandbox.js).
 ENV HOME=/var/lib/gemix-grok \
     GROK_HOME=/var/lib/gemix-grok \
     GROK_DISABLE_AUTOUPDATER=1 \

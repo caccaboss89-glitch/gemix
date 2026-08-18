@@ -170,5 +170,6 @@ export default {
   CODEX_BUILD_ENABLED: process.env.CODEX_BUILD_ENABLED === 'true',
   CODEX_BIN: process.env.CODEX_BIN || 'codex',
   CODEX_BROKER_HOST: process.env.CODEX_BROKER_HOST || 'gemix-codex-broker',
-  CODEX_BROKER_PORT: Number(process.env.CODEX_BROKER_PORT) || 8081
+  CODEX_BROKER_PORT: Number(process.env.CODEX_BROKER_PORT) || 8081,
+  CODEX_BROKER_BIND: process.env.CODEX_BROKER_BIND || '127.0.0.1'
 };

@@ -20,6 +20,13 @@ Routing:
 - Fail-closed: if the SOCKS5 upstream (Redmi) is unreachable, the request fails
   with 502 and there is no direct-internet fallback. When the Redmi is off, the
   sandbox simply has no internet (intended security property).
+- One exception, off by default: the Codex Build auth broker. The sandbox
+  network has no route to the host, so a build CLI reaches the broker by asking
+  this proxy for ${CODEX_BROKER_NAME}, and only that name is dialled directly at
+  the fixed ${CODEX_BROKER_UPSTREAM} instead of going out residential. The
+  operator sets both; the container never chooses the destination, and the
+  broker refuses anything that does not carry a live single-invocation ticket.
+  With CODEX_BROKER_UPSTREAM unset the name has no route at all.
 
 Operational:
 - Listens on 0.0.0.0:${PROXY_PORT:-8080} (only reachable from the internal
@@ -57,6 +64,13 @@ MAX_UPSTREAM_CONNECT_S: int = int(os.environ.get("UPSTREAM_CONNECT_TIMEOUT_S", "
 # exits here; there is no direct-internet fallback.
 REDMI_SOCKS_HOST: str = os.environ.get("REDMI_SOCKS_HOST", "host.docker.internal")
 REDMI_SOCKS_PORT: int = int(os.environ.get("REDMI_SOCKS_PORT", "5040"))
+
+# Codex Build auth broker. CODEX_BROKER_NAME is what the sandbox asks for (it
+# matches CODEX_BROKER_HOST on the GemiX side); CODEX_BROKER_UPSTREAM is where
+# this container actually dials it, "host:port" on the egress gateway. Unset
+# upstream means the route does not exist.
+CODEX_BROKER_NAME: str = os.environ.get("CODEX_BROKER_NAME", "gemix-codex-broker")
+CODEX_BROKER_UPSTREAM: str = os.environ.get("CODEX_BROKER_UPSTREAM", "")
 
 GEMIX_NOTIFY_URL: str | None = os.environ.get(
     "GEMIX_NOTIFY_URL"
@@ -187,6 +201,41 @@ def _log(level: str, **fields) -> None:
 # -- HTTP handler ----------------------------------------------------------
 
 
+def broker_target(dst_host: str, dst_port: int) -> tuple[str, int] | None:
+    """
+    The address to dial directly for a request aimed at the Codex Build broker,
+    or None when this is ordinary egress that belongs on the residential exit.
+
+    Both sides are operator configuration: the sandbox can only ask for the one
+    configured name, and where that name leads is decided here, not in the
+    container.
+    """
+    if not CODEX_BROKER_UPSTREAM or dst_host.lower() != CODEX_BROKER_NAME.lower():
+        return None
+    host, _, port_str = CODEX_BROKER_UPSTREAM.rpartition(":")
+    if not host or not port_str.isdigit():
+        _log("warn", event="broker_misconfigured", upstream=CODEX_BROKER_UPSTREAM)
+        return None
+    if dst_port != int(port_str):
+        # The name is right but the port is not the broker's: not a broker call.
+        return None
+    return host, int(port_str)
+
+
+def upstream_connect(dst_host: str, dst_port: int, timeout: int) -> tuple[socket.socket, bool]:
+    """
+    Open the upstream socket for one request: straight to the broker when this
+    is the broker, residential SOCKS5 for everything else. The second element
+    says which of the two it was, for the log line.
+    """
+    direct = broker_target(dst_host, dst_port)
+    if direct is None:
+        return socks5_connect(dst_host, dst_port, timeout), False
+    sock = socket.create_connection(direct, timeout=timeout)
+    sock.settimeout(TUNNEL_TIMEOUT_S)
+    return sock, True
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "GemixSandboxProxy/2.0"
@@ -206,7 +255,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            upstream = socks5_connect(host, port, MAX_UPSTREAM_CONNECT_S)
+            upstream, is_broker = upstream_connect(host, port, MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
@@ -215,7 +264,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             )
             self._reject(502, "residential upstream unavailable")
             return
-        _log("info", event="allow_connect", host=host, port=port)
+        _log("info", event="allow_broker" if is_broker else "allow_connect", host=host, port=port)
         try:
             self.send_response(200, "Connection Established")
             self.end_headers()
@@ -240,7 +289,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             path += "?" + parsed.query
 
         try:
-            upstream = socks5_connect(host, port, MAX_UPSTREAM_CONNECT_S)
+            upstream, is_broker = upstream_connect(host, port, MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
@@ -279,7 +328,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             upstream.sendall(req_data)
             _log(
                 "info",
-                event="allow_http",
+                event="allow_broker_http" if is_broker else "allow_http",
                 method=self.command,
                 host=host,
                 body_bytes=len(body),

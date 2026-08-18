@@ -10,6 +10,10 @@
 //
 //   sandbox ──ticket──> egress proxy ──> broker (host) ──real bearer──> Codex API
 //
+// The sandbox network has no route to the host, so the proxy is what carries
+// that middle hop: it is the one place allowed to dial the broker directly
+// instead of sending the request out through the residential exit.
+//
 // The ticket is minted per build invocation, expires with it, is revoked in the
 // caller's `finally`, and means nothing anywhere else. The real
 // `Authorization` and `ChatGPT-Account-ID` headers are attached here, on the
@@ -183,9 +187,13 @@ async function _handle(req, res) {
 }
 
 /**
- * Start the broker. Bound to all interfaces because it is reached from the
- * sandbox's egress proxy, and safe to do so only because a request without a
- * live ticket gets nothing.
+ * Start the broker.
+ *
+ * Bound to CODEX_BROKER_BIND, loopback by default: the sandbox reaches it
+ * through the egress proxy, which the operator points at a socat relay on the
+ * egress gateway — the same shape as the notify server. A live ticket is still
+ * required for any answer, but the listener is not on every interface as well.
+ *
  * @returns {Promise<void>}
  */
 function startBroker() {
@@ -200,8 +208,8 @@ function startBroker() {
       _server = null;
       reject(err);
     });
-    _server.listen(envConfig.CODEX_BROKER_PORT, () => {
-      log.info(`listening on port ${envConfig.CODEX_BROKER_PORT} for Codex Build`);
+    _server.listen(envConfig.CODEX_BROKER_PORT, envConfig.CODEX_BROKER_BIND, () => {
+      log.info(`listening on ${envConfig.CODEX_BROKER_BIND}:${envConfig.CODEX_BROKER_PORT} for Codex Build`);
       resolve();
     });
   });

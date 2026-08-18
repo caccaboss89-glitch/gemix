@@ -40,6 +40,14 @@ services:
       # Host internal notify URL, e.g. http://$EGRESS_GW:9999/notify
       GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
       GEMIX_NOTIFY_SECRET: "${GEMIX_NOTIFY_SECRET:-}"
+      # Codex Build auth broker: the one name that is dialled directly instead
+      # of going out residential, because the host is not reachable from the
+      # internal sandbox network. The name must match CODEX_BROKER_HOST in the
+      # GemiX .env; the upstream is the egress gateway plus CODEX_BROKER_PORT,
+      # e.g. CODEX_BROKER_UPSTREAM=$EGRESS_GW:8081. Leave it empty and the
+      # route does not exist, which is the default while Codex Build is gated.
+      CODEX_BROKER_NAME: "${CODEX_BROKER_NAME:-gemix-codex-broker}"
+      CODEX_BROKER_UPSTREAM: "${CODEX_BROKER_UPSTREAM:-}"
     networks:
       egress: {}           # path to the host (reaches tailsocks); upstream is SOCKS5
       sandbox_net: {}      # reachable by sandboxes as hostname "gemix-sandbox-proxy"
@@ -48,7 +56,7 @@ services:
 
   sandbox_example:
     # Example of how the Node manager will run a sandbox: quiet
-    # `sleep infinity` process, attach via `docker exec` (Grok Build).
+    # `sleep infinity` process, attach via `docker exec` (grok or codex).
     build:
       context: .
       dockerfile: Dockerfile
@@ -79,7 +87,7 @@ services:
     volumes:
       # Mount a real build workspace here in tests, e.g.:
       # - /path/to/build_workspace:/workspace:rw
-      # GemiX skill packs are not mounted; Grok Build uses its own skills.
+      # GemiX skill packs are not mounted; each CLI uses its own skills.
 
 networks:
   # Internal-only network where sandboxes live; no direct internet.

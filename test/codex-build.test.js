@@ -10,7 +10,12 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import { seedEnv, writeAuthFile } from './helpers/testEnv.js';
+
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const REAL_BEARER = 'openai-real-bearer-must-never-leak';
 const REAL_ACCOUNT = 'acct_real_must_never_leak';
@@ -55,6 +60,21 @@ test('the CLI is pointed at the broker, not at the Codex API', () => {
   assert.match(flat, /model_providers\.gemix_broker\.base_url="http:\/\/gemix-codex-broker:8081\/v1"/);
   assert.match(flat, /model_providers\.gemix_broker\.env_key="CODEX_BROKER_TICKET"/);
   assert.equal(flat.includes('chatgpt.com'), false, 'the container must not know the real endpoint');
+});
+
+test('the broker call is the one request that stays inside the proxy', () => {
+  const spec = buildSandbox.buildCodexExecSpec(SPEC_ARGS);
+  const env = spec.env.join('\n');
+  // The sandbox network is internal, so the broker is reached the only way out
+  // exists: through the egress proxy, which routes that one name directly. A
+  // NO_PROXY entry for the broker would strand the request with no route at all.
+  assert.match(env, /HTTPS?_PROXY=http:\/\/gemix-sandbox-proxy:\d+/);
+  const noProxy = spec.env.find(e => e.startsWith('NO_PROXY='));
+  assert.equal(noProxy, 'NO_PROXY=localhost,127.0.0.1');
+  assert.equal(noProxy.includes('gemix-codex-broker'), false, 'the broker must stay proxied');
+  // And the CLI writes nothing under the workspace the harvest reads.
+  assert.ok(spec.env.includes('HOME=/var/lib/gemix-codex'));
+  assert.equal(env.includes('/workspace'), false);
 });
 
 test('the spec applies the settings the plan pins', () => {
@@ -132,6 +152,53 @@ test('a missing, malformed or invented ticket is refused', () => {
 });
 
 // -- Header injection --------------------------------------------------------
+
+// -- The egress proxy's half of the boundary ---------------------------------
+
+/** The python the egress proxy runs under, or null when this host has none. */
+function _python() {
+  for (const bin of ['python3', 'python']) {
+    const probe = spawnSync(bin, ['-c', 'import sys; sys.exit(0)'], { stdio: 'ignore' });
+    if (!probe.error && probe.status === 0) return bin;
+  }
+  return null;
+}
+
+const PYTHON = _python();
+
+test('the proxy dials the broker directly and everything else residential', { skip: PYTHON ? false : 'no python on this host' }, () => {
+  // The routing rule lives in the proxy, so it is checked where it runs. Only
+  // the configured name on the configured port leaves the residential path; a
+  // container asking for the real API, or for the broker on another port, is
+  // still tunnelled out like any other request.
+  const script = [
+    'import json, os, sys',
+    'os.environ["CODEX_BROKER_UPSTREAM"] = "172.20.0.1:8081"',
+    'sys.path.insert(0, "sandbox/proxy")',
+    'import proxy',
+    'out = {',
+    '  "broker": proxy.broker_target("gemix-codex-broker", 8081),',
+    '  "case": proxy.broker_target("GEMIX-CODEX-BROKER", 8081),',
+    '  "wrong_port": proxy.broker_target("gemix-codex-broker", 443),',
+    '  "api": proxy.broker_target("chatgpt.com", 443),',
+    '  "xai": proxy.broker_target("api.x.ai", 443),',
+    '}',
+    'proxy.CODEX_BROKER_UPSTREAM = ""',
+    'out["unconfigured"] = proxy.broker_target("gemix-codex-broker", 8081)',
+    'print(json.dumps(out))'
+  ].join('\n');
+
+  const run = spawnSync(PYTHON, ['-c', script], { encoding: 'utf8', cwd: REPO_ROOT });
+  assert.equal(run.status, 0, run.stderr);
+  const routes = JSON.parse(run.stdout.trim());
+
+  assert.deepEqual(routes.broker, ['172.20.0.1', 8081]);
+  assert.deepEqual(routes.case, ['172.20.0.1', 8081], 'the hostname match is case-insensitive');
+  assert.equal(routes.wrong_port, null, 'only the broker port is a broker call');
+  assert.equal(routes.api, null, 'the real endpoint is never dialled directly');
+  assert.equal(routes.xai, null);
+  assert.equal(routes.unconfigured, null, 'no upstream configured means no route at all');
+});
 
 test('the broker replaces the sandbox headers with the real ones', () => {
   const headers = broker.buildUpstreamHeaders({
