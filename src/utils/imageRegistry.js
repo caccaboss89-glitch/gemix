@@ -5,8 +5,8 @@
 // The final `attachments` field accepts public file URLs, which is what makes a
 // web image deliverable at all — and also what would let the model ship a URL it
 // scraped out of a page it read, or wrote from memory. The registry closes that:
-// entries come only from the structured result objects (SearXNG hits, hosted
-// `image_result` entries) plus the URLs the user wrote themselves, each kept
+// entries come only from the structured SearXNG result objects plus the URLs
+// the user wrote themselves, each kept
 // with the page it was found on and deduplicated under a per-turn budget.
 //
 // Enforcement is a profile capability, not a global rule: the xAI branch gets
@@ -23,7 +23,6 @@ const MAX_REGISTERED_IMAGES = 60;
 /** Where a registered URL came from. */
 const IMAGE_SOURCE = {
   SEARCH: 'web_image_search',
-  HOSTED: 'hosted_search',
   USER: 'user_message'
 };
 

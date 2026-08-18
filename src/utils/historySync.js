@@ -280,6 +280,10 @@ function getStoredUserTranscription(userId, historyFilename, contentHash, model)
     if (_getEntryFilename(entry) !== normalized) continue;
     const cached = entry && typeof entry === 'object' ? entry.userTranscription : null;
     if (!cached || cached.contentHash !== contentHash || cached.model !== model) return null;
+    if (cached.status === 'quota_exhausted'
+      && (!Number.isFinite(Number(cached.retryAt)) || Date.now() >= Number(cached.retryAt))) {
+      return null;
+    }
     if (_TRANSIENT_STT_STATUSES.has(cached.status)
       && Date.now() - (Number(cached.updatedAt) || 0) > USER_TRANSCRIPTION_RETRY_MS) {
       return null;
@@ -314,6 +318,7 @@ async function storeUserTranscription(userId, historyFilename, record) {
         provider: record.provider,
         model: record.model,
         contentHash: record.contentHash,
+        retryAt: Number.isFinite(Number(record.retryAt)) ? Number(record.retryAt) : null,
         updatedAt: Date.now()
       }
     };

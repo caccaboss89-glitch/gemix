@@ -26,7 +26,15 @@ import { extractAttachmentTagPaths } from './media.js';
 import { escapeXml } from './xmlEscape.js';
 import { resolveHistoryAbsPath } from './aiFileDelivery.js';
 import { getStoredUserTranscription, storeUserTranscription } from './historySync.js';
-import { STT_STATUS, contentHashOf, isSttConfigured, sttModelId, transcribeAudioFile } from './speechToText.js';
+import {
+  STT_STATUS,
+  STT_UNCONFIGURED_MESSAGE,
+  contentHashOf,
+  isSttConfigured,
+  sttModelId,
+  transcribeAudioFile
+} from './speechToText.js';
+import { STT_DAILY_LIMIT_MESSAGE } from './cloudflareNeurons.js';
 import { getMediaDurationSecFromPath } from './mediaDuration.js';
 import { createLogger } from './logger.js';
 import fs from 'fs';
@@ -50,7 +58,14 @@ const STATUS_NOTE = {
   [STT_STATUS.NO_SPEECH]: 'status="no_speech"',
   [STT_STATUS.TOO_LONG]: 'status="too_long"',
   [STT_STATUS.TIMEOUT]: 'status="timeout"',
+  [STT_STATUS.QUOTA_EXHAUSTED]: 'status="quota_exhausted"',
+  [STT_STATUS.UNCONFIGURED]: 'status="unconfigured"',
   [STT_STATUS.ERROR]: 'status="error"'
+};
+
+const STATUS_MESSAGE = {
+  [STT_STATUS.QUOTA_EXHAUSTED]: STT_DAILY_LIMIT_MESSAGE,
+  [STT_STATUS.UNCONFIGURED]: STT_UNCONFIGURED_MESSAGE
 };
 
 function _escapeRegExp(s) {
@@ -67,7 +82,11 @@ function _voiceTag(name, record) {
   if (record.status === STT_STATUS.OK && record.text) {
     return `<VoiceMessage file="${safeName}">${escapeXml(record.text)}</VoiceMessage>`;
   }
-  return `<VoiceMessage file="${safeName}" ${STATUS_NOTE[record.status] || STATUS_NOTE[STT_STATUS.ERROR]} />`;
+  const status = STATUS_NOTE[record.status] || STATUS_NOTE[STT_STATUS.ERROR];
+  const message = record.message || STATUS_MESSAGE[record.status];
+  return message
+    ? `<VoiceMessage file="${safeName}" ${status}>${escapeXml(message)}</VoiceMessage>`
+    : `<VoiceMessage file="${safeName}" ${status} />`;
 }
 
 /** Every audio filename referenced by an [Attachment] tag in a piece of text. */
@@ -131,12 +150,13 @@ async function _transcribe(storageId, name, info, opts) {
       status: result.status,
       provider: result.provider,
       model: result.model,
-      contentHash: info.contentHash
+      contentHash: info.contentHash,
+      retryAt: result.retryAt
     });
   } catch (err) {
     log.warn(`Could not cache the transcript of "${name}": ${err.message}`);
   }
-  return { status: result.status, text: result.text };
+  return { status: result.status, text: result.text, message: result.message };
 }
 
 /**
@@ -213,7 +233,6 @@ function _projectContent(content, resolved) {
  */
 async function projectUserVoiceMessages({ history, current, storageId }, opts = {}) {
   const safeHistory = Array.isArray(history) ? history : [];
-  if (!storageId || !isSttConfigured()) return { history: safeHistory, current, projected: 0 };
 
   // Only user-role text can carry a user voice note; assistant audio is handled
   // by <PastVoiceReply>, which is a different thing entirely.
@@ -237,10 +256,22 @@ async function projectUserVoiceMessages({ history, current, storageId }, opts = 
 
   if (names.size === 0) return { history: safeHistory, current, projected: 0 };
 
-  const resolved = await _resolveAll([...names], storageId, {
-    language: opts.language,
-    signal: opts.signal
-  });
+  let resolved;
+  if (!isSttConfigured()) {
+    resolved = new Map([...names].map(name => [name, {
+      status: STT_STATUS.UNCONFIGURED,
+      text: '',
+      message: STT_UNCONFIGURED_MESSAGE
+    }]));
+  } else if (!storageId) {
+    resolved = new Map([...names].map(name => [name, { status: STT_STATUS.ERROR, text: '' }]));
+  } else {
+    resolved = await _resolveAll([...names], storageId, {
+      language: opts.language,
+      signal: opts.signal
+    });
+  }
+
   if (resolved.size === 0) return { history: safeHistory, current, projected: 0 };
 
   const nextHistory = safeHistory.map((msg) => {

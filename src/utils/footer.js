@@ -131,6 +131,34 @@ function buildResearchBadgeText(stats) {
 }
 
 /**
+ * Merge one model round's research counters into the turn total. OpenAI rounds
+ * carry canonical source keys, so repeated URLs across several searches or
+ * tool rounds count once. Providers without keys keep their existing additive
+ * counters.
+ * @param {object|null} current
+ * @param {object|null} incoming
+ * @returns {object|null}
+ */
+function mergeResearchStats(current, incoming) {
+  if (!incoming) return current || null;
+  const currentWeb = Number.isFinite(current?.webSources) ? current.webSources : 0;
+  const currentX = Number.isFinite(current?.xPosts) ? current.xPosts : 0;
+  const incomingWeb = Number.isFinite(incoming.webSources) ? incoming.webSources : 0;
+  const incomingX = Number.isFinite(incoming.xPosts) ? incoming.xPosts : 0;
+  const currentKeys = Array.isArray(current?.webSourceKeys) ? current.webSourceKeys : [];
+  const incomingKeys = Array.isArray(incoming.webSourceKeys) ? incoming.webSourceKeys : [];
+
+  if (currentKeys.length > 0 || incomingKeys.length > 0) {
+    const webSourceKeys = [...new Set(
+      [...currentKeys, ...incomingKeys].filter(key => typeof key === 'string' && key)
+    )];
+    return { webSources: webSourceKeys.length, xPosts: currentX + incomingX, webSourceKeys };
+  }
+  if (currentWeb + incomingWeb <= 0 && currentX + incomingX <= 0) return current || null;
+  return { webSources: currentWeb + incomingWeb, xPosts: currentX + incomingX };
+}
+
+/**
  * Append the research badge block to a text reply (text replies only).
  * @param {string} text
  * @param {{ webSources?: number, xPosts?: number }|null} stats
@@ -151,6 +179,7 @@ export {
   hasScheduledFooter,
   removeScheduledFooter,
   buildResearchBadgeText,
+  mergeResearchStats,
   appendResearchBadge
 
 };

@@ -25,8 +25,13 @@
 import http from 'http';
 import crypto from 'crypto';
 import envConfig from '../config/env.js';
-import { getOpenAiAuth } from '../config/openaiAuth.js';
 import { joinUrl } from '../ai/openaiResponsesProtocol.js';
+import {
+  buildOpenAiAuthHeaders,
+  createOpenAiOAuthState,
+  fetchWithOpenAiOAuth,
+  isOpenAiOAuthError
+} from '../utils/openaiOAuth.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('CodexBroker');
@@ -41,8 +46,16 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   'host',
   'connection',
   'proxy-authorization',
-  'content-length'
+  'content-length',
+  'transfer-encoding',
+  'keep-alive',
+  'te',
+  'trailer',
+  'upgrade'
 ]);
+
+const ALLOWED_METHOD = 'POST';
+const ALLOWED_PATH = '/responses';
 
 let _server = null;
 
@@ -61,12 +74,17 @@ function _sweep(now = Date.now()) {
  * @param {number} opts.ttlMs - the invocation's own ceiling
  * @returns {string} the opaque ticket handed to the sandbox
  */
-function mintTicket({ workspaceId, ttlMs }) {
+function mintTicket({ workspaceId, ttlMs, oauthState = createOpenAiOAuthState() }) {
   const ttl = Number(ttlMs);
   if (!(ttl > 0)) throw new Error('mintTicket: ttlMs must be a positive number');
   _sweep();
   const ticket = crypto.randomBytes(32).toString('base64url');
-  _tickets.set(ticket, { workspaceId, expiresAt: Date.now() + ttl, uses: 0 });
+  _tickets.set(ticket, {
+    workspaceId,
+    expiresAt: Date.now() + ttl,
+    uses: 0,
+    oauthState
+  });
   return ticket;
 }
 
@@ -113,9 +131,30 @@ function buildUpstreamHeaders(incomingHeaders, auth) {
   for (const [name, value] of Object.entries(incomingHeaders || {})) {
     if (!STRIPPED_REQUEST_HEADERS.has(name.toLowerCase())) out[name] = value;
   }
-  out['Authorization'] = `Bearer ${auth.accessToken}`;
-  out['ChatGPT-Account-ID'] = auth.chatgptAccountId;
+  return buildOpenAiAuthHeaders(out, auth);
+}
+
+/** Headers the untrusted sandbox may forward before host-side auth is added. */
+function _forwardedHeaders(incomingHeaders) {
+  const out = {};
+  for (const [name, value] of Object.entries(incomingHeaders || {})) {
+    if (!STRIPPED_REQUEST_HEADERS.has(name.toLowerCase())) out[name] = value;
+  }
   return out;
+}
+
+/**
+ * The only upstream URL this broker can produce. The CLI uses the broker root
+ * as its provider base and appends `/responses`; accepting any other path would
+ * turn a Build ticket into access to unrelated ChatGPT backend endpoints.
+ */
+function resolveCodexBrokerUpstreamUrl(rawUrl) {
+  if (typeof rawUrl !== 'string' || !rawUrl.startsWith('/')) return null;
+  let parsed;
+  try { parsed = new URL(rawUrl, 'http://codex-broker.invalid'); }
+  catch { return null; }
+  if (parsed.pathname !== ALLOWED_PATH || parsed.search || parsed.hash) return null;
+  return joinUrl(envConfig.OPENAI_BASE_URL, 'responses');
 }
 
 /** Read a request body with a hard ceiling so one build cannot exhaust the host. */
@@ -146,6 +185,10 @@ function _deny(res, status, reason) {
 async function _handle(req, res) {
   const check = validateTicket(req.headers.authorization);
   if (!check.ok) return _deny(res, 401, check.reason);
+  if (req.method !== ALLOWED_METHOD) return _deny(res, 405, 'method not allowed');
+
+  const url = resolveCodexBrokerUpstreamUrl(req.url);
+  if (!url) return _deny(res, 404, 'path not allowed');
 
   let body;
   try {
@@ -154,36 +197,39 @@ async function _handle(req, res) {
     return _deny(res, 413, err.message);
   }
 
-  let auth;
+  let upstream;
   try {
-    auth = getOpenAiAuth();
-  } catch (err) {
-    // The reason is safe to log; the credential itself never is.
-    return _deny(res, 503, `no usable credential (${err.code || err.message})`);
-  }
-
-  const url = joinUrl(envConfig.OPENAI_BASE_URL, req.url.replace(/^\/+/, ''));
-  try {
-    const upstream = await fetch(url, {
-      method: req.method,
-      headers: buildUpstreamHeaders(req.headers, auth),
-      body: ['GET', 'HEAD'].includes(req.method) ? undefined : body,
+    const result = await fetchWithOpenAiOAuth(url, {
+      method: ALLOWED_METHOD,
+      headers: _forwardedHeaders(req.headers),
+      body,
       redirect: 'manual'
+    }, {
+      minRemainingMs: Math.max(0, check.entry.expiresAt - Date.now()),
+      refreshState: check.entry.oauthState
     });
-
-    const headers = {};
-    upstream.headers.forEach((value, name) => {
-      if (name.toLowerCase() !== 'content-encoding') headers[name] = value;
-    });
-    res.writeHead(upstream.status, headers);
-    if (upstream.body) {
-      for await (const chunk of upstream.body) res.write(chunk);
+    upstream = result.response;
+    if (result.refreshError) {
+      log.warn('the single OpenAI OAuth refresh attempt failed');
     }
-    res.end();
-    log.info(`forwarded ${req.method} ${req.url.split('?')[0]} -> ${upstream.status}`);
   } catch (err) {
+    if (isOpenAiOAuthError(err)) return _deny(res, 503, 'no usable OpenAI credential');
     _deny(res, 502, `upstream unreachable (${err.message})`);
+    return;
   }
+
+  const headers = {};
+  upstream.headers.forEach((value, name) => {
+    if (!STRIPPED_REQUEST_HEADERS.has(name.toLowerCase()) && name.toLowerCase() !== 'content-encoding') {
+      headers[name] = value;
+    }
+  });
+  res.writeHead(upstream.status, headers);
+  if (upstream.body) {
+    for await (const chunk of upstream.body) res.write(chunk);
+  }
+  res.end();
+  log.info(`forwarded ${ALLOWED_METHOD} ${ALLOWED_PATH} -> ${upstream.status}`);
 }
 
 /**
@@ -230,6 +276,7 @@ export {
   revokeTicket,
   validateTicket,
   buildUpstreamHeaders,
+  resolveCodexBrokerUpstreamUrl,
   activeTicketCount,
   startBroker,
   stopBroker

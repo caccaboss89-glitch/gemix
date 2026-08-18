@@ -10,6 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
@@ -33,12 +34,13 @@ const buildSandbox = (await import('../src/sandbox/buildSandbox.js')).default;
 const broker = await import('../src/sandbox/codexAuthBroker.js');
 const { getProviderProfile, PROVIDER } = await import('../src/ai/providers/providerProfile.js');
 
+// codexHome is a path inside the container, under the HOME the image creates.
+const CODEX_HOME = '/var/lib/gemix-codex/run-abc123';
 const SPEC_ARGS = {
   prompt: 'Create hello.txt in /workspace/',
   rules: 'GemiX-Build rules text',
   ticket: 'opaque-ticket-value',
-  codexHome: '/tmp/gemix-codex-abc123',
-  instructionsFile: '/tmp/gemix-codex-abc123/instructions.md'
+  codexHome: CODEX_HOME
 };
 
 // -- The exec spec carries no credential -------------------------------------
@@ -57,9 +59,22 @@ test('nothing in the Codex spec is a secret', () => {
 test('the CLI is pointed at the broker, not at the Codex API', () => {
   const spec = buildSandbox.buildCodexExecSpec(SPEC_ARGS);
   const flat = spec.cmd.join(' ');
-  assert.match(flat, /model_providers\.gemix_broker\.base_url="http:\/\/gemix-codex-broker:8081\/v1"/);
+  assert.match(flat, /model_providers\.gemix_broker\.base_url="http:\/\/gemix-codex-broker:8081"/);
   assert.match(flat, /model_providers\.gemix_broker\.env_key="CODEX_BROKER_TICKET"/);
   assert.equal(flat.includes('chatgpt.com'), false, 'the container must not know the real endpoint');
+});
+
+test('the base URL is the one path the broker accepts', () => {
+  // wire_api="responses" makes the CLI POST to `${base_url}/responses`. A
+  // version segment in base_url would make that /v1/responses, which the broker
+  // rejects as "path not allowed" — every build would fail with a 404.
+  const spec = buildSandbox.buildCodexExecSpec(SPEC_ARGS);
+  const baseUrl = spec.cmd
+    .find(arg => arg.startsWith('model_providers.gemix_broker.base_url='))
+    .replace(/^[^=]+="?|"$/g, '');
+  const requested = new URL('/responses', `${baseUrl}/`);
+  assert.equal(broker.resolveCodexBrokerUpstreamUrl(requested.pathname), 'https://chatgpt.com/backend-api/codex/responses');
+  assert.equal(broker.resolveCodexBrokerUpstreamUrl('/v1/responses'), null);
 });
 
 test('the broker call is the one request that stays inside the proxy', () => {
@@ -82,7 +97,8 @@ test('the spec applies the settings the plan pins', () => {
   const flat = spec.cmd.join(' ');
   assert.match(flat, /project_doc_max_bytes=0/, 'a staged AGENTS.md is data, not instructions');
   assert.match(flat, /model_reasoning_effort="high"/);
-  assert.match(flat, /experimental_instructions_file="\/tmp\/gemix-codex-abc123\/instructions\.md"/);
+  assert.equal(spec.instructionsFile, `${CODEX_HOME}/instructions.md`);
+  assert.ok(flat.includes(`experimental_instructions_file="${spec.instructionsFile}"`));
   assert.ok(spec.cmd.includes('--json'), 'the runner parses JSONL');
   assert.ok(spec.cmd.includes('exec'));
   assert.ok(spec.cmd.includes('gpt-5.6-sol'));
@@ -106,7 +122,28 @@ test('CODEX_HOME is required and may not live in the workspace', () => {
   assert.throws(() => buildSandbox.buildCodexExecSpec({ ...SPEC_ARGS, codexHome: '' }), /CODEX_HOME/);
   assert.throws(() => buildSandbox.buildCodexExecSpec({ ...SPEC_ARGS, codexHome: '/workspace/.codex' }), /outside \/workspace/);
   const spec = buildSandbox.buildCodexExecSpec(SPEC_ARGS);
-  assert.ok(spec.env.includes('CODEX_HOME=/tmp/gemix-codex-abc123'));
+  assert.ok(spec.env.includes(`CODEX_HOME=${CODEX_HOME}`));
+  // It must sit under the HOME the image provisions, or the container has
+  // nowhere writable to put it.
+  assert.ok(spec.instructionsFile.startsWith('/var/lib/gemix-codex/'));
+});
+
+test('the throwaway CODEX_HOME is a container path the host never creates', async () => {
+  // The previous shape mkdtemp'd on the host and handed that path to the
+  // container, where it does not exist: the CLI then ran with no developer
+  // instructions at all.
+  const { CODEX_RUNNER } = await import('../src/ai/buildRunners.js');
+  const prepared = await CODEX_RUNNER.prepare();
+  try {
+    const home = prepared.execOpts.codexHome;
+    assert.match(home, /^\/var\/lib\/gemix-codex\/run-[0-9a-f]{16}$/);
+    assert.equal(fs.existsSync(home), false, 'the host must not create the container path');
+    assert.equal(prepared.execOpts.ticket.length > 0, true);
+  } finally {
+    prepared.cleanup();
+    // prepare() brings the broker up; leave no listening socket behind.
+    await broker.stopBroker();
+  }
 });
 
 test('a run without a ticket or a brief is refused', () => {

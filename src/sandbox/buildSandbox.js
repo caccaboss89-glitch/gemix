@@ -20,6 +20,7 @@
 //     proxy, which forwards upstream via the residential SOCKS5 (Redmi).
 
 import crypto from 'crypto';
+import path from 'path';
 import stream from 'stream';
 
 import constants from '../config/constants.js';
@@ -336,15 +337,15 @@ function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns 
  * @param {string} opts.prompt - the user's brief, kept separate from the rules
  * @param {string} opts.rules - build instructions, passed as developer instructions
  * @param {string} opts.ticket - single-invocation broker ticket (not a credential)
- * @param {string} opts.codexHome - throwaway CODEX_HOME outside /workspace
- * @param {string} [opts.instructionsFile] - path inside codexHome holding the rules
+ * @param {string} opts.codexHome - throwaway CODEX_HOME, a container path outside /workspace
  * @param {string} [opts.model]
  * @param {string} [opts.effort]
  * @param {number} [opts.timeoutMs]
- * @returns {{ cmd: string[], env: string[], timeoutMs: number }}
+ * @returns {{ cmd: string[], env: string[], timeoutMs: number, rules: string,
+ *   codexHome: string, instructionsFile: string }}
  */
 function buildCodexExecSpec({
-  prompt, rules, ticket, codexHome, instructionsFile, model, effort, timeoutMs
+  prompt, rules, ticket, codexHome, model, effort, timeoutMs
 } = {}) {
   if (typeof ticket !== 'string' || !ticket.trim()) {
     throw new Error('buildCodexExecSpec: missing broker ticket');
@@ -362,6 +363,8 @@ function buildCodexExecSpec({
   );
   const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
   const brokerUrl = `http://${envConfig.CODEX_BROKER_HOST}:${envConfig.CODEX_BROKER_PORT}`;
+  // Container path, so it is derived with posix rules whatever the host runs on.
+  const instructionsFile = path.posix.join(codexHome, 'instructions.md');
 
   const cmd = [
     'timeout',
@@ -376,7 +379,9 @@ function buildCodexExecSpec({
     // Every request is authenticated by the broker, never by the CLI itself.
     '--config', 'model_provider="gemix_broker"',
     '--config', 'model_providers.gemix_broker.name="GemiX broker"',
-    '--config', `model_providers.gemix_broker.base_url="${brokerUrl}/v1"`,
+    // Broker root, with no version segment: the CLI appends `/responses`, which
+    // is the only path the broker accepts.
+    '--config', `model_providers.gemix_broker.base_url="${brokerUrl}"`,
     '--config', 'model_providers.gemix_broker.env_key="CODEX_BROKER_TICKET"',
     '--config', 'model_providers.gemix_broker.wire_api="responses"',
     '--config', `model_reasoning_effort="${effort || envConfig.OPENAI_REASONING_EFFORT}"`,
@@ -384,9 +389,7 @@ function buildCodexExecSpec({
     '--config', 'project_doc_max_bytes=0',
     '--config', 'experimental_use_freeform_apply_patch=true'
   ];
-  if (typeof instructionsFile === 'string' && instructionsFile.trim()) {
-    cmd.push('--config', `experimental_instructions_file="${instructionsFile.trim()}"`);
-  }
+  cmd.push('--config', `experimental_instructions_file="${instructionsFile}"`);
   // Already inside a locked-down container with no default route; a second
   // sandbox on top of it only breaks the tools the build is meant to use.
   cmd.push('--config', 'sandbox_mode="danger-full-access"');
@@ -406,8 +409,16 @@ function buildCodexExecSpec({
   ];
 
   // `rules` travels as developer instructions in a file the CLI reads, never on
-  // the command line where it would sit next to the user's brief.
-  return { cmd, env, timeoutMs: timeout, rules: typeof rules === 'string' ? rules : '' };
+  // the command line where it would sit next to the user's brief. execCodexBuild
+  // writes it inside the container, at the path named above.
+  return {
+    cmd,
+    env,
+    timeoutMs: timeout,
+    rules: typeof rules === 'string' ? rules : '',
+    codexHome,
+    instructionsFile
+  };
 }
 
 /**
@@ -512,24 +523,103 @@ async function execGrokBuild(workspaceId, opts = {}) {
   });
 }
 
+/** Single-quote one argument for `sh -c`. */
+function _shQuote(value) {
+  return `'${String(value).replace(/'/g, '\'\\\'\'')}'`;
+}
+
+/** Run a short `sh -c` inside the container and resolve its exit code. */
+async function _containerSh(entry, script, stdin = null) {
+  const exec = await entry.container.exec({
+    Cmd: ['sh', '-c', script],
+    AttachStdin: stdin !== null,
+    AttachStdout: true,
+    AttachStderr: true,
+    User: sandboxUserString(),
+    WorkingDir: '/workspace'
+  });
+
+  const execStream = await exec.start({ hijack: true, stdin: stdin !== null });
+  const sink = new stream.PassThrough();
+  const errBuf = [];
+  const errStream = new stream.PassThrough();
+  errStream.on('data', (chunk) => errBuf.push(chunk));
+  sink.on('data', () => { /* drained so the stream can end */ });
+  entry.container.modem.demuxStream(execStream, sink, errStream);
+
+  await new Promise((resolve, reject) => {
+    execStream.on('end', resolve);
+    execStream.on('close', resolve);
+    execStream.on('error', reject);
+    if (stdin !== null) execStream.end(stdin);
+  });
+
+  let rc = 1;
+  try {
+    const inspect = await exec.inspect();
+    if (typeof inspect.ExitCode === 'number') rc = inspect.ExitCode;
+  } catch { /* treated as a failure below */ }
+  return { rc, stderr: Buffer.concat(errBuf).toString('utf8').trim() };
+}
+
+/**
+ * Create the throwaway CODEX_HOME inside the container and write the developer
+ * instructions into it.
+ *
+ * The content travels over stdin, never in argv: the rules must not sit next to
+ * the user's brief on a command line. The directory lives under
+ * /var/lib/gemix-codex, outside /workspace, so the listing, the snapshot and the
+ * harvest never see it.
+ *
+ * @param {object} entry - live sandbox entry
+ * @param {object} spec - from buildCodexExecSpec
+ */
+async function _stageCodexHome(entry, spec) {
+  const home = _shQuote(spec.codexHome);
+  const script = `mkdir -p ${home} && chmod 700 ${home} && cat > ${_shQuote(spec.instructionsFile)}`;
+  const { rc, stderr } = await _containerSh(entry, script, Buffer.from(spec.rules, 'utf8'));
+  if (rc !== 0) {
+    throw new Error(`could not stage CODEX_HOME in the sandbox (rc=${rc})${stderr ? `: ${stderr}` : ''}`);
+  }
+}
+
+/** Remove the throwaway CODEX_HOME inside the container. Best effort. */
+async function _unstageCodexHome(entry, spec) {
+  try {
+    const { rc, stderr } = await _containerSh(entry, `rm -rf ${_shQuote(spec.codexHome)}`);
+    if (rc !== 0) log.warn(`could not remove CODEX_HOME in the sandbox (rc=${rc})${stderr ? `: ${stderr}` : ''}`);
+  } catch (err) {
+    log.warn(`could not remove CODEX_HOME in the sandbox: ${err.message}`);
+  }
+}
+
 /**
  * Run the Codex CLI inside the workspace sandbox.
  *
  * The credential lives on the host: the container only ever holds the broker
  * ticket, and the ticket is redacted out of anything that could be logged. The
- * throwaway CODEX_HOME is created and removed by the caller.
+ * throwaway CODEX_HOME is created inside the container before the run and
+ * removed after it, whatever the run's outcome — a container is reused across
+ * builds, so leaving it behind would leak one build's instructions into the next.
  *
  * @param {string} workspaceId
  * @param {object} opts - see buildCodexExecSpec
  * @returns {Promise<{rc:number,stdout:string,stderr:string,timedOut:boolean,durationMs:number,cmd:string[]}>}
  */
 async function execCodexBuild(workspaceId, opts = {}) {
-  return _execBuildRunner(workspaceId, buildCodexExecSpec(opts), {
-    killPattern: '[c]odex',
-    // The brief is the last argument and the ticket never appears in argv, but
-    // the prompt itself is user content and does not belong in a log line.
-    redactCmd: (cmd) => cmd.map((c, i) => (i === cmd.length - 1 ? '[prompt]' : c))
-  });
+  const spec = buildCodexExecSpec(opts);
+  const entry = await getOrCreate(workspaceId);
+  await _stageCodexHome(entry, spec);
+  try {
+    return await _execBuildRunner(workspaceId, spec, {
+      killPattern: '[c]odex',
+      // The brief is the last argument and the ticket never appears in argv, but
+      // the prompt itself is user content and does not belong in a log line.
+      redactCmd: (cmd) => cmd.map((c, i) => (i === cmd.length - 1 ? '[prompt]' : c))
+    });
+  } finally {
+    await _unstageCodexHome(entry, spec);
+  }
 }
 
 async function _killEntry(entry) {

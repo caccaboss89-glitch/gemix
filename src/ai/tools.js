@@ -223,16 +223,11 @@ const TOOL_X_SEARCH_NATIVE = {
 
 // -- OpenAI hosted server-side tool -----------------------------------------
 //
-// The Codex backend runs its own web search inside the request and returns
-// `web_search_call.results`, mixing prose sources (later surfaced as
-// url_citation annotations) with structured `image_result` entries. Asking for
-// both content types is what makes image results appear at all; the caption and
-// max_results settings shape those entries. Serialized exactly as probed — the
-// request builder is an allowlist and drops anything not on it.
+// The Codex backend runs text web search inside the request. Image search stays
+// exclusively in GemiX's web_image_search function so every deliverable result
+// goes through the SearXNG registry and its normal validation path.
 const TOOL_OPENAI_WEB_SEARCH_HOSTED = {
-  type: 'web_search',
-  search_content_types: ['image', 'text'],
-  image_settings: { max_results: 3, caption: true }
+  type: 'web_search'
 };
 
 // -- Static tool definitions (schema never varies) -------------------------
@@ -806,8 +801,8 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // files attach natively on user turns (videos excepted, hence read_video);
   // assistant history stays [Attachment] tags. The OpenAI profile has neither an
   // X corpus nor video understanding, so it stops after the first two.
-  tools.push(can.hostedImageResults ? TOOL_OPENAI_WEB_SEARCH_HOSTED : TOOL_WEB_SEARCH_NATIVE);
-  tools.push(buildWebImageSearchTool(provider));
+  tools.push(can.hostedWebSearch ? TOOL_OPENAI_WEB_SEARCH_HOSTED : TOOL_WEB_SEARCH_NATIVE);
+  if (can.imageSearch) tools.push(buildWebImageSearchTool(provider));
   if (can.xSearch) tools.push(TOOL_X_SEARCH_NATIVE);
   if (can.readVideo) tools.push(TOOL_READ_VIDEO);
 

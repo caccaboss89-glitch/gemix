@@ -21,8 +21,12 @@
 // file content or user text is ever written.
 
 import envConfig from '../config/env.js';
-import { getOpenAiAuth, invalidateOpenAiAuthCache, OPENAI_AUTH_FILE } from '../config/openaiAuth.js';
-import { refreshHermesOAuth } from '../utils/hermesAuthRefresh.js';
+import {
+  createOpenAiOAuthState,
+  fetchWithOpenAiOAuth,
+  isOpenAiOAuthError,
+  resolveOpenAiOAuth
+} from '../utils/openaiOAuth.js';
 import { createLogger } from '../utils/logger.js';
 import { joinUrl, SseDecoder, ResponseAssembler } from './openaiResponsesProtocol.js';
 
@@ -163,31 +167,9 @@ class TurnBudget {
   }
 }
 
-/** Headers for an authenticated Codex request. Values are never logged. */
-function _authHeaders(auth) {
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${auth.accessToken}`,
-    'ChatGPT-Account-ID': auth.chatgptAccountId
-  };
-}
-
-/**
- * Resolve credentials, refreshing through Hermes first when the token would not
- * survive the operation. Shares the single-flight refresh with every other
- * OpenAI caller (Responses, images, Build).
- * @param {number} minRemainingMs
- * @returns {Promise<object>}
- */
-async function resolveAuth(minRemainingMs) {
-  try {
-    return getOpenAiAuth({ minRemainingMs });
-  } catch (err) {
-    if (err.code !== 'OPENAI_CREDENTIAL_EXPIRING') throw err;
-    await refreshHermesOAuth(envConfig.OPENAI_HERMES_REFRESH_PROVIDER, OPENAI_AUTH_FILE);
-    invalidateOpenAiAuthCache();
-    return getOpenAiAuth({ forceReload: true });
-  }
+/** Compatibility export for callers that only need the canonical credential. */
+function resolveAuth(minRemainingMs) {
+  return resolveOpenAiOAuth({ minRemainingMs });
 }
 
 /**
@@ -201,24 +183,30 @@ async function resolveAuth(minRemainingMs) {
  */
 async function callCodexResponses({ body, budget, requestId = null }) {
   const url = joinUrl(envConfig.OPENAI_BASE_URL, 'responses');
-  let hermesRefreshed = false;
+  const oauthState = createOpenAiOAuthState();
 
   for (let attempt = 1; attempt <= MAX_COLD_ATTEMPTS; attempt++) {
     if (budget.expired) {
       throw makeOpenAiError(OPENAI_ERROR.TIMEOUT, 'Turn budget exhausted before the request could start.');
     }
     const startedAt = Date.now();
-    const auth = await resolveAuth(MIN_TOKEN_REMAINING_MS);
-
     let res;
+    let oauthResult;
     try {
-      res = await fetch(url, {
+      oauthResult = await fetchWithOpenAiOAuth(url, {
         method: 'POST',
-        headers: _authHeaders(auth),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: budget.signal
+      }, {
+        minRemainingMs: MIN_TOKEN_REMAINING_MS,
+        refreshState: oauthState
       });
+      res = oauthResult.response;
     } catch (err) {
+      if (isOpenAiOAuthError(err)) {
+        throw makeOpenAiError(OPENAI_ERROR.AUTH, err.message);
+      }
       if (budget.signal.aborted) {
         throw makeOpenAiError(OPENAI_ERROR.TIMEOUT, 'Turn budget expired while contacting the model.');
       }
@@ -238,18 +226,8 @@ async function callCodexResponses({ body, budget, requestId = null }) {
       const kind = classifyHttpFailure(res.status, bodyText);
       const detail = summarizeErrorBody(bodyText);
       log.warn(`HTTP ${res.status} (${kind}) requestId=${upstreamRequestId ?? 'n/a'} gemixRequestId=${requestId ?? 'n/a'} — ${detail}`);
-
-      // One Hermes wake, one retry: exactly the recovery the xAI branch uses.
-      if (kind === OPENAI_ERROR.AUTH && !hermesRefreshed) {
-        hermesRefreshed = true;
-        try {
-          await refreshHermesOAuth(envConfig.OPENAI_HERMES_REFRESH_PROVIDER, OPENAI_AUTH_FILE);
-          invalidateOpenAiAuthCache();
-          attempt--; // a successful refresh is not a spent attempt
-          continue;
-        } catch (refreshErr) {
-          log.error(`Hermes refresh failed: ${refreshErr.message}`);
-        }
+      if (oauthResult.refreshError) {
+        log.error(`Hermes refresh failed: ${oauthResult.refreshError.message}`);
       }
 
       const retryable = kind === OPENAI_ERROR.TRANSIENT || kind === OPENAI_ERROR.RATE_LIMIT;

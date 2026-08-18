@@ -18,7 +18,6 @@ import {
   toolsToWire,
   responseToAssistantMessage,
   extractSearchStats,
-  collectImageResults,
   collectCitations
 } from './openaiResponsesProtocol.js';
 import { TurnBudget, callCodexResponses } from './openaiResponsesTransport.js';
@@ -39,7 +38,7 @@ const CALL_TIMEOUT_MS = constants.API_TIMEOUT_MS;
  * @param {string} [opts.toolChoice]
  * @param {string} [opts.requestId] - GemiX request id, for log correlation
  * @param {AbortSignal} [opts.signal] - turn-level cancellation
- * @returns {Promise<{message: object, provider: string, model: string, searchStats: object, imageResults: Array, citations: Array}>}
+ * @returns {Promise<{message: object, provider: string, model: string, searchStats: object, citations: Array}>}
  */
 async function callAI(messages, tools = null, opts = {}) {
   const profile = opts.providerProfile?.id === PROVIDER.OPENAI
@@ -73,9 +72,6 @@ async function callAI(messages, tools = null, opts = {}) {
       provider: profile.displayName,
       model: profile.model,
       searchStats: extractSearchStats(response),
-      // Structured hits from the hosted search: the only images this turn may
-      // promote to attachments.
-      imageResults: collectImageResults(response),
       citations: collectCitations(response)
     };
   } finally {

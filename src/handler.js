@@ -39,17 +39,18 @@ import {
 import { getToolsForUser, getToolAccessError  } from './ai/tools.js';
 import { buildGemixResponseFormat, parseStructuredReply  } from './ai/responseSchema.js';
 import { resolveDeliverySelection  } from './utils/deliverySelection.js';
-import { createImageRegistry, registerImageResults, registerUserUrls, IMAGE_SOURCE  } from './utils/imageRegistry.js';
+import { createImageRegistry, registerUserUrls  } from './utils/imageRegistry.js';
+import { summarizeToolArguments, summarizeToolResult  } from './utils/safeToolLogging.js';
 import { applyPastVoiceRepliesToHistory  } from './utils/voiceTranscripts.js';
 import { projectUserVoiceMessages  } from './utils/voiceMessageProjection.js';
-import { generateVoice  } from './tools/voiceMessage.js';
+import { generateVoice, spokenTextForProvider  } from './tools/voiceMessage.js';
 import { sanitizeVoiceMessageText  } from './utils/text.js';
 import { getCapabilities, resolveProfile, toolUnavailableMessage  } from './config/platformCapabilities.js';
 import { executeTool } from './tools/index.js';
 import constants from './config/constants.js';
 import envConfig from './config/env.js';
 import { createLogger  } from './utils/logger.js';
-import { appendResearchBadge, buildResearchBadgeText  } from './utils/footer.js';
+import { appendResearchBadge, buildResearchBadgeText, mergeResearchStats  } from './utils/footer.js';
 
 import { resolveWorkspaceId  } from './utils/workspaceId.js';
 import { touchActivity  } from './utils/buildState.js';
@@ -221,7 +222,7 @@ async function handleMessage(ctx) {
     // recorded right away so it cannot repeat even if it goes unanswered.
     ctx.settingsReviewDue = Boolean(ctx.settings && isReviewDue(ctx.settings, Date.now(), ctx));
     if (ctx.settingsReviewDue) {
-      try { await markReviewed(settingsFileId); }
+      try { await markReviewed(settingsFileId, ctx); }
       catch (err) { log.warn(`markReviewed failed: ${err.message}`); }
     }
 
@@ -416,12 +417,7 @@ async function handleMessage(ctx) {
     const promptCacheKey = generatePromptCacheKey(userCtx);
 
     const accumulateSearchStats = (searchStats) => {
-      if (!searchStats || (searchStats.webSources === 0 && searchStats.xPosts === 0)) return;
-      if (!responseCtx.researchStats) {
-        responseCtx.researchStats = { webSources: 0, xPosts: 0 };
-      }
-      responseCtx.researchStats.webSources += searchStats.webSources;
-      responseCtx.researchStats.xPosts += searchStats.xPosts;
+      responseCtx.researchStats = mergeResearchStats(responseCtx.researchStats, searchStats);
     };
 
     // Resolve the attachments the model listed in its structured final reply
@@ -460,12 +456,11 @@ async function handleMessage(ctx) {
 
     const executeToolCall = async (tc) => {
       try {
-        log.info(`   Executing: ${tc.function.name} args=${tc.function.arguments || '{}'}`);
+        // Metadata only: arguments and results carry prompts, message bodies,
+        // file contents and inline base64, none of which belongs in a log.
+        log.info(`   Executing: ${tc.function.name} ${summarizeToolArguments(tc.function.arguments)}`);
         const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, currentRoundTools);
-        const resultLog = Array.isArray(result) || typeof result === 'object'
-          ? JSON.stringify(result)
-          : String(result ?? '');
-        log.info(`   Result: ${resultLog}`);
+        log.info(`   Result: ${summarizeToolResult(result)}`);
         return {
           role: 'tool',
           tool_call_id: toolCallId,
@@ -487,7 +482,8 @@ async function handleMessage(ctx) {
     // `voice:true` (WhatsApp dedicated only). Returns a voice response object,
     // or null to fall back to a normal text reply (too long, error).
     const buildVoiceReply = async (rawResponseText, finalAttachments) => {
-      const spoken = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
+      const sanitized = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
+      const spoken = spokenTextForProvider(sanitized, ctx);
       if (!spoken.trim()) return null;
 
       if (spoken.length > constants.MAX_TTS_CHARS) {
@@ -568,11 +564,10 @@ async function handleMessage(ctx) {
         reasoningEffort: ctx.settings?.effort
       };
 
-      const { message: assistantMsg, provider, model, searchStats, citations, imageResults } = await callAI(messages, roundTools, callOpts);
+      const { message: assistantMsg, provider, model, searchStats, citations } = await callAI(messages, roundTools, callOpts);
       lastModelUsed = model;
       accumulateSearchStats(searchStats);
       roundCitations = Array.isArray(citations) ? citations : [];
-      registerImageResults(responseCtx.imageRegistry, imageResults, IMAGE_SOURCE.HOSTED);
       log.info(`   Provider: ${provider} (${model})`);
 
       if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
@@ -772,7 +767,7 @@ async function handleMessage(ctx) {
         role: 'user',
         content: wrapSystemReminder(wrapUpNote)
       });
-      const { message: finalMsg, model: finalModel, searchStats, citations, imageResults } = await callAI(messages, wrapUpTools, {
+      const { message: finalMsg, model: finalModel, searchStats, citations } = await callAI(messages, wrapUpTools, {
         providerProfile,
         toolChoice: 'none',
         requestId: ctx.requestId,
@@ -784,7 +779,6 @@ async function handleMessage(ctx) {
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
       roundCitations = Array.isArray(citations) ? citations : [];
-      registerImageResults(responseCtx.imageRegistry, imageResults, IMAGE_SOURCE.HOSTED);
       const parsed = parseStructuredReply(finalMsg.content || '');
       applyParsedTitle(parsed);
       applyParsedCitations(parsed);

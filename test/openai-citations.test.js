@@ -3,9 +3,9 @@
 // Phase 7: the two things that decide what a reply is allowed to say and send.
 //
 // Citations arrive as separate annotations on this provider instead of being
-// written into the text, and images arrive as structured search results. Both
-// are projected into the shared contract here, and both have to survive the
-// malformed cases without corrupting the reply or promoting a URL nobody found.
+// written into the text, while images arrive only from structured SearXNG
+// results. Both paths have to survive malformed data without corrupting the
+// reply or promoting a URL nobody found.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +19,7 @@ seedEnv({ XAI_AUTH_FILE: AUTH_FILE, OPENAI_AUTH_FILE: AUTH_FILE });
 
 const { applyCitationAnnotations, renderInlineCitations, sanitizeVoiceMessageText } =
   await import('../src/utils/text.js');
-const { SseDecoder, ResponseAssembler, collectCitations, collectImageResults } =
+const { SseDecoder, ResponseAssembler, collectCitations } =
   await import('../src/ai/openaiResponsesProtocol.js');
 const {
   MAX_REGISTERED_IMAGES,
@@ -189,15 +189,19 @@ test('normalizeImageUrl accepts https and rejects everything else', () => {
   assert.equal(normalizeImageUrl(''), null);
 });
 
-test('hosted image results register with their source page, deduplicated', () => {
+test('SearXNG image results register with their source page, deduplicated', () => {
   const registry = createImageRegistry();
-  const results = collectImageResults(assembleFixture('web-search.sse.txt'));
-  assert.equal(registerImageResults(registry, results, IMAGE_SOURCE.HOSTED), 2);
+  const results = [
+    { url: 'https://cdn.example.invalid/one.webp', sourcePage: 'https://example.invalid/gallery' },
+    { url: 'https://cdn.example.invalid/one.webp', sourcePage: 'https://example.invalid/gallery' },
+    { url: 'https://cdn.example.invalid/two.webp', sourcePage: 'https://example.invalid/other' }
+  ];
+  assert.equal(registerImageResults(registry, results, IMAGE_SOURCE.SEARCH), 2);
   const entry = lookupImage(registry, 'https://cdn.example.invalid/one.webp');
-  assert.equal(entry.source, IMAGE_SOURCE.HOSTED);
+  assert.equal(entry.source, IMAGE_SOURCE.SEARCH);
   assert.equal(entry.sourcePage, 'https://example.invalid/gallery');
   // Re-registering the same hits adds nothing.
-  assert.equal(registerImageResults(registry, results, IMAGE_SOURCE.HOSTED), 0);
+  assert.equal(registerImageResults(registry, results, IMAGE_SOURCE.SEARCH), 0);
 });
 
 test('the per-turn budget caps the registry', () => {

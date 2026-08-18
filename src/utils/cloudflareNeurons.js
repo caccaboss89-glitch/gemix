@@ -4,9 +4,10 @@
 //
 // Speech-to-text and the image fallback draw on the same allowance, so they
 // share this counter rather than keeping two optimistic ones that together
-// overshoot. The period key is the UTC date: the allowance resets at 00:00 UTC
-// and so does the circuit breaker, which survives restarts because the state
-// lives in systemState.json.
+// overshoot. The period key is the Europe/Rome calendar date: the allowance
+// and circuit breaker reset at the next local midnight, including across DST
+// changes. The breaker survives restarts because the state lives in
+// systemState.json.
 //
 // The reservation is pessimistic. Units are charged before the request goes out
 // and refunded only when the request provably never reached Cloudflare — once
@@ -18,6 +19,7 @@
 
 import { get as getState, update as updateState } from './systemState.js';
 import { createLogger } from './logger.js';
+import { convertRomeLocalToISO, getRomeParts } from './time.js';
 
 const log = createLogger('CfNeurons');
 
@@ -34,6 +36,12 @@ const STT_NEURONS_PER_MINUTE = 46.63;
  */
 const IMAGE_NEURONS_PER_TILE = 250;
 
+/** User/model-visible explanations for the two consumers of the allowance. */
+const STT_DAILY_LIMIT_MESSAGE =
+  'Il limite giornaliero di trascrizione è esaurito; si resetta alla prossima mezzanotte (Europe/Rome).';
+const IMAGE_DAILY_LIMIT_MESSAGE =
+  'Il limite giornaliero di generazione immagini tramite Cloudflare è esaurito; si resetta alla prossima mezzanotte (Europe/Rome).';
+
 /** Reasons a reservation can be refused. */
 const NEURON_DENIAL = {
   /** The remaining allowance is smaller than the request. */
@@ -42,12 +50,23 @@ const NEURON_DENIAL = {
   CIRCUIT_OPEN: 'circuit_open'
 };
 
-/** UTC day the allowance belongs to. */
+/** Europe/Rome calendar day the allowance belongs to. */
 function periodKey(now = Date.now()) {
-  return new Date(now).toISOString().slice(0, 10);
+  const date = now instanceof Date ? now : new Date(now);
+  const { year, month, day } = getRomeParts(date);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-/** Reset the counters when the stored state belongs to an earlier UTC day. */
+/** Epoch of the next Europe/Rome midnight, used by retryable cached denials. */
+function nextRomeMidnightMs(now = Date.now()) {
+  const date = now instanceof Date ? now : new Date(now);
+  const { year, month, day } = getRomeParts(date);
+  const nextDate = new Date(Date.UTC(year, month - 1, day + 1));
+  const localMidnight = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDate.getUTCDate()).padStart(2, '0')}T00:00:00`;
+  return Date.parse(convertRomeLocalToISO(localMidnight));
+}
+
+/** Reset the counters when the stored state belongs to an earlier Rome day. */
 function _rollOver(state, period) {
   if (state && state.period === period) {
     return {
@@ -103,7 +122,7 @@ async function reserveNeurons(units, kind = 'stt') {
       return state;
     }
     const next = { ...state, used: state.used + cost, calls: state.calls + 1 };
-    outcome = { ok: true, charged: cost, remaining: DAILY_FREE_NEURONS - next.used };
+    outcome = { ok: true, charged: cost, period: state.period, remaining: DAILY_FREE_NEURONS - next.used };
     return next;
   });
 
@@ -118,27 +137,32 @@ async function reserveNeurons(units, kind = 'stt') {
  * a connection that never opened, a body that failed to build). Anything the
  * API answered — including an error — stays charged.
  *
- * @param {number} units
+ * @param {number|{charged:number, period?:string}} reservation
  * @returns {Promise<void>}
  */
-async function refundNeurons(units) {
-  const cost = Math.max(0, Math.ceil(Number(units) || 0));
+async function refundNeurons(reservation) {
+  const rawCost = typeof reservation === 'object' ? reservation?.charged : reservation;
+  const reservedPeriod = typeof reservation === 'object' ? reservation?.period : null;
+  const cost = Math.max(0, Math.ceil(Number(rawCost) || 0));
   if (cost === 0) return;
   await updateState(MODULE, (current) => {
     const state = _rollOver(current, periodKey());
+    // A delayed completion from yesterday must never subtract from today's
+    // fresh allowance.
+    if (reservedPeriod && reservedPeriod !== state.period) return state;
     return { ...state, used: Math.max(0, state.used - cost), calls: Math.max(0, state.calls - 1) };
   });
 }
 
 /**
- * Cloudflare said the account is out of quota: stop trying until the UTC reset.
+ * Cloudflare said the account is out of quota: stop trying until Rome midnight.
  * @returns {Promise<void>}
  */
 async function openQuotaCircuit() {
   await updateState(MODULE, (current) => {
     const state = _rollOver(current, periodKey());
     if (state.circuitOpen) return state;
-    log.warn('Cloudflare reported the free quota is exhausted — pausing until 00:00 UTC.');
+    log.warn('Cloudflare reported the free quota is exhausted — pausing until the next Europe/Rome midnight.');
     return { ...state, circuitOpen: true, used: DAILY_FREE_NEURONS };
   });
 }
@@ -162,8 +186,11 @@ export {
   DAILY_FREE_NEURONS,
   STT_NEURONS_PER_MINUTE,
   IMAGE_NEURONS_PER_TILE,
+  STT_DAILY_LIMIT_MESSAGE,
+  IMAGE_DAILY_LIMIT_MESSAGE,
   NEURON_DENIAL,
   periodKey,
+  nextRomeMidnightMs,
   neuronsForAudioSeconds,
   neuronsForImage,
   reserveNeurons,

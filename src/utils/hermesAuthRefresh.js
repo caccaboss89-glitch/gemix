@@ -21,7 +21,7 @@ const { HERMES_REFRESH_TIMEOUT_MS, HERMES_REFRESH_QUERY } = envConfig;
 /** Map<`${provider}|${authFile}`, Promise> — one refresh per pair. */
 const _refreshInFlight = new Map();
 
-function _runHermesRefresh(provider) {
+function buildHermesRefreshArgs(provider, { model = '' } = {}) {
   const args = [
     'chat',
     '-q', HERMES_REFRESH_QUERY,
@@ -31,6 +31,14 @@ function _runHermesRefresh(provider) {
     '--ignore-rules',
     '--max-turns', '1'
   ];
+  if (typeof model === 'string' && model.trim()) {
+    args.push('--model', model.trim());
+  }
+  return args;
+}
+
+function _runHermesRefresh(provider, opts = {}) {
+  const args = buildHermesRefreshArgs(provider, opts);
 
   return new Promise((resolve, reject) => {
     let child;
@@ -44,7 +52,6 @@ function _runHermesRefresh(provider) {
     }
 
     let stdout = '';
-    let stderr = '';
     let settled = false;
     const settle = (fn, value) => {
       if (settled) return;
@@ -60,14 +67,15 @@ function _runHermesRefresh(provider) {
     killer.unref?.();
 
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    // Drain stderr without retaining it. CLI failures must not echo request or
+    // credential material into application errors or logs.
+    child.stderr.on('data', () => {});
     child.on('error', (err) => {
       settle(reject, new Error(`Hermes process error: ${err.message}`));
     });
     child.on('close', (code) => {
       if (code !== 0) {
-        const detail = (stderr || stdout || `exit code ${code}`).trim().slice(0, 500);
-        return settle(reject, new Error(`Hermes exited with code ${code}: ${detail}`));
+        return settle(reject, new Error(`Hermes exited with code ${code}.`));
       }
       settle(resolve, stdout.trim());
     });
@@ -96,9 +104,12 @@ function _authFileStamp(authFile) {
  *
  * @param {string} providerId - Hermes provider/pool name (e.g. 'xai-oauth')
  * @param {string} authFile - the auth.json this caller reads
+ * @param {object} [opts]
+ * @param {string} [opts.model] - inexpensive provider model for the wake call
+ * @param {boolean} [opts.requireAuthFileChange] - fail if Hermes leaves authFile unchanged
  * @returns {Promise<string>} Hermes response text on success.
  */
-async function refreshHermesOAuth(providerId, authFile) {
+async function refreshHermesOAuth(providerId, authFile, opts = {}) {
   const provider = typeof providerId === 'string' && providerId.trim()
     ? providerId.trim()
     : envConfig.HERMES_REFRESH_PROVIDER;
@@ -110,10 +121,12 @@ async function refreshHermesOAuth(providerId, authFile) {
   const run = (async () => {
     log.warn(`Invoking Hermes OAuth refresh for provider "${provider}"...`);
     const before = _authFileStamp(authFile);
-    const reply = await _runHermesRefresh(provider);
+    const reply = await _runHermesRefresh(provider, opts);
     const after = _authFileStamp(authFile);
-    if (authFile && before !== null && before === after) {
-      log.warn(`Hermes exited cleanly but did not update ${authFile} — the credential may still be stale.`);
+    if (authFile && (after === null || before === after)) {
+      const message = `Hermes exited cleanly but did not update ${authFile}.`;
+      if (opts.requireAuthFileChange) throw new Error(message);
+      log.warn(`${message} The credential may still be stale.`);
     } else {
       log.info('Hermes OAuth refresh completed — auth file updated.');
     }
@@ -126,5 +139,5 @@ async function refreshHermesOAuth(providerId, authFile) {
   return run;
 }
 
-export { refreshHermesOAuth
+export { refreshHermesOAuth, buildHermesRefreshArgs
 };

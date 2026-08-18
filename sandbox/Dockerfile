@@ -75,12 +75,16 @@ RUN pip install --no-cache-dir --retries 5 --timeout 120 yt-dlp
 # sandbox has no package installs at runtime; operators rebuild this image to
 # upgrade either. Host GemiX only needs Docker.
 # pptxgenjs / docx stack remain available for ad-hoc scripts under /workspace.
+# @openai/codex is pinned because Codex Build drives it through the experimental
+# `experimental_instructions_file` and custom model_providers config keys, which
+# have moved between releases; bump it only after re-checking those flags. Grok
+# stays unpinned: it is configured entirely through stable CLI arguments.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g --no-fund --no-audit \
         @xai-official/grok \
-        @openai/codex \
+        @openai/codex@0.147.0 \
         pptxgenjs \
         react-icons \
         react \

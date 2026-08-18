@@ -12,6 +12,8 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { seedEnv, writeAuthFile } from './helpers/testEnv.js';
 import { installFetchStub } from './helpers/fetchStub.js';
 
@@ -24,11 +26,20 @@ seedEnv({
 });
 
 const constants = (await import('../src/config/constants.js')).default;
+const envConfig = (await import('../src/config/env.js')).default;
 const neurons = await import('../src/utils/cloudflareNeurons.js');
 const { update: updateState } = await import('../src/utils/systemState.js');
 const { STT_STATUS, transcribeAudioFile, contentHashOf, isSttConfigured } = await import('../src/utils/speechToText.js');
 const { projectUserVoiceMessages, MAX_NEW_TRANSCRIPTIONS_PER_TURN } = await import('../src/utils/voiceMessageProjection.js');
+const {
+  collectReferencedHistoryFilenames,
+  getStoredUserTranscription,
+  storeUserTranscription,
+  pruneHistory
+} = await import('../src/utils/historySync.js');
 const { escapeXml } = await import('../src/utils/xmlEscape.js');
+
+const execFileAsync = promisify(execFile);
 
 // The history root is a fixed code-level path, so the fixtures live under a
 // throwaway user id inside it and both it and the shared state file are put
@@ -103,26 +114,85 @@ test('STT and images draw on the same counter', async () => {
   assert.equal((await neurons.reserveNeurons(3000, 'stt')).ok, false);
 });
 
+test('parallel reservations are atomic and cannot overshoot', async () => {
+  await resetLedger();
+  const outcomes = await Promise.all(
+    Array.from({ length: 125 }, (_, i) => neurons.reserveNeurons(100, i % 2 ? 'stt' : 'image'))
+  );
+  assert.equal(outcomes.filter(result => result.ok).length, 100);
+  assert.equal(neurons.readNeuronLedger().used, neurons.DAILY_FREE_NEURONS);
+  assert.equal(neurons.readNeuronLedger().calls, 100);
+});
+
+test('the persistent lock keeps concurrent processes on the same allowance', async () => {
+  await resetLedger();
+  const script = [
+    'import(\'./src/utils/cloudflareNeurons.js\')',
+    '.then(async m => {',
+    '  for (let i = 0; i < 30; i++) await m.reserveNeurons(100, \'stt\');',
+    '})'
+  ].join('\n');
+  await Promise.all(Array.from({ length: 4 }, () => execFileAsync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: path.resolve('.'),
+    windowsHide: true
+  })));
+  const ledger = neurons.readNeuronLedger();
+  assert.equal(ledger.used, neurons.DAILY_FREE_NEURONS);
+  assert.equal(ledger.calls, 100);
+});
+
+test('a restart can recover a lock left by a dead process', async () => {
+  await resetLedger();
+  const lockFile = `${STATE_FILE}.lock`;
+  fs.writeFileSync(lockFile, `2147483647:${Date.now()}:dead-owner`);
+  const startedAt = Date.now();
+  const reservation = await neurons.reserveNeurons(100, 'stt');
+  assert.equal(reservation.ok, true);
+  assert.ok(Date.now() - startedAt < 1000, 'a dead owner must not impose the lock timeout');
+  assert.equal(fs.existsSync(lockFile), false);
+});
+
 test('a refund is only for a request that never went out', async () => {
   await resetLedger();
-  await neurons.reserveNeurons(500, 'stt');
-  await neurons.refundNeurons(500);
+  const reservation = await neurons.reserveNeurons(500, 'stt');
+  await neurons.refundNeurons(reservation);
   assert.equal(neurons.readNeuronLedger().used, 0);
 });
 
-test('the quota breaker stays open until the UTC reset', async () => {
+test('a late refund from an old period cannot debit the new day', async () => {
+  await resetLedger();
+  await neurons.reserveNeurons(200, 'image');
+  await neurons.refundNeurons({ charged: 100, period: '2000-01-01' });
+  assert.equal(neurons.readNeuronLedger().used, 200);
+});
+
+test('the quota breaker stays open until the Europe/Rome reset', async () => {
   await resetLedger();
   await neurons.openQuotaCircuit();
   const denied = await neurons.reserveNeurons(1, 'stt');
   assert.equal(denied.reason, neurons.NEURON_DENIAL.CIRCUIT_OPEN);
   assert.equal(neurons.readNeuronLedger().circuitOpen, true);
 
-  // A new UTC day is a fresh allowance, breaker included.
+  // A new Rome day is a fresh allowance, breaker included.
   await updateState('cloudflareNeurons', () => ({ period: '2000-01-01', used: 9999, circuitOpen: true, calls: 12 }));
   const ledger = neurons.readNeuronLedger();
   assert.equal(ledger.period, neurons.periodKey());
   assert.equal(ledger.used, 0);
   assert.equal(ledger.circuitOpen, false);
+});
+
+test('the period and next reset follow Rome local midnight across offsets', () => {
+  assert.equal(neurons.periodKey(Date.parse('2026-01-18T22:30:00Z')), '2026-01-18');
+  assert.equal(neurons.periodKey(Date.parse('2026-01-18T23:30:00Z')), '2026-01-19');
+  assert.equal(neurons.periodKey(Date.parse('2026-08-18T22:30:00Z')), '2026-08-19');
+  assert.equal(
+    neurons.nextRomeMidnightMs(Date.parse('2026-01-18T22:30:00Z')),
+    Date.parse('2026-01-18T23:00:00Z')
+  );
+  assert.equal(
+    neurons.nextRomeMidnightMs(Date.parse('2026-08-18T21:30:00Z')),
+    Date.parse('2026-08-18T22:00:00Z')
+  );
 });
 
 // -- Transcription -----------------------------------------------------------
@@ -183,7 +253,9 @@ test('an out-of-quota answer opens the breaker and stays charged', async () => {
   ));
   try {
     const result = await transcribeAudioFile(writeVoice('quota.ogg'), { durationSec: 30 });
-    assert.equal(result.status, STT_STATUS.ERROR);
+    assert.equal(result.status, STT_STATUS.QUOTA_EXHAUSTED);
+    assert.equal(result.message, neurons.STT_DAILY_LIMIT_MESSAGE);
+    assert.ok(result.retryAt > Date.now());
     // Cloudflare answered, so the neurons are spent whatever it said.
     assert.equal(neurons.readNeuronLedger().circuitOpen, true);
   } finally {
@@ -191,13 +263,13 @@ test('an out-of-quota answer opens the breaker and stays charged', async () => {
   }
 });
 
-test('a request that never left the host is refunded', async () => {
+test('an ambiguous fetch failure stays charged so a retry cannot overshoot', async () => {
   await resetLedger();
   const stub = installFetchStub(() => { throw new TypeError('fetch failed'); });
   try {
     const result = await transcribeAudioFile(writeVoice('offline.ogg'), { durationSec: 60 });
     assert.equal(result.status, STT_STATUS.ERROR);
-    assert.equal(neurons.readNeuronLedger().used, 0);
+    assert.equal(neurons.readNeuronLedger().used, neurons.neuronsForAudioSeconds(60));
   } finally {
     stub.restore();
   }
@@ -255,6 +327,27 @@ test('a voice note becomes a VoiceMessage tag on the same user turn', async () =
   }
 });
 
+test('reply prefixes, history and current content keep their role and position', async () => {
+  await resetLedger();
+  resetTranscriptCache();
+  writeVoice('reply.ogg');
+  const stub = installFetchStub(() => cfOk('testo della risposta'));
+  try {
+    const out = await projectUserVoiceMessages({
+      history: [{ role: 'user', content: '[In reply to: [Attachment: reply.ogg]]\nmessaggio storico' }],
+      current: '[In reply to: [Attachment: reply.ogg]]\nmessaggio corrente',
+      storageId: STORAGE_ID
+    });
+    const tag = '<VoiceMessage file="reply.ogg">testo della risposta</VoiceMessage>';
+    assert.equal(out.history[0].content, `[In reply to: ${tag}]\nmessaggio storico`);
+    assert.equal(out.current, `[In reply to: ${tag}]\nmessaggio corrente`);
+    assert.equal(out.history[0].role, 'user');
+    assert.equal(stub.calls.length, 1);
+  } finally {
+    stub.restore();
+  }
+});
+
 test('the transcript is cached by content hash and model', async () => {
   await resetLedger();
   resetTranscriptCache();
@@ -288,6 +381,23 @@ test('the transcript is cached by content hash and model', async () => {
   }
 });
 
+test('a cached quota state expires at its reset boundary', async () => {
+  resetTranscriptCache();
+  const abs = writeVoice('quota-cache.ogg');
+  const hash = contentHashOf(fs.readFileSync(abs));
+  const base = {
+    text: '',
+    status: STT_STATUS.QUOTA_EXHAUSTED,
+    provider: 'cloudflare',
+    model: envConfig.CLOUDFLARE_STT_MODEL,
+    contentHash: hash
+  };
+  await storeUserTranscription(STORAGE_ID, 'quota-cache.ogg', { ...base, retryAt: Date.now() + 60_000 });
+  assert.notEqual(getStoredUserTranscription(STORAGE_ID, 'quota-cache.ogg', hash, base.model), null);
+  await storeUserTranscription(STORAGE_ID, 'quota-cache.ogg', { ...base, retryAt: Date.now() - 1 });
+  assert.equal(getStoredUserTranscription(STORAGE_ID, 'quota-cache.ogg', hash, base.model), null);
+});
+
 test('a failed transcription carries a status, never invented words', async () => {
   await resetLedger();
   resetTranscriptCache();
@@ -304,6 +414,52 @@ test('a failed transcription carries a status, never invented words', async () =
   }
 });
 
+test('quota exhaustion is explicit Italian model-visible content', async () => {
+  await resetLedger();
+  resetTranscriptCache();
+  writeVoice('daily-limit.ogg');
+  await neurons.openQuotaCircuit();
+  const stub = installFetchStub(() => { throw new Error('the open circuit must stop the request'); });
+  try {
+    const out = await projectUserVoiceMessages({
+      history: [],
+      current: '[Attachment: daily-limit.ogg]',
+      storageId: STORAGE_ID
+    });
+    assert.match(out.current, /status="quota_exhausted"/);
+    assert.match(out.current, /limite giornaliero di trascrizione è esaurito/i);
+    assert.match(out.current, /prossima mezzanotte \(Europe\/Rome\)/);
+    assert.doesNotMatch(out.current, /trascrizione non disponibile/i);
+    assert.equal(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('an unconfigured STT replaces every voice attachment with an explicit state', async () => {
+  const account = envConfig.CLOUDFLARE_AI_ACCOUNT_ID;
+  const token = envConfig.CLOUDFLARE_AI_API_TOKEN;
+  envConfig.CLOUDFLARE_AI_ACCOUNT_ID = '';
+  envConfig.CLOUDFLARE_AI_API_TOKEN = '';
+  const stub = installFetchStub(() => { throw new Error('unconfigured STT must fail before fetch'); });
+  try {
+    const out = await projectUserVoiceMessages({
+      history: [{ role: 'user', content: 'prima [Attachment: old.ogg]' }],
+      current: '[In reply to: [Attachment: current.ogg]]\nadesso',
+      storageId: STORAGE_ID
+    });
+    assert.match(out.history[0].content, /status="unconfigured"/);
+    assert.match(out.current, /status="unconfigured"/);
+    assert.match(out.current, /trascrizione vocale non è configurata/i);
+    assert.doesNotMatch(out.history[0].content + out.current, /\[Attachment:/);
+    assert.equal(stub.calls.length, 0);
+  } finally {
+    stub.restore();
+    envConfig.CLOUDFLARE_AI_ACCOUNT_ID = account;
+    envConfig.CLOUDFLARE_AI_API_TOKEN = token;
+  }
+});
+
 test('a transcript cannot close its own tag or inject structure', async () => {
   await resetLedger();
   resetTranscriptCache();
@@ -314,6 +470,23 @@ test('a transcript cannot close its own tag or inject structure', async () => {
     const out = await projectUserVoiceMessages({ history: [], current: '[Attachment: inject.ogg]', storageId: STORAGE_ID });
     assert.equal(out.current, `<VoiceMessage file="inject.ogg">${escapeXml(hostile)}</VoiceMessage>`);
     assert.equal(out.current.includes('</VoiceMessage><system-reminder>'), false);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('voice filenames are XML-escaped too', async () => {
+  await resetLedger();
+  resetTranscriptCache();
+  writeVoice('amp&voice.ogg');
+  const stub = installFetchStub(() => cfOk('ciao'));
+  try {
+    const out = await projectUserVoiceMessages({
+      history: [],
+      current: '[Attachment: amp&voice.ogg]',
+      storageId: STORAGE_ID
+    });
+    assert.equal(out.current, '<VoiceMessage file="amp&amp;voice.ogg">ciao</VoiceMessage>');
   } finally {
     stub.restore();
   }
@@ -414,6 +587,30 @@ test('parts arrays are projected as well as plain strings', async () => {
     assert.equal(out.current[0].text, 'ecco <VoiceMessage file="parts.ogg">testo dalla parte</VoiceMessage>');
     // Non-text parts keep their position and their content.
     assert.equal(out.current[1].type, 'input_image');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('pruning uses the original attachment tags and removes transcript metadata with the file', async () => {
+  await resetLedger();
+  resetTranscriptCache();
+  const abs = writeVoice('prune-cache.ogg');
+  const bytes = fs.readFileSync(abs);
+  const hash = contentHashOf(bytes);
+  const original = [{ role: 'user', content: '[Attachment: prune-cache.ogg]' }];
+  const stub = installFetchStub(() => cfOk('resta finché referenziato'));
+  try {
+    const projected = await projectUserVoiceMessages({ history: original, current: '', storageId: STORAGE_ID });
+    assert.match(projected.history[0].content, /<VoiceMessage/);
+    assert.equal(collectReferencedHistoryFilenames(original).has('prune-cache.ogg'), true);
+    pruneHistory(STORAGE_ID, collectReferencedHistoryFilenames(original));
+    assert.equal(fs.existsSync(abs), true);
+    assert.notEqual(getStoredUserTranscription(STORAGE_ID, 'prune-cache.ogg', hash, envConfig.CLOUDFLARE_STT_MODEL), null);
+
+    pruneHistory(STORAGE_ID, new Set());
+    assert.equal(fs.existsSync(abs), false);
+    assert.equal(getStoredUserTranscription(STORAGE_ID, 'prune-cache.ogg', hash, envConfig.CLOUDFLARE_STT_MODEL), null);
   } finally {
     stub.restore();
   }

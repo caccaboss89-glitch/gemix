@@ -5,7 +5,7 @@
 // implementation that profile names.
 //
 // Both branches return the same shape — { message, provider, model,
-// searchStats, imageResults, citations } — so the handler loop never has to
+// searchStats, citations } — so the handler loop never has to
 // know which back end answered.
 
 import { PROVIDER, profileFromContext } from './providers/providerProfile.js';
@@ -23,7 +23,7 @@ const IMPLEMENTATIONS = {
  * @param {Array|null} tools
  * @param {object} [opts] - carries providerProfile plus the per-call options
  *   the selected implementation understands.
- * @returns {Promise<{message: object, provider: string, model: string, searchStats: object, imageResults: Array, citations: Array}>}
+ * @returns {Promise<{message: object, provider: string, model: string, searchStats: object, citations: Array}>}
  */
 async function callAI(messages, tools = null, opts = {}) {
   const profile = profileFromContext(opts);

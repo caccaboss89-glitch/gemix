@@ -2,7 +2,7 @@
 //
 // Phase 3: the Codex Responses wire format — request building, SSE decoding
 // under hostile chunking, canonical item assembly, and the reading helpers
-// (assistant message, search stats, structured image hits, citations).
+// (assistant message, search sources and citations).
 //
 // Everything here runs off the sanitized fixtures in test/fixtures/openai.
 
@@ -26,7 +26,7 @@ const {
   ResponseAssembler,
   responseToAssistantMessage,
   extractSearchStats,
-  collectImageResults,
+  collectSearchSources,
   collectCitations
 } = await import('../src/ai/openaiResponsesProtocol.js');
 
@@ -65,22 +65,19 @@ test('request body is an allowlist: no xAI field and no server-side state', () =
   assert.equal(body.stream, true);
   assert.equal(body.model, 'gpt-5.6-sol');
   assert.deepEqual(body.reasoning, { effort: 'max' });
+  assert.deepEqual(body.include, ['web_search_call.action.sources']);
   assert.equal(body.text.format.name, 'gemix_reply');
-  for (const forbidden of ['previous_response_id', 'max_turns', 'prompt_cache_key', 'include', 'conversation']) {
+  for (const forbidden of ['previous_response_id', 'max_turns', 'prompt_cache_key', 'conversation']) {
     assert.equal(forbidden in body, false, `${forbidden} must never be sent`);
   }
 });
 
-test('hosted tools pass through and function tools are flattened', () => {
+test('hosted search is forced to text-only and function tools are flattened', () => {
   const wire = toolsToWire([
     { type: 'web_search', search_content_types: ['image', 'text'], image_settings: { max_results: 3, caption: true } },
     { type: 'function', function: { name: 'build', description: 'd', parameters: { type: 'object', properties: {} } } }
   ]);
-  assert.deepEqual(wire[0], {
-    type: 'web_search',
-    search_content_types: ['image', 'text'],
-    image_settings: { max_results: 3, caption: true }
-  });
+  assert.deepEqual(wire[0], { type: 'web_search' });
   assert.equal(wire[1].type, 'function');
   assert.equal(wire[1].name, 'build');
   assert.equal('function' in wire[1], false);
@@ -208,17 +205,25 @@ test('assistant message carries tool calls and replayable items', () => {
   assert.equal(message._responsesOutput.length, 2);
 });
 
-test('hosted search yields text stats, deduped image hits and clean citations', () => {
+test('hosted search yields deduplicated real sources and clean citations', () => {
   const response = decodeStream(fixture('web-search.sse.txt'), 512).toResponse();
 
-  // Image results never count as web sources, and there is no X corpus here.
-  assert.deepEqual(extractSearchStats(response), { webSources: 2, xPosts: 0 });
-
-  const images = collectImageResults(response);
-  assert.equal(images.length, 2, 'the duplicated image_result must collapse');
-  assert.equal(images[0].imageUrl, 'https://cdn.example.invalid/one.webp');
-  assert.equal(images[0].caption, 'Placeholder caption one');
-  assert.equal(images[1].thumbnailUrl, null);
+  const sources = collectSearchSources(response);
+  assert.equal(sources.length, 3, 'duplicate URLs collapse while the named feed survives');
+  assert.deepEqual(sources.map(source => source.url), [
+    'https://example.invalid/alpha',
+    'https://example.invalid/beta',
+    null
+  ]);
+  assert.deepEqual(extractSearchStats(response), {
+    webSources: 3,
+    xPosts: 0,
+    webSourceKeys: [
+      'url:https://example.invalid/alpha',
+      'url:https://example.invalid/beta',
+      'feed:oai-weather:weather'
+    ]
+  });
 
   const citations = collectCitations(response);
   assert.equal(citations.length, 2, 'duplicate URLs collapse, distinct ones survive');

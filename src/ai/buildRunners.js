@@ -18,9 +18,7 @@
 // broker (see sandbox/codexAuthBroker.js). Its rules text names Codex Build and
 // mentions no xAI tool, endpoint or capability.
 
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import crypto from 'crypto';
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { PROVIDER } from './providers/providerProfile.js';
@@ -29,9 +27,6 @@ import { getOpenAiAuth } from '../config/openaiAuth.js';
 import { mintTicket, revokeTicket, startBroker } from '../sandbox/codexAuthBroker.js';
 import buildSandbox from '../sandbox/buildSandbox.js';
 import { getRomeTime } from '../utils/time.js';
-import { createLogger } from '../utils/logger.js';
-
-const log = createLogger('BuildRunner');
 
 /** Rules every build agent gets, whichever CLI is running. */
 function _sharedRuleLines({ networkLine, skillsLine }) {
@@ -153,16 +148,21 @@ const CODEX_RUNNER = {
   },
 
   /**
-   * Bring up the auth boundary for one invocation: a throwaway CODEX_HOME
-   * outside the workspace, the developer instructions written into it, and a
-   * ticket that dies with the run. No credential is produced here — the check
-   * below only confirms the host still has one for the broker to use.
+   * Bring up the auth boundary for one invocation: the container path that will
+   * hold the throwaway CODEX_HOME, and a ticket that dies with the run. No
+   * credential is produced here — the check below only confirms the host still
+   * has one for the broker to use.
+   *
+   * The directory itself is created, populated and removed inside the container
+   * by buildSandbox.execCodexBuild: it is a container path, so the host must not
+   * try to manage it. HOME is /var/lib/gemix-codex in the image, which is
+   * writable and sits outside /workspace, so nothing here reaches the harvest.
    */
   async prepare() {
     getOpenAiAuth({ minRemainingMs: constants.BUILD_HARD_TIMEOUT_MS });
     await startBroker();
 
-    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-codex-'));
+    const codexHome = `/var/lib/gemix-codex/run-${crypto.randomBytes(8).toString('hex')}`;
     const ticket = mintTicket({ ttlMs: constants.BUILD_HARD_TIMEOUT_MS + 60_000 });
     return {
       execOpts: {
@@ -171,24 +171,12 @@ const CODEX_RUNNER = {
         model: envConfig.OPENAI_MODEL,
         effort: envConfig.OPENAI_REASONING_EFFORT
       },
-      cleanup: () => {
-        revokeTicket(ticket);
-        try {
-          fs.rmSync(codexHome, { recursive: true, force: true });
-        } catch (err) {
-          log.warn(`could not remove the temporary CODEX_HOME: ${err.message}`);
-        }
-      }
+      cleanup: () => revokeTicket(ticket)
     };
   },
 
   exec(workspaceId, opts) {
-    // The rules are developer instructions, read from a file inside the
-    // throwaway CODEX_HOME so they never sit next to the user's brief and never
-    // appear in the workspace.
-    const instructionsFile = path.join(opts.codexHome, 'instructions.md');
-    fs.writeFileSync(instructionsFile, opts.rules || '', 'utf8');
-    return buildSandbox.execCodexBuild(workspaceId, { ...opts, instructionsFile });
+    return buildSandbox.execCodexBuild(workspaceId, opts);
   },
 
   /** Codex writes JSONL; the reply is the text those events carry. */

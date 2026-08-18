@@ -24,8 +24,9 @@ import { tempDirForOwner } from './tempFileServer.js';
 import {
   neuronsForAudioSeconds,
   reserveNeurons,
-  refundNeurons,
-  openQuotaCircuit
+  openQuotaCircuit,
+  nextRomeMidnightMs,
+  STT_DAILY_LIMIT_MESSAGE
 } from './cloudflareNeurons.js';
 
 const log = createLogger('STT');
@@ -36,8 +37,13 @@ const STT_STATUS = {
   NO_SPEECH: 'no_speech',
   TOO_LONG: 'too_long',
   TIMEOUT: 'timeout',
+  QUOTA_EXHAUSTED: 'quota_exhausted',
+  UNCONFIGURED: 'unconfigured',
   ERROR: 'error'
 };
+
+const STT_UNCONFIGURED_MESSAGE =
+  'La trascrizione vocale non è configurata su questo GemiX; il modello non può leggere il contenuto audio.';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 const REQUEST_TIMEOUT_MS = 120 * 1000;
@@ -165,7 +171,7 @@ async function _postToCloudflare(audioBuffer, language, signal) {
 async function transcribeAudioFile(absPath, opts = {}) {
   if (!isSttConfigured()) {
     log.warn('Workers AI credentials are not configured — voice notes cannot be transcribed.');
-    return _result(STT_STATUS.ERROR);
+    return _result(STT_STATUS.UNCONFIGURED, { message: STT_UNCONFIGURED_MESSAGE });
   }
 
   const durationSec = Number(opts.durationSec) || 0;
@@ -187,9 +193,11 @@ async function transcribeAudioFile(absPath, opts = {}) {
   const cost = neuronsForAudioSeconds(durationSec);
   const reservation = await reserveNeurons(cost, 'stt');
   if (!reservation.ok) {
-    // Quota and breaker are not the user's problem to guess about: the caller
-    // reports a status and the model is told the words are unknown.
-    return _result(STT_STATUS.ERROR, { denied: reservation.reason });
+    return _result(STT_STATUS.QUOTA_EXHAUSTED, {
+      denied: reservation.reason,
+      message: STT_DAILY_LIMIT_MESSAGE,
+      retryAt: nextRomeMidnightMs()
+    });
   }
 
   const language = String(opts.language || 'it').split('-')[0].toLowerCase();
@@ -201,7 +209,13 @@ async function transcribeAudioFile(absPath, opts = {}) {
       if (wav) {
         // The retry is a second billable call, so it is reserved separately.
         const retryReservation = await reserveNeurons(cost, 'stt');
-        if (!retryReservation.ok) return _result(STT_STATUS.ERROR, { denied: retryReservation.reason });
+        if (!retryReservation.ok) {
+          return _result(STT_STATUS.QUOTA_EXHAUSTED, {
+            denied: retryReservation.reason,
+            message: STT_DAILY_LIMIT_MESSAGE,
+            retryAt: nextRomeMidnightMs()
+          });
+        }
         attempt = await _postToCloudflare(wav, language, opts.signal);
       }
     }
@@ -211,6 +225,10 @@ async function transcribeAudioFile(absPath, opts = {}) {
         await openQuotaCircuit();
         // The request was answered, so the reservation stands.
         log.warn(`Cloudflare STT quota exhausted (HTTP ${attempt.status}).`);
+        return _result(STT_STATUS.QUOTA_EXHAUSTED, {
+          message: STT_DAILY_LIMIT_MESSAGE,
+          retryAt: nextRomeMidnightMs()
+        });
       } else {
         log.warn(`Cloudflare STT failed (HTTP ${attempt.status}): ${attempt.detail}`);
       }
@@ -223,8 +241,8 @@ async function transcribeAudioFile(absPath, opts = {}) {
     if (err.name === 'AbortError' || err.name === 'TimeoutError' || opts.signal?.aborted) {
       return _result(STT_STATUS.TIMEOUT);
     }
-    // The request never reached Cloudflare, so the neurons were not spent.
-    await refundNeurons(cost);
+    // A fetch failure does not prove that Cloudflare received zero bytes. Keep
+    // the pessimistic reservation so a retry cannot overshoot the allowance.
     log.warn(`Cloudflare STT unreachable: ${err.message}`);
     return _result(STT_STATUS.ERROR);
   }
@@ -233,6 +251,7 @@ async function transcribeAudioFile(absPath, opts = {}) {
 export {
   STT_STATUS,
   REQUEST_TIMEOUT_MS,
+  STT_UNCONFIGURED_MESSAGE,
   sttModelId,
   isSttConfigured,
   contentHashOf,

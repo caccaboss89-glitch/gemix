@@ -31,7 +31,12 @@ import { pushBufferAttachment } from '../utils/attachments.js';
 import { projectToolResult } from '../utils/aiFileDelivery.js';
 import { sniffImageType } from '../utils/imageRegistry.js';
 import { reserveGeneration } from '../utils/mediaUsageLimits.js';
-import { neuronsForImage, reserveNeurons, refundNeurons, openQuotaCircuit, NEURON_DENIAL } from '../utils/cloudflareNeurons.js';
+import {
+  neuronsForImage,
+  reserveNeurons,
+  openQuotaCircuit,
+  IMAGE_DAILY_LIMIT_MESSAGE
+} from '../utils/cloudflareNeurons.js';
 import { resolveStorageId } from '../utils/userPaths.js';
 import { tempDirForOwner } from '../utils/tempFileServer.js';
 import { sanitizeFilename } from '../utils/text.js';
@@ -232,12 +237,7 @@ async function _generateWithFlux(prompt) {
   const cost = neuronsForImage(FALLBACK_SIZE, FALLBACK_SIZE);
   const reservation = await reserveNeurons(cost, 'image');
   if (!reservation.ok) {
-    return {
-      ok: false,
-      detail: reservation.reason === NEURON_DENIAL.CIRCUIT_OPEN
-        ? 'the fallback allowance is exhausted for today'
-        : `the fallback allowance is too low (${reservation.remaining} left today)`
-    };
+    return { ok: false, detail: IMAGE_DAILY_LIMIT_MESSAGE, quotaExhausted: true };
   }
 
   const url = `${CLOUDFLARE_API_BASE}/${envConfig.CLOUDFLARE_AI_ACCOUNT_ID}/ai/run/${envConfig.CLOUDFLARE_IMAGE_MODEL}`;
@@ -255,8 +255,8 @@ async function _generateWithFlux(prompt) {
       signal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS)
     });
   } catch (err) {
-    // Nothing was accepted, so the estimate goes back.
-    await refundNeurons(cost);
+    // A failed fetch can still have reached Cloudflare. Keep the pessimistic
+    // charge so retrying the fallback cannot overshoot the shared allowance.
     return { ok: false, detail: err.name === 'TimeoutError' ? 'the fallback timed out' : err.message };
   }
 
@@ -268,7 +268,10 @@ async function _generateWithFlux(prompt) {
     const detail = Array.isArray(payload?.errors)
       ? payload.errors.map(e => `${e.code ?? '?'}: ${e.message ?? 'unknown'}`).join('; ')
       : bodyText.slice(0, 200);
-    if (/quota|exceeded|limit/i.test(detail)) await openQuotaCircuit();
+    if (res.status === 429 || /quota|neuron|exceeded|limit/i.test(detail)) {
+      await openQuotaCircuit();
+      return { ok: false, detail: IMAGE_DAILY_LIMIT_MESSAGE, quotaExhausted: true };
+    }
     return { ok: false, detail };
   }
 
@@ -334,26 +337,34 @@ async function generateImageOpenAi(args, userCtx, responseCtx, callId = null) {
 
   try {
     let usedFallback = false;
-    let attempt = await _generateWithCodex(prompt);
-    if (!attempt.ok) {
-      log.warn(`${envConfig.OPENAI_IMAGE_MODEL} failed (${attempt.kind}): ${attempt.detail}`);
-      if (!FALLBACK_WORTHY.has(attempt.kind)) {
+    let meta = {};
+    const attempt = await _generateWithCodex(prompt);
+    let decoded = attempt.ok ? decodeImageBase64(attempt.b64) : null;
+    if (decoded?.ok) meta = attempt.meta || {};
+
+    // The primary can let us down two ways: it refuses, or it answers with bytes
+    // that are not an image. Both earn one FLUX attempt — a result that does not
+    // decode is no more usable than no result at all.
+    if (!decoded?.ok) {
+      const why = attempt.ok
+        ? `unusable result: ${decoded.reason}`
+        : `${attempt.kind}: ${attempt.detail}`;
+      log.warn(`${envConfig.OPENAI_IMAGE_MODEL} failed (${why})`);
+      if (!attempt.ok && !FALLBACK_WORTHY.has(attempt.kind)) {
         return { success: false, error: `Image generation failed: ${attempt.detail}` };
       }
       const fallback = await _generateWithFlux(prompt);
       if (!fallback.ok) {
         return {
           success: false,
-          error: `Image generation failed: ${attempt.detail}. The fallback did not run either: ${fallback.detail}.`
+          error: `Image generation failed: ${why}. The fallback did not run either: ${fallback.detail}.`
         };
       }
+      decoded = decodeImageBase64(fallback.b64);
+      if (!decoded.ok) {
+        return { success: false, error: `Image generation produced an unusable result: ${decoded.reason}.` };
+      }
       usedFallback = true;
-      attempt = { ok: true, b64: fallback.b64, meta: {} };
-    }
-
-    const decoded = decodeImageBase64(attempt.b64);
-    if (!decoded.ok) {
-      return { success: false, error: `Image generation produced an unusable result: ${decoded.reason}.` };
     }
 
     const filename = _artifactName(prompt, decoded.ext);
@@ -377,7 +388,7 @@ async function generateImageOpenAi(args, userCtx, responseCtx, callId = null) {
     const notes = [];
     if (truncated) notes.push('the prompt was truncated');
     if (usedFallback) notes.push('the primary generator was unavailable, so a fallback produced this one');
-    if (attempt.meta?.size) notes.push(`size ${attempt.meta.size}`);
+    if (meta.size) notes.push(`size ${meta.size}`);
     const suffix = notes.length > 0 ? ` (${notes.join('; ')})` : '';
 
     const result = await projectToolResult({

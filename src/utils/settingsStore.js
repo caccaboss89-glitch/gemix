@@ -147,6 +147,15 @@ function _storedEffort(stored, provider) {
   return null;
 }
 
+/** Provider-scoped timestamp with legacy flat fields belonging to xAI only. */
+function _providerTimestamp(stored, field, provider) {
+  const byProvider = stored[`${field}ByProvider`];
+  if (byProvider && typeof byProvider === 'object' && byProvider[provider.id]) {
+    return byProvider[provider.id];
+  }
+  return provider.id === PROVIDER.XAI ? (stored[field] || null) : null;
+}
+
 /**
  * Read the effective settings for a chat: stored values merged over the
  * program defaults, so callers always get a complete object. Only the fields
@@ -167,8 +176,8 @@ function readSettings(fileId, ctx) {
     effort: _storedEffort(stored, provider) ?? defaults.effort,
     language: VALID_LANGUAGES.includes(stored.language) ? stored.language : defaults.language,
     memory: typeof stored.memory === 'string' && stored.memory.trim() ? stored.memory : defaults.memory,
-    updatedAt: stored.updatedAt || null,
-    reviewedAt: stored.reviewedAt || null
+    updatedAt: _providerTimestamp(stored, 'updatedAt', provider),
+    reviewedAt: _providerTimestamp(stored, 'reviewedAt', provider)
   };
   if (provider.capabilities.namedVoices) {
     settings.voice = VALID_VOICES.includes(stored.voice) ? stored.voice : defaults.voice;
@@ -220,9 +229,16 @@ async function updateSettings(fileId, patch, ctx) {
       }
       next[key] = value;
     }
-    next.updatedAt = getRomeISO();
+    const timestamp = getRomeISO();
+    next.updatedAtByProvider = { ...(next.updatedAtByProvider || {}), [provider.id]: timestamp };
     // A change restarts the renewal cycle.
-    next.reviewedAt = next.updatedAt;
+    next.reviewedAtByProvider = { ...(next.reviewedAtByProvider || {}), [provider.id]: timestamp };
+    // Keep the legacy xAI fields in sync for rollback to an older build. They
+    // never act as timestamps for OpenAI.
+    if (provider.id === PROVIDER.XAI) {
+      next.updatedAt = timestamp;
+      next.reviewedAt = timestamp;
+    }
     const written = _writeRawUnlocked(fileId, next);
     if (!written.success) return written;
     return { success: true, settings: readSettings(fileId, provider) };
@@ -251,15 +267,22 @@ function isReviewDue(settings, now = Date.now(), ctx) {
  * GemiX never mentions it or the user ignores it, so the notice cannot loop.
  * Throws if the write fails so callers do not treat the notice as recorded.
  * @param {string} fileId
+ * @param {object} [ctx] - active provider whose notice was injected
  * @returns {Promise<void>}
  */
-async function markReviewed(fileId) {
+async function markReviewed(fileId, ctx) {
   if (!fileId) return;
+  const provider = profileFromContext(ctx);
   await _withLock(fileId, async () => {
     const stored = _readRawUnlocked(fileId);
     // Nothing stored means everything is default: no review to record.
     if (!stored || typeof stored !== 'object') return;
-    stored.reviewedAt = getRomeISO();
+    const timestamp = getRomeISO();
+    stored.reviewedAtByProvider = {
+      ...(stored.reviewedAtByProvider || {}),
+      [provider.id]: timestamp
+    };
+    if (provider.id === PROVIDER.XAI) stored.reviewedAt = timestamp;
     const written = _writeRawUnlocked(fileId, stored);
     if (!written.success) {
       throw new Error(written.error || 'Failed to write reviewedAt');

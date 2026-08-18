@@ -53,11 +53,17 @@ function _baseLanguage(language) {
  * @returns {string} Cleaned text with all effect tags removed and spaces normalized
  */
 function stripVocalTags(text) {
-  return text
+  return String(text || '')
     .replace(/\[[\w:-]+\]/g, '')       // [pause], [laugh], etc.
     .replace(/<\/?[\w-]+>/g, '')       // <soft>, </soft>, etc.
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+/** Text that is both synthesized and stored as the past voice transcript. */
+function spokenTextForProvider(text, ctx) {
+  const provider = profileFromContext(ctx);
+  return provider.voiceProfile.supportsVoiceTags ? String(text || '').trim() : stripVocalTags(text);
 }
 
 /**
@@ -275,5 +281,5 @@ async function googleTranslateTTS(text, language, signal) {
   return convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
 }
 
-export { generateVoice, convertMp3ToWhatsAppOpus
+export { generateVoice, convertMp3ToWhatsAppOpus, stripVocalTags, spokenTextForProvider
 };

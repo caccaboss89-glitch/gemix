@@ -92,15 +92,15 @@ function validateToolDumpLeaks(dump, caseId) {
 const PROVIDER_DENY = {
   [PROVIDER.XAI]: [
     { re: /ChatGPT/i, label: 'ChatGPT' },
-    { re: /GPT-\d/i, label: 'a GPT model slug' },
+    { re: /\bGPT-\d/i, label: 'a GPT model slug' },
     { re: /Codex/i, label: 'Codex' },
     { re: /Google Translate/i, label: 'Google Translate TTS' },
     { re: /<VoiceMessage/i, label: '<VoiceMessage>' },
     { re: /gpt-image/i, label: 'gpt-image' }
   ],
   [PROVIDER.OPENAI]: [
-    { re: /Grok/i, label: 'Grok' },
-    { re: /xAI/i, label: 'xAI' },
+    { re: /\bGrok\b/i, label: 'Grok' },
+    { re: /\bxAI\b/i, label: 'xAI' },
     { re: /SuperGrok/i, label: 'SuperGrok' },
     { re: /Imagine/i, label: 'Grok Imagine' },
     { re: /render_inline_citation/i, label: 'render_inline_citation' },
@@ -465,8 +465,26 @@ function _validateVisibility(staticPart, caseId, providerId) {
   if (!visibility.includes('[Reactions: emoji xN]')) {
     ISSUES.push({ caseId, msg: 'visibility section missing [Reactions: emoji xN] notation' });
   }
-  if (getProviderProfile(providerId).capabilities.xSearch && !/videos inside X posts/.test(visibility)) {
+  const provider = getProviderProfile(providerId);
+  if (provider.capabilities.xSearch && !/videos inside X posts/.test(visibility)) {
     ISSUES.push({ caseId, msg: 'visibility section missing the web-image / X-video capability line' });
+  }
+  if (provider.id === PROVIDER.OPENAI) {
+    if (!/raw content is never loaded|Raw video content is unavailable/.test(visibility)) {
+      ISSUES.push({ caseId, msg: 'OpenAI visibility must say raw video content is unavailable' });
+    }
+    if (/Videos are the exception:[^\n]*are loaded|videos included,[^\n]*you can only read/i.test(visibility)) {
+      ISSUES.push({ caseId, msg: 'OpenAI visibility falsely claims raw videos can be loaded or read' });
+    }
+  }
+}
+
+/** OpenAI must explain provider-owned X/video gaps without offering a switch. */
+function _validateProviderUnavailableRule(staticPart, caseId, providerId) {
+  if (providerId !== PROVIDER.OPENAI) return;
+  const answer = _promptSection(staticPart, 'How you answer') || '';
+  if (!/administrator configured GemiX with ChatGPT/.test(answer) || !/users cannot change that setting/.test(answer)) {
+    ISSUES.push({ caseId, msg: 'OpenAI prompt missing the admin-configured ChatGPT X/video unavailable rule' });
   }
 }
 
@@ -610,6 +628,7 @@ function validatePrompt(staticPart, dynamicPart, caseId, providerId) {
   _validateDiscordSplit(staticPart, dynamicPart, id, caseId);
   _validateAudience(staticPart, id, caseId);
   _validateVisibility(staticPart, caseId, providerId);
+  _validateProviderUnavailableRule(staticPart, caseId, providerId);
   _validateThisChat(staticPart, id, caseId, providerId);
   _validateQuotaLine(dynamicPart, id, caseId, providerId);
   _validateSettingsBlocks(dynamicPart, prompt, id, caseId);

@@ -3,8 +3,8 @@
 // Wire format for the ChatGPT Codex Responses backend: request building, SSE
 // decoding, and the replay rules for a multi-round tool loop.
 //
-// This module is pure — no network, no credentials, no filesystem — so every
-// shape below is covered by the sanitized fixtures in test/fixtures/openai.
+// This module is pure — no network, no credentials, no filesystem — so its
+// request and response shapes can be exercised directly in memory.
 //
 // Three properties the probes pinned down and the code depends on:
 //   1. `store` must be false and `previous_response_id` is rejected outright,
@@ -29,6 +29,9 @@ const REPLAYABLE_ITEM_TYPES = new Set([
 
 /** Content part types accepted inside a user/system input item. */
 const INPUT_PART_TYPES = new Set(['input_text', 'input_image', 'input_file']);
+
+/** Extra response data required to count the real sources consulted by search. */
+const RESPONSE_INCLUDE = Object.freeze(['web_search_call.action.sources']);
 
 // -- Request building --------------------------------------------------------
 
@@ -221,8 +224,8 @@ function toolContentToOutput(content) {
 
 /**
  * Build the request body. Strict allowlist: no xAI field (max_turns,
- * prompt_cache_key, include) and no public Responses option that was not
- * exercised against this backend ever reaches the wire.
+ * prompt_cache_key) and no public Responses option other than the official
+ * source include exercised for hosted web search reaches the wire.
  *
  * @param {object} opts
  * @param {string} opts.model
@@ -240,6 +243,7 @@ function buildResponsesBody({ model, effort, input, tools = null, toolChoice = '
     store: false,
     stream: true,
     reasoning: { effort },
+    include: [...RESPONSE_INCLUDE],
     input
   };
   if (Array.isArray(tools) && tools.length > 0) {
@@ -254,8 +258,9 @@ function buildResponsesBody({ model, effort, input, tools = null, toolChoice = '
 
 /**
  * Serialize GemiX tool definitions for this backend. Function tools use the
- * flat Responses shape; hosted tools (already written in wire form by the
- * registry) pass through untouched.
+ * flat Responses shape. The only hosted tool on this profile is text-only web
+ * search; image-specific options are deliberately dropped even if a stale
+ * definition reaches this boundary.
  * @param {Array|null} tools
  * @returns {Array|null}
  */
@@ -273,7 +278,7 @@ function toolsToWire(tools) {
       });
       continue;
     }
-    if (typeof tool.type === 'string' && tool.type !== 'function') out.push({ ...tool });
+    if (tool.type === 'web_search') out.push({ type: 'web_search' });
   }
   return out.length > 0 ? out : null;
 }
@@ -545,51 +550,70 @@ function responseToAssistantMessage(response) {
   return message;
 }
 
-/**
- * Server-side search statistics for the research badge.
- * This backend has no X corpus, so xPosts is always 0 and the badge never shows
- * the X section.
- * @param {object} response
- * @returns {{ webSources: number, xPosts: number }}
- */
-function extractSearchStats(response) {
-  let webSources = 0;
-  for (const item of Array.isArray(response?.output) ? response.output : []) {
-    if (item?.type !== 'web_search_call') continue;
-    const results = Array.isArray(item.results) ? item.results : [];
-    const textResults = results.filter(r => r && r.type !== 'image_result');
-    webSources += textResults.length || (results.length === 0 ? 1 : 0);
+/** Canonical, safe key for one web source URL. */
+function _canonicalSourceUrl(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const parsed = new URL(raw.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (!parsed.hostname || parsed.username || parsed.password) return null;
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return null;
   }
-  return { webSources, xPosts: 0 };
 }
 
 /**
- * Structured image hits from hosted web search, deduplicated by image URL.
- *
- * Only entries the tool itself produced are collected. A URL the model merely
- * wrote in its prose is not a search result and never becomes an attachment.
+ * Sources returned by the official `web_search_call.action.sources` include.
+ * URLs are canonicalized and deduplicated across every search call. Named
+ * OpenAI feeds without a URL are retained by their type/name pair so the badge
+ * still reflects a real consulted source.
  * @param {object} response
- * @returns {Array<{imageUrl: string, thumbnailUrl: string|null, sourceUrl: string|null, caption: string|null}>}
+ * @returns {Array<{key: string, url: string|null, title: string|null, type: string|null}>}
  */
-function collectImageResults(response) {
+function collectSearchSources(response) {
   const out = [];
   const seen = new Set();
   for (const item of Array.isArray(response?.output) ? response.output : []) {
-    if (item?.type !== 'web_search_call' || !Array.isArray(item.results)) continue;
-    for (const result of item.results) {
-      if (!result || result.type !== 'image_result') continue;
-      const imageUrl = typeof result.image_url === 'string' ? result.image_url.trim() : '';
-      if (!imageUrl || seen.has(imageUrl)) continue;
-      seen.add(imageUrl);
+    if (item?.type !== 'web_search_call') continue;
+    const sources = Array.isArray(item.action?.sources) ? item.action.sources : [];
+    for (const rawSource of sources) {
+      const source = typeof rawSource === 'string' ? { url: rawSource } : rawSource;
+      if (!source || typeof source !== 'object') continue;
+      const url = _canonicalSourceUrl(source.url || source.uri || source.source?.url);
+      const type = typeof source.type === 'string' && source.type.trim() ? source.type.trim() : null;
+      const name = typeof source.name === 'string' && source.name.trim() ? source.name.trim() : null;
+      const key = url ? `url:${url}` : (type ? `feed:${type}:${name || ''}` : null);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
       out.push({
-        imageUrl,
-        thumbnailUrl: typeof result.thumbnail_url === 'string' ? result.thumbnail_url : null,
-        sourceUrl: typeof result.source_website_url === 'string' ? result.source_website_url : null,
-        caption: typeof result.caption === 'string' ? result.caption : null
+        key,
+        url,
+        title: typeof source.title === 'string' && source.title.trim() ? source.title.trim() : name,
+        type
       });
     }
   }
   return out;
+}
+
+/**
+ * Count distinct sources for the research badge. The complete `action.sources`
+ * list is authoritative; citation URLs are unioned as a defensive fallback for
+ * partial or older payloads and cannot inflate the count through duplicates.
+ * This backend has no X corpus, so xPosts is always zero.
+ * @param {object} response
+ * @returns {{ webSources: number, xPosts: number }}
+ */
+function extractSearchStats(response) {
+  const seen = new Set(collectSearchSources(response).map(source => source.key));
+  for (const citation of collectCitations(response)) {
+    const url = _canonicalSourceUrl(citation.url);
+    if (url) seen.add(`url:${url}`);
+  }
+  const webSourceKeys = [...seen];
+  return { webSources: webSourceKeys.length, xPosts: 0, webSourceKeys };
 }
 
 /**
@@ -607,7 +631,7 @@ function collectImageResults(response) {
  */
 function collectCitations(response) {
   const out = [];
-  const seen = new Set();
+  const indexByUrl = new Map();
   for (const item of Array.isArray(response?.output) ? response.output : []) {
     if (item?.type !== 'message' || !Array.isArray(item.content)) continue;
     for (const part of item.content) {
@@ -615,19 +639,32 @@ function collectCitations(response) {
       const textLength = typeof part.text === 'string' ? part.text.length : 0;
       for (const annotation of part.annotations) {
         if (!annotation || annotation.type !== 'url_citation') continue;
-        const url = typeof annotation.url === 'string' ? annotation.url.trim() : '';
-        if (!url || seen.has(url)) continue;
-        seen.add(url);
-        const start = Number.isInteger(annotation.start_index) ? annotation.start_index : null;
-        const end = Number.isInteger(annotation.end_index) ? annotation.end_index : null;
+        // Responses uses direct fields. Accept the nested form too because some
+        // SDK/compatibility payloads wrap them under `url_citation`.
+        const detail = annotation.url_citation && typeof annotation.url_citation === 'object'
+          ? annotation.url_citation
+          : annotation;
+        const url = _canonicalSourceUrl(detail.url);
+        if (!url) continue;
+        const start = Number.isInteger(detail.start_index) ? detail.start_index : null;
+        const end = Number.isInteger(detail.end_index) ? detail.end_index : null;
         const inRange = start !== null && end !== null && start >= 0 && end >= start && end <= textLength;
-        out.push({
+        const candidate = {
           url,
-          title: typeof annotation.title === 'string' ? annotation.title : null,
+          title: typeof detail.title === 'string' ? detail.title : null,
           start: inRange ? start : null,
           end: inRange ? end : null,
           quote: inRange && end > start ? part.text.slice(start, end) : null
-        });
+        };
+        const existingIndex = indexByUrl.get(url);
+        if (existingIndex === undefined) {
+          indexByUrl.set(url, out.length);
+          out.push(candidate);
+        } else if (!out[existingIndex].quote && candidate.quote) {
+          // Preserve first-appearance order, but do not let an earlier malformed
+          // duplicate discard the usable range returned later in the payload.
+          out[existingIndex] = candidate;
+        }
       }
     }
   }
@@ -645,6 +682,6 @@ export {
   ResponseAssembler,
   responseToAssistantMessage,
   extractSearchStats,
-  collectImageResults,
+  collectSearchSources,
   collectCitations
 };

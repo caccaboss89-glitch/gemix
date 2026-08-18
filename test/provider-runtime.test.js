@@ -22,7 +22,7 @@ const { providerFailureReply } = await import('../src/ai/providers/errorPolicy.j
 const { runProviderPreflight } = await import('../src/ai/providers/preflight.js');
 const { OPENAI_ERROR, makeOpenAiError } = await import('../src/ai/openaiResponsesTransport.js');
 const { GROK_CREDIT_EXHAUSTED_MESSAGE } = await import('../src/config/systemMessages.js');
-const { getModelDisplayName, buildResearchBadgeText } = await import('../src/utils/footer.js');
+const { getModelDisplayName, buildResearchBadgeText, mergeResearchStats } = await import('../src/utils/footer.js');
 const { effortsForProvider, defaultSettings, visibleSettingFields } =
   await import('../src/utils/settingsStore.js');
 const { managePreferences } = await import('../src/tools/preferences.js');
@@ -130,6 +130,26 @@ test('the research badge never shows an X count without X posts', () => {
   assert.equal(buildResearchBadgeText({ webSources: 0, xPosts: 0 }), null);
   // The xAI branch keeps both halves.
   assert.equal(buildResearchBadgeText({ webSources: 1, xPosts: 2 }), '🌐: 1 source. 𝕏: 2 posts.');
+});
+
+test('OpenAI source URLs are deduplicated across tool rounds before the badge', () => {
+  const first = mergeResearchStats(null, {
+    webSources: 2,
+    xPosts: 0,
+    webSourceKeys: ['url:https://example.invalid/a', 'url:https://example.invalid/b']
+  });
+  const merged = mergeResearchStats(first, {
+    webSources: 2,
+    xPosts: 0,
+    webSourceKeys: ['url:https://example.invalid/b', 'url:https://example.invalid/c']
+  });
+  assert.equal(merged.webSources, 3);
+  assert.deepEqual(merged.webSourceKeys, [
+    'url:https://example.invalid/a',
+    'url:https://example.invalid/b',
+    'url:https://example.invalid/c'
+  ]);
+  assert.equal(buildResearchBadgeText(merged), '🌐: 3 sources.');
 });
 
 // -- Preferences --------------------------------------------------------------

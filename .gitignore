@@ -21,6 +21,10 @@ src/data/**
 
 # Dev scripts
 scripts/output-regenerate-prompt-dumps/
+# Prompt dumps quote the real member roster (names, phones, emails, groups) and
+# are already regenerated above. Only their digests are committed, in
+# test/fixtures/xai-prompt-manifest.json.
+test/fixtures/golden/
 
 # Configuration
 .env

@@ -31,9 +31,9 @@ const OPENAI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 function _xaiCapabilities() {
   return {
     webSearch: true,
+    hostedWebSearch: false,
     xSearch: true,
     imageSearch: true,
-    hostedImageResults: false,
     // X media URLs come back inside a hosted search whose results GemiX never
     // sees, so there is nothing to build an allowlist from.
     imageAllowlist: false,
@@ -53,13 +53,12 @@ function _xaiCapabilities() {
 function _openaiCapabilities() {
   return {
     webSearch: true,
+    hostedWebSearch: true,
     // Probed and rejected on the Codex OAuth path: there is no X corpus here.
     xSearch: false,
     imageSearch: true,
-    // Structured `image_result` entries come back on the hosted web_search call.
-    hostedImageResults: true,
-    // Every deliverable image is therefore one this turn's structured results
-    // named, or one the user wrote themselves.
+    // Hosted OpenAI search is text-only. Deliverable web images come only from
+    // GemiX's structured SearXNG results, or from a URL the user wrote.
     imageAllowlist: true,
     readVideo: false,
     generateImage: true,

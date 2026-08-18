@@ -27,12 +27,18 @@ const POOL = 'openai-codex';
  * @returns {{ accessToken: string, chatgptAccountId: string, expiresAtMs: number|null }}
  */
 function getOpenAiAuth({ forceReload = false, minRemainingMs = 0 } = {}) {
-  const cred = readPoolCredential({
-    authFile: AUTH_FILE,
-    pool: POOL,
-    requireAccountId: true,
-    forceReload
-  });
+  let cred;
+  try {
+    cred = readPoolCredential({
+      authFile: AUTH_FILE,
+      pool: POOL,
+      requireAccountId: true,
+      forceReload
+    });
+  } catch (err) {
+    err.code = err.code || 'OPENAI_CREDENTIAL_UNAVAILABLE';
+    throw err;
+  }
 
   if (minRemainingMs > 0 && cred.expiresAtMs !== null) {
     if (cred.expiresAtMs - Date.now() < minRemainingMs) {

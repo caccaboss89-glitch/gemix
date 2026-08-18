@@ -33,13 +33,14 @@ const { getProviderProfile, PROVIDER } = await import('../src/ai/providers/provi
 const envConfig = (await import('../src/config/env.js')).default;
 const constants = (await import('../src/config/constants.js')).default;
 const { TEMP_DIR } = await import('../src/utils/tempFileServer.js');
+const neurons = await import('../src/utils/cloudflareNeurons.js');
+const { update: updateState } = await import('../src/utils/systemState.js');
+const { clearMediaUsage, formatQuotaCounts } = await import('../src/utils/mediaUsageLimits.js');
 
 const OPENAI = getProviderProfile(PROVIDER.OPENAI);
 
 // The fallback charges the shared neuron ledger, which lives in the real state
-// file: it is put back byte for byte when this file finishes. That file is also
-// why `npm test` runs one test file at a time — the voice suite charges the
-// same ledger, and in parallel processes the two would race over it.
+// file: it is put back byte for byte when this file finishes.
 const STATE_FILE = path.join(constants.DATA_DIR, 'systemState.json');
 const STATE_BEFORE = fs.existsSync(STATE_FILE) ? fs.readFileSync(STATE_FILE) : null;
 
@@ -80,6 +81,15 @@ function cleanup(userCtx) {
 function payloadOf(result) {
   if (Array.isArray(result)) return JSON.parse(result[0].text);
   return result;
+}
+
+async function resetNeuronLedger() {
+  await updateState('cloudflareNeurons', () => ({
+    period: neurons.periodKey(),
+    used: 0,
+    circuitOpen: false,
+    calls: 0
+  }));
 }
 
 // -- Bounded, strict base64 decode -------------------------------------------
@@ -204,7 +214,9 @@ test('a replayed call_id returns the first result without generating again', asy
   }
 });
 
-test('a corrupt primary payload produces an error, not a phantom attachment', async () => {
+test('an HTML error page dressed as an image never becomes an attachment', async () => {
+  // Both back ends answer with the same page, so neither produces an image and
+  // the failure has to surface instead of a zero-byte attachment.
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
   const stub = installFetchStub(() => ({ data: [{ b64_json: HTML.toString('base64') }] }));
@@ -242,6 +254,7 @@ test('a response with no b64_json entry is reported as a failure', async () => {
 // -- The fallback -------------------------------------------------------------
 
 test('a rate-limited primary falls back to FLUX exactly once', async () => {
+  await resetNeuronLedger();
   const userCtx = makeUserCtx();
   const responseCtx = makeResponseCtx();
   const stub = installFetchStub((url) => {
@@ -255,6 +268,136 @@ test('a rate-limited primary falls back to FLUX exactly once', async () => {
     assert.match(stub.calls[1].url, new RegExp(envConfig.CLOUDFLARE_IMAGE_MODEL.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')));
     assert.match(payload.message, /fallback/);
     assert.equal(responseCtx.attachments.length, 1);
+  } finally {
+    stub.restore();
+    cleanup(userCtx);
+  }
+});
+
+test('a primary result that is not really an image falls back to FLUX', async () => {
+  // The call succeeded and carried a b64_json, so nothing upstream reports a
+  // failure — but the bytes are not an image. Before, this returned an error to
+  // the model with the fallback never attempted.
+  await resetNeuronLedger();
+  const userCtx = makeUserCtx();
+  const responseCtx = makeResponseCtx();
+  const stub = installFetchStub((url) => {
+    if (String(url).includes('cloudflare')) return { success: true, result: { image: PNG_B64 } };
+    return { data: [{ b64_json: Buffer.from('this is not an image at all').toString('base64') }] };
+  });
+  try {
+    const payload = payloadOf(await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx));
+    assert.equal(payload.success, true);
+    assert.equal(stub.calls.length, 2, 'the corrupt primary result must trigger exactly one fallback');
+    assert.match(stub.calls[1].url, /api\.cloudflare\.com/);
+    assert.equal(responseCtx.attachments.length, 1);
+  } finally {
+    stub.restore();
+    cleanup(userCtx);
+  }
+});
+
+test('a corrupt fallback result is not retried a second time', async () => {
+  await resetNeuronLedger();
+  const userCtx = makeUserCtx();
+  const responseCtx = makeResponseCtx();
+  const corrupt = Buffer.from('still not an image').toString('base64');
+  const stub = installFetchStub((url) => {
+    if (String(url).includes('cloudflare')) return { success: true, result: { image: corrupt } };
+    return { data: [{ b64_json: corrupt }] };
+  });
+  try {
+    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
+    assert.equal(result.success, false);
+    assert.match(result.error, /unusable result/);
+    assert.equal(stub.calls.length, 2, 'one primary, one fallback, then it gives up');
+    assert.equal(responseCtx.attachments.length, 0);
+  } finally {
+    stub.restore();
+    cleanup(userCtx);
+  }
+});
+
+test('an exhausted FLUX allowance returns the specific Italian image reset message', async () => {
+  await resetNeuronLedger();
+  await neurons.openQuotaCircuit();
+  const userCtx = makeUserCtx();
+  const responseCtx = makeResponseCtx();
+  const stub = installFetchStub((url) => {
+    if (String(url).includes('cloudflare')) throw new Error('the breaker must stop this request');
+    return new Response('{}', { status: 503 });
+  });
+  try {
+    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
+    assert.equal(result.success, false);
+    assert.match(result.error, /limite giornaliero di generazione immagini/i);
+    assert.match(result.error, /prossima mezzanotte \(Europe\/Rome\)/);
+    assert.equal(stub.calls.length, 1, 'only the primary request reaches the network');
+    assert.equal(responseCtx.attachments.length, 0);
+  } finally {
+    stub.restore();
+    cleanup(userCtx);
+  }
+});
+
+test('a Cloudflare denial does not consume normal user image or song quota', async () => {
+  await resetNeuronLedger();
+  await neurons.openQuotaCircuit();
+  const userCtx = makeUserCtx();
+  userCtx.isAdmin = false;
+  userCtx.taskFileId = `media-quota-${Math.random().toString(36).slice(2, 10)}`;
+  const responseCtx = makeResponseCtx();
+  const stub = installFetchStub(() => new Response('{}', { status: 503 }));
+  try {
+    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
+    assert.equal(result.success, false);
+    const quotaLine = formatQuotaCounts(userCtx.taskFileId, ['image', 'song']);
+    assert.match(quotaLine, /Immagini: 0\/5/);
+    assert.match(quotaLine, /Canzoni: 0\/2/);
+  } finally {
+    stub.restore();
+    await clearMediaUsage(userCtx.taskFileId);
+    cleanup(userCtx);
+  }
+});
+
+test('a Cloudflare quota response opens the shared breaker and hides its raw error', async () => {
+  await resetNeuronLedger();
+  const userCtx = makeUserCtx();
+  const responseCtx = makeResponseCtx();
+  const stub = installFetchStub((url) => {
+    if (String(url).includes('cloudflare')) {
+      return new Response(JSON.stringify({
+        success: false,
+        errors: [{ code: 3036, message: 'neuron quota exceeded' }]
+      }), { status: 429 });
+    }
+    return new Response('{}', { status: 503 });
+  });
+  try {
+    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
+    assert.equal(result.success, false);
+    assert.match(result.error, /limite giornaliero di generazione immagini/i);
+    assert.doesNotMatch(result.error, /3036|neuron quota exceeded/i);
+    assert.equal(neurons.readNeuronLedger().circuitOpen, true);
+  } finally {
+    stub.restore();
+    cleanup(userCtx);
+  }
+});
+
+test('an ambiguous FLUX fetch failure stays charged for safe retries', async () => {
+  await resetNeuronLedger();
+  const userCtx = makeUserCtx();
+  const responseCtx = makeResponseCtx();
+  const stub = installFetchStub((url) => {
+    if (String(url).includes('cloudflare')) throw new TypeError('fetch failed');
+    return new Response('{}', { status: 503 });
+  });
+  try {
+    const result = await generateImageOpenAi({ prompt: 'un gatto astronauta' }, userCtx, responseCtx);
+    assert.equal(result.success, false);
+    assert.equal(neurons.readNeuronLedger().used, neurons.neuronsForImage(512, 512));
   } finally {
     stub.restore();
     cleanup(userCtx);

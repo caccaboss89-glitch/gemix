@@ -4,10 +4,11 @@
 // (static prompt, Runtime block, tool schemas, structured output, tool errors,
 // build sub-agent contract) for every case in the prompt-dump corpus.
 //
-// These goldens must stay green for the entire provider migration: the xAI
+// These digests must stay green for the entire provider migration: the xAI
 // branch is allowed exactly one model-visible diff (the shared sentence on the
-// origin of the GemiX name), and it is re-approved by regenerating the goldens
-// in that single commit.
+// origin of the GemiX name), re-recorded with UPDATE_GOLDEN=1 in that single
+// commit. Only the digests are committed — see helpers/goldenFile.js for why the
+// prompts themselves are not.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -44,6 +44,9 @@ async function _xaiPreflight(profile) {
 function _openaiPreflight(profile) {
   const auth = getOpenAiAuth();
   log.info(`   OpenAI API: ${envConfig.OPENAI_BASE_URL} (model: ${profile.model}, auth: ${describeOpenAiAuthSource()})`);
+  if (!envConfig.CLOUDFLARE_AI_ACCOUNT_ID || !envConfig.CLOUDFLARE_AI_API_TOKEN) {
+    log.warn('   Cloudflare STT is not configured - user voice notes will be marked explicitly as unreadable');
+  }
   if (auth.expiresAtMs === null) {
     log.info('   OpenAI credential loaded (no expiry recorded)');
     return;

@@ -80,14 +80,13 @@ async function callAI(messages, tools = null, opts = {}) {
 
   const message = responsesToAssistantMessage(data);
   const searchStats = extractServerSearchStats(data);
-  // imageResults/citations stay empty here: xAI renders its own inline
-  // citations and image search runs as a client tool, not a hosted one.
+  // Citations stay empty here: xAI renders its own inline citations and image
+  // search runs as a client tool, not a hosted one.
   return {
     message,
     provider: 'Grok',
     model: envConfig.GROK_MODEL,
     searchStats,
-    imageResults: [],
     citations: []
   };
 }
