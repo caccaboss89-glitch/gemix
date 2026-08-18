@@ -10,7 +10,12 @@ import { createWhatsAppClient, isWaClientReady } from './client.js';
 import { resolveWaSender } from '../../utils/waContact.js';
 import { materializeWhatsAppBatchContent } from '../../utils/batchContentRefresh.js';
 import { identifyUser } from '../../utils/userIdentifier.js';
-import { setDedicatedClient } from '../../tools/whatsappSender.js';
+import { setDedicatedClient as setSenderClient } from '../../tools/whatsappSender.js';
+import {
+  setDedicatedClient as publishDedicatedClient,
+  getDedicatedClient,
+  isDedicatedClientReady
+} from './clientRegistry.js';
 import constants from '../../config/constants.js';
 import { containsMetaAiTag } from '../../utils/waMentions.js';
 import { createLogger } from '../../utils/logger.js';
@@ -29,25 +34,27 @@ const { PLATFORM_WA_DEDICATED, META_AI_NUMBER } = constants;
 
 const log = createLogger('WA-DEDICATED');
 
-let client;
-
 /**
  * Initialize dedicated WhatsApp account client. Listens to `message` only:
  * this account's own sends are GemiX replies and must not re-enter the loop.
+ * The instance is published to the client registry right away, so utilities can
+ * reach it without importing this module (see clientRegistry.js).
  * @returns {object} The whatsapp-web.js Client instance
  */
 function initDedicatedWhatsApp() {
-  client = createWhatsAppClient({
+  const client = createWhatsAppClient({
     clientId: 'dedicated',
     log,
     messageEvent: 'message',
     onMessage: onDedicatedMessage,
-    onReady: (c) => setDedicatedClient(c)
+    onReady: (c) => setSenderClient(c)
   });
+  publishDedicatedClient(client);
   return client;
 }
 
 async function onDedicatedMessage(msg) {
+  const client = getDedicatedClient();
   if (!isWaClientReady(client)) {
     log.warn('Dedicated client not ready — ignoring message (not queued)');
     return;
@@ -217,13 +224,6 @@ async function _handleDedicatedBatch(entries) {
   });
 }
 
-function getDedicatedClient() {
-  return client;
-}
-
-function isDedicatedClientReady() {
-  return Boolean(client?.info?.wid?._serialized);
-}
-
+// Re-exported from the registry so existing importers keep one call site.
 export { initDedicatedWhatsApp, getDedicatedClient, isDedicatedClientReady
 };

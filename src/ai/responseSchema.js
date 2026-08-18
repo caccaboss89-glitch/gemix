@@ -16,6 +16,7 @@
 // "" is a valid value and parseStructuredReply reads it as "no rename".
 //
 import constants from '../config/constants.js';
+import { profileFromContext } from './providers/providerProfile.js';
 
 // Which markup actually renders is stated once, in the "This chat" section of
 // the system prompt — not restated here.
@@ -37,6 +38,15 @@ const VOICE_RESPONSE_FIELD_DESC =
   + 'false write plain text and DO NOT use any voice tag. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
+
+// Google Translate reads plain text in one flat voice: there is nothing to tag,
+// and any markup left in would be pronounced aloud.
+const PLAIN_VOICE_RESPONSE_FIELD_DESC =
+  'The reply shown to the user. When `voice` is true this text is spoken aloud by Google Translate: write ONLY '
+  + 'spoken words - no emoji, no symbols, no markup and no voice or effect tags of any kind; readable punctuation '
+  + '. , ! ? only, which is all the delivery you get. '
+  + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. `
+  + 'When `voice` is false write plain text as usual.';
 
 const GEMIX_ATTACHMENTS_FIELD_DESC =
   'OPTIONAL. The ONLY way to send files in this chat. '
@@ -61,22 +71,31 @@ const TITLE_FIELD_DESC =
  * @param {boolean} [opts.includeTitle] - Discord: include the required
  *   conversation_title key. Must be the same on every turn of a conversation.
  * @param {boolean} [opts.allowVoice] - WA dedicated: expose the `voice` flag.
+ * @param {object} [opts.providerProfile] - active ProviderProfile; selects the
+ *   voice description (xAI voice tags vs plain Google Translate speech).
  * @returns {object}
  */
-function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } = {}) {
+function buildGemixResponseFormat({ includeTitle = false, allowVoice = false, providerProfile } = {}) {
+  const voiceProfile = profileFromContext({ providerProfile }).voiceProfile;
   const properties = {};
   const required = [];
 
   // `voice` first so the model commits to the channel before writing `response`.
   if (allowVoice) {
-    properties.voice = { type: 'boolean', description: VOICE_FLAG_DESC };
+    const desc = voiceProfile.attribution
+      ? `${VOICE_FLAG_DESC} The voice is ${voiceProfile.attribution}.`
+      : VOICE_FLAG_DESC;
+    properties.voice = { type: 'boolean', description: desc };
     required.push('voice');
   }
 
-  properties.response = {
-    type: 'string',
-    description: allowVoice ? VOICE_RESPONSE_FIELD_DESC : RESPONSE_FIELD_DESC
-  };
+  let responseDesc = RESPONSE_FIELD_DESC;
+  if (allowVoice) {
+    responseDesc = voiceProfile.supportsVoiceTags
+      ? VOICE_RESPONSE_FIELD_DESC
+      : PLAIN_VOICE_RESPONSE_FIELD_DESC;
+  }
+  properties.response = { type: 'string', description: responseDesc };
   required.push('response');
 
   properties.attachments = {

@@ -2,22 +2,30 @@
 //
 // When GemiX reads expired OAuth tokens from ~/.hermes/auth.json, Hermes CLI
 // must run a real API call to refresh them. A one-shot chat ping does that.
+//
+// The provider is always passed in by the caller — refreshing "xai-oauth" does
+// nothing for a stale `openai-codex` token and vice versa. Concurrent callers
+// share one in-flight run per (provider, auth file) pair, so a burst of 401s
+// across the transport, the image generator and Build spawns a single CLI
+// invocation instead of one each.
 
+import fs from 'fs';
 import { spawn  } from 'child_process';
 import { createLogger  } from './logger.js';
 import envConfig from '../config/env.js';
 
 const log = createLogger('Hermes');
 
-const { HERMES_REFRESH_TIMEOUT_MS, HERMES_REFRESH_QUERY, HERMES_REFRESH_PROVIDER } = envConfig;
+const { HERMES_REFRESH_TIMEOUT_MS, HERMES_REFRESH_QUERY } = envConfig;
 
-let _refreshInFlight = null;
+/** Map<`${provider}|${authFile}`, Promise> — one refresh per pair. */
+const _refreshInFlight = new Map();
 
-function _runHermesRefresh() {
+function _runHermesRefresh(provider) {
   const args = [
     'chat',
     '-q', HERMES_REFRESH_QUERY,
-    '--provider', HERMES_REFRESH_PROVIDER,
+    '--provider', provider,
     '--quiet',
     '--ignore-user-config',
     '--ignore-rules',
@@ -66,25 +74,56 @@ function _runHermesRefresh() {
   });
 }
 
+/** mtime+size of the auth file, or null when it cannot be read. */
+function _authFileStamp(authFile) {
+  if (!authFile) return null;
+  try {
+    const st = fs.statSync(authFile);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Ask Hermes to refresh ~/.hermes/auth.json by sending a minimal Grok request.
- * Concurrent callers share one in-flight refresh.
+ * Ask Hermes to refresh the auth file by sending a minimal request on the given
+ * provider. Concurrent callers share one in-flight refresh per provider/file.
  *
+ * The file is stamped before and after: Hermes exiting 0 without touching the
+ * configured file means the credential the caller is about to retry with is
+ * still the stale one, which is worth saying out loud rather than silently
+ * retrying into the same 401.
+ *
+ * @param {string} providerId - Hermes provider/pool name (e.g. 'xai-oauth')
+ * @param {string} authFile - the auth.json this caller reads
  * @returns {Promise<string>} Hermes response text on success.
  */
-async function refreshHermesOAuth() {
-  if (_refreshInFlight) return _refreshInFlight;
+async function refreshHermesOAuth(providerId, authFile) {
+  const provider = typeof providerId === 'string' && providerId.trim()
+    ? providerId.trim()
+    : envConfig.HERMES_REFRESH_PROVIDER;
+  const key = `${provider}|${authFile || ''}`;
 
-  _refreshInFlight = (async () => {
-    log.warn(`Invoking Hermes OAuth refresh (${envConfig.HERMES_BIN} chat -q "${HERMES_REFRESH_QUERY}")...`);
-    const reply = await _runHermesRefresh();
-    log.info('Hermes OAuth refresh completed — auth file should be updated.');
+  const pending = _refreshInFlight.get(key);
+  if (pending) return pending;
+
+  const run = (async () => {
+    log.warn(`Invoking Hermes OAuth refresh for provider "${provider}"...`);
+    const before = _authFileStamp(authFile);
+    const reply = await _runHermesRefresh(provider);
+    const after = _authFileStamp(authFile);
+    if (authFile && before !== null && before === after) {
+      log.warn(`Hermes exited cleanly but did not update ${authFile} — the credential may still be stale.`);
+    } else {
+      log.info('Hermes OAuth refresh completed — auth file updated.');
+    }
     return reply;
   })().finally(() => {
-    _refreshInFlight = null;
+    _refreshInFlight.delete(key);
   });
 
-  return _refreshInFlight;
+  _refreshInFlight.set(key, run);
+  return run;
 }
 
 export { refreshHermesOAuth

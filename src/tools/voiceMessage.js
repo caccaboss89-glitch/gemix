@@ -6,10 +6,14 @@
 // (This file returns binary audio Buffers, so it produces no tool-facing text.)
 //
 // Voice generation pipeline. Produces OGG/Opus audio buffers for WhatsApp
-// voice messages. Uses the direct xAI TTS endpoint (`POST /v1/tts`) when
-// enabled (primary), with Google Translate TTS fallback. Always applies
-// MP3-to-Opus transcode. Strips vocal tags for Google TTS input (speech
-// tags are written by GemiX itself in the voice reply `response` text).
+// voice messages. The backend is chosen by the active provider profile:
+//   - xai:    direct xAI TTS endpoint (`POST /v1/tts`) when enabled (primary),
+//             with Google Translate TTS fallback;
+//   - openai: Google Translate directly — no xAI endpoint, credential, error
+//             message or admin notification is reachable from that branch.
+// Both share the MP3-to-Opus transcode. Vocal tags are stripped before Google
+// TTS input (speech tags are written by GemiX itself in the `response` text and
+// only the xAI voice schema offers them).
 
 import googleTTS from 'google-tts-api';
 import { spawn  } from 'child_process';
@@ -20,6 +24,7 @@ import { createLogger  } from '../utils/logger.js';
 import { defaultSettings  } from '../utils/settingsStore.js';
 import envConfig from '../config/env.js';
 import { getXaiAuth  } from '../config/xaiAuth.js';
+import { PROVIDER, profileFromContext  } from '../ai/providers/providerProfile.js';
 
 const log = createLogger('TTS');
 
@@ -135,19 +140,22 @@ function convertMp3ToWhatsAppOpus(mp3Buffer, opts = {}) {
 }
 
 /**
- * Generate voice audio using the direct xAI TTS endpoint (primary) with
- * Google Translate TTS fallback.
+ * Generate voice audio through the active provider's TTS backend: xAI endpoint
+ * first (Google Translate fallback) on the xAI profile, Google Translate
+ * directly on every other one.
  * Enforces a global timeout; on expiry aborts ffmpeg and swallows the losing branch.
  * @param {string} text - Text to convert to speech (max 1000 characters).
- *   May contain xAI speech tags ([pause], <soft>...</soft>, ...) - GemiX
- *   writes them directly; they are stripped for the Google fallback.
+ *   On the xAI profile it may carry speech tags ([pause], <soft>...</soft>, ...)
+ *   written by GemiX itself; they are stripped before any Google Translate call.
  * @param {object} [settings] - Per-chat settings { voice, language }; defaults when omitted.
+ * @param {object} [ctx] - anything carrying providerProfile/providerId; picks the backend.
  * @returns {Promise<Buffer>} OGG/Opus audio buffer (48kHz mono, iOS-optimized WhatsApp format)
  */
-async function generateVoice(text, settings = {}) {
+async function generateVoice(text, settings = {}, ctx) {
+  const provider = profileFromContext(ctx);
   const controller = new AbortController();
   let timeoutId;
-  const work = _generateVoice(text, settings, controller.signal);
+  const work = _generateVoice(text, settings, controller.signal, provider);
   // Losing race branch must not surface as unhandledRejection.
   work.catch(() => {});
   const timeout = new Promise((_, reject) => {
@@ -163,10 +171,25 @@ async function generateVoice(text, settings = {}) {
   }
 }
 
-async function _generateVoice(text, settings, signal) {
-  const defaults = defaultSettings();
-  const voiceId = settings?.voice || defaults.voice || envConfig.XAI_TTS_VOICE;
+async function _generateVoice(text, settings, signal, provider) {
+  const defaults = defaultSettings(provider);
   const language = settings?.language || defaults.language;
+
+  // Providers without a voice catalog speak through Google Translate directly.
+  // Nothing below this branch touches xAI: no endpoint, no credential, no
+  // "xAI disabled" wording and no admin notification naming it.
+  if (provider.id !== PROVIDER.XAI) {
+    if (signal?.aborted) throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
+    try {
+      return await googleTranslateTTS(stripVocalTags(text), language, signal);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      await notifyAdmin('Google TTS', err.message);
+      throw new Error(`TTS failed: Google Translate service error.${ADMIN_NOTIFIED_SUFFIX}`);
+    }
+  }
+
+  const voiceId = settings?.voice || defaults.voice || envConfig.XAI_TTS_VOICE;
 
   // Try the direct xAI TTS endpoint first (only if enabled).
   if (envConfig.XAI_TTS_ENABLED) {

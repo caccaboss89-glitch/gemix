@@ -70,9 +70,6 @@ const MAX_REF_IMAGES_FOR_VIDEO = 7;
 
 // Fixed video parameters (resolution/duration live in config/constants.js).
 
-// Generated image/video download cap (same as ingress video limit).
-const GENERATED_MEDIA_MAX_BYTES = MAX_VIDEO_BYTES;
-
 // -- Helpers -----------------------------------------------------------------
 
 /**
@@ -191,8 +188,11 @@ async function _downloadMedia(url) {
   if (!arrBuf || arrBuf.byteLength === 0) {
     throw new Error('Download returned an empty body.');
   }
-  if (arrBuf.byteLength > GENERATED_MEDIA_MAX_BYTES) {
-    throw new Error(`Download too large (${arrBuf.byteLength} bytes, max ${GENERATED_MEDIA_MAX_BYTES}).`);
+  // Generated image/video download cap (same as ingress video limit). Read at
+  // call time: a module-level alias would evaluate MAX_VIDEO_BYTES during the
+  // import cycle this file sits in and hit its temporal dead zone.
+  if (arrBuf.byteLength > MAX_VIDEO_BYTES) {
+    throw new Error(`Download too large (${arrBuf.byteLength} bytes, max ${MAX_VIDEO_BYTES}).`);
   }
   return Buffer.from(arrBuf);
 }

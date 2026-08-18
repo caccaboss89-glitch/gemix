@@ -14,7 +14,7 @@ import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
-import { getXaiAuth  } from '../config/xaiAuth.js';
+import { getXaiAuth, XAI_HERMES_POOL  } from '../config/xaiAuth.js';
 import { createLogger  } from '../utils/logger.js';
 import { refreshHermesOAuth  } from '../utils/hermesAuthRefresh.js';
 import { isXaiFileDownloadError  } from '../utils/refreshXaiMessageUrls.js';
@@ -352,7 +352,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       if (!envConfig.XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
         hermesRefreshAttempted = true;
         try {
-          await refreshHermesOAuth();
+          await refreshHermesOAuth(XAI_HERMES_POOL, envConfig.XAI_AUTH_FILE);
           forceTokenReload = true;
           // A successful refresh is not a failed attempt: give back the budget
           // so the retry happens even when the 401 landed on the last one.
@@ -490,7 +490,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
         if (!envConfig.XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
           hermesRefreshAttempted = true;
           try {
-            await refreshHermesOAuth();
+            await refreshHermesOAuth(XAI_HERMES_POOL, envConfig.XAI_AUTH_FILE);
             forceTokenReload = true;
             continue;
           } catch (refreshErr) {

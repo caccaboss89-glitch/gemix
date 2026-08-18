@@ -9,7 +9,7 @@
 // allowed to send (Meta AI, and on the personal account its own @gemix).
 
 import constants from '../config/constants.js';
-import { getDedicatedClient } from '../platforms/whatsapp/dedicated.js';
+import { getDedicatedClient } from '../platforms/whatsapp/clientRegistry.js';
 
 const { META_AI_NUMBER } = constants;
 

@@ -9,17 +9,20 @@
 //
 // Central registry of tool definitions for the main brain (function calling schema).
 // Uses makeTool + validateToolArgs (lightweight hallucination guard, no ajv).
-// getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
-// The build tool description is generic and does not expose sub-agent internals.
+// getToolsForUser builds the per-user/platform/provider list (hides admin-only,
+// active-member-only, Discord-specific, and everything the active provider
+// cannot actually do). The build tool description is generic and does not
+// expose sub-agent internals.
 
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
+import { PROVIDER, profileFromContext } from './providers/providerProfile.js';
 import {
   defaultSettings,
   VALID_VOICES,
   VOICES_MALE,
   VOICES_FEMALE,
-  VALID_EFFORTS,
+  effortsForProvider,
   VALID_LANGUAGES
 } from '../utils/settingsStore.js';
 import {
@@ -218,6 +221,20 @@ const TOOL_X_SEARCH_NATIVE = {
   enable_video_understanding: true
 };
 
+// -- OpenAI hosted server-side tool -----------------------------------------
+//
+// The Codex backend runs its own web search inside the request and returns
+// `web_search_call.results`, mixing prose sources (later surfaced as
+// url_citation annotations) with structured `image_result` entries. Asking for
+// both content types is what makes image results appear at all; the caption and
+// max_results settings shape those entries. Serialized exactly as probed — the
+// request builder is an allowlist and drops anything not on it.
+const TOOL_OPENAI_WEB_SEARCH_HOSTED = {
+  type: 'web_search',
+  search_content_types: ['image', 'text'],
+  image_settings: { max_results: 3, caption: true }
+};
+
 // -- Static tool definitions (schema never varies) -------------------------
 
 // Named web_image_search (not search_images): xAI reserves search_images for its
@@ -265,47 +282,58 @@ const TOOL_READ_MUSIC_STATS = makeTool({
   properties: {}
 });
 
-function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
+function buildManagePreferencesTool(isGroup, isPersonalChat = false, provider) {
   const scope = isGroup
     ? 'the current group'
     : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
-  const defaults = defaultSettings();
+  const defaults = defaultSettings(provider);
+  const efforts = effortsForProvider(provider);
+  const fields = provider.capabilities.namedVoices
+    ? 'voice, effort, language, custom memory'
+    : 'effort, language, custom memory';
+  const properties = {};
+  // Voice is only a preference where the TTS backend has voices to choose from.
+  if (provider.capabilities.namedVoices) {
+    properties.voice = {
+      type: 'string',
+      enum: VALID_VOICES,
+      description: `Voice used for spoken replies (default ${defaults.voice}). `
+        + `Male: ${VOICES_MALE.join(', ')}. Female: ${VOICES_FEMALE.join(', ')}. `
+        + 'Pick the one matching the gender and character the user asks for.'
+    };
+  }
+  Object.assign(properties, {
+    effort: {
+      type: 'string',
+      enum: efforts,
+      description: `How much reasoning you spend per reply (default ${defaults.effort}): `
+        + `${efforts[0]} = fastest, ${efforts[efforts.length - 1]} = most thorough.`
+    },
+    language: {
+      type: 'string',
+      enum: VALID_LANGUAGES,
+      description: `Language you reply and speak in (default ${defaults.language}). Main codes: it, en, es-ES, fr, de, pt-BR, zh, ja, ru, ar-SA.`
+    },
+    memory: {
+      type: 'string',
+      allowEmpty: true,
+      description: 'Free-text custom instructions, for anything not covered by the fields above: '
+        + 'e.g. speak with a certain slang, use lots of emoji, always prefer text or voice replies, or what the user is working on in this period '
+        + '(ideas/projects that stay relevant for days, weeks or months — never a one-off question or transient context). '
+        + 'Max 1000 chars, always in English; empty resets it to the default. Do not write timestamps: the system tracks them.'
+    },
+    replace: {
+      type: 'boolean',
+      description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.'
+    }
+  });
+
   return makeTool({
     name: 'manage_preferences',
-    description: `Change your own settings for ${scope} — the ones listed in CurrentSettings (voice, effort, language, custom memory). `
+    description: `Change your own settings for ${scope} — the ones listed in CurrentSettings (${fields}). `
       + 'Pass only the fields to change; the others stay as they are. Values marked (default) there are the program defaults. '
       + 'Never store transient context (current task, session state, temporary data).',
-    properties: {
-      voice: {
-        type: 'string',
-        enum: VALID_VOICES,
-        description: `Voice used for spoken replies (default ${defaults.voice}). `
-          + `Male: ${VOICES_MALE.join(', ')}. Female: ${VOICES_FEMALE.join(', ')}. `
-          + 'Pick the one matching the gender and character the user asks for.'
-      },
-      effort: {
-        type: 'string',
-        enum: VALID_EFFORTS,
-        description: `How much reasoning you spend per reply (default ${defaults.effort}): low = fastest, high = most thorough.`
-      },
-      language: {
-        type: 'string',
-        enum: VALID_LANGUAGES,
-        description: `Language you reply and speak in (default ${defaults.language}). Main codes: it, en, es-ES, fr, de, pt-BR, zh, ja, ru, ar-SA.`
-      },
-      memory: {
-        type: 'string',
-        allowEmpty: true,
-        description: 'Free-text custom instructions, for anything not covered by the fields above: '
-          + 'e.g. speak with a certain slang, use lots of emoji, always prefer text or voice replies, or what the user is working on in this period '
-          + '(ideas/projects that stay relevant for days, weeks or months — never a one-off question or transient context). '
-          + 'Max 1000 chars, always in English; empty resets it to the default. Do not write timestamps: the system tracks them.'
-      },
-      replace: {
-        type: 'boolean',
-        description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.'
-      }
-    }
+    properties
   });
 }
 
@@ -353,6 +381,22 @@ const TOOL_GENERATE_MUSIC = makeTool({
 // Reference images: each entry is a filename with extension from the delivery
 // buffer or chat history, or a public https URL. Filenames resolve buffer-first,
 // then history; local files are exposed as public URLs for xAI.
+
+// gpt-image-2 on the Codex path is text-to-image only as far as GemiX has
+// validated it: reference images, editing and aspect ratio were never probed on
+// that route, so the schema does not offer them and the handler rejects them.
+const TOOL_GENERATE_IMAGE_OPENAI = makeTool({
+  name: 'generate_image',
+  description:
+    'Generate an image from a textual prompt. Result is pushed to the delivery buffer.',
+  properties: {
+    prompt: {
+      type: 'string',
+      description: 'Image description: subject, style, lighting, mood, composition.'
+    }
+  },
+  required: ['prompt']
+});
 
 const TOOL_GENERATE_IMAGE = makeTool({
   name: 'generate_image',
@@ -703,18 +747,28 @@ const TOOL_BUG_REPORT = makeTool({
 // stage inputs via attachments[]. After the run, harvested workspace files land
 // in the delivery buffer; GemiX selects final user attachments.
 
-function buildBuildTool(isGroup) {
+function buildBuildTool(isGroup, provider) {
   const scope = isGroup ? 'the current group' : 'the current user';
+  const isOpenAI = provider.id === PROVIDER.OPENAI;
+  const agentName = isOpenAI ? 'Codex Build' : 'Grok Build';
+  // Only the xAI profile has an X corpus to fetch media from.
+  const fetchableMedia = isOpenAI
+    ? 'Not for fetchable web media — use web_image_search + final attachments; never call build only to download, mirror, or re-send such media. '
+    : 'Not for fetchable X/web media — use x_search / web_image_search + final attachments; never call build only to download, mirror, or re-send such media. ';
+  const standaloneMedia = isOpenAI
+    ? 'Not for standalone image generation or search-downloadable media. '
+    : 'Not for standalone imagine or search-downloadable media. ';
   return makeTool({
     name: 'build',
     description:
-      'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
-      + 'Use build to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp, multi-step deliverables; images/video only if embedded in those). Not for standalone imagine or search-downloadable media. '
-      + 'Not for fetchable X/web media — use x_search / web_image_search + final attachments; never call build only to download, mirror, or re-send such media. '
+      `Delegate file deliverables to ${agentName} in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). `
+      + 'Use build to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp, multi-step deliverables; images/video only if embedded in those). '
+      + standaloneMedia
+      + fetchableMedia
       + 'Isolated turn — no chat history; it sees only your prompt, the BuildWorkspace files, and attachments[] you stage. '
       + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from generate_music, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
       + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
-      + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
+      + `A resend-only brief still runs a full ${agentName} session (not a free reattach). `
       + `Workspace for ${scope}, ${constants.BUILD_WORKSPACE_TTL_LABEL} TTL, ${constants.BUILD_WORKSPACE_QUOTA_MB} MB, once per main-brain round.`,
     properties: {
       prompt: {
@@ -738,24 +792,34 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const isWhatsApp = constants.isWhatsAppPlatform(userCtx.platform);
   const isWhatsAppGroup = isWhatsApp && Boolean(userCtx.isGroup);
   const isDiscord = userCtx.platform === constants.PLATFORM_DISCORD;
+  const provider = profileFromContext(userCtx);
+  const can = provider.capabilities;
 
   const tools = [];
 
   // Order = importance / how often the main brain should reach for them.
-  // 1) Pulling material into context: native web → local web images → native X
-  // (image mode off on web) → one video already in this chat. History files
-  // attach natively on user turns (videos excepted, hence read_video);
-  // assistant history stays [Attachment] tags.
-  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_WEB_IMAGE_SEARCH, TOOL_X_SEARCH_NATIVE, TOOL_READ_VIDEO);
+  // 1) Pulling material into context: server-side web → local web images →
+  // native X (image mode off on web) → one video already in this chat. History
+  // files attach natively on user turns (videos excepted, hence read_video);
+  // assistant history stays [Attachment] tags. The OpenAI profile has neither an
+  // X corpus nor video understanding, so it stops after the first two.
+  tools.push(can.hostedImageResults ? TOOL_OPENAI_WEB_SEARCH_HOSTED : TOOL_WEB_SEARCH_NATIVE);
+  tools.push(TOOL_WEB_IMAGE_SEARCH);
+  if (can.xSearch) tools.push(TOOL_X_SEARCH_NATIVE);
+  if (can.readVideo) tools.push(TOOL_READ_VIDEO);
 
   // 2) Media generation (WhatsApp). Weekly quota is the real cap (mediaUsageLimits).
   if (isWhatsApp) {
-    tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO, TOOL_GENERATE_MUSIC);
+    if (can.generateImage) {
+      tools.push(can.generateVideo ? TOOL_GENERATE_IMAGE : TOOL_GENERATE_IMAGE_OPENAI);
+    }
+    if (can.generateVideo) tools.push(TOOL_GENERATE_VIDEO);
+    tools.push(TOOL_GENERATE_MUSIC);
   }
 
   // 3) Build deliverables (sandbox) — outside Discord.
-  if (!isDiscord) {
-    tools.push(buildBuildTool(isWhatsAppGroup));
+  if (!isDiscord && can.build) {
+    tools.push(buildBuildTool(isWhatsAppGroup, provider));
   }
 
   // 4) Outbound delivery. Voice is not a tool (structured `voice` flag on WA dedicated).
@@ -777,7 +841,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // 6) Preferences & meta (no persistent settings on Discord).
   if (!isDiscord) {
     const isPersonalChat = userCtx.platform === constants.PLATFORM_WA_PERSONAL;
-    tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
+    tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat, provider));
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
   // Active WA members: music stats, sent-message audit. The Statute is not a
@@ -809,22 +873,28 @@ function toolNamesToSet(tools) {
 }
 
 /**
- * Fill CAPS[].tools from getToolsForUser so the static profile capability sets
- * are always the registry's own answer, never a hand-kept copy of it. Resolved
- * for an active non-admin member: the widest set a profile can expose short of
- * admin-only tools.
+ * Fill CAPS[].toolsByProvider from getToolsForUser so the platform capability
+ * sets are always the registry's own answer, never a hand-kept copy of it —
+ * one entry per provider, because the same platform exposes a different set on
+ * each. Resolved for an active non-admin member: the widest set a profile can
+ * expose short of admin-only tools.
  * @param {object} caps - CAPS map from platformCapabilities
  * @param {object} profileEnum - PROFILE enum from platformCapabilities
+ * @param {string[]} providerIds - provider ids to resolve the sets for
  */
-function syncProfileToolSets(caps, profileEnum) {
+function syncProfileToolSets(caps, profileEnum, providerIds) {
   for (const profile of Object.values(profileEnum)) {
     const cap = caps[profile];
     if (!cap) continue;
-    const tools = getToolsForUser(true, false, {
-      platform: cap.platform,
-      isGroup: Boolean(cap.isGroup)
-    });
-    cap.tools = toolNamesToSet(tools);
+    cap.toolsByProvider = {};
+    for (const providerId of providerIds) {
+      const tools = getToolsForUser(true, false, {
+        platform: cap.platform,
+        isGroup: Boolean(cap.isGroup),
+        providerId
+      });
+      cap.toolsByProvider[providerId] = toolNamesToSet(tools);
+    }
   }
 }
 

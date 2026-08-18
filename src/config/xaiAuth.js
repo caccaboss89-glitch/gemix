@@ -6,16 +6,20 @@
 //
 // OAuth auth file shape:
 //   {
-//     "active_provider": "xai-oauth",
+//     "active_provider": "…",            // ignored: see below
 //     "credential_pool": {
 //       "xai-oauth": [
 //         { "access_token": "...", "base_url": "https://api.x.ai/v1", ... }
 //       ]
 //     }
 //   }
+//
+// The pool is always "xai-oauth". `active_provider` only records which provider
+// the Hermes CLI last used, so following it could hand an unrelated provider's
+// token to api.x.ai after any other Hermes invocation.
 
-import fs from 'fs';
 import envConfig from './env.js';
+import { readPoolCredential, invalidateAuthFileCache } from './hermesCredentialStore.js';
 
 const {
   XAI_USE_API_KEY,
@@ -25,57 +29,15 @@ const {
 } = envConfig;
 
 const DEFAULT_BASE_URL = 'https://api.x.ai/v1';
-
-let _oauthCache = null; // { mtimeMs, size, token, baseUrl }
-
-function _pickCredential(parsed) {
-  const provider = parsed.active_provider || 'xai-oauth';
-  const pool = parsed.credential_pool?.[provider];
-  if (!Array.isArray(pool) || pool.length === 0) {
-    throw new Error(`No credentials for provider "${provider}" in ${XAI_AUTH_FILE}`);
-  }
-  const usable = pool
-    .filter(c => c && typeof c.access_token === 'string' && c.access_token.length > 0)
-    .sort((a, b) => {
-      const okA = !a.last_status || a.last_status === 'ok' ? 0 : 1;
-      const okB = !b.last_status || b.last_status === 'ok' ? 0 : 1;
-      if (okA !== okB) return okA - okB;
-      return (a.priority ?? 0) - (b.priority ?? 0);
-    });
-  if (usable.length === 0) {
-    throw new Error(`No usable access_token in ${XAI_AUTH_FILE}`);
-  }
-  return usable[0];
-}
+const POOL = 'xai-oauth';
 
 function _getOAuthAuth(forceReload = false) {
-  let stat;
-  try {
-    stat = fs.statSync(XAI_AUTH_FILE);
-  } catch (err) {
-    throw new Error(`xAI auth file not found at ${XAI_AUTH_FILE}: ${err.message}`);
-  }
-
-  if (!forceReload && _oauthCache
-    && _oauthCache.mtimeMs === stat.mtimeMs
-    && _oauthCache.size === stat.size) {
-    return { token: _oauthCache.token, baseUrl: _oauthCache.baseUrl };
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(XAI_AUTH_FILE, 'utf-8'));
-  } catch (err) {
-    throw new Error(`Cannot parse xAI auth file ${XAI_AUTH_FILE}: ${err.message}`);
-  }
-
-  const cred = _pickCredential(parsed);
-  const baseUrl = (typeof cred.base_url === 'string' && cred.base_url.trim()
-    ? cred.base_url.trim()
-    : DEFAULT_BASE_URL).replace(/\/+$/, '');
-
-  _oauthCache = { mtimeMs: stat.mtimeMs, size: stat.size, token: cred.access_token, baseUrl };
-  return { token: _oauthCache.token, baseUrl: _oauthCache.baseUrl };
+  const cred = readPoolCredential({
+    authFile: XAI_AUTH_FILE,
+    pool: POOL,
+    forceReload
+  });
+  return { token: cred.accessToken, baseUrl: cred.baseUrl || DEFAULT_BASE_URL };
 }
 
 /**
@@ -97,8 +59,13 @@ function describeXaiAuthSource() {
   if (XAI_USE_API_KEY) {
     return `api_key (${XAI_BASE_URL})`;
   }
-  return `oauth file (${XAI_AUTH_FILE})`;
+  return `hermes pool "${POOL}" (${XAI_AUTH_FILE})`;
 }
 
-export { getXaiAuth, describeXaiAuthSource
+/** Forget the cached parse so the next read picks up a refreshed file. */
+function invalidateXaiAuthCache() {
+  invalidateAuthFileCache(XAI_AUTH_FILE);
+}
+
+export { getXaiAuth, describeXaiAuthSource, invalidateXaiAuthCache, POOL as XAI_HERMES_POOL
 };

@@ -1,0 +1,34 @@
+=== BUILD SUB-AGENT (Grok Build in Docker: --rules + exec contract) ===
+
+--- GROK --rules ---
+You are GemiX-Build: complete the task brief inside this isolated container.
+Time (Europe/Rome): <TIME>
+Filesystem: work only under /workspace/ (writable). Do not rely on host paths outside it.
+Quota: keep the workspace under about 500 MB (host enforces staging caps; do not fill the disk). Files persist for the user session (~4h TTL managed by the host).
+Network: HTTP/HTTPS egress already uses HTTP_PROXY/HTTPS_PROXY (residential), including API calls to xAI. Do not pass --proxy to yt-dlp/curl. On proxy 502, CONNECT errors, timeouts, or DNS failures: internet is down — stop, do not retry loops, explain the system outage in your reply.
+Toolchain: Python 3.12, Node 22, ffmpeg, yt-dlp, LibreOffice, TeX, zip/unzip, curl/wget. Runtime pip/npm/apt are disabled — do not attempt package installs.
+Use your built-in Grok skills and tools as needed.
+IMPORTANT delivery contract: after you finish, the host harvests new/modified files under /workspace/ (and may harvest all files on a successful no-change run, e.g. resend). Write a clear free-text summary of what you did and what files matter; GemiX-Main will select what to send the user.
+If GemiX-Main only asks to send/resend files already present: confirm they are under /workspace/ (do not recreate them unless missing) and reply briefly — the host harvests them and forwards to GemiX-Main automatically; you do not list JSON attachments.
+Language: write documents in the user's language (Italian default). No emojis in your reply or generated files unless the brief asks for them.
+Staged inputs already under /workspace/: logo(1).png.
+Upload filename collisions (use the on-disk name): "logo.png" → on disk "logo(1).png".
+
+--- EXEC (argv, secrets redacted) ---
+cmd: ["timeout","--signal=KILL","600s","grok","-p","Create a short hello.txt in /workspace/","--cwd","/workspace","--always-approve","--no-subagents","--no-auto-update","--max-turns","60","--rules","You are GemiX-Build: complete the task brief inside this isolated container.\nTime (Europe/Rome): <TIME>
+env: ["XAI_API_KEY=[REDACTED]","HOME=/var/lib/gemix-grok","GROK_HOME=/var/lib/gemix-grok","GROK_DISABLE_AUTOUPDATER=1","GEMIX_BUILD=1","HTTP_PROXY=http://gemix-sandbox-proxy:8080","HTTPS_PROXY=http://gemix-sandbox-proxy:8080","http_proxy=http://gemix-sandbox-proxy:8080","https_proxy=http://gemix-sandbox-proxy:8080","NO_PROXY=localhost,127.0.0.1"]
+timeoutMs: 600000
+
+--- HOST CONTRACT ---
+- Auth: host getXaiAuth().token injected as XAI_API_KEY for this exec only (no host ~/.hermes mount).
+- After exit: harvest every regular file under /workspace/ into the delivery buffer.
+- Tool result includes free-text agent reply + delivery_note: Workspace files harvested into the delivery buffer for this run are listed in `delivered` (new or modified under /workspace/; on a clean success with no delta, all workspace files). Choose which to put in final `attachments` for the user: prefer final deliverables; skip intermediates, sources, logs, and scratch files unless the user asked for them.
+- No structured JSON schema for build attachments; GemiX-Main selects final user files.
+
+--- TOOL ERRORS (host) ---
+    build:
+        - Cannot resolve requested attachment(s): <names>
+        - build is busy: another request is using this workspace.
+        - Cannot load xAI credentials for build: <reason>
+        - Grok Build failed to start or run: <reason>
+        - Build hard timeout (<N>s).

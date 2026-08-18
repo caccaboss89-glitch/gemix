@@ -29,6 +29,7 @@
 //      search counts), and ship the reply back to the platform.
 
 import { callAI  } from './ai/aiProvider.js';
+import { resolveProviderProfile  } from './ai/providers/providerProfile.js';
 import {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
@@ -91,7 +92,7 @@ function extractPlainTextContent(content) {
 /** Re-read the persisted preferences so a manage_preferences call takes effect at once. */
 function reloadSettings(ctx, ui) {
   if (ctx.platform === constants.PLATFORM_DISCORD) return;
-  ctx.settings = readSettings(resolveSettingsFileId(ctx, ui));
+  ctx.settings = readSettings(resolveSettingsFileId(ctx, ui), ctx);
 }
 
 function getReleaseNotifyTarget(ctx, ui) {
@@ -112,7 +113,8 @@ function buildMaintenanceReleaseAlreadyEnabledMessage() {
 
 function _toolNotAvailableMessage(toolName, ctx) {
   return toolUnavailableMessage(toolName, resolveProfile(ctx), {
-    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember)
+    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
+    providerProfile: ctx.providerProfile
   });
 }
 
@@ -122,11 +124,18 @@ function _toolNotAvailableMessage(toolName, ctx) {
  * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, researchFooter?, voiceTranscriptText?, voiceTranscriptChatId?, systemMessage? }
  */
 async function handleMessage(ctx) {
+  // Resolved once and captured immutably for the whole turn: prompt, tools,
+  // schema, media projection, dispatcher and Build all read this same object,
+  // so nothing downstream re-derives the provider from a model slug or a URL.
+  const providerProfile = resolveProviderProfile();
+  ctx.providerProfile = providerProfile;
+
   const responseCtx = {
     attachments: [],
     discordTitle: '',
-    // Accumulated stats from native server-side web/X searches (main brain
-    // and build sub-agent) - used for the badge appended to the reply.
+    providerProfile,
+    // Accumulated stats from server-side web (and, on xAI, X) searches — main
+    // brain and build sub-agent — used for the badge appended to the reply.
     researchStats: null
   };
 
@@ -200,10 +209,10 @@ async function handleMessage(ctx) {
 
     // Per-chat preferences drive the prompt's <CurrentSettings>, the reasoning
     // effort, and the TTS voice/language.
-    ctx.settings = isDiscord ? null : readSettings(settingsFileId);
+    ctx.settings = isDiscord ? null : readSettings(settingsFileId, ctx);
     // Monthly renewal notice: injected only when something is customized, and
     // recorded right away so it cannot repeat even if it goes unanswered.
-    ctx.settingsReviewDue = Boolean(ctx.settings && isReviewDue(ctx.settings));
+    ctx.settingsReviewDue = Boolean(ctx.settings && isReviewDue(ctx.settings, Date.now(), ctx));
     if (ctx.settingsReviewDue) {
       try { await markReviewed(settingsFileId); }
       catch (err) { log.warn(`markReviewed failed: ${err.message}`); }
@@ -214,6 +223,7 @@ async function handleMessage(ctx) {
     }
 
     const userCtx = {
+      providerProfile,
       isActiveMember,
       isAdmin: userIsAdmin,
       member: ui.member,
@@ -440,7 +450,7 @@ async function handleMessage(ctx) {
         if (ctx.presence && typeof ctx.presence.setRecording === 'function') {
           try { await ctx.presence.setRecording(); } catch { /* best effort */ }
         }
-        voiceBuffer = await generateVoice(spoken, ctx.settings || {});
+        voiceBuffer = await generateVoice(spoken, ctx.settings || {}, ctx);
       } catch (err) {
         log.error(`   Voice generation failed (${err.message}); replying as text`);
         return null;
@@ -495,9 +505,11 @@ async function handleMessage(ctx) {
       // omit it so the model cannot rename mid-conversation.
       const responseFormat = buildGemixResponseFormat({
         includeTitle: isDiscord,
-        allowVoice
+        allowVoice,
+        providerProfile
       });
       const callOpts = {
+        providerProfile,
         maxTurns: constants.MAX_TOOL_ROUNDS,
         requestId: ctx.requestId,
         responseFormat,
@@ -697,7 +709,8 @@ async function handleMessage(ctx) {
       }
       const responseFormat = buildGemixResponseFormat({
         includeTitle: isDiscord,
-        allowVoice
+        allowVoice,
+        providerProfile
       });
       const wrapUpNote = sessionDurationLimitReached
         ? 'This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
@@ -707,6 +720,7 @@ async function handleMessage(ctx) {
         content: wrapSystemReminder(wrapUpNote)
       });
       const { message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
+        providerProfile,
         toolChoice: 'none',
         requestId: ctx.requestId,
         responseFormat,

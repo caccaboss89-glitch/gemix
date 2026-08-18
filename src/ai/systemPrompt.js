@@ -18,8 +18,12 @@
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
 import { ACTIVE_MEMBERS  } from '../config/members.js';
 import envConfig from '../config/env.js';
-import { getModelDisplayName  } from '../utils/footer.js';
-import { defaultSettings, customizedFields  } from '../utils/settingsStore.js';
+import { profileFromContext  } from './providers/providerProfile.js';
+import {
+  defaultSettings,
+  customizedFields,
+  visibleSettingFields
+} from '../utils/settingsStore.js';
 import constants from '../config/constants.js';
 import { PRIVACY_WIPE_COMMAND  } from '../config/systemMessages.js';
 
@@ -32,7 +36,8 @@ import {
   buildVisibilityLines,
   buildAudienceLines,
   getCapabilities,
-  profileHasMediaQuota
+  profileHasMediaQuota,
+  quotaKindsForProfile
 } from '../config/platformCapabilities.js';
 import { getToolsForUser, toolNamesToSet  } from './tools.js';
 import { formatQuotaCounts, formatMediaQuotaResetLabel  } from '../utils/mediaUsageLimits.js';
@@ -69,7 +74,8 @@ function _indentLines(text, depth) {
 function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
   const tools = getToolsForUser(isActiveMember, isAdmin, {
     platform: ctx.platform,
-    isGroup: ctx.isGroup
+    isGroup: ctx.isGroup,
+    providerProfile: profileFromContext(ctx)
   });
   return { toolNames: toolNamesToSet(tools) };
 }
@@ -100,15 +106,16 @@ function buildStaticInstructions(ctx) {
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
   const { toolNames } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
+  const provider = profileFromContext(ctx);
   // Discord Thread title / conversation_title guidance live only in Runtime.
-  const promptOpts = { isActiveMember, toolNames };
+  const promptOpts = { isActiveMember, toolNames, providerProfile: provider };
 
-  const sections = [_buildOpening(cap)];
+  const sections = [_buildOpening(cap, provider)];
 
   sections.push(_section('This chat', _buildChatLines(ctx, cap, profile)));
   sections.push(_section('Who you are talking to', _buildAudienceLines(ctx, cap, profile, promptOpts, isAdmin)));
   sections.push(_section('Program-owned turns', [PROGRAM_ITEMS_RULE]));
-  sections.push(_section('What you can and cannot see', buildVisibilityLines(profile)));
+  sections.push(_section('What you can and cannot see', buildVisibilityLines(profile, promptOpts)));
   sections.push(_section('How you answer', buildAnswerLines(profile, promptOpts)));
 
   const sendingFiles = buildSendingFilesLines(profile, promptOpts);
@@ -126,11 +133,16 @@ function buildStaticInstructions(ctx) {
   return sections.join('\n\n');
 }
 
-/** Identity and the standing goal. No heading: it opens the prompt. */
-function _buildOpening(cap) {
+/**
+ * Identity and the standing goal. No heading: it opens the prompt.
+ * The origin sentence is shared by every provider: GemiX grew out of Gemini and
+ * Grok tooling, ran as SuperGrok, and kept the name whichever model is behind it.
+ */
+function _buildOpening(cap, provider) {
   const division = cap.isDiscord ? ' (Legal Division)' : '';
   return (
-    `You are ${getModelDisplayName(envConfig.GROK_MODEL)} inside GemiX, a fusion of SuperGrok and Gemini${division}. `
+    `You are ${provider.displayName} inside GemiX${division}, a fusion of Gemini and Grok tools that grew into `
+    + 'SuperGrok and kept the name on every model it has run on since. '
     + 'You have a sense of irony, and you catch things even when they are only implied.\n'
     + 'Your main goal is to answer the request inside the `<user_query>` tag, using every means and tool '
     + 'available to you to make that answer as good as it can be.'
@@ -285,10 +297,12 @@ function buildDynamicRuntimeContext(ctx) {
     blocks.push(_renderBuildWorkspace(ctx.userWorkspace));
   }
 
-  // Per-user weekly generation quota line: non-admins only, and only where the
-  // three generation tools exist (WhatsApp) — admins and Discord get no line.
-  if (!isAdmin && profileHasMediaQuota(profile)) {
-    const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId);
+  // Per-user weekly generation quota line: non-admins only, and only where at
+  // least one metered generation tool exists — admins and Discord get no line.
+  // The counters shown are exactly the ones this provider can spend: a provider
+  // without video generation still shows its image and song allowances.
+  if (!isAdmin && profileHasMediaQuota(profile, ctx)) {
+    const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId, quotaKindsForProfile(profile, ctx));
     blocks.push(
       `Weekly generation quota for this user — ${counts} `
       + `(resets ${formatMediaQuotaResetLabel()}). At the cap the tool returns an error; `
@@ -311,19 +325,28 @@ function buildDynamicRuntimeContext(ctx) {
  * or (custom) so it can tell at a glance what the user actually chose.
  */
 function _renderCurrentSettings(ctx) {
-  const settings = ctx.settings || { ...defaultSettings(), updatedAt: null };
-  const custom = new Set(customizedFields(settings));
+  const provider = profileFromContext(ctx);
+  const settings = ctx.settings || { ...defaultSettings(provider), updatedAt: null };
+  const custom = new Set(customizedFields(settings, provider));
+  const visible = new Set(visibleSettingFields(provider));
   const scope = ctx.isGroup
     ? 'group'
     : (ctx.platform === constants.PLATFORM_WA_PERSONAL ? 'chat' : 'user');
   const mark = (field) => (custom.has(field) ? 'custom' : 'default');
-  const lines = [
-    `Voice: ${settings.voice} (${mark('voice')})`,
+  const lines = [];
+  // A provider whose TTS has no voice catalog states the fixed backend instead
+  // of a selectable name, and manage_preferences omits the field to match.
+  if (visible.has('voice')) {
+    lines.push(`Voice: ${settings.voice} (${mark('voice')})`);
+  } else if (provider.voiceProfile.attribution) {
+    lines.push(`Voice: ${provider.voiceProfile.attribution} (fixed)`);
+  }
+  lines.push(
     `Effort: ${settings.effort} (${mark('effort')})`,
     `Language: ${settings.language} (${mark('language')})`,
     `Memory: ${escapeXml(settings.memory)} (${mark('memory')})`,
     `Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`
-  ];
+  );
   const body = _indentLines(lines.join('\n'), 1);
   return `<CurrentSettings scope="${scope}">\n${body}\n</CurrentSettings>`;
 }

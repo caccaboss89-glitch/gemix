@@ -13,11 +13,25 @@ const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defa
 
 const XAI_USE_API_KEY = toBool(process.env.XAI_USE_API_KEY, false);
 
+// Which AI back end this deployment runs. Always explicit: the provider is
+// never inferred from a model slug, a base URL or the contents of auth.json.
+const AI_PROVIDERS = ['xai', 'openai'];
+const AI_PROVIDER = (process.env.AI_PROVIDER || 'xai').trim().toLowerCase();
+if (!AI_PROVIDERS.includes(AI_PROVIDER)) {
+  console.error(`\n❌ Invalid AI_PROVIDER "${process.env.AI_PROVIDER}". Allowed: ${AI_PROVIDERS.join(', ')}.\n`);
+  process.exit(1);
+}
+
+// Keys only the xAI profile needs. Left configured for an instant rollback, but
+// never required while another provider is active.
+const PROVIDER_REQUIRED = {
+  xai: ['GROK_MODEL', 'IMAGE_GEN_MODEL', 'VIDEO_GEN_MODEL'],
+  openai: []
+};
+
 // Every value below must be set in .env (no || null in exports).
 const REQUIRED = [
-  'GROK_MODEL',
-  'IMAGE_GEN_MODEL',
-  'VIDEO_GEN_MODEL',
+  ...PROVIDER_REQUIRED[AI_PROVIDER],
   'OPENROUTER_BASE_URL',
   'OPENROUTER_API_KEY',
   'MUSIC_MODEL',
@@ -38,7 +52,7 @@ const REQUIRED = [
   'GEMIX_TEMP_FILE_PORT'
 ];
 const missing = REQUIRED.filter((k) => !process.env[k] || !String(process.env[k]).trim());
-if (XAI_USE_API_KEY) {
+if (AI_PROVIDER === 'xai' && XAI_USE_API_KEY) {
   if (!process.env.XAI_API_KEY || !String(process.env.XAI_API_KEY).trim()) {
     missing.push('XAI_API_KEY (required when XAI_USE_API_KEY=true)');
   }
@@ -50,7 +64,19 @@ if (missing.length > 0) {
 }
 
 export default {
+  AI_PROVIDER,
+  AI_PROVIDERS,
+
   GROK_MODEL: process.env.GROK_MODEL,
+
+  // OpenAI/ChatGPT profile (AI_PROVIDER=openai). Auth is the Hermes
+  // `openai-codex` pool; the Codex Responses backend is the only proven path.
+  OPENAI_MODEL: process.env.OPENAI_MODEL || 'gpt-5.6-sol',
+  OPENAI_REASONING_EFFORT: process.env.OPENAI_REASONING_EFFORT || 'max',
+  OPENAI_AUTH_FILE: process.env.OPENAI_AUTH_FILE || path.join(os.homedir(), '.hermes', 'auth.json'),
+  OPENAI_BASE_URL: (process.env.OPENAI_BASE_URL || 'https://chatgpt.com/backend-api/codex').replace(/\/+$/, ''),
+  OPENAI_HERMES_REFRESH_PROVIDER: process.env.OPENAI_HERMES_REFRESH_PROVIDER || 'openai-codex',
+  OPENAI_IMAGE_MODEL: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
 
   // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.
   XAI_USE_API_KEY,
@@ -107,6 +133,19 @@ export default {
   FFPROBE_PATH: process.env.FFPROBE_PATH || 'ffprobe',
   FFMPEG_PATH: process.env.FFMPEG_PATH || 'ffmpeg',
 
+  // Cloudflare Workers AI: Whisper STT for OpenAI voice notes and the FLUX
+  // image fallback. Both draw on the same free daily neuron allowance, so they
+  // share one ledger (utils/cloudflareAi.js).
+  CLOUDFLARE_AI_ACCOUNT_ID: process.env.CLOUDFLARE_AI_ACCOUNT_ID || '',
+  CLOUDFLARE_AI_API_TOKEN: process.env.CLOUDFLARE_AI_API_TOKEN || '',
+  CLOUDFLARE_STT_MODEL: process.env.CLOUDFLARE_STT_MODEL || '@cf/openai/whisper-large-v3-turbo',
+  CLOUDFLARE_IMAGE_MODEL: process.env.CLOUDFLARE_IMAGE_MODEL || '@cf/black-forest-labs/flux-2-klein-4b',
+
+  // Local whisper.cpp fallback used when Cloudflare is out of quota or down.
+  // Both paths must be set for the fallback to be attempted at all.
+  WHISPER_CPP_PATH: process.env.WHISPER_CPP_PATH || '',
+  WHISPER_CPP_MODEL_PATH: process.env.WHISPER_CPP_MODEL_PATH || '',
+
   GEMIX_SANDBOX_IMAGE: process.env.GEMIX_SANDBOX_IMAGE || 'gemix-sandbox:latest',
   GEMIX_SANDBOX_NETWORK: process.env.GEMIX_SANDBOX_NETWORK || 'gemix_sandbox_net',
   GEMIX_SANDBOX_PROXY_HOST: process.env.GEMIX_SANDBOX_PROXY_HOST || 'gemix-sandbox-proxy',
@@ -123,5 +162,12 @@ export default {
   HERMES_BIN: process.env.HERMES_BIN || 'hermes',
   HERMES_REFRESH_TIMEOUT_MS: Number(process.env.HERMES_REFRESH_TIMEOUT_MS) || 120_000,
   HERMES_REFRESH_QUERY: process.env.HERMES_REFRESH_QUERY || 'ciao',
-  HERMES_REFRESH_PROVIDER: process.env.HERMES_REFRESH_PROVIDER || 'xai-oauth'
+  HERMES_REFRESH_PROVIDER: process.env.HERMES_REFRESH_PROVIDER || 'xai-oauth',
+
+  // Codex Build (AI_PROVIDER=openai): CLI baked into the sandbox image, and the
+  // host-side broker that swaps the sandbox's single-use ticket for the real
+  // bearer so the model-controlled shell never sees a credential.
+  CODEX_BIN: process.env.CODEX_BIN || 'codex',
+  CODEX_BROKER_HOST: process.env.CODEX_BROKER_HOST || 'gemix-codex-broker',
+  CODEX_BROKER_PORT: process.env.CODEX_BROKER_PORT || '8081'
 };

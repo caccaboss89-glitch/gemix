@@ -89,11 +89,25 @@ function getMediaUsage(userKey) {
  * @param {string} userKey
  * @returns {string} e.g. "Video: 1/2 · Immagini: 3/5 · Canzoni: 0/2"
  */
-function formatQuotaCounts(userKey) {
+/** Italian label per counter, in the order the Runtime line prints them. */
+const QUOTA_LABELS = { video: 'Video', image: 'Immagini', song: 'Canzoni' };
+const QUOTA_ORDER = ['video', 'image', 'song'];
+
+/**
+ * The weekly counters for one user, rendered for the Runtime block.
+ * @param {string} userKey
+ * @param {Array<'video'|'image'|'song'>} [kinds] - which counters this context
+ *   actually meters; omitted means all three. A capability the active provider
+ *   lacks is left out entirely rather than shown at 0.
+ * @returns {string}
+ */
+function formatQuotaCounts(userKey, kinds) {
   const u = getMediaUsage(userKey);
-  return `Video: ${u.video}/${MEDIA_WEEKLY_LIMITS.video} · `
-    + `Immagini: ${u.image}/${MEDIA_WEEKLY_LIMITS.image} · `
-    + `Canzoni: ${u.song}/${MEDIA_WEEKLY_LIMITS.song}`;
+  const wanted = Array.isArray(kinds) ? kinds : QUOTA_ORDER;
+  return QUOTA_ORDER
+    .filter(kind => wanted.includes(kind))
+    .map(kind => `${QUOTA_LABELS[kind]}: ${u[kind]}/${MEDIA_WEEKLY_LIMITS[kind]}`)
+    .join(' · ');
 }
 
 /**

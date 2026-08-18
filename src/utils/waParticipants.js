@@ -3,7 +3,7 @@
 // @<phone-number>. GemiX itself is always included for context.
 
 import { createLogger } from './logger.js';
-import { getDedicatedClient } from '../platforms/whatsapp/dedicated.js';
+import { getDedicatedClient } from '../platforms/whatsapp/clientRegistry.js';
 
 const log = createLogger('WaParticipants');
 
