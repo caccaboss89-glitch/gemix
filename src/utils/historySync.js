@@ -470,8 +470,8 @@ function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
     if (!part || typeof part !== 'object') return;
     if (typeof part.text === 'string') _scanText(part.text);
     if (typeof part._historyPath === 'string') _addName(part._historyPath);
-    if (typeof part._xaiSourcePath === 'string') {
-      const base = path.basename(part._xaiSourcePath);
+    if (typeof part._sourcePath === 'string') {
+      const base = path.basename(part._sourcePath);
       if (base) _addName(base);
     }
   };

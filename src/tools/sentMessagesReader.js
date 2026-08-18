@@ -18,7 +18,8 @@ import path from 'path';
 import crypto from 'crypto';
 import { resolveActiveMemberByName, findMemberByWa, findMemberByEmail  } from '../config/members.js';
 import { normalizePhoneToJid  } from './whatsappSender.js';
-import { buildXaiFileParts  } from '../utils/aiFileDelivery.js';
+import { buildProviderFileParts  } from '../utils/aiFileDelivery.js';
+import { profileFromContext  } from '../ai/providers/providerProfile.js';
 import { downloadPublicFileToDisk  } from '../utils/fetch.js';
 import { TEMP_DIR  } from '../utils/tempFileServer.js';
 import { sanitizeFilename  } from '../utils/text.js';
@@ -107,9 +108,18 @@ async function _downloadExternalToTemp(url, name) {
 
 /**
  * Try to turn a stored attachment back into a native file part for the model.
+ *
+ * The projector decides what the active provider can take: on OpenAI an audio
+ * or video attachment recovered here is never re-sent raw, it just keeps its
+ * text entry.
+ *
+ * @param {string} senderKey
+ * @param {object} stored
+ * @param {number} imagesReadCount
+ * @param {object} [ctx] - carries the turn's providerProfile
  * @returns {Promise<{ part: object|null, bumpImageCount?: boolean }>}
  */
-async function _recoverAttachment(senderKey, stored, imagesReadCount) {
+async function _recoverAttachment(senderKey, stored, imagesReadCount, ctx) {
   try {
     let absPath = stored.storedFile
       ? resolveStoredAttachmentPath(senderKey, stored.storedFile)
@@ -119,7 +129,8 @@ async function _recoverAttachment(senderKey, stored, imagesReadCount) {
     }
     if (!absPath) return { part: null };
 
-    const built = await buildXaiFileParts(absPath, stored.originalName || 'file', {
+    const built = await buildProviderFileParts(absPath, stored.originalName || 'file', {
+      providerProfile: profileFromContext(ctx),
       mimetype: stored.mimetype,
       imagesReadCount
     });
@@ -236,7 +247,7 @@ async function readSentMessages(args, userCtx) {
     if (Array.isArray(r.attachments) && r.attachments.length > 0) {
       msgOut.attachments = [];
       for (const a of r.attachments) {
-        const recovered = await _recoverAttachment(senderKey, a, imagesReadCount);
+        const recovered = await _recoverAttachment(senderKey, a, imagesReadCount, userCtx);
         if (recovered.part) {
           nativeParts.push(recovered.part);
           if (recovered.bumpImageCount && imagesReadCount < MAX_RECOVERED_IMAGES) imagesReadCount += 1;

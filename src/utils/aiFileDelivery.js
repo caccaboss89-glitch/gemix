@@ -1,7 +1,12 @@
-// Central policy for how files reach xAI on /v1/responses.
+// Central policy for how files reach the main model.
 //
-// Every supported file is exposed through a public URL (tmpfile.link upload,
-// see utils/xaiUpload.js) and attached natively:
+// The projection is provider-aware and lives behind buildProviderFileParts():
+// the xAI branch below is unchanged, while the OpenAI branch is implemented in
+// utils/openaiFileProjection.js and never touches upload, auth or any other xAI
+// helper in this file.
+//
+// xAI: every supported file is exposed through a public URL (tmpfile.link
+// upload, see utils/xaiUpload.js) and attached natively:
 //   - supported image types            -> { type: 'input_image', image_url }
 //   - everything else (text/code, PDF, Office, archives, audio, video, ...)
 //                                      -> { type: 'input_file', file_url }
@@ -17,6 +22,10 @@
 // Videos are the one exception: history builders pass `deferVideo` so older
 // clips stay tags and reach the model only through the read_video tool (xAI
 // turns a video into ~1 frame per second, which floods the window).
+//
+// OpenAI: nothing is uploaded. Accepted images and documents travel inline as
+// base64 (see config/openaiFileMatrix.js), raw audio and video are refused by
+// the backend and stay tagged, and read_video does not exist on that profile.
 
 import fs from 'fs';
 import path from 'path';
@@ -37,6 +46,8 @@ import {
 } from './mediaIngressLimits.js';
 import { getMediaDurationSecFromPath  } from './mediaDuration.js';
 import { createLogger  } from './logger.js';
+import { PROVIDER, profileFromContext  } from '../ai/providers/providerProfile.js';
+import { projectFileForOpenAi, projectBufferForOpenAi  } from './openaiFileProjection.js';
 
 const log = createLogger('AiFileDelivery');
 
@@ -280,7 +291,7 @@ async function buildXaiFileParts(absPath, displayPath, opts = {}) {
   }
 
   const nativePart = _filePartFor(mode, url);
-  nativePart._xaiSourcePath = absPath;
+  nativePart._sourcePath = absPath;
 
   return {
     success: true,
@@ -325,6 +336,77 @@ async function buildXaiPartFromBuffer(buffer, filename, mimetype, ownerKey = nul
   } finally {
     try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
   }
+}
+
+// -- Provider dispatch -----------------------------------------------------------
+
+/**
+ * Project a file on disk for the active provider.
+ *
+ * xAI uploads it and links it; OpenAI inlines it after the fail-closed matrix
+ * check. Both return `{ success, parts }` on acceptance; on refusal both carry
+ * `error` (for tool results) and OpenAI adds a short `note` for the tag.
+ *
+ * @param {string} absPath
+ * @param {string} displayPath
+ * @param {object} [opts] - projection options plus the turn's providerProfile
+ * @returns {Promise<{ success: true, parts: object[], url?: string, bumpImageCount?: boolean }
+ *   | { success: false, error: string, note?: string }>}
+ */
+async function buildProviderFileParts(absPath, displayPath, opts = {}) {
+  return profileFromContext(opts).id === PROVIDER.OPENAI
+    ? projectFileForOpenAi(absPath, displayPath, opts)
+    : buildXaiFileParts(absPath, displayPath, opts);
+}
+
+/**
+ * Project an in-memory file (something GemiX just produced) for the active
+ * provider. Best-effort: null means the model does not see it, while the user
+ * still receives it through the delivery buffer.
+ *
+ * @param {Buffer} buffer
+ * @param {string} filename
+ * @param {string} mimetype
+ * @param {string|null} [ownerKey] - temp-dir isolation key (xAI staging only)
+ * @param {object} [opts] - carries the turn's providerProfile
+ * @returns {Promise<object|null>}
+ */
+async function buildProviderPartFromBuffer(buffer, filename, mimetype, ownerKey = null, opts = {}) {
+  return profileFromContext(opts).id === PROVIDER.OPENAI
+    ? projectBufferForOpenAi(buffer, filename, mimetype)
+    : buildXaiPartFromBuffer(buffer, filename, mimetype, ownerKey);
+}
+
+/**
+ * Serialize a tool result that wants the model to look at one or more files.
+ *
+ * Tools describe the result provider-neutrally — a JSON payload plus the files
+ * they would like shown — and only this function decides how the active
+ * provider carries them. A preview the provider cannot take degrades to the
+ * text payload alone; the file itself stays in the delivery buffer either way.
+ *
+ * @param {object} spec
+ * @param {object|((attached: number) => object)} spec.payload - the JSON result,
+ *   or a function receiving how many previews survived
+ * @param {Array<{buffer?: Buffer, absPath?: string, filename: string, mimetype?: string}>} [spec.previews]
+ * @param {object} [opts]
+ * @param {string|null} [opts.ownerKey] - temp-dir isolation key (xAI staging only)
+ * @returns {Promise<object|Array>} the payload alone, or [text, ...parts]
+ */
+async function projectToolResult({ payload, previews = [] }, opts = {}) {
+  const parts = [];
+  for (const preview of previews) {
+    if (!preview) continue;
+    const part = preview.buffer
+      ? await buildProviderPartFromBuffer(preview.buffer, preview.filename, preview.mimetype || '', opts.ownerKey || null, opts)
+      : (await buildProviderFileParts(preview.absPath, preview.filename, { ...opts, mimetype: preview.mimetype }))
+        .parts?.find(p => p.type === 'input_image' || p.type === 'input_file') || null;
+    if (part) parts.push(part);
+  }
+
+  const resolved = typeof payload === 'function' ? payload(parts.length) : payload;
+  if (parts.length === 0) return resolved;
+  return [{ type: 'text', text: JSON.stringify(resolved) }, ...parts];
 }
 
 /**
@@ -456,7 +538,10 @@ async function deliverSyncedAttachment(opts) {
     deferVideo = false
   } = opts;
 
+  const profile = profileFromContext(opts);
   const tag = buildAttachmentTag(syncedPath, name);
+  // The xAI classification is the wider one: anything tag-only here is refused
+  // by the OpenAI matrix too, so this gate is safe for both profiles.
   const mode = classifyAiFileDelivery(name, contentType);
   const kind = _mediaKindFor(name, contentType);
 
@@ -502,7 +587,7 @@ async function deliverSyncedAttachment(opts) {
   // since that filename is the handle read_video resolves. Videos in the current
   // message and in the message being replied to are still attached directly:
   // those are what the user is asking about.
-  if (deferVideo && kind === 'video' && syncedPath) {
+  if (deferVideo && kind === 'video' && syncedPath && profile.capabilities.readVideo) {
     return {
       tag,
       syncedPath,
@@ -511,19 +596,36 @@ async function deliverSyncedAttachment(opts) {
     };
   }
 
+  // Without read_video there is nothing to defer to: the file is kept in the
+  // history and named as something this model cannot open, wherever it appears.
+  if (kind === 'video' && !profile.capabilities.readVideo) {
+    return {
+      tag,
+      syncedPath: syncedPath || null,
+      contentParts: [],
+      textFragment: `${tag} (unsupported_by_openai: video) `
+    };
+  }
+
   const resolved = await _resolveIngressTarget(opts);
   if (resolved.error) {
     return { tag, syncedPath: syncedPath || null, contentParts: [], textFragment: `${tag} (${resolved.error}) ` };
   }
 
-  const built = await buildXaiFileParts(resolved.absPath, resolved.displayName, {
+  const built = await buildProviderFileParts(resolved.absPath, resolved.displayName, {
+    providerProfile: profile,
     mimetype: resolved.mimetype,
     imagesReadCount: opts.imagesReadCount ?? 0
   });
   if (!built.success) {
-    log.warn(`xAI ingestion skipped for ${resolved.displayName}: ${built.error}`);
+    log.warn(`Projection skipped for ${resolved.displayName}: ${built.error}`);
     const failTag = buildAttachmentTag(syncedPath, name);
-    return { tag: failTag, syncedPath: syncedPath || null, contentParts: [], textFragment: `${failTag} (${built.error}) ` };
+    return {
+      tag: failTag,
+      syncedPath: syncedPath || null,
+      contentParts: [],
+      textFragment: `${failTag} (${built.note || built.error}) `
+    };
   }
 
   let finalSyncedPath = syncedPath;
@@ -543,12 +645,14 @@ async function deliverSyncedAttachment(opts) {
 
   const finalTag = buildAttachmentTag(finalSyncedPath, name);
   const filePart = built.parts.find(p => p.type === 'input_file' || p.type === 'input_image');
+  // The on-disk source is what keeps the file out of the pruner and, on xAI,
+  // what a stale-URL refresh re-uploads.
   if (filePart) {
     if (finalSyncedPath && opts.historyStorageId) {
       const histAbs = resolveHistoryAbsPath(opts.historyStorageId, finalSyncedPath);
-      if (histAbs) filePart._xaiSourcePath = histAbs;
+      if (histAbs) filePart._sourcePath = histAbs;
     } else if (resolved.absPath) {
-      filePart._xaiSourcePath = resolved.absPath;
+      filePart._sourcePath = resolved.absPath;
     }
   }
   return {
@@ -570,6 +674,9 @@ export {
   isVideoAttachment,
   buildXaiFileParts,
   buildXaiPartFromBuffer,
+  buildProviderFileParts,
+  buildProviderPartFromBuffer,
+  projectToolResult,
   exposeXaiUrlFromAbsPath,
   deliverSyncedAttachment,
   resolveHistoryAbsPath

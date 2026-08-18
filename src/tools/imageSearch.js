@@ -16,7 +16,8 @@ import crypto from 'crypto';
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
-import { buildXaiFileParts  } from '../utils/aiFileDelivery.js';
+import { buildProviderFileParts  } from '../utils/aiFileDelivery.js';
+import { profileFromContext  } from '../ai/providers/providerProfile.js';
 import { TEMP_DIR  } from '../utils/tempFileServer.js';
 import { createLogger  } from '../utils/logger.js';
 
@@ -123,9 +124,12 @@ function _sniffImageType(buffer) {
 
 /**
  * Download one search hit and build a native input_image part for the model.
+ * @param {string} imgUrl
+ * @param {number} index - position in the result list, also the image budget cursor
+ * @param {object} [ctx] - carries the turn's providerProfile
  * @returns {Promise<{ part: object|null, error?: string }>}
  */
-async function _buildVisionPart(imgUrl, index) {
+async function _buildVisionPart(imgUrl, index, ctx) {
   let destPath = null;
   try {
     if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
@@ -144,12 +148,13 @@ async function _buildVisionPart(imgUrl, index) {
     );
     fs.writeFileSync(destPath, dl.buffer);
 
-    const built = await buildXaiFileParts(destPath, name, {
+    const built = await buildProviderFileParts(destPath, name, {
+      providerProfile: profileFromContext(ctx),
       mimetype: sniffed.mime,
       imagesReadCount: index
     });
     if (!built.success) {
-      return { part: null, error: built.error || 'vision upload failed' };
+      return { part: null, error: built.note || built.error || 'vision preview failed' };
     }
     // Prefer true vision parts; gif/unsupported still may arrive as input_file.
     const part = built.parts.find(p => p.type === 'input_image')
@@ -176,7 +181,7 @@ async function _buildVisionPart(imgUrl, index) {
  * @param {number} [args.count]
  * @returns {Promise<object|Array>}
  */
-async function searchImages(args = {}) {
+async function searchImages(args = {}, ctx = null) {
   const query = _cleanQuery(args.query);
   if (!query) {
     return { success: false, error: 'Missing required argument "query".' };
@@ -275,7 +280,7 @@ async function searchImages(args = {}) {
 
   // Build vision previews in parallel (download + re-host for xAI).
   const visionSettled = await Promise.all(
-    images.map((img, i) => _buildVisionPart(img.url, i))
+    images.map((img, i) => _buildVisionPart(img.url, i, ctx))
   );
 
   const nativeParts = [];

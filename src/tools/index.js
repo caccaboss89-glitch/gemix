@@ -27,7 +27,8 @@ import { managePreferences } from './preferences.js';
 import { toggleReleaseNotify } from './releaseNotify.js';
 import { buildTool } from './build.js';
 import { pushBufferAttachment } from '../utils/attachments.js';
-import { buildXaiPartFromBuffer } from '../utils/aiFileDelivery.js';
+import { projectToolResult } from '../utils/aiFileDelivery.js';
+import { profileFromContext } from '../ai/providers/providerProfile.js';
 import { musicCreator } from './musicCreator.js';
 import { searchImages } from './imageSearch.js';
 import { getGroupTaskFileId } from '../utils/userIdentifier.js';
@@ -99,7 +100,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
 
     switch (name) {
     case 'web_image_search': {
-      result = await searchImages(args);
+      result = await searchImages(args, userCtx);
       break;
     }
 
@@ -198,14 +199,17 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           mimetype: 'application/pdf'
         });
         const ownerKey = workspaceIdToSlug(resolveWorkspaceId(userCtx)) || resolveStorageId(userCtx) || null;
-        const pdfPart = await buildXaiPartFromBuffer(formalPdfBuffer, formalFinalName, 'application/pdf', ownerKey);
-        const pdfPayload = {
-          success: true,
-          filename: formalFinalName,
-          message: `Formal request PDF generated successfully and pushed to the delivery buffer as "${formalFinalName}".`
-            + (pdfPart ? ' Attached below so you can check its content.' : '')
-        };
-        result = pdfPart ? [{ type: 'text', text: JSON.stringify(pdfPayload) }, pdfPart] : pdfPayload;
+        // The PDF is already in the delivery buffer; showing it to the model is
+        // a preview the active provider may or may not be able to carry.
+        result = await projectToolResult({
+          payload: (attached) => ({
+            success: true,
+            filename: formalFinalName,
+            message: `Formal request PDF generated successfully and pushed to the delivery buffer as "${formalFinalName}".`
+              + (attached > 0 ? ' Attached below so you can check its content.' : '')
+          }),
+          previews: [{ buffer: formalPdfBuffer, filename: formalFinalName, mimetype: 'application/pdf' }]
+        }, { providerProfile: profileFromContext(userCtx), ownerKey });
       } catch (err) {
         await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
         result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };

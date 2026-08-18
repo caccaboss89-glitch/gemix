@@ -34,7 +34,7 @@ function _partHasUrl(part) {
 }
 
 function _resolveAbsPathForPart(part, storageId, tagPaths, usedTagIndices) {
-  const absPath = typeof part._xaiSourcePath === 'string' ? part._xaiSourcePath : null;
+  const absPath = typeof part._sourcePath === 'string' ? part._sourcePath : null;
   if (absPath && fs.existsSync(absPath)) return absPath;
 
   if (storageId && tagPaths.length > 0) {
@@ -70,7 +70,7 @@ async function _refreshFilePart(part, absPath, displayName) {
   const mimetype = mimeForExtension(_extOf(displayName), 'application/octet-stream');
   const mode = classifyAiFileDelivery(displayName, mimetype);
   const url = await uploadFileForXai(absPath, displayName, mimetype, { forceRefresh: true });
-  part._xaiSourcePath = absPath;
+  part._sourcePath = absPath;
 
   if (part.type === 'input_file' && typeof part.file_url === 'string') {
     part.file_url = url;

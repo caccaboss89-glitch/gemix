@@ -21,7 +21,7 @@ const MAX_STALE_URL_REFRESHES = 2;
  * @param {object} [opts.logExtra]
  * @param {number} [opts.timeoutMs]
  * @param {string|null} [opts.historyStorageId] - History path fallback for refresh.
- * @param {boolean} [opts.allowStaleUrlRefresh] - Refresh via _xaiSourcePath only (build agent).
+ * @param {boolean} [opts.allowStaleUrlRefresh] - Refresh via _sourcePath only (build agent).
  */
 async function callResponsesWithStaleUrlRetry(opts) {
   const {
