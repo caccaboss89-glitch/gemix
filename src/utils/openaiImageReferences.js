@@ -3,6 +3,13 @@
 // Resolve the reference_images contract of the OpenAI generate_image tool.
 // The private Codex Image endpoint accepts JSON `images[].image_url` entries,
 // including base64 data URLs; no xAI upload or public staging is involved.
+//
+// Staged, not yet reachable: generate_image still refuses reference_images by
+// name, because the live probe could not confirm the accepted reference count,
+// sizes or mask support — the account hit its usage limit first. The wire shape
+// below is the part the probe did establish (JSON accepted, multipart refused).
+// See docs/deep-research/2026-08-18-gpt-image-2-and-search-sources-probe.md for
+// what the re-probe has to answer before the tool schema may expose any of this.
 
 import fs from 'fs';
 import constants from '../config/constants.js';

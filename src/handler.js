@@ -80,12 +80,14 @@ import {
 import { providerFailureReply  } from './ai/providers/errorPolicy.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
 import { wrapSystemReminder, wrapUserQuery  } from './utils/systemTags.js';
+import { TurnBudget  } from './utils/turnBudget.js';
 
 const log = createLogger('Handler');
 
 // Total wall-clock budget for one main turn. Caps runaway tool loops even
 // when the model keeps emitting tool_calls within the round limit.
 const SESSION_MAX_DURATION_MS = 10 * 60 * 1000;
+const SESSION_MAX_DURATION_MIN = SESSION_MAX_DURATION_MS / 60_000;
 
 function extractPlainTextContent(content) {
   if (typeof content === 'string') return content;
@@ -134,10 +136,20 @@ async function handleMessage(ctx) {
   const providerProfile = resolveProviderProfile();
   ctx.providerProfile = providerProfile;
 
+  // The same wall-clock ceiling the round loop has always had, as one object
+  // threaded like the profile above. Reading it only between rounds was never
+  // enough on its own: a round already in flight ran to its own timeout no
+  // matter how long the turn had taken. Every call in the loop now derives its
+  // timeout and its abort signal from this one deadline. The forced wrap-up is
+  // the deliberate exception — see where it is built.
+  const turnBudget = new TurnBudget(SESSION_MAX_DURATION_MS);
+  ctx.turnBudget = turnBudget;
+
   const responseCtx = {
     attachments: [],
     discordTitle: '',
     providerProfile,
+    turnBudget,
     // Allowlist of the image URLs this turn is allowed to deliver. Filled from
     // structured search results and from what the user wrote, never from text
     // the model produced.
@@ -322,7 +334,7 @@ async function handleMessage(ctx) {
       try {
         const projected = await projectUserVoiceMessages(
           { history: historyForApi, current: currentContent, storageId: resolveStorageId(ctx) },
-          { language: ctx.settings?.language }
+          { language: ctx.settings?.language, signal: turnBudget.signal }
         );
         historyForApi = projected.history;
         currentContent = projected.current;
@@ -412,7 +424,6 @@ async function handleMessage(ctx) {
     let lastModelUsed = null;
     // Citations of the round that produced the reply the user actually reads.
     let roundCitations = [];
-    const sessionStartTime = Date.now();
     let sessionDurationLimitReached = false;
     const promptCacheKey = generatePromptCacheKey(userCtx);
 
@@ -522,8 +533,8 @@ async function handleMessage(ctx) {
     while (rounds < constants.MAX_TOOL_ROUNDS) {
       rounds++;
 
-      if (Date.now() - sessionStartTime > SESSION_MAX_DURATION_MS) {
-        log.warn('   Session duration limit reached (10 minutes), forcing wrap up');
+      if (turnBudget.expired) {
+        log.warn(`   Session duration limit reached (${SESSION_MAX_DURATION_MIN} minutes), forcing wrap up`);
         sessionDurationLimitReached = true;
         break;
       }
@@ -556,6 +567,7 @@ async function handleMessage(ctx) {
       });
       const callOpts = {
         providerProfile,
+        turnBudget,
         maxTurns: constants.MAX_TOOL_ROUNDS,
         requestId: ctx.requestId,
         responseFormat,
@@ -767,15 +779,27 @@ async function handleMessage(ctx) {
         role: 'user',
         content: wrapSystemReminder(wrapUpNote)
       });
-      const { message: finalMsg, model: finalModel, searchStats, citations } = await callAI(messages, wrapUpTools, {
-        providerProfile,
-        toolChoice: 'none',
-        requestId: ctx.requestId,
-        responseFormat,
-        historyStorageId: resolveStorageId(ctx) || null,
-        promptCacheKey,
-        reasoningEffort: ctx.settings?.effort
-      });
+      // Deliberately its own window rather than a slice of the turn: the loop
+      // usually reaches here precisely because the turn is spent, and a wrap-up
+      // born expired would hand every long turn the generic failure text
+      // instead of the answer the model already has. It runs no tools, so this
+      // is one bounded call, not another round.
+      const wrapUpBudget = new TurnBudget(constants.API_TIMEOUT_MS);
+      let finalMsg, finalModel, searchStats, citations;
+      try {
+        ({ message: finalMsg, model: finalModel, searchStats, citations } = await callAI(messages, wrapUpTools, {
+          providerProfile,
+          turnBudget: wrapUpBudget,
+          toolChoice: 'none',
+          requestId: ctx.requestId,
+          responseFormat,
+          historyStorageId: resolveStorageId(ctx) || null,
+          promptCacheKey,
+          reasoningEffort: ctx.settings?.effort
+        }));
+      } finally {
+        wrapUpBudget.dispose();
+      }
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
       roundCitations = Array.isArray(citations) ? citations : [];
@@ -861,6 +885,8 @@ async function handleMessage(ctx) {
     // Drop per-call notification dedup entries so subsequent AI calls can
     // fire intermediate notifications.
     try { clearCallNotifications(ctx); } catch { /* best effort */ }
+    // Release the deadline timer: the turn is over either way.
+    turnBudget.dispose();
   }
 }
 

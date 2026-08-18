@@ -26,12 +26,12 @@ seedEnv({
 
 const {
   OPENAI_ERROR,
-  TurnBudget,
   callCodexResponses,
   classifyHttpFailure,
   retryAfterMs,
   summarizeErrorBody
 } = await import('../src/ai/openaiResponsesTransport.js');
+const { TurnBudget } = await import('../src/utils/turnBudget.js');
 
 const DONE_STREAM = [
   'event: response.output_item.done\n',

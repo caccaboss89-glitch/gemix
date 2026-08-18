@@ -128,45 +128,6 @@ function sleep(ms, signal) {
   });
 }
 
-/**
- * One turn's budget: an absolute deadline plus the AbortSignal every call,
- * stream, sleep and sub-operation of that turn shares.
- */
-class TurnBudget {
-  /**
-   * @param {number} totalMs
-   * @param {AbortSignal} [parentSignal] - aborting it aborts this budget too
-   */
-  constructor(totalMs, parentSignal) {
-    this.deadlineAt = Date.now() + totalMs;
-    this._controller = new AbortController();
-    this._timer = setTimeout(() => this._controller.abort(), totalMs);
-    this._timer.unref?.();
-    if (parentSignal) {
-      if (parentSignal.aborted) this._controller.abort();
-      else parentSignal.addEventListener('abort', () => this._controller.abort(), { once: true });
-    }
-  }
-
-  get signal() {
-    return this._controller.signal;
-  }
-
-  get remainingMs() {
-    return Math.max(0, this.deadlineAt - Date.now());
-  }
-
-  /** True when there is no budget left to start new work. */
-  get expired() {
-    return this.remainingMs <= 0 || this._controller.signal.aborted;
-  }
-
-  /** Release the timer once the turn is over. */
-  dispose() {
-    clearTimeout(this._timer);
-  }
-}
-
 /** Compatibility export for callers that only need the canonical credential. */
 function resolveAuth(minRemainingMs) {
   return resolveOpenAiOAuth({ minRemainingMs });
@@ -342,7 +303,6 @@ async function _consumeStream(res, budget, upstreamRequestId) {
 
 export {
   OPENAI_ERROR,
-  TurnBudget,
   callCodexResponses,
   makeOpenAiError,
   classifyHttpFailure,

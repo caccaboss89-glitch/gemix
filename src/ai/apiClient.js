@@ -18,6 +18,7 @@ import { getXaiAuth, XAI_HERMES_POOL  } from '../config/xaiAuth.js';
 import { createLogger  } from '../utils/logger.js';
 import { refreshHermesOAuth  } from '../utils/hermesAuthRefresh.js';
 import { isXaiFileDownloadError  } from '../utils/refreshXaiMessageUrls.js';
+import { callTimeoutWithin  } from '../utils/turnBudget.js';
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
@@ -290,18 +291,48 @@ function isGrokCreditExhaustedError(errOrMsg) {
  * @param {object} body - Request body
  * @returns {Promise<Response>} The raw fetch Response
  */
-async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutMs = constants.API_TIMEOUT_MS) {
+/**
+ * The abort plumbing for one attempt: its own timeout, plus the turn's signal
+ * when the caller is inside a turn, so an expired turn aborts a request already
+ * in flight instead of waiting for the per-call timeout to notice.
+ *
+ * `cleanup` must run on every exit path — it also drops the listener, which
+ * would otherwise pile up on the turn signal one per attempt.
+ *
+ * @param {number} timeoutMs
+ * @param {AbortSignal} [turnSignal]
+ * @returns {{ signal: AbortSignal, cleanup: () => void }}
+ */
+function _attemptAbort(timeoutMs, turnSignal) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onTurnAbort = () => controller.abort();
+  if (turnSignal) {
+    if (turnSignal.aborted) controller.abort();
+    else turnSignal.addEventListener('abort', onTurnAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timer);
+      turnSignal?.removeEventListener('abort', onTurnAbort);
+    }
+  };
+}
+
+async function callApiWithRetry(
+  modelName, apiUrl, body, logExtra = {}, timeoutMs = constants.API_TIMEOUT_MS, turnSignal = null
+) {
   logApiRequest(modelName, apiUrl, body, logExtra);
   let forceTokenReload = false;
   let hermesRefreshAttempted = false;
   for (let attempt = 1; attempt <= constants.MAX_API_RETRIES; attempt++) {
-    let timer;
+    let abort;
     const attemptStarted = Date.now();
     try {
       const { token } = getXaiAuth(forceTokenReload);
       forceTokenReload = false;
-      const controller = new AbortController();
-      timer = setTimeout(() => controller.abort(), timeoutMs);
+      abort = _attemptAbort(timeoutMs, turnSignal);
 
       // Sticky routing: body.prompt_cache_key + x-grok-conv-id (Grok Build repo always
       // sends the header; same stable per-conversation id when present).
@@ -318,9 +349,9 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: controller.signal
+        signal: abort.signal
       });
-      clearTimeout(timer);
+      abort.cleanup();
       const duration = Date.now() - attemptStarted;
 
       if (!res.ok) {
@@ -339,7 +370,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       log.debug(`   Model: ${modelName} - ${duration}ms${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
       return res;
     } catch (err) {
-      if (timer) clearTimeout(timer);
+      abort?.cleanup();
       const attemptMs = Date.now() - attemptStarted;
       const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
       const isNetworkError = err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message);
@@ -411,10 +442,15 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
  */
 async function callResponsesModel(modelName, body, logExtra = {}) {
   const apiUrl = `${getXaiAuth().baseUrl}/responses`;
-  const timeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : constants.API_TIMEOUT_MS;
+  const callTimeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : constants.API_TIMEOUT_MS;
+  // Inside a turn the call also has to fit what is left of it.
+  const timeoutMs = callTimeoutWithin(callTimeoutMs, logExtra.turnBudget);
   const requestLogExtra = { ...logExtra };
   delete requestLogExtra.timeoutMs;
-  const res = await callApiWithRetry(modelName, apiUrl, body, requestLogExtra, timeoutMs);
+  delete requestLogExtra.turnBudget;
+  const res = await callApiWithRetry(
+    modelName, apiUrl, body, requestLogExtra, timeoutMs, logExtra.turnBudget?.signal || null
+  );
 
   let data;
   try {
@@ -464,12 +500,11 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   let hermesRefreshAttempted = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let timer;
+    let abort;
     try {
       const { token } = getXaiAuth(forceTokenReload);
       forceTokenReload = false;
-      const controller = new AbortController();
-      timer = setTimeout(() => controller.abort(), timeoutMs);
+      abort = _attemptAbort(timeoutMs, opts.turnSignal);
 
       const res = await fetch(url, {
         ...options,
@@ -477,9 +512,9 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
           ...(options.headers || {}),
           Authorization: `Bearer ${token}`
         },
-        signal: controller.signal
+        signal: abort.signal
       });
-      clearTimeout(timer);
+      abort.cleanup();
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
@@ -503,7 +538,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
 
       return res;
     } catch (err) {
-      if (timer) clearTimeout(timer);
+      abort?.cleanup();
       const isTimeout = err.name === 'AbortError';
       const isRetryable = isTimeout
         || (err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message))

@@ -44,6 +44,10 @@ function _applyPromptCacheKey(body, key) {
  */
 async function callAI(messages, tools = null, opts = {}) {
   const logExtra = opts.requestId ? { requestId: opts.requestId } : {};
+  // Caps this call at whatever is left of the turn and lets an expired turn
+  // abort it mid-flight. Absent outside a turn, where the call timeout is the
+  // only ceiling — exactly as before.
+  if (opts.turnBudget) logExtra.turnBudget = opts.turnBudget;
 
   const body = {
     model: envConfig.GROK_MODEL,

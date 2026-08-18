@@ -20,7 +20,8 @@ import {
   extractSearchStats,
   collectCitations
 } from './openaiResponsesProtocol.js';
-import { TurnBudget, callCodexResponses } from './openaiResponsesTransport.js';
+import { callCodexResponses } from './openaiResponsesTransport.js';
+import { TurnBudget, turnBudgetFrom } from '../utils/turnBudget.js';
 
 /** Wall-clock budget for one Responses call, matching the xAI request timeout. */
 const CALL_TIMEOUT_MS = constants.API_TIMEOUT_MS;
@@ -59,7 +60,12 @@ async function callAI(messages, tools = null, opts = {}) {
     responseFormat: opts.responseFormat || null
   });
 
-  const budget = new TurnBudget(CALL_TIMEOUT_MS, opts.signal);
+  // Inside a turn the call also has to fit what is left of it; outside one
+  // (preflight, tests) its own timeout is the only ceiling there is.
+  const turn = turnBudgetFrom(opts);
+  const budget = turn
+    ? turn.childFor(CALL_TIMEOUT_MS)
+    : new TurnBudget(CALL_TIMEOUT_MS, opts.signal);
   try {
     const { response } = await callCodexResponses({
       body,
