@@ -92,17 +92,19 @@ test('the xAI extension declares X search and never a hosted web search', () => 
   assert.equal(nativeTypes.includes('web_search'), false);
 });
 
-test('the xAI extension adds only xAI fields, and reasoning replay can be switched off', () => {
+test('the xAI extension adds max_turns and the sticky-routing header, nothing standard', () => {
   const body = xaiResponsesExtensions.decorateBody({ model: 'm' }, { promptCacheKey: 'k', maxTurns: 7 });
-  assert.equal(body.prompt_cache_key, 'k');
   assert.equal(body.max_turns, 7);
-  assert.deepEqual(body.include, ['reasoning.encrypted_content']);
+  // prompt_cache_key and the reasoning include are standard Responses fields,
+  // so the generic body builder owns them, not this extension.
+  assert.equal('prompt_cache_key' in body, false);
+  assert.equal('include' in body, false);
 
   const headers = xaiResponsesExtensions.decorateHeaders({}, { promptCacheKey: 'k' });
   assert.equal(headers['x-grok-conv-id'], 'k');
 
-  const noReplay = xaiResponsesExtensions.decorateBody({ model: 'm' }, { reasoningReplay: false });
-  assert.equal('include' in noReplay, false);
+  const noTurns = xaiResponsesExtensions.decorateBody({ model: 'm' }, {});
+  assert.equal('max_turns' in noTurns, false);
 });
 
 test('the xAI extension replays its own server-side item types on top of the base set', () => {

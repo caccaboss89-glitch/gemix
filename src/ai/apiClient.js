@@ -16,11 +16,8 @@ import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import constants from '../config/constants.js';
-import envConfig from '../config/env.js';
-import { getXaiAuth  } from '../config/xaiAuth.js';
+import { getXaiServiceAuth, markXaiServiceStatus  } from './credentials/xaiServiceCredentials.js';
 import { createLogger  } from '../utils/logger.js';
-import { refreshHermesOAuth  } from '../utils/hermesAuthRefresh.js';
-import { isXaiFileDownloadError  } from '../utils/refreshXaiMessageUrls.js';
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
@@ -272,43 +269,36 @@ function _isGrokCreditExhaustedError(errMsg) {
 }
 
 /**
- * Unified xAI API client with retry and timeout logic.
- * The bearer token is resolved per attempt from the auth file; a 401 forces
- * a fresh read on the next attempt (the external refresher may have rotated
- * the token between attempts).
+ * POST to an xAI media endpoint with retry and timeout logic.
  *
- * @param {string} modelName - Model name for logging (e.g., 'Grok')
+ * The bearer is resolved per attempt from the shared xAI CredentialProvider,
+ * which refreshes proactively; a rejected credential forces one in-process
+ * refresh before the retry.
+ *
+ * @param {string} modelName - Model name for logging (e.g., 'Grok-Imagine')
  * @param {string} apiUrl - Full API endpoint URL
  * @param {object} body - Request body
  * @returns {Promise<Response>} The raw fetch Response
  */
 async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutMs = constants.API_TIMEOUT_MS) {
   logApiRequest(modelName, apiUrl, body, logExtra);
-  let forceTokenReload = false;
-  let hermesRefreshAttempted = false;
+  let forceCredentialRefresh = false;
+  let credentialRefreshAttempted = false;
   for (let attempt = 1; attempt <= constants.MAX_API_RETRIES; attempt++) {
     let timer;
     const attemptStarted = Date.now();
     try {
-      const { token } = getXaiAuth(forceTokenReload);
-      forceTokenReload = false;
+      const { token } = await getXaiServiceAuth({ forceRefresh: forceCredentialRefresh });
+      forceCredentialRefresh = false;
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      // Sticky routing: body.prompt_cache_key + x-grok-conv-id (Grok Build repo always
-      // sends the header; same stable per-conversation id when present).
-      const convId = (typeof body?.prompt_cache_key === 'string' && body.prompt_cache_key)
-        || (typeof logExtra.promptCacheKey === 'string' && logExtra.promptCacheKey)
-        || '';
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      };
-      if (convId) headers['x-grok-conv-id'] = convId;
-
       const res = await fetch(apiUrl, {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(body),
         signal: controller.signal
       });
@@ -320,10 +310,6 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
         if (res.status === 429) {
           log.warn(`   ${_formatRateLimitLog(res.status, errBody, res.headers)}`);
-        }
-        if (res.status === 401) {
-          // Token likely rotated on disk between our cached read and now.
-          forceTokenReload = true;
         }
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
@@ -341,19 +327,15 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         ? `Timeout (request aborted after ${timeoutMs / 1000}s)`
         : err.message;
 
-      if (!envConfig.XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
-        hermesRefreshAttempted = true;
-        try {
-          await refreshHermesOAuth();
-          forceTokenReload = true;
-          // A successful refresh is not a failed attempt: give back the budget
-          // so the retry happens even when the 401 landed on the last one.
-          attempt--;
-          log.info('   Retrying API call with refreshed OAuth credentials...');
-          continue;
-        } catch (refreshErr) {
-          log.error(`   Hermes OAuth refresh failed: ${refreshErr.message}`);
-        }
+      if (_isOAuthCredentialError(errMsg) && !credentialRefreshAttempted) {
+        credentialRefreshAttempted = true;
+        markXaiServiceStatus('auth_failed');
+        forceCredentialRefresh = true;
+        // A refresh is not a failed attempt: give back the budget so the retry
+        // still happens when the rejection landed on the last one.
+        attempt--;
+        log.info('   Retrying API call with a refreshed xAI credential...');
+        continue;
       }
 
       if (isRetryable && attempt < constants.MAX_API_RETRIES) {
@@ -370,12 +352,8 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       }
 
       log.error(`   API error after ${attempt} attempt(s), last try ${Math.round(attemptMs / 1000)}s: ${errMsg}`);
-      if (isXaiFileDownloadError(errMsg) && logExtra.deferStaleFileUrlError) {
-        const staleErr = new Error(errMsg);
-        staleErr.code = 'XAI_STALE_FILE_URL';
-        throw staleErr;
-      }
       if (_isGrokCreditExhaustedError(errMsg)) {
+        markXaiServiceStatus('quota');
         const creditErr = new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
         creditErr.code = GROK_CREDIT_EXHAUSTED_CODE;
         throw creditErr;
@@ -390,20 +368,20 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
 }
 
 /**
- * Authenticated fetch to xAI with OAuth reload + optional Hermes refresh (GET/POST).
- * Used by TTS, video poll, and other non-Responses endpoints.
+ * Authenticated GET/POST against an xAI endpoint, with one credential refresh.
+ * Used by xAI TTS and the Grok Imagine video poll.
  */
 async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : constants.API_TIMEOUT_MS;
   const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : constants.MAX_API_RETRIES;
-  let forceTokenReload = false;
-  let hermesRefreshAttempted = false;
+  let forceCredentialRefresh = false;
+  let credentialRefreshAttempted = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let timer;
     try {
-      const { token } = getXaiAuth(forceTokenReload);
-      forceTokenReload = false;
+      const { token } = await getXaiServiceAuth({ forceRefresh: forceCredentialRefresh });
+      forceCredentialRefresh = false;
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -421,17 +399,12 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
         const errBody = await res.text().catch(() => '');
         const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
         const errMsg = `HTTP ${res.status}: ${shortErr}`;
-        if (res.status === 401) forceTokenReload = true;
 
-        if (!envConfig.XAI_USE_API_KEY && _isOAuthCredentialError(errMsg) && !hermesRefreshAttempted) {
-          hermesRefreshAttempted = true;
-          try {
-            await refreshHermesOAuth();
-            forceTokenReload = true;
-            continue;
-          } catch (refreshErr) {
-            log.error(`   Hermes OAuth refresh failed: ${refreshErr.message}`);
-          }
+        if (_isOAuthCredentialError(errMsg) && !credentialRefreshAttempted) {
+          credentialRefreshAttempted = true;
+          markXaiServiceStatus('auth_failed');
+          forceCredentialRefresh = true;
+          continue;
         }
 
         throw new Error(errMsg);

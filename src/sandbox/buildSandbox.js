@@ -10,7 +10,7 @@
 //
 // Grok Build CLI is baked into the image. The host runs `docker exec grok …`
 // with cwd /workspace (see execGrokBuild). Auth is injected per-exec only
-// (XAI_API_KEY from getXaiAuth) — never host ~/.hermes or ~/.grok mounts.
+// (XAI_API_KEY from getXaiServiceAuth) — never a host auth-file mount.
 //
 // Notes:
 //   - The base image ENTRYPOINT is overridden with
@@ -254,8 +254,8 @@ async function _killGrokProcesses(entry) {
  * @param {object} opts
  * @param {string} opts.prompt
  * @param {string} opts.rules
- * @param {string} opts.token - same live credential as GemiX (Hermes OAuth or API key)
- * @param {string} [opts.baseUrl] - optional API base from getXaiAuth()
+ * @param {string} opts.token - same live credential as GemiX (OAuth or API key)
+ * @param {string} [opts.baseUrl] - optional API base from getXaiServiceAuth()
  * @param {number} [opts.timeoutMs]
  * @param {number} [opts.maxTurns]
  * @returns {{ cmd: string[], env: string[], timeoutMs: number }}

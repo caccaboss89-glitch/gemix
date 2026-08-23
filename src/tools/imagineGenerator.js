@@ -20,7 +20,7 @@ import path from 'path';
 import crypto from 'crypto';
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
-import { getXaiAuth  } from '../config/xaiAuth.js';
+import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
 import { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
 import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
 import { tempDirForOwner  } from '../utils/tempFileServer.js';
@@ -265,7 +265,7 @@ function _videoPollFailureMessage(data, status) {
 }
 
 async function _xaiJsonRequest(label, endpointPath, body, timeoutMs) {
-  const { baseUrl } = getXaiAuth();
+  const { baseUrl } = await getXaiServiceAuth();
   const url = `${baseUrl}${endpointPath}`;
   const res = await callApiWithRetry(label, url, body, {}, timeoutMs);
   const data = await res.json();
@@ -518,7 +518,7 @@ async function _pollVideoResult(requestId) {
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, VIDEO_POLL_INTERVAL_MS));
 
-    const { baseUrl } = getXaiAuth();
+    const { baseUrl } = await getXaiServiceAuth();
     const url = `${baseUrl}/videos/${encodeURIComponent(requestId)}`;
     let data;
     try {

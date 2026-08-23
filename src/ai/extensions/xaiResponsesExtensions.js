@@ -5,8 +5,7 @@
 //
 // What lives here:
 //   - the sticky-routing header xAI uses alongside prompt_cache_key;
-//   - the xAI-only body fields (prompt_cache_key, max_turns, the encrypted
-//     reasoning include);
+//   - the one xAI-only body field, max_turns;
 //   - the extra output item types xAI emits and accepts back on replay;
 //   - the native `x_search` tool object, and the rule that its family replaces
 //     GemiX's own definitions when declared;
@@ -106,9 +105,10 @@ const xaiResponsesExtensions = Object.freeze({
   nativeTools: Object.freeze({ x_search: XAI_X_SEARCH_TOOL }),
 
   /**
-   * Sticky routing. xAI matches the prefix cache from the start of `input[]`
-   * and routes on a stable conversation id; sending the same value in both
-   * places is what the Grok clients do and what keeps the cache warm.
+   * Sticky routing. `prompt_cache_key` is standard Responses and the generic
+   * body builder already sets it; this header is the xAI half of the same
+   * mechanism — its backend routes a conversation on it, which is what keeps
+   * the prefix cache warm across the rounds of one turn.
    */
   decorateHeaders(headers, context = {}) {
     const convId = typeof context.promptCacheKey === 'string' ? context.promptCacheKey : '';
@@ -116,16 +116,10 @@ const xaiResponsesExtensions = Object.freeze({
     return headers;
   },
 
-  /** xAI-only body fields. Nothing here is part of the generic Responses body. */
+  /** The one body field that exists on xAI alone. */
   decorateBody(body, context = {}) {
-    if (typeof context.promptCacheKey === 'string' && context.promptCacheKey) {
-      body.prompt_cache_key = context.promptCacheKey;
-    }
-    // Bounds the server-side sub-tool turns (x_search) inside one request.
+    // Bounds the server-side sub-tool turns (the X family) inside one request.
     if (Number.isFinite(context.maxTurns)) body.max_turns = context.maxTurns;
-    if (context.reasoningReplay !== false) {
-      body.include = [...new Set([...(body.include || []), 'reasoning.encrypted_content'])];
-    }
     return body;
   },
 

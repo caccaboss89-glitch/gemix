@@ -211,7 +211,9 @@ function toolsToWire(tools) {
  * @param {string} [opts.toolChoice]
  * @param {object|null} [opts.responseFormat] - json_schema format object
  * @param {number} [opts.maxOutputTokens]
- * @param {string[]} [opts.include]
+ * @param {string[]} [opts.include] - standard Responses includes (e.g. the
+ *   encrypted reasoning chain needed for stateless replay)
+ * @param {string|null} [opts.promptCacheKey] - standard Responses cache hint
  * @returns {object}
  */
 function buildResponsesBody(opts) {
@@ -223,7 +225,8 @@ function buildResponsesBody(opts) {
     toolChoice = 'auto',
     responseFormat = null,
     maxOutputTokens = null,
-    include = null
+    include = null,
+    promptCacheKey = null
   } = opts;
 
   const body = {
@@ -233,6 +236,7 @@ function buildResponsesBody(opts) {
     input
   };
   if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
+  if (typeof promptCacheKey === 'string' && promptCacheKey) body.prompt_cache_key = promptCacheKey;
   if (Number.isFinite(maxOutputTokens)) body.max_output_tokens = maxOutputTokens;
   if (Array.isArray(include) && include.length > 0) body.include = [...include];
   if (Array.isArray(tools) && tools.length > 0) {

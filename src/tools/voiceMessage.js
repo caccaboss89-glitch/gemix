@@ -19,7 +19,7 @@ import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 import { createLogger  } from '../utils/logger.js';
 import { defaultSettings  } from '../utils/settingsStore.js';
 import envConfig from '../config/env.js';
-import { getXaiAuth  } from '../config/xaiAuth.js';
+import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
 
 const log = createLogger('TTS');
 
@@ -204,11 +204,11 @@ async function _generateVoice(text, settings, signal) {
 // -- xAI TTS (direct endpoint) ----------------------------------------------
 
 /**
- * Call `POST /v1/tts` and return the MP3 buffer. Uses shared xAI OAuth refresh
- * (disk reload + Hermes when XAI_USE_API_KEY=false).
+ * Call `POST /v1/tts` and return the MP3 buffer. Authenticates through the
+ * shared xAI CredentialProvider, same as every other xAI endpoint.
  */
 async function xaiTTS(text, voiceId, language) {
-  const { baseUrl } = getXaiAuth();
+  const { baseUrl } = await getXaiServiceAuth();
   const res = await fetchXaiWithOAuthRetry(`${baseUrl}/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

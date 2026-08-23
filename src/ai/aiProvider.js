@@ -100,7 +100,11 @@ async function callAI(messages, tools = null, opts = {}) {
     tools: toolsToWire(tools),
     toolChoice: opts.toolChoice || 'auto',
     responseFormat: opts.responseFormat || null,
-    maxOutputTokens: constants.MAX_TOKENS
+    maxOutputTokens: constants.MAX_TOKENS,
+    promptCacheKey: opts.promptCacheKey || null,
+    // Stateless reasoning replay: the encrypted chain has to come back on the
+    // response or the next round starts the model's thinking from scratch.
+    include: profile.wire.supportsReasoningReplay ? ['reasoning.encrypted_content'] : null
   });
 
   const { response } = await callWithStaleUrlRetry({

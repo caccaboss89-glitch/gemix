@@ -1,11 +1,11 @@
 // src/ai/buildAgent.js
 //
 // Build sub-agent runner: Grok Build CLI inside the per-workspace Docker sandbox.
-// Host: immutable --rules, auth via getXaiAuth (token + baseUrl) as process env,
+// Host: immutable --rules, auth via getXaiServiceAuth (token + baseUrl) as process env,
 // hard timeout, harvest new/changed workspace files into the delivery path.
 // No host-side write_file/edit_file/bash tool loop and no structured attachments JSON.
 
-import { getXaiAuth  } from '../config/xaiAuth.js';
+import { getXaiServiceAuth  } from './credentials/xaiServiceCredentials.js';
 import constants from '../config/constants.js';
 import { renewBuildLock  } from '../utils/buildState.js';
 import {
@@ -179,7 +179,7 @@ async function runBuildAgent({
   let token;
   let baseUrl;
   try {
-    const auth = typeof getToken === 'function' ? getToken() : getXaiAuth();
+    const auth = typeof getToken === 'function' ? await getToken() : await getXaiServiceAuth();
     token = auth && auth.token;
     baseUrl = auth && auth.baseUrl;
   } catch (err) {

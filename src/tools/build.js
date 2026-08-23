@@ -9,7 +9,7 @@
 // Host side:
 //   1. Resolve workspaceId; acquire per-workspace lock.
 //   2. Resolve attachments[] (buffer / history / URL) and stage into /workspace/.
-//   3. Run Grok Build in-container (auth = getXaiAuth token via process env only).
+//   3. Run Grok Build in-container (auth = getXaiServiceAuth token via process env only).
 //   4. Harvest new/modified workspace files (full tree on clean success with no delta).
 //   5. Return free-text agent reply + delivery_note so GemiX selects final user files.
 //

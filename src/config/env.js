@@ -6,9 +6,6 @@
 
 import 'dotenv/config';
 
-import path from 'path';
-import os from 'os';
-
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
 
 const XAI_USE_API_KEY = toBool(process.env.XAI_USE_API_KEY, false);
@@ -44,6 +41,7 @@ const missing = REQUIRED.filter((k) => !process.env[k] || !String(process.env[k]
 const AI_PROVIDER = (process.env.AI_PROVIDER || 'xai').trim().toLowerCase();
 const PROFILE_REQUIRED = {
   xai: XAI_USE_API_KEY ? ['XAI_API_KEY'] : [],
+  chatgpt: ['CHATGPT_MODEL'],
   openrouter: ['OPENROUTER_MAIN_MODEL'],
   custom: ['CUSTOM_RESPONSES_BASE_URL', 'CUSTOM_RESPONSES_API_KEY', 'CUSTOM_RESPONSES_MODEL']
 };
@@ -70,11 +68,32 @@ export default {
 
   GROK_MODEL: process.env.GROK_MODEL,
 
-  // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.
+  // xAI authentication: false (default) uses GemiX's own OAuth store
+  // (src/data/credentials/xai.json, filled by `npm run auth -- login xai`);
+  // true uses the static XAI_API_KEY instead and needs no OAuth settings.
   XAI_USE_API_KEY,
   XAI_API_KEY: process.env.XAI_API_KEY || '',
-  XAI_AUTH_FILE: process.env.XAI_AUTH_FILE || path.join(os.homedir(), '.hermes', 'auth.json'),
   XAI_BASE_URL: (process.env.XAI_BASE_URL || 'https://api.x.ai/v1').replace(/\/+$/, ''),
+
+  // xAI OAuth endpoints for the native login/refresh. Public values belonging to
+  // xAI's own open-source client, so they are deployment data rather than
+  // secrets — and they carry no default, because a wrong endpoint would fail
+  // every login with no way to tell it apart from a real refusal.
+  XAI_OAUTH_CLIENT_ID: process.env.XAI_OAUTH_CLIENT_ID || '',
+  XAI_OAUTH_AUTHORIZE_URL: process.env.XAI_OAUTH_AUTHORIZE_URL || '',
+  XAI_OAUTH_TOKEN_URL: process.env.XAI_OAUTH_TOKEN_URL || '',
+  XAI_OAUTH_SCOPE: process.env.XAI_OAUTH_SCOPE || 'offline_access',
+  XAI_OAUTH_REDIRECT_URI: process.env.XAI_OAUTH_REDIRECT_URI || 'http://127.0.0.1:8976/callback',
+
+  // ChatGPT/Codex subscription profile (AI_PROVIDER=chatgpt). The OAuth values
+  // are the ones the official open-source Codex CLI publishes.
+  CHATGPT_MODEL: process.env.CHATGPT_MODEL || '',
+  CHATGPT_BASE_URL: (process.env.CHATGPT_BASE_URL || 'https://chatgpt.com/backend-api/codex').replace(/\/+$/, ''),
+  CHATGPT_OAUTH_CLIENT_ID: process.env.CHATGPT_OAUTH_CLIENT_ID || 'app_EMoamEEZ73f0CkXaXp7hrann',
+  CHATGPT_OAUTH_AUTHORIZE_URL: process.env.CHATGPT_OAUTH_AUTHORIZE_URL || 'https://auth.openai.com/oauth/authorize',
+  CHATGPT_OAUTH_TOKEN_URL: process.env.CHATGPT_OAUTH_TOKEN_URL || 'https://auth.openai.com/oauth/token',
+  CHATGPT_OAUTH_SCOPE: process.env.CHATGPT_OAUTH_SCOPE || 'openid profile email offline_access',
+  CHATGPT_OAUTH_REDIRECT_URI: process.env.CHATGPT_OAUTH_REDIRECT_URI || 'http://localhost:1455/auth/callback',
 
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
@@ -108,7 +127,6 @@ export default {
   ADMIN_NAME: process.env.ADMIN_NAME,
   LEGAL_NAME: process.env.LEGAL_NAME,
 
-  XAI_REASONING_REPLAY: toBool(process.env.XAI_REASONING_REPLAY, true),
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),
   XAI_TTS_ENABLED: toBool(process.env.XAI_TTS_ENABLED, false),
   XAI_TTS_VOICE: process.env.XAI_TTS_VOICE || 'leo',
@@ -143,11 +161,5 @@ export default {
   IMAGE_SEARCH_BASE_URL: (process.env.IMAGE_SEARCH_BASE_URL || 'http://127.0.0.1:8888').replace(/\/+$/, ''),
 
   GEMIX_NOTIFY_SECRET: process.env.GEMIX_NOTIFY_SECRET || '',
-  CHROMIUM_PATH: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
-
-  // Hermes CLI binary used to refresh ~/.hermes/auth.json when OAuth tokens expire.
-  HERMES_BIN: process.env.HERMES_BIN || 'hermes',
-  HERMES_REFRESH_TIMEOUT_MS: Number(process.env.HERMES_REFRESH_TIMEOUT_MS) || 120_000,
-  HERMES_REFRESH_QUERY: process.env.HERMES_REFRESH_QUERY || 'ciao',
-  HERMES_REFRESH_PROVIDER: process.env.HERMES_REFRESH_PROVIDER || 'xai-oauth'
+  CHROMIUM_PATH: process.env.CHROMIUM_PATH || '/usr/bin/chromium'
 };

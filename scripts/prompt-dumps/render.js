@@ -390,7 +390,7 @@ function renderBuildAgentDump() {
     `timeoutMs: ${spec.timeoutMs}`,
     '',
     '--- HOST CONTRACT ---',
-    '- Auth: host getXaiAuth().token injected as XAI_API_KEY for this exec only (no host ~/.hermes mount).',
+    '- Auth: host xAI credential injected as XAI_API_KEY for this exec only (no host auth-file mount).',
     '- After exit: harvest every regular file under /workspace/ into the delivery buffer.',
     `- Tool result includes free-text agent reply + delivery_note: ${DELIVERY_SELECTION_NOTICE}`,
     '- No structured JSON schema for build attachments; GemiX-Main selects final user files.',

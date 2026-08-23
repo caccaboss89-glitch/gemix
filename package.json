@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "auth": "node scripts/gemix-auth.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node --test \"test/**/*.test.js\" && node scripts/regenerate-prompt-dumps.js",

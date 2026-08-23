@@ -21,17 +21,22 @@ import envConfig from '../../config/env.js';
 import { defineWireCapabilities, validateWireCapabilities } from './wireCapabilities.js';
 import { FEATURE, defineFeatureBindings } from '../../features/featureBindings.js';
 import { ApiKeyCredentialProvider } from '../credentials/credentialProvider.js';
-import { XaiAuthFileCredentialProvider } from '../credentials/xaiAuthFileCredentialProvider.js';
+import { sharedCredentialProvider, xaiCredentialProvider } from '../credentials/credentialRegistry.js';
+import { createCodexCredentialProvider } from '../credentials/nativeCodexCredentialProvider.js';
+import { CREDENTIAL_POOL } from '../credentials/oauthProviders.js';
 import { xaiResponsesExtensions } from '../extensions/xaiResponsesExtensions.js';
 
 const PROVIDER = Object.freeze({
   XAI: 'xai',
+  CHATGPT: 'chatgpt',
   OPENROUTER: 'openrouter',
   CUSTOM: 'custom'
 });
 
 /** Reasoning efforts the xAI Responses API accepts. */
 const XAI_EFFORTS = Object.freeze(['low', 'medium', 'high']);
+/** Efforts the Codex model catalog reports. */
+const CODEX_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 /** Generic Responses providers: the three the API documents. */
 const GENERIC_EFFORTS = Object.freeze(['low', 'medium', 'high']);
 
@@ -42,6 +47,15 @@ function _xaiDisplayName(model) {
   if (grok) return `Grok ${grok[1]}`;
   if (!slug) return 'AI Model';
   return slug.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function _chatgptDisplayName(model) {
+  const slug = String(model || '').trim();
+  const sol = slug.match(/^gpt-(\d+(?:\.\d+)?)-sol/i);
+  if (sol) return `ChatGPT ${sol[1]} Sol`;
+  const gpt = slug.match(/^gpt-(\d+(?:\.\d+)?)/i);
+  if (gpt) return `ChatGPT ${gpt[1]}`;
+  return slug ? `ChatGPT (${slug})` : 'ChatGPT';
 }
 
 function _genericDisplayName(model) {
@@ -74,13 +88,7 @@ function _buildXaiProfile() {
       supportsReasoningReplay: true,
       supportsImageInput: true
     }),
-    createCredentialProvider: () => (envConfig.XAI_USE_API_KEY
-      ? new ApiKeyCredentialProvider({
-        id: 'xai-api-key',
-        apiKey: envConfig.XAI_API_KEY,
-        baseUrl: envConfig.XAI_BASE_URL
-      })
-      : new XaiAuthFileCredentialProvider()),
+    createCredentialProvider: xaiCredentialProvider,
     extensions: xaiResponsesExtensions,
     features: defineFeatureBindings({
       [FEATURE.X_SEARCH]: 'xai-native',
@@ -89,6 +97,40 @@ function _buildXaiProfile() {
       [FEATURE.STT]: 'xai-stt',
       [FEATURE.TTS]: 'xai-tts'
     })
+  };
+}
+
+/**
+ * The ChatGPT subscription reached through the Codex backend. It is treated as
+ * exactly what the credential unlocks — a Responses endpoint — and never as the
+ * whole OpenAI product line: image, video, STT and TTS fall back to the GemiX
+ * baselines (spec §14.2).
+ */
+function _buildChatgptProfile() {
+  return {
+    id: PROVIDER.CHATGPT,
+    model: envConfig.CHATGPT_MODEL,
+    displayName: _chatgptDisplayName(envConfig.CHATGPT_MODEL),
+    identity: 'ChatGPT',
+    baseUrl: envConfig.CHATGPT_BASE_URL,
+    defaultEffort: 'high',
+    supportedEfforts: CODEX_EFFORTS,
+    wire: defineWireCapabilities({
+      supportsResponses: true,
+      supportsSse: true,
+      supportsFunctionCalling: true,
+      supportsStrictStructuredOutput: true,
+      supportsReasoningReplay: true,
+      supportsImageInput: true
+    }),
+    createCredentialProvider: () => sharedCredentialProvider(
+      CREDENTIAL_POOL.CHATGPT,
+      () => createCodexCredentialProvider()
+    ),
+    // Nothing about this backend needs a Responses extension: no extra header
+    // beyond the account id the credential already carries, no extra body field.
+    extensions: null,
+    features: defineFeatureBindings({})
   };
 }
 
@@ -113,12 +155,15 @@ function _buildOpenRouterProfile() {
       supportsReasoningReplay: true,
       supportsImageInput: true
     }),
-    createCredentialProvider: () => new ApiKeyCredentialProvider({
-      id: 'openrouter-api-key',
-      apiKey: envConfig.OPENROUTER_API_KEY,
-      baseUrl: envConfig.OPENROUTER_BASE_URL,
-      headers: { 'HTTP-Referer': envConfig.OPENROUTER_HTTP_REFERER }
-    }),
+    createCredentialProvider: () => sharedCredentialProvider(
+      'openrouter-api-key',
+      () => new ApiKeyCredentialProvider({
+        id: 'openrouter-api-key',
+        apiKey: envConfig.OPENROUTER_API_KEY,
+        baseUrl: envConfig.OPENROUTER_BASE_URL,
+        headers: { 'HTTP-Referer': envConfig.OPENROUTER_HTTP_REFERER }
+      })
+    ),
     extensions: null,
     features: defineFeatureBindings({})
   };
@@ -142,11 +187,14 @@ function _buildCustomProfile() {
       supportsReasoningReplay: true,
       supportsImageInput: true
     }),
-    createCredentialProvider: () => new ApiKeyCredentialProvider({
-      id: 'custom-api-key',
-      apiKey: envConfig.CUSTOM_RESPONSES_API_KEY,
-      baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL
-    }),
+    createCredentialProvider: () => sharedCredentialProvider(
+      'custom-api-key',
+      () => new ApiKeyCredentialProvider({
+        id: 'custom-api-key',
+        apiKey: envConfig.CUSTOM_RESPONSES_API_KEY,
+        baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL
+      })
+    ),
     extensions: null,
     features: defineFeatureBindings({})
   };
@@ -154,6 +202,7 @@ function _buildCustomProfile() {
 
 const BUILDERS = Object.freeze({
   [PROVIDER.XAI]: _buildXaiProfile,
+  [PROVIDER.CHATGPT]: _buildChatgptProfile,
   [PROVIDER.OPENROUTER]: _buildOpenRouterProfile,
   [PROVIDER.CUSTOM]: _buildCustomProfile
 });
@@ -221,6 +270,7 @@ export {
   PROVIDER,
   PROVIDER_IDS,
   XAI_EFFORTS,
+  CODEX_EFFORTS,
   GENERIC_EFFORTS,
   getProviderProfile,
   resolveProviderProfile,
