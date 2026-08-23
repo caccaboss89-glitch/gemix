@@ -1,4 +1,5 @@
-// Public HTTPS base for temp attachment URLs (xAI input_file, WhatsApp download links).
+// Public HTTPS base for the temp attachment links GemiX sends to users on
+// WhatsApp and Discord. The model never receives one: its files come by path.
 // Set GEMIX_PUBLIC_ATTACHMENT_BASE_URL in .env (no trailing slash).
 
 import { createLogger  } from './logger.js';

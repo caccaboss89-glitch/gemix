@@ -469,7 +469,8 @@ async function processCurrentMedia(msg, userId, options = {}) {
  * Build contentParts for one logical WA turn: a single message or a multi-
  * attachment album (several protocol messages, one UI send).
  * One labeled input_text (caption + all [Attachment] tags + reply chain once)
- * plus native input_image/input_file parts for every item.
+ * plus a native input_image part for every image of this turn. Nothing else
+ * travels natively: the tags are how the rest reaches read_file.
  *
  * @param {object|object[]} msgOrMsgs - one Message or album Messages (oldest→newest)
  * @param {string} chatId
