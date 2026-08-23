@@ -8,7 +8,10 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "test": "node --test \"test/**/*.test.js\" && node scripts/regenerate-prompt-dumps.js",
+    "test:unit": "node --test \"test/**/*.test.js\"",
+    "test:dumps": "node scripts/regenerate-prompt-dumps.js"
   },
   "dependencies": {
     "discord.js": "^14.16.3",

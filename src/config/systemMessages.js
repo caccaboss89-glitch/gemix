@@ -49,18 +49,32 @@ const RELEASE_NOTIFY_ALREADY_PREFIX = 'ℹ️ Le notifiche degli aggiornamenti d
 
 const FALLBACK_ERROR_PREFIX = '⚠️ GemiX: Generazione della risposta fallita. Riprova tra poco.';
 
-// -- Grok credit exhaustion (user-facing) -----------------------------------
+// -- Provider refusals (user-facing) ----------------------------------------
 
 /**
- * Shown to the user when xAI returns personal-team-blocked:spending-limit
- * (SuperGrok weekly credit cap). Built as a full message (not only a prefix)
- * so handler.js never hardcodes copy. Detection of the *error* is in
- * apiClient.isGrokCreditExhaustedError; this entry is for send + history tag.
+ * Shown when xAI reports the SuperGrok allowance is spent. It names the plan and
+ * its weekly renewal, so it may only ever answer a QUOTA failure that really
+ * came from the xAI profile — ai/providers/errorPolicy.js decides that on the
+ * error's kind and the active profile, never on the wording of a message.
  * It opens with ADMIN_ERROR_PREFIX, which is what makes it a system message.
  */
 const GROK_CREDIT_EXHAUSTED_MESSAGE =
   `${ADMIN_ERROR_PREFIX} API (Grok)*\n\nScusa ma i crediti sono finiti al momento, `
   + 'tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶';
+
+/**
+ * The same situation on any other profile. It names no provider and no plan:
+ * the user cannot act on which backend GemiX runs, and a message that said
+ * "SuperGrok" elsewhere would simply be wrong.
+ */
+const PROVIDER_LIMIT_MESSAGE =
+  `${ADMIN_ERROR_PREFIX} API*\n\nHo esaurito la disponibilità del modello per il momento. `
+  + 'Riprova più tardi.';
+
+/** Credentials the deployment has to fix: the user can only be told to wait. */
+const PROVIDER_AUTH_MESSAGE =
+  `${ADMIN_ERROR_PREFIX} API*\n\nNon riesco ad autenticarmi con il modello in questo momento. `
+  + 'L\'amministratore è stato avvisato.';
 
 // -- Temporary attachment links --------------------------------------------
 
@@ -169,7 +183,8 @@ function buildPrivacyWipeDoneMessage(opts = {}) {
 const SYSTEM_MESSAGE_PREFIXES = [
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
-  // Also covers GROK_CREDIT_EXHAUSTED_MESSAGE, which opens with it.
+  // Also covers GROK_CREDIT_EXHAUSTED_MESSAGE, PROVIDER_LIMIT_MESSAGE and
+  // PROVIDER_AUTH_MESSAGE, which all open with it.
   ADMIN_ERROR_PREFIX,
   MAINTENANCE_PREFIX,
   RELEASE_NOTIFY_ENABLED_PREFIX,
@@ -214,6 +229,8 @@ export {
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
   GROK_CREDIT_EXHAUSTED_MESSAGE,
+  PROVIDER_LIMIT_MESSAGE,
+  PROVIDER_AUTH_MESSAGE,
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   PRIVACY_WIPE_COMMAND,

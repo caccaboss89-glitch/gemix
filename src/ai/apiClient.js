@@ -1,9 +1,12 @@
 // src/ai/apiClient.js
 //
-// Centralized API client for all direct xAI LLM calls (`/v1/responses`).
-// Reads the OAuth token from config/xaiAuth.js on every attempt (the auth
-// file is refreshed externally), provides retry + timeout logic, structured
-// request/response logging, and log directory quota enforcement.
+// HTTP plumbing for the xAI endpoints that are NOT the Responses main brain:
+// Grok Imagine image/video and xAI TTS. Retry, timeout, structured
+// request/response logging and log-directory quota live here.
+//
+// The main brain no longer passes through this file — it speaks the generic
+// OpenAIResponsesTransport (ai/transport/) with a CredentialProvider. What is
+// left is the xAI media stack, and phase 6 moves it behind the media backends.
 
 import fs from 'fs';
 import path from 'path';
@@ -256,26 +259,15 @@ function _isOAuthUnauthenticatedHttp403Body(errMsg) {
 const GROK_CREDIT_EXHAUSTED_CODE = 'GROK_CREDIT_EXHAUSTED';
 
 /**
- * Canonical detector for SuperGrok / xAI team credit exhaustion.
- * Accepts Error or string. True for:
- *   - err.code === GROK_CREDIT_EXHAUSTED_CODE
- *   - the rethrow from callApiWithRetry ("… API credit exhausted …")
- *   - raw / nested `HTTP 403` JSON with code personal-team-blocked:spending-limit
- *   - the `HTTP 403` OAuth `unauthenticated:bad-credentials` body xAI starts
- *     returning once the credits are exhausted (same cause, different message)
- * @param {Error|string|null|undefined} errOrMsg
+ * Credit exhaustion on an xAI media endpoint. Marking the error with a code
+ * instead of notifying the admin is the whole point: a spent weekly allowance is
+ * an expected state, and the tool result already tells the model what happened.
+ * The main brain has its own typed equivalent (transport QUOTA + errorPolicy).
+ * @param {string|null|undefined} errMsg
  * @returns {boolean}
  */
-function isGrokCreditExhaustedError(errOrMsg) {
-  if (errOrMsg && typeof errOrMsg === 'object' && errOrMsg.code === GROK_CREDIT_EXHAUSTED_CODE) {
-    return true;
-  }
-  const errMsg = typeof errOrMsg === 'string'
-    ? errOrMsg
-    : (errOrMsg && typeof errOrMsg.message === 'string' ? errOrMsg.message : null);
-  if (!errMsg) return false;
-  // English log marker written by callApiWithRetry (keep in sync with throw below)
-  if (errMsg.includes('API credit exhausted')) return true;
+function _isGrokCreditExhaustedError(errMsg) {
+  if (typeof errMsg !== 'string' || !errMsg) return false;
   return _isGrokCreditExhaustedHttpBody(errMsg) || _isOAuthUnauthenticatedHttp403Body(errMsg);
 }
 
@@ -383,7 +375,7 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
         staleErr.code = 'XAI_STALE_FILE_URL';
         throw staleErr;
       }
-      if (isGrokCreditExhaustedError(errMsg)) {
+      if (_isGrokCreditExhaustedError(errMsg)) {
         const creditErr = new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
         creditErr.code = GROK_CREDIT_EXHAUSTED_CODE;
         throw creditErr;
@@ -395,62 +387,6 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
   // Unreachable: every path above returns or throws. Guards against a future
   // `continue` leaking out of the loop and handing callers an undefined Response.
   throw new Error(`${modelName} API unreachable: retry loop exhausted`);
-}
-
-/**
- * Call an AI model on the xAI Responses API (`/v1/responses`) and return
- * the parsed raw payload (not yet adapted to chat-completion shape).
- *
- * Callers (aiProvider.callAI for the main brain, and other
- * sub-agent) translate `output[]` via responsesToAssistantMessage into the
- * chat-style message shape the handler expects.
- *
- * @param {string} modelName
- * @param {object} body
- * @returns {Promise<object>} The full parsed JSON body
- */
-async function callResponsesModel(modelName, body, logExtra = {}) {
-  const apiUrl = `${getXaiAuth().baseUrl}/responses`;
-  const timeoutMs = Number.isFinite(logExtra.timeoutMs) ? logExtra.timeoutMs : constants.API_TIMEOUT_MS;
-  const requestLogExtra = { ...logExtra };
-  delete requestLogExtra.timeoutMs;
-  const res = await callApiWithRetry(modelName, apiUrl, body, requestLogExtra, timeoutMs);
-
-  let data;
-  try {
-    data = await res.json();
-  } catch (parseErr) {
-    log.error(`   JSON parse error from ${modelName}:`);
-    log.error(`      ${parseErr.message}`);
-    const msg = `${modelName} API: invalid response (JSON parsing failed)`;
-    await notifyAdmin(`API (${modelName})`, msg);
-    throw new Error(`${msg}${ADMIN_NOTIFIED_SUFFIX}`);
-  }
-
-  try {
-    logApiResponse(modelName, apiUrl, data, logExtra);
-  } catch (err) {
-    log.warn(`Failed to write API response log: ${err.message}`);
-  }
-
-  // API error takes precedence over shape checks — HTTP 200 bodies can still
-  // carry data.error alongside empty/partial output.
-  if (data?.error) {
-    const msg = `${modelName} API error: ${data.error.message || JSON.stringify(data.error)}`;
-    await notifyAdmin(`API (${modelName})`, msg);
-    throw new Error(`${msg}${ADMIN_NOTIFIED_SUFFIX}`);
-  }
-
-  if (!data || (!Array.isArray(data.output) && typeof data.output_text !== 'string')) {
-    log.error(`   Malformed ${modelName} response (Responses API):`);
-    log.error(`      output: ${typeof data?.output} | output_text: ${typeof data?.output_text}`);
-    log.error(`      full response: ${JSON.stringify(data)}`);
-    const msg = `${modelName} API: no response received (empty or malformed)`;
-    await notifyAdmin(`API (${modelName})`, msg);
-    throw new Error(`${msg}${ADMIN_NOTIFIED_SUFFIX}`);
-  }
-
-  return data;
 }
 
 /**
@@ -519,10 +455,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
 }
 
 export {
-  callResponsesModel,
   callApiWithRetry,
   logApiResponse,
-  fetchXaiWithOAuthRetry,
-  isGrokCreditExhaustedError
-
+  fetchXaiWithOAuthRetry
 };

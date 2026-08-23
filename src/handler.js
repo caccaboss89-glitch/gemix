@@ -69,10 +69,11 @@ import { sendIntermediateNotification  } from './utils/intermediateNotification.
 import {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
-  FALLBACK_ERROR_PREFIX,
-  GROK_CREDIT_EXHAUSTED_MESSAGE
+  FALLBACK_ERROR_PREFIX
 } from './config/systemMessages.js';
-import { isGrokCreditExhaustedError  } from './ai/apiClient.js';
+import { resolveProviderProfile } from './ai/providers/providerProfile.js';
+import { providerFailureReply } from './ai/providers/errorPolicy.js';
+import { notifyAdmin } from './utils/adminNotifier.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
 import { wrapSystemReminder, wrapUserQuery  } from './utils/systemTags.js';
 
@@ -753,13 +754,17 @@ async function handleMessage(ctx) {
       ? ctx.platform.toUpperCase().padEnd(10)
       : 'UNKNOWN   ';
 
-    // Grok credit exhaustion (SuperGrok weekly cap, or the OAuth "bad-credentials"
-    // 403 xAI returns once credits run out) is an expected, already-handled state:
-    // reply with the credit notice — no admin alert and no red error/stack trace.
-    if (isGrokCreditExhaustedError(err)) {
-      log.warn(`   [${platformLabel.trim()}] Grok credits exhausted — replying with the credit notice (admin not notified).`);
+    // A typed refusal from the provider (spent allowance, throttling, bad
+    // credentials) is an already-handled state, not a crash: the error policy
+    // picks the copy for the active profile and no stack trace is logged.
+    const providerReply = providerFailureReply(err, resolveProviderProfile());
+    if (providerReply) {
+      log.warn(`   [${platformLabel.trim()}] ${providerReply.logLine}`);
+      if (providerReply.notifyAdmin) {
+        await notifyAdmin('AI Provider', `${err.kind}: ${err.message}`).catch(() => {});
+      }
       return {
-        text: GROK_CREDIT_EXHAUSTED_MESSAGE,
+        text: providerReply.text,
         voiceBuffer: null,
         isVoiceOnly: false,
         attachments: [],

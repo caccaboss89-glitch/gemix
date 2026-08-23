@@ -1,75 +1,46 @@
 // src/ai/responsesWithUrlRefresh.js
 //
-// Shared callResponsesModel wrapper: on xAI "failed to download file from URL"
-// errors, refresh tmpfile.link URLs from disk and retry (no admin notify).
+// PHASE 4 BRIDGE. Retries one model call after re-uploading the tmpfile.link
+// URLs a provider refused to fetch.
+//
+// It sits above the transport, not inside it: rebuilding a public URL for a
+// file GemiX still holds on disk is an attachment-layer concern, and the
+// transport must stay free of it. Phase 4 removes tmpfile.link from the model
+// path entirely (spec §8.6) and this file goes with it.
 
-import { clearXaiUploadCache  } from '../utils/xaiUpload.js';
-import { refreshXaiUrlsInMessages  } from '../utils/refreshXaiMessageUrls.js';
-import { callResponsesModel  } from './apiClient.js';
-import { chatMessagesToResponsesInput  } from './responsesAdapter.js';
-import { createLogger  } from '../utils/logger.js';
+import { clearXaiUploadCache } from '../utils/xaiUpload.js';
+import { isXaiFileDownloadError, refreshXaiUrlsInMessages } from '../utils/refreshXaiMessageUrls.js';
+import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('AI');
 const MAX_STALE_URL_REFRESHES = 2;
 
 /**
  * @param {object} opts
- * @param {string} opts.modelName
- * @param {Array|null} opts.messages - When set, body.input is rebuilt each attempt
- *   from messages (roles stay in input[] order; no top-level instructions).
- * @param {object} opts.body - Responses API body (mutated when messages provided).
- * @param {object} [opts.logExtra]
- * @param {number} [opts.timeoutMs]
- * @param {string|null} [opts.historyStorageId] - History path fallback for refresh.
- * @param {boolean} [opts.allowStaleUrlRefresh] - Refresh via _xaiSourcePath only (build agent).
+ * @param {Array} opts.messages - rebuilt into a body on every attempt
+ * @param {(messages: Array) => object} opts.buildBody
+ * @param {(body: object) => Promise<object>} opts.call
+ * @param {string|null} [opts.historyStorageId] - history path used to re-upload
+ * @returns {Promise<object>} whatever `call` resolved with
  */
-async function callResponsesWithStaleUrlRetry(opts) {
-  const {
-    modelName,
-    messages,
-    body,
-    logExtra = {},
-    timeoutMs,
-    historyStorageId = null,
-    allowStaleUrlRefresh = false
-  } = opts;
-
-  const canRefresh = allowStaleUrlRefresh || Boolean(historyStorageId);
-  let staleRefreshCount = 0;
+async function callWithStaleUrlRetry({ messages, buildBody, call, historyStorageId = null }) {
+  const canRefresh = Boolean(historyStorageId) && Array.isArray(messages);
+  let refreshCount = 0;
 
   for (;;) {
-    if (Array.isArray(messages)) {
-      const { input } = chatMessagesToResponsesInput(messages);
-      body.input = input;
-      // Main brain puts the static system prompt in input[0], not top-level
-      // instructions (xAI prefix-cache is message-array based).
-      delete body.instructions;
-    }
-
     try {
-      return await callResponsesModel(modelName, body, {
-        ...logExtra,
-        deferStaleFileUrlError: canRefresh && staleRefreshCount < MAX_STALE_URL_REFRESHES,
-        timeoutMs
-      });
+      return await call(buildBody(messages));
     } catch (err) {
-      if (err.code !== 'XAI_STALE_FILE_URL' || !canRefresh || !Array.isArray(messages)) {
+      if (!canRefresh || refreshCount >= MAX_STALE_URL_REFRESHES || !isXaiFileDownloadError(err.message)) {
         throw err;
       }
-      if (staleRefreshCount >= MAX_STALE_URL_REFRESHES) {
-        throw err;
-      }
-      staleRefreshCount += 1;
+      refreshCount += 1;
       clearXaiUploadCache();
       const refreshed = await refreshXaiUrlsInMessages(messages, historyStorageId);
-      if (refreshed > 0) {
-        log.info(`Stale xAI file URL(s) refreshed (${refreshed}), retrying ${modelName}...`);
-        continue;
-      }
-      throw err;
+      if (refreshed === 0) throw err;
+      log.info(`Stale file URL(s) refreshed (${refreshed}), retrying the model call...`);
     }
   }
 }
 
-export { callResponsesWithStaleUrlRetry
-};
+export { callWithStaleUrlRetry };

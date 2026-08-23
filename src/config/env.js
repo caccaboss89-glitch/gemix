@@ -38,9 +38,22 @@ const REQUIRED = [
   'GEMIX_TEMP_FILE_PORT'
 ];
 const missing = REQUIRED.filter((k) => !process.env[k] || !String(process.env[k]).trim());
-if (XAI_USE_API_KEY) {
-  if (!process.env.XAI_API_KEY || !String(process.env.XAI_API_KEY).trim()) {
-    missing.push('XAI_API_KEY (required when XAI_USE_API_KEY=true)');
+
+// Per-profile requirements: only the selected AI_PROVIDER's settings are
+// mandatory, so a deployment never has to fill in credentials it does not use.
+const AI_PROVIDER = (process.env.AI_PROVIDER || 'xai').trim().toLowerCase();
+const PROFILE_REQUIRED = {
+  xai: XAI_USE_API_KEY ? ['XAI_API_KEY'] : [],
+  openrouter: ['OPENROUTER_MAIN_MODEL'],
+  custom: ['CUSTOM_RESPONSES_BASE_URL', 'CUSTOM_RESPONSES_API_KEY', 'CUSTOM_RESPONSES_MODEL']
+};
+if (!(AI_PROVIDER in PROFILE_REQUIRED)) {
+  missing.push(`AI_PROVIDER (unknown value "${AI_PROVIDER}"; allowed: ${Object.keys(PROFILE_REQUIRED).join(', ')})`);
+} else {
+  for (const key of PROFILE_REQUIRED[AI_PROVIDER]) {
+    if (!process.env[key] || !String(process.env[key]).trim()) {
+      missing.push(`${key} (required when AI_PROVIDER=${AI_PROVIDER}${key === 'XAI_API_KEY' ? ' and XAI_USE_API_KEY=true' : ''})`);
+    }
   }
 }
 if (missing.length > 0) {
@@ -50,6 +63,11 @@ if (missing.length > 0) {
 }
 
 export default {
+  // Which provider profile drives the main brain (ai/providers/providerProfile.js).
+  // The profile composes transport + credentials + feature bindings; it never
+  // decides what GemiX itself can do.
+  AI_PROVIDER,
+
   GROK_MODEL: process.env.GROK_MODEL,
 
   // xAI authentication: false (default) reads ~/.hermes/auth.json; true uses XAI_API_KEY.
@@ -64,6 +82,14 @@ export default {
   MUSIC_MODEL: process.env.MUSIC_MODEL,
   MUSIC_STATS_URL: process.env.MUSIC_STATS_URL,
   MUSIC_WRAP_URL: process.env.MUSIC_WRAP_URL,
+  // Main-brain model when AI_PROVIDER=openrouter (unrelated to MUSIC_MODEL,
+  // which the music tool keeps whatever the main brain runs on).
+  OPENROUTER_MAIN_MODEL: process.env.OPENROUTER_MAIN_MODEL || '',
+
+  // Any other Responses-compatible endpoint (AI_PROVIDER=custom).
+  CUSTOM_RESPONSES_BASE_URL: (process.env.CUSTOM_RESPONSES_BASE_URL || '').replace(/\/+$/, ''),
+  CUSTOM_RESPONSES_API_KEY: process.env.CUSTOM_RESPONSES_API_KEY || '',
+  CUSTOM_RESPONSES_MODEL: process.env.CUSTOM_RESPONSES_MODEL || '',
 
   IMAGE_GEN_MODEL: process.env.IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL,
