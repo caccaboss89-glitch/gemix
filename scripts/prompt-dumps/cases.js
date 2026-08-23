@@ -4,7 +4,10 @@
 // combination whose prompt we want on disk and under validation.
 //
 // Every case is a plain handler-shaped ctx. Cases without explicit `settings`
-// render the program defaults, like a fresh chat.
+// render the program defaults, like a fresh chat. A case may also carry a
+// `deployment`, which renders it as a different provider profile: the tool
+// registry and some media backends vary by profile, so the corpus has to show
+// more than the one this .env happens to select.
 //
 // Discord note: conversation_title sits in text.format on every turn (its rules
 // live there only — Runtime just carries the current Thread title to compare
@@ -98,7 +101,7 @@ const CASES = {
     }
   },
   5: {
-    label: 'WA personal — build workspace listed',
+    label: 'WA personal — workspace files listed',
     ctx: {
       platform: PLATFORM_WA_PERSONAL,
       isGroup: false,
@@ -295,6 +298,21 @@ const CASES = {
       rulesContext: '[STATUTE EXCERPT PLACEHOLDER]',
       serverEvents: '',
       availableEmojis: ''
+    }
+  },
+  19: {
+    label: 'WA dedicated private — non-xAI profile (baseline media backends)',
+    // Same chat as case 6, on a provider with no X search and no video service:
+    // those tools are absent rather than present-and-failing, and generate_image
+    // shows the Cloudflare schema instead of the Grok Imagine one.
+    deployment: { provider: 'chatgpt', cloudflare: true },
+    ctx: {
+      platform: PLATFORM_WA_DEDICATED,
+      isGroup: false,
+      chatId: 'wa_priv@test',
+      userName: envConfig.ADMIN_NAME,
+      userIdentity: ACTIVE,
+      userWorkspace: null
     }
   }
 };

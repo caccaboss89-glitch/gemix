@@ -9,10 +9,9 @@
 
 import constants from '../../src/config/constants.js';
 import { PRIVACY_WIPE_COMMAND } from '../../src/config/systemMessages.js';
-import envConfig from '../../src/config/env.js';
 import { getCapabilities } from '../../src/config/platformCapabilities.js';
-import { getModelDisplayName } from '../../src/utils/footer.js';
 import { getToolsForUser } from '../../src/ai/tools.js';
+import { resolveProviderProfile } from '../../src/ai/providers/providerProfile.js';
 import { CASES } from './cases.js';
 
 const { PLATFORM_DISCORD } = constants;
@@ -130,7 +129,7 @@ function _validateStaticShape(staticPart, prompt, caseId) {
   }
   // The opening carries the model name and the standing goal.
   const opening = staticPart.split('\n## ')[0];
-  const expectedModel = getModelDisplayName(envConfig.GROK_MODEL);
+  const expectedModel = resolveProviderProfile().displayName;
   if (!opening.includes(expectedModel)) {
     ISSUES.push({ caseId, msg: `opening missing model display name "${expectedModel}"` });
   }

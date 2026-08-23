@@ -16,6 +16,8 @@
 // "" is a valid value and parseStructuredReply reads it as "no rename".
 //
 import constants from '../config/constants.js';
+import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
+import { resolveProviderProfile } from './providers/providerProfile.js';
 
 // Which markup actually renders is stated once, in the "This chat" section of
 // the system prompt — not restated here.
@@ -38,12 +40,19 @@ const VOICE_RESPONSE_FIELD_DESC =
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
 
-const GEMIX_ATTACHMENTS_FIELD_DESC =
-  'OPTIONAL. The ONLY way to send files in this chat. '
-  + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
-  + '(image/video/audio/PDF/etc. — never a page/article/post link; '
-  + 'for X media use x_search CDN URLs; for web images use the `url` fields from web_image_search). '
-  + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
+// The X clause only appears where x_search does: naming a tool the profile does
+// not have would send the model looking for it. The profile is fixed for the
+// life of the process, so this stays byte-stable within a conversation.
+function _attachmentsFieldDesc() {
+  const xMedia = isFeatureAvailable(resolveProviderProfile(), FEATURE.X_SEARCH)
+    ? 'for X media use x_search CDN URLs; '
+    : '';
+  return 'OPTIONAL. The ONLY way to send files in this chat. '
+    + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
+    + '(image/video/audio/PDF/etc. — never a page/article/post link; '
+    + `${xMedia}for web images use the \`url\` fields from web_image_search). `
+    + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
+}
 
 // Discord, every turn. Non-empty renames the thread, "" leaves it alone.
 const TITLE_FIELD_DESC =
@@ -83,7 +92,7 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
   properties.attachments = {
     type: 'array',
     items: { type: 'string' },
-    description: GEMIX_ATTACHMENTS_FIELD_DESC
+    description: _attachmentsFieldDesc()
   };
 
   if (includeTitle) {

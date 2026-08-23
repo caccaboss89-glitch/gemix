@@ -14,6 +14,14 @@
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import {
+  BACKEND as IMAGE_BACKEND,
+  FLUX_DEFAULT_SIZE,
+  FLUX_SIZES,
+  declaredImageBackend
+} from '../media/imageBackends.js';
+import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
+import { resolveProviderProfile } from './providers/providerProfile.js';
+import {
   defaultSettings,
   VALID_VOICES,
   VOICES_MALE,
@@ -324,38 +332,90 @@ const TOOL_GENERATE_MUSIC = makeTool({
 //
 // Available on WhatsApp (dedicated + personal); image/video generation likewise.
 //
-// Reference images: each entry is a filename with extension from the delivery
-// buffer or chat history, or a public https URL. Filenames resolve buffer-first,
-// then history; local files are exposed as public URLs for xAI.
+// Reference images: each entry is a path in this chat, exactly as the model saw
+// it, or a public https URL. Nothing is uploaded to a third-party host on the
+// way: a local reference travels inline.
+//
+// `generate_image` has two backends with genuinely different capabilities, so
+// its schema is built per backend rather than shared (spec §18.12). Advertising
+// an aspect-ratio enum FLUX cannot honour, or three reference slots where only
+// one is read, would make the tool lie about what it does.
 
-const TOOL_GENERATE_IMAGE = makeTool({
-  name: 'generate_image',
-  description:
-    `Generate an image from a textual prompt, optionally guided by up to ${constants.MAX_REF_IMAGES_FOR_IMAGE} reference images `
-    + '(editing, composition, style transfer). The image is saved in your workspace.',
-  properties: {
-    prompt: {
-      type: 'string',
-      description:
-        'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them '
-        + 'ALWAYS as <IMAGE_0>, <IMAGE_1>, … in array order - never by filename.'
+/** The Grok Imagine variant: real edits, up to three references, ratio enum. */
+function _buildXaiImageTool() {
+  return makeTool({
+    name: 'generate_image',
+    description:
+      `Generate an image from a textual prompt, optionally guided by up to ${constants.MAX_REF_IMAGES_FOR_IMAGE} reference images `
+      + '(editing, composition, style transfer). The image is saved in your workspace.',
+    properties: {
+      prompt: {
+        type: 'string',
+        description:
+          'Image description: subject, style, lighting, mood, composition. When passing reference images, refer to them '
+          + 'ALWAYS as <IMAGE_0>, <IMAGE_1>, … in array order - never by filename.'
+      },
+      reference_images: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          `Up to ${constants.MAX_REF_IMAGES_FOR_IMAGE}. Each entry: a path in this chat, exactly as you saw it, `
+          + 'or a public https URL. Order matters (<IMAGE_0> = first). 1 = edit/transform; 2+ = combine or style transfer. '
+          + 'Omit for pure text-to-image.'
+      },
+      aspect_ratio: {
+        type: 'string',
+        enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+        description: 'Aspect ratio for pure text-to-image. Omit for automatic. Ignored with reference images (output follows the input image).'
+      }
     },
-    reference_images: {
-      type: 'array',
-      items: { type: 'string' },
-      description:
-        `Up to ${constants.MAX_REF_IMAGES_FOR_IMAGE}. Each entry: a path in this chat, exactly as you saw it, `
-        + 'or a public https URL. Order matters (<IMAGE_0> = first). 1 = edit/transform; 2+ = combine or style transfer. '
-        + 'Omit for pure text-to-image.'
+    required: ['prompt']
+  });
+}
+
+/**
+ * The Cloudflare FLUX variant: one reference, named sizes, and an honest
+ * description of what a reference does — klein-4b regenerates freely from it
+ * rather than editing the original, so promising an edit would set the model up
+ * to report a failure that never happened.
+ */
+function _buildFluxImageTool() {
+  return makeTool({
+    name: 'generate_image',
+    description:
+      'Generate an image from a textual prompt. The image is saved in your workspace. '
+      + 'A reference image guides the subject and style, but the result is a fresh image built from that '
+      + 'guidance, not an edit of the original: do not use it to change one detail of a picture and expect '
+      + 'the rest to survive.',
+    properties: {
+      prompt: {
+        type: 'string',
+        description: 'Image description: subject, style, lighting, mood, composition. Describe the whole picture you want, '
+          + 'including the parts a reference image already shows.'
+      },
+      reference_images: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'At most one, as a path in this chat exactly as you saw it. Guides subject and style. '
+          + 'Omit for pure text-to-image.'
+      },
+      size: {
+        type: 'string',
+        enum: Object.keys(FLUX_SIZES),
+        description: `Output shape. Default ${FLUX_DEFAULT_SIZE}.`
+      }
     },
-    aspect_ratio: {
-      type: 'string',
-      enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
-      description: 'Aspect ratio for pure text-to-image. Omit for automatic. Ignored with reference images (output follows the input image).'
-    }
-  },
-  required: ['prompt']
-});
+    required: ['prompt']
+  });
+}
+
+/** The image tool for the backend actually bound on this profile, or null. */
+function buildGenerateImageTool() {
+  const backend = declaredImageBackend();
+  if (backend === IMAGE_BACKEND.XAI) return _buildXaiImageTool();
+  if (backend === IMAGE_BACKEND.CLOUDFLARE) return _buildFluxImageTool();
+  return null;
+}
 
 const TOOL_GENERATE_VIDEO = makeTool({
   name: 'generate_video',
@@ -388,7 +448,7 @@ const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string' },
   description:
-    'OPTIONAL. Same entry types as reply attachments: buffer/history filename or direct https file URL. Omit if none.'
+    'OPTIONAL. Same entry types as reply attachments: a path exactly as you saw it, or a direct public https file URL. Omit if none.'
 };
 
 function buildWhatsAppTool(isAdmin) {
@@ -819,14 +879,24 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   const tools = [];
 
   // Order = importance / how often the main brain should reach for them.
-  // 1) Pulling material into context: native web → local web images → native X
-  // (image mode off on web). Files already in this chat are not here: they are
-  // paths under attachments/, and read_file opens them.
-  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_WEB_IMAGE_SEARCH, TOOL_X_SEARCH_NATIVE);
+  // 1) Pulling material into context: web → local web images → X, where the
+  // profile has it. x_search is a provider-native extension and only exists on
+  // one, so it is injected from the feature binding rather than unconditionally
+  // (§18.12). Files already in this chat are not here: they are paths under
+  // attachments/, and read_file opens them.
+  const profile = resolveProviderProfile();
+  tools.push(TOOL_WEB_SEARCH_NATIVE, TOOL_WEB_IMAGE_SEARCH);
+  if (isFeatureAvailable(profile, FEATURE.X_SEARCH)) tools.push(TOOL_X_SEARCH_NATIVE);
 
-  // 2) Media generation (WhatsApp). Weekly quota is the real cap (mediaUsageLimits).
+  // 2) Media generation (WhatsApp). Weekly quota is the real cap
+  // (mediaUsageLimits). Each of these appears only where a backend can serve
+  // it: image generation picks the schema of the backend that will run, and
+  // video generation exists only on a profile that has one at all (§18.12).
   if (isWhatsApp) {
-    tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO, TOOL_GENERATE_MUSIC);
+    const imageTool = buildGenerateImageTool();
+    if (imageTool) tools.push(imageTool);
+    if (isFeatureAvailable(profile, FEATURE.GENERATE_VIDEO)) tools.push(TOOL_GENERATE_VIDEO);
+    tools.push(TOOL_GENERATE_MUSIC);
   }
 
   // 3) The workspace itself, on every platform: `read_file` is the only way to

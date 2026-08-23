@@ -28,6 +28,8 @@ import { resolveProviderProfile } from '../ai/providers/providerProfile.js';
 import { fetchXaiWithOAuthRetry } from '../ai/apiClient.js';
 import { getXaiServiceAuth } from '../ai/credentials/xaiServiceCredentials.js';
 import { tempDirForOwner } from '../utils/tempFileServer.js';
+import { CF_ERROR, callWorkersAi, isCloudflareConfigured } from './cloudflareClient.js';
+import { estimateSttNeurons } from './neuronLedger.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('STT');
@@ -45,16 +47,10 @@ const STT_STATUS = Object.freeze({
 const STT_UNCONFIGURED_MESSAGE =
   'Voice transcription is not configured on this deployment, so the spoken contents of this clip are unknown.';
 
-const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 const REQUEST_TIMEOUT_MS = 120 * 1000;
 const FFMPEG_TIMEOUT_MS = 60 * 1000;
 /** Audio bigger than this is not worth base64-ing into a JSON body. */
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
-
-/** True when the deployment has Workers AI credentials. */
-function isCloudflareSttConfigured() {
-  return Boolean(envConfig.CLOUDFLARE_AI_ACCOUNT_ID && envConfig.CLOUDFLARE_AI_API_TOKEN);
-}
 
 /** True when this deployment knows where xAI's transcription endpoint lives. */
 function isXaiSttConfigured() {
@@ -70,7 +66,7 @@ function resolveSttBackend() {
   const bound = backendFor(resolveProviderProfile(), FEATURE.STT);
   if (bound === 'xai-stt' && isXaiSttConfigured()) return bound;
   const candidate = bound === 'xai-stt' ? fallbackBackendFor(bound) : bound;
-  if (candidate === 'cloudflare-whisper' && isCloudflareSttConfigured()) return candidate;
+  if (candidate === 'cloudflare-whisper' && isCloudflareConfigured()) return candidate;
   return null;
 }
 
@@ -137,43 +133,38 @@ function _extractTranscript(payload) {
 // -- Cloudflare Workers AI (Whisper) -----------------------------------------
 
 async function _cloudflarePost(buffer, opts) {
-  const model = envConfig.CLOUDFLARE_STT_MODEL;
-  const url = `${CLOUDFLARE_API_BASE}/${envConfig.CLOUDFLARE_AI_ACCOUNT_ID}/ai/run/${model}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${envConfig.CLOUDFLARE_AI_API_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
+  return callWorkersAi({
+    model: envConfig.CLOUDFLARE_STT_MODEL,
+    body: {
       audio: buffer.toString('base64'),
       task: 'transcribe',
       ...(opts.language ? { language: opts.language } : {}),
       vad_filter: true,
       beam_size: 5,
       condition_on_previous_text: false
-    }),
-    signal: opts.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    },
+    estimatedNeurons: estimateSttNeurons(opts.durationSec),
+    signal: opts.signal,
+    timeoutMs: REQUEST_TIMEOUT_MS
   });
-  const text = await res.text();
-  let payload = null;
-  try { payload = JSON.parse(text); } catch { /* reported below */ }
-  return { ok: res.ok, status: res.status, payload, raw: text };
 }
 
 async function _transcribeCloudflare(absPath, buffer, opts) {
   let attempt = await _cloudflarePost(buffer, opts);
 
-  // A refused container is worth exactly one re-encode, never two.
-  if (!attempt.ok && attempt.status >= 400 && attempt.status < 500) {
+  // A refused container is worth exactly one re-encode, never two. A rejected
+  // budget or a rate limit is not about the container, so it is not re-encoded.
+  if (!attempt.ok && attempt.code === CF_ERROR.MALFORMED) {
     const wav = await _toWav16k(absPath, opts.signal);
     if (wav) attempt = await _cloudflarePost(wav, opts);
   }
 
   if (!attempt.ok) {
-    const detail = attempt.payload?.errors?.[0]?.message || attempt.raw.slice(0, 200);
-    log.warn(`Workers AI refused the clip (HTTP ${attempt.status}): ${detail}`);
-    return _result(STT_STATUS.ERROR, 'cloudflare');
+    log.warn(`Workers AI refused the clip (${attempt.code}): ${attempt.error}`);
+    const status = attempt.code === CF_ERROR.TRANSIENT && /in time/.test(attempt.error || '')
+      ? STT_STATUS.TIMEOUT
+      : STT_STATUS.ERROR;
+    return { ..._result(status, 'cloudflare'), message: attempt.error };
   }
   const transcript = _extractTranscript(attempt.payload);
   return transcript
@@ -240,7 +231,7 @@ async function transcribeAudioFile(absPath, opts = {}) {
       } catch (err) {
         // The whole point of the binding's fallback: a refusal from xAI must
         // not cost the user their transcript when Cloudflare can still do it.
-        if (!isCloudflareSttConfigured()) throw err;
+        if (!isCloudflareConfigured()) throw err;
         log.warn(`xAI transcription failed (${err.message}); falling back to Workers AI`);
         return await _transcribeCloudflare(absPath, buffer, opts);
       }
@@ -261,7 +252,6 @@ export {
   MAX_AUDIO_BYTES,
   contentHashOf,
   isSttConfigured,
-  isCloudflareSttConfigured,
   isXaiSttConfigured,
   resolveSttBackend,
   sttModelId,

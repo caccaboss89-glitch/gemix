@@ -13,6 +13,8 @@ import { buildGemixResponseFormat } from '../../src/ai/responseSchema.js';
 import constants from '../../src/config/constants.js';
 import { resolveProfile, toolUnavailableMessage, getCapabilities } from '../../src/config/platformCapabilities.js';
 import { ADMIN_NOTIFIED_SUFFIX } from '../../src/utils/adminNotifier.js';
+import envConfig from '../../src/config/env.js';
+import { _resetActiveProfileForTests } from '../../src/ai/providers/providerProfile.js';
 
 const {
   PLATFORM_DISCORD,
@@ -344,6 +346,40 @@ function renderInputLayout() {
  * @param {number} id - key into CASES
  * @returns {{ staticPart: string, dynamicPart: string, dump: string }}
  */
+/**
+ * Run `fn` under the provider profile a case asks for, then put the process back
+ * as it was. The profile is resolved per call, so swapping it here is enough for
+ * the prompt, the tool registry and the response schema to follow. Validation
+ * has to run inside the same window as the render, which is why this wraps a
+ * callback instead of living inside renderCase.
+ */
+function underCaseDeployment(id, fn) {
+  const deployment = CASES[id]?.deployment;
+  if (!deployment) return fn();
+  const saved = {
+    provider: envConfig.AI_PROVIDER,
+    account: envConfig.CLOUDFLARE_AI_ACCOUNT_ID,
+    token: envConfig.CLOUDFLARE_AI_API_TOKEN
+  };
+  envConfig.AI_PROVIDER = deployment.provider;
+  if (deployment.cloudflare) {
+    // Placeholders: the dump only asks whether a backend is configured, and
+    // never calls it.
+    envConfig.CLOUDFLARE_AI_ACCOUNT_ID = envConfig.CLOUDFLARE_AI_ACCOUNT_ID || 'dump-account';
+    envConfig.CLOUDFLARE_AI_API_TOKEN = envConfig.CLOUDFLARE_AI_API_TOKEN || 'dump-token';
+  }
+  _resetActiveProfileForTests();
+  try { return fn(); }
+  finally {
+    Object.assign(envConfig, {
+      AI_PROVIDER: saved.provider,
+      CLOUDFLARE_AI_ACCOUNT_ID: saved.account,
+      CLOUDFLARE_AI_API_TOKEN: saved.token
+    });
+    _resetActiveProfileForTests();
+  }
+}
+
 function renderCase(id) {
   const spec = CASES[id];
   const ctx = { ...spec.ctx };
@@ -431,4 +467,4 @@ function renderWorkspaceRuntimeDump() {
   ].join('\n');
 }
 
-export { renderCase, renderWorkspaceRuntimeDump };
+export { renderCase, renderWorkspaceRuntimeDump, underCaseDeployment };

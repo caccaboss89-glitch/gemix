@@ -17,10 +17,10 @@
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
 import { ACTIVE_MEMBERS  } from '../config/members.js';
 import envConfig from '../config/env.js';
-import { getModelDisplayName  } from '../utils/footer.js';
 import { defaultSettings, customizedFields  } from '../utils/settingsStore.js';
 import constants from '../config/constants.js';
 import { PRIVACY_WIPE_COMMAND  } from '../config/systemMessages.js';
+import { resolveProviderProfile  } from './providers/providerProfile.js';
 
 import { formatParticipantsForPrompt  } from '../utils/waParticipants.js';
 import {
@@ -127,11 +127,17 @@ function buildStaticInstructions(ctx) {
   return sections.join('\n\n');
 }
 
-/** Identity and the standing goal. No heading: it opens the prompt. */
+/**
+ * Identity and the standing goal. No heading: it opens the prompt.
+ *
+ * The brand comes from the provider profile, not from one provider's model
+ * setting: the model is told what it actually is on this deployment.
+ */
 function _buildOpening(cap) {
   const division = cap.isDiscord ? ' (Legal Division)' : '';
+  const profile = resolveProviderProfile();
   return (
-    `You are ${getModelDisplayName(envConfig.GROK_MODEL)} inside GemiX, a fusion of SuperGrok and Gemini${division}. `
+    `You are ${profile.displayName} inside GemiX, a fusion of ${profile.identity} and Gemini${division}. `
     + 'You have a sense of irony, and you catch things even when they are only implied.\n'
     + 'Your main goal is to answer the request inside the `<user_query>` tag, using every means and tool '
     + 'available to you to make that answer as good as it can be.'

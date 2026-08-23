@@ -6,10 +6,15 @@
 // (This file returns binary audio Buffers, so it produces no tool-facing text.)
 //
 // Voice generation pipeline. Produces OGG/Opus audio buffers for WhatsApp
-// voice messages. Uses the direct xAI TTS endpoint (`POST /v1/tts`) when
-// enabled (primary), with Google Translate TTS fallback. Always applies
-// MP3-to-Opus transcode. Strips vocal tags for Google TTS input (speech
-// tags are written by GemiX itself in the voice reply `response` text).
+// voice messages. Always applies MP3-to-Opus transcode, and strips vocal tags
+// for Google TTS input (speech tags are written by GemiX itself in the voice
+// reply `response` text).
+//
+// TTS is a delivery backend, not a model tool (spec §11.3): the chain comes
+// from the profile's TTS feature binding, so a provider with a deliberately
+// integrated service is primary and Google Translate is behind it. On a profile
+// with no such service, Google Translate is simply the primary — the xAI
+// endpoint is not called with a credential that does not belong to it.
 
 import googleTTS from 'google-tts-api';
 import { spawn  } from 'child_process';
@@ -20,6 +25,8 @@ import { createLogger  } from '../utils/logger.js';
 import { defaultSettings  } from '../utils/settingsStore.js';
 import envConfig from '../config/env.js';
 import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
+import { FEATURE, backendFor  } from '../features/featureBindings.js';
+import { resolveProviderProfile  } from '../ai/providers/providerProfile.js';
 
 const log = createLogger('TTS');
 
@@ -163,13 +170,23 @@ async function generateVoice(text, settings = {}) {
   }
 }
 
+/**
+ * True when xAI TTS is both bound on this profile and switched on. Both have to
+ * hold: the binding says the service belongs to this provider at all, the flag
+ * is the operator's own kill switch for it.
+ */
+function xaiTtsIsPrimary() {
+  return backendFor(resolveProviderProfile(), FEATURE.TTS) === 'xai-tts'
+    && Boolean(envConfig.XAI_TTS_ENABLED);
+}
+
 async function _generateVoice(text, settings, signal) {
   const defaults = defaultSettings();
   const voiceId = settings?.voice || defaults.voice || envConfig.XAI_TTS_VOICE;
   const language = settings?.language || defaults.language;
+  const xaiPrimary = xaiTtsIsPrimary();
 
-  // Try the direct xAI TTS endpoint first (only if enabled).
-  if (envConfig.XAI_TTS_ENABLED) {
+  if (xaiPrimary) {
     try {
       if (signal?.aborted) throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
       const mp3Buffer = await xaiTTS(text, voiceId, language);
@@ -192,10 +209,10 @@ async function _generateVoice(text, settings, signal) {
     return await googleTranslateTTS(cleanText, language, signal);
   } catch (err) {
     if (signal?.aborted) throw err;
-    if (!envConfig.XAI_TTS_ENABLED) {
-      // Notify admin on Google TTS failure when xAI TTS is disabled.
+    if (!xaiPrimary) {
+      // Google Translate was the primary here, so its failure is the failure.
       await notifyAdmin('Google TTS (Primary)', err.message);
-      throw new Error(`TTS failed: Google Translate service error. xAI TTS is currently DISABLED by Admin.${ADMIN_NOTIFIED_SUFFIX}`);
+      throw new Error(`TTS failed: Google Translate service error and no provider TTS is available.${ADMIN_NOTIFIED_SUFFIX}`);
     }
     throw err;
   }

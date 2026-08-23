@@ -26,7 +26,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import constants from '../src/config/constants.js';
 import { CASES } from './prompt-dumps/cases.js';
-import { renderCase, renderWorkspaceRuntimeDump } from './prompt-dumps/render.js';
+import { renderCase, renderWorkspaceRuntimeDump, underCaseDeployment } from './prompt-dumps/render.js';
 import {
   ISSUES,
   validatePrompt,
@@ -51,13 +51,17 @@ if (fs.existsSync(OUT_DIR)) {
 
 const ids = Object.keys(CASES).map(Number).sort((a, b) => a - b);
 for (const id of ids) {
-  const { staticPart, dynamicPart, dump } = renderCase(id);
-  const file = path.join(OUT_DIR, `case${String(id).padStart(2, '0')}-dump.txt`);
-  fs.writeFileSync(file, dump, 'utf8');
-  validatePrompt(staticPart, dynamicPart, id);
-  validateResponseFormat(dump, id);
-  validateToolDumpLeaks(dump, id);
-  console.log(`Wrote ${file}`);
+  // Render and validate inside the case's provider profile: a case that models
+  // another deployment has to be checked against that deployment's prompt.
+  underCaseDeployment(id, () => {
+    const { staticPart, dynamicPart, dump } = renderCase(id);
+    const file = path.join(OUT_DIR, `case${String(id).padStart(2, '0')}-dump.txt`);
+    fs.writeFileSync(file, dump, 'utf8');
+    validatePrompt(staticPart, dynamicPart, id);
+    validateResponseFormat(dump, id);
+    validateToolDumpLeaks(dump, id);
+    console.log(`Wrote ${file}`);
+  });
 }
 
 const workspaceFile = path.join(OUT_DIR, 'workspace-runtime-dump.txt');
