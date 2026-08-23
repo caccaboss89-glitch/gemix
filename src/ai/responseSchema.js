@@ -47,11 +47,11 @@ function _attachmentsFieldDesc() {
   const xMedia = isFeatureAvailable(resolveProviderProfile(), FEATURE.X_SEARCH)
     ? 'for X media use x_search CDN URLs; '
     : '';
-  return 'OPTIONAL. The ONLY way to send files in this chat. '
+  return 'The ONLY way to send files in this chat. Use null when you are sending nothing. '
     + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
     + '(image/video/audio/PDF/etc. — never a page/article/post link; '
     + `${xMedia}for web images use the \`url\` fields from web_image_search). `
-    + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
+    + 'Never other file syntax (e.g. render_components).';
 }
 
 // Discord, every turn. Non-empty renames the thread, "" leaves it alone.
@@ -89,11 +89,16 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
   };
   required.push('response');
 
+  // Strict json_schema has no optional keys: every property has to be in
+  // `required`, and "I am not sending anything" is expressed by the null branch
+  // of the type. xAI tolerates a missing key; a stricter backend rejects the
+  // whole schema, so the portable shape is the one built here.
   properties.attachments = {
-    type: 'array',
+    type: ['array', 'null'],
     items: { type: 'string' },
     description: _attachmentsFieldDesc()
   };
+  required.push('attachments');
 
   if (includeTitle) {
     properties.conversation_title = { type: 'string', description: TITLE_FIELD_DESC };
@@ -111,14 +116,6 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
       additionalProperties: false
     }
   };
-}
-
-/** Attach structured output to a /v1/responses request body. */
-function applyResponsesTextFormat(body, format) {
-  if (format) {
-    body.text = { format };
-  }
-  return body;
 }
 
 /**
@@ -278,7 +275,7 @@ function parseStructuredReply(raw) {
   const attachments = Array.isArray(parsed.attachments)
     ? parsed.attachments.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim())
     : [];
-  // attachments: [] is treated as omitted (no files to send).
+  // attachments: null or [] both mean there is nothing to send.
   const voice = parsed.voice === true;
 
   return { structured: true, text, title, attachments, voice };
@@ -286,7 +283,6 @@ function parseStructuredReply(raw) {
 
 export {
   buildGemixResponseFormat,
-  applyResponsesTextFormat,
   parseStructuredReply
 
 };

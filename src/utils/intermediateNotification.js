@@ -77,7 +77,7 @@ function resolveIntermediateNotificationTarget(ctx) {
 
 /**
  * @param {object} ctx
- * @param {string} kind - dedup key: image_gen | video_gen | build
+ * @param {string} kind - dedup key: image_gen | video_gen
  * @param {string} message
  * @returns {Promise<boolean>} true if delivered
  */

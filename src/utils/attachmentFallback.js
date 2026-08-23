@@ -288,8 +288,7 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
         if (hasExternalUrl(att)) {
           log.info(`WhatsApp source link: ${label}`);
         } else if (shouldWhatsAppUseTempLink(att)) {
-          const reason = att.waTempLinkPreferred ? 'build media' : 'oversized';
-          log.info(`WhatsApp temp link (${reason}): ${label}`);
+          log.info(`WhatsApp temp link (oversized): ${label}`);
         }
       }
     }

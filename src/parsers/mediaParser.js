@@ -24,6 +24,7 @@ import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { getMediaDurationSecFromPath } from '../utils/mediaDuration.js';
 import { STT_STATUS, transcribeAudioFile } from '../media/speechToText.js';
+import { PARSE_ERROR } from './parseErrors.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('MediaParser');
@@ -116,9 +117,22 @@ async function parseImage(absPath) {
 }
 
 /** Turn an STT outcome into the content and the note that go with it. */
-function _sttOutcome(result, durationSec) {
+/**
+ * The transcript as the model should read it.
+ *
+ * `timed` asks for one line per segment prefixed with its timecode, which is
+ * what a video transcript needs to be useful (spec §8.6): quoting a line is
+ * half the answer, saying when it was said is the other half. A backend that
+ * returned no segments falls back to plain text rather than inventing timings.
+ */
+function _sttOutcome(result, durationSec, { timed = false } = {}) {
   const notes = [];
   if (result.status === STT_STATUS.OK && result.text) {
+    if (timed && Array.isArray(result.segments) && result.segments.length > 0) {
+      const lines = result.segments.map((seg) => `[${_timecode(seg.start)}] ${seg.text}`);
+      return { content: lines.join('\n'), notes };
+    }
+    if (timed) notes.push('The transcript has no timings: this backend returned plain text.');
     return { content: result.text, notes };
   }
   if (result.status === STT_STATUS.NO_SPEECH) {
@@ -207,6 +221,7 @@ async function parseVideo(absPath, opts = {}) {
   if (durationSec > constants.MAX_VIDEO_DURATION_S) {
     return {
       ok: false,
+      error_code: PARSE_ERROR.TOO_LARGE,
       error: `This video is ${_timecode(durationSec)} long, over the ${constants.MAX_VIDEO_DURATION_S}s limit. `
         + 'Cut the part you need with shell and read that instead.'
     };
@@ -228,7 +243,7 @@ async function parseVideo(absPath, opts = {}) {
       });
       transcriptStatus = result.status;
       transcribedBy = result.provider || undefined;
-      const outcome = _sttOutcome(result, durationSec);
+      const outcome = _sttOutcome(result, durationSec, { timed: true });
       content = outcome.content;
       notes.push(...outcome.notes);
     } else {

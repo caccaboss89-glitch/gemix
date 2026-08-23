@@ -44,6 +44,9 @@ const log = createLogger('AttachmentIngress');
 const AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a', '.flac', '.aac']);
 const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi']);
 
+/** What a tag says about a file no parser can open. */
+const UNREADABLE_NOTE = ' (binary — read_file cannot open it; use shell if you need to inspect it)';
+
 /** How many images may travel inline in one turn. */
 const MAX_INLINE_IMAGES = constants.MAX_INLINE_IMAGES_PER_TURN;
 
@@ -165,15 +168,12 @@ async function ingestAttachment(opts) {
 
   const displayName = path.basename(syncedPath || name || 'file');
 
-  // Raw binaries are never readable by anything, so they stay a bare tag and
-  // are not worth a copy into the projection.
-  if (isNonReadableExt(_extOf(displayName))) {
-    return { ..._tagResult(displayName), syncedPath };
-  }
-
-  // Duration gates run before anything is copied, so an over-long clip costs
-  // one probe rather than a projection entry that read_file would refuse.
+  // Duration gates only decide what the tag *says*: an over-long clip is still
+  // projected, because the invariant is tag ⇔ file and because trimming a long
+  // recording with `shell` is exactly what the raw is kept for (§8.3, §8.6).
   const kind = mediaKindFor(displayName, contentType);
+  let overDurationLimit = null;
+  let durationNote = '';
   if (kind === 'audio' || kind === 'video') {
     try {
       const historyAbsPath = syncedPath ? resolveHistoryAbsPath(opts.historyStorageId, syncedPath) : null;
@@ -188,13 +188,20 @@ async function ingestAttachment(opts) {
         historyAbsPath
       });
       if (kind === 'audio' && isAudioOverDurationLimit(dur)) {
-        return { ..._tagResult(displayName, { note: formatAudioTooLongNote(dur) }), syncedPath, overDurationLimit: 'audio', durationNote: formatAudioTooLongNote(dur).trim() };
+        overDurationLimit = 'audio';
+        durationNote = formatAudioTooLongNote(dur);
+      } else if (kind === 'video' && isVideoOverDurationLimit(dur)) {
+        overDurationLimit = 'video';
+        durationNote = formatVideoTooLongNote(dur);
       }
-      if (kind === 'video' && isVideoOverDurationLimit(dur)) {
-        return { ..._tagResult(displayName, { note: formatVideoTooLongNote(dur) }), syncedPath, overDurationLimit: 'video', durationNote: formatVideoTooLongNote(dur).trim() };
-      }
-    } catch { /* fall through and project it anyway */ }
+    } catch { /* no note, and the file is projected as usual */ }
   }
+
+  // Raw binaries reach no parser, but they are still files in this chat: the
+  // model can hash, unpack or inspect one with `shell`. A tag without a file
+  // behind it is the one thing §8.6 forbids.
+  const unreadable = isNonReadableExt(_extOf(displayName));
+  const note = unreadable ? UNREADABLE_NOTE : durationNote;
 
   const materialized = await _materialize(opts);
   if (!materialized) {
@@ -203,9 +210,13 @@ async function ingestAttachment(opts) {
   }
 
   const finalName = materialized.name;
-  const result = { ..._tagResult(finalName), syncedPath: syncedPath || finalName };
+  const result = { ..._tagResult(finalName, { note }), syncedPath: syncedPath || finalName };
+  if (overDurationLimit) {
+    result.overDurationLimit = overDurationLimit;
+    result.durationNote = durationNote.trim();
+  }
 
-  if (!inline || !isInlineableImage(finalName, contentType)) return result;
+  if (unreadable || !inline || !isInlineableImage(finalName, contentType)) return result;
   if (imagesInlined >= MAX_INLINE_IMAGES) {
     return {
       ...result,

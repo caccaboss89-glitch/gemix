@@ -53,9 +53,4 @@ function xaiCredentialProvider() {
   );
 }
 
-/** Drop every memoized provider. Tests only. */
-function _resetCredentialProvidersForTests() {
-  _instances.clear();
-}
-
-export { sharedCredentialProvider, xaiCredentialProvider, _resetCredentialProvidersForTests };
+export { sharedCredentialProvider, xaiCredentialProvider };

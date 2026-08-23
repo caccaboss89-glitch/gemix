@@ -86,10 +86,9 @@ test('provider-primary media backends fall back to the GemiX baseline', () => {
   assert.equal(fallbackBackendFor('xai-imagine-video'), null);
 });
 
-test('the xAI extension declares X search and never a hosted web search', () => {
+test('X search is a native type the extension owns, not a function tool', () => {
   assert.equal(XAI_X_SEARCH_TOOL.type, 'x_search');
-  const nativeTypes = Object.values(xaiResponsesExtensions.nativeTools).map(t => t.type);
-  assert.equal(nativeTypes.includes('web_search'), false);
+  assert.equal('function' in XAI_X_SEARCH_TOOL, false);
 });
 
 test('the xAI extension adds max_turns and the sticky-routing header, nothing standard', () => {

@@ -862,8 +862,9 @@ function buildShellTool() {
   return makeTool({
     name: 'shell',
     description:
-      'Run a bash command in the workspace container: Python 3, Node, ffmpeg, yt-dlp, poppler, LibreOffice, TeX, '
-      + 'zip/unzip, curl/wget, ImageMagick. Use it to convert, compress, download, inspect and assemble files. '
+      'Run a bash command in the workspace container: Python 3 (numpy, pandas, matplotlib, Pillow, rembg, '
+      + 'python-docx/pptx/openpyxl, reportlab, pypdf, pdfplumber), Node, ffmpeg, yt-dlp, poppler, LibreOffice, '
+      + 'TeX, zip/unzip, curl/wget. Use it to convert, compress, download, inspect and assemble files. '
       + 'Package installs (pip/npm/apt) are disabled — the toolchain is fixed. '
       + `Timeout ${defaultSec}s by default, ${maxSec}s maximum; start anything longer in the background and check on it in a later call. `
       + 'The container keeps running between calls in the same chat.',

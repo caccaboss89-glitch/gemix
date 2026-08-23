@@ -161,7 +161,7 @@ function _buildChatLines(ctx, cap, profile) {
       : 'the other participant';
     lines.push(
       'The admin\'s own WhatsApp account, in a chat with one other person. Reply only when the message '
-      + 'contains @gemix. History, memory and build workspace are shared between the two of them.',
+      + 'contains @gemix. History, memory and workspace are shared between the two of them.',
       `In the chat: ${escapeXml(envConfig.ADMIN_NAME)} (the account owner) and ${otherName}.`,
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
       + 'name. Your own replies carry no speaker prefix.',

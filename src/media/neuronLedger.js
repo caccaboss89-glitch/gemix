@@ -32,7 +32,8 @@ const DAILY_NEURONS = 10_000;
 const NEURONS_PER_OUTPUT_TILE = 26.05;
 const NEURONS_PER_INPUT_TILE = 5.37;
 
-/** Whisper large-v3-turbo, per second of audio (Workers AI published rate). */
+/** Whisper large-v3-turbo, per second of audio. An estimate: the ledger is a
+ *  guard rail, and Cloudflare's own count is the one that decides. */
 const NEURONS_PER_AUDIO_SECOND = 0.0929;
 
 /**

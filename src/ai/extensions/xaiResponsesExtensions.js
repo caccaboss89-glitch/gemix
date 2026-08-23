@@ -102,8 +102,6 @@ function _isOAuthUnauthenticatedBody(bodyText) {
 const xaiResponsesExtensions = Object.freeze({
   providerId: 'xai',
   replayableItemTypes: XAI_REPLAYABLE_ITEM_TYPES,
-  nativeTools: Object.freeze({ x_search: XAI_X_SEARCH_TOOL }),
-
   /**
    * Sticky routing. `prompt_cache_key` is standard Responses and the generic
    * body builder already sets it; this header is the xAI half of the same

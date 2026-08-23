@@ -21,6 +21,7 @@ import workspaceRuntime from '../../sandbox/workspaceRuntime.js';
 import { checkWorkspaceQuota } from '../../sandbox/workspaceFs.js';
 import { ROOT, invalidPathError, resolveAgentPath, toContainerPath } from '../../sandbox/workspacePaths.js';
 import { withWorkspaceLock } from '../../utils/workspaceState.js';
+import { callTimeoutWithin } from '../../utils/turnBudget.js';
 
 /**
  * @param {object} args
@@ -30,6 +31,7 @@ import { withWorkspaceLock } from '../../utils/workspaceState.js';
  * @param {string} workspaceId
  * @param {object} [opts]
  * @param {string} [opts.lockOwnerId]
+ * @param {import('../../utils/turnBudget.js').TurnBudget|null} [opts.budget]
  */
 async function shell(args = {}, workspaceId, opts = {}) {
   const command = typeof args.command === 'string' ? args.command.trim() : '';
@@ -43,10 +45,14 @@ async function shell(args = {}, workspaceId, opts = {}) {
   }
 
   const requestedSec = Number(args.timeoutSeconds);
-  const timeoutMs = Number.isFinite(requestedSec) && requestedSec > 0
+  const requestedMs = Number.isFinite(requestedSec) && requestedSec > 0
     ? requestedSec * 1000
     : constants.SHELL_TIMEOUT_DEFAULT_MS;
-  const cappedSec = Math.round(Math.min(timeoutMs, constants.SHELL_TIMEOUT_MAX_MS) / 1000);
+  const timeoutMs = callTimeoutWithin(
+    Math.min(requestedMs, constants.SHELL_TIMEOUT_MAX_MS),
+    opts.budget
+  );
+  const cappedSec = Math.round(timeoutMs / 1000);
 
   return withWorkspaceLock(workspaceId, { ownerId: opts.lockOwnerId }, async () => {
     const run = await workspaceRuntime.execInWorkspace(workspaceId, {

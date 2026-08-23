@@ -2,7 +2,7 @@
 //
 // Core periodic scheduler: executes due tasks from per-user/group JSON files,
 // advances recurring tasks, delivers via WhatsApp (using dedicated client),
-// and runs background sweeps (idle build workspaces, daily music wrap, release checks).
+// and runs background sweeps (idle workspaces, stale history, daily music wrap, release checks).
 // Uses per-file locking via taskStore.
 
 import fs from 'fs';

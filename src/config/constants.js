@@ -71,6 +71,12 @@ export default {
   // API
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 4 * 60 * 1000,
+  // Absolute ceiling for one turn, shared by the model calls and the shell.
+  // Individual timeouts bound one call; nothing bounds their sum, and a turn
+  // that keeps hitting slow rounds would hold the user's request open long
+  // after the reply stopped being useful. Wide on purpose: video generation
+  // and long shell work are legitimate, a fifty-round loop is not.
+  TURN_BUDGET_MS: 20 * 60 * 1000,
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 64_000,
   // Main brain outer loop (client-side tool rounds). When exhausted the

@@ -1,14 +1,11 @@
 // Platform delivery policy and attachment partitioning for outbound files.
 // Normal delivery: link only when too heavy for the platform (or externalUrl).
-// Files fetched from a public URL set waTempLinkPreferred on audio/video via
-// applyRemoteFetchFlags().
 
 import {
   attachmentSize,
   shouldWhatsAppUseTempLink,
   toDiscordAttachmentArgs,
   toEmailAttachment,
-  isWhatsAppAudioVideoAttachment,
   toWhatsAppMediaArgs,
   WA_DIRECT_MAX_BYTES,
   hasExternalUrl
@@ -70,12 +67,6 @@ function partitionAttachments(attachments, platform) {
   return { direct, linkOnly };
 }
 
-/** Audio/video fetched from a remote URL always prefer WA temp links. */
-function applyRemoteFetchFlags(att) {
-  if (att && isWhatsAppAudioVideoAttachment(att)) att.waTempLinkPreferred = true;
-  return att;
-}
-
 /**
  * Send one attachment as WhatsApp MessageMedia via the provided poster.
  * One media per sendMessage (wwebjs limit). Optional sendOptions are merged
@@ -99,7 +90,6 @@ export {
   PLATFORM,
   hasExternalUrl,
   partitionAttachments,
-  applyRemoteFetchFlags,
   sendWhatsAppAttachment
 
 };

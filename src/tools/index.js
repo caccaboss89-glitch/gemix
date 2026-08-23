@@ -154,12 +154,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       // inside their own module, keyed on this turn so a retry does not
       // deadlock against itself.
       const lockOpts = { lockOwnerId: userCtx.requestId ? `${userCtx.requestId}:workspace` : undefined };
+      // The shell also needs the turn's deadline: its own cap is a per-call
+      // ceiling, and what is left of the turn can be shorter.
       if (name === 'list_files') result = listFiles(args, workspaceId);
       else if (name === 'search_files') result = searchFiles(args, workspaceId);
-      else if (name === 'read_file') result = await readFile(args, workspaceId);
+      else if (name === 'read_file') result = await readFile(args, workspaceId, { signal: userCtx.turnBudget?.signal });
       else if (name === 'write_file') result = await writeFile(args, workspaceId, lockOpts);
       else if (name === 'edit_file') result = await editFile(args, workspaceId, lockOpts);
-      else result = await shell(args, workspaceId, lockOpts);
+      else result = await shell(args, workspaceId, { ...lockOpts, budget: userCtx.turnBudget || null });
       break;
     }
 

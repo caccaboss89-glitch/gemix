@@ -22,6 +22,7 @@ import { shell } from '../src/tools/workspace/shell.js';
 import { checkWorkspaceQuota, listFilesUnder } from '../src/sandbox/workspaceFs.js';
 import workspaceRuntime from '../src/sandbox/workspaceRuntime.js';
 import { isProbablyText } from '../src/tools/workspace/textFiles.js';
+import { TurnBudget } from '../src/utils/turnBudget.js';
 
 const WORKSPACE_ID = `user:tools-${process.pid}@c.us`;
 const ROOT = getWorkspacePath(WORKSPACE_ID);
@@ -233,6 +234,29 @@ test('shell refuses a workingDir outside the namespace', async () => {
   const res = await shell({ command: 'ls', workingDir: '/etc' }, WORKSPACE_ID);
   assert.equal(res.success, false);
   assert.match(res.error, /Invalid path/);
+});
+
+test('shell caps its own timeout and then the turn budget caps it again', async () => {
+  const realExec = workspaceRuntime.execInWorkspace;
+  const seen = [];
+  workspaceRuntime.execInWorkspace = async (_id, spec) => {
+    seen.push(spec.timeoutMs);
+    return { rc: 0, stdout: '', stderr: '', durationMs: 1, timedOut: false, truncated: false };
+  };
+  try {
+    // An hour was asked for; the ceiling is 300s and nothing above it reaches
+    // the container.
+    await shell({ command: 'sleep 1', timeoutSeconds: 3600 }, WORKSPACE_ID);
+    assert.equal(seen[0], constants.SHELL_TIMEOUT_MAX_MS);
+
+    // What is left of the turn is shorter than the tool's own cap, so it wins.
+    const budget = new TurnBudget(5_000);
+    await shell({ command: 'sleep 1', timeoutSeconds: 3600 }, WORKSPACE_ID, { budget });
+    assert.ok(seen[1] <= 5_000 && seen[1] > 0, `expected the turn's remainder, got ${seen[1]}`);
+    budget.dispose();
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
 });
 
 // -- exec shaping and quota ---------------------------------------------------

@@ -85,16 +85,10 @@ function getUserRoot(userCtx) {
   return path.join(constants.DATA_DIR, 'users', id);
 }
 
-function getHistoryDir(userCtx) {
-  const r = getUserRoot(userCtx);
-  return r && path.join(r, 'history');
-}
-
 export {
   resolvePersonalChatStorageId,
   resolveSettingsFileId,
   resolveStorageId,
-  getUserRoot,
-  getHistoryDir
+  getUserRoot
 
 };

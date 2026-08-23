@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import constants from '../config/constants.js';
 import { isProbablyText } from '../tools/workspace/textFiles.js';
+import { PARSE_ERROR } from './parseErrors.js';
 import { handlesExt as isDocumentExt, parseDocument } from './documentParser.js';
 import { familyOf as mediaFamilyOf, parseAudio, parseImage, parseVideo } from './mediaParser.js';
 import { cacheKey, hashFile, readCache, writeCache } from './parserCache.js';
@@ -30,14 +31,6 @@ const log = createLogger('ParserRegistry');
 
 /** Never parsable and never useful: executables and disk images. */
 const REFUSED_EXTS = new Set(['.exe', '.dll', '.so', '.bin', '.iso', '.dmg', '.lnk']);
-
-/** Structured reasons a parse can fail, so the model can act on them. */
-const PARSE_ERROR = Object.freeze({
-  FILE_UNAVAILABLE: 'FILE_UNAVAILABLE',
-  PARSER_UNAVAILABLE: 'PARSER_UNAVAILABLE',
-  UNSUPPORTED_TYPE: 'UNSUPPORTED_TYPE',
-  TOO_LARGE: 'TOO_LARGE'
-});
 
 /**
  * Which parser owns a file, from its extension alone.
@@ -52,7 +45,7 @@ function familyFor(ext) {
 }
 
 /** Parsers whose work is expensive enough to be worth caching. */
-const CACHEABLE = new Set(['document', 'archive', 'audio', 'video']);
+const CACHEABLE = new Set(['document', 'audio', 'video']);
 
 function _fail(code, error) {
   return { ok: false, error_code: code, error };

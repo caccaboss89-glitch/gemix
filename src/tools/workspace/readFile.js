@@ -43,9 +43,12 @@ function _imageLabel(kind, img, index) {
  * @param {number} [args.offset] - first line to return, 1-based, text only
  * @param {number} [args.limit] - how many lines to return, text only
  * @param {string} workspaceId
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal] - the turn's deadline; a transcript that
+ *   outlives the turn is work nobody is waiting for any more
  * @returns {Promise<object|Array>} envelope, or [envelope, ...content parts]
  */
-async function readFile(args = {}, workspaceId) {
+async function readFile(args = {}, workspaceId, opts = {}) {
   const raw = typeof args.path === 'string' ? args.path : '';
   if (!raw.trim()) return { success: false, error: 'Missing required argument "path".' };
 
@@ -77,7 +80,8 @@ async function readFile(args = {}, workspaceId) {
     workspaceId,
     offset: args.offset,
     limit: args.limit,
-    language: args.language
+    language: args.language,
+    signal: opts.signal
   });
 
   if (!result.ok) {

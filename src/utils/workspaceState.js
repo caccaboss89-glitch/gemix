@@ -153,21 +153,6 @@ async function withWorkspaceLock(workspaceId, opts, fn) {
 }
 
 /**
- * Push the lock's expiry forward if the given ownerId holds the lock.
- * Called while a long operation is still making progress.
- */
-function renewWorkspaceLock(workspaceId, ownerId) {
-  if (!workspaceId || !ownerId) return false;
-  const state = _readState(workspaceId);
-  if (state.lock && state.lock.ownerId === ownerId) {
-    state.lock.expiresAt = Date.now() + LOCK_MAX_TTL_MS;
-    _writeState(workspaceId, state);
-    return true;
-  }
-  return false;
-}
-
-/**
  * Iterate over every workspace meta dir under constants.DATA_DIR/users/ that
  * has a state file. Returns [{ workspaceSlug, workspaceId, metaDir,
  * lastActivityAt, lock }]. Used by the cron sweeper to find stale workspaces.
@@ -206,6 +191,5 @@ export {
   acquireWorkspaceLock,
   releaseWorkspaceLock,
   withWorkspaceLock,
-  renewWorkspaceLock,
   listWorkspaceStates
 };

@@ -369,11 +369,16 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
 
 /**
  * Authenticated GET/POST against an xAI endpoint, with one credential refresh.
- * Used by xAI TTS and the Grok Imagine video poll.
+ * Used by xAI TTS, STT and the Grok Imagine video poll.
+ *
+ * `opts.signal` is the caller's own abort — a turn that ran out of budget, or a
+ * user who stopped waiting. It is combined with the per-attempt timeout, so
+ * either can end the request and the retry loop stops on the caller's.
  */
 async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : constants.API_TIMEOUT_MS;
   const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : constants.MAX_API_RETRIES;
+  const callerSignal = opts.signal || null;
   let forceCredentialRefresh = false;
   let credentialRefreshAttempted = false;
 
@@ -382,18 +387,27 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
     try {
       const { token } = await getXaiServiceAuth({ forceRefresh: forceCredentialRefresh });
       forceCredentialRefresh = false;
+      if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
+      const onCallerAbort = () => controller.abort(callerSignal.reason);
+      callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
 
-      const res = await fetch(url, {
-        ...options,
-        headers: {
-          ...(options.headers || {}),
-          Authorization: `Bearer ${token}`
-        },
-        signal: controller.signal
-      });
+      let res;
+      try {
+        res = await fetch(url, {
+          ...options,
+          headers: {
+            ...(options.headers || {}),
+            Authorization: `Bearer ${token}`
+          },
+          signal: controller.signal
+        });
+      } finally {
+        callerSignal?.removeEventListener('abort', onCallerAbort);
+      }
       clearTimeout(timer);
+      if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');

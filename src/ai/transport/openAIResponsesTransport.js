@@ -153,17 +153,6 @@ class OpenAIResponsesTransport {
           }
         }
 
-        // An extension may drop an optional body field the backend refused and
-        // let the request through unchanged otherwise. That is not a failed
-        // attempt either.
-        if (kind === TRANSPORT_ERROR.UNSUPPORTED_INPUT && this.extensions?.onUnsupportedInput) {
-          const adjusted = this.extensions.onUnsupportedInput(bodyText, body, context);
-          if (adjusted === true) {
-            attempt--;
-            continue;
-          }
-        }
-
         if (kind === TRANSPORT_ERROR.QUOTA) this.credentials.markStatus('quota', credential.accountId);
 
         const explicitWait = retryAfterMs(res.headers, budget.remainingMs);

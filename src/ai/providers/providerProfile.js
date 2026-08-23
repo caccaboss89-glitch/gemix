@@ -242,25 +242,6 @@ function resolveProviderProfile() {
   return _active;
 }
 
-/**
- * Read the profile off any context that carries one, falling back to the active
- * profile. Contexts are threaded explicitly (ctx → userCtx → callOpts); this is
- * the single accessor, so no module invents its own guess.
- * @param {object} [ctx]
- * @returns {Readonly<object>}
- */
-function profileFromContext(ctx) {
-  if (ctx && typeof ctx === 'object') {
-    // A profile handed straight in (dump generator, tests): without this a
-    // caller that already resolved one would silently fall through to the
-    // active profile whenever the two differ.
-    if (typeof ctx.id === 'string' && ctx.wire && BUILDERS[ctx.id]) return ctx;
-    if (ctx.providerProfile && typeof ctx.providerProfile === 'object') return ctx.providerProfile;
-    if (typeof ctx.providerId === 'string' && ctx.providerId) return getProviderProfile(ctx.providerId);
-  }
-  return resolveProviderProfile();
-}
-
 /** Reset the memoized profile. Tests only — a live process resolves once. */
 function _resetActiveProfileForTests() {
   _active = null;
@@ -268,12 +249,7 @@ function _resetActiveProfileForTests() {
 
 export {
   PROVIDER,
-  PROVIDER_IDS,
-  XAI_EFFORTS,
-  CODEX_EFFORTS,
-  GENERIC_EFFORTS,
   getProviderProfile,
   resolveProviderProfile,
-  profileFromContext,
   _resetActiveProfileForTests
 };

@@ -95,22 +95,35 @@ test('the search and workspace features stay GemiX-owned on every profile', () =
 
 // -- backend selection --------------------------------------------------------
 
-test('the declared backend is the one whose schema the tool should show', () => {
-  const declared = declaredImageBackend();
-  assert.ok(declared === BACKEND.XAI || declared === BACKEND.CLOUDFLARE || declared === null);
+test('the declared backend follows the binding, and disappears with the credentials', () => {
+  withDeployment({ provider: 'xai', cloudflare: true }, () => {
+    assert.equal(declaredImageBackend(), BACKEND.XAI);
+  });
+  withDeployment({ provider: 'chatgpt', cloudflare: true }, () => {
+    assert.equal(declaredImageBackend(), BACKEND.CLOUDFLARE);
+  });
+  // Rule 1 of §18.13: a backend with no credentials is not offered at all.
+  withDeployment({ provider: 'chatgpt', cloudflare: false }, () => {
+    assert.equal(declaredImageBackend(), null);
+  });
 });
 
 test('a cooled-down primary hands over to the fallback, and comes back after', () => {
-  const before = resolveImageBackends();
-  if (!before.primary || !before.fallback) return; // no chain on this deployment
+  // Pinned to a deployment with a real chain, so this never silently no-ops on
+  // a machine that happens to have no Cloudflare credentials.
+  withDeployment({ provider: 'xai', cloudflare: true }, () => {
+    const before = resolveImageBackends();
+    assert.equal(before.primary, BACKEND.XAI);
+    assert.equal(before.fallback, BACKEND.CLOUDFLARE);
 
-  startCooldown(before.primary);
-  const during = resolveImageBackends();
-  assert.notEqual(during.primary, before.primary, 'the cooled backend is skipped');
-  assert.equal(during.primary, before.fallback);
+    startCooldown(BACKEND.XAI);
+    const during = resolveImageBackends();
+    assert.equal(during.primary, BACKEND.CLOUDFLARE, 'the cooled backend is skipped');
+    assert.equal(during.fallback, null, 'nothing left behind the last resort');
 
-  _resetCooldownsForTests();
-  assert.equal(resolveImageBackends().primary, before.primary);
+    _resetCooldownsForTests();
+    assert.equal(resolveImageBackends().primary, BACKEND.XAI);
+  });
 });
 
 // -- fallback policy (§18.13) -------------------------------------------------

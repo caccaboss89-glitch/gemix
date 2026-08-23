@@ -15,7 +15,6 @@ import crypto from 'crypto';
 import { downloadPublicFile, downloadPublicFileToDisk, filenameFromPublicUrl  } from './fetch.js';
 import { sanitizeFilename  } from './text.js';
 import { uniqueAttachmentName  } from './attachments.js';
-import { applyRemoteFetchFlags  } from './attachmentDelivery.js';
 import { resolveAgentPath  } from '../sandbox/workspacePaths.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { TEMP_DIR  } from './tempFileServer.js';
@@ -85,19 +84,17 @@ function createExternalUrlAttachment(url, existing = []) {
 }
 
 /**
- * Resolve one public URL to an attachment, with optional WhatsApp link
- * preference and source-link fallback when hosting fails.
+ * Resolve one public URL to an attachment, with a source-link fallback when
+ * hosting it ourselves fails.
  *
  * @param {string} url
  * @param {Array<object>} existing
- * @param {{ preferWaLink?: boolean }} [opts]
  * @returns {Promise<{ att: object|null, missing: boolean }>}
  */
-async function resolveUrlEntry(url, existing = [], opts = {}) {
+async function resolveUrlEntry(url, existing = []) {
   const clean = String(url || '').trim();
   try {
     const att = await resolvePublicUrlAttachment(clean, existing);
-    if (opts.preferWaLink) applyRemoteFetchFlags(att);
     return { att, missing: false };
   } catch (err) {
     if (_isFileTooLargeError(err)) {

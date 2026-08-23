@@ -14,11 +14,6 @@ import { mimeForExtension } from '../../config/mimeExtensions.js';
 /** Formats a vision model reads directly. */
 const INLINE_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
 
-/** True when this path is an image worth attaching inline. */
-function isInlineImageExt(filePath) {
-  return INLINE_IMAGE_EXTS.has(path.extname(String(filePath || '')).toLowerCase());
-}
-
 /**
  * Build an `input_image` part from a file on disk.
  *
@@ -52,4 +47,4 @@ function inlineImagePartFromBuffer(buffer, mime, maxBytes = constants.MAX_IMAGE_
   return { type: 'input_image', image_url: `data:${mime || 'image/png'};base64,${buffer.toString('base64')}` };
 }
 
-export { INLINE_IMAGE_EXTS, isInlineImageExt, inlineImagePart, inlineImagePartFromBuffer };
+export { INLINE_IMAGE_EXTS, inlineImagePart, inlineImagePartFromBuffer };

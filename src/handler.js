@@ -50,6 +50,7 @@ import { sanitizeVoiceMessageText  } from './utils/text.js';
 import { getCapabilities, resolveProfile, toolUnavailableMessage  } from './config/platformCapabilities.js';
 import { executeTool } from './tools/index.js';
 import constants from './config/constants.js';
+import { TurnBudget, turnBudgetFrom } from './utils/turnBudget.js';
 import envConfig from './config/env.js';
 import { createLogger  } from './utils/logger.js';
 import { appendResearchBadge, buildResearchBadgeText  } from './utils/footer.js';
@@ -129,6 +130,10 @@ function _toolNotAvailableMessage(toolName, ctx) {
  * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, researchFooter?, voiceTranscriptText?, voiceTranscriptChatId?, systemMessage? }
  */
 async function handleMessage(ctx) {
+  // One deadline for the whole turn. Every model call and every shell command
+  // takes its ceiling from here, so the sum of the rounds is bounded and not
+  // just each round on its own.
+  ctx.turnBudget = new TurnBudget(constants.TURN_BUDGET_MS);
   const responseCtx = {
     discordTitle: '',
     // Accumulated stats from native server-side web/X searches (main brain
@@ -234,8 +239,9 @@ async function handleMessage(ctx) {
       platform: ctx.platform,
       requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
       presence: ctx.presence || null,
+      turnBudget: ctx.turnBudget,
       // Bound helper for tools that want to fire an intermediate notification
-      // (e.g. build - "Sto delegando il lavoro al coder agent...").
+      // (e.g. generate_video - "Sto generando il video...").
       // Dedup is enforced per (call, kind) inside sendIntermediateNotification.
       sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message)
     };
@@ -301,7 +307,8 @@ async function handleMessage(ctx) {
     let contentForApi = ctx.content;
     try {
       const projected = await projectUserVoiceMessages(
-        { history: historyForApi, current: contentForApi, storageId: resolveStorageId(ctx) }
+        { history: historyForApi, current: contentForApi, storageId: resolveStorageId(ctx) },
+        { language: ctx.settings?.language, signal: ctx.turnBudget?.signal }
       );
       historyForApi = projected.history;
       contentForApi = projected.current;
@@ -334,7 +341,7 @@ async function handleMessage(ctx) {
     // actually holds (87-89% within a turn).
     // Must not use role:system either: xAI merges extra system messages into the
     // leading system block, which moves them and busts the prefix for good.
-    // What it states can move during the turn (build workspace, quota counts,
+    // What it states can move during the turn (workspace files, quota counts,
     // preferences); the tool results that cause those changes report them, so
     // the frozen snapshot stays truthful about turn start.
     input.push(userItem(buildDynamicRuntimeContext(ctx)));
@@ -500,7 +507,8 @@ async function handleMessage(ctx) {
         requestId: ctx.requestId,
         responseFormat,
         promptCacheKey,
-        reasoningEffort: ctx.settings?.effort
+        reasoningEffort: ctx.settings?.effort,
+        budget: turnBudgetFrom(ctx)
       };
 
       const { reply, provider, model, searchStats } = await callAI(input, roundTools, callOpts);
@@ -760,6 +768,7 @@ async function handleMessage(ctx) {
     // Drop per-call notification dedup entries so subsequent AI calls can
     // fire intermediate notifications.
     try { clearCallNotifications(ctx); } catch { /* best effort */ }
+    ctx.turnBudget?.dispose();
   }
 }
 

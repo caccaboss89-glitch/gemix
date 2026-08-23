@@ -130,6 +130,40 @@ function _extractTranscript(payload) {
   return typeof candidate === 'string' ? candidate.trim() : '';
 }
 
+/**
+ * Timed segments, when the backend returned them.
+ *
+ * A video transcript has to carry timings (spec §8.6): without them the model
+ * can quote what was said but not say when, which is most of what a transcript
+ * is for. Whisper returns `segments`; a backend that gives only word timings is
+ * grouped into lines rather than losing the clock entirely.
+ *
+ * @returns {Array<{start: number, text: string}>}
+ */
+function _extractSegments(payload) {
+  const root = payload?.result ?? payload ?? {};
+
+  if (Array.isArray(root.segments) && root.segments.length > 0) {
+    return root.segments
+      .map((seg) => ({ start: Number(seg?.start), text: String(seg?.text ?? '').trim() }))
+      .filter((seg) => Number.isFinite(seg.start) && seg.text);
+  }
+
+  if (Array.isArray(root.words) && root.words.length > 0) {
+    const WORDS_PER_LINE = 14;
+    const out = [];
+    for (let i = 0; i < root.words.length; i += WORDS_PER_LINE) {
+      const chunk = root.words.slice(i, i + WORDS_PER_LINE);
+      const start = Number(chunk[0]?.start);
+      const text = chunk.map((w) => String(w?.word ?? '').trim()).filter(Boolean).join(' ').trim();
+      if (Number.isFinite(start) && text) out.push({ start, text });
+    }
+    return out;
+  }
+
+  return [];
+}
+
 // -- Cloudflare Workers AI (Whisper) -----------------------------------------
 
 async function _cloudflarePost(buffer, opts) {
@@ -168,7 +202,7 @@ async function _transcribeCloudflare(absPath, buffer, opts) {
   }
   const transcript = _extractTranscript(attempt.payload);
   return transcript
-    ? { ..._result(STT_STATUS.OK, 'cloudflare'), text: transcript }
+    ? { ..._result(STT_STATUS.OK, 'cloudflare'), text: transcript, segments: _extractSegments(attempt.payload) }
     : _result(STT_STATUS.NO_SPEECH, 'cloudflare');
 }
 
@@ -183,15 +217,21 @@ async function _transcribeXai(absPath, buffer, opts) {
 
   const res = await fetchXaiWithOAuthRetry(url, { method: 'POST', body: form }, {
     timeoutMs: REQUEST_TIMEOUT_MS,
-    maxAttempts: 2
+    maxAttempts: 2,
+    signal: opts.signal
   });
   const text = await res.text();
   let payload = null;
   try { payload = JSON.parse(text); } catch { /* handled below */ }
   const transcript = _extractTranscript(payload);
   return transcript
-    ? { ..._result(STT_STATUS.OK, 'xai'), text: transcript }
+    ? { ..._result(STT_STATUS.OK, 'xai'), text: transcript, segments: _extractSegments(payload) }
     : _result(STT_STATUS.NO_SPEECH, 'xai');
+}
+
+/** A refusal about the content itself, which no other backend will reverse. */
+function _isContentPolicyRefusal(err) {
+  return /content[_ -]?policy|safety|moderation|inappropriate|not allowed/i.test(err?.message || '');
 }
 
 // -- Public entry point --------------------------------------------------------
@@ -231,6 +271,14 @@ async function transcribeAudioFile(absPath, opts = {}) {
       } catch (err) {
         // The whole point of the binding's fallback: a refusal from xAI must
         // not cost the user their transcript when Cloudflare can still do it.
+        // Two exceptions (§18.13): an aborted turn is not a backend failure,
+        // and a content-policy refusal is a decision no second backend should
+        // be asked to overturn.
+        if (err.name === 'AbortError' || err.name === 'TimeoutError') throw err;
+        if (_isContentPolicyRefusal(err)) {
+          log.warn('xAI refused the clip on content policy; not retrying elsewhere');
+          return { ..._result(STT_STATUS.ERROR, 'xai'), message: err.message };
+        }
         if (!isCloudflareConfigured()) throw err;
         log.warn(`xAI transcription failed (${err.message}); falling back to Workers AI`);
         return await _transcribeCloudflare(absPath, buffer, opts);

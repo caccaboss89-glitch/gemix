@@ -255,29 +255,19 @@ test('extensions decorate headers and body without touching the transport', asyn
   assert.equal(JSON.parse(seenInit.body).prompt_cache_key, 'conv-1');
 });
 
-test('an extension may drop a refused optional field and retry without spending an attempt', async () => {
+test('a refused field is a hard stop, not something to retry blindly', async () => {
   let calls = 0;
-  let dropped = false;
   const transport = new OpenAIResponsesTransport({
     credentialProvider: new StubCredentials(),
     label: 'test',
-    extensions: {
-      providerId: 'stubprov',
-      decorateBody: (b) => (dropped ? { ...b, include: undefined } : b),
-      onUnsupportedInput: (bodyText) => {
-        if (!dropped && /include/i.test(bodyText)) { dropped = true; return true; }
-        return false;
-      }
-    },
     fetchImpl: async () => {
       calls++;
-      return calls === 1
-        ? errorResponse(400, '{"error":{"message":"unknown parameter: include"}}')
-        : sseResponse(COMPLETED_STREAM);
+      return errorResponse(400, '{"error":{"message":"unknown parameter: include"}}');
     }
   });
-  const { response } = await transport.createResponse({ body: { model: 'm', input: [], include: ['x'] } });
-  assert.equal(calls, 2);
-  assert.equal(dropped, true);
-  assert.equal(response.status, 'completed');
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [], include: ['x'] } }),
+    (err) => err.kind === TRANSPORT_ERROR.UNSUPPORTED_INPUT
+  );
+  assert.equal(calls, 1, 'the same body would be refused the same way');
 });

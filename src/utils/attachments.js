@@ -1,17 +1,15 @@
 // src/utils/attachments.js
 // Unified attachment shape used across responseCtx.
-// An attachment is: { name, mimetype, buffer?, filePath?, externalUrl?, waTempLinkPreferred? }
+// An attachment is: { name, mimetype, buffer?, filePath?, externalUrl? }
 //   - buffer:   Buffer already in memory (small/in-flight files: voice, formal PDF, generated media)
-//   - filePath: absolute path on disk (build workspace harvest, history, large files)
+//   - filePath: absolute path on disk (workspace harvest, history, large files)
 //   - externalUrl: source link when the file is too large even to stage on disk
-//   - waTempLinkPreferred: build-agent audio/video only (normal delivery uses size only)
 //
 // At least one of buffer, filePath, or externalUrl must be set. Helper functions handle
 // read-on-demand from disk.
 
 import fs from 'fs';
 import path from 'path';
-import { mimeBase  } from '../config/mimeExtensions.js';
 
 /**
  * WhatsApp direct-send cap: above this the file goes to a temp download link.
@@ -24,15 +22,8 @@ import { mimeBase  } from '../config/mimeExtensions.js';
  */
 const WA_DIRECT_MAX_BYTES = 16 * 1024 * 1024;
 
-const WA_TEMP_LINK_AUDIO_EXTS = new Set([
-  '.mp3', '.mpeg', '.mpga', '.ogg', '.opus', '.oga', '.wav', '.m4a', '.flac', '.aac', '.webm'
-]);
-const WA_TEMP_LINK_VIDEO_EXTS = new Set([
-  '.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v'
-]);
-
 /**
- * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string, externalUrl?: string, waTempLinkPreferred?: boolean, sendAudioAsVoice?: boolean }} Attachment
+ * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string, externalUrl?: string, sendAudioAsVoice?: boolean }} Attachment
  */
 
 /**
@@ -113,28 +104,18 @@ function toEmailAttachment(att) {
   return { ...base, content: att.buffer };
 }
 
-/** True for audio/video payloads (not voice-note TTS). */
-function isWhatsAppAudioVideoAttachment(att) {
-  if (!att || att.sendAudioAsVoice) return false;
-  const mt = mimeBase(att.mimetype || '');
-  if (mt.startsWith('audio/') || mt.startsWith('video/')) return true;
-  const ext = path.extname(att.name || '').toLowerCase();
-  return WA_TEMP_LINK_AUDIO_EXTS.has(ext) || WA_TEMP_LINK_VIDEO_EXTS.has(ext);
-}
-
 function isWhatsAppOversizedAttachment(att) {
   return attachmentSize(att) > WA_DIRECT_MAX_BYTES;
 }
 
 /**
- * Prefer a public temp download link over attempting a direct WA media send.
- * - files over WA_DIRECT_MAX_BYTES (16 MB) — all sources, all types
- * - waTempLinkPreferred: build-agent audio/video only
+ * Prefer a public temp download link over attempting a direct WA media send:
+ * files over WA_DIRECT_MAX_BYTES (16 MB), whatever their source or type.
  * Failed direct sends still fall back to temp links.
  */
 function shouldWhatsAppUseTempLink(att) {
   if (att?.sendAudioAsVoice) return false;
-  return isWhatsAppOversizedAttachment(att) || Boolean(att.waTempLinkPreferred);
+  return isWhatsAppOversizedAttachment(att);
 }
 
 /**
@@ -171,7 +152,6 @@ export {
   readAttachmentBuffer,
   attachmentSize,
   shouldWhatsAppUseTempLink,
-  isWhatsAppAudioVideoAttachment,
   WA_DIRECT_MAX_BYTES,
   toEmailAttachment,
   hasExternalUrl,

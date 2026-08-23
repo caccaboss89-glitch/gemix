@@ -69,11 +69,14 @@ test('past the per-turn cap an image degrades to its path, with a reason', async
   assert.equal(MAX_INLINE_IMAGES, constants.MAX_INLINE_IMAGES_PER_TURN);
 });
 
-test('a raw binary stays a bare tag and is not projected', async () => {
+test('a raw binary is projected too, with a tag that says what it is', async () => {
   const r = await ingest('setup.exe', Buffer.from([0x4d, 0x5a]), { inline: true });
   assert.equal(r.tag, '[Attachment: attachments/setup.exe]');
-  assert.deepEqual(r.contentParts, []);
-  assert.equal(fs.existsSync(path.join(ATTACHMENTS, 'setup.exe')), false);
+  assert.deepEqual(r.contentParts, [], 'nothing about it is worth vision');
+  assert.match(r.textFragment, /binary/i, 'the model is told read_file will not open it');
+  // The invariant is tag ⇔ file (§8.6): a live tag with nothing behind it is
+  // the one shape that is not allowed, even for a file no parser can read.
+  assert.equal(fs.existsSync(path.join(ATTACHMENTS, 'setup.exe')), true);
 });
 
 test('a file that cannot be materialized is marked expired, never left dangling', async () => {
@@ -89,15 +92,17 @@ test('a file that cannot be materialized is marked expired, never left dangling'
   assert.equal(fs.existsSync(path.join(ATTACHMENTS, 'gone.pdf')), false);
 });
 
-test('an over-long clip is refused before anything is copied', async () => {
+test('an over-long clip is flagged but still kept for the shell to work on', async () => {
   const r = await ingest('long.mp3', Buffer.from('id3'), {
     inline: true,
     contentType: 'audio/mpeg',
     metadataDurationSec: constants.MAX_AUDIO_DURATION_S + 60
   });
   assert.equal(r.overDurationLimit, 'audio');
-  assert.match(r.textFragment, /too long/i);
-  assert.equal(fs.existsSync(path.join(ATTACHMENTS, 'long.mp3')), false);
+  assert.match(r.textFragment, /too long/i, 'read_file will not transcribe it');
+  // Trimming or converting a long recording is exactly what the raw is for,
+  // and the tag has to point at a real file either way.
+  assert.equal(fs.existsSync(path.join(ATTACHMENTS, 'long.mp3')), true);
   clearProjection(WORKSPACE_ID);
   fs.mkdirSync(ATTACHMENTS, { recursive: true });
 });
