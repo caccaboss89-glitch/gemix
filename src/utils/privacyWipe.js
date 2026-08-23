@@ -20,7 +20,7 @@ import path from 'path';
 import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 import { getUserRoot, resolveSettingsFileId  } from './userPaths.js';
-import { resolveWorkspaceId, getBuildWorkspaceMetaDir  } from './workspaceId.js';
+import { resolveWorkspaceId, getWorkspaceMetaDir  } from './workspaceId.js';
 import { getGroupTaskFileId  } from './userIdentifier.js';
 import { forgetRecentVoiceText  } from './historySync.js';
 import { deleteSentMessages  } from './sentMessagesStore.js';
@@ -82,7 +82,7 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   }
 
   step('history', _removeTree(getUserRoot(ctx), 'chat history'));
-  step('workspace', _removeTree(getBuildWorkspaceMetaDir(resolveWorkspaceId(ctx)), 'build workspace'));
+  step('workspace', _removeTree(getWorkspaceMetaDir(resolveWorkspaceId(ctx)), 'workspace'));
 
   const settingsFileId = resolveSettingsFileId(ctx, { taskFileId });
   if (settingsFileId) {

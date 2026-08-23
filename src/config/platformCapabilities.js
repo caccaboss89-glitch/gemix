@@ -28,7 +28,12 @@ const TOOL = {
   GENERATE_MUSIC: 'generate_music',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
-  BUILD: 'build',
+  LIST_FILES: 'list_files',
+  SEARCH_FILES: 'search_files',
+  READ_FILE: 'read_file',
+  WRITE_FILE: 'write_file',
+  EDIT_FILE: 'edit_file',
+  SHELL: 'shell',
   SEND_WHATSAPP: 'send_whatsapp_message',
   SEND_EMAIL: 'send_email',
   SCHEDULE: 'schedule_tasks',
@@ -52,7 +57,7 @@ const CAPS = {
     isWhatsApp: true,
     isGroup: false,
     longTermMemory: true,
-    buildWorkspace: true,
+    workspace: true,
     historyTranscriptionNote: false,
     voiceReply: false,
     tools: null
@@ -63,7 +68,7 @@ const CAPS = {
     isWhatsApp: true,
     isGroup: false,
     longTermMemory: true,
-    buildWorkspace: true,
+    workspace: true,
     historyTranscriptionNote: true,
     voiceReply: true,
     tools: null
@@ -74,7 +79,7 @@ const CAPS = {
     isWhatsApp: true,
     isGroup: true,
     longTermMemory: true,
-    buildWorkspace: true,
+    workspace: true,
     historyTranscriptionNote: true,
     voiceReply: true,
     tools: null
@@ -85,7 +90,7 @@ const CAPS = {
     isWhatsApp: false,
     isGroup: false,
     longTermMemory: false,
-    buildWorkspace: false,
+    workspace: false,
     historyTranscriptionNote: false,
     voiceReply: false,
     tools: null
@@ -117,8 +122,10 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   if (toolName === TOOL.MANAGE_PREFERENCES && cap.isDiscord) {
     return 'Saved preferences (manage_preferences) are not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for saved preferences.';
   }
-  if (toolName === TOOL.BUILD && cap.isDiscord) {
-    return 'The build tool is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for file deliverables.';
+  const workspaceTools = [TOOL.LIST_FILES, TOOL.SEARCH_FILES, TOOL.READ_FILE, TOOL.WRITE_FILE, TOOL.EDIT_FILE, TOOL.SHELL];
+  if (workspaceTools.includes(toolName) && cap.isDiscord) {
+    return `"${toolName}" is not available on Discord: there is no workspace here. `
+      + 'Tell the user to use the dedicated GemiX WhatsApp account for anything involving files.';
   }
   if ((toolName === TOOL.SCHEDULE || toolName === TOOL.READ_TASKS || toolName === TOOL.REMOVE_TASKS) && cap.isDiscord) {
     return `"${toolName}" is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for scheduled reminders.`;
@@ -290,8 +297,8 @@ function buildAnswerLines(profile, opts = {}) {
  * Body of "Sending files". States the two mechanisms the tool descriptions
  * cannot: the program does the fetching, so a URL in `attachments` is the whole
  * job; and the delivery buffer is where every file a tool produces waits.
- * Without the first, media already sitting on a CDN gets routed through the
- * build sandbox, or the model claims it cannot download anything at all.
+ * Without the first, media already sitting on a CDN gets re-created from
+ * scratch, or the model claims it cannot download anything at all.
  * Without the second, files that were generated this turn are never sent, or
  * are regenerated to be sent.
  */
@@ -310,9 +317,8 @@ function buildSendingFilesLines(profile, opts = {}) {
   if (has(TOOL.X_SEARCH)) {
     let x = 'So when someone wants a photo or a video from an X post, open that post with the X tools, take the '
       + 'CDN link of the media out of the result, and put that link in `attachments`.';
-    if (has(TOOL.BUILD)) {
-      x += ' Never route it through the build agent: build is for files that have to be created or converted, '
-        + 'not for fetching something that is already a URL.';
+    if (has(TOOL.SHELL)) {
+      x += ' Do not download it into the workspace first: the link is already everything the program needs.';
     }
     lines.push(x);
   }
@@ -357,7 +363,7 @@ function buildVisibilityLines(profile) {
   ];
   if (cap.isDiscord) {
     lines.push(
-      'Voice replies, scheduled reminders, build and file deliverables, imagine, music clips and listening stats are '
+      'Voice replies, scheduled reminders, the file workspace, imagine, music clips and listening stats are '
       + 'not part of this Discord session: they live on the dedicated GemiX WhatsApp account. Say so if you are asked.'
     );
   } else if (cap.isWhatsApp && !cap.voiceReply) {

@@ -33,38 +33,27 @@ function partitionHandlerToolCalls(toolCalls) {
  * weekly quota (mediaUsageLimits.js), so capping them per round would only
  * waste model rounds.
  *
- * Two semantics, see EXCLUSIVE_ROUND_TOOLS:
- *   - default   -> the first `limit` calls run, the extra ones get an error
- *                  (read_* tools: one result is enough, no round wasted).
- *   - exclusive -> more than one call in a round rejects EVERY call
- *                  (build: concurrent runs would corrupt the shared workspace).
+ * The first `limit` calls run and the extra ones get an error, so a repeated
+ * read costs the model an error line rather than a whole round.
+ *
+ * The workspace tools are deliberately absent: an agentic round routinely
+ * reads several files or runs several commands, and mutations already
+ * serialize on the per-workspace lock rather than racing.
  */
 const PER_ROUND_TOOL_LIMITS = {
   read_music_stats: 1,
   // A video costs ~1 frame per second of context; loading several at once is
   // the flood read_video exists to prevent.
-  read_video: 1,
-  build: 1
+  read_video: 1
 };
-
-/**
- * Tools that must run alone: when the model emits more than one call in the
- * same round, all of them are rejected so it retries with a single call.
- */
-const EXCLUSIVE_ROUND_TOOLS = new Set(['build']);
 
 const ONCE_PER_ROUND_ERROR =
   'can only be called once per round. Use the result from the previous call in this round.';
 
-const EXCLUSIVE_ROUND_ERROR =
-  'can only run once per round, and it was called several times in this round, so none of the calls ran. '
-  + 'Retry with a single call that covers everything you need.';
-
 /**
  * Given tool calls in model order, return ids that exceed per-round caps.
  * Counts are per model turn (same batch), in call order — first N run, rest
- * block. For EXCLUSIVE_ROUND_TOOLS every call is blocked when the cap is
- * exceeded, so the model retries with one consolidated call.
+ * block.
  *
  * @param {object[]} toolCalls
  * @param {Record<string, number>} [limits] - defaults to PER_ROUND_TOOL_LIMITS
@@ -84,13 +73,7 @@ function perRoundCappedDuplicateIds(toolCalls, limits = PER_ROUND_TOOL_LIMITS) {
   }
 
   for (const [name, calls] of byName) {
-    const max = limits[name];
-    if (EXCLUSIVE_ROUND_TOOLS.has(name)) {
-      // Over the cap → reject the whole set, including the first call.
-      if (calls.length > max) for (const tc of calls) blocked.add(tc.id);
-      continue;
-    }
-    for (const tc of calls.slice(max)) blocked.add(tc.id);
+    for (const tc of calls.slice(limits[name])) blocked.add(tc.id);
   }
   return blocked;
 }
@@ -103,12 +86,6 @@ function oncePerRoundErrorPayload(toolName) {
 }
 
 function perRoundCapErrorPayload(toolName, limit) {
-  if (EXCLUSIVE_ROUND_TOOLS.has(toolName)) {
-    return JSON.stringify({
-      success: false,
-      error: `"${toolName}" ${EXCLUSIVE_ROUND_ERROR}`
-    });
-  }
   if (limit === 1) return oncePerRoundErrorPayload(toolName);
   return JSON.stringify({
     success: false,

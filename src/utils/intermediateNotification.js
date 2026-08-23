@@ -6,7 +6,6 @@
 // Tools that trigger notifications (see tools/index.js):
 //   - generate_image → kind 'image_gen'
 //   - generate_video → kind 'video_gen'
-//   - build          → kind 'build'
 //
 // Platform routing:
 //   Discord          → ctx.discordChannel.send

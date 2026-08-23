@@ -1,6 +1,6 @@
 // src/utils/workspaceId.js
 //
-// Computes the canonical workspace identifier for the build sub-agent
+// Computes the canonical workspace identifier for the agent runtime
 // based on the current user/group context:
 //
 //   - WhatsApp group  - "group:<groupId>"  (shared workspace for the whole group)
@@ -51,26 +51,41 @@ function workspaceIdToSlug(workspaceId) {
 }
 
 /**
- * Resolve the on-disk path of a workspace.
+ * Resolve the on-disk path of the agent's writable workspace.
  *
- *   data/users/<workspaceSlug>/build_workspace/
+ *   data/users/<workspaceSlug>/build_workspace/   ->  /workspace in the container
  *
- * The parent path (`data/users/<workspaceSlug>/`) is intentionally distinct
- * from the legacy per-user `data/users/<storageId>/` tree (different prefix
- * `group_`/`user_` ensures no collision) so legacy history/projects continue
- * to live where they always have.
+ * The directory name is historical and kept so an existing deployment does not
+ * lose its workspace on upgrade. The parent path (`data/users/<workspaceSlug>/`)
+ * is intentionally distinct from the legacy per-user `data/users/<storageId>/`
+ * tree (different prefix `group_`/`user_` ensures no collision) so legacy
+ * history/projects continue to live where they always have.
  */
-function getBuildWorkspacePath(workspaceId) {
+function getWorkspacePath(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);
   if (!slug) return null;
   return path.join(constants.DATA_DIR, 'users', slug, 'build_workspace');
 }
 
 /**
- * Get the parent directory used to store build-workspace metadata
- * (.activity.json, .lock, ...) alongside the workspace tree itself.
+ * Resolve the on-disk root of the read-only attachment projection.
+ *
+ *   data/users/<workspaceSlug>/attachments/   ->  /attachments in the container
+ *
+ * The projection itself (which conversation files land here, and when they are
+ * pruned) is the attachment layer's job; this only names the directory.
  */
-function getBuildWorkspaceMetaDir(workspaceId) {
+function getAttachmentsPath(workspaceId) {
+  const slug = workspaceIdToSlug(workspaceId);
+  if (!slug) return null;
+  return path.join(constants.DATA_DIR, 'users', slug, 'attachments');
+}
+
+/**
+ * Get the parent directory used to store workspace metadata
+ * (activity timestamp, lock) alongside the workspace tree itself.
+ */
+function getWorkspaceMetaDir(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);
   if (!slug) return null;
   return path.join(constants.DATA_DIR, 'users', slug);
@@ -79,7 +94,8 @@ function getBuildWorkspaceMetaDir(workspaceId) {
 export {
   resolveWorkspaceId,
   workspaceIdToSlug,
-  getBuildWorkspacePath,
-  getBuildWorkspaceMetaDir
+  getWorkspacePath,
+  getAttachmentsPath,
+  getWorkspaceMetaDir
 
 };

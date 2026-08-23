@@ -1,23 +1,31 @@
-// src/sandbox/buildSandbox.js
+// src/sandbox/workspaceRuntime.js
 //
-// Per-workspace docker container manager for the `build` sub-agent.
+// The per-conversation container the main agent works in.
 //
-// One container per `workspaceId`, lazily started on first use, reused as
-// long as the user keeps interacting (sandboxes that stay idle past
-// constants.SANDBOX_IDLE_TTL_MS are reaped). Bind mounts:
+// One container per `workspaceId`, started lazily on first use and reused for
+// as long as the user keeps interacting (containers idle past
+// constants.SANDBOX_IDLE_TTL_MS are reaped). It stays alive between tool calls
+// on purpose: a background process the agent starts in one `shell` call has to
+// still be there in the next one, and re-creating a container per call would
+// cost more than most calls do. The workspace's own 4h TTL is separate — the
+// container is disposable, the files are not.
 //
-//   /workspace/  -> host build_workspace dir for this workspaceId  (rw)
+// Bind mounts, and the whole of what the model can see:
 //
-// Grok Build CLI is baked into the image. The host runs `docker exec grok …`
-// with cwd /workspace (see execGrokBuild). Auth is injected per-exec only
-// (XAI_API_KEY from getXaiServiceAuth) — never a host auth-file mount.
+//   /workspace     rw   host build_workspace dir for this workspaceId
+//   /attachments   ro   host projection of this conversation's files
+//
+// Nothing else is mounted and no credential is passed in. The container runs
+// GemiX's own tools and whatever the model asks for, so it gets no bearer, no
+// refresh token and no API key — that is the whole reason the old Grok Build
+// exec, which injected XAI_API_KEY into the environment, is gone.
 //
 // Notes:
-//   - The base image ENTRYPOINT is overridden with
-//     `Cmd:['sleep','infinity']` + `Entrypoint:[]` so the container is
-//     a quiet idle process we can attach to.
-//   - All egress (curl/wget/yt-dlp/requests/grok API) goes through the egress
-//     proxy, which forwards upstream via the residential SOCKS5 (Redmi).
+//   - The base image ENTRYPOINT is overridden with `Cmd:['sleep','infinity']`
+//     + `Entrypoint:[]` so the container is a quiet idle process to attach to.
+//   - All egress (curl/wget/yt-dlp/pip-less downloads) goes through the egress
+//     proxy, which forwards upstream via the residential SOCKS5 and fails
+//     closed when that is unavailable.
 
 import crypto from 'crypto';
 import stream from 'stream';
@@ -25,18 +33,24 @@ import stream from 'stream';
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 
-import { workspaceIdToSlug  } from '../utils/workspaceId.js';
-import { ensureWorkspace, ensureWorkspaceWritable, sandboxUserString  } from './buildWorkspace.js';
-import { createLogger  } from '../utils/logger.js';
+import { workspaceIdToSlug } from '../utils/workspaceId.js';
+import {
+  ensureAttachmentsDir,
+  ensureWorkspace,
+  ensureWorkspaceWritable,
+  sandboxUserString
+} from './workspaceFs.js';
+import { createLogger } from '../utils/logger.js';
 
-const log = createLogger('BuildSandbox');
+const log = createLogger('WorkspaceRuntime');
 
 const SANDBOX_IMAGE = envConfig.GEMIX_SANDBOX_IMAGE;
 const SANDBOX_NETWORK = envConfig.GEMIX_SANDBOX_NETWORK;
 const PROXY_HOSTNAME = envConfig.GEMIX_SANDBOX_PROXY_HOST;
 const PROXY_PORT = envConfig.GEMIX_SANDBOX_PROXY_PORT;
+const PROXY_URL = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
 
-/** Map<workspaceId, BuildSandboxEntry> */
+/** Map<workspaceId, WorkspaceContainerEntry> */
 const _pool = new Map();
 
 let _docker = null;
@@ -55,8 +69,26 @@ async function _getDocker() {
 }
 
 /**
+ * The environment every exec inherits. Docker's ExecConfig.Env replaces the
+ * container environment entirely when set, so the proxy and HOME are repeated
+ * per exec rather than relied on from the container.
+ */
+function containerEnv() {
+  return [
+    'HOME=/var/lib/gemix-workspace',
+    // All outbound traffic goes through the egress proxy → residential SOCKS5.
+    // Fail-closed when the upstream is down.
+    `HTTP_PROXY=${PROXY_URL}`,
+    `HTTPS_PROXY=${PROXY_URL}`,
+    `http_proxy=${PROXY_URL}`,
+    `https_proxy=${PROXY_URL}`,
+    'NO_PROXY=localhost,127.0.0.1'
+  ];
+}
+
+/**
  * Spawn a fresh container for `workspaceId`. Idle `sleep infinity` PID 1;
- * Grok Build (and optional debug shells) attach via docker exec.
+ * tools attach via docker exec.
  */
 async function _spawnContainer(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);
@@ -64,32 +96,21 @@ async function _spawnContainer(workspaceId) {
 
   const workspaceDir = ensureWorkspace(workspaceId);
   if (!workspaceDir) throw new Error('Cannot ensure workspace directory');
+  // Docker refuses to start when a bind source is missing, so the projection
+  // root has to exist even before anything is projected into it.
+  const attachmentsDir = ensureAttachmentsDir(workspaceId);
+  if (!attachmentsDir) throw new Error('Cannot ensure attachments directory');
   ensureWorkspaceWritable(workspaceId);
 
-  const containerName = `gemix-bw-${slug}-${crypto.randomBytes(3).toString('hex')}`
+  const containerName = `gemix-ws-${slug}-${crypto.randomBytes(3).toString('hex')}`
     .toLowerCase().replace(/[^a-z0-9_.-]/g, '-').slice(0, 63);
 
   const docker = await _getDocker();
   const memBytes = constants.SANDBOX_MEMORY_MB * 1024 * 1024;
 
   const binds = [
-    `${workspaceDir}:/workspace:rw`
-  ];
-
-  // HOME/GROK_HOME on rootfs (not /tmp): Docker tmpfs defaults to noexec, which
-  // breaks the Grok CLI wrapper that spawns ~/.grok/bin/grok (EACCES).
-  const env = [
-    'HOME=/var/lib/gemix-grok',
-    'GROK_HOME=/var/lib/gemix-grok',
-    'GROK_DISABLE_AUTOUPDATER=1',
-    'GEMIX_BUILD=1',
-    // All outbound traffic (curl/wget/yt-dlp/requests/grok) goes through the
-    // egress proxy → residential SOCKS5 (Redmi). Fail-closed when Redmi is off.
-    `HTTP_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
-    `HTTPS_PROXY=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
-    `http_proxy=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
-    `https_proxy=http://${PROXY_HOSTNAME}:${PROXY_PORT}`,
-    'NO_PROXY=localhost,127.0.0.1'
+    `${workspaceDir}:/workspace:rw`,
+    `${attachmentsDir}:/attachments:ro`
   ];
 
   const hostConfig = {
@@ -107,20 +128,19 @@ async function _spawnContainer(workspaceId) {
     RestartPolicy: { Name: 'no' }
   };
 
-
   const createOpts = {
     name: containerName,
     Image: SANDBOX_IMAGE,
-    Hostname: 'build',
+    Hostname: 'workspace',
     // Override image defaults so the container is a quiet idle process we
-    // attach to via docker exec (bash helpers + Grok Build CLI).
+    // attach to via docker exec.
     Entrypoint: [],
     Cmd: ['sleep', 'infinity'],
     User: sandboxUserString(),
-    Env: env,
+    Env: containerEnv(),
     HostConfig: hostConfig,
     Labels: {
-      'gemix.kind': 'build-workspace',
+      'gemix.kind': 'workspace-runtime',
       'gemix.workspaceId': workspaceId
     }
   };
@@ -149,7 +169,7 @@ async function getOrCreate(workspaceId) {
     await entry._bootPromise;
     const ready = _pool.get(workspaceId);
     if (!ready || !ready.container) {
-      throw new Error(`build sandbox boot failed for ${workspaceId}`);
+      throw new Error(`workspace container boot failed for ${workspaceId}`);
     }
     ready.lastUsedAt = Date.now();
     return ready;
@@ -163,7 +183,7 @@ async function getOrCreate(workspaceId) {
         return entry;
       }
     } catch { /* container gone */ }
-    log.warn(`Stale build sandbox for ${workspaceId}, recreating`);
+    log.warn(`Stale workspace container for ${workspaceId}, recreating`);
     await _killEntry(entry).catch(err => log.warn(`stale purge: ${err.message}`));
     _pool.delete(workspaceId);
   }
@@ -174,7 +194,7 @@ async function getOrCreate(workspaceId) {
     await entry._bootPromise;
     const ready = _pool.get(workspaceId);
     if (!ready || !ready.container) {
-      throw new Error(`build sandbox boot failed for ${workspaceId}`);
+      throw new Error(`workspace container boot failed for ${workspaceId}`);
     }
     ready.lastUsedAt = Date.now();
     return ready;
@@ -192,7 +212,7 @@ async function getOrCreate(workspaceId) {
     const fresh = await bootPromise;
     fresh.lastUsedAt = Date.now();
     _pool.set(workspaceId, fresh);
-    log.info(`build sandbox ready workspace=${workspaceId} container=${fresh.containerName}`);
+    log.info(`workspace container ready workspace=${workspaceId} container=${fresh.containerName}`);
     return fresh;
   } catch (err) {
     _pool.delete(workspaceId);
@@ -200,13 +220,11 @@ async function getOrCreate(workspaceId) {
   }
 }
 
-const CAPTURE_MAX_BYTES = 200 * 1024;
-
-function _capBufferChunks(chunks, maxBytes = CAPTURE_MAX_BYTES) {
+function _capBufferChunks(chunks, maxBytes = constants.WORKSPACE_OUTPUT_MAX_BYTES) {
   let total = 0;
   for (const c of chunks) total += c.length;
-  if (total <= maxBytes) return Buffer.concat(chunks).toString('utf-8');
-  // Keep the tail (most relevant for errors / final text).
+  if (total <= maxBytes) return { text: Buffer.concat(chunks).toString('utf-8'), truncated: false };
+  // Keep the tail (most relevant for errors / final output).
   const out = Buffer.alloc(maxBytes);
   let remaining = maxBytes;
   let offset = maxBytes;
@@ -217,128 +235,83 @@ function _capBufferChunks(chunks, maxBytes = CAPTURE_MAX_BYTES) {
     chunk.copy(out, offset, chunk.length - take);
     remaining -= take;
   }
-  return out.toString('utf-8');
+  return { text: out.toString('utf-8'), truncated: true };
 }
 
 /**
- * Best-effort kill leftover grok processes inside the sandbox after timeout.
- */
-async function _killGrokProcesses(entry) {
-  if (!entry || !entry.container) return;
-  try {
-    const exec = await entry.container.exec({
-      Cmd: ['/bin/bash', '-lc', 'pkill -9 -f "[g]rok" 2>/dev/null || true'],
-      AttachStdout: false,
-      AttachStderr: false,
-      User: sandboxUserString(),
-      WorkingDir: '/tmp'
-    });
-    const s = await exec.start({ hijack: true, stdin: false });
-    await new Promise((resolve) => {
-      s.on('end', resolve);
-      s.on('close', resolve);
-      s.on('error', resolve);
-      setTimeout(resolve, 3000).unref?.();
-    });
-  } catch (err) {
-    log.debug(`pkill grok: ${err.message}`);
-  }
-}
-
-/**
- * Build argv + env for an in-container Grok Build run (pure; testable without Docker).
+ * Argv for one command inside the workspace, wrapped in `timeout` so a runaway
+ * process dies in the container rather than only losing its stream on the host.
  *
- * Docker ExecConfig.Env replaces the process environment entirely when set
- * (does not inherit the container env), so proxy + HOME must be listed here.
+ * Pure and Docker-free so the shaping stays testable.
  *
  * @param {object} opts
- * @param {string} opts.prompt
- * @param {string} opts.rules
- * @param {string} opts.token - same live credential as GemiX (OAuth or API key)
- * @param {string} [opts.baseUrl] - optional API base from getXaiServiceAuth()
+ * @param {string[]|string} opts.command - argv, or a shell line run with bash -lc
  * @param {number} [opts.timeoutMs]
- * @param {number} [opts.maxTurns]
- * @returns {{ cmd: string[], env: string[], timeoutMs: number }}
+ * @returns {{ cmd: string[], timeoutMs: number }}
  */
-function buildGrokExecSpec({ prompt, rules, token, baseUrl, timeoutMs, maxTurns } = {}) {
-  if (typeof token !== 'string' || !token.trim()) {
-    throw new Error('buildGrokExecSpec: missing xAI token');
-  }
-  if (typeof prompt !== 'string' || !prompt.trim()) {
-    throw new Error('buildGrokExecSpec: missing prompt');
-  }
+function buildExecSpec({ command, timeoutMs } = {}) {
+  const requested = Number(timeoutMs);
   const timeout = Math.max(
-    5_000,
-    Math.min(Number(timeoutMs) || constants.BUILD_HARD_TIMEOUT_MS, constants.BUILD_HARD_TIMEOUT_MS)
+    1_000,
+    Math.min(
+      Number.isFinite(requested) && requested > 0 ? requested : constants.SHELL_TIMEOUT_DEFAULT_MS,
+      constants.SHELL_TIMEOUT_MAX_MS
+    )
   );
-  const turns = Math.max(1, Math.min(Number(maxTurns) || constants.BUILD_MAX_ROUNDS, constants.BUILD_MAX_ROUNDS));
-  const rulesText = typeof rules === 'string' ? rules : '';
-  // Free-text stdout (no --output-format json). timeout(1) enforces hard kill.
+  let argv;
+  if (Array.isArray(command)) {
+    argv = command.filter(a => typeof a === 'string');
+    if (argv.length === 0) throw new Error('buildExecSpec: empty command');
+  } else if (typeof command === 'string' && command.trim()) {
+    argv = ['/bin/bash', '-lc', command];
+  } else {
+    throw new Error('buildExecSpec: missing command');
+  }
   const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
-  const cmd = [
-    'timeout',
-    '--signal=KILL',
-    `${timeoutSec}s`,
-    'grok',
-    '-p', prompt.trim(),
-    '--cwd', '/workspace',
-    '--always-approve',
-    '--no-subagents',
-    '--no-auto-update',
-    '--max-turns', String(turns)
-  ];
-  if (rulesText.trim()) {
-    cmd.push('--rules', rulesText);
-  }
-  const proxyUrl = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
-  const env = [
-    `XAI_API_KEY=${token.trim()}`,
-    'HOME=/var/lib/gemix-grok',
-    'GROK_HOME=/var/lib/gemix-grok',
-    'GROK_DISABLE_AUTOUPDATER=1',
-    'GEMIX_BUILD=1',
-    `HTTP_PROXY=${proxyUrl}`,
-    `HTTPS_PROXY=${proxyUrl}`,
-    `http_proxy=${proxyUrl}`,
-    `https_proxy=${proxyUrl}`,
-    'NO_PROXY=localhost,127.0.0.1'
-  ];
-  if (typeof baseUrl === 'string' && baseUrl.trim()) {
-    const base = baseUrl.trim().replace(/\/+$/, '');
-    env.push(`XAI_BASE_URL=${base}`);
-  }
-  return { cmd, env, timeoutMs: timeout };
+  return {
+    cmd: ['timeout', '--signal=KILL', `${timeoutSec}s`, ...argv],
+    timeoutMs: timeout
+  };
 }
 
 /**
- * Run Grok Build CLI inside the workspace sandbox (one-shot docker exec).
- * Auth is process-env only for this exec — never host auth mounts.
+ * Run one command inside the workspace container and capture its output.
+ *
+ * `input` is how file content reaches the container: piping it on stdin keeps
+ * the bytes out of argv, which has a hard size limit and would put user content
+ * in the process table.
  *
  * @param {string} workspaceId
  * @param {object} opts
- * @param {string} opts.prompt
- * @param {string} opts.rules
- * @param {string} opts.token
+ * @param {string[]|string} opts.command
+ * @param {Buffer|string} [opts.input] - written to the command's stdin
  * @param {number} [opts.timeoutMs]
- * @param {number} [opts.maxTurns]
- * @returns {Promise<{rc:number,stdout:string,stderr:string,timedOut:boolean,durationMs:number,cmd:string[]}>}
+ * @param {string} [opts.workingDir] - defaults to /workspace
+ * @returns {Promise<{rc:number,stdout:string,stderr:string,truncated:boolean,timedOut:boolean,durationMs:number}>}
  */
-async function execGrokBuild(workspaceId, opts = {}) {
-  const { cmd, env, timeoutMs } = buildGrokExecSpec(opts);
+async function execInWorkspace(workspaceId, opts = {}) {
+  const { cmd, timeoutMs } = buildExecSpec(opts);
+  const hasInput = opts.input !== undefined && opts.input !== null;
   const entry = await getOrCreate(workspaceId);
   entry.lastUsedAt = Date.now();
 
   const exec = await entry.container.exec({
     Cmd: cmd,
+    AttachStdin: hasInput,
     AttachStdout: true,
     AttachStderr: true,
     User: sandboxUserString(),
-    WorkingDir: '/workspace',
-    Env: env
+    WorkingDir: opts.workingDir || '/workspace',
+    Env: containerEnv()
   });
 
   const startedAt = Date.now();
-  const execStream = await exec.start({ hijack: true, stdin: false });
+  const execStream = await exec.start({ hijack: true, stdin: hasInput });
+  if (hasInput) {
+    execStream.write(Buffer.isBuffer(opts.input) ? opts.input : Buffer.from(String(opts.input), 'utf-8'));
+    // The command reads until EOF, so the half-close is what makes it finish.
+    execStream.end();
+  }
 
   const stdoutBuf = [];
   const stderrBuf = [];
@@ -349,7 +322,8 @@ async function execGrokBuild(workspaceId, opts = {}) {
   entry.container.modem.demuxStream(execStream, stdoutStream, stderrStream);
 
   let timedOut = false;
-  // Host-side ceiling slightly above in-container `timeout` so stream teardown is a backstop.
+  // Host-side ceiling slightly above in-container `timeout` so stream teardown
+  // is only a backstop for a container that stopped answering entirely.
   const hostTimeoutMs = timeoutMs + 15_000;
   const timer = setTimeout(() => {
     timedOut = true;
@@ -376,23 +350,21 @@ async function execGrokBuild(workspaceId, opts = {}) {
   } catch {
     rc = timedOut ? 124 : 1;
   }
-  // GNU timeout uses 124 on timeout; SIGKILL path is 137.
+  // GNU timeout uses 124 on timeout; the SIGKILL path reports 137.
   if (rc === 124 || rc === 137) timedOut = true;
 
-  if (timedOut) {
-    await _killGrokProcesses(entry);
-  }
-
+  const stdout = _capBufferChunks(stdoutBuf);
+  const stderr = _capBufferChunks(stderrBuf);
   const durationMs = Date.now() - startedAt;
   ensureWorkspaceWritable(workspaceId);
   entry.lastUsedAt = Date.now();
   return {
     rc,
-    stdout: _capBufferChunks(stdoutBuf),
-    stderr: _capBufferChunks(stderrBuf),
+    stdout: stdout.text,
+    stderr: stderr.text,
+    truncated: stdout.truncated || stderr.truncated,
     timedOut,
-    durationMs,
-    cmd: cmd.map((c, i) => (i > 0 && cmd[i - 1] === '--rules' ? '[rules]' : c))
+    durationMs
   };
 }
 
@@ -411,7 +383,7 @@ async function shutdown(workspaceId) {
   if (!entry) return;
   _pool.delete(workspaceId);
   await _killEntry(entry);
-  log.info(`build sandbox shut down workspace=${workspaceId}`);
+  log.info(`workspace container shut down workspace=${workspaceId}`);
 }
 
 async function shutdownAll() {
@@ -421,11 +393,11 @@ async function shutdownAll() {
 }
 
 /**
- * Best-effort cleanup of dangling build containers from previous runs.
- * Matches by the `gemix-bw-` name prefix or by the `gemix.kind=build-workspace`
- * label. Called on startup.
+ * Best-effort cleanup of dangling workspace containers from previous runs.
+ * Matches the current `gemix-ws-` prefix and the `gemix-bw-` one older builds
+ * used, plus either generation's label. Called on startup.
  */
-async function cleanupOrphanBuildSandboxes() {
+async function cleanupOrphanContainers() {
   let docker;
   try { docker = await _getDocker(); }
   catch (err) { log.debug(`Orphan cleanup skipped: ${err.message}`); return; }
@@ -433,12 +405,12 @@ async function cleanupOrphanBuildSandboxes() {
   try {
     const containers = await docker.listContainers({ all: true });
     const orphans = containers.filter(c =>
-      c.Names.some(n => n.startsWith('/gemix-bw-'))
-      || (c.Labels && c.Labels['gemix.kind'] === 'build-workspace')
+      c.Names.some(n => n.startsWith('/gemix-ws-') || n.startsWith('/gemix-bw-'))
+      || (c.Labels && (c.Labels['gemix.kind'] === 'workspace-runtime' || c.Labels['gemix.kind'] === 'build-workspace'))
     );
     if (orphans.length === 0) return;
 
-    log.info(`Found ${orphans.length} orphan build sandbox(es). Cleaning up...`);
+    log.info(`Found ${orphans.length} orphan workspace container(s). Cleaning up...`);
     for (const cInfo of orphans) {
       try {
         const container = docker.getContainer(cInfo.Id);
@@ -456,7 +428,7 @@ async function cleanupOrphanBuildSandboxes() {
       }
     }
   } catch (err) {
-    log.error(`Orphan build sandbox cleanup failed: ${err.message}`);
+    log.error(`Orphan workspace container cleanup failed: ${err.message}`);
   }
 }
 
@@ -466,7 +438,7 @@ const _reaper = setInterval(() => {
   for (const [workspaceId, entry] of _pool.entries()) {
     if (!entry.lastUsedAt) continue;
     if (now - entry.lastUsedAt > constants.SANDBOX_IDLE_TTL_MS) {
-      log.info(`reaping idle build sandbox ${workspaceId} (idle ${(now - entry.lastUsedAt) / 1000 | 0}s)`);
+      log.info(`reaping idle workspace container ${workspaceId} (idle ${(now - entry.lastUsedAt) / 1000 | 0}s)`);
       _pool.delete(workspaceId);
       _killEntry(entry).catch(err => log.warn(`reap kill failed: ${err.message}`));
     }
@@ -474,11 +446,12 @@ const _reaper = setInterval(() => {
 }, 60_000);
 _reaper.unref();
 
-cleanupOrphanBuildSandboxes().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
+cleanupOrphanContainers().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
 
 export default {
-  execGrokBuild,
-  buildGrokExecSpec,
+  execInWorkspace,
+  buildExecSpec,
+  containerEnv,
   shutdown,
   shutdownAll
 };

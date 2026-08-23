@@ -48,8 +48,8 @@ import { createLogger  } from './utils/logger.js';
 import { appendResearchBadge, buildResearchBadgeText  } from './utils/footer.js';
 
 import { resolveWorkspaceId  } from './utils/workspaceId.js';
-import { touchActivity  } from './utils/buildState.js';
-import { listWorkspaceFiles  } from './sandbox/buildWorkspace.js';
+import { touchActivity  } from './utils/workspaceState.js';
+import { listWorkspaceFiles  } from './sandbox/workspaceFs.js';
 import { readSettings, isReviewDue, markReviewed  } from './utils/settingsStore.js';
 import { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, renderInlineCitations  } from './utils/text.js';
 import { sanitizeDiscordThreadTitle  } from './utils/discord.js';
@@ -127,7 +127,7 @@ async function handleMessage(ctx) {
     attachments: [],
     discordTitle: '',
     // Accumulated stats from native server-side web/X searches (main brain
-    // and build sub-agent) - used for the badge appended to the reply.
+    // server-side search tools) - used for the badge appended to the reply.
     researchStats: null
   };
 
@@ -242,20 +242,21 @@ async function handleMessage(ctx) {
     ctx.requestId = userCtx.requestId;
 
     // -- Build workspace activity tracking (WhatsApp only) --
-    // Touch last-activity on each main turn and read <BuildWorkspace> for the
-    // prompt. Read once: the Runtime block that carries it is built once too,
-    // and the build tool reports the files it produces in its own result.
+    // Touch last-activity on each main turn and read <Workspace> for the
+    // prompt. Read once, first level only: the Runtime block that carries it is
+    // built once too, and `list_files` gives the model the rest on demand.
     const workspaceId = isDiscord ? null : resolveWorkspaceId(ctx);
     ctx.userWorkspace = null;
     if (workspaceId) {
       try { touchActivity(workspaceId); }
       catch (e) { log.warn(`touchActivity failed: ${e.message}`); }
       try {
-        const listing = listWorkspaceFiles(workspaceId, 30);
+        const listing = listWorkspaceFiles(workspaceId, 30, { depth: 1 });
         if (listing.total > 0) {
           ctx.userWorkspace = {
             total: listing.total,
             files: listing.files,
+            dirs: listing.dirs,
             more: !!listing.more
           };
         }

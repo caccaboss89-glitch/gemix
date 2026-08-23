@@ -8,8 +8,8 @@
  *   - the full tool schema (function tools + native xAI tools) for that
  *     platform / membership;
  *   - the structured-output (text.format) schema, when one applies.
- * A final build-agent-dump.txt mirrors the Grok Build --rules text and
- * host exec contract so prompts can be cross-checked in one place.
+ * A final workspace-runtime-dump.txt mirrors the container exec contract and
+ * the filesystem tool schemas so prompts can be cross-checked in one place.
  *
  * The corpus lives in scripts/prompt-dumps/cases.js, the text generation in
  * render.js and every assertion in validate.js. This file only wires them
@@ -26,13 +26,13 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import constants from '../src/config/constants.js';
 import { CASES } from './prompt-dumps/cases.js';
-import { renderCase, renderBuildAgentDump } from './prompt-dumps/render.js';
+import { renderCase, renderWorkspaceRuntimeDump } from './prompt-dumps/render.js';
 import {
   ISSUES,
   validatePrompt,
   validateResponseFormat,
   validateToolDumpLeaks,
-  validateBuildAgentDump
+  validateWorkspaceRuntimeDump
 } from './prompt-dumps/validate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -60,11 +60,11 @@ for (const id of ids) {
   console.log(`Wrote ${file}`);
 }
 
-const buildFile = path.join(OUT_DIR, 'build-agent-dump.txt');
-const buildDump = renderBuildAgentDump();
-fs.writeFileSync(buildFile, buildDump, 'utf8');
-validateBuildAgentDump(buildDump, PLATFORM_WA_DEDICATED);
-console.log(`Wrote ${buildFile}`);
+const workspaceFile = path.join(OUT_DIR, 'workspace-runtime-dump.txt');
+const workspaceDump = renderWorkspaceRuntimeDump();
+fs.writeFileSync(workspaceFile, workspaceDump, 'utf8');
+validateWorkspaceRuntimeDump(workspaceDump, PLATFORM_WA_DEDICATED);
+console.log(`Wrote ${workspaceFile}`);
 
 if (ISSUES.length) {
   console.error('\nValidation issues:');

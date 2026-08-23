@@ -1,5 +1,5 @@
 // Stable per-conversation IDs for xAI sticky routing / prompt cache.
-// Sent as body.prompt_cache_key and header x-grok-conv-id (Grok Build repo uses
+// Sent as body.prompt_cache_key and, on xAI, header x-grok-conv-id (its backend uses
 // the header on main turns). Pairs with a single byte-stable leading system in
 // input[], append-only history, and a per-turn Runtime role:user block (not a
 // second system). Exact prefix match is still required; this key only sticky-routes.

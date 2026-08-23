@@ -206,7 +206,7 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
   }
   // Prose may name a Runtime tag (`<CurrentSettings>`); what static must never
   // carry is the block itself, which only ever opens a line.
-  for (const tag of ['CurrentSettings', 'BuildWorkspace', 'SettingsReview', 'Caller']) {
+  for (const tag of ['CurrentSettings', 'Workspace', 'SettingsReview', 'Caller']) {
     if (new RegExp(`^<${tag}[ >]`, 'm').test(staticPart)) {
       ISSUES.push({ caseId, msg: `static must not include the ${tag} block (belongs in Runtime)` });
     }
@@ -223,35 +223,31 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
   }
 }
 
-function _validateBuildWorkspace(dynamicPart, id, caseId) {
+function _validateWorkspaceBlock(dynamicPart, id, caseId) {
   if (!WHATSAPP_CASES.includes(id)) return;
-  if (!/<BuildWorkspace files="/.test(dynamicPart)) {
-    ISSUES.push({ caseId, msg: 'WhatsApp case missing BuildWorkspace block in Runtime' });
+  if (!/<Workspace files="/.test(dynamicPart)) {
+    ISSUES.push({ caseId, msg: 'WhatsApp case missing Workspace block in Runtime' });
     return;
   }
   if (!WORKSPACE_CASES.includes(id)) {
-    if (!/<BuildWorkspace files="0"/.test(dynamicPart)) {
-      ISSUES.push({ caseId, msg: 'case without a workspace should show BuildWorkspace files="0"' });
+    if (!/<Workspace files="0"/.test(dynamicPart)) {
+      ISSUES.push({ caseId, msg: 'case without a workspace should show Workspace files="0"' });
     }
     return;
   }
-  if (!/delivery buffer/i.test(dynamicPart)) {
-    ISSUES.push({ caseId, msg: 'BuildWorkspace missing delivery-buffer wording' });
-  }
-  if (!/resend-only|re-send/i.test(dynamicPart)) {
-    ISSUES.push({ caseId, msg: 'BuildWorkspace missing resend-only build wording' });
-  }
+  // Every listed file carries its full namespace path, because that same
+  // string is what the model passes back to read_file and to attachments[].
   for (const { relPath } of _ctx(id).userWorkspace.files) {
-    if (!dynamicPart.includes(relPath)) {
-      ISSUES.push({ caseId, msg: `BuildWorkspace missing listed workspace path ${relPath}` });
+    if (!dynamicPart.includes(`workspace/${relPath}`)) {
+      ISSUES.push({ caseId, msg: `Workspace block missing listed path workspace/${relPath}` });
     }
   }
 }
 
 function _validateDiscordSplit(staticPart, dynamicPart, id, caseId) {
   if (!DISCORD_CASES.includes(id)) return;
-  if (staticPart.includes('BuildWorkspace')) {
-    ISSUES.push({ caseId, msg: 'Discord static must not mention BuildWorkspace' });
+  if (/<Workspace[ >]/.test(staticPart)) {
+    ISSUES.push({ caseId, msg: 'Discord static must not carry a Workspace block' });
   }
   // Statute is static (process-stable); thread title / emojis / events are
   // Runtime-only. conversation_title is in text.format on every turn, and its
@@ -485,7 +481,7 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
   _validateStaticShape(staticPart, prompt, caseId);
   _validateNoStaleClaims(staticPart, prompt, caseId);
   _validateStaticDynamicSplit(staticPart, dynamicPart, caseId);
-  _validateBuildWorkspace(dynamicPart, id, caseId);
+  _validateWorkspaceBlock(dynamicPart, id, caseId);
   _validateDiscordSplit(staticPart, dynamicPart, id, caseId);
   _validateAudience(staticPart, id, caseId);
   _validateVisibility(staticPart, caseId);
@@ -497,72 +493,68 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
 
 // -- Build sub-agent -------------------------------------------------------
 
-/** The `--rules` text handed to Grok Build, sliced out of the build dump. */
-function _validateBuildRules(rulesText) {
-  if (typeof rulesText !== 'string' || !rulesText.trim()) {
-    ISSUES.push({ caseId: 'build', msg: 'build rules text empty' });
+/**
+ * The workspace-runtime dump is where the "no secret reaches the container"
+ * rule is actually checkable: the exec environment is printed verbatim, so a
+ * credential leaking into it fails the build instead of shipping.
+ */
+function _validateWorkspaceExecEnv(dump) {
+  const marker = '--- EXEC ENV';
+  const start = dump.indexOf(marker);
+  if (start < 0) {
+    ISSUES.push({ caseId: 'workspace', msg: 'workspace dump missing the exec env section' });
     return;
   }
-  if (!/GemiX-Build/i.test(rulesText)) {
-    ISSUES.push({ caseId: 'build', msg: 'build rules missing GemiX-Build identity' });
+  const end = dump.indexOf('\n--- EXEC:', start);
+  const envText = end >= 0 ? dump.slice(start, end) : dump.slice(start);
+  const forbidden = /API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|BEARER|AUTHORIZATION|OAUTH|_SECRET|_TOKEN/i;
+  if (forbidden.test(envText)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'workspace exec env carries a credential-looking variable' });
   }
-  if (!/\/workspace\//i.test(rulesText)) {
-    ISSUES.push({ caseId: 'build', msg: 'build rules missing /workspace/' });
+  if (!/HTTPS_PROXY/.test(envText)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'workspace exec env missing the fail-closed proxy settings' });
   }
-  if (!/harvests|delivery buffer|GemiX-Main will select/i.test(rulesText)) {
-    ISSUES.push({ caseId: 'build', msg: 'build rules missing harvest / delivery buffer contract' });
-  }
-  if (!/HTTP_PROXY|HTTPS_PROXY|residential/i.test(rulesText)) {
-    ISSUES.push({ caseId: 'build', msg: 'build rules missing proxy/network guidance' });
-  }
-  if (!/do not (emit|list) JSON attachments/i.test(rulesText)) {
-    ISSUES.push({ caseId: 'build', msg: 'build rules still imply JSON attachments schema' });
-  }
-  if (/\/skills\//i.test(rulesText)) {
-    ISSUES.push({ caseId: 'build', msg: 'build rules must not require GemiX /skills/ packs' });
-  }
-  validateNoImplLeaks(rulesText, 'build', 'build grok rules');
 }
 
-/** The main-brain `build` tool description, read off the live schema. */
-function _validateBuildToolDescription(platform) {
+/** The workspace tool descriptions, read off the live schema. */
+function _validateWorkspaceToolDescriptions(platform) {
   const tools = getToolsForUser(true, true, { platform, isGroup: false });
-  const desc = tools.find(t => t?.function?.name === 'build')?.function?.description || '';
-  if (!/delivery buffer/i.test(desc)) {
-    ISSUES.push({ caseId: 'build', msg: 'main build tool description missing delivery buffer harvest wording' });
+  const byName = new Map(tools.filter(t => t?.function).map(t => [t.function.name, t.function.description || '']));
+
+  for (const name of ['list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell']) {
+    if (!byName.has(name)) {
+      ISSUES.push({ caseId: 'workspace', msg: `main tool schema is missing "${name}"` });
+    }
   }
-  if (!/final `attachments`|final attachments/i.test(desc)) {
-    ISSUES.push({ caseId: 'build', msg: 'main build tool description missing GemiX attachment selection wording' });
+  if (byName.has('build')) {
+    ISSUES.push({ caseId: 'workspace', msg: 'the build sub-agent tool is still offered to the model' });
   }
-  if (/Skills:/i.test(desc)) {
-    ISSUES.push({ caseId: 'build', msg: 'main build tool description still lists GemiX skill packs' });
+  const readFile = byName.get('read_file') || '';
+  if (!/only way to open one/i.test(readFile)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'read_file description does not state it is the universal gateway' });
   }
-  if (/&lt;BuildWorkspace&gt;/.test(desc)) {
-    ISSUES.push({ caseId: 'build', msg: 'main build tool description should use raw <BuildWorkspace> not HTML entities' });
+  const editFile = byName.get('edit_file') || '';
+  if (!/exactly once/i.test(editFile)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'edit_file description does not state the unique-match contract' });
   }
-  if (!/resend|full Grok Build/i.test(desc)) {
-    ISSUES.push({ caseId: 'build', msg: 'main build tool description should note resend still runs full Grok Build' });
+  const shell = byName.get('shell') || '';
+  if (!/pip\/npm\/apt|package installs/i.test(shell)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'shell description does not state that package installs are disabled' });
   }
 }
 
 /**
- * @param {string} buildDump - full build-agent-dump.txt text
- * @param {string} platform - platform to read the live `build` tool schema from
+ * @param {string} dump - full workspace-runtime-dump.txt text
+ * @param {string} platform - platform to read the live tool schema from
  */
-function validateBuildAgentDump(buildDump, platform) {
-  const marker = '--- GROK --rules ---';
-  const rulesStart = buildDump.indexOf(marker);
-  if (rulesStart < 0) {
-    ISSUES.push({ caseId: 'build', msg: 'build dump missing GROK --rules section' });
-  } else {
-    const rulesEnd = buildDump.indexOf('\n--- EXEC', rulesStart);
-    const slice = rulesEnd >= 0
-      ? buildDump.slice(rulesStart + marker.length, rulesEnd)
-      : buildDump.slice(rulesStart + marker.length);
-    _validateBuildRules(slice.trim());
+function validateWorkspaceRuntimeDump(dump, platform) {
+  if (!dump || !dump.includes('=== WORKSPACE RUNTIME')) {
+    ISSUES.push({ caseId: 'workspace', msg: 'workspace dump missing its header' });
+    return;
   }
-  _validateBuildToolDescription(platform);
-  validateToolDumpLeaks(buildDump, 'build');
+  _validateWorkspaceExecEnv(dump);
+  _validateWorkspaceToolDescriptions(platform);
+  validateToolDumpLeaks(dump, 'workspace');
 }
 
 export {
@@ -570,5 +562,5 @@ export {
   validatePrompt,
   validateResponseFormat,
   validateToolDumpLeaks,
-  validateBuildAgentDump
+  validateWorkspaceRuntimeDump
 };

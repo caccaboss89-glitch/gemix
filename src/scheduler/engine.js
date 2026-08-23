@@ -18,9 +18,9 @@ import { modifyTaskFile, readTaskFile  } from '../utils/taskStore.js';
 import { createLogger  } from '../utils/logger.js';
 import { stripVoiceTags, normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
-import { listWorkspaceStates  } from '../utils/buildState.js';
-import buildSandbox from '../sandbox/buildSandbox.js';
-import { wipeWorkspace  } from '../sandbox/buildWorkspace.js';
+import { listWorkspaceStates  } from '../utils/workspaceState.js';
+import workspaceRuntime from '../sandbox/workspaceRuntime.js';
+import { wipeWorkspace  } from '../sandbox/workspaceFs.js';
 
 const log = createLogger('Scheduler');
 
@@ -32,17 +32,17 @@ let lastReleaseCheckTime = 0;
 let _cycleInFlight = false;
 
 /**
- * Periodic sweeper for the build sub-agent's per-workspace tree.
+ * Periodic sweeper for the agent's per-conversation workspace tree.
  * Wipes any workspace whose user has not interacted with GemiX for
- * constants.BUILD_WORKSPACE_TTL_MS, and shuts down the matching sandbox container.
+ * constants.WORKSPACE_TTL_MS, and shuts down the matching container.
  * The metadata file (.build_state.json) is left in place.
  */
-async function _sweepBuildWorkspaces() {
+async function _sweepStaleWorkspaces() {
   const states = listWorkspaceStates();
   const now = Date.now();
   for (const s of states) {
     if (!s.lastActivityAt) continue;
-    if (now - s.lastActivityAt < constants.BUILD_WORKSPACE_TTL_MS) continue;
+    if (now - s.lastActivityAt < constants.WORKSPACE_TTL_MS) continue;
 
     const workspaceId = s.workspaceId;
     if (!workspaceId) {
@@ -52,8 +52,8 @@ async function _sweepBuildWorkspaces() {
     log.info(`Wiping idle build workspace ${s.workspaceSlug} (idle ${(now - s.lastActivityAt) / 60000 | 0} min)`);
     try { wipeWorkspace(workspaceId); }
     catch (err) { log.warn(`wipeWorkspace failed: ${err.message}`); }
-    try { await buildSandbox.shutdown(workspaceId); }
-    catch (err) { log.warn(`buildSandbox shutdown failed: ${err.message}`); }
+    try { await workspaceRuntime.shutdown(workspaceId); }
+    catch (err) { log.warn(`workspace container shutdown failed: ${err.message}`); }
   }
 }
 
@@ -95,11 +95,11 @@ function startScheduler() {
 
   // Hourly: wipe idle build workspaces past the TTL.
   const buildSweepInterval = setInterval(() => {
-    _sweepBuildWorkspaces().catch(err => log.error('Build workspace sweep error:', err));
+    _sweepStaleWorkspaces().catch(err => log.error('Workspace sweep error:', err));
   }, 60 * 60 * 1000);
   buildSweepInterval.unref();
   // Initial sweep at startup.
-  _sweepBuildWorkspaces().catch(err => log.error('Build workspace initial sweep error:', err));
+  _sweepStaleWorkspaces().catch(err => log.error('Workspace initial sweep error:', err));
 }
 
 function _taskIsDue(task, nowTime) {

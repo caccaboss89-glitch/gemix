@@ -1,7 +1,7 @@
 // src/utils/xmlEscape.js
 //
 // Shared XML escape utility used when building structured prompts
-// (especially for the build sub-agent and other XML-tagged contexts).
+// (especially in the history projection and other XML-tagged contexts).
 // Provides basic escaping for &, <, >, and " characters.
 
 /**

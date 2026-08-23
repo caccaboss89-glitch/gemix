@@ -111,6 +111,8 @@ function buildStaticInstructions(ctx) {
   sections.push(_section('What you can and cannot see', buildVisibilityLines(profile)));
   sections.push(_section('How you answer', buildAnswerLines(profile, promptOpts)));
 
+  if (cap.workspace) sections.push(_section('Your workspace', _buildWorkspaceLines()));
+
   const sendingFiles = buildSendingFilesLines(profile, promptOpts);
   if (sendingFiles.length > 0) sections.push(_section('Sending files', sendingFiles));
 
@@ -281,8 +283,8 @@ function buildDynamicRuntimeContext(ctx) {
     }
   }
 
-  if (cap.buildWorkspace) {
-    blocks.push(_renderBuildWorkspace(ctx.userWorkspace));
+  if (cap.workspace) {
+    blocks.push(_renderWorkspace(ctx.userWorkspace));
   }
 
   // Per-user weekly generation quota line: non-admins only, and only where the
@@ -328,25 +330,52 @@ function _renderCurrentSettings(ctx) {
   return `<CurrentSettings scope="${scope}">\n${body}\n</CurrentSettings>`;
 }
 
-/** Persisted build sub-agent workspace listing (WhatsApp only). Always emitted. */
-function _renderBuildWorkspace(ws) {
+/**
+ * Top level of the workspace, as it stands at the start of this turn.
+ *
+ * Only the first level: a deep tree would grow the per-turn prefix without
+ * saying anything `list_files` cannot say on demand. The listing is
+ * authoritative for what exists — a file not here has to be created.
+ */
+function _renderWorkspace(ws) {
   const total = ws?.total ?? 0;
-  if (total > 0) {
-    const items = ws.files.map(f => `    - ${f.relPath}`).join('\n');
-    const more = ws.more ? '\n    ... and more' : '';
+  if (total === 0) {
     return (
-      `<BuildWorkspace files="${total}">\n${items}${more}\n`
-      + `    On disk only (${constants.BUILD_WORKSPACE_TTL_LABEL} TTL) until build runs — then new/modified workspace files are harvested into the delivery buffer; pick final user \`attachments\` from that buffer.\n`
-      + '    To re-send existing outputs: ask build with a resend-only prompt and attachments=[].\n'
-      + '</BuildWorkspace>'
+      '<Workspace files="0">\n'
+      + '    (empty — authoritative; nothing to look for)\n'
+      + `    If the user asks for a file you made earlier, explain it expired (${constants.WORKSPACE_TTL_LABEL} without activity).\n`
+      + '</Workspace>'
     );
   }
-  return (
-    '<BuildWorkspace files="0">\n'
-    + '    (empty — authoritative; do not call build to search for missing files)\n'
-    + `    If the user asks for a past build output, explain it expired (${constants.BUILD_WORKSPACE_TTL_LABEL} TTL).\n`
-    + '</BuildWorkspace>'
-  );
+  const items = (ws.files || []).map(f => `    - workspace/${f.relPath}`).join('\n');
+  const dirs = (ws.dirs || []).map(d => `    - workspace/${d}/`).join('\n');
+  const body = [items, dirs].filter(Boolean).join('\n');
+  const more = ws.more ? '\n    ... and more' : '';
+  return `<Workspace files="${total}">\n${body}${more}\n</Workspace>`;
+}
+
+/**
+ * The workspace rules the model needs before it touches a file: what the two
+ * areas are, which one it may write to, the quota and the TTL. These used to be
+ * the build sub-agent's own rules; the main agent owns the workspace now, so
+ * they belong in its prompt.
+ */
+function _buildWorkspaceLines() {
+  return [
+    'You have a working area of your own. `workspace/` is yours to write in and persists across turns in this chat. '
+    + '`attachments/` holds this chat\'s files, mounted read-only: to change one, copy it into `workspace/` first.',
+    'One path namespace covers everything: the path `list_files` shows you is the same string you pass to `read_file`, '
+    + 'to `shell`, and to `attachments` in your final reply. Never invent a path or shorten one to its filename.',
+    '`read_file` is the only way to open a file. Reading, listing and searching are free and instant — look before '
+    + 'you assume, and never tell the user a file is missing without checking.',
+    'The same file can exist in both areas at once (you made it, you sent it, it came back in the chat). That is '
+    + 'normal: work from whichever copy the user means.',
+    `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `
+    + 'without activity in this chat. Delete what you no longer need instead of filling it. '
+    + 'Package installs are disabled; the toolchain in `shell` is fixed.',
+    'Network access from `shell` goes through a proxy that fails closed. On a connection error, a CONNECT failure '
+    + 'or a DNS failure the internet is down: stop, do not retry in a loop, and say so in your reply.'
+  ];
 }
 
 /** One "## Heading" section of the static prefix, one idea per line. */

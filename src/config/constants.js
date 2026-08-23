@@ -31,7 +31,7 @@ function isWhatsAppPlatform(platform) {
   return platform === PLATFORM_WA_DEDICATED || platform === PLATFORM_WA_PERSONAL;
 }
 
-const BUILD_WORKSPACE_TTL_MS = 4 * 60 * 60 * 1000;
+const WORKSPACE_TTL_MS = 4 * 60 * 60 * 1000;
 
 /** Human-readable duration for prompt and tool text (e.g. "4h", "90m"). */
 function formatDurationLabel(ms) {
@@ -78,8 +78,9 @@ export default {
   // sub-tool turns (web_search/x_search) per request.
   MAX_TOOL_ROUNDS: 50,
 
-  // Build sub-agent sandbox container.
-  // Memory cap and idle TTL for the sandbox.
+  // Workspace runtime container: memory cap and idle TTL. The container is a
+  // per-conversation process the main agent execs into; it is reaped when idle
+  // and re-created on demand, independently of the workspace's own 4h TTL.
   SANDBOX_MEMORY_MB: 1536,
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
 
@@ -89,20 +90,20 @@ export default {
   TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,
   TUNNEL_TOKEN_TTL_TEMP_MS: 60 * 60 * 1000,
 
-  // Build tool (Grok Build CLI in Docker sandbox).
-  // Workspace lifecycle is decoupled from the sandbox container's idle TTL:
+  // Workspace lifecycle, decoupled from the container's idle TTL:
   //   - WORKSPACE_TTL_MS: time after the user's last interaction before wipe.
-  //   - QUOTA_MB: hard cap on host-side staging writes into the workspace.
-  //   - MAX_ROUNDS: passed to Grok as --max-turns.
-  //   - HARD_TIMEOUT_MS: in-container timeout + host stream backstop.
-  //   - LOCK_WAIT_MS: wait for per-workspace lock before "build busy".
-  BUILD_WORKSPACE_TTL_MS,
+  //   - WORKSPACE_QUOTA_MB: cap on the workspace tree, checked after each write.
+  //   - SHELL_TIMEOUT_*_MS: default and ceiling for one `shell` call.
+  //   - WORKSPACE_LOCK_WAIT_MS: wait for the per-workspace mutation lock.
+  WORKSPACE_TTL_MS,
   // Same TTL as prose, for the prompt and the tool descriptions that quote it.
-  BUILD_WORKSPACE_TTL_LABEL: formatDurationLabel(BUILD_WORKSPACE_TTL_MS),
-  BUILD_WORKSPACE_QUOTA_MB: 500,
-  BUILD_MAX_ROUNDS: 60,
-  BUILD_HARD_TIMEOUT_MS: 10 * 60 * 1000,
-  BUILD_LOCK_WAIT_MS: 30 * 1000,
+  WORKSPACE_TTL_LABEL: formatDurationLabel(WORKSPACE_TTL_MS),
+  WORKSPACE_QUOTA_MB: 500,
+  SHELL_TIMEOUT_DEFAULT_MS: 60 * 1000,
+  SHELL_TIMEOUT_MAX_MS: 5 * 60 * 1000,
+  WORKSPACE_LOCK_WAIT_MS: 30 * 1000,
+  /** Cap on captured stdout/stderr and on host-side file reads returned to the model. */
+  WORKSPACE_OUTPUT_MAX_BYTES: 200 * 1024,
 
   // Media
   MAX_IMAGE_BYTES: 8 * 1024 * 1024,

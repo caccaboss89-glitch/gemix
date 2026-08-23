@@ -10,7 +10,6 @@
 // Central registry of tool definitions for the main brain (function calling schema).
 // Uses makeTool + validateToolArgs (lightweight hallucination guard, no ajv).
 // getToolsForUser builds the per-user/platform list (hides admin-only, active-member-only, Discord-specific).
-// The build tool description is generic and does not expose sub-agent internals.
 
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
@@ -697,38 +696,138 @@ const TOOL_BUG_REPORT = makeTool({
   required: ['description']
 });
 
-// -- Build sub-agent (build tool) ------------------------------------
+// -- Workspace filesystem and shell ----------------------------------------
 //
-// Grok Build CLI inside Docker (/workspace/, proxy egress). No chat history —
-// stage inputs via attachments[]. After the run, harvested workspace files land
-// in the delivery buffer; GemiX selects final user attachments.
+// The main agent works on files itself: there is no sub-agent between it and
+// the workspace. Reads run on the host, mutations and shell in the container.
+// One path namespace covers all of them: `workspace/...` for its own files,
+// `attachments/...` for this conversation's.
 
-function buildBuildTool(isGroup) {
-  const scope = isGroup ? 'the current group' : 'the current user';
+const WORKSPACE_PATH_HINT =
+  'Path in the shared namespace: "workspace/<file>" for your own files, "attachments/<file>" for files '
+  + 'from this chat. A path with no prefix is read as workspace/.';
+
+const TOOL_LIST_FILES = makeTool({
+  name: 'list_files',
+  description:
+    'List what is in your workspace or in the files attached to this chat. Call it before assuming a file is or is not there.',
+  properties: {
+    path: {
+      type: 'string',
+      description: `Directory to list, default "workspace/". ${WORKSPACE_PATH_HINT}`
+    },
+    recursive: {
+      type: 'boolean',
+      description: 'Descend into sub-directories. Default false: only the entries directly inside it.'
+    }
+  }
+});
+
+const TOOL_SEARCH_FILES = makeTool({
+  name: 'search_files',
+  description:
+    'Find files by name pattern, or lines by exact text, without reading whole files. '
+    + 'Use it on a workspace you did not just create, and to locate the part of a long file you need.',
+  properties: {
+    namePattern: {
+      type: 'string',
+      description: 'Glob on the name, e.g. "*.py". Include a slash to match the whole relative path, e.g. "src/*.md".'
+    },
+    contains: {
+      type: 'string',
+      description: 'Exact text to find inside text files. Returns path, line number and the matching line.'
+    },
+    path: {
+      type: 'string',
+      description: `Directory to search under, default "workspace/". ${WORKSPACE_PATH_HINT}`
+    }
+  }
+});
+
+const TOOL_READ_FILE = makeTool({
+  name: 'read_file',
+  description:
+    'Read any file on disk: read_file is the only way to open one. Text and code come back as content; '
+    + 'images come back attached so you can look at them. '
+    + 'Files in this chat that were not loaded this turn appear as "[Attachment: attachments/name.ext]" — '
+    + 'pass that exact path here to open one.',
+  properties: {
+    path: {
+      type: 'string',
+      description: WORKSPACE_PATH_HINT
+    },
+    offset: {
+      type: 'integer',
+      description: 'Text files: first line to return, 1-based. Use with limit to page through a long file.'
+    },
+    limit: {
+      type: 'integer',
+      description: 'Text files: how many lines to return from offset.'
+    }
+  },
+  required: ['path']
+});
+
+const TOOL_WRITE_FILE = makeTool({
+  name: 'write_file',
+  description:
+    'Create a file, or overwrite one completely. Only inside workspace/. '
+    + 'To change part of an existing file use edit_file instead — this replaces the whole content. '
+    + 'To change a file from attachments/, copy it into workspace/ with shell first.',
+  properties: {
+    path: {
+      type: 'string',
+      description: 'Destination under workspace/. Parent directories are created for you.'
+    },
+    content: {
+      type: 'string',
+      description: 'Full new content of the file.'
+    }
+  },
+  required: ['path', 'content']
+});
+
+const TOOL_EDIT_FILE = makeTool({
+  name: 'edit_file',
+  description:
+    'Replace an exact piece of text in an existing workspace file. '
+    + 'oldText must appear exactly once: copy it verbatim from read_file, whitespace included, and add '
+    + 'surrounding lines until it is unique. Set replaceAll to change every occurrence instead.',
+  properties: {
+    path: { type: 'string', description: 'File under workspace/.' },
+    oldText: { type: 'string', description: 'Exact text to replace, copied verbatim from the file.' },
+    newText: { type: 'string', description: 'Replacement text. Empty string deletes the matched text.' },
+    replaceAll: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match.' }
+  },
+  required: ['path', 'oldText', 'newText']
+});
+
+function buildShellTool() {
+  const defaultSec = Math.round(constants.SHELL_TIMEOUT_DEFAULT_MS / 1000);
+  const maxSec = Math.round(constants.SHELL_TIMEOUT_MAX_MS / 1000);
   return makeTool({
-    name: 'build',
+    name: 'shell',
     description:
-      'Delegate file deliverables to Grok Build in an isolated sandbox (/workspace/, bash, yt-dlp, ffmpeg, LibreOffice, TeX; no pip/npm/apt). '
-      + 'Use build to create, edit, convert, or assemble files (PDF, PPTX, ffmpeg, yt-dlp, multi-step deliverables; images/video only if embedded in those). Not for standalone imagine or search-downloadable media. '
-      + 'Not for fetchable X/web media — use x_search / web_image_search + final attachments; never call build only to download, mirror, or re-send such media. '
-      + 'Isolated turn — no chat history; it sees only your prompt, the BuildWorkspace files, and attachments[] you stage. '
-      + 'Stage in attachments[] only inputs it must use that are not already in the workspace (e.g. music clips from generate_music, or user files). Do not pre-generate images/videos on the main brain just to feed build. '
-      + 'On return: free-text summary plus harvested workspace files (new/modified this run; full tree only if nothing changed, e.g. resend) in the delivery buffer — put only user-facing deliverables in final `attachments` (skip intermediates/sources unless asked). '
-      + 'A resend-only brief still runs a full Grok Build session (not a free reattach). '
-      + `Workspace for ${scope}, ${constants.BUILD_WORKSPACE_TTL_LABEL} TTL, ${constants.BUILD_WORKSPACE_QUOTA_MB} MB, once per main-brain round.`,
+      'Run a bash command in the workspace container: Python 3, Node, ffmpeg, yt-dlp, poppler, LibreOffice, TeX, '
+      + 'zip/unzip, curl/wget, ImageMagick. Use it to convert, compress, download, inspect and assemble files. '
+      + 'Package installs (pip/npm/apt) are disabled — the toolchain is fixed. '
+      + `Timeout ${defaultSec}s by default, ${maxSec}s maximum; start anything longer in the background and check on it in a later call. `
+      + 'The container keeps running between calls in the same chat.',
     properties: {
-      prompt: {
+      command: {
         type: 'string',
-        description: 'Brief for the sub-agent: deliverable, format, naming, and constraints.'
+        description: 'Bash command line. Runs in workspace/ unless workingDir says otherwise.'
       },
-      attachments: {
-        type: 'array',
-        items: { type: 'string' },
-        description:
-          'Each entry: buffer/history filename or public https URL. Omit if already in workspace or not needed.'
+      timeoutSeconds: {
+        type: 'integer',
+        description: `Seconds before the command is killed (default ${defaultSec}, max ${maxSec}).`
+      },
+      workingDir: {
+        type: 'string',
+        description: `Directory to run in, default "workspace/". ${WORKSPACE_PATH_HINT}`
       }
     },
-    required: ['prompt']
+    required: ['command']
   });
 }
 
@@ -753,9 +852,10 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(TOOL_GENERATE_IMAGE, TOOL_GENERATE_VIDEO, TOOL_GENERATE_MUSIC);
   }
 
-  // 3) Build deliverables (sandbox) — outside Discord.
+  // 3) The workspace itself — outside Discord. Reads first: the model should
+  // look before it writes, and `read_file` is the gateway for every file.
   if (!isDiscord) {
-    tools.push(buildBuildTool(isWhatsAppGroup));
+    tools.push(TOOL_LIST_FILES, TOOL_SEARCH_FILES, TOOL_READ_FILE, TOOL_WRITE_FILE, TOOL_EDIT_FILE, buildShellTool());
   }
 
   // 4) Outbound delivery. Voice is not a tool (structured `voice` flag on WA dedicated).

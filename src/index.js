@@ -14,7 +14,7 @@ import { initPersonalWhatsApp } from './platforms/whatsapp/personal.js';
 import { initDiscord } from './platforms/discord/client.js';
 import { startScheduler, setSchedulerWaClient } from './scheduler/engine.js';
 import { setAdminNotifierClient } from './utils/adminNotifier.js';
-import buildSandbox from './sandbox/buildSandbox.js';
+import workspaceRuntime from './sandbox/workspaceRuntime.js';
 import { startInternalNotifyServer } from './utils/internalNotifyServer.js';
 import { startTempFileServer } from './utils/tempFileServer.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
@@ -113,7 +113,7 @@ runStartupCleanup();
 
 const shutdownHandler = async (signal) => {
   log.info(`\nGemiX - Shutting down (${signal})...`);
-  try { await buildSandbox.shutdownAll(); } catch (err) { log.warn(`Build sandbox shutdown failed during ${signal}: ${err.message}`); }
+  try { await workspaceRuntime.shutdownAll(); } catch (err) { log.warn(`Workspace container shutdown failed during ${signal}: ${err.message}`); }
   process.exit(0);
 };
 

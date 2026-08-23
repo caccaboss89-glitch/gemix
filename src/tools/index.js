@@ -25,7 +25,12 @@ import { readMusicStats } from './musicStats.js';
 import { readVideo } from './videoReader.js';
 import { managePreferences } from './preferences.js';
 import { toggleReleaseNotify } from './releaseNotify.js';
-import { buildTool } from './build.js';
+import { listFiles } from './workspace/listFiles.js';
+import { searchFiles } from './workspace/searchFiles.js';
+import { readFile } from './workspace/readFile.js';
+import { writeFile } from './workspace/writeFile.js';
+import { editFile } from './workspace/editFile.js';
+import { shell } from './workspace/shell.js';
 import { pushBufferAttachment } from '../utils/attachments.js';
 import { buildXaiPartFromBuffer } from '../utils/aiFileDelivery.js';
 import { musicCreator } from './musicCreator.js';
@@ -41,7 +46,6 @@ import {
   ADMIN_NOTIFIED_SUFFIX,
   ADMIN_NOTIFIED_SUFFIX_AFTER_REPORT
 } from '../utils/adminNotifier.js';
-import { buildEngineeringNotificationMessage } from '../utils/notificationDedup.js';
 
 const { isWhatsAppPlatform } = constants;
 const log = createLogger('Tools');
@@ -125,12 +129,27 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       break;
     }
 
-    case 'build': {
-      // Fire the "delegating to build team" banner once per AI call.
-      if (typeof userCtx.sendIntermediateNotification === 'function') {
-        await userCtx.sendIntermediateNotification('build', buildEngineeringNotificationMessage());
+    case 'list_files':
+    case 'search_files':
+    case 'read_file':
+    case 'write_file':
+    case 'edit_file':
+    case 'shell': {
+      const workspaceId = resolveWorkspaceId(userCtx);
+      if (!workspaceId) {
+        result = { success: false, error: 'Cannot resolve a workspace for this chat.' };
+        break;
       }
-      result = await buildTool(args, userCtx, responseCtx);
+      // Reads run straight through; mutations take the per-workspace lock
+      // inside their own module, keyed on this turn so a retry does not
+      // deadlock against itself.
+      const lockOpts = { lockOwnerId: userCtx.requestId ? `${userCtx.requestId}:workspace` : undefined };
+      if (name === 'list_files') result = listFiles(args, workspaceId);
+      else if (name === 'search_files') result = searchFiles(args, workspaceId);
+      else if (name === 'read_file') result = readFile(args, workspaceId);
+      else if (name === 'write_file') result = await writeFile(args, workspaceId, lockOpts);
+      else if (name === 'edit_file') result = await editFile(args, workspaceId, lockOpts);
+      else result = await shell(args, workspaceId, lockOpts);
       break;
     }
 

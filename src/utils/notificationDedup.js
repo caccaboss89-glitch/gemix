@@ -52,7 +52,7 @@ function getChatKey(ctx) {
  * invocation - the caller should stay silent.
  *
  * @param {object} ctx  - Handler context; must have `requestId` set.
- * @param {string} kind - Notification kind: 'image_gen' | 'video_gen' | 'build'
+ * @param {string} kind - Notification kind: 'image_gen' | 'video_gen'
  * @returns {boolean}
  */
 function markNotifiedInCall(ctx, kind) {
@@ -93,19 +93,6 @@ function clearCallNotifications(ctx) {
   }
 }
 
-// -- Message builders ------------------------------------------------------
-
-/**
- * Fixed build notification. Sent BEFORE the build sub-agent is invoked,
- * so the user knows the host is delegating the task and is about to wait for
- * the deliverable. Dedup key 'build' ensures it fires once per AI call even
- * if the model invokes `build` multiple times.
- * @returns {string}
- */
-function buildEngineeringNotificationMessage() {
-  return '🛠️ Sto delegando il lavoro al coder agent, attendi un attimo...';
-}
-
 // -- Safety valve ----------------------------------------------------------
 // The Set should stay tiny (one entry per active call × kind), but guard
 // against leaks from calls that crash before clearCallNotifications runs.
@@ -121,7 +108,6 @@ _cleanupTimer.unref();
 export {
   markNotifiedInCall,
   unmarkNotifiedInCall,
-  clearCallNotifications,
-  buildEngineeringNotificationMessage
+  clearCallNotifications
 
 };

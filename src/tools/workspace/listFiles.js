@@ -1,0 +1,89 @@
+// src/tools/workspace/listFiles.js
+//
+// Tool directives: all tool-facing text is in English, uses no emojis, no XML
+// wrappers, and results are plain objects the dispatcher serializes into the
+// fixed `{ success, message?, error?, ... }` envelope.
+//
+// `list_files`: what is in `workspace/` or `attachments/` right now.
+//
+// Host-side, in-process: a listing only ever runs GemiX's own code, and a
+// docker exec would cost more than the readdir it wraps.
+
+import fs from 'fs';
+import constants from '../../config/constants.js';
+import { listFilesUnder } from '../../sandbox/workspaceFs.js';
+import {
+  ROOT,
+  invalidPathError,
+  resolveAgentPath,
+  toDisplayPath
+} from '../../sandbox/workspacePaths.js';
+
+/** Cap on entries returned in one call, so a big tree cannot flood the round. */
+const MAX_ENTRIES = 300;
+
+/**
+ * @param {object} args
+ * @param {string} [args.path] - directory to list, defaults to `workspace/`
+ * @param {boolean} [args.recursive]
+ * @param {string} workspaceId
+ */
+function listFiles(args = {}, workspaceId) {
+  const raw = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : `${ROOT.WORKSPACE}/`;
+  const resolved = resolveAgentPath(workspaceId, raw);
+  if (!resolved) return invalidPathError(raw);
+
+  let stat = null;
+  try { stat = fs.statSync(resolved.abs); } catch { /* missing */ }
+  if (!stat) {
+    return {
+      success: true,
+      path: resolved.display,
+      total: 0,
+      entries: [],
+      message: `${resolved.display} does not exist yet.`
+    };
+  }
+  if (!stat.isDirectory()) {
+    return {
+      success: false,
+      error: `${resolved.display} is a file, not a directory. Use read_file to read it.`
+    };
+  }
+
+  const listing = listFilesUnder(resolved.abs, {
+    limit: MAX_ENTRIES,
+    depth: args.recursive ? Infinity : 1
+  });
+
+  const prefix = resolved.relPath ? `${resolved.relPath}/` : '';
+  const entries = listing.files.map(f => ({
+    path: toDisplayPath(resolved.root, `${prefix}${f.relPath}`),
+    bytes: f.size,
+    modified: new Date(f.mtimeMs).toISOString()
+  }));
+  const directories = listing.dirs.map(d => toDisplayPath(resolved.root, `${prefix}${d}`));
+
+  const notes = [];
+  if (listing.more) notes.push(`Only the first ${MAX_ENTRIES} of ${listing.total} files are listed.`);
+  if (!args.recursive && directories.length > 0) {
+    notes.push('Sub-directories are shown but not expanded; pass recursive=true to see inside them.');
+  }
+  if (resolved.root === ROOT.ATTACHMENTS) {
+    notes.push('attachments/ is read-only. Copy a file into workspace/ before changing it.');
+  } else {
+    notes.push(`workspace/ holds up to ${constants.WORKSPACE_QUOTA_MB} MB and is wiped after `
+      + `${constants.WORKSPACE_TTL_LABEL} without activity in this chat.`);
+  }
+
+  return {
+    success: true,
+    path: resolved.display,
+    total: listing.total,
+    entries,
+    directories,
+    message: notes.join(' ')
+  };
+}
+
+export { listFiles, MAX_ENTRIES };

@@ -1,6 +1,6 @@
 // scripts/prompt-dumps/render.js
 //
-// Turns one case (or the build sub-agent) into the exact text written to
+// Turns one case (or the workspace runtime) into the exact text written to
 // scripts/output-regenerate-prompt-dumps/. Rendering only — every assertion
 // about the result lives in validate.js.
 
@@ -14,15 +14,25 @@ import constants from '../../src/config/constants.js';
 import { resolveProfile, toolUnavailableMessage, getCapabilities } from '../../src/config/platformCapabilities.js';
 import { ADMIN_NOTIFIED_SUFFIX } from '../../src/utils/adminNotifier.js';
 
-const { PLATFORM_DISCORD, BUILD_MAX_ROUNDS, BUILD_HARD_TIMEOUT_MS } = constants;
+const {
+  PLATFORM_DISCORD,
+  PLATFORM_WA_DEDICATED,
+  SHELL_TIMEOUT_DEFAULT_MS,
+  SHELL_TIMEOUT_MAX_MS,
+  WORKSPACE_QUOTA_MB,
+  WORKSPACE_TTL_LABEL
+} = constants;
+
 import {
   PER_ROUND_TOOL_LIMITS,
   perRoundCapErrorPayload
 } from '../../src/utils/toolCallExecution.js';
 import { formatMediaQuotaResetLabel } from '../../src/utils/mediaUsageLimits.js';
-import { buildGrokRules, DELIVERY_SELECTION_NOTICE } from '../../src/ai/buildAgent.js';
-import buildSandbox from '../../src/sandbox/buildSandbox.js';
+import workspaceRuntime from '../../src/sandbox/workspaceRuntime.js';
 import { CASES, DEFAULT_SETTINGS } from './cases.js';
+
+/** Tool names the workspace-runtime dump quotes verbatim. */
+const WORKSPACE_TOOL_NAMES = new Set(['list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell']);
 
 // -- Schema rendering ------------------------------------------------------
 
@@ -106,8 +116,9 @@ function renderResponseFormat(fmt) {
 
 // Deterministic per-tool runtime errors the system can return, mirroring the
 // tool implementations (tools/index.js, scheduler.js, imagineGenerator.js,
-// build.js, preferences.js). Kept here as an audit catalog; update it when a
-// tool's error strings change. Only entries for tools live in the case are dumped.
+// tools/workspace/*.js, preferences.js). Kept here as an audit catalog; update
+// it when a tool's error strings change. Only entries for tools live in the
+// case are dumped.
 const TOOL_RUNTIME_ERRORS = {
   send_whatsapp_message: [
     'Missing "message" parameter. You must provide the text message to send.',
@@ -186,18 +197,36 @@ const TOOL_RUNTIME_ERRORS = {
     'A music generation is already in progress...',
     `Weekly song generation limit reached (2 per week). It resets every ${formatMediaQuotaResetLabel()}.`
   ],
-  build: [
-    'build is busy: another request is using this workspace.',
-    'Missing required argument "prompt".',
-    'Cannot resolve workspace id for this context.',
-    'Cannot ensure workspace directory.',
-    'Cannot resolve requested attachment(s): <names>. Tell the user which file is missing or retry without those attachments.',
-    'Failed to stage attachments: <reasons>',
-    'Cannot load xAI credentials for build: <reason>',
-    'Grok Build failed to start or run: <reason>',
-    'Build hard timeout (<N>s).',
-    'build agent failed without a clear error.',
-    'Error executing build: <reason>' + ADMIN_NOTIFIED_SUFFIX
+  list_files: [
+    'Invalid path "<path>". Use "workspace/<file>" ... (traversal and host paths refused)',
+    '<path> is a file, not a directory. Use read_file to read it.'
+  ],
+  search_files: [
+    'Give at least one of "namePattern" or "contains".'
+  ],
+  read_file: [
+    'Missing required argument "path".',
+    '<path> does not exist. Use list_files to see what is there.        [FILE_UNAVAILABLE]',
+    'No parser is wired up for <kind> files yet ...                     [PARSER_UNAVAILABLE]',
+    '<path> is binary and has no known parser ...                       [UNSUPPORTED_TYPE]',
+    '<path> is <n> KB, too large to read whole ...                      [TOO_LARGE]'
+  ],
+  write_file: [
+    'Missing required argument "path" / "content".',
+    '<path> is read-only. Copy it into workspace/ first, then write there.',
+    'The workspace is busy: another operation on this conversation is still running.',
+    'Could not write <path>: <reason>'
+  ],
+  edit_file: [
+    'That exact text is not in <path>. Read the file again and copy the target text verbatim ...',
+    '"oldText" matches <n> times in <path>. Include enough surrounding lines ... or pass replaceAll=true.',
+    '<path> is binary; edit_file only works on text.',
+    '<path> does not exist. Use write_file to create it.'
+  ],
+  shell: [
+    'Missing required argument "command".',
+    'Command exited with code <rc>.',
+    'The workspace is busy: another operation on this conversation is still running.'
   ],
   generate_formal_request_pdf: [
     'Error generating formal request PDF: <reason> (admin notified).'
@@ -227,7 +256,7 @@ const TOOL_RUNTIME_ERRORS = {
 // per profile. Used to dump the exact "unavailable" message GemiX gets back.
 const ALL_TOOL_NAMES = [
   'web_search', 'x_search', 'web_image_search', 'read_video', 'generate_music', 'generate_image', 'generate_video',
-  'build', 'send_whatsapp_message',
+  'list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell', 'send_whatsapp_message',
   'send_email', 'schedule_tasks', 'read_my_tasks', 'remove_my_tasks',
   'manage_preferences', 'toggle_release_notify',
   'read_music_stats', 'read_sent_messages', 'generate_formal_request_pdf', 'bug_report'
@@ -361,48 +390,45 @@ function renderCase(id) {
   return { staticPart, dynamicPart, dump };
 }
 
-// -- Build sub-agent dump --------------------------------------------------
+// -- Workspace runtime dump ------------------------------------------------
 
-function renderBuildAgentDump() {
-  const rules = buildGrokRules({
-    renamedAttachments: [{ requested: 'logo.png', actual: 'logo(1).png' }],
-    stagedNames: ['logo(1).png']
+function renderWorkspaceRuntimeDump() {
+  const shellSpec = workspaceRuntime.buildExecSpec({
+    command: 'ffmpeg -i input.mov -c:v libx264 out.mp4',
+    timeoutMs: SHELL_TIMEOUT_DEFAULT_MS
   });
-  const spec = buildSandbox.buildGrokExecSpec({
-    prompt: 'Create a short hello.txt in /workspace/',
-    rules,
-    token: 'test-token-not-real',
-    maxTurns: BUILD_MAX_ROUNDS,
-    timeoutMs: BUILD_HARD_TIMEOUT_MS
+  const writeSpec = workspaceRuntime.buildExecSpec({
+    command: ['/bin/bash', '-c', 'mkdir -p "$(dirname "$1")" && cat > "$1"', 'write_file', '/workspace/report.md']
   });
-  const redactedEnv = (spec.env || []).map((e) => (
-    e.startsWith('XAI_API_KEY=') ? 'XAI_API_KEY=[REDACTED]' : e
-  ));
+  const tools = getToolsForUser(true, true, { platform: PLATFORM_WA_DEDICATED, isGroup: false });
+  const workspaceTools = tools.filter(t => WORKSPACE_TOOL_NAMES.has(t?.function?.name));
+
   return [
-    '=== BUILD SUB-AGENT (Grok Build in Docker: --rules + exec contract) ===',
+    '=== WORKSPACE RUNTIME (container exec contract + filesystem tools) ===',
     '',
-    '--- GROK --rules ---',
-    rules,
+    '--- MOUNTS ---',
+    '/workspace    rw   the agent working area',
+    '/attachments  ro   projection of the conversation files',
     '',
-    '--- EXEC (argv, secrets redacted) ---',
-    `cmd: ${JSON.stringify(spec.cmd)}`,
-    `env: ${JSON.stringify(redactedEnv)}`,
-    `timeoutMs: ${spec.timeoutMs}`,
+    '--- EXEC ENV (every exec; no credential is ever passed) ---',
+    JSON.stringify(workspaceRuntime.containerEnv(), null, 2),
+    '',
+    '--- EXEC: shell ---',
+    `cmd: ${JSON.stringify(shellSpec.cmd)}`,
+    `timeoutMs: ${shellSpec.timeoutMs} (max ${SHELL_TIMEOUT_MAX_MS})`,
+    '',
+    '--- EXEC: write_file / edit_file (content arrives on stdin) ---',
+    `cmd: ${JSON.stringify(writeSpec.cmd)}`,
     '',
     '--- HOST CONTRACT ---',
-    '- Auth: host xAI credential injected as XAI_API_KEY for this exec only (no host auth-file mount).',
-    '- After exit: harvest every regular file under /workspace/ into the delivery buffer.',
-    `- Tool result includes free-text agent reply + delivery_note: ${DELIVERY_SELECTION_NOTICE}`,
-    '- No structured JSON schema for build attachments; GemiX-Main selects final user files.',
+    '- Reads (read_file / list_files / search_files) run in-process on the host.',
+    '- Mutations (write_file / edit_file / shell) run via docker exec and take the per-workspace lock.',
+    `- Quota ${WORKSPACE_QUOTA_MB} MB, checked after every mutation; TTL ${WORKSPACE_TTL_LABEL} of inactivity.`,
+    '- Package installs (pip/npm/apt) are disabled in the image.',
     '',
-    '--- TOOL ERRORS (host) ---',
-    '    build:',
-    '        - Cannot resolve requested attachment(s): <names>',
-    '        - build is busy: another request is using this workspace.',
-    '        - Cannot load xAI credentials for build: <reason>',
-    '        - Grok Build failed to start or run: <reason>',
-    '        - Build hard timeout (<N>s).'
+    '--- TOOL SCHEMAS ---',
+    workspaceTools.map(t => `${t.function.name}: ${t.function.description}`).join('\n\n')
   ].join('\n');
 }
 
-export { renderCase, renderBuildAgentDump };
+export { renderCase, renderWorkspaceRuntimeDump };

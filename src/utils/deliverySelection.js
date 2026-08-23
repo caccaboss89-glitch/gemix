@@ -14,7 +14,7 @@ import crypto from 'crypto';
 import { downloadPublicFile, downloadPublicFileToDisk, filenameFromPublicUrl  } from './fetch.js';
 import { sanitizeFilename  } from './text.js';
 import { uniqueAttachmentName  } from './attachments.js';
-import { applyBuildAgentFlags  } from './attachmentDelivery.js';
+import { applyRemoteFetchFlags  } from './attachmentDelivery.js';
 import { getHistoryDir  } from './userPaths.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { TEMP_DIR  } from './tempFileServer.js';
@@ -84,19 +84,19 @@ function createExternalUrlAttachment(url, existing = []) {
 }
 
 /**
- * Resolve one public URL to an attachment, with optional build-agent flags and
- * source-link fallback when hosting fails.
+ * Resolve one public URL to an attachment, with optional WhatsApp link
+ * preference and source-link fallback when hosting fails.
  *
  * @param {string} url
  * @param {Array<object>} existing
- * @param {{ forBuild?: boolean }} [opts]
+ * @param {{ preferWaLink?: boolean }} [opts]
  * @returns {Promise<{ att: object|null, missing: boolean }>}
  */
 async function resolveUrlEntry(url, existing = [], opts = {}) {
   const clean = String(url || '').trim();
   try {
     const att = await resolvePublicUrlAttachment(clean, existing);
-    if (opts.forBuild) applyBuildAgentFlags(att);
+    if (opts.preferWaLink) applyRemoteFetchFlags(att);
     return { att, missing: false };
   } catch (err) {
     if (_isFileTooLargeError(err)) {

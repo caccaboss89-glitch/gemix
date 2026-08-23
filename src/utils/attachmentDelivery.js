@@ -1,6 +1,7 @@
 // Platform delivery policy and attachment partitioning for outbound files.
 // Normal delivery: link only when too heavy for the platform (or externalUrl).
-// Build agent sets waTempLinkPreferred on audio/video via applyBuildAgentFlags().
+// Files fetched from a public URL set waTempLinkPreferred on audio/video via
+// applyRemoteFetchFlags().
 
 import {
   attachmentSize,
@@ -69,8 +70,8 @@ function partitionAttachments(attachments, platform) {
   return { direct, linkOnly };
 }
 
-/** Build-agent deliverables: audio/video always prefer WA temp links. */
-function applyBuildAgentFlags(att) {
+/** Audio/video fetched from a remote URL always prefer WA temp links. */
+function applyRemoteFetchFlags(att) {
   if (att && isWhatsAppAudioVideoAttachment(att)) att.waTempLinkPreferred = true;
   return att;
 }
@@ -98,7 +99,7 @@ export {
   PLATFORM,
   hasExternalUrl,
   partitionAttachments,
-  applyBuildAgentFlags,
+  applyRemoteFetchFlags,
   sendWhatsAppAttachment
 
 };

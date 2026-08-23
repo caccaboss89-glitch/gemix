@@ -12,7 +12,7 @@
 //       user_<sanitized>/             ← build workspaces (workspaceId user:…)
 //       group_<sanitized>/            ← build workspaces (workspaceId group:…)
 //
-// Build trees live under user_* / group_* (see workspaceId.js, buildWorkspace.js).
+// Workspace trees live under user_* / group_* (see workspaceId.js, workspaceFs.js).
 // This module only manages <storageId>/ history paths.
 
 import path from 'path';

@@ -1,33 +1,37 @@
-// src/utils/buildState.js
+// src/utils/workspaceState.js
 //
-// Per-workspace activity tracking and locking for the `build` sub-agent.
+// Per-workspace activity tracking and mutation locking.
 //
 // What's stored:
-//   - lastActivityAt: ms timestamp updated by handler.js on each WhatsApp main
-//     turn (Discord does not touch build workspaces). The workspace TTL counts
-//     inactivity from the user's last WhatsApp interaction with GemiX.
-//   - lock: { ownerId, acquiredAt, expiresAt } - a per-workspace mutex used
-//     by the build tool to serialize concurrent invocations. The lock has
-//     a hard expiry.
+//   - lastActivityAt: ms timestamp updated by handler.js on each main turn.
+//     The workspace TTL counts inactivity from the user's last interaction
+//     with GemiX, not from the last file write.
+//   - lock: { ownerId, acquiredAt, expiresAt } - a per-workspace mutex the
+//     mutating tools (write_file / edit_file / shell) hold so two turns on the
+//     same conversation cannot interleave writes. Reads take no lock and run in
+//     parallel. The lock has a hard expiry so a crashed turn cannot wedge the
+//     workspace forever.
 //
-// Both pieces of state live in `<workspaceMetaDir>/.build_state.json` and
-// are written atomically (tmp + rename).
+// Both pieces of state live in `<workspaceMetaDir>/.build_state.json` and are
+// written atomically (tmp + rename). The filename is historical and kept so an
+// upgrade does not lose an existing workspace's activity timestamp.
 
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { getBuildWorkspaceMetaDir  } from './workspaceId.js';
+import { getWorkspaceMetaDir  } from './workspaceId.js';
 import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 
-const log = createLogger('BuildState');
+const log = createLogger('WorkspaceState');
 
 const STATE_FILENAME = '.build_state.json';
-// Hard ceiling for a held lock: constants.BUILD_HARD_TIMEOUT_MS + 60s margin.
-const LOCK_MAX_TTL_MS = constants.BUILD_HARD_TIMEOUT_MS + 60_000;
+// Hard ceiling for a held lock: the longest a single shell call can run, plus
+// margin for the host-side teardown that follows it.
+const LOCK_MAX_TTL_MS = constants.SHELL_TIMEOUT_MAX_MS + 60_000;
 
 function _stateFile(workspaceId) {
-  const metaDir = getBuildWorkspaceMetaDir(workspaceId);
+  const metaDir = getWorkspaceMetaDir(workspaceId);
   if (!metaDir) return null;
   if (!fs.existsSync(metaDir)) {
     try { fs.mkdirSync(metaDir, { recursive: true }); }
@@ -77,14 +81,15 @@ function touchActivity(workspaceId) {
 }
 
 /**
- * Try to acquire the build lock for this workspace, polling up to
- * constants.BUILD_LOCK_WAIT_MS. Returns the owner id on success or throws on timeout.
+ * Try to acquire the mutation lock for this workspace, polling up to
+ * constants.WORKSPACE_LOCK_WAIT_MS. Returns the owner id on success or throws
+ * on timeout.
  *
  * Stale locks (held longer than LOCK_MAX_TTL_MS) are reaped automatically.
  */
-async function acquireBuildLock(workspaceId, opts = {}) {
+async function acquireWorkspaceLock(workspaceId, opts = {}) {
   const ownerId = opts.ownerId || crypto.randomBytes(8).toString('hex');
-  const waitMs = Number.isFinite(opts.waitMs) ? opts.waitMs : constants.BUILD_LOCK_WAIT_MS;
+  const waitMs = Number.isFinite(opts.waitMs) ? opts.waitMs : constants.WORKSPACE_LOCK_WAIT_MS;
   const start = Date.now();
 
   while (true) {
@@ -108,8 +113,8 @@ async function acquireBuildLock(workspaceId, opts = {}) {
     }
 
     if (Date.now() - start >= waitMs) {
-      const err = new Error('build is busy: another request is using this workspace.');
-      err.code = 'EBUILDBUSY';
+      const err = new Error('The workspace is busy: another operation on this conversation is still running.');
+      err.code = 'EWORKSPACEBUSY';
       throw err;
     }
     await new Promise(r => setTimeout(r, 500));
@@ -119,7 +124,7 @@ async function acquireBuildLock(workspaceId, opts = {}) {
 /**
  * Release the lock for the given ownerId. No-op if a different owner holds it.
  */
-function releaseBuildLock(workspaceId, ownerId) {
+function releaseWorkspaceLock(workspaceId, ownerId) {
   if (!workspaceId || !ownerId) return;
   const state = _readState(workspaceId);
   if (state.lock && state.lock.ownerId === ownerId) {
@@ -129,10 +134,29 @@ function releaseBuildLock(workspaceId, ownerId) {
 }
 
 /**
- * Push the lock's expiry forward if the given ownerId holds the lock.
- * Called during active build progress.
+ * Run `fn` holding the workspace mutation lock, releasing it whatever happens.
+ * Every write/edit/shell call goes through here, which is what serializes
+ * mutations per workspace while leaving reads unlocked.
+ *
+ * @param {string} workspaceId
+ * @param {object} opts - forwarded to acquireWorkspaceLock
+ * @param {Function} fn - async () => T
+ * @returns {Promise<T>}
  */
-function renewBuildLock(workspaceId, ownerId) {
+async function withWorkspaceLock(workspaceId, opts, fn) {
+  const ownerId = await acquireWorkspaceLock(workspaceId, opts);
+  try {
+    return await fn();
+  } finally {
+    releaseWorkspaceLock(workspaceId, ownerId);
+  }
+}
+
+/**
+ * Push the lock's expiry forward if the given ownerId holds the lock.
+ * Called while a long operation is still making progress.
+ */
+function renewWorkspaceLock(workspaceId, ownerId) {
   if (!workspaceId || !ownerId) return false;
   const state = _readState(workspaceId);
   if (state.lock && state.lock.ownerId === ownerId) {
@@ -144,9 +168,9 @@ function renewBuildLock(workspaceId, ownerId) {
 }
 
 /**
- * Iterate over every workspace_meta dir under constants.DATA_DIR/users/ that has a
- * build_state file. Returns [{ workspaceSlug, workspaceId, metaDir, lastActivityAt, lock }].
- * Used by the cron sweeper to find stale workspaces to wipe.
+ * Iterate over every workspace meta dir under constants.DATA_DIR/users/ that
+ * has a state file. Returns [{ workspaceSlug, workspaceId, metaDir,
+ * lastActivityAt, lock }]. Used by the cron sweeper to find stale workspaces.
  */
 function listWorkspaceStates() {
   const usersDir = path.join(constants.DATA_DIR, 'users');
@@ -177,10 +201,11 @@ function listWorkspaceStates() {
 }
 
 export {
+  LOCK_MAX_TTL_MS,
   touchActivity,
-  acquireBuildLock,
-  releaseBuildLock,
-  renewBuildLock,
+  acquireWorkspaceLock,
+  releaseWorkspaceLock,
+  withWorkspaceLock,
+  renewWorkspaceLock,
   listWorkspaceStates
-
 };
