@@ -108,6 +108,23 @@ export default {
   /** Cap on captured stdout/stderr and on host-side file reads returned to the model. */
   WORKSPACE_OUTPUT_MAX_BYTES: 200 * 1024,
 
+  // read_file parser stack. The cache is host-only and invisible to the model
+  // (never mounted in the container); it shares the workspace TTL and is swept
+  // on the same hourly pass, bounded globally so one heavy chat cannot fill
+  // the disk. The rest are the whitelist limits read_file enforces before it
+  // hands a file to a parser.
+  PARSER_CACHE_CAP_MB: 200,
+  /** Largest file read_file will hand to the document parser. */
+  PARSE_MAX_DOCUMENT_BYTES: 100 * 1024 * 1024,
+  /** Longest document text returned in one call, before the model must page. */
+  PARSE_MAX_TEXT_CHARS: 120_000,
+  /** PDF pages rendered as images alongside the text, when the text is thin. */
+  PARSE_MAX_PDF_RENDER_PAGES: 5,
+  /** Frames sampled from a video and attached to the tool result. */
+  PARSE_MAX_VIDEO_FRAMES: 8,
+  /** Images pulled out of a document and attached to the tool result. */
+  PARSE_MAX_EMBEDDED_IMAGES: 4,
+
   // Media. The reference-image caps and the image-search counts live here
   // rather than in the tool modules because the tool *schemas* quote them:
   // importing them from src/ai/tools.js the other way round closes a cycle

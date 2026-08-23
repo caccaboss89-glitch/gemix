@@ -163,6 +163,7 @@ export default {
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   FFPROBE_PATH: process.env.FFPROBE_PATH || 'ffprobe',
   FFMPEG_PATH: process.env.FFMPEG_PATH || 'ffmpeg',
+  TESSERACT_PATH: process.env.TESSERACT_PATH || 'tesseract',
 
   GEMIX_SANDBOX_IMAGE: process.env.GEMIX_SANDBOX_IMAGE || 'gemix-sandbox:latest',
   GEMIX_SANDBOX_NETWORK: process.env.GEMIX_SANDBOX_NETWORK || 'gemix_sandbox_net',

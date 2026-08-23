@@ -22,6 +22,7 @@ import { listWorkspaceStates  } from '../utils/workspaceState.js';
 import workspaceRuntime from '../sandbox/workspaceRuntime.js';
 import { wipeWorkspace  } from '../sandbox/workspaceFs.js';
 import { clearProjection, sweepExpiredAttachments } from '../attachments/projection.js';
+import { clearParserCache, sweepParserCache } from '../parsers/parserCache.js';
 
 const log = createLogger('Scheduler');
 
@@ -38,9 +39,9 @@ let _cycleInFlight = false;
  * constants.WORKSPACE_TTL_MS, along with its attachment projection, and shuts
  * down the matching container. The metadata file is left in place.
  *
- * Projected attachments are also swept on their own clock: a file keeps its
- * 4h from the last time it was used, not from the last message in the chat,
- * so an active conversation still lets an untouched attachment go.
+ * Projected attachments and cached parses are also swept on their own clock: an
+ * entry keeps its 4h from the last time it was used, not from the last message
+ * in the chat, so an active conversation still lets an untouched file go.
  */
 async function _sweepStaleWorkspaces() {
   const states = listWorkspaceStates();
@@ -59,12 +60,17 @@ async function _sweepStaleWorkspaces() {
     catch (err) { log.warn(`wipeWorkspace failed: ${err.message}`); }
     try { clearProjection(workspaceId); }
     catch (err) { log.warn(`clearProjection failed: ${err.message}`); }
+    try { clearParserCache(workspaceId); }
+    catch (err) { log.warn(`clearParserCache failed: ${err.message}`); }
     try { await workspaceRuntime.shutdown(workspaceId); }
     catch (err) { log.warn(`workspace container shutdown failed: ${err.message}`); }
   }
 
   try { sweepExpiredAttachments(now); }
   catch (err) { log.warn(`attachment sweep failed: ${err.message}`); }
+
+  try { sweepParserCache(now); }
+  catch (err) { log.warn(`parser cache sweep failed: ${err.message}`); }
 }
 
 /**

@@ -143,7 +143,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       const lockOpts = { lockOwnerId: userCtx.requestId ? `${userCtx.requestId}:workspace` : undefined };
       if (name === 'list_files') result = listFiles(args, workspaceId);
       else if (name === 'search_files') result = searchFiles(args, workspaceId);
-      else if (name === 'read_file') result = readFile(args, workspaceId);
+      else if (name === 'read_file') result = await readFile(args, workspaceId);
       else if (name === 'write_file') result = await writeFile(args, workspaceId, lockOpts);
       else if (name === 'edit_file') result = await editFile(args, workspaceId, lockOpts);
       else result = await shell(args, workspaceId, lockOpts);

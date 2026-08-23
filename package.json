@@ -15,6 +15,7 @@
     "test:dumps": "node scripts/regenerate-prompt-dumps.js"
   },
   "dependencies": {
+    "@kreuzberg/node": "^4.10.2",
     "discord.js": "^14.16.3",
     "dockerode": "^4.0.7",
     "dotenv": "^16.4.7",
@@ -23,6 +24,7 @@
     "pdfkit": "^0.15.1",
     "puppeteer-core": "^24.39.1",
     "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.35.3",
     "whatsapp-web.js": "github:lindionez/whatsapp-web.js#ea60403",
     "ws": "^8.18.0"
   },

@@ -125,56 +125,62 @@ test('search_files needs something to search for', () => {
 
 // -- read_file ----------------------------------------------------------------
 
-test('read_file returns text content with a line count', () => {
-  const res = readFile({ path: 'workspace/notes.md' }, WORKSPACE_ID);
+test('read_file returns text content with a line count', async () => {
+  const res = await readFile({ path: 'workspace/notes.md' }, WORKSPACE_ID);
   assert.equal(res.success, true);
   assert.equal(res.kind, 'text');
   assert.match(res.content, /alpha beta/);
   assert.equal(res.metadata.lines, 4);
 });
 
-test('read_file pages a text file with offset and limit', () => {
-  const res = readFile({ path: 'workspace/notes.md', offset: 2, limit: 1 }, WORKSPACE_ID);
+test('read_file pages a text file with offset and limit', async () => {
+  const res = await readFile({ path: 'workspace/notes.md', offset: 2, limit: 1 }, WORKSPACE_ID);
   assert.equal(res.content, 'alpha beta');
   assert.match(res.message, /Lines 2-2 of 4/);
 });
 
-test('read_file attaches an image as a content part', () => {
-  const res = readFile({ path: 'workspace/logo.png' }, WORKSPACE_ID);
+test('read_file attaches an image as a content part', async () => {
+  const res = await readFile({ path: 'workspace/logo.png' }, WORKSPACE_ID);
   assert.ok(Array.isArray(res), 'image reads return content parts');
   const [envelope, part] = res;
-  assert.equal(JSON.parse(envelope.text).kind, 'image');
+  const parsed = JSON.parse(envelope.text);
+  assert.equal(parsed.kind, 'image');
+  assert.equal(parsed.metadata.width, 1, 'image metadata comes back with it');
   assert.equal(part.type, 'input_image');
   assert.match(part.image_url, /^data:image\/png;base64,/);
 });
 
-test('read_file reports a missing file as FILE_UNAVAILABLE', () => {
-  const res = readFile({ path: 'workspace/nope.txt' }, WORKSPACE_ID);
+test('read_file reports a missing file as FILE_UNAVAILABLE', async () => {
+  const res = await readFile({ path: 'workspace/nope.txt' }, WORKSPACE_ID);
   assert.equal(res.success, false);
   assert.equal(res.error_code, READ_ERROR.FILE_UNAVAILABLE);
 });
 
-test('read_file reports a not-yet-wired parser as PARSER_UNAVAILABLE', () => {
-  const res = readFile({ path: 'workspace/report.pdf' }, WORKSPACE_ID);
+test('read_file reports a file no parser can open as PARSER_UNAVAILABLE', async () => {
+  // A .pdf extension over bytes that are not a PDF: the dispatch is right and
+  // the parser is the thing that fails, which is a different answer from
+  // "unsupported type".
+  const res = await readFile({ path: 'workspace/report.pdf' }, WORKSPACE_ID);
   assert.equal(res.success, false);
   assert.equal(res.error_code, READ_ERROR.PARSER_UNAVAILABLE);
   assert.equal(res.metadata.extension, '.pdf');
 });
 
-test('read_file refuses an unparsable binary rather than returning bytes', () => {
-  const res = readFile({ path: 'workspace/blob.dat' }, WORKSPACE_ID);
+test('read_file refuses an unparsable binary rather than returning bytes', async () => {
+  const res = await readFile({ path: 'workspace/blob.dat' }, WORKSPACE_ID);
   assert.equal(res.success, false);
   assert.equal(res.error_code, READ_ERROR.UNSUPPORTED_TYPE);
 });
 
-test('read_file reaches into attachments/ through the same call', () => {
-  const res = readFile({ path: 'attachments/missing.txt' }, WORKSPACE_ID);
+test('read_file reaches into attachments/ through the same call', async () => {
+  const res = await readFile({ path: 'attachments/missing.txt' }, WORKSPACE_ID);
   assert.equal(res.error_code, READ_ERROR.FILE_UNAVAILABLE);
   assert.match(res.error, /^attachments\/missing\.txt/);
 });
 
-test('read_file refuses a traversal', () => {
-  assert.equal(readFile({ path: '../../package.json' }, WORKSPACE_ID).success, false);
+test('read_file refuses a traversal', async () => {
+  const res = await readFile({ path: '../../package.json' }, WORKSPACE_ID);
+  assert.equal(res.success, false);
 });
 
 // -- mutation guards ----------------------------------------------------------
