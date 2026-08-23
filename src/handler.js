@@ -63,7 +63,6 @@ import { sanitizeDiscordThreadTitle  } from './utils/discord.js';
 import { loadRegolamento  } from './utils/regolamento.js';
 import { resolveStorageId, resolveSettingsFileId  } from './utils/userPaths.js';
 import { generatePromptCacheKey  } from './utils/promptCacheKey.js';
-import { pruneHistory, collectReferencedHistoryFilenames, DISCORD_MAX_AGE_MS  } from './utils/historySync.js';
 import { enableReleaseNotify  } from './tools/releaseNotify.js';
 import { sendWhatsAppDirect  } from './tools/whatsappSender.js';
 import {
@@ -137,7 +136,6 @@ async function handleMessage(ctx) {
     researchStats: null
   };
 
-  let pruneAfterTurn = null;
   try {
     const ui = ctx.userIdentity;
     const isActiveMember = ui.isActiveMember;
@@ -352,25 +350,6 @@ async function handleMessage(ctx) {
       }
     };
 
-    try {
-      const historyUserId = resolveStorageId(ctx);
-      if (historyUserId) {
-        if (ctx.historyLoadIncomplete) {
-          pruneAfterTurn = {
-            historyUserId,
-            referenced: new Set(),
-            opts: { maxAgeMs: DISCORD_MAX_AGE_MS, ageOnly: true }
-          };
-        } else {
-          const referenced = collectReferencedHistoryFilenames(ctx.history, ctx.content);
-          const opts = isDiscord ? { maxAgeMs: DISCORD_MAX_AGE_MS } : {};
-          pruneAfterTurn = { historyUserId, referenced, opts };
-        }
-      }
-    } catch (pruneErr) {
-      log.warn(`pruneHistory setup failed: ${pruneErr.message}`);
-    }
-
     // One outbound message per destination per turn (per-round tool caps are
     // enforced upstream by perRoundCappedDuplicateIds).
     const deliveryCtx = {
@@ -397,11 +376,12 @@ async function handleMessage(ctx) {
       responseCtx.researchStats.xPosts += searchStats.xPosts;
     };
 
-    // Resolve the attachments the model listed in its structured final reply
-    // (delivery-buffer filenames and/or public URLs). Only listed files ship.
+    // Resolve the attachments the model listed in its structured final reply:
+    // paths in this conversation's namespace, or public https URLs. Only what
+    // it listed ships.
     const resolveFinalAttachments = async (parsed) => {
       if (!parsed.structured) return [];
-      const { attachments, missing } = await resolveDeliverySelection(parsed.attachments, responseCtx, userCtx);
+      const { attachments, missing } = await resolveDeliverySelection(parsed.attachments, workspaceId);
       if (missing.length > 0) {
         log.warn(`   Final reply attachments not resolved: ${missing.join(', ')}`);
       }
@@ -773,16 +753,10 @@ async function handleMessage(ctx) {
       systemMessage: true
     };
   } finally {
-    if (pruneAfterTurn) {
-      try {
-        if (ctx.historyLoadIncomplete) {
-          log.warn('History load incomplete: reference-based prune skipped (age-only disk sweep)');
-        }
-        pruneHistory(pruneAfterTurn.historyUserId, pruneAfterTurn.referenced, pruneAfterTurn.opts);
-      } catch (pruneErr) {
-        log.warn(`pruneHistory failed: ${pruneErr.message}`);
-      }
-    }
+    // Nothing is pruned here: the history store expires on the shared hourly
+    // sweep, 4h sliding from last use (spec §8.6). Deleting per turn is what
+    // made a returning attachment unrecoverable.
+    //
     // Drop per-call notification dedup entries so subsequent AI calls can
     // fire intermediate notifications.
     try { clearCallNotifications(ctx); } catch { /* best effort */ }

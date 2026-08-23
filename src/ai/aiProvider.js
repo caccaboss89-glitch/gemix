@@ -104,7 +104,10 @@ async function callAI(items, tools = null, opts = {}) {
     include: profile.wire.supportsReasoningReplay ? ['reasoning.encrypted_content'] : null
   });
 
-  const response = await transport.createResponse({
+  // The transport hands back the assembled response inside an envelope that
+  // also carries the upstream request id and usage; the response itself is what
+  // the protocol reader takes.
+  const { response } = await transport.createResponse({
     body,
     budget: opts.budget || null,
     requestId: opts.requestId || null,
@@ -138,4 +141,18 @@ function _resetProviderClientForTests() {
   _credentialProvider = null;
 }
 
-export { callAI, getCredentialProvider, getTransport, _resetProviderClientForTests };
+/**
+ * Install a transport for the process. Tests only: it is what lets the seam
+ * between the transport and this module be exercised without a live provider.
+ */
+function _setTransportForTests(transport) {
+  _transport = transport;
+}
+
+export {
+  callAI,
+  getCredentialProvider,
+  getTransport,
+  _resetProviderClientForTests,
+  _setTransportForTests
+};

@@ -10,7 +10,6 @@ import path from 'path';
 import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
 import { sanitizeFilename  } from './text.js';
-import { extractAttachmentTagPaths  } from './media.js';
 import { withKeyedLock  } from './keyedLock.js';
 
 const log = createLogger('HistorySync');
@@ -18,7 +17,9 @@ const log = createLogger('HistorySync');
 // Age cap on on-disk history attachments when reference-based prune is skipped
 // (history fetch timeout/incomplete). Files older than this TTL are removed;
 // the next successful history rebuild re-syncs media from the last MAX_HISTORY messages.
-const DISCORD_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+// Retention of the durable history store, shared with the workspace and the
+// attachment projection so one conversation expires as a whole (spec §8.6).
+const HISTORY_RETENTION_MS = constants.WORKSPACE_TTL_MS;
 const GEMIX_VOICE_TEXT_CACHE_FILE = path.join(constants.DATA_DIR, 'gemixVoiceTextCache.json');
 const RECENT_VOICE_MAX_ENTRIES = 200;
 /** Match cache entry to history message time (voice sent vs history rebuild delay). */
@@ -396,46 +397,39 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
 }
 
 /**
- * Deterministic prune. Called by the handler after each user turn completes.
- * Removes from disk every file that is no longer reachable from the chat
- * that is no longer reachable from the current chat history (i.e. its
- * filename does not appear in the set of `[Attachment: <name>]`
- * tags the AI is about to see).
+ * Age sweep of one conversation's history store, on the shared hourly clock.
  *
- * Optionally also removes files older than `maxAgeMs` (Discord: 4h; WA: none).
- * Discord re-fetches missing files from the thread when history is rebuilt.
+ * Retention is 4h sliding from last use (spec §8.6): a file's mtime is
+ * refreshed when it is reused, so an active chat still lets an untouched file
+ * go while a file the model keeps opening stays.
+ *
+ * The old post-turn referential prune is deliberately gone. It deleted anything
+ * that had fallen out of the 30-message window the moment it fell out, which
+ * made rehydration impossible and, once history tags became full paths, matched
+ * nothing at all and deleted the whole store every turn.
  *
  * @param {string} userId
- * @param {Set<string>|Iterable<string>} referencedFilenames - bare filenames referenced in chat history or the current turn (no "history/" prefix)
  * @param {object} [opts]
- * @param {number} [opts.maxAgeMs] - extra age cap (Discord: 4h via DISCORD_MAX_AGE_MS; WA: none)
- * @param {boolean} [opts.ageOnly] - when true, delete only files older than maxAgeMs (safe if history load failed)
- * @returns {{deletedCount: number, ageDeletedCount: number, kept: number}}
+ * @param {number} [opts.maxAgeMs] - retention window; defaults to the workspace TTL
+ * @param {number} [opts.now]
+ * @returns {{deletedCount: number, kept: number}}
  */
-function pruneHistory(userId, referencedFilenames, opts = {}) {
-  if (!userId) return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
+function sweepHistoryStore(userId, opts = {}) {
+  if (!userId) return { deletedCount: 0, kept: 0 };
   const { historyDir, metaFile } = getUserHistoryPaths(userId);
-  if (!fs.existsSync(historyDir)) return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
+  if (!fs.existsSync(historyDir)) return { deletedCount: 0, kept: 0 };
 
-  // Build referenced set. For PDF dirs stored as "name/", the attachment tag
-  // path is "name/" so the bare filename reaching us is "name/".
-  const referenced = referencedFilenames instanceof Set
-    ? referencedFilenames
-    : new Set(referencedFilenames || []);
-
-  const now = Date.now();
-  const maxAgeMs = Number.isFinite(opts.maxAgeMs) ? opts.maxAgeMs : null;
-  const ageOnly = Boolean(opts.ageOnly);
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+  const maxAgeMs = Number.isFinite(opts.maxAgeMs) ? opts.maxAgeMs : HISTORY_RETENTION_MS;
 
   let deletedCount = 0;
-  let ageDeletedCount = 0;
   let kept = 0;
 
   let entries;
   try { entries = fs.readdirSync(historyDir); }
   catch (err) {
-    log.error(`pruneHistory readdir failed for ${userId}: ${err.message}`);
-    return { deletedCount: 0, ageDeletedCount: 0, kept: 0 };
+    log.error(`sweepHistoryStore readdir failed for ${userId}: ${err.message}`);
+    return { deletedCount: 0, kept: 0 };
   }
 
   for (const entry of entries) {
@@ -444,37 +438,13 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
     try { stat = fs.statSync(entryPath); }
     catch { continue; }
 
-    // For directories (PDF dirs), the reference key includes trailing slash
-    const refKey = stat.isDirectory() ? entry + '/' : entry;
-
-    let shouldDelete = false;
-    let ageDelete = false;
-    if (ageOnly) {
-      if (maxAgeMs !== null && (now - stat.mtimeMs) > maxAgeMs) {
-        shouldDelete = true;
-        ageDelete = true;
-      }
-    } else if (!referenced.has(refKey) && !referenced.has(entry)) {
-      shouldDelete = true;
-    } else if (maxAgeMs !== null && (now - stat.mtimeMs) > maxAgeMs) {
-      shouldDelete = true;
-      ageDelete = true;
-    }
-
-    if (shouldDelete) {
-      try {
-        if (stat.isDirectory()) {
-          fs.rmSync(entryPath, { recursive: true, force: true });
-        } else {
-          fs.unlinkSync(entryPath);
-        }
-        deletedCount++;
-        if (ageDelete) ageDeletedCount++;
-      } catch (err) {
-        log.warn(`pruneHistory remove failed for ${entry}: ${err.message}`);
-      }
-    } else {
-      kept++;
+    if ((now - stat.mtimeMs) <= maxAgeMs) { kept++; continue; }
+    try {
+      if (stat.isDirectory()) fs.rmSync(entryPath, { recursive: true, force: true });
+      else fs.unlinkSync(entryPath);
+      deletedCount++;
+    } catch (err) {
+      log.warn(`sweepHistoryStore remove failed for ${entry}: ${err.message}`);
     }
   }
 
@@ -493,61 +463,30 @@ function pruneHistory(userId, referencedFilenames, opts = {}) {
           changed = true;
         }
       }
-      if (changed) {
-        _saveMeta(metaFile, meta, userId);
-      }
+      if (changed) _saveMeta(metaFile, meta, userId);
     } catch (err) {
-      log.warn(`pruneHistory meta sync failed for ${userId}: ${err.message}`);
+      log.warn(`sweepHistoryStore meta sync failed for ${userId}: ${err.message}`);
     }
   }
 
   if (deletedCount > 0) {
-    log.info(`pruneHistory user=${userId} removed=${deletedCount} (age-based=${ageDeletedCount}) kept=${kept}`);
+    log.info(`sweepHistoryStore user=${userId} removed=${deletedCount} kept=${kept}`);
   }
-  return { deletedCount, ageDeletedCount, kept };
+  return { deletedCount, kept };
 }
 
-/**
- * Collect on-disk history filenames still referenced by chat history or the
- * current turn (attachment tags, multimodal _historyPath hints).
- *
- * @param {Array<{content: any}>} historyMsgs
- * @param {any} [currentContent] - current turn user content
- * @returns {Set<string>}
- */
-function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
-  const out = new Set();
-  const _addName = (raw) => {
-    if (!raw || typeof raw !== 'string') return;
-    let name = raw.trim().replace(/\\/g, '/');
-    if (name.startsWith('history/')) name = name.slice('history/'.length).trim();
-    if (name) out.add(name);
-  };
-  const _scanText = (text) => {
-    if (typeof text !== 'string' || text.length === 0) return;
-    for (const taggedPath of extractAttachmentTagPaths(text)) _addName(taggedPath);
-  };
-  const _scanPart = (part) => {
-    if (!part || typeof part !== 'object') return;
-    if (typeof part.text === 'string') _scanText(part.text);
-    if (typeof part._historyPath === 'string') _addName(part._historyPath);
-    if (typeof part._xaiSourcePath === 'string') {
-      const base = path.basename(part._xaiSourcePath);
-      if (base) _addName(base);
-    }
-  };
-  const _scanContent = (c) => {
-    if (!c) return;
-    if (typeof c === 'string') return _scanText(c);
-    if (Array.isArray(c)) {
-      for (const part of c) _scanPart(part);
-    }
-  };
-  if (Array.isArray(historyMsgs)) {
-    for (const msg of historyMsgs) _scanContent(msg && msg.content);
+/** Sweep every conversation's history store in one pass. */
+function sweepAllHistoryStores(now = Date.now()) {
+  let removed = 0;
+  let dirs;
+  try { dirs = fs.readdirSync(path.join(constants.DATA_DIR, 'users'), { withFileTypes: true }); }
+  catch { return { removed: 0 }; }
+
+  for (const dirent of dirs) {
+    if (!dirent.isDirectory()) continue;
+    removed += sweepHistoryStore(dirent.name, { now }).deletedCount;
   }
-  _scanContent(currentContent);
-  return out;
+  return { removed };
 }
 
 _loadRecentVoiceEntries();
@@ -561,8 +500,7 @@ export {
   storeUserTranscription,
   storeRecentVoiceText,
   forgetRecentVoiceText,
-  pruneHistory,
-  collectReferencedHistoryFilenames,
-  DISCORD_MAX_AGE_MS
-
+  sweepAllHistoryStores,
+  sweepHistoryStore,
+  HISTORY_RETENTION_MS
 };
