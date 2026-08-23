@@ -276,7 +276,7 @@ async function readSentMessages(args, userCtx) {
   const payload = { success: true, message, recipients: [...groups.values()] };
 
   if (nativeParts.length > 0) {
-    return [{ type: 'text', text: JSON.stringify(payload) }, ...nativeParts];
+    return [{ type: 'input_text', text: JSON.stringify(payload) }, ...nativeParts];
   }
   return payload;
 }

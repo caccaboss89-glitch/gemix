@@ -77,7 +77,7 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
  * tags with stored transcriptions become <PastVoiceReply> on those same
  * assistant messages.
  *
- * @param {Array} history - chat-completion history messages
+ * @param {Array} history - Responses items for this conversation
  * @param {string|null} storageId - history storage id for this conversation
  * @returns {{ history: Array, replacedCount: number }}
  */
@@ -89,38 +89,23 @@ function applyPastVoiceRepliesToHistory(history, storageId) {
   const seen = new Set();
   let replacedCount = 0;
   const out = history.map((msg) => {
-    if (!msg || msg.role !== 'assistant') return msg;
+    // An assistant turn is a `message` item; its words live in output_text parts.
+    if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.content)) return msg;
 
-    if (typeof msg.content === 'string') {
+    let partChanged = false;
+    const parts = msg.content.map((part) => {
+      if (!part || part.type !== 'output_text' || typeof part.text !== 'string') return part;
       const { content, replaced } = _replaceVoiceAttachmentsInAssistantContent(
-        msg.content,
+        part.text,
         storageId,
         seen
       );
-      if (replaced === 0) return msg;
+      if (replaced === 0) return part;
       replacedCount += replaced;
-      return { ...msg, content };
-    }
-
-    // Rare: assistant content as array of parts
-    if (Array.isArray(msg.content)) {
-      let partChanged = false;
-      const parts = msg.content.map((part) => {
-        if (!part || part.type !== 'text' || typeof part.text !== 'string') return part;
-        const { content, replaced } = _replaceVoiceAttachmentsInAssistantContent(
-          part.text,
-          storageId,
-          seen
-        );
-        if (replaced === 0) return part;
-        replacedCount += replaced;
-        partChanged = true;
-        return { ...part, text: content };
-      });
-      return partChanged ? { ...msg, content: parts } : msg;
-    }
-
-    return msg;
+      partChanged = true;
+      return { ...part, text: content };
+    });
+    return partChanged ? { ...msg, content: parts } : msg;
   });
 
   return { history: out, replacedCount };

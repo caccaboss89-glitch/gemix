@@ -16,6 +16,7 @@ import { identifyUser } from '../../utils/userIdentifier.js';
 import { formatTimestamp } from '../../utils/time.js';
 import { ingressDiscordAttachment } from '../../utils/incomingMediaIngress.js';
 import { resolveChatWorkspaceId } from '../../utils/workspaceId.js';
+import { assistantTextItem, userItem } from '../../ai/responsesItems.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { enqueueBatchedTurn } from '../../utils/batchIngress.js';
 import { pickLatestBatchEntry } from '../../utils/batchContext.js';
@@ -204,7 +205,7 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
 
   if (textBody) {
     const tsMs = msg.createdAt?.getTime?.() || Date.now();
-    contentParts.unshift({ type: 'text', text: formatLabeledUserContent(tsMs, senderName, textBody) });
+    contentParts.unshift({ type: 'input_text', text: formatLabeledUserContent(tsMs, senderName, textBody) });
   }
 
   return contentParts;
@@ -555,10 +556,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     if (isSystemNotice) finalText = wrapSystemNotification(`[${ts}] ${textContent}`);
     else finalText = isBot ? textContent : `[${ts}] ${senderName}: ${textContent}`;
 
-    return {
-      role: isBot && !isSystemNotice ? 'assistant' : 'user',
-      content: finalText
-    };
+    return isBot && !isSystemNotice ? assistantTextItem(finalText) : userItem(finalText);
   }
 
   // Build entries in parallel, preserving order.

@@ -24,7 +24,6 @@ import {
   readResponse,
   toolsToWire
 } from './transport/responsesProtocol.js';
-import { chatMessagesToResponsesItems } from './responsesAdapter.js';
 
 const log = createLogger('AI');
 
@@ -65,9 +64,8 @@ function _resolveEffort(profile, requested) {
 /**
  * Run one round of the agent loop against the active provider.
  *
- * @param {Array} messages - conversation for this round. Chat-style messages are
- *   still accepted and normalized (see responsesAdapter.js, removed in phase 8);
- *   Responses-native items pass straight through.
+ * @param {Array} items - the conversation for this round, as Responses-native
+ *   items (see ai/responsesItems.js). There is no other accepted shape.
  * @param {Array|null} tools - GemiX tool definitions plus any native tool the
  *   profile's feature bindings enabled.
  * @param {object} [opts]
@@ -78,9 +76,10 @@ function _resolveEffort(profile, requested) {
  * @param {number} [opts.maxTurns]
  * @param {string|null} [opts.requestId]
  * @param {import('../utils/turnBudget.js').TurnBudget|null} [opts.budget]
- * @returns {Promise<{ message: object, provider: string, model: string, searchStats: object }>}
+ * @returns {Promise<{ reply: {text: string, toolCalls: Array, items: Array},
+ *   provider: string, model: string, searchStats: object }>}
  */
-async function callAI(messages, tools = null, opts = {}) {
+async function callAI(items, tools = null, opts = {}) {
   const profile = resolveProviderProfile();
   const transport = getTransport();
   const replayableItemTypes = profile.extensions?.replayableItemTypes || BASE_REPLAYABLE_ITEM_TYPES;
@@ -93,7 +92,7 @@ async function callAI(messages, tools = null, opts = {}) {
 
   const body = buildResponsesBody({
     model: profile.model,
-    input: buildResponsesInput(chatMessagesToResponsesItems(messages), { replayableItemTypes }),
+    input: buildResponsesInput(items, { replayableItemTypes }),
     reasoningEffort: _resolveEffort(profile, opts.reasoningEffort),
     tools: toolsToWire(tools),
     toolChoice: opts.toolChoice || 'auto',
@@ -121,18 +120,16 @@ async function callAI(messages, tools = null, opts = {}) {
     log.warn(`   response incomplete (${read.incompleteReason})`);
   }
 
-  // Chat-style shape the handler loop still consumes (removed in phase 8).
-  const message = { role: 'assistant', content: read.text };
-  if (read.toolCalls.length > 0) {
-    message.tool_calls = read.toolCalls.map(tc => ({
-      id: tc.id,
-      type: 'function',
-      function: { name: tc.name, arguments: tc.arguments }
-    }));
-  }
-  if (read.replayItems.length > 0) message._responsesOutput = read.replayItems;
+  // What the round produced, in the same item language the request was built
+  // in: `items` is what goes back into the conversation, `text` and `toolCalls`
+  // are the two things the loop has to decide on.
+  const reply = {
+    text: read.text,
+    toolCalls: read.toolCalls,
+    items: read.replayItems
+  };
 
-  return { message, provider: profile.displayName, model: profile.model, searchStats };
+  return { reply, provider: profile.displayName, model: profile.model, searchStats };
 }
 
 /** Reset the memoized transport and credentials. Tests only. */

@@ -375,7 +375,7 @@ async function generateImage(args, userCtx) {
         + backendNote
         + (visionPart ? ' Attached below so you can see it.' : '')
     };
-    return visionPart ? [{ type: 'text', text: JSON.stringify(payload) }, visionPart] : payload;
+    return visionPart ? [{ type: 'input_text', text: JSON.stringify(payload) }, visionPart] : payload;
   } finally {
     await quota.release();
   }

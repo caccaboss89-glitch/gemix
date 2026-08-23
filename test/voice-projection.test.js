@@ -14,6 +14,7 @@ import { getUserHistoryPaths, storeUserTranscription } from '../src/utils/histor
 import { contentHashOf, isSttConfigured, sttModelId } from '../src/media/speechToText.js';
 import { projectUserVoiceMessages } from '../src/attachments/voiceProjection.js';
 import { applyPastVoiceRepliesToHistory } from '../src/utils/voiceTranscripts.js';
+import { assistantTextItem } from '../src/ai/responsesItems.js';
 
 const STORAGE_ID = `voiceproj-${process.pid}@c.us`;
 const { historyDir } = getUserHistoryPaths(STORAGE_ID);
@@ -67,7 +68,7 @@ test('a clip with no speech says so instead of pretending it had words', async (
 
 test('the projection reaches content parts, not just plain strings', async () => {
   const current = [
-    { type: 'text', text: 'guarda [Attachment: attachments/voice_1.ogg]' },
+    { type: 'input_text', text: 'guarda [Attachment: attachments/voice_1.ogg]' },
     { type: 'input_image', image_url: 'data:image/png;base64,AA==' }
   ];
   const out = await projectUserVoiceMessages({ history: [], current, storageId: STORAGE_ID });
@@ -141,7 +142,7 @@ test('without a conversation to look the clip up in, the tag reports the failure
 });
 
 test('GemiX own past voice keeps <PastVoiceReply>, now on the namespace path', () => {
-  const history = [{ role: 'assistant', content: 'eccolo [Attachment: attachments/gemix_voice.ogg]' }];
+  const history = [assistantTextItem('eccolo [Attachment: attachments/gemix_voice.ogg]')];
   // The reply transcript lives under the GemiX-voice key, written at TTS time.
   const { metaFile } = getUserHistoryPaths(STORAGE_ID);
   fs.writeFileSync(metaFile, JSON.stringify({
@@ -151,7 +152,7 @@ test('GemiX own past voice keeps <PastVoiceReply>, now on the namespace path', (
   const out = applyPastVoiceRepliesToHistory(history, STORAGE_ID);
   assert.equal(out.replacedCount, 1);
   assert.equal(
-    out.history[0].content,
+    out.history[0].content[0].text,
     'eccolo <PastVoiceReply file="attachments/gemix_voice.ogg">eccolo qui</PastVoiceReply>'
   );
 });

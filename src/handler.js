@@ -5,7 +5,7 @@
 // One round of conversation looks like this:
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
 //   2. Touch the per-conversation workspace activity timestamp.
-//   3. Build chat messages: static system first (byte-stable for the turn —
+//   3. Build the Responses input: static system first (byte-stable for the turn —
 //      xAI prefix-cache matches from the start of input[]), then history, the
 //      current user message, then the program-owned <Runtime>…</Runtime>
 //      role:user item. Runtime is built once per turn and never moves, so every
@@ -16,18 +16,25 @@
 //      path the model opens with read_file. Voice notes are rendered as text in
 //      place — the user's with STT (<PastVoice>), GemiX's from the transcript
 //      it already had (<PastVoiceReply>).
-//   4. Loop: call Grok (`/v1/responses`) - tool calls per round in two phases:
+//   4. Loop: one `/v1/responses` call per round, whichever provider profile is
+//      active - tool calls per round in two phases:
 //      (1) standard tools parallel, (2) delivery parallel - repeat until the
 //      model returns the final response or the round budget is reached. The
 //      final reply is always structured JSON (response / optional attachments,
-//      plus conversation_title on Discord first turn only, plus a `voice`
-//      flag on WA dedicated) enforced via text.format.
+//      plus conversation_title on every Discord turn, plus a `voice` flag on
+//      WA dedicated) enforced via text.format.
 //      When `voice:true` (WA dedicated only), `response` is spoken via TTS.
-//   5. Off Discord, turn xAI's inline citations into a plain source list
+//   5. Off Discord, turn inline citation markup into a plain source list
 //      (WhatsApp renders no anchor text), apply the research badge (real web/X
-//      search counts), and ship the reply back to the platform.
+//      source counts), and ship the reply back to the platform.
 
 import { callAI  } from './ai/aiProvider.js';
+import {
+  pruneSeenToolMedia,
+  systemItem,
+  toolResultItems,
+  userItem
+} from './ai/responsesItems.js';
 import {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
@@ -85,7 +92,7 @@ const SESSION_MAX_DURATION_MS = 10 * 60 * 1000;
 
 function extractPlainTextContent(content) {
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.find(p => p.type === 'text')?.text || '';
+  if (Array.isArray(content)) return content.find(p => p.type === 'input_text')?.text || '';
   return '';
 }
 
@@ -269,11 +276,8 @@ async function handleMessage(ctx) {
     // Rebuilt static only if the live tool fingerprint changes mid-turn (rare).
     let staticInstructions = buildStaticInstructions(ctx);
     let toolsFp = promptToolsFingerprint(ctx);
-    const messages = [{
-      role: 'system',
-      content: staticInstructions,
-      _staticPrefix: true
-    }];
+    const input = [systemItem(staticInstructions)];
+    input[0]._staticPrefix = true;
 
     // GemiX voice in history is [Attachment] on assistant (no native audio parts).
     // Replace those tags in-place with <PastVoiceReply> on the assistant messages
@@ -311,7 +315,7 @@ async function handleMessage(ctx) {
     }
 
     if (historyForApi.length > 0) {
-      messages.push(...historyForApi);
+      input.push(...historyForApi);
     }
 
     // The whole burst is a single item (utils/batchContentRefresh), tagged so the
@@ -319,7 +323,7 @@ async function handleMessage(ctx) {
     // break in the cross-turn prefix: next turn the history replays these same
     // messages untagged and separate, so the shared prefix now ends where this
     // turn's burst began instead of at the Runtime block below.
-    messages.push({ role: 'user', content: wrapUserQuery(contentForApi) });
+    input.push(userItem(wrapUserQuery(contentForApi)));
 
     // Turn-varying program state: built once, placed right after the current
     // user message, and never moved again. Both constraints matter.
@@ -335,18 +339,16 @@ async function handleMessage(ctx) {
     // What it states can move during the turn (build workspace, quota counts,
     // preferences); the tool results that cause those changes report them, so
     // the frozen snapshot stays truthful about turn start.
-    messages.push({ role: 'user', content: buildDynamicRuntimeContext(ctx) });
+    input.push(userItem(buildDynamicRuntimeContext(ctx)));
 
-    /** Keep messages[0] in sync if the static prefix is rebuilt mid-turn. */
+    /** Keep input[0] in sync if the static prefix is rebuilt mid-turn. */
     const syncStaticPrefix = () => {
-      if (messages[0] && messages[0]._staticPrefix) {
-        messages[0].content = staticInstructions;
+      if (input[0] && input[0]._staticPrefix) {
+        input[0].content = [{ type: 'input_text', text: staticInstructions }];
       } else {
-        messages.unshift({
-          role: 'system',
-          content: staticInstructions,
-          _staticPrefix: true
-        });
+        const item = systemItem(staticInstructions);
+        item._staticPrefix = true;
+        input.unshift(item);
       }
     };
 
@@ -414,30 +416,28 @@ async function handleMessage(ctx) {
       responseCtx.discordTitle = title;
     };
 
-    // Tool defs for the round in flight (platform/membership-gated; delivery
-    // buffer state is injected into the Runtime block, not into tool schemas).
+    // Tool defs for the round in flight (platform/membership-gated; what the
+    // model may reach for is decided here, never re-derived per call).
     let currentRoundTools = [];
 
     const runToolCall = async (tc) => {
       try {
-        log.info(`   Executing: ${tc.function.name} args=${tc.function.arguments || '{}'}`);
-        const { toolCallId, result } = await executeTool(tc, userCtx, responseCtx, deliveryCtx, currentRoundTools);
+        log.info(`   Executing: ${tc.name} args=${tc.arguments || '{}'}`);
+        const { toolCallId, result } = await executeTool(
+          { id: tc.id, function: { name: tc.name, arguments: tc.arguments } },
+          userCtx, responseCtx, deliveryCtx, currentRoundTools
+        );
         const resultLog = Array.isArray(result) || typeof result === 'object'
           ? JSON.stringify(result)
           : String(result ?? '');
         log.info(`   Result: ${resultLog}`);
-        return {
-          role: 'tool',
-          tool_call_id: toolCallId,
-          content: result
-        };
+        return toolResultItems(toolCallId, result);
       } catch (toolErr) {
-        log.error(`   ❌ Tool error "${tc.function.name}": ${toolErr.message}`);
-        return {
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: JSON.stringify({ success: false, error: `Execution error: ${toolErr.message}` })
-        };
+        log.error(`   ❌ Tool error "${tc.name}": ${toolErr.message}`);
+        return toolResultItems(tc.id, JSON.stringify({
+          success: false,
+          error: `Execution error: ${toolErr.message}`
+        }));
       }
     };
 
@@ -523,21 +523,19 @@ async function handleMessage(ctx) {
         reasoningEffort: ctx.settings?.effort
       };
 
-      const { message: assistantMsg, provider, model, searchStats } = await callAI(messages, roundTools, callOpts);
+      const { reply, provider, model, searchStats } = await callAI(input, roundTools, callOpts);
       lastModelUsed = model;
       accumulateSearchStats(searchStats);
       log.info(`   Provider: ${provider} (${model})`);
 
-      if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-        log.info(`[${pLabel}] ${assistantMsg.tool_calls.length} tool call(s)`);
-        // OpenAI-compatible reasoning models occasionally return content=null
-        // - drop it so the message validates downstream.
-        if (assistantMsg.content === null || assistantMsg.content === undefined) {
-          delete assistantMsg.content;
-        }
-        messages.push(assistantMsg);
+      if (reply.toolCalls.length > 0) {
+        log.info(`[${pLabel}] ${reply.toolCalls.length} tool call(s)`);
+        // The model's own output goes back verbatim — reasoning, message and
+        // function_call items in the order it produced them. Replaying the
+        // encrypted reasoning is what keeps the next round's thinking continuous.
+        input.push(...reply.items);
 
-        const orderedCalls = assistantMsg.tool_calls;
+        const orderedCalls = reply.toolCalls;
         // The set the model was actually offered this round: membership in it is
         // the whole permission check (see ai/tools.js getToolAccessError).
         const allowedToolNames = new Set(roundTools.map(t => t.function?.name).filter(Boolean));
@@ -546,27 +544,18 @@ async function handleMessage(ctx) {
 
         const recordToolResult = async (tc, blockedOncePerRound) => {
           if (blockedOncePerRound.has(tc.id)) {
-            const name = tc.function?.name || 'tool';
-            const cap = PER_ROUND_TOOL_LIMITS[name];
-            log.warn(`   Tool "${name}" blocked: per-round cap (${cap}) exceeded in same model turn`);
-            return {
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: perRoundCapErrorPayload(name, cap)
-            };
+            const cap = PER_ROUND_TOOL_LIMITS[tc.name];
+            log.warn(`   Tool "${tc.name}" blocked: per-round cap (${cap}) exceeded in same model turn`);
+            return toolResultItems(tc.id, perRoundCapErrorPayload(tc.name, cap));
           }
           const toolBlock = getToolAccessError(
-            tc.function.name,
+            tc.name,
             allowedToolNames,
             (name) => _toolNotAvailableMessage(name, ctx)
           );
           if (toolBlock) {
-            log.warn(`   Tool "${tc.function.name}" blocked: ${toolBlock}`);
-            return {
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: JSON.stringify({ success: false, error: toolBlock })
-            };
+            log.warn(`   Tool "${tc.name}" blocked: ${toolBlock}`);
+            return toolResultItems(tc.id, JSON.stringify({ success: false, error: toolBlock }));
           }
           return runToolCall(tc);
         };
@@ -587,34 +576,23 @@ async function handleMessage(ctx) {
         await runPhase(phases.phase1, true);
         await runPhase(phases.phase2, false);
 
+        // Every call answered, in the order the model made them: a
+        // function_call with no output back is a malformed conversation.
         for (const tc of orderedCalls) {
-          const msg = resultsById.get(tc.id);
-          if (msg) messages.push(msg);
+          const items = resultsById.get(tc.id);
+          if (items) input.push(...items);
         }
 
-        // Token optimization: native file/image previews are stripped from tool
-        // results after the model evaluates them in the current round.
-        const HEAVY_TOOL_PART_TYPES = new Set(['image_url', 'input_file', 'input_image']);
-        for (const msg of messages) {
-          if (msg.role === 'tool' && Array.isArray(msg.content)) {
-            if (msg._heavyMediaPreviewSeen) {
-              msg.content = msg.content.filter(p => !HEAVY_TOOL_PART_TYPES.has(p.type));
-              if (msg.content.length === 1 && msg.content[0].type === 'text') {
-                msg.content = msg.content[0].text;
-              }
-              delete msg._heavyMediaPreviewSeen;
-            } else if (msg.content.some(p => HEAVY_TOOL_PART_TYPES.has(p.type))) {
-              msg._heavyMediaPreviewSeen = true;
-            }
-          }
-        }
+        // A file or image preview a tool attached is worth its tokens on the
+        // round it arrives and not after; the envelope stays either way.
+        pruneSeenToolMedia(input);
 
         continue;
       }
 
       // The fixed structured reply carries the user-facing text in `response`,
       // plus optional attachments, the Discord title, and (WhatsApp) the voice flag.
-      const parsed = parseStructuredReply(assistantMsg.content || '');
+      const parsed = parseStructuredReply(reply.text || '');
       if (!parsed.structured) {
         log.warn('   Structured reply expected but content was not valid JSON; using raw text');
       }
@@ -644,17 +622,12 @@ async function handleMessage(ctx) {
             '   Empty model output (no tool call, no structured reply) — one retry '
             + `(${emptyOutputRetries}/${MAX_EMPTY_OUTPUT_RETRIES})`
           );
-          if (Array.isArray(assistantMsg._responsesOutput) && assistantMsg._responsesOutput.length > 0) {
-            messages.push(assistantMsg);
-          }
-          messages.push({
-            role: 'user',
-            content: wrapSystemReminder(
-              'Your previous output was empty: no tool call and no structured reply. '
-              + 'Immediately call any tools you need (e.g. web_image_search for web photos) '
-              + 'or send a valid structured reply. Never leave the reply empty.'
-            )
-          });
+          if (reply.items.length > 0) input.push(...reply.items);
+          input.push(userItem(wrapSystemReminder(
+            'Your previous output was empty: no tool call and no structured reply. '
+            + 'Immediately call any tools you need (e.g. web_image_search for web photos) '
+            + 'or send a valid structured reply. Never leave the reply empty.'
+          )));
           continue;
         }
         log.warn(
@@ -719,11 +692,8 @@ async function handleMessage(ctx) {
       const wrapUpNote = sessionDurationLimitReached
         ? 'This turn hit the maximum session duration. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
-      messages.push({
-        role: 'user',
-        content: wrapSystemReminder(wrapUpNote)
-      });
-      const { message: finalMsg, model: finalModel, searchStats } = await callAI(messages, wrapUpTools, {
+      input.push(userItem(wrapSystemReminder(wrapUpNote)));
+      const { reply: finalReply, model: finalModel, searchStats } = await callAI(input, wrapUpTools, {
         toolChoice: 'none',
         requestId: ctx.requestId,
         responseFormat,
@@ -732,7 +702,7 @@ async function handleMessage(ctx) {
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(searchStats);
-      const parsed = parseStructuredReply(finalMsg.content || '');
+      const parsed = parseStructuredReply(finalReply.text || '');
       applyParsedTitle(parsed);
       wrapUpAttachments = await resolveFinalAttachments(parsed);
       wrapUpVoice = Boolean(allowVoice && parsed.voice);

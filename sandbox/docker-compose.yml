@@ -1,6 +1,6 @@
 # GemiX sandbox - reference topology.
 #
-# This file is NOT used in production (the Node `buildSandbox` spawns
+# This file is NOT used in production (src/sandbox/workspaceRuntime.js spawns
 # containers programmatically). It exists to:
 #   1. Let you verify the image + proxy work on your Linux server:
 #        docker compose -f sandbox/docker-compose.yml up --build
@@ -47,8 +47,8 @@ services:
     # from sandbox_net.
 
   sandbox_example:
-    # Example of how the Node manager will run a sandbox: quiet
-    # `sleep infinity` process, attach via `docker exec` (Grok Build).
+    # Example of how the Node manager runs a workspace container: quiet
+    # `sleep infinity` process, attached per call via `docker exec`.
     build:
       context: .
       dockerfile: Dockerfile
@@ -64,7 +64,6 @@ services:
       http_proxy:  "http://gemix-sandbox-proxy:8080"
       https_proxy: "http://gemix-sandbox-proxy:8080"
       NO_PROXY:    "localhost,127.0.0.1"
-      GEMIX_BUILD: "1"
     networks:
       sandbox_net: {}      # no default internet; only the proxy is reachable
     read_only: false       # /workspace must be writable
@@ -77,9 +76,9 @@ services:
     memswap_limit: 1536m
     cpus: 1.0
     volumes:
-      # Mount a real build workspace here in tests, e.g.:
-      # - /path/to/build_workspace:/workspace:rw
-      # GemiX skill packs are not mounted; Grok Build uses its own skills.
+      # Mount a real pair here in tests, as the manager does per conversation:
+      # - /path/to/workspace:/workspace:rw
+      # - /path/to/attachments:/attachments:ro
 
 networks:
   # Internal-only network where sandboxes live; no direct internet.

@@ -181,8 +181,8 @@ function validateToolArgs(args, toolDef) {
 // Passed straight through to /v1/responses as `{type:'<name>', ...}`.
 // xAI runs them inside the same request and folds the results back into the
 // response (zero extra rounds in our outer loop). The bot does NOT implement
-// function tools with these names: the model invokes the native path, we
-// never see them as tool_calls. (web_search and x_search are the native tools used.)
+// function tools with these names: the model invokes the native path and GemiX
+// never sees a function call for them.
 // Reserved native function names (do not reuse as client tools): search_images
 // (SERVER_SIDE_TOOL_IMAGE_SEARCH), browse_page/open_page/…, x_*_search, etc.
 //

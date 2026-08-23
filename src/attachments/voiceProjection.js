@@ -200,7 +200,7 @@ function _projectContent(content, resolved) {
 
   let changed = false;
   const parts = content.map((part) => {
-    if (!part || part.type !== 'text' || typeof part.text !== 'string') return part;
+    if (!part || part.type !== 'input_text' || typeof part.text !== 'string') return part;
     let next = part.text;
     for (const [name, record] of resolved) next = _replaceTag(next, name, _voiceTag(name, record));
     if (next === part.text) return part;
@@ -235,7 +235,7 @@ async function projectUserVoiceMessages({ history, current, storageId }, opts = 
     }
     if (!Array.isArray(content)) return;
     for (const part of content) {
-      if (part && part.type === 'text') {
+      if (part && part.type === 'input_text') {
         for (const name of _voiceNamesIn(part.text)) names.add(name);
       }
     }

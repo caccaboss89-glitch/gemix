@@ -18,7 +18,7 @@ import { groupWhatsAppBatchEntries  } from './waAlbumGroup.js';
  */
 function finalizeBatchContentParts(parts) {
   if (!Array.isArray(parts) || parts.length === 0) return '';
-  if (parts.length === 1 && parts[0]?.type === 'text') return parts[0].text;
+  if (parts.length === 1 && parts[0]?.type === 'input_text') return parts[0].text;
   return parts;
 }
 
@@ -43,14 +43,14 @@ function mergeBatchUnitsToContent(units, fallbackLatest = null) {
   const parts = [];
   for (const unit of list) {
     const unitParts = typeof unit.content === 'string'
-      ? (unit.content ? [{ type: 'text', text: unit.content }] : [])
+      ? (unit.content ? [{ type: 'input_text', text: unit.content }] : [])
       : (Array.isArray(unit.content) ? unit.content : []);
     for (const part of unitParts) {
       const prev = parts[parts.length - 1];
-      if (part?.type === 'text' && prev?.type === 'text') {
+      if (part?.type === 'input_text' && prev?.type === 'input_text') {
         prev.text = `${prev.text}\n${part.text}`;
       } else {
-        parts.push(part?.type === 'text' ? { ...part } : part);
+        parts.push(part?.type === 'input_text' ? { ...part } : part);
       }
     }
   }

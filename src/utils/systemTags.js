@@ -68,15 +68,15 @@ function wrapUserQuery(content) {
 
   const parts = content.slice();
   const last = parts.length - 1;
-  if (parts[last]?.type === 'text') {
+  if (parts[last]?.type === 'input_text') {
     parts[last] = { ...parts[last], text: `${parts[last].text}\n${close}` };
   } else {
-    parts.push({ type: 'text', text: close });
+    parts.push({ type: 'input_text', text: close });
   }
-  if (parts[0]?.type === 'text') {
+  if (parts[0]?.type === 'input_text') {
     parts[0] = { ...parts[0], text: `${open}\n${parts[0].text}` };
   } else {
-    parts.unshift({ type: 'text', text: open });
+    parts.unshift({ type: 'input_text', text: open });
   }
   return parts;
 }

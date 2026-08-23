@@ -128,7 +128,7 @@ async function readFile(args = {}, workspaceId) {
   if (result.content) envelope.content = result.content;
 
   return parts.length > 0
-    ? [{ type: 'text', text: JSON.stringify(envelope) }, ...parts]
+    ? [{ type: 'input_text', text: JSON.stringify(envelope) }, ...parts]
     : envelope;
 }
 

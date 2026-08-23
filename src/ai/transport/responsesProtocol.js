@@ -35,11 +35,7 @@ const BASE_REPLAYABLE_ITEM_TYPES = Object.freeze([
 /** Keep only the wire fields of one content part; null when unusable. */
 function wirePart(part) {
   if (!part || typeof part !== 'object') return null;
-  // Chat-style `text` / `image_url` parts still reach this boundary from tool
-  // results and from history entries the phase-8 migration has not reached yet.
-  let type = part.type;
-  if (type === 'text') type = 'input_text';
-  else if (type === 'image_url') type = 'input_image';
+  const type = part.type;
 
   if (type === 'input_text') {
     return typeof part.text === 'string' && part.text.length > 0
@@ -47,9 +43,7 @@ function wirePart(part) {
       : null;
   }
   if (type === 'input_image') {
-    const url = typeof part.image_url === 'string'
-      ? part.image_url
-      : (typeof part.image_url?.url === 'string' ? part.image_url.url : null);
+    const url = typeof part.image_url === 'string' ? part.image_url : null;
     if (!url) return null;
     const out = { type: 'input_image', image_url: url };
     if (typeof part.detail === 'string' && part.detail) out.detail = part.detail;
@@ -447,22 +441,6 @@ function readResponse(response, opts = {}) {
   };
 }
 
-// -- Item constructors used by the agent loop --------------------------------
-
-/** A `function_call_output` item for one executed tool call. */
-function functionCallOutputItem(callId, output) {
-  return {
-    type: 'function_call_output',
-    call_id: callId,
-    output: typeof output === 'string' ? output : JSON.stringify(output ?? '')
-  };
-}
-
-/** A role item carrying plain text (system prompt, runtime block, reminders). */
-function textItem(role, text) {
-  return { role, content: [{ type: 'input_text', text: String(text ?? '') }] };
-}
-
 export {
   INPUT_PART_TYPES,
   BASE_REPLAYABLE_ITEM_TYPES,
@@ -473,7 +451,5 @@ export {
   toolsToWire,
   ResponseAssembler,
   pickAssistantText,
-  readResponse,
-  functionCallOutputItem,
-  textItem
+  readResponse
 };

@@ -1,21 +1,23 @@
 // src/utils/toolCallExecution.js
 //
 // Shared helpers for ordering and batching tool calls within one model turn.
+//
+// A tool call here is the Responses shape the transport reads off a
+// `function_call` item: `{ id, name, arguments }`.
 
 const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
 
 /**
- * @param {object[]} toolCalls - assistant tool_calls in model order
+ * @param {object[]} toolCalls - `{id, name, arguments}` in model order
  * @returns {{ phase1: object[], phase2: object[] }}
- *   phase1: standard tools (parallel) — build, generate_*, …
+ *   phase1: standard tools (parallel) — generate_*, workspace, search, …
  *   phase2: outbound delivery (parallel) — send_email, send_whatsapp_message
  */
 function partitionHandlerToolCalls(toolCalls) {
   const phase1 = [];
   const phase2 = [];
   for (const tc of toolCalls) {
-    const name = tc.function?.name;
-    if (HANDLER_DELIVERY_TOOLS.has(name)) {
+    if (HANDLER_DELIVERY_TOOLS.has(tc.name)) {
       phase2.push(tc);
     } else {
       phase1.push(tc);
@@ -52,9 +54,9 @@ const ONCE_PER_ROUND_ERROR =
  * Counts are per model turn (same batch), in call order — first N run, rest
  * block.
  *
- * @param {object[]} toolCalls
+ * @param {object[]} toolCalls - `{id, name, arguments}` in model order
  * @param {Record<string, number>} [limits] - defaults to PER_ROUND_TOOL_LIMITS
- * @returns {Set<string>} tool_call ids to block
+ * @returns {Set<string>} call ids to block
  */
 function perRoundCappedDuplicateIds(toolCalls, limits = PER_ROUND_TOOL_LIMITS) {
   const blocked = new Set();
@@ -62,7 +64,7 @@ function perRoundCappedDuplicateIds(toolCalls, limits = PER_ROUND_TOOL_LIMITS) {
 
   const byName = new Map();
   for (const tc of toolCalls) {
-    const name = tc.function?.name;
+    const name = tc.name;
     const max = limits[name];
     if (!name || !Number.isFinite(max) || max < 1) continue;
     if (!byName.has(name)) byName.set(name, []);

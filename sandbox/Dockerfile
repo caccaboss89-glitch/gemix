@@ -1,9 +1,11 @@
 # GemiX sandbox image.
 # Build: docker build -t gemix-sandbox:latest -f sandbox/Dockerfile sandbox
-# Run: managed by src/sandbox/buildSandbox.js, which boots the container with
-#      Cmd: ['sleep', 'infinity'] and attaches per-call via `docker exec`.
-#      Bind mounts: /workspace (rw, per-workspaceId build dir).
-#      Grok Build CLI is baked into the image; GemiX skill packs are not mounted.
+# Run: managed by src/sandbox/workspaceRuntime.js, which boots the container
+#      with Cmd: ['sleep', 'infinity'] and attaches per-call via `docker exec`.
+#      Bind mounts: /workspace (rw, this conversation's own files) and
+#      /attachments (ro, the host projection of the chat's files).
+#      No agent CLI is baked in: the main agent runs the tools itself and only
+#      uses the container to execute shell commands.
 
 FROM python:3.12-slim-bookworm
 
@@ -68,16 +70,13 @@ RUN pip install --no-cache-dir --retries 5 --timeout 120 unoserver
 # (residential IP), so anti-datacenter blocks are bypassed like any other host.
 RUN pip install --no-cache-dir --retries 5 --timeout 120 yt-dlp
 
-# -- Node.js + Grok Build CLI + common JS tooling --------------------------
-# Grok Build (`grok`) is the in-container build sub-agent runtime (baked into
-# the image once — not reinstalled on each container create). Host GemiX only
-# needs Docker; operators rebuild this image to upgrade the CLI.
-# pptxgenjs / docx stack remain available for ad-hoc scripts under /workspace.
+# -- Node.js + common JS tooling -------------------------------------------
+# For scripts the model writes and runs under /workspace. The pptxgenjs / docx
+# stack is here so document generation needs no install at runtime.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g --no-fund --no-audit \
-        @xai-official/grok \
         pptxgenjs \
         react-icons \
         react \
@@ -87,18 +86,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
         docxtemplater@3.68.7 \
         pizzip@3.2.0 \
         angular-expressions@1.5.5 \
-    && npm cache clean --force \
-    && command -v grok >/dev/null \
-    && grok version
+    && npm cache clean --force
 
-# Writable exec-capable home for the Grok CLI (downloads ~/.grok/bin/grok here).
-# Must NOT be a noexec tmpfs mount — see buildSandbox.js Tmpfs/HOME notes.
-RUN mkdir -p /var/lib/gemix-grok \
-    && chmod 1777 /var/lib/gemix-grok
+# Writable exec-capable HOME. The path must match containerEnv() in
+# workspaceRuntime.js, which sets HOME on every exec — a mismatch would leave
+# the preloaded caches below outside the home the tools actually use.
+# Must NOT be a noexec tmpfs mount.
+RUN mkdir -p /var/lib/gemix-workspace \
+    && chmod 1777 /var/lib/gemix-workspace
 
-ENV HOME=/var/lib/gemix-grok \
-    GROK_HOME=/var/lib/gemix-grok \
-    GROK_DISABLE_AUTOUPDATER=1 \
+ENV HOME=/var/lib/gemix-workspace \
     NODE_PATH=/usr/lib/node_modules
 
 # -- Preload heavy models at build time (offline runtime) ------------------
@@ -109,11 +106,11 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash sandbox \
     && mkdir -p /workspace \
     && chown -R sandbox:sandbox /workspace /home/sandbox
 
-# rembg caches under $HOME/.u2net during preload (HOME=/var/lib/gemix-grok above).
-# Runtime HOME is the same path (buildSandbox.js), so leave models there; only
-# ensure the sandbox user can read them (preload runs as root).
-RUN if [ -d /var/lib/gemix-grok/.u2net ]; then \
-        chmod -R a+rX /var/lib/gemix-grok/.u2net; \
+# rembg caches under $HOME/.u2net during preload (HOME set above). Runtime HOME
+# is the same path, so leave the models there; only make sure the sandbox user
+# can read them, since preload runs as root.
+RUN if [ -d /var/lib/gemix-workspace/.u2net ]; then \
+        chmod -R a+rX /var/lib/gemix-workspace/.u2net; \
     fi
 
 # Disable pip at runtime so the AI cannot install arbitrary packages.

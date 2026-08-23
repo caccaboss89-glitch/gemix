@@ -263,7 +263,7 @@ async function searchImages(args = {}) {
     if (img.engine) entry.engine = img.engine;
     if (v && v.part) {
       nativeParts.push(
-        { type: 'text', text: `[web_image_search IMAGE_${i}]` },
+        { type: 'input_text', text: `[web_image_search IMAGE_${i}]` },
         v.part
       );
     } else if (v && v.error) {
@@ -292,7 +292,7 @@ async function searchImages(args = {}) {
   if (nativeParts.length === 0) {
     return payload;
   }
-  return [{ type: 'text', text: JSON.stringify(payload) }, ...nativeParts];
+  return [{ type: 'input_text', text: JSON.stringify(payload) }, ...nativeParts];
 }
 
 export {

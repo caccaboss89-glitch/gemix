@@ -11,10 +11,8 @@ import {
   BASE_REPLAYABLE_ITEM_TYPES,
   buildResponsesBody,
   buildResponsesInput,
-  functionCallOutputItem,
   pickAssistantText,
   readResponse,
-  textItem,
   toolsToWire,
   wireItem,
   wirePart
@@ -35,12 +33,16 @@ test('wirePart keeps only wire fields and drops internal bookkeeping', () => {
   );
 });
 
-test('wirePart normalizes chat-style text and image_url parts', () => {
-  assert.deepEqual(wirePart({ type: 'text', text: 'hi' }), { type: 'input_text', text: 'hi' });
+test('wirePart takes native parts only — there is no second content dialect', () => {
+  assert.deepEqual(wirePart({ type: 'input_text', text: 'hi' }), { type: 'input_text', text: 'hi' });
   assert.deepEqual(
-    wirePart({ type: 'image_url', image_url: { url: 'https://x/i.png' } }),
+    wirePart({ type: 'input_image', image_url: 'https://x/i.png' }),
     { type: 'input_image', image_url: 'https://x/i.png' }
   );
+  // Chat-style parts are not produced anywhere any more, so accepting them
+  // would only hide a producer that skipped the migration.
+  assert.equal(wirePart({ type: 'text', text: 'hi' }), null);
+  assert.equal(wirePart({ type: 'image_url', image_url: { url: 'https://x/i.png' } }), null);
 });
 
 test('wirePart rejects empty text, urlless media and an inline file without a filename', () => {
@@ -149,10 +151,4 @@ test('readResponse extracts text, tool calls and replay items', () => {
   assert.equal(read.status, 'completed');
 });
 
-test('item constructors produce the shapes the agent loop appends', () => {
-  assert.deepEqual(
-    functionCallOutputItem('c1', { success: true }),
-    { type: 'function_call_output', call_id: 'c1', output: '{"success":true}' }
-  );
-  assert.deepEqual(textItem('user', 'hi'), { role: 'user', content: [{ type: 'input_text', text: 'hi' }] });
-});
+

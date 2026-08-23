@@ -18,6 +18,7 @@ import { isSystemMessage } from '../../config/systemMessages.js';
 import { wrapSystemNotification } from '../../utils/systemTags.js';
 import { buildAttachmentTag } from '../../attachments/ingress.js';
 import { resolveChatWorkspaceId } from '../../utils/workspaceId.js';
+import { assistantTextItem, userItem } from '../../ai/responsesItems.js';
 import { resolveGemixVoiceTranscription, storeRecentVoiceText } from '../../utils/historySync.js';
 import { ingressWaMessageMedia } from '../../utils/incomingMediaIngress.js';
 import {
@@ -82,7 +83,8 @@ async function getRecentWhatsAppMessageIds(msg) {
  * @param {string} userId - storage id for media sync
  * @param {Set<string>|string|null} [excludeKeys] - WhatsApp message keys (from _waMessageKey) to exclude from history.
  *   Current-batch messages are excluded from history (the user turn containing attachment tags/inline content is provided as the final turn instead).
- * @returns {Promise<Array>} Array of history messages with role ('user'|'assistant') and content
+ * @returns {Promise<Array>} Responses items: user turns as role items, GemiX's
+ *   own replies as assistant `message` items
  */
 async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) {
   const workspaceId = resolveChatWorkspaceId(platform, chat, userId);
@@ -286,10 +288,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     const finalText = isSystemEvent
       ? wrapSystemNotification(`[${ts}] ${textContent}`)
       : (isFromBot ? textContent : `[${ts}] ${senderName}: ${textContent}`);
-    return {
-      role: isFromBot && !isSystemEvent ? 'assistant' : 'user',
-      content: finalText
-    };
+    return isFromBot && !isSystemEvent ? assistantTextItem(finalText) : userItem(finalText);
   }
 
   const built = await mapWithConcurrency(historyGroups, HISTORY_INGRESS_CONCURRENCY, processHistoryGroup);
@@ -597,7 +596,7 @@ async function buildIncomingContentPartsFromMessages(
   if (textBody.trim()) {
     const tsMs = (primaryMsg.timestamp || 0) * 1000;
     contentParts.unshift({
-      type: 'text',
+      type: 'input_text',
       text: formatLabeledUserContent(tsMs, senderName, textBody.trim())
     });
   }
