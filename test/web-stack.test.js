@@ -1,6 +1,6 @@
 // test/web-stack.test.js
 //
-// The GemiX-owned web tools (spec §10, §18.9): web_search finds pages,
+// The GemiX-owned web tools (spec §10, §18.9): search_web finds pages,
 // read_page opens one, and both run on our own stack on every provider profile.
 //
 // The sidecar is stubbed at the fetch boundary, so what is under test is the
@@ -49,7 +49,7 @@ const HIT = {
 beforeEach(() => { calls = []; });
 afterEach(() => { globalThis.fetch = realFetch; });
 
-// -- web_search ---------------------------------------------------------------
+// -- search_web ---------------------------------------------------------------
 
 test('a search asks for snippets, not for ten page extractions', async () => {
   stubSidecar(200, { results: [HIT], meta: { engines_used: ['duckduckgo'] } });
@@ -215,7 +215,7 @@ test('both web tools are function tools on every profile, never provider-hosted'
       envConfig.AI_PROVIDER = provider;
       _resetActiveProfileForTests();
       const tools = getToolsForUser(true, false, { platform: constants.PLATFORM_WA_DEDICATED });
-      for (const name of ['web_search', 'read_page']) {
+      for (const name of ['search_web', 'read_page']) {
         const found = tools.find((t) => t.function?.name === name);
         assert.ok(found, `${name} missing on ${provider}`);
         assert.equal(found.type, 'function', `${name} must not be a hosted type on ${provider}`);

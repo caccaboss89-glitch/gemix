@@ -4,12 +4,12 @@
 // wrappers, and results are returned as plain objects so the dispatcher
 // serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
 //
-// The two GemiX-owned web tools (spec §10): web_search finds pages, read_page
+// The two GemiX-owned web tools (spec §10): search_web finds pages, read_page
 // opens one. Neither is a provider feature — whichever main brain is running,
 // the agent searches the web the same way, through our own SearXNG and the
 // agent-search sidecar in front of it.
 //
-// The split is deliberate. web_search returns titles, URLs and snippets only:
+// The split is deliberate. search_web returns titles, URLs and snippets only:
 // the model decides what is worth opening, and read_page pays the extraction
 // cost for that page alone.
 

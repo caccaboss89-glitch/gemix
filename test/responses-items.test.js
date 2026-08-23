@@ -162,7 +162,7 @@ test('internal bookkeeping never reaches the wire', () => {
 
 test('delivery tools run after everything else, in model order', () => {
   const calls = [
-    { id: 'a', name: 'web_search', arguments: '{}' },
+    { id: 'a', name: 'search_web', arguments: '{}' },
     { id: 'b', name: 'send_email', arguments: '{}' },
     { id: 'c', name: 'read_file', arguments: '{}' },
     { id: 'd', name: 'send_whatsapp_message', arguments: '{}' }
@@ -178,8 +178,8 @@ test('a per-round cap blocks the extra calls, not the first ones', () => {
   const calls = [
     { id: 'a', name: 'read_music_stats', arguments: '{}' },
     { id: 'b', name: 'read_music_stats', arguments: '{}' },
-    { id: 'c', name: 'web_search', arguments: '{}' },
-    { id: 'd', name: 'web_search', arguments: '{}' }
+    { id: 'c', name: 'search_web', arguments: '{}' },
+    { id: 'd', name: 'search_web', arguments: '{}' }
   ];
   const blocked = perRoundCappedDuplicateIds(calls, PER_ROUND_TOOL_LIMITS);
 

@@ -83,7 +83,7 @@ export default {
   // handler makes one final tool-less call to force a clean text answer
   // instead of bailing out - so GemiX always returns a real response.
   // Also passed as `max_turns` on the Responses body to bound server-side
-  // sub-tool turns (web_search/x_search) per request.
+  // sub-tool turns (the x_search family) per request.
   MAX_TOOL_ROUNDS: 50,
 
   // Workspace runtime container: memory cap and idle TTL. The container is a

@@ -257,7 +257,7 @@ const TOOL_RUNTIME_ERRORS = {
 // All tool names that can surface a context/permission error from the system,
 // per profile. Used to dump the exact "unavailable" message GemiX gets back.
 const ALL_TOOL_NAMES = [
-  'web_search', 'x_search', 'web_image_search', 'generate_music', 'generate_image', 'generate_video',
+  'search_web', 'x_search', 'web_image_search', 'generate_music', 'generate_image', 'generate_video',
   'list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell', 'send_whatsapp_message',
   'send_email', 'schedule_tasks', 'read_my_tasks', 'remove_my_tasks',
   'manage_preferences', 'toggle_release_notify',

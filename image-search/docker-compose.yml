@@ -2,7 +2,7 @@
 #
 # One SearXNG instance serves both search tools:
 #   web_image_search -> SearXNG JSON directly, on 127.0.0.1:8888
-#   web_search / read_page -> the agent-search sidecar, on 127.0.0.1:3939
+#   search_web / read_page -> the agent-search sidecar, on 127.0.0.1:3939
 # The sidecar adds cross-engine dedup and scoring to /search, and an escalating
 # extraction chain (direct fetch -> readability -> UA rotation -> browser render
 # -> Wayback -> Google cache -> PDF -> YouTube transcript) to /read.

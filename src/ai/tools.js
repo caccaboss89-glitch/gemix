@@ -194,11 +194,14 @@ function validateToolArgs(args, toolDef) {
 // -- Static tool definitions (schema never varies) -------------------------
 
 // The GemiX web pair (spec §10). Searching and reading are split on purpose:
-// web_search is cheap and returns snippets, read_page pays the extraction cost
+// search_web is cheap and returns snippets, read_page pays the extraction cost
 // for the one page the model chose. Both run on our own SearXNG + agent-search
 // stack, so they are identical on every provider profile.
-const TOOL_WEB_SEARCH = makeTool({
-  name: 'web_search',
+// Named search_web (not web_search): providers reserve web_search for their
+// hosted server-side tools; reusing that name as a client function risks the
+// same empty-reply collision as search_images (spec §18.15 note).
+const TOOL_SEARCH_WEB = makeTool({
+  name: 'search_web',
   description:
     'Search the web. Returns titles, URLs and snippets from several engines at once - not page content. '
     + 'Use it for anything you are not certain of, anything after your training data, and any claim a user '
@@ -228,7 +231,7 @@ const TOOL_READ_PAGE = makeTool({
   properties: {
     url: {
       type: 'string',
-      description: 'Full http(s) address of the page, e.g. one of the `url` values from web_search.'
+      description: 'Full http(s) address of the page, e.g. one of the `url` values from search_web.'
     }
   },
   required: ['url']
@@ -903,7 +906,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // already in this chat are not here: they are paths under attachments/, and
   // read_file opens them.
   const profile = resolveProviderProfile();
-  tools.push(TOOL_WEB_SEARCH, TOOL_READ_PAGE, TOOL_WEB_IMAGE_SEARCH);
+  tools.push(TOOL_SEARCH_WEB, TOOL_READ_PAGE, TOOL_WEB_IMAGE_SEARCH);
   if (isFeatureAvailable(profile, FEATURE.X_SEARCH)) tools.push(XAI_X_SEARCH_TOOL);
 
   // 2) Media generation (WhatsApp). Weekly quota is the real cap

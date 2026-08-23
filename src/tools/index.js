@@ -100,7 +100,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
 
     switch (name) {
-    case 'web_search': {
+    case 'search_web': {
       // responseCtx carries the source count for the research badge, the same
       // role the provider's own search statistics used to fill.
       result = await webSearch(args, responseCtx);

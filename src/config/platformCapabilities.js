@@ -21,7 +21,7 @@ const PROFILE = {
 
 /** Tool names that may appear at runtime (before admin/active-member trimming). */
 const TOOL = {
-  WEB_SEARCH: 'web_search',
+  WEB_SEARCH: 'search_web',
   READ_PAGE: 'read_page',
   X_SEARCH: 'x_search',
   WEB_IMAGE_SEARCH: 'web_image_search',

@@ -300,7 +300,7 @@ test('the GemiX-owned tools are on every profile', () => {
   for (const provider of ['xai', 'chatgpt']) {
     const tools = withDeployment({ provider, cloudflare: false },
       () => getToolsForUser(true, false, whatsappCtx));
-    for (const name of ['web_search', 'web_image_search', 'read_file', 'shell']) {
+    for (const name of ['search_web', 'web_image_search', 'read_file', 'shell']) {
       assert.ok(names(tools).includes(name), `${name} missing on ${provider}`);
     }
   }
