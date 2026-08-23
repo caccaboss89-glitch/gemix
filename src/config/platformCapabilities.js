@@ -22,6 +22,7 @@ const PROFILE = {
 /** Tool names that may appear at runtime (before admin/active-member trimming). */
 const TOOL = {
   WEB_SEARCH: 'web_search',
+  READ_PAGE: 'read_page',
   X_SEARCH: 'x_search',
   WEB_IMAGE_SEARCH: 'web_image_search',
   GENERATE_MUSIC: 'generate_music',
@@ -266,7 +267,7 @@ function buildAnswerLines(profile, opts = {}) {
     + 'or the contents of a file you were not shown.'
   );
 
-  let verifyTools = 'web or X search for facts';
+  let verifyTools = has(TOOL.X_SEARCH) ? 'web or X search for facts' : 'web search for facts';
   if (cap.isDiscord) {
     verifyTools += ', the statute below for its text';
   } else if (has(TOOL.READ_TASKS)) {
@@ -278,10 +279,12 @@ function buildAnswerLines(profile, opts = {}) {
   );
 
   if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
-    lines.push(
-      'Search before you answer anything factual that is not already in the history or the settings: news, people, '
-      + 'products, events, social posts and screenshots, references you do not recognise. Search first, never guess.'
-    );
+    let search = 'Search before you answer anything factual that is not already in the history or the settings: news, people, '
+      + 'products, events, social posts and screenshots, references you do not recognise. Search first, never guess.';
+    if (has(TOOL.READ_PAGE)) {
+      search += ' Snippets are a shortlist, not the answer: open the pages that matter with read_page before you rely on them.';
+    }
+    lines.push(search);
   }
 
   lines.push(

@@ -174,6 +174,12 @@ export default {
   // Bind to loopback only in production. No trailing slash.
   IMAGE_SEARCH_BASE_URL: (process.env.IMAGE_SEARCH_BASE_URL || 'http://127.0.0.1:8888').replace(/\/+$/, ''),
 
+  // agent-search sidecar in front of the same SearXNG: text search and page
+  // reading for web_search / read_page. Loopback only, no trailing slash. The
+  // token is optional and only set when the sidecar itself requires one.
+  AGENT_SEARCH_BASE_URL: (process.env.AGENT_SEARCH_BASE_URL || 'http://127.0.0.1:3939').replace(/\/+$/, ''),
+  AGENT_SEARCH_TOKEN: process.env.AGENT_SEARCH_TOKEN || '',
+
   GEMIX_NOTIFY_SECRET: process.env.GEMIX_NOTIFY_SECRET || '',
   CHROMIUM_PATH: process.env.CHROMIUM_PATH || '/usr/bin/chromium'
 };

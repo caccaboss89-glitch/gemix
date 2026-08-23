@@ -1,6 +1,17 @@
-# GemiX local image search — SearXNG (free, self-hosted, Google Images + fallbacks).
+# GemiX web stack — SearXNG plus the agent-search sidecar (free, self-hosted).
 #
-# Bind to loopback only. GemiX calls IMAGE_SEARCH_BASE_URL (default http://127.0.0.1:8888).
+# One SearXNG instance serves both search tools:
+#   web_image_search -> SearXNG JSON directly, on 127.0.0.1:8888
+#   web_search / read_page -> the agent-search sidecar, on 127.0.0.1:3939
+# The sidecar adds cross-engine dedup and scoring to /search, and an escalating
+# extraction chain (direct fetch -> readability -> UA rotation -> browser render
+# -> Wayback -> Google cache -> PDF -> YouTube transcript) to /read.
+#
+# Both ports bind to loopback only: nothing here is meant to face the internet.
+#
+# Versions are pinned (GemiX spec 18.11): SearXNG by image digest, agent-search
+# by the commit its build context points at. Update them deliberately, never by
+# floating a tag.
 #
 # Quick start (Linux server):
 #   cd /path/to/GemiX/image-search
@@ -8,18 +19,21 @@
 #   sed -i "s/CHANGE_ME_TO_A_LONG_RANDOM_STRING/$(openssl rand -hex 32)/" searxng/settings.yml
 #   # Prefer Compose V2 plugin; fallback to docker-compose V1 if needed:
 #   docker compose version || docker-compose version
-#   docker compose up -d
+#   docker compose up -d          # first run builds the sidecar image
 #   # if "unknown command: compose" or flag errors:
 #   #   sudo apt-get install -y docker-compose-plugin
 #   #   # or: docker-compose up -d
 #   curl -sS 'http://127.0.0.1:8888/search?q=cats&format=json&categories=images' | head -c 400
+#   curl -sS 'http://127.0.0.1:3939/health'
 #
-# Optional in GemiX .env (commented by default; env.js default is the same URL):
+# Optional in GemiX .env (commented by default; env.js defaults are the same URLs):
 #   # IMAGE_SEARCH_BASE_URL=http://127.0.0.1:8888
+#   # AGENT_SEARCH_BASE_URL=http://127.0.0.1:3939
+#   # AGENT_SEARCH_TOKEN=            (only if you set AGENT_SEARCH_TOKEN below too)
 
 services:
   searxng:
-    image: docker.io/searxng/searxng:latest
+    image: docker.io/searxng/searxng@sha256:4d7ed8b7035ecf827bd901ba6d32f5c32d8119bc09bb3cdafeb0ce58f1b951c1
     container_name: gemix-searxng
     restart: unless-stopped
     ports:
@@ -30,6 +44,8 @@ services:
       SEARXNG_BASE_URL: http://127.0.0.1:8888/
       # Keep limiter off for local loopback API use from GemiX.
       SEARXNG_LIMITER: "false"
+    networks:
+      - gemix-web
     cap_drop:
       - ALL
     cap_add:
@@ -40,3 +56,41 @@ services:
       - no-new-privileges:true
     mem_limit: 512m
     cpus: 1.0
+
+  agent-search:
+    # Built from the upstream repo at a pinned commit: MIT, no published image.
+    # The mcp-server/ directory in that repo is AGPL and is not used here — the
+    # sidecar is reached over plain HTTP by src/web/agentSearch.js.
+    build:
+      context: https://github.com/brcrusoe72/agent-search.git#7830af0efded9dfe0d632c461d7b919de8726f5d
+    container_name: gemix-agent-search
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3939:3939"
+    environment:
+      SEARXNG_URL: http://searxng:8080
+      CACHE_TTL: "3600"
+      RATE_LIMIT: "60"
+      ADAPTERS_DIR: /app/adapters
+      # Loopback-only, so a token is optional. If you set one, mirror it in
+      # GemiX .env as AGENT_SEARCH_TOKEN.
+      AGENT_SEARCH_TOKEN: "${AGENT_SEARCH_TOKEN:-}"
+    volumes:
+      - agent-search-data:/app/data
+    depends_on:
+      - searxng
+    networks:
+      - gemix-web
+    security_opt:
+      - no-new-privileges:true
+    # The browser-render fallback runs headless Chromium, so this one needs more
+    # room than SearXNG.
+    mem_limit: 2g
+    cpus: 2.0
+
+networks:
+  gemix-web:
+    driver: bridge
+
+volumes:
+  agent-search-data:

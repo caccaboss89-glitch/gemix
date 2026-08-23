@@ -372,7 +372,8 @@ function _buildWorkspaceLines() {
     'One path namespace covers everything: the path `list_files` shows you is the same string you pass to `read_file`, '
     + 'to `shell`, and to `attachments` in your final reply. Never invent a path or shorten one to its filename.',
     '`read_file` is the only way to open a file. Reading, listing and searching are free and instant — look before '
-    + 'you assume, and never tell the user a file is missing without checking.',
+    + 'you assume, and never tell the user a file is missing without checking. A file that only exists at a URL is '
+    + 'in neither area yet: download it with `shell` into `workspace/`, then read it there.',
     'The same file can exist in both areas at once (you made it, you sent it, it came back in the chat). That is '
     + 'normal: work from whichever copy the user means.',
     `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `

@@ -1,17 +1,22 @@
-# Minimal SearXNG config for GemiX web_image_search.
-# use_default_settings keeps the full engine catalog; we only override what we need.
+# SearXNG config for the GemiX web stack: images for web_image_search, and the
+# general category that the agent-search sidecar queries for web_search.
+# use_default_settings keeps the full engine catalog; we only override what we
+# need. The general engines (DuckDuckGo, Brave, Bing, Wikipedia, ...) come from
+# that catalog already active — the block at the bottom only adds the image
+# engines, which the defaults leave off.
 
 use_default_settings: true
 
 general:
-  instance_name: "GemiX Image Search"
+  instance_name: "GemiX Web Stack"
   enable_metrics: false
 
 search:
   safe_search: 0
   autocomplete: ""
   default_lang: "auto"
-  # JSON is required for the GemiX tool API. Keep html for manual browser checks.
+  # JSON is required by both GemiX (image search) and the agent-search sidecar.
+  # Keep html for manual browser checks.
   formats:
     - html
     - json
