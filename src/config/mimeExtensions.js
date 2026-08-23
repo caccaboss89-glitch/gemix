@@ -1,5 +1,5 @@
 // Shared MIME → file-extension map (no leading dot). Used for ingress filenames
-// and xAI public-URL ingestion (see utils/aiFileDelivery.js).
+// and for the data URLs that carry an image inline to the model.
 
 /** @type {Record<string, string>} */
 const MIME_EXTENSION_MAP = {

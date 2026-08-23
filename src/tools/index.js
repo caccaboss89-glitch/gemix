@@ -22,7 +22,6 @@ import { sendEmailTool } from './sendEmail.js';
 import { sendWhatsAppTool } from './sendWhatsApp.js';
 import { readSentMessages } from './sentMessagesReader.js';
 import { readMusicStats } from './musicStats.js';
-import { readVideo } from './videoReader.js';
 import { managePreferences } from './preferences.js';
 import { toggleReleaseNotify } from './releaseNotify.js';
 import { listFiles } from './workspace/listFiles.js';
@@ -31,14 +30,12 @@ import { readFile } from './workspace/readFile.js';
 import { writeFile } from './workspace/writeFile.js';
 import { editFile } from './workspace/editFile.js';
 import { shell } from './workspace/shell.js';
-import { pushBufferAttachment } from '../utils/attachments.js';
-import { buildXaiPartFromBuffer } from '../utils/aiFileDelivery.js';
+import { stageToolOutput } from './workspace/toolOutput.js';
 import { musicCreator } from './musicCreator.js';
 import { searchImages } from './imageSearch.js';
 import { getGroupTaskFileId } from '../utils/userIdentifier.js';
 import { sanitizeFilename } from '../utils/text.js';
-import { resolveStorageId } from '../utils/userPaths.js';
-import { resolveWorkspaceId, workspaceIdToSlug } from '../utils/workspaceId.js';
+import { resolveWorkspaceId } from '../utils/workspaceId.js';
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
 import {
@@ -54,7 +51,7 @@ const log = createLogger('Tools');
  * Execute a tool call and return the result.
  * @param {object} toolCall - The tool call from the AI model { id, function: { name, arguments } }
  * @param {object} userCtx - User context { isActiveMember, isAdmin, member, taskFileId, userId, userName, waJid, isGroup, groupId }
- * @param {object} responseCtx - Mutable per-turn context { attachments, discordTitle, researchStats }
+ * @param {object} responseCtx - Mutable per-turn context { discordTitle, researchStats }
  * @param {object} deliveryCtx - Per-turn delivery tracking { contactedWA: Set, contactedEmail: Set }
  * @param {Array} [toolDefs] - The tool definitions offered this round, used for early arg validation.
  * @returns {Promise<object>} { toolCallId: string, result: string }
@@ -114,7 +111,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           '🎨 Sto generando l\'immagine, attendi un attimo...'
         );
       }
-      result = await generateImage(args, userCtx, responseCtx);
+      result = await generateImage(args, userCtx);
       break;
     }
 
@@ -125,7 +122,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           '🎬 Sto generando il video (può richiedere qualche minuto), attendi un attimo...'
         );
       }
-      result = await generateVideo(args, userCtx, responseCtx);
+      result = await generateVideo(args, userCtx);
       break;
     }
 
@@ -211,20 +208,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
           legalSignature: args.legalSignature
         });
         const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
-        const formalFinalName = pushBufferAttachment(responseCtx, {
-          name: formalFileName,
-          buffer: formalPdfBuffer,
-          mimetype: 'application/pdf'
-        });
-        const ownerKey = workspaceIdToSlug(resolveWorkspaceId(userCtx)) || resolveStorageId(userCtx) || null;
-        const pdfPart = await buildXaiPartFromBuffer(formalPdfBuffer, formalFinalName, 'application/pdf', ownerKey);
-        const pdfPayload = {
+        const staged = stageToolOutput(resolveWorkspaceId(userCtx), formalFileName, formalPdfBuffer);
+        result = {
           success: true,
-          filename: formalFinalName,
-          message: `Formal request PDF generated successfully and pushed to the delivery buffer as "${formalFinalName}".`
-            + (pdfPart ? ' Attached below so you can check its content.' : '')
+          path: staged.display,
+          message: `Formal request PDF generated successfully and saved as "${staged.display}". `
+            + 'Open it with read_file to check its content, or pass that path to send it.'
         };
-        result = pdfPart ? [{ type: 'text', text: JSON.stringify(pdfPayload) }, pdfPart] : pdfPayload;
       } catch (err) {
         await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
         result = { success: false, error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
@@ -233,24 +223,17 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
 
     case 'send_email': {
-      result = await sendEmailTool(args, userCtx, responseCtx, deliveryCtx);
+      result = await sendEmailTool(args, userCtx, deliveryCtx);
       break;
     }
 
     case 'send_whatsapp_message': {
-      result = await sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx);
+      result = await sendWhatsAppTool(args, userCtx, deliveryCtx);
       break;
     }
 
     case 'read_music_stats': {
       result = await readMusicStats();
-      break;
-    }
-
-    case 'read_video': {
-      // May return content parts (text + the input_file for the clip) so the
-      // deferred history video is watchable this round.
-      result = await readVideo(args, userCtx);
       break;
     }
 
@@ -273,13 +256,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       }
       const musicResult = await musicCreator(args.prompt, userCtx);
       if (musicResult.attachments && musicResult.attachments.length > 0) {
-        // Every buffered file must be named back, or the model cannot send it.
-        const filenames = musicResult.attachments.map(att => pushBufferAttachment(responseCtx, att));
+        const musicWorkspaceId = resolveWorkspaceId(userCtx);
+        const paths = musicResult.attachments
+          .map(att => stageToolOutput(musicWorkspaceId, att.name, att.buffer).display);
         result = {
           success: true,
-          filename: filenames[0],
-          message: 'Song generated successfully and pushed to the delivery buffer as '
-              + `${filenames.map(f => `"${f}"`).join(', ')}. `
+          path: paths[0],
+          message: 'Song generated successfully and saved as '
+              + `${paths.map(f => `"${f}"`).join(', ')}. `
               + 'You cannot listen to it yourself, but you can still use it or send it to the user.'
         };
       } else {

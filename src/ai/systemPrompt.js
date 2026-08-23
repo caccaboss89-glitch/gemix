@@ -11,9 +11,8 @@
 // multi-system into the head, which moves it and busts the prefix cache). Time,
 // workspace, quotas, settings, caller and turn-varying platform fields live
 // there. The Discord statute is conversation-stable, so it stays in the static
-// prefix. The delivery buffer is deliberately absent: it is always empty when
-// this block is built, and each tool result names the file it added — which is
-// what the model reads for the rest of the turn.
+// prefix. Files a tool produces are not listed here: each tool result names the
+// path it wrote, which is what the model reads for the rest of the turn.
 
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
 import { ACTIVE_MEMBERS  } from '../config/members.js';

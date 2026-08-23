@@ -64,11 +64,10 @@ function _sentRecipient(target) {
 /**
  * @param {object} args - { recipient, message, attachments? }
  * @param {object} userCtx
- * @param {object} responseCtx - holds the delivery buffer
  * @param {object} deliveryCtx - { contactedWA: Set }
  * @returns {Promise<object>} tool result
  */
-async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
+async function sendWhatsAppTool(args, userCtx, deliveryCtx) {
   if (typeof args.message !== 'string' || !args.message.trim()) {
     return { success: false, error: 'Missing "message" parameter. You must provide the text message to send.' };
   }
@@ -83,7 +82,7 @@ async function sendWhatsAppTool(args, userCtx, responseCtx, deliveryCtx) {
   if (contacted) return contacted;
 
   const { attachments, missingNote } = await resolveOutboundAttachments(
-    args.attachments, responseCtx, userCtx
+    args.attachments, userCtx
   );
   const text = stripOutgoingDeliveryArtifacts(args.message);
 

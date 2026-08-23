@@ -9,32 +9,27 @@
 //   - POST /v1/images/edits        (image generation guided by reference images)
 //   - POST /v1/videos/generations + GET /v1/videos/{request_id} (async video)
 //
-// Reference images are passed as public HTTPS URLs: entries that are already
-// URLs go straight through; local filenames (delivery buffer or chat history)
-// are uploaded via utils/xaiUpload.js first. The generated media URL is
-// downloaded, stored as a buffered attachment for delivery, and re-uploaded
-// so the model can see/watch its own output this turn (utils/aiFileDelivery.js).
+// Reference images: entries that are already public URLs go straight through;
+// a namespace path is read off disk and sent as an inline base64 data URL, so
+// no file of the user's is published to a third party on the way to xAI.
+// The generated media is downloaded into `workspace/`, and the tool answers
+// with its path — plus, for an image, an inline copy so the model sees it.
 
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
 import { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
 import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
-import { tempDirForOwner  } from '../utils/tempFileServer.js';
-import { resolveStorageId  } from '../utils/userPaths.js';
 import { resolveLocalFileEntry  } from '../utils/deliverySelection.js';
-import { resolveWorkspaceId, workspaceIdToSlug  } from '../utils/workspaceId.js';
-import { pushBufferAttachment  } from '../utils/attachments.js';
+import { resolveWorkspaceId  } from '../utils/workspaceId.js';
+import { stageToolOutput  } from './workspace/toolOutput.js';
+import { INLINE_IMAGE_EXTS, inlineImagePart  } from './workspace/inlineImage.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 import { sanitizeFilename  } from '../utils/text.js';
 import { createLogger  } from '../utils/logger.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
-import { XAI_IMAGE_EXTS, exposeXaiUrlFromAbsPath, buildXaiPartFromBuffer, MAX_VIDEO_BYTES  } from '../utils/aiFileDelivery.js';
-import { clearXaiUploadCache  } from '../utils/xaiUpload.js';
-import { isXaiFileDownloadError  } from '../utils/refreshXaiMessageUrls.js';
 import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
 
 const log = createLogger('ImagineGenerator');
@@ -65,13 +60,13 @@ const ALLOWED_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4'
 // /images/edits accepts up to 3 reference images (documented xAI limit).
 // Reference-to-video publishes no count limit, so 7 is our own cap; both are
 // checked before the request so the model gets the error without a round trip.
-const MAX_REF_IMAGES_FOR_IMAGE = 3;
-const MAX_REF_IMAGES_FOR_VIDEO = 7;
+// They live in constants.js because the tool schemas quote them too.
+const { MAX_REF_IMAGES_FOR_IMAGE, MAX_REF_IMAGES_FOR_VIDEO } = constants;
 
 // Fixed video parameters (resolution/duration live in config/constants.js).
 
-// Generated image/video download cap (same as ingress video limit).
-const GENERATED_MEDIA_MAX_BYTES = MAX_VIDEO_BYTES;
+// Generated image/video download cap (same as the ingress video limit).
+const GENERATED_MEDIA_MAX_BYTES = constants.MAX_VIDEO_BYTES;
 
 // -- Helpers -----------------------------------------------------------------
 
@@ -94,39 +89,23 @@ function _cleanPrompt(prompt) {
 }
 
 /**
- * Persist a buffer-sourced reference image to the caller's private temp subdir
- * so it can be uploaded. Per-user isolation: files for one user never share a
- * directory with another's.
- */
-function _materializeRefToTemp(buffer, name, ownerKey) {
-  const dir = tempDirForOwner(ownerKey);
-  const safe = (name || 'ref').replace(/[^a-zA-Z0-9._-]/g, '_');
-  const filePath = path.join(dir, `imgref_${crypto.randomBytes(8).toString('hex')}_${safe}`);
-  fs.writeFileSync(filePath, buffer);
-  return filePath;
-}
-
-/** Per-user isolation key for temp files staged from this user's context. */
-function _ownerKeyFor(userCtx) {
-  return workspaceIdToSlug(resolveWorkspaceId(userCtx)) || resolveStorageId(userCtx) || null;
-}
-
-/**
- * Resolve reference-image entries (public HTTPS URLs or local filenames) into
- * public HTTPS URLs xAI can fetch. Validates count, extension, and size.
+ * Resolve reference-image entries into values the Imagine endpoints accept.
+ *
+ * A public URL is passed through untouched; a namespace path becomes an inline
+ * base64 data URL, which is what keeps a user file off any third-party host on
+ * the way to the provider. Count, type and size are validated here so a bad
+ * reference costs no round trip.
  *
  * Returns { ok:true, urls:[] } or { ok:false, reason }.
  */
-async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, opts = {}) {
+function _resolveReferenceImageUrls(refList, max, workspaceId) {
   if (refList.length > max) {
     return { ok: false, reason: `Too many reference images (${refList.length}). Max allowed: ${max}.` };
   }
-  // Per-user temp subdir so buffer-materialized references stay isolated.
-  const ownerKey = _ownerKeyFor(userCtx);
   const urls = [];
   for (const raw of refList) {
     if (typeof raw !== 'string' || !raw.trim()) {
-      return { ok: false, reason: 'Each reference image must be a filename or a public https URL.' };
+      return { ok: false, reason: 'Each reference image must be a workspace/attachments path or a public https URL.' };
     }
     const entry = raw.trim();
 
@@ -136,48 +115,32 @@ async function _resolveReferenceImageUrls(refList, max, userCtx, responseCtx, op
       continue;
     }
 
-    const found = resolveLocalFileEntry(entry, userCtx, responseCtx);
+    const found = resolveLocalFileEntry(entry, workspaceId);
     if (!found) {
-      return { ok: false, reason: `Reference image "${entry}" not found in the delivery buffer or chat history.` };
+      return { ok: false, reason: `Reference image "${entry}" does not exist. Pass the path exactly as you saw it.` };
     }
 
-    const ext = path.extname(found.name || entry).toLowerCase();
-    if (!XAI_IMAGE_EXTS.has(ext)) {
+    const ext = path.extname(found.name).toLowerCase();
+    if (!INLINE_IMAGE_EXTS.has(ext)) {
       return {
         ok: false,
-        reason: `Reference "${entry}" is not a supported image type (allowed: ${[...XAI_IMAGE_EXTS].join(', ')}).`
+        reason: `Reference "${entry}" is not a supported image type (allowed: ${[...INLINE_IMAGE_EXTS].join(', ')}).`
       };
     }
 
-    let diskPath = found.filePath || null;
-    if (!diskPath) {
-      if (found.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-      if (found.buffer.length > constants.MAX_IMAGE_BYTES) {
+    let buffer;
+    try {
+      const sz = fs.statSync(found.filePath).size;
+      if (sz === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
+      if (sz > constants.MAX_IMAGE_BYTES) {
         return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
       }
-      try {
-        diskPath = _materializeRefToTemp(found.buffer, found.name, ownerKey);
-      } catch (err) {
-        return { ok: false, reason: `Cannot stage reference "${entry}": ${err.message}` };
-      }
-    } else {
-      try {
-        const sz = fs.statSync(diskPath).size;
-        if (sz === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-        if (sz > constants.MAX_IMAGE_BYTES) return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
-      } catch (err) {
-        return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
-      }
+      buffer = fs.readFileSync(found.filePath);
+    } catch (err) {
+      return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
     }
 
-    const exposed = await exposeXaiUrlFromAbsPath(diskPath, found.name || `ref${ext}`, {
-      mimetype: mimeForExtension(ext),
-      forceRefresh: opts.forceRefresh === true
-    });
-    if (!exposed.success) {
-      return { ok: false, reason: exposed.error || `Cannot expose reference "${entry}" publicly.` };
-    }
-    urls.push(exposed.url);
+    urls.push(`data:${mimeForExtension(ext, 'image/png')};base64,${buffer.toString('base64')}`);
   }
   return { ok: true, urls };
 }
@@ -197,35 +160,19 @@ async function _downloadMedia(url) {
   return Buffer.from(arrBuf);
 }
 
-function _hasLocalRefEntries(refList) {
-  return refList.some((e) => typeof e === 'string' && e.trim() && !/^https?:\/\//i.test(e.trim()));
-}
-
 /**
- * POST to Imagine image/video endpoints; on stale local ref URLs, refresh upload once.
+ * Resolve the references, then POST to an Imagine endpoint. References travel
+ * inline, so there is no hosted URL that can go stale between the two steps.
  */
-async function _xaiImagineSubmitWithRefRefresh({
-  label, timeoutMs, refList, maxRefs, userCtx, responseCtx, buildRequest
-}) {
-  let refs = await _resolveReferenceImageUrls(refList, maxRefs, userCtx, responseCtx);
+async function _xaiImagineSubmit({ label, timeoutMs, refList, maxRefs, workspaceId, buildRequest }) {
+  const refs = _resolveReferenceImageUrls(refList, maxRefs, workspaceId);
   if (!refs.ok) return { ok: false, reason: refs.reason };
-
-  // Exactly two attempts: the retry only fires once (attempt 0, stale local ref
-  // URL), so attempt 1 always returns from inside the loop — nothing follows it.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const { endpointPath, body } = buildRequest(refs.urls);
-      const data = await _xaiJsonRequest(label, endpointPath, body, timeoutMs);
-      return { ok: true, data, refs };
-    } catch (err) {
-      const canRefresh = attempt === 0 && refList.length > 0 && _hasLocalRefEntries(refList)
-        && isXaiFileDownloadError(err.message);
-      if (!canRefresh) return { ok: false, reason: err.message };
-      clearXaiUploadCache();
-      refs = await _resolveReferenceImageUrls(refList, maxRefs, userCtx, responseCtx, { forceRefresh: true });
-      if (!refs.ok) return { ok: false, reason: refs.reason };
-      log.info(`   ${label}: stale ref URL(s), re-uploaded and retrying...`);
-    }
+  try {
+    const { endpointPath, body } = buildRequest(refs.urls);
+    const data = await _xaiJsonRequest(label, endpointPath, body, timeoutMs);
+    return { ok: true, data, refs };
+  } catch (err) {
+    return { ok: false, reason: err.message };
   }
 }
 
@@ -238,11 +185,10 @@ function _extFromGeneratedMedia(url, mimeType, fallbackExt) {
   return (m && m[1]) ? m[1].toLowerCase() : fallbackExt;
 }
 
-function _pushGeneratedMedia(responseCtx, prompt, buffer, ext, fallbackBase) {
+/** Land the generated bytes in the workspace under a name taken from the prompt. */
+function _stageGeneratedMedia(workspaceId, prompt, buffer, ext, fallbackBase) {
   const baseName = sanitizeFilename(prompt.slice(0, 30), 30) || fallbackBase;
-  const desiredName = `${baseName}_${Date.now()}.${ext}`;
-  const mimetype = mimeForExtension(`.${ext}`);
-  return pushBufferAttachment(responseCtx, { name: desiredName, buffer, mimetype });
+  return stageToolOutput(workspaceId, `${baseName}_${Date.now()}.${ext}`, buffer);
 }
 
 /** HTTP statuses worth retrying during async job polling (transient server / rate limit). */
@@ -278,13 +224,12 @@ async function _xaiJsonRequest(label, endpointPath, body, timeoutMs) {
 /**
  * @param {object} args
  * @param {string} args.prompt
- * @param {string[]} [args.reference_images] - filenames or public https URLs (max 3).
+ * @param {string[]} [args.reference_images] - namespace paths or public https URLs (max 3).
  * @param {string} [args.aspect_ratio] - pure text-to-image only (edits respect the input image).
  * @param {object} userCtx
- * @param {object} responseCtx
- * @returns {Promise<{ success: boolean, message?: string, filename?: string, error?: string }>}
+ * @returns {Promise<{ success: boolean, message?: string, path?: string, error?: string }>}
  */
-async function generateImage(args, userCtx, responseCtx) {
+async function generateImage(args, userCtx) {
   if (!envConfig.IMAGE_GEN_MODEL) return { success: false, error: 'envConfig.IMAGE_GEN_MODEL is not configured.' };
 
   const { prompt, truncated } = _cleanPrompt(args && args.prompt);
@@ -292,8 +237,9 @@ async function generateImage(args, userCtx, responseCtx) {
     return { success: false, error: 'Missing or too short "prompt": describe the image to generate.' };
   }
 
-  if (!resolveStorageId(userCtx)) {
-    return { success: false, error: 'Could not resolve storage ID for this context.' };
+  const workspaceId = resolveWorkspaceId(userCtx);
+  if (!workspaceId) {
+    return { success: false, error: 'Could not resolve the workspace for this context.' };
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
@@ -318,13 +264,12 @@ async function generateImage(args, userCtx, responseCtx) {
   if (!quota.ok) return { success: false, error: quota.error };
 
   try {
-    const submit = await _xaiImagineSubmitWithRefRefresh({
+    const submit = await _xaiImagineSubmit({
       label: 'Grok-Imagine-Image',
       timeoutMs: IMAGE_TIMEOUT_MS,
       refList,
       maxRefs: MAX_REF_IMAGES_FOR_IMAGE,
-      userCtx,
-      responseCtx,
+      workspaceId,
       buildRequest: (urls) => {
         const body = {
           model: envConfig.IMAGE_GEN_MODEL,
@@ -364,9 +309,13 @@ async function generateImage(args, userCtx, responseCtx) {
     }
 
     const ext = _extFromGeneratedMedia(item.url, item.mime_type, 'jpg');
-    const mimetype = mimeForExtension(`.${ext}`);
-    const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'image');
-    const visionPart = await buildXaiPartFromBuffer(buffer, filename, mimetype, _ownerKeyFor(userCtx));
+    let staged;
+    try {
+      staged = _stageGeneratedMedia(workspaceId, prompt, buffer, ext, 'image');
+    } catch (err) {
+      return { success: false, error: `Cannot save the generated image: ${err.message}` };
+    }
+    const visionPart = inlineImagePart(staged.abs);
 
     const truncNote = truncated ? ' (prompt was truncated)' : '';
     const refNote = refsForNote.urls.length > 0
@@ -375,9 +324,9 @@ async function generateImage(args, userCtx, responseCtx) {
     quota.commit();
     const payload = {
       success: true,
-      filename,
-      message: `Image generated successfully and pushed to the delivery buffer as "${filename}".${refNote} `
-        + `You can also pass this filename as a reference image in generate_image or generate_video.${truncNote}`
+      path: staged.display,
+      message: `Image generated successfully and saved as "${staged.display}".${refNote} `
+        + `Pass that path to send it, or as a reference image in generate_image or generate_video.${truncNote}`
         + (visionPart ? ' Attached below so you can see it.' : '')
     };
     return visionPart ? [{ type: 'text', text: JSON.stringify(payload) }, visionPart] : payload;
@@ -391,13 +340,12 @@ async function generateImage(args, userCtx, responseCtx) {
 /**
  * @param {object} args
  * @param {string} args.prompt
- * @param {string[]} [args.reference_images] - filenames or public https URLs (max 7).
+ * @param {string[]} [args.reference_images] - namespace paths or public https URLs (max 7).
  * @param {string} [args.aspect_ratio]
  * @param {object} userCtx
- * @param {object} responseCtx
- * @returns {Promise<{ success: boolean, message?: string, filename?: string, error?: string }>}
+ * @returns {Promise<{ success: boolean, message?: string, path?: string, error?: string }>}
  */
-async function generateVideo(args, userCtx, responseCtx) {
+async function generateVideo(args, userCtx) {
   if (!envConfig.VIDEO_GEN_MODEL) return { success: false, error: 'envConfig.VIDEO_GEN_MODEL is not configured.' };
 
   const { prompt, truncated } = _cleanPrompt(args && args.prompt);
@@ -405,8 +353,9 @@ async function generateVideo(args, userCtx, responseCtx) {
     return { success: false, error: 'Missing or too short "prompt": describe the video to generate.' };
   }
 
-  if (!resolveStorageId(userCtx)) {
-    return { success: false, error: 'Could not resolve storage ID for this context.' };
+  const workspaceId = resolveWorkspaceId(userCtx);
+  if (!workspaceId) {
+    return { success: false, error: 'Could not resolve the workspace for this context.' };
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
@@ -429,13 +378,12 @@ async function generateVideo(args, userCtx, responseCtx) {
   if (!quota.ok) return { success: false, error: quota.error };
 
   try {
-    const submitResult = await _xaiImagineSubmitWithRefRefresh({
+    const submitResult = await _xaiImagineSubmit({
       label: 'Grok-Imagine-Video',
       timeoutMs: IMAGE_TIMEOUT_MS,
       refList,
       maxRefs: MAX_REF_IMAGES_FOR_VIDEO,
-      userCtx,
-      responseCtx,
+      workspaceId,
       buildRequest: (urls) => {
         const body = {
           model: envConfig.VIDEO_GEN_MODEL,
@@ -482,26 +430,25 @@ async function generateVideo(args, userCtx, responseCtx) {
     }
 
     const ext = _extFromGeneratedMedia(videoUrl, null, 'mp4');
-    const mimetype = mimeForExtension(`.${ext}`);
-    const filename = _pushGeneratedMedia(responseCtx, prompt, buffer, ext, 'video');
-    const videoPart = await buildXaiPartFromBuffer(buffer, filename, mimetype, _ownerKeyFor(userCtx));
+    let staged;
+    try {
+      staged = _stageGeneratedMedia(workspaceId, prompt, buffer, ext, 'video');
+    } catch (err) {
+      return { success: false, error: `Cannot save the generated video: ${err.message}` };
+    }
 
     const truncNote = truncated ? ' (prompt was truncated)' : '';
     const refNote = refsForNote.urls.length > 0
       ? ` Used ${refsForNote.urls.length} reference image(s).`
       : '';
     quota.commit();
-    const watchNote = videoPart
-      ? ' Attached below so you can watch it. If it has no speech, only music or ambient sound, '
-        + 'you will not get a transcript of dialogue for it — that does not mean the video is silent, '
-        + 'only that there is no speech to transcribe.'
-      : '';
-    const payload = {
+    return {
       success: true,
-      filename,
-      message: `Video generated successfully (${constants.VIDEO_GEN_DURATION_S}s, ${constants.VIDEO_GEN_RESOLUTION}) and pushed to the delivery buffer as "${filename}".${refNote}${truncNote}${watchNote}`
+      path: staged.display,
+      message: `Video generated successfully (${constants.VIDEO_GEN_DURATION_S}s, ${constants.VIDEO_GEN_RESOLUTION}) `
+        + `and saved as "${staged.display}".${refNote}${truncNote} `
+        + 'Open it with read_file to watch it, or pass that path to send it.'
     };
-    return videoPart ? [{ type: 'text', text: JSON.stringify(payload) }, videoPart] : payload;
   } finally {
     await quota.release();
   }
@@ -566,8 +513,6 @@ async function _pollVideoResult(requestId) {
 
 export {
   generateImage,
-  generateVideo,
-  MAX_REF_IMAGES_FOR_IMAGE,
-  MAX_REF_IMAGES_FOR_VIDEO
+  generateVideo
 
 };

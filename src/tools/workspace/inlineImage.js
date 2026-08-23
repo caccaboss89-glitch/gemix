@@ -32,11 +32,24 @@ function inlineImagePart(absPath, maxBytes = constants.MAX_IMAGE_BYTES) {
     const stat = fs.statSync(absPath);
     if (!stat.isFile() || stat.size === 0 || stat.size > maxBytes) return null;
     const mime = mimeForExtension(path.extname(absPath), 'image/png');
-    const base64 = fs.readFileSync(absPath).toString('base64');
-    return { type: 'input_image', image_url: `data:${mime};base64,${base64}` };
+    return inlineImagePartFromBuffer(fs.readFileSync(absPath), mime, maxBytes);
   } catch {
     return null;
   }
 }
 
-export { INLINE_IMAGE_EXTS, isInlineImageExt, inlineImagePart };
+/**
+ * Same part, from bytes already in memory. Used where the image never needs to
+ * touch disk, such as a search hit downloaded only to be looked at.
+ *
+ * @param {Buffer} buffer
+ * @param {string} mime
+ * @param {number} [maxBytes]
+ * @returns {{ type: 'input_image', image_url: string }|null}
+ */
+function inlineImagePartFromBuffer(buffer, mime, maxBytes = constants.MAX_IMAGE_BYTES) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0 || buffer.length > maxBytes) return null;
+  return { type: 'input_image', image_url: `data:${mime || 'image/png'};base64,${buffer.toString('base64')}` };
+}
+
+export { INLINE_IMAGE_EXTS, isInlineImageExt, inlineImagePart, inlineImagePartFromBuffer };

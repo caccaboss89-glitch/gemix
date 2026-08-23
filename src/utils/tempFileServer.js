@@ -3,12 +3,11 @@
 //
 // Serves the temporary download links sent to USERS when WhatsApp/Discord
 // reject or cannot carry an attachment directly (delivery fallback, see
-// utils/attachmentFallback.js). Files bound for xAI use tmpfile.link
-// instead (utils/xaiUpload.js) - this server never feeds the model.
+// utils/attachmentFallback.js). This server never feeds the model: what the
+// model sees is inline base64 or a path it opens with read_file.
 //
 // It also owns the .tempfiles/ staging directory (tempDirForOwner), where
-// per-user buffers are materialized before upload/delivery and periodically
-// swept.
+// per-user buffers are materialized before delivery and periodically swept.
 //
 // Each token is 128-bit random (crypto.randomBytes(16)). Listing is
 // disabled (regex match on /temp/<32hex>/<name> only). Path traversal is

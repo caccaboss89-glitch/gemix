@@ -10,13 +10,14 @@ import path from 'path';
 import { extractAttachmentTagPaths  } from './media.js';
 import { getStoredHistoryVoiceTranscription  } from './historySync.js';
 import { escapeXml  } from './xmlEscape.js';
+import { attachmentDisplayPath  } from '../attachments/projection.js';
 
 const VOICE_AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a']);
 
 function _formatPastVoiceReply(name, text) {
-  const safeName = escapeXml(name);
+  const safePath = escapeXml(attachmentDisplayPath(name));
   const safeText = escapeXml(text);
-  return `<PastVoiceReply file="${safeName}">${safeText}</PastVoiceReply>`;
+  return `<PastVoiceReply file="${safePath}">${safeText}</PastVoiceReply>`;
 }
 
 /**
@@ -54,9 +55,10 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
     if (!text) continue;
 
     const past = _formatPastVoiceReply(name, text);
-    // Match [Attachment: name] and optional [Attachment (expired): name]
+    // Tags carry the namespace path; older history entries kept the bare name
+    // or the legacy history/ prefix, so all three forms have to match.
     const re = new RegExp(
-      `\\[Attachment(?:\\s*\\(expired\\))?:\\s*${_escapeRegExp(name)}\\]`,
+      `\\[Attachment(?:\\s*\\(expired\\))?:\\s*(?:attachments/|history/)?${_escapeRegExp(name)}\\]`,
       'g'
     );
     const before = next;
@@ -64,23 +66,6 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
     if (next !== before) {
       seen.add(name);
       replaced += 1;
-      continue;
-    }
-
-    // Tag path may be history/name — replace the literal extracted path form
-    // (buildAttachmentTag strips history/ and would rebuild the basename form already tried).
-    const literalPath = String(tagPath || '').trim();
-    if (literalPath && literalPath !== name) {
-      const pathRe = new RegExp(
-        `\\[Attachment(?:\\s*\\(expired\\))?:\\s*${_escapeRegExp(literalPath)}\\]`,
-        'g'
-      );
-      const beforePath = next;
-      next = next.replace(pathRe, past);
-      if (next !== beforePath) {
-        seen.add(name);
-        replaced += 1;
-      }
     }
   }
 

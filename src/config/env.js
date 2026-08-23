@@ -113,6 +113,19 @@ export default {
   IMAGE_GEN_MODEL: process.env.IMAGE_GEN_MODEL,
   VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL,
 
+  // Cloudflare Workers AI: the free-tier backend behind STT on every profile
+  // and behind image generation where xAI Imagine is absent. Without the two
+  // credentials the backend reports itself unconfigured instead of guessing.
+  CLOUDFLARE_AI_ACCOUNT_ID: process.env.CLOUDFLARE_AI_ACCOUNT_ID || '',
+  CLOUDFLARE_AI_API_TOKEN: process.env.CLOUDFLARE_AI_API_TOKEN || '',
+  CLOUDFLARE_STT_MODEL: process.env.CLOUDFLARE_STT_MODEL || '@cf/openai/whisper-large-v3-turbo',
+  CLOUDFLARE_IMAGE_MODEL: process.env.CLOUDFLARE_IMAGE_MODEL || '@cf/black-forest-labs/flux-2-klein-4b',
+
+  // xAI's own transcription endpoint, relative to XAI_BASE_URL. It carries no
+  // default because the path is not published: unset means the STT feature
+  // resolves to its Cloudflare fallback rather than posting to a guessed URL.
+  XAI_STT_PATH: process.env.XAI_STT_PATH || '',
+
   BOT_TOKEN: process.env.BOT_TOKEN,
   GUILD_ID: process.env.GUILD_ID,
   BOT_EMAIL: process.env.BOT_EMAIL,

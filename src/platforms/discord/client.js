@@ -14,15 +14,8 @@ const { DISCORD_THREAD_NAME, MAX_HISTORY, PLATFORM_DISCORD } = constants;
 
 import { identifyUser } from '../../utils/userIdentifier.js';
 import { formatTimestamp } from '../../utils/time.js';
-import {
-  MAX_IMAGE_READS,
-  MAX_FILE_READS,
-  classifyAiFileDelivery,
-  isVideoAttachment,
-  DELIVERY_MODE
-} from '../../utils/aiFileDelivery.js';
-import { isDiscordAttachmentOversize } from '../../utils/discordAttachmentFetch.js';
-import { ingressDiscordAttachment, capHistoryImageParts } from '../../utils/incomingMediaIngress.js';
+import { ingressDiscordAttachment } from '../../utils/incomingMediaIngress.js';
+import { resolveChatWorkspaceId } from '../../utils/workspaceId.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { enqueueBatchedTurn } from '../../utils/batchIngress.js';
 import { pickLatestBatchEntry } from '../../utils/batchContext.js';
@@ -52,8 +45,9 @@ import { wrapSystemNotification  } from '../../utils/systemTags.js';
 
 const log = createLogger('DISCORD');
 
-// Max parallel xAI uploads while building one history window (see WA shared.js).
-const HISTORY_UPLOAD_CONCURRENCY = 15;
+// Max parallel attachment ingresses while building one history window
+// (see WA shared.js).
+const HISTORY_INGRESS_CONCURRENCY = 15;
 
 let discordClient;
 
@@ -166,17 +160,24 @@ async function fetchDiscordMessageWindow(channel, starterMessageId) {
  */
 async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, recentMessageIds, senderName) {
   let textBody = msg.content || '';
+  const workspaceId = resolveChatWorkspaceId(PLATFORM_DISCORD, channel, historyStorageId);
   const { prefix, mediaParts: quotedMediaParts } = await processDiscordQuotedReply(
-    msg, channel, historyStorageId, recentMessageIds, { includeQuotedMedia: true }
+    msg, channel, historyStorageId, recentMessageIds, { includeQuotedMedia: true, workspaceId }
   );
   textBody = prefix + textBody;
 
   const contentParts = [...quotedMediaParts];
   const attachmentTags = [];
 
+  // The message being answered and the one it replies to are the only sources
+  // of inline images, and they share the per-turn cap (spec §8.6).
+  let imagesInlined = quotedMediaParts.length;
   for (const att of msg.attachments.values()) {
     const ingress = await ingressDiscordAttachment(att, historyStorageId, {
-      metadataDurationSec: Number(att.duration || 0)
+      metadataDurationSec: Number(att.duration || 0),
+      workspaceId,
+      inline: true,
+      imagesInlined
     });
     if (ingress.oversize) {
       attachmentTags.push({ tag: ingress.tag, name: att.name, syncedPath: null });
@@ -184,6 +185,7 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
       continue;
     }
     contentParts.push(...ingress.contentParts);
+    imagesInlined += ingress.contentParts.length;
     attachmentTags.push({ tag: ingress.tag, name: ingress.name, syncedPath: ingress.syncedPath });
     textBody = `${textBody} ${ingress.textFragment.trim()}`.trim();
   }
@@ -490,47 +492,19 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     .slice(-MAX_HISTORY);
 
   const history = [];
-
-  // Pre-upload budget pass (newest→oldest, per attachment): up to
-  // MAX_IMAGE_READS images and MAX_FILE_READS files uploaded to xAI per turn.
-  const uploadAllowedAtt = new Set();
-  {
-    let imgBudget = MAX_IMAGE_READS;
-    let fileBudget = MAX_FILE_READS;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.author.id === discordClient.user.id) continue;
-      for (const att of m.attachments.values()) {
-        if (isDiscordAttachmentOversize(att)) continue;
-        // History videos never attach (read_video fetches them), so they must
-        // not burn a file slot another document could use.
-        if (isVideoAttachment(att.name || 'file', att.contentType || '')) continue;
-        const mode = classifyAiFileDelivery(att.name || 'file', att.contentType || '');
-        if (mode === DELIVERY_MODE.IMAGE) {
-          if (imgBudget > 0) { imgBudget--; uploadAllowedAtt.add(att.id); }
-        } else if (mode === DELIVERY_MODE.FILE) {
-          if (fileBudget > 0) { fileBudget--; uploadAllowedAtt.add(att.id); }
-        }
-      }
-    }
-  }
+  const workspaceId = resolveChatWorkspaceId(PLATFORM_DISCORD, channel, historyStorageId);
 
   async function processDiscordHistoryMessage(m) {
     const ts = formatTimestamp(m.createdAt);
     const isBot = m.author.id === discordClient.user.id;
     let textContent = cleanIncomingText(m.content || '');
-    const mediaParts = [];
 
     for (const att of m.attachments.values()) {
-      // Main brain sees recent history files directly: entries from other
-      // authors carry native parts. Everything our own account posted stays
-      // [Attachment] tags only — GemiX's replies ride the assistant role, which
-      // cannot carry input parts. Over the per-call media budget we also force
-      // tag-only so the file is never uploaded to xAI.
-      const overBudget = !isBot && !uploadAllowedAtt.has(att.id);
+      // History is tags only, on every platform: the model opens what it needs
+      // with read_file instead of the window carrying every past file (§8.6).
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
-        tagOnly: isBot || overBudget,
-        deferVideo: true,
+        workspaceId,
+        inline: false,
         metadataDurationSec: Number(att.duration || 0)
       });
       if (ingress.oversize) {
@@ -545,10 +519,6 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
         captionHints
       );
       textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
-      if (overBudget && !ingress.oversize && !textContent.includes('not shown this turn')) {
-        textContent = `${textContent} (older file, not shown this turn — newest ${MAX_IMAGE_READS} images / ${MAX_FILE_READS} files per call; ask to resend or reply to it to view)`.trim();
-      }
-      mediaParts.push(...ingress.contentParts);
     }
 
     // Preserve reply chains in history (text-only; quoted media lives on its own entry).
@@ -557,7 +527,8 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
         const quoted = await processDiscordQuotedReply(
           m, channel, historyStorageId, recentMessageIds, {
             includeQuotedMedia: false,
-            messageById
+            messageById,
+            workspaceId
           }
         );
         if (quoted.prefix) {
@@ -586,18 +557,13 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
     return {
       role: isBot && !isSystemNotice ? 'assistant' : 'user',
-      content: mediaParts.length > 0
-        ? [{ type: 'text', text: finalText }, ...mediaParts]
-        : finalText
+      content: finalText
     };
   }
 
-  // Build entries (incl. their xAI uploads) in parallel, preserving order.
-  const built = await mapWithConcurrency(messages, HISTORY_UPLOAD_CONCURRENCY, processDiscordHistoryMessage);
+  // Build entries in parallel, preserving order.
+  const built = await mapWithConcurrency(messages, HISTORY_INGRESS_CONCURRENCY, processDiscordHistoryMessage);
   history.push(...built.filter(Boolean));
-
-  // Bound the cost of re-attached history media: newest images + newest files.
-  capHistoryImageParts(history, MAX_IMAGE_READS, MAX_FILE_READS);
 
   return { history, recentMessageIds };
 }

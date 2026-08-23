@@ -182,13 +182,13 @@ const TOOL_RUNTIME_ERRORS = {
     'Invalid phone number: use country code and 8–15 digits (e.g. +393331234567).'
   ],
   generate_image: [
-    'Reference image "<name>" not found in the delivery buffer or chat history.',
+    'Reference image "<path>" does not exist. Pass the path exactly as you saw it.',
     'Too many reference images (<n>). Max allowed: 3.',
-    'Each reference image must be a filename or a public https URL.',
+    'Each reference image must be a workspace/attachments path or a public https URL.',
     `Weekly image generation limit reached (5 per week). It resets every ${formatMediaQuotaResetLabel()}.`
   ],
   generate_video: [
-    'Reference image "<name>" not found in the delivery buffer or chat history.',
+    'Reference image "<path>" does not exist. Pass the path exactly as you saw it.',
     'Too many reference images (<n>). Max allowed: 7.',
     `Weekly video generation limit reached (2 per week). It resets every ${formatMediaQuotaResetLabel()}.`
   ],
@@ -255,7 +255,7 @@ const TOOL_RUNTIME_ERRORS = {
 // All tool names that can surface a context/permission error from the system,
 // per profile. Used to dump the exact "unavailable" message GemiX gets back.
 const ALL_TOOL_NAMES = [
-  'web_search', 'x_search', 'web_image_search', 'read_video', 'generate_music', 'generate_image', 'generate_video',
+  'web_search', 'x_search', 'web_image_search', 'generate_music', 'generate_image', 'generate_video',
   'list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell', 'send_whatsapp_message',
   'send_email', 'schedule_tasks', 'read_my_tasks', 'remove_my_tasks',
   'manage_preferences', 'toggle_release_notify',

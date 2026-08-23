@@ -56,9 +56,11 @@ export default {
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
   MAX_HISTORY: 30,
-  // Max native history media parts re-attached per turn (matches MAX_HISTORY).
-  MAX_HISTORY_MEDIA_IMAGES: 30,
-  MAX_HISTORY_MEDIA_FILES: 30,
+  // Images are the only file type that reaches the model natively, and only
+  // from the message being answered or the one it replies to. Past that cap the
+  // image becomes an [Attachment] tag like everything else, and read_file
+  // brings it back on demand.
+  MAX_INLINE_IMAGES_PER_TURN: 8,
   MAX_TASK_DAYS: 365,
   SCHEDULER_INTERVAL_MS: 60_000,
   // responseLock TTL while a debounced batch waits or a turn pipeline runs
@@ -85,8 +87,9 @@ export default {
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
 
   // Public temp file URLs (tempFileServer + Caddy) - token TTLs for the
-  // temporary download links sent to USERS (delivery fallback). xAI never
-  // uses these links: files for xAI go through tmpfile.link (utils/xaiUpload.js).
+  // temporary download links sent to USERS when a file is too large to attach.
+  // Nothing on this path ever reaches the model: files the model sees are
+  // inline base64 or paths it opens with read_file.
   TUNNEL_TOKEN_TTL_HISTORY_MS: 24 * 60 * 60 * 1000,
   TUNNEL_TOKEN_TTL_TEMP_MS: 60 * 60 * 1000,
 
@@ -105,8 +108,19 @@ export default {
   /** Cap on captured stdout/stderr and on host-side file reads returned to the model. */
   WORKSPACE_OUTPUT_MAX_BYTES: 200 * 1024,
 
-  // Media
+  // Media. The reference-image caps and the image-search counts live here
+  // rather than in the tool modules because the tool *schemas* quote them:
+  // importing them from src/ai/tools.js the other way round closes a cycle
+  // through the dispatcher, which then breaks depending on which module the
+  // process happens to load first.
   MAX_IMAGE_BYTES: 8 * 1024 * 1024,
+  MAX_REF_IMAGES_FOR_IMAGE: 3,
+  MAX_REF_IMAGES_FOR_VIDEO: 7,
+  IMAGE_SEARCH_DEFAULT_COUNT: 2,
+  IMAGE_SEARCH_MIN_COUNT: 1,
+  IMAGE_SEARCH_MAX_COUNT: 10,
+  // Ceiling on a video GemiX downloads or generates, before it ever touches disk.
+  MAX_VIDEO_BYTES: 60 * 1024 * 1024,
   VIDEO_GEN_DURATION_S: 6,
   VIDEO_GEN_RESOLUTION: '480p',
   MAX_TTS_CHARS: 1000,

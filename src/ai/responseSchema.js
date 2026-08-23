@@ -40,7 +40,8 @@ const VOICE_RESPONSE_FIELD_DESC =
 
 const GEMIX_ATTACHMENTS_FIELD_DESC =
   'OPTIONAL. The ONLY way to send files in this chat. '
-  + 'Each entry: delivery-buffer or history filename, or a direct public https file URL (image/video/audio/PDF/etc. — never a page/article/post link; '
+  + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
+  + '(image/video/audio/PDF/etc. — never a page/article/post link; '
   + 'for X media use x_search CDN URLs; for web images use the `url` fields from web_image_search). '
   + 'Omit if nothing to send. Never other file syntax (e.g. render_components).';
 

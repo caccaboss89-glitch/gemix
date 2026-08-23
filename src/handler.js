@@ -4,19 +4,18 @@
 //
 // One round of conversation looks like this:
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
-//   2. Touch the per-user/group build workspace activity timestamp (WA only).
+//   2. Touch the per-conversation workspace activity timestamp.
 //   3. Build chat messages: static system first (byte-stable for the turn —
 //      xAI prefix-cache matches from the start of input[]), then history, the
 //      current user message, then the program-owned <Runtime>…</Runtime>
 //      role:user item. Runtime is built once per turn and never moves, so every
 //      later round only appends to input[] — never a second role:system (xAI
-//      folds extra system into the head and busts progressive cache). Media uses
-//      utils/incomingMediaIngress.js → aiFileDelivery.js: native `input_image`
-//      / `input_file` parts via public URLs (user/history files attached
-//      natively; assistant-side entries including GemiX voice stay [Attachment]
-//      tags only), or tag-only for raw binaries. GemiX past voice transcripts
-//      replace assistant [Attachment: …] tags in history with <PastVoiceReply>
-//      (WA voice platforms).
+//      folds extra system into the head and busts progressive cache). Files
+//      arrive through attachments/ingress.js: images of the current or quoted
+//      message inline as base64, everything else an [Attachment: attachments/…]
+//      path the model opens with read_file. Voice notes are rendered as text in
+//      place — the user's with STT (<PastVoice>), GemiX's from the transcript
+//      it already had (<PastVoiceReply>).
 //   4. Loop: call Grok (`/v1/responses`) - tool calls per round in two phases:
 //      (1) standard tools parallel, (2) delivery parallel - repeat until the
 //      model returns the final response or the round budget is reached. The
@@ -38,6 +37,7 @@ import { getToolsForUser, getToolAccessError  } from './ai/tools.js';
 import { buildGemixResponseFormat, parseStructuredReply  } from './ai/responseSchema.js';
 import { resolveDeliverySelection  } from './utils/deliverySelection.js';
 import { applyPastVoiceRepliesToHistory  } from './utils/voiceTranscripts.js';
+import { projectUserVoiceMessages  } from './attachments/voiceProjection.js';
 import { generateVoice  } from './tools/voiceMessage.js';
 import { sanitizeVoiceMessageText  } from './utils/text.js';
 import { getCapabilities, resolveProfile, toolUnavailableMessage  } from './config/platformCapabilities.js';
@@ -124,7 +124,6 @@ function _toolNotAvailableMessage(toolName, ctx) {
  */
 async function handleMessage(ctx) {
   const responseCtx = {
-    attachments: [],
     discordTitle: '',
     // Accumulated stats from native server-side web/X searches (main brain
     // server-side search tools) - used for the badge appended to the reply.
@@ -241,11 +240,11 @@ async function handleMessage(ctx) {
     // keys written by the tools dispatcher (which receives userCtx).
     ctx.requestId = userCtx.requestId;
 
-    // -- Build workspace activity tracking (WhatsApp only) --
+    // -- Workspace activity tracking --
     // Touch last-activity on each main turn and read <Workspace> for the
     // prompt. Read once, first level only: the Runtime block that carries it is
     // built once too, and `list_files` gives the model the rest on demand.
-    const workspaceId = isDiscord ? null : resolveWorkspaceId(ctx);
+    const workspaceId = resolveWorkspaceId(ctx);
     ctx.userWorkspace = null;
     if (workspaceId) {
       try { touchActivity(workspaceId); }
@@ -294,6 +293,23 @@ async function handleMessage(ctx) {
         log.warn(`PastVoiceReply history rewrite failed: ${txErr.message}`);
       }
     }
+    // The user's own voice notes are conversational content, not files to open:
+    // every one of them becomes <PastVoice> with its transcript, in place, on
+    // every platform. The audio stays in attachments/ for read_file.
+    let contentForApi = ctx.content;
+    try {
+      const projected = await projectUserVoiceMessages(
+        { history: historyForApi, current: contentForApi, storageId: resolveStorageId(ctx) }
+      );
+      historyForApi = projected.history;
+      contentForApi = projected.current;
+      if (projected.projected > 0) {
+        log.info(`   Rendered ${projected.projected} user voice note(s) as <PastVoice>`);
+      }
+    } catch (voiceErr) {
+      log.warn(`PastVoice projection failed: ${voiceErr.message}`);
+    }
+
     if (historyForApi.length > 0) {
       messages.push(...historyForApi);
     }
@@ -303,7 +319,7 @@ async function handleMessage(ctx) {
     // break in the cross-turn prefix: next turn the history replays these same
     // messages untagged and separate, so the shared prefix now ends where this
     // turn's burst began instead of at the Runtime block below.
-    messages.push({ role: 'user', content: wrapUserQuery(ctx.content) });
+    messages.push({ role: 'user', content: wrapUserQuery(contentForApi) });
 
     // Turn-varying program state: built once, placed right after the current
     // user message, and never moved again. Both constraints matter.
@@ -503,7 +519,6 @@ async function handleMessage(ctx) {
         maxTurns: constants.MAX_TOOL_ROUNDS,
         requestId: ctx.requestId,
         responseFormat,
-        historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
         reasoningEffort: ctx.settings?.effort
       };
@@ -712,7 +727,6 @@ async function handleMessage(ctx) {
         toolChoice: 'none',
         requestId: ctx.requestId,
         responseFormat,
-        historyStorageId: resolveStorageId(ctx) || null,
         promptCacheKey,
         reasoningEffort: ctx.settings?.effort
       });

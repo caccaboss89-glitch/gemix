@@ -25,7 +25,6 @@ import {
   toolsToWire
 } from './transport/responsesProtocol.js';
 import { chatMessagesToResponsesItems } from './responsesAdapter.js';
-import { callWithStaleUrlRetry } from './responsesWithUrlRefresh.js';
 
 const log = createLogger('AI');
 
@@ -79,7 +78,6 @@ function _resolveEffort(profile, requested) {
  * @param {number} [opts.maxTurns]
  * @param {string|null} [opts.requestId]
  * @param {import('../utils/turnBudget.js').TurnBudget|null} [opts.budget]
- * @param {string|null} [opts.historyStorageId]
  * @returns {Promise<{ message: object, provider: string, model: string, searchStats: object }>}
  */
 async function callAI(messages, tools = null, opts = {}) {
@@ -93,9 +91,9 @@ async function callAI(messages, tools = null, opts = {}) {
     requestId: opts.requestId || null
   };
 
-  const buildBody = (roundMessages) => buildResponsesBody({
+  const body = buildResponsesBody({
     model: profile.model,
-    input: buildResponsesInput(chatMessagesToResponsesItems(roundMessages), { replayableItemTypes }),
+    input: buildResponsesInput(chatMessagesToResponsesItems(messages), { replayableItemTypes }),
     reasoningEffort: _resolveEffort(profile, opts.reasoningEffort),
     tools: toolsToWire(tools),
     toolChoice: opts.toolChoice || 'auto',
@@ -107,16 +105,11 @@ async function callAI(messages, tools = null, opts = {}) {
     include: profile.wire.supportsReasoningReplay ? ['reasoning.encrypted_content'] : null
   });
 
-  const { response } = await callWithStaleUrlRetry({
-    messages,
-    buildBody,
-    historyStorageId: opts.historyStorageId || null,
-    call: (body) => transport.createResponse({
-      body,
-      budget: opts.budget || null,
-      requestId: opts.requestId || null,
-      context
-    })
+  const response = await transport.createResponse({
+    body,
+    budget: opts.budget || null,
+    requestId: opts.requestId || null,
+    context
   });
 
   const read = readResponse(response, { replayableItemTypes });

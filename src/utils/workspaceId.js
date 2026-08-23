@@ -33,6 +33,30 @@ function resolveWorkspaceId(ctx) {
 }
 
 /**
+ * The workspace id for a chat, from what the platform builders have on hand.
+ *
+ * The history builders run before the handler assembles its ctx, but they still
+ * have to project attachments into the same conversation's `attachments/` root.
+ * Deriving it here — rather than each builder rebuilding a ctx-shaped object —
+ * is what keeps the two paths from drifting onto different workspaces.
+ *
+ * @param {string} platform
+ * @param {object} chat - platform chat object with an id
+ * @param {string} storageOrJid - the id the caller uses for history
+ * @returns {string|null}
+ */
+function resolveChatWorkspaceId(platform, chat, storageOrJid) {
+  const chatId = chat?.id?._serialized || chat?.id || null;
+  return resolveWorkspaceId({
+    platform,
+    isGroup: Boolean(chat?.isGroup),
+    groupId: chat?.isGroup ? chatId : null,
+    chatId,
+    waJid: storageOrJid
+  });
+}
+
+/**
  * Derive a filesystem-safe slug from a workspace id. Used both for the
  * on-disk workspace path and for docker container names.
  *
@@ -93,6 +117,7 @@ function getWorkspaceMetaDir(workspaceId) {
 
 export {
   resolveWorkspaceId,
+  resolveChatWorkspaceId,
   workspaceIdToSlug,
   getWorkspacePath,
   getAttachmentsPath,

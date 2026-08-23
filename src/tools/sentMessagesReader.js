@@ -7,8 +7,9 @@
 // read_sent_messages tool: lets an active member (or admin) confirm what GemiX
 // previously delivered to OTHER people on their behalf, on WhatsApp and/or
 // email. Results are grouped by recipient. Any files that were attached are
-// retrieved and re-attached to the current round so the model can inspect
-// them; files that can no longer be retrieved are flagged as expired.
+// put back into this conversation projection, so each one comes back as an
+// `attachments/<name>` path the model can open with read_file — images also
+// come back inline. Files that can no longer be retrieved are flagged expired.
 //
 // Scope guard: an active non-admin caller can only look up other active
 // members (mirrors the send tools). Admin may look up any number.
@@ -18,18 +19,22 @@ import path from 'path';
 import crypto from 'crypto';
 import { resolveActiveMemberByName, findMemberByWa, findMemberByEmail  } from '../config/members.js';
 import { normalizePhoneToJid  } from './whatsappSender.js';
-import { buildXaiFileParts  } from '../utils/aiFileDelivery.js';
+import constants from '../config/constants.js';
 import { downloadPublicFileToDisk  } from '../utils/fetch.js';
 import { TEMP_DIR  } from '../utils/tempFileServer.js';
 import { sanitizeFilename  } from '../utils/text.js';
 import { formatTimestamp  } from '../utils/time.js';
 import { readSentRecords, resolveStoredAttachmentPath  } from '../utils/sentMessagesStore.js';
+import { resolveWorkspaceId  } from '../utils/workspaceId.js';
+import { projectFile  } from '../attachments/projection.js';
+import { isInlineableImage  } from '../attachments/ingress.js';
+import { inlineImagePart  } from './workspace/inlineImage.js';
 import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('SentMessagesReader');
 
-/** Cap on native file parts re-attached in one lookup (matches history image budget). */
-const MAX_RECOVERED_IMAGES = 10;
+/** Images shown inline in one lookup; the rest still come back as paths. */
+const MAX_RECOVERED_IMAGES = constants.MAX_INLINE_IMAGES_PER_TURN;
 
 function _phoneDigits(value) {
   return String(value || '').split('@')[0].split(':')[0].replace(/\D/g, '');
@@ -106,10 +111,13 @@ async function _downloadExternalToTemp(url, name) {
 }
 
 /**
- * Try to turn a stored attachment back into a native file part for the model.
- * @returns {Promise<{ part: object|null, bumpImageCount?: boolean }>}
+ * Put a stored attachment back where the model can reach it: a path under
+ * `attachments/`, plus an inline copy when it is an image and there is still
+ * room in this lookup budget.
+ *
+ * @returns {Promise<{ path: string|null, part?: object }>}
  */
-async function _recoverAttachment(senderKey, stored, imagesReadCount) {
+async function _recoverAttachment(workspaceId, senderKey, stored, imagesReadCount) {
   try {
     let absPath = stored.storedFile
       ? resolveStoredAttachmentPath(senderKey, stored.storedFile)
@@ -117,18 +125,19 @@ async function _recoverAttachment(senderKey, stored, imagesReadCount) {
     if (!absPath && typeof stored.externalUrl === 'string' && stored.externalUrl.trim()) {
       absPath = await _downloadExternalToTemp(stored.externalUrl, stored.originalName);
     }
-    if (!absPath) return { part: null };
+    if (!absPath || !workspaceId) return { path: null };
 
-    const built = await buildXaiFileParts(absPath, stored.originalName || 'file', {
-      mimetype: stored.mimetype,
-      imagesReadCount
-    });
-    if (!built.success) return { part: null };
-    const part = built.parts.find(p => p.type === 'input_file' || p.type === 'input_image') || null;
-    return { part, bumpImageCount: built.bumpImageCount };
+    const projected = projectFile(workspaceId, absPath, stored.originalName || undefined);
+    if (!projected) return { path: null };
+
+    const part = imagesReadCount < MAX_RECOVERED_IMAGES
+      && isInlineableImage(projected.name, stored.mimetype || '')
+      ? inlineImagePart(projected.abs)
+      : null;
+    return part ? { path: projected.display, part } : { path: projected.display };
   } catch (err) {
     log.warn(`Attachment recovery failed for "${stored.originalName}": ${err.message}`);
-    return { part: null };
+    return { path: null };
   }
 }
 
@@ -202,6 +211,7 @@ async function readSentMessages(args, userCtx) {
 
   // Newest first — most useful when confirming a message just sent.
   const ordered = matched.slice().reverse();
+  const workspaceId = resolveWorkspaceId(userCtx);
   const groups = new Map();
   const nativeParts = [];
   let imagesReadCount = 0;
@@ -236,12 +246,14 @@ async function readSentMessages(args, userCtx) {
     if (Array.isArray(r.attachments) && r.attachments.length > 0) {
       msgOut.attachments = [];
       for (const a of r.attachments) {
-        const recovered = await _recoverAttachment(senderKey, a, imagesReadCount);
-        if (recovered.part) {
-          nativeParts.push(recovered.part);
-          if (recovered.bumpImageCount && imagesReadCount < MAX_RECOVERED_IMAGES) imagesReadCount += 1;
+        const recovered = await _recoverAttachment(workspaceId, senderKey, a, imagesReadCount);
+        if (recovered.path) {
+          if (recovered.part) {
+            nativeParts.push(recovered.part);
+            imagesReadCount += 1;
+          }
           anyRecovered = true;
-          msgOut.attachments.push({ name: a.originalName || 'file' });
+          msgOut.attachments.push({ name: a.originalName || 'file', path: recovered.path });
         } else {
           anyExpired = true;
           msgOut.attachments.push({ name: a.originalName || 'file', status: 'expired' });
@@ -254,7 +266,8 @@ async function readSentMessages(args, userCtx) {
 
   let message = `Found ${matched.length} ${channelLabel} message(s) GemiX sent on your behalf (only your last 10 outgoing messages are kept).`;
   if (anyRecovered) {
-    message += ' Their attachments have been re-attached to the current round, so you can view them now.';
+    message += ' Their attachments are back under attachments/, so you can open them with read_file;'
+      + ' images are attached below.';
   }
   if (anyExpired) {
     message += ' Some attachments could no longer be retrieved and are marked as expired.';

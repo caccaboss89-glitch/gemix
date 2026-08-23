@@ -76,11 +76,10 @@ function _sentRecipient(target) {
 /**
  * @param {object} args - { recipient, subject, body, attachments? }
  * @param {object} userCtx
- * @param {object} responseCtx - holds the delivery buffer
  * @param {object} deliveryCtx - { contactedEmail: Set }
  * @returns {Promise<object>} tool result
  */
-async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
+async function sendEmailTool(args, userCtx, deliveryCtx) {
   const target = _resolveTargetEmail(args, userCtx);
   if (target.error) return target.error;
 
@@ -88,7 +87,7 @@ async function sendEmailTool(args, userCtx, responseCtx, deliveryCtx) {
   if (contacted) return contacted;
 
   const { attachments, missingNote } = await resolveOutboundAttachments(
-    args.attachments, responseCtx, userCtx
+    args.attachments, userCtx
   );
   const subject = stripOutgoingDeliveryArtifacts(args.subject || '');
 

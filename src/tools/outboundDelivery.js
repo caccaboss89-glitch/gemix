@@ -13,6 +13,7 @@
 // half-succeeded (text out, attachments not) cannot blast the text twice.
 
 import { resolveDeliverySelection  } from '../utils/deliverySelection.js';
+import { resolveWorkspaceId  } from '../utils/workspaceId.js';
 import { recordSentMessage  } from '../utils/sentMessagesStore.js';
 import { createLogger  } from '../utils/logger.js';
 
@@ -22,13 +23,12 @@ const log = createLogger('OutboundDelivery');
  * Resolve the files the model listed, and the note to append when some of them
  * could not be found.
  *
- * @param {string[]|undefined} entries
- * @param {object} responseCtx
+ * @param {string[]|undefined} entries - namespace paths and/or public URLs
  * @param {object} userCtx
  * @returns {Promise<{ attachments: object[], missingNote: string }>}
  */
-async function resolveOutboundAttachments(entries, responseCtx, userCtx) {
-  const selection = await resolveDeliverySelection(entries, responseCtx, userCtx);
+async function resolveOutboundAttachments(entries, userCtx) {
+  const selection = await resolveDeliverySelection(entries, resolveWorkspaceId(userCtx));
   const missingNote = selection.missing.length > 0
     ? ` Attachment(s) not resolved and NOT sent: ${selection.missing.join(', ')}.`
     : '';

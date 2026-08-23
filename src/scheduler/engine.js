@@ -21,6 +21,7 @@ import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
 import { listWorkspaceStates  } from '../utils/workspaceState.js';
 import workspaceRuntime from '../sandbox/workspaceRuntime.js';
 import { wipeWorkspace  } from '../sandbox/workspaceFs.js';
+import { clearProjection, sweepExpiredAttachments } from '../attachments/projection.js';
 
 const log = createLogger('Scheduler');
 
@@ -34,8 +35,12 @@ let _cycleInFlight = false;
 /**
  * Periodic sweeper for the agent's per-conversation workspace tree.
  * Wipes any workspace whose user has not interacted with GemiX for
- * constants.WORKSPACE_TTL_MS, and shuts down the matching container.
- * The metadata file (.build_state.json) is left in place.
+ * constants.WORKSPACE_TTL_MS, along with its attachment projection, and shuts
+ * down the matching container. The metadata file is left in place.
+ *
+ * Projected attachments are also swept on their own clock: a file keeps its
+ * 4h from the last time it was used, not from the last message in the chat,
+ * so an active conversation still lets an untouched attachment go.
  */
 async function _sweepStaleWorkspaces() {
   const states = listWorkspaceStates();
@@ -49,12 +54,17 @@ async function _sweepStaleWorkspaces() {
       log.warn(`Skipping idle workspace ${s.workspaceSlug}: no workspaceId persisted`);
       continue;
     }
-    log.info(`Wiping idle build workspace ${s.workspaceSlug} (idle ${(now - s.lastActivityAt) / 60000 | 0} min)`);
+    log.info(`Wiping idle workspace ${s.workspaceSlug} (idle ${(now - s.lastActivityAt) / 60000 | 0} min)`);
     try { wipeWorkspace(workspaceId); }
     catch (err) { log.warn(`wipeWorkspace failed: ${err.message}`); }
+    try { clearProjection(workspaceId); }
+    catch (err) { log.warn(`clearProjection failed: ${err.message}`); }
     try { await workspaceRuntime.shutdown(workspaceId); }
     catch (err) { log.warn(`workspace container shutdown failed: ${err.message}`); }
   }
+
+  try { sweepExpiredAttachments(now); }
+  catch (err) { log.warn(`attachment sweep failed: ${err.message}`); }
 }
 
 /**
@@ -68,7 +78,7 @@ function setSchedulerWaClient(client) {
 /**
  * Start the task scheduler.
  * Initializes the task directory and begins checking for due tasks at regular intervals.
- * Also triggers daily music wrap monitoring and hourly build-workspace sweep.
+ * Also triggers daily music wrap monitoring and the hourly workspace sweep.
  */
 function startScheduler() {
   if (!fs.existsSync(constants.TASKS_DIR)) {
@@ -93,11 +103,11 @@ function startScheduler() {
   }, constants.SCHEDULER_INTERVAL_MS);
   schedulerInterval.unref();
 
-  // Hourly: wipe idle build workspaces past the TTL.
-  const buildSweepInterval = setInterval(() => {
+  // Hourly: wipe idle workspaces and expired attachments past the TTL.
+  const workspaceSweepInterval = setInterval(() => {
     _sweepStaleWorkspaces().catch(err => log.error('Workspace sweep error:', err));
   }, 60 * 60 * 1000);
-  buildSweepInterval.unref();
+  workspaceSweepInterval.unref();
   // Initial sweep at startup.
   _sweepStaleWorkspaces().catch(err => log.error('Workspace initial sweep error:', err));
 }

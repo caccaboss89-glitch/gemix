@@ -229,6 +229,67 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
 }
 
 /**
+ * Stored transcription of a USER voice note, valid only for the exact bytes and
+ * the exact model that produced it.
+ *
+ * The hash is what makes the cache safe across a backend switch or a re-sent
+ * clip: a different file, or a different STT model, is a cache miss rather than
+ * a stale transcript attributed to the wrong audio.
+ *
+ * @param {string} userId
+ * @param {string} historyFilename
+ * @param {string} contentHash
+ * @param {string} model
+ * @returns {{ text: string, status: string }|null}
+ */
+function getStoredUserTranscription(userId, historyFilename, contentHash, model) {
+  if (!userId || !historyFilename) return null;
+  const { metaFile } = getUserHistoryPaths(userId);
+  const normalized = _normalizeHistoryFilename(historyFilename);
+  if (!normalized) return null;
+
+  const meta = _loadMeta(metaFile, userId);
+  for (const entry of Object.values(meta)) {
+    if (_getEntryFilename(entry) !== normalized) continue;
+    const stored = entry && typeof entry === 'object' ? entry.userTranscription : null;
+    if (!stored || typeof stored !== 'object') return null;
+    if (contentHash && stored.contentHash !== contentHash) return null;
+    if (model && stored.model !== model) return null;
+    return { text: typeof stored.text === 'string' ? stored.text : '', status: stored.status || 'ok' };
+  }
+  return null;
+}
+
+/**
+ * Remember the outcome of transcribing a user voice note — including the
+ * failures, so a clip that cannot be transcribed is not retried on every turn.
+ *
+ * @param {string} userId
+ * @param {string} historyFilename
+ * @param {{ text?: string, status: string, provider?: string, model?: string, contentHash?: string }} record
+ * @returns {boolean}
+ */
+function storeUserTranscription(userId, historyFilename, record) {
+  if (!userId || !historyFilename || !record || !record.status) return false;
+  const { metaFile } = getUserHistoryPaths(userId);
+  const meta = _loadMeta(metaFile, userId);
+  const target = _upsertMetaEntry(meta, historyFilename);
+  if (!target.id || !target.normalized) return false;
+  meta[target.id] = {
+    ...target.entry,
+    userTranscription: {
+      text: typeof record.text === 'string' ? record.text.trim() : '',
+      status: record.status,
+      provider: record.provider || '',
+      model: record.model || '',
+      contentHash: record.contentHash || '',
+      updatedAt: Date.now()
+    }
+  };
+  return _saveMeta(metaFile, meta, userId);
+}
+
+/**
  * Transcription for GemiX (bot) voice messages in chat history only.
  * History shows them as [Attachment: …] tags (assistant role cannot load audio);
  * reads history_meta first, otherwise matches the short cache written when
@@ -492,9 +553,12 @@ function collectReferencedHistoryFilenames(historyMsgs, currentContent) {
 _loadRecentVoiceEntries();
 
 export {
+  getUserHistoryPaths,
   syncFileToHistory,
   resolveGemixVoiceTranscription,
   getStoredHistoryVoiceTranscription,
+  getStoredUserTranscription,
+  storeUserTranscription,
   storeRecentVoiceText,
   forgetRecentVoiceText,
   pruneHistory,

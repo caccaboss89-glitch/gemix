@@ -16,16 +16,10 @@ import { hasScheduledFooter } from '../../utils/footer.js';
 import { buildPersonalGemixFlags } from '../../utils/personalWaHistory.js';
 import { isSystemMessage } from '../../config/systemMessages.js';
 import { wrapSystemNotification } from '../../utils/systemTags.js';
-import { buildAttachmentTag } from '../../utils/media.js';
-import {
-  MAX_IMAGE_READS,
-  MAX_FILE_READS,
-  classifyAiFileDelivery,
-  isVideoAttachment,
-  DELIVERY_MODE
-} from '../../utils/aiFileDelivery.js';
+import { buildAttachmentTag } from '../../attachments/ingress.js';
+import { resolveChatWorkspaceId } from '../../utils/workspaceId.js';
 import { resolveGemixVoiceTranscription, storeRecentVoiceText } from '../../utils/historySync.js';
-import { ingressWaMessageMedia, capHistoryImageParts } from '../../utils/incomingMediaIngress.js';
+import { ingressWaMessageMedia } from '../../utils/incomingMediaIngress.js';
 import {
   normalizeMarkdown,
   stripOutgoingDeliveryArtifacts,
@@ -61,10 +55,9 @@ const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = constants;
 
 const log = createLogger('WhatsAppResponse');
 
-// Max parallel xAI uploads while building one history window. Uploads are
-// already bounded to MAX_HISTORY_MEDIA_IMAGES/FILES per turn by the pre-upload
-// budget pass (see constants.js).
-const HISTORY_UPLOAD_CONCURRENCY = 15;
+// Max parallel attachment ingresses while building one history window. History
+// carries tags only, so this bounds disk work, not anything sent to the model.
+const HISTORY_INGRESS_CONCURRENCY = 15;
 
 function _waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
@@ -92,6 +85,7 @@ async function getRecentWhatsAppMessageIds(msg) {
  * @returns {Promise<Array>} Array of history messages with role ('user'|'assistant') and content
  */
 async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) {
+  const workspaceId = resolveChatWorkspaceId(platform, chat, userId);
   const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
   const windowMessages = rawMessages.slice(-MAX_HISTORY);
   // Quote window = full MAX_HISTORY slice (incl. current-batch keys later excluded
@@ -139,35 +133,6 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     ? Boolean(msg.fromMe && personalGemixFlags && personalGemixFlags[mi])
     : Boolean(msg.fromMe));
 
-  // Pre-upload budget pass (newest→oldest, per message with media on WA):
-  // only the newest MAX_IMAGE_READS image messages and MAX_FILE_READS file
-  // messages may upload to xAI; the rest stay tag-only and are never uploaded.
-  // (Discord allocates budget per attachment — see discord/client.js.)
-  const uploadAllowed = new Array(messages.length).fill(false);
-  {
-    let imgBudget = MAX_IMAGE_READS;
-    let fileBudget = MAX_FILE_READS;
-    for (let mi = messages.length - 1; mi >= 0; mi--) {
-      const msg = messages[mi];
-      if (!msg.hasMedia) continue;
-      if (formatSpecialMessageText(msg) !== null) continue; // location/event: no upload
-      if (isHistoryBotMessage(msg, mi)) continue; // our own sends are tag-only anyway
-      const waFilename = msg._data?.filename;
-      const resolvedName = _resolveWaFilename(waFilename, msg._data?.mimetype, msg.id?.id);
-      const budgetName = resolvedName || waFilename || 'file';
-      const budgetMime = msg._data?.mimetype || '';
-      // History videos never attach (read_video fetches them), so they must not
-      // burn a file slot another document could use.
-      if (isVideoAttachment(budgetName, budgetMime)) continue;
-      const mode = classifyAiFileDelivery(budgetName, budgetMime);
-      if (mode === DELIVERY_MODE.IMAGE) {
-        if (imgBudget > 0) { imgBudget--; uploadAllowed[mi] = true; }
-      } else if (mode === DELIVERY_MODE.FILE) {
-        if (fileBudget > 0) { fileBudget--; uploadAllowed[mi] = true; }
-      }
-      // TAG_ONLY (raw binaries): never uploaded, no budget consumed.
-    }
-  }
 
   // Album multi-attach (same sender, short time window, caption-less siblings)
   // → one history user turn with every tag + native part. Separate sends stay
@@ -252,12 +217,9 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       }
     }
 
-    const mediaParts = [];
-    let anyOverBudget = false;
     // Multi-attach album: ingest every item's media into this single turn.
     for (let gi = 0; gi < groupMsgs.length; gi++) {
       const msg = groupMsgs[gi];
-      const mi = indices[gi];
       if (!msg.hasMedia || formatSpecialMessageText(msg) !== null) continue;
 
       const waFilename = msg._data?.filename;
@@ -267,11 +229,11 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
         textContent = _stripRedundantAttachmentCaption(textContent, allFilenameHints);
       }
 
-      const overBudget = !isFromBot && !uploadAllowed[mi];
-      if (overBudget) anyOverBudget = true;
+      // History is tags only, on every platform: the model opens what it needs
+      // with read_file instead of the window carrying every past file (§8.6).
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
-        tagOnly: isFromBot || overBudget,
-        deferVideo: true
+        workspaceId,
+        inline: false
       });
       if (platform !== PLATFORM_WA_PERSONAL && isGemiX
           && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {
@@ -284,15 +246,8 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       );
       textContent = `${textContent} ${mediaIngress.textFragment.trim()}`.trim();
       if (!textContent) {
-        textContent = (mediaIngress.tag || buildAttachmentTag(null, resolvedName || msg._data?.filename || 'file')).trim();
+        textContent = (mediaIngress.tag || buildAttachmentTag(resolvedName || msg._data?.filename || 'file')).trim();
       }
-      if (mediaIngress.contentParts?.length) {
-        mediaParts.push(...mediaIngress.contentParts);
-      }
-    }
-
-    if (anyOverBudget && !textContent.includes('not shown this turn')) {
-      textContent = `${textContent} (older media, not shown this turn — newest ${MAX_IMAGE_READS} image messages + ${MAX_FILE_READS} file messages on WhatsApp; ask to resend or reply to view)`.trim();
     }
 
     // Reply chain once per logical turn (first album item that quotes).
@@ -306,7 +261,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
           recentMessageIds,
           isGroup,
           platform,
-          { includeQuotedMedia: false }
+          { includeQuotedMedia: false, workspaceId }
         );
         if (quoted.prefix) {
           textContent = `${quoted.prefix}${textContent || ''}`.trimEnd();
@@ -333,17 +288,12 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       : (isFromBot ? textContent : `[${ts}] ${senderName}: ${textContent}`);
     return {
       role: isFromBot && !isSystemEvent ? 'assistant' : 'user',
-      content: mediaParts.length > 0
-        ? [{ type: 'text', text: finalText }, ...mediaParts]
-        : finalText
+      content: finalText
     };
   }
 
-  const built = await mapWithConcurrency(historyGroups, HISTORY_UPLOAD_CONCURRENCY, processHistoryGroup);
+  const built = await mapWithConcurrency(historyGroups, HISTORY_INGRESS_CONCURRENCY, processHistoryGroup);
   const historyMessages = built.filter(Boolean);
-
-  // Bound the cost of re-attached history media: newest images + newest files.
-  capHistoryImageParts(historyMessages, MAX_IMAGE_READS, MAX_FILE_READS);
 
   return historyMessages;
 }
@@ -467,18 +417,22 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
 }
 
 /**
- * Process current message media: applies duration limits for audio/video and
- * returns native content parts (input_image / input_file via public URL) for
- * supported media. Skipped media carries its tag (plus any inline note) in
- * `fragment`.
+ * Process current message media: applies the audio/video duration limits and
+ * returns the inline image part when the file is one. Everything else carries
+ * its tag (plus any inline note) in `fragment` and waits for read_file.
  * @param {object} msg - The whatsapp-web.js message object
  * @param {string} userId - storage id for media sync
+ * @param {object} [options] - { workspaceId, imagesInlined }
  * @returns {Promise<object|null>} { skipped, fragment?, filename?, syncedPath?, tag, contentParts? } or null
  */
-async function processCurrentMedia(msg, userId) {
+async function processCurrentMedia(msg, userId, options = {}) {
   if (!msg.hasMedia) return null;
 
-  const r = await ingressWaMessageMedia(msg, userId, {});
+  const r = await ingressWaMessageMedia(msg, userId, {
+    workspaceId: options.workspaceId || null,
+    inline: true,
+    imagesInlined: options.imagesInlined || 0
+  });
 
   if (r.unsupported) {
     return { skipped: true, tag: r.tag, fragment: r.tag };
@@ -578,6 +532,8 @@ async function buildIncomingContentPartsFromMessages(
     textBody = formatWhatsAppPollText(captionMsg, `[Poll] ${textBody}`);
   }
 
+  const currentWorkspaceId = resolveChatWorkspaceId(platform, { id: { _serialized: chatId }, isGroup }, userId);
+
   // Reply chain once (first album item that is a reply).
   const quoteMsg = messages.find(m => m.hasQuotedMsg) || null;
   const recentIds = recentMessageIds
@@ -585,7 +541,7 @@ async function buildIncomingContentPartsFromMessages(
   if (quoteMsg) {
     const quotedContent = await processWhatsAppQuotedReply(
       quoteMsg, chatId, userId, recentIds, isGroup, platform,
-      { includeQuotedMedia }
+      { includeQuotedMedia, workspaceId: currentWorkspaceId }
     );
     if (quotedContent && quotedContent.prefix) {
       textBody = quotedContent.prefix + textBody;
@@ -595,10 +551,18 @@ async function buildIncomingContentPartsFromMessages(
     }
   }
 
-  // Every media item in the logical message (album or single).
+  // Every media item in the logical message (album or single). Only these and
+  // the quoted message may put an image in front of the model, up to the
+  // per-turn cap (§8.6).
+  let imagesInlined = contentParts.filter(p => p?.type === 'input_image').length;
   for (const msg of messages) {
     if (specialText !== null && msg === captionMsg) continue;
-    const mediaResult = specialText === null ? await processCurrentMedia(msg, userId) : null;
+    const mediaResult = specialText === null
+      ? await processCurrentMedia(msg, userId, { workspaceId: currentWorkspaceId, imagesInlined })
+      : null;
+    if (mediaResult?.contentParts?.length) {
+      imagesInlined += mediaResult.contentParts.filter(p => p?.type === 'input_image').length;
+    }
     const waFilename = msg._data?.filename;
     if (mediaResult) {
       if (mediaResult.skipped) {
@@ -615,7 +579,7 @@ async function buildIncomingContentPartsFromMessages(
         }
       }
     } else if (msg.hasMedia && specialText === null) {
-      const tag = buildAttachmentTag(null, msg._data?.filename || 'file');
+      const tag = buildAttachmentTag(msg._data?.filename || 'file');
       textBody = `${tag} (file unavailable) ${textBody}`.trim();
     } else if (waFilename) {
       textBody = _stripRedundantAttachmentCaption(textBody, [waFilename]);

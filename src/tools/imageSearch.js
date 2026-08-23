@@ -6,25 +6,19 @@
 //
 // Local web image search via a self-hosted SearXNG instance (JSON API).
 // Returns direct https image file URLs for delivery through final `attachments`,
-// and attaches each found image as native vision content (input_image) so the
+// and attaches each found image inline as vision content (input_image) so the
 // model can see them — same multimodal tool-result pattern as read_sent_messages.
 // Config: envConfig.IMAGE_SEARCH_BASE_URL (default http://127.0.0.1:8888).
 
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
-import { buildXaiFileParts  } from '../utils/aiFileDelivery.js';
-import { TEMP_DIR  } from '../utils/tempFileServer.js';
+import { inlineImagePartFromBuffer  } from './workspace/inlineImage.js';
 import { createLogger  } from '../utils/logger.js';
 
 const log = createLogger('ImageSearch');
 
-const DEFAULT_COUNT = 2;
-const MIN_COUNT = 1;
-const MAX_COUNT = 10;
+const { IMAGE_SEARCH_DEFAULT_COUNT, IMAGE_SEARCH_MIN_COUNT, IMAGE_SEARCH_MAX_COUNT } = constants;
 const SEARCH_TIMEOUT_MS = 25_000;
 const VISION_DOWNLOAD_TIMEOUT_MS = 20_000;
 const MAX_QUERY_LEN = 300;
@@ -51,8 +45,8 @@ function _cleanQuery(raw) {
  */
 function _clampCount(raw) {
   const n = Number(raw);
-  if (!Number.isFinite(n)) return DEFAULT_COUNT;
-  return Math.min(MAX_COUNT, Math.max(MIN_COUNT, Math.floor(n)));
+  if (!Number.isFinite(n)) return IMAGE_SEARCH_DEFAULT_COUNT;
+  return Math.min(IMAGE_SEARCH_MAX_COUNT, Math.max(IMAGE_SEARCH_MIN_COUNT, Math.floor(n)));
 }
 
 /**
@@ -122,13 +116,12 @@ function _sniffImageType(buffer) {
 }
 
 /**
- * Download one search hit and build a native input_image part for the model.
+ * Download one search hit and build an inline input_image part for the model.
+ * The bytes never touch disk: a hit the model only looks at is not a file.
  * @returns {Promise<{ part: object|null, error?: string }>}
  */
 async function _buildVisionPart(imgUrl, index) {
-  let destPath = null;
   try {
-    if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
     const dl = await downloadPublicFile(imgUrl, {
       maxBytes: constants.MAX_IMAGE_BYTES,
       timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS
@@ -137,32 +130,11 @@ async function _buildVisionPart(imgUrl, index) {
     if (!sniffed) {
       return { part: null, error: 'Downloaded body is not a recognized image (JPEG/PNG/WEBP/GIF/ICO).' };
     }
-    const name = `search_img_${index}${sniffed.ext}`;
-    destPath = path.join(
-      TEMP_DIR,
-      `imgsearch_${crypto.randomBytes(8).toString('hex')}_${name}`
-    );
-    fs.writeFileSync(destPath, dl.buffer);
-
-    const built = await buildXaiFileParts(destPath, name, {
-      mimetype: sniffed.mime,
-      imagesReadCount: index
-    });
-    if (!built.success) {
-      return { part: null, error: built.error || 'vision upload failed' };
-    }
-    // Prefer true vision parts; gif/unsupported still may arrive as input_file.
-    const part = built.parts.find(p => p.type === 'input_image')
-      || built.parts.find(p => p.type === 'input_file')
-      || null;
-    return { part };
+    const part = inlineImagePartFromBuffer(dl.buffer, sniffed.mime);
+    return part ? { part } : { part: null, error: 'Image is too large to attach inline.' };
   } catch (err) {
     log.warn(`Vision preview failed for image ${index}: ${err.message}`);
     return { part: null, error: err.message };
-  } finally {
-    if (destPath) {
-      try { fs.unlinkSync(destPath); } catch { /* ignore */ }
-    }
   }
 }
 
@@ -324,9 +296,6 @@ async function searchImages(args = {}) {
 }
 
 export {
-  searchImages,
-  DEFAULT_COUNT,
-  MIN_COUNT,
-  MAX_COUNT
+  searchImages
 
 };

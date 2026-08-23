@@ -2,7 +2,8 @@
 //
 // Erases everything GemiX persists about one WhatsApp conversation and about
 // the person who asked for it: chat history and its attachments (the voice
-// transcriptions in history_meta.json go with them), build workspace, saved
+// transcriptions in history_meta.json go with them), the workspace tree — which
+// holds both the agent area and the read-only attachment projection — saved
 // preferences, scheduled reminders, the log of messages sent on their behalf,
 // the weekly generation counters, the release-notification subscription and the
 // privacy-notice record.

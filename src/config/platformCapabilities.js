@@ -24,7 +24,6 @@ const TOOL = {
   WEB_SEARCH: 'web_search',
   X_SEARCH: 'x_search',
   WEB_IMAGE_SEARCH: 'web_image_search',
-  READ_VIDEO: 'read_video',
   GENERATE_MUSIC: 'generate_music',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
@@ -90,7 +89,7 @@ const CAPS = {
     isWhatsApp: false,
     isGroup: false,
     longTermMemory: false,
-    workspace: false,
+    workspace: true,
     historyTranscriptionNote: false,
     voiceReply: false,
     tools: null
@@ -287,7 +286,7 @@ function buildAnswerLines(profile, opts = {}) {
 
   lines.push(
     'Write natural prose. Never quote raw tool syntax, JSON fragments, backend tags, error messages, stack traces, '
-    + 'or the `[Attachment: ...]` and `<PastVoiceReply>` labels that mark attached or past-voice context.'
+    + 'or the `[Attachment: ...]`, `<PastVoice>` and `<PastVoiceReply>` labels that mark attached or past-voice context.'
   );
 
   return lines;
@@ -296,7 +295,7 @@ function buildAnswerLines(profile, opts = {}) {
 /**
  * Body of "Sending files". States the two mechanisms the tool descriptions
  * cannot: the program does the fetching, so a URL in `attachments` is the whole
- * job; and the delivery buffer is where every file a tool produces waits.
+ * job; and a file a tool produced is sent by its path, exactly as returned.
  * Without the first, media already sitting on a CDN gets re-created from
  * scratch, or the model claims it cannot download anything at all.
  * Without the second, files that were generated this turn are never sent, or
@@ -307,12 +306,11 @@ function buildSendingFilesLines(profile, opts = {}) {
   const has = (name) => _hasTool(opts.toolNames, cap, name);
 
   const lines = [
-    'Whatever you list in `attachments` is fetched and delivered by the program: a filename from this chat or '
-    + 'from the delivery buffer, or a direct https link to the file itself. You never download anything yourself '
-    + 'and you never need a tool to do it for you — the link is enough.',
-    'The delivery buffer holds every file your tools produce during this turn. Each one tells you the exact name '
-    + 'it was stored under; that name is what you list in `attachments` to send it, or pass to another tool to '
-    + 'work from it. Nothing leaves the buffer unless you list it, and the buffer is gone once the turn ends.'
+    'Whatever you list in `attachments` is fetched and delivered by the program: a path in this chat, or a direct '
+    + 'https link to the file itself. You never download anything yourself and you never need a tool to do it for '
+    + 'you — the link is enough.',
+    'A tool that produces a file tells you the exact path it wrote. Send it by listing that path, unchanged; the '
+    + 'file stays there afterwards, so nothing has to be regenerated to be sent again.'
   ];
   if (has(TOOL.X_SEARCH)) {
     let x = 'So when someone wants a photo or a video from an X post, open that post with the X tools, take the '
@@ -337,7 +335,7 @@ function profileHasMediaQuota(profile) {
 /**
  * Body of "What you can and cannot see": what reaches you, in what shape, and
  * what never does. Weekly media quota counts move with the Runtime block, and
- * the mechanics of loading an old video stay in the read_video description.
+ * how a file is opened stays in the read_file description.
  */
 function buildVisibilityLines(profile) {
   const cap = CAPS[profile];
@@ -345,12 +343,13 @@ function buildVisibilityLines(profile) {
   // caps equal MAX_HISTORY, so inside a 30-message window they never bind.
   let historyLine =
     `Your history is the last ${MAX_HISTORY} messages of this chat, and anything older is not in your context at `
-    + 'all. Files inside that window arrive loaded and labelled `[Attachment: filename]`, past reactions as '
-    + '`[Reactions: emoji xN]`. Videos are the exception: only the ones in the message you are answering, or in '
-    + 'the message it replies to, are loaded.';
+    + 'all. Files inside that window are labelled `[Attachment: attachments/filename]` and past reactions as '
+    + '`[Reactions: emoji xN]`. Images in the message you are answering, or in the message it replies to, you see '
+    + 'directly; every other file you open with read_file at that path, whenever you need it.';
+  historyLine += ' A voice message the user sent is already written out for you in `<PastVoice>`, on the turn '
+    + 'where it was spoken, with the audio still there as a file if you need it.';
   if (cap.historyTranscriptionNote) {
-    historyLine += ' Your own past voice messages appear as `<PastVoiceReply>` blocks on those assistant turns: '
-      + 'transcript text, with the audio not reloaded.';
+    historyLine += ' Your own past voice messages appear the same way, as `<PastVoiceReply>` on those assistant turns.';
   }
   const lines = [
     'The user sees only the chat history and your final reply — not this prompt, your tool calls, '
@@ -358,13 +357,13 @@ function buildVisibilityLines(profile) {
     `Incoming media: audio longer than ${MAX_AUDIO_DURATION_S}s and video longer than ${MAX_VIDEO_DURATION_S}s are dropped `
     + 'and replaced inline with a "(too long, max Ns)" note. If a file is still attached, it passed the check — read it.',
     historyLine,
-    'You can look at web images by URL and at videos inside X posts. Any other file, videos included, '
-    + 'you can only read when it is in this chat.'
+    'You can look at web images by URL and at videos inside X posts. Any other file you can only read '
+    + 'when it is in this chat.'
   ];
   if (cap.isDiscord) {
     lines.push(
-      'Voice replies, scheduled reminders, the file workspace, imagine, music clips and listening stats are '
-      + 'not part of this Discord session: they live on the dedicated GemiX WhatsApp account. Say so if you are asked.'
+      'Voice replies, scheduled reminders, imagine, music clips and listening stats are not part of this '
+      + 'Discord session: they live on the dedicated GemiX WhatsApp account. Say so if you are asked.'
     );
   } else if (cap.isWhatsApp && !cap.voiceReply) {
     lines.push(

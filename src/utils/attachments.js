@@ -64,28 +64,6 @@ function uniqueAttachmentName(existing, rawName) {
   return candidate;
 }
 
-/**
- * Push an attachment into `responseCtx.attachments`, guaranteeing its logical
- * `name` is unique within the buffer (renaming to "name(1).ext" on clash).
- * Returns the final unique name stored.
- *
- * @param {object} responseCtx
- * @param {Attachment} att - { name, mimetype, buffer?|filePath? }
- * @returns {string} the final, buffer-unique name stored
- */
-function pushBufferAttachment(responseCtx, att) {
-  if (!responseCtx || typeof responseCtx !== 'object') {
-    throw new Error('pushBufferAttachment: responseCtx is required');
-  }
-  if (!att || !att.name) {
-    throw new Error('pushBufferAttachment: attachment with a name is required');
-  }
-  if (!Array.isArray(responseCtx.attachments)) responseCtx.attachments = [];
-  const finalName = uniqueAttachmentName(responseCtx.attachments, att.name);
-  responseCtx.attachments.push({ ...att, name: finalName });
-  return finalName;
-}
-
 function isValidAttachment(att) {
   if (!att || typeof att !== 'object') return false;
   if (!att.name || !att.mimetype) return false;
@@ -190,7 +168,6 @@ function hasExternalUrl(att) {
 
 export {
   uniqueAttachmentName,
-  pushBufferAttachment,
   readAttachmentBuffer,
   attachmentSize,
   shouldWhatsAppUseTempLink,

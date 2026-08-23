@@ -38,11 +38,18 @@ function _outsideResult() {
 /**
  * Resolve one WhatsApp message into a single reply-prefix line (+ optional media).
  * @param {object} quoted
- * @param {{ isGroup?: boolean, historyStorageId?: string, includeMedia?: boolean }} opts
+ * @param {{ isGroup?: boolean, historyStorageId?: string, includeMedia?: boolean,
+ *   workspaceId?: string|null, imagesInlined?: number }} opts
  * @returns {Promise<{ prefix: string, mediaParts: Array }>}
  */
 async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
-  const { isGroup = false, historyStorageId = null, includeMedia = true } = opts;
+  const {
+    isGroup = false,
+    historyStorageId = null,
+    includeMedia = true,
+    workspaceId = null,
+    imagesInlined = 0
+  } = opts;
 
   const quotedSpecial = formatSpecialMessageText(quoted);
   if (quotedSpecial !== null) {
@@ -75,10 +82,12 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
 
   if (quoted.hasMedia) {
     const ingress = await ingressWaMessageMedia(quoted, historyStorageId, {
-      tagOnly: !includeMedia
+      workspaceId,
+      inline: includeMedia,
+      imagesInlined
     });
     const inner = ingress.textFragment.trim();
-    const mediaParts = includeMedia ? (ingress.contentParts || []) : [];
+    const mediaParts = ingress.contentParts || [];
     // Same shape as Discord: one or more "[In reply to: …]" lines (no "text" variant).
     if (quotedText) {
       return {
@@ -109,7 +118,8 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
  * @param {Set<string>} recentMessageIds
  * @param {boolean} [isGroup=false]
  * @param {string} [platform]
- * @param {{ maxChainDepth?: number, includeQuotedMedia?: boolean }} [options]
+ * @param {{ maxChainDepth?: number, includeQuotedMedia?: boolean,
+ *   workspaceId?: string|null, imagesInlined?: number }} [options]
  */
 async function processWhatsAppQuotedReply(
   msg,
@@ -166,7 +176,9 @@ async function processWhatsAppQuotedReply(
       const level = await formatWhatsAppQuotedLevel(quoted, {
         isGroup,
         historyStorageId,
-        includeMedia: includeQuotedMedia && depth === 0
+        includeMedia: includeQuotedMedia && depth === 0,
+        workspaceId: options.workspaceId || null,
+        imagesInlined: options.imagesInlined || 0
       });
       levels.push(level);
       if (level.mediaParts?.length) mediaParts.push(...level.mediaParts);
@@ -195,17 +207,23 @@ async function processWhatsAppQuotedReply(
 /**
  * Resolve one Discord message into reply-prefix line(s) + optional media.
  */
-async function formatDiscordQuotedLevel(quotedMsg, historyStorageId, includeMedia) {
+async function formatDiscordQuotedLevel(quotedMsg, historyStorageId, includeMedia, opts = {}) {
   const mediaParts = [];
   let prefix = '';
 
   if (quotedMsg.attachments?.size > 0) {
+    let inlined = opts.imagesInlined || 0;
     for (const att of quotedMsg.attachments.values()) {
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         metadataDurationSec: Number(att.duration || 0),
-        tagOnly: !includeMedia
+        workspaceId: opts.workspaceId || null,
+        inline: includeMedia,
+        imagesInlined: inlined
       });
-      if (includeMedia) mediaParts.push(...ingress.contentParts);
+      if (ingress.contentParts?.length) {
+        mediaParts.push(...ingress.contentParts);
+        inlined += ingress.contentParts.length;
+      }
       prefix += `[In reply to: ${ingress.textFragment.trim()}]\n`;
     }
     if (quotedMsg.content) {
@@ -235,6 +253,8 @@ async function formatDiscordQuotedLevel(quotedMsg, historyStorageId, includeMedi
  *   maxChainDepth?: number,
  *   includeQuotedMedia?: boolean,
  *   messageById?: Map<string, object>|null,
+ *   workspaceId?: string|null,
+ *   imagesInlined?: number,
  * }} [options]
  */
 async function processDiscordQuotedReply(msg, channel, historyStorageId, recentMessageIds, options = {}) {
@@ -281,7 +301,8 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
       const level = await formatDiscordQuotedLevel(
         quotedMsg,
         historyStorageId,
-        includeQuotedMedia && depth === 0
+        includeQuotedMedia && depth === 0,
+        { workspaceId: options.workspaceId || null, imagesInlined: options.imagesInlined || 0 }
       );
       levels.push(level);
       if (level.mediaParts?.length) mediaParts.push(...level.mediaParts);

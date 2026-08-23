@@ -41,10 +41,7 @@ function partitionHandlerToolCalls(toolCalls) {
  * serialize on the per-workspace lock rather than racing.
  */
 const PER_ROUND_TOOL_LIMITS = {
-  read_music_stats: 1,
-  // A video costs ~1 frame per second of context; loading several at once is
-  // the flood read_video exists to prevent.
-  read_video: 1
+  read_music_stats: 1
 };
 
 const ONCE_PER_ROUND_ERROR =
