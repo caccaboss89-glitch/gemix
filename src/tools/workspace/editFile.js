@@ -54,7 +54,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     return { success: false, error: 'Missing required argument "newText" (pass an empty string to delete the text).' };
   }
 
-  const resolved = resolveAgentPath(workspaceId, raw);
+  const resolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
   if (!resolved) return invalidPathError(raw);
   if (!resolved.writable) {
     return {
@@ -64,19 +64,23 @@ async function editFile(args = {}, workspaceId, opts = {}) {
   }
 
   return runWorkspaceMutation(workspaceId, opts, async () => {
+    // Re-resolve before the read while holding the lock. This closes the gap
+    // between the initial permission check and the read-transform-write cycle.
+    const lockedResolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
+    if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
     let buffer;
     try {
-      const stat = fs.statSync(resolved.abs);
-      if (!stat.isFile()) return { success: false, error: `${resolved.display} is not a file.` };
-      buffer = fs.readFileSync(resolved.abs);
+      const stat = fs.statSync(lockedResolved.abs);
+      if (!stat.isFile()) return { success: false, error: `${lockedResolved.display} is not a file.` };
+      buffer = fs.readFileSync(lockedResolved.abs);
     } catch {
       return {
         success: false,
-        error: `${resolved.display} does not exist. Use write_file to create it.`
+        error: `${lockedResolved.display} does not exist. Use write_file to create it.`
       };
     }
     if (!isProbablyText(buffer)) {
-      return { success: false, error: `${resolved.display} is binary; edit_file only works on text.` };
+      return { success: false, error: `${lockedResolved.display} is binary; edit_file only works on text.` };
     }
 
     const before = buffer.toString('utf-8');
@@ -84,13 +88,13 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     if (occurrences === 0) {
       return {
         success: false,
-        error: `That exact text is not in ${resolved.display}. Read the file again and copy the target text verbatim, whitespace included.`
+        error: `That exact text is not in ${lockedResolved.display}. Read the file again and copy the target text verbatim, whitespace included.`
       };
     }
     if (occurrences > 1 && !args.replaceAll) {
       return {
         success: false,
-        error: `"oldText" matches ${occurrences} times in ${resolved.display}. `
+        error: `"oldText" matches ${occurrences} times in ${lockedResolved.display}. `
           + 'Include enough surrounding lines to make it unique, or pass replaceAll=true to change every occurrence.'
       };
     }
@@ -99,18 +103,18 @@ async function editFile(args = {}, workspaceId, opts = {}) {
       ? before.split(args.oldText).join(args.newText)
       : before.replace(args.oldText, args.newText);
 
-    const committed = await commitWorkspaceText(workspaceId, resolved, after);
+    const committed = await commitWorkspaceText(workspaceId, lockedResolved, after);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;
     const replaced = args.replaceAll ? occurrences : 1;
     return {
       success: true,
-      path: resolved.display,
+      path: lockedResolved.display,
       replacements: replaced,
       bytes,
       message: quota.ok
-        ? `Replaced ${replaced} occurrence(s) in ${resolved.display}.`
-        : `Replaced ${replaced} occurrence(s) in ${resolved.display}. ${quota.message}`,
+        ? `Replaced ${replaced} occurrence(s) in ${lockedResolved.display}.`
+        : `Replaced ${replaced} occurrence(s) in ${lockedResolved.display}. ${quota.message}`,
       ...quotaResultFields(quota)
     };
   });

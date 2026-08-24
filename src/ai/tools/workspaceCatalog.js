@@ -34,13 +34,11 @@ const TOOL_SEARCH_FILES = makeTool({
 
 const TOOL_READ_FILE = makeTool({
   name: 'read_file',
-  description: 'Read any file on disk: read_file is the only way to open one, whatever the format. Text and code come '
+  description: 'Bring a supported local file into your context. Text and code come '
     + 'back as content; PDFs, Office documents, email and archives come back as their text, with pages or '
     + 'figures attached as images when the text alone would lose them; audio comes back as a transcript '
     + '(empty for music or ambient sound, which is not the same as silent); video comes back as its '
     + 'transcript plus frames sampled across the clip; images come back attached so you can look at them. '
-    + 'Long or complex documents may be truncated or only partly extracted; if that is insufficient, use shell '
-    + 'to extract page or slide images into workspace/ and inspect them with read_file. '
     + 'Files in this chat that were not loaded this turn appear as "[Attachment: attachments/name.ext]" — '
     + 'pass that exact path here to open one.',
   properties: {
@@ -87,7 +85,8 @@ function buildShellTool() {
       + 'TeX, zip/unzip, curl/wget. Use it to convert, compress, download, inspect and assemble files. '
       + 'Package installs (pip/npm/apt) are disabled — the toolchain is fixed. '
       + `Timeout ${defaultSec}s by default, ${maxSec}s maximum; start anything longer in the background and check on it in a later call. `
-      + 'The container keeps running between calls in the same chat.',
+      + 'The container keeps running between calls in the same chat. Background jobs outlive the foreground '
+      + 'workspace lock, so do not let them edit files that another tool call may change before they finish.',
     properties: {
       command: { type: 'string', description: 'Bash command line. Runs in workspace/ unless workingDir says otherwise.' },
       timeoutSeconds: { type: 'integer', description: `Seconds before the command is killed (default ${defaultSec}, max ${maxSec}).` },

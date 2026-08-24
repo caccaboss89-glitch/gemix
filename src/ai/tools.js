@@ -10,10 +10,7 @@ import { XAI_X_SEARCH_TOOL } from './extensions/xaiResponsesExtensions.js';
 import { resolveProviderProfile } from './providers/providerProfile.js';
 import {
   buildEmailTool,
-  buildReadMyTasksTool,
   buildReadSentMessagesTool,
-  buildRemoveMyTasksTool,
-  buildScheduleTasksTool,
   buildWhatsAppTool
 } from './tools/deliveryCatalog.js';
 import { TOOL_GENERATE_FORMAL_REQUEST_PDF } from './tools/documentCatalog.js';
@@ -26,6 +23,11 @@ import {
 import { TOOL_TOGGLE_RELEASE_NOTIFY, buildManagePreferencesTool } from './tools/preferenceCatalog.js';
 import { validateToolArgs } from './tools/schema.js';
 import { TOOL_BUG_REPORT } from './tools/systemCatalog.js';
+import {
+  buildReadMyTasksTool,
+  buildRemoveMyTasksTool,
+  buildScheduleTasksTool
+} from './tools/taskCatalog.js';
 import { TOOL_READ_PAGE, TOOL_SEARCH_IMAGE, TOOL_SEARCH_WEB } from './tools/webCatalog.js';
 import { workspaceTools } from './tools/workspaceCatalog.js';
 
@@ -33,12 +35,21 @@ import { workspaceTools } from './tools/workspaceCatalog.js';
  * @typedef {object} ToolContext
  * @property {boolean} [isActiveMember]
  * @property {boolean} [isAdmin]
- * @property {string} [platform]
+ * @property {string} platform
  * @property {boolean} [isGroup]
  */
 
+const SUPPORTED_TOOL_PLATFORMS = new Set([
+  constants.PLATFORM_DISCORD,
+  constants.PLATFORM_WA_DEDICATED,
+  constants.PLATFORM_WA_PERSONAL
+]);
+
 /** Build the exact tool permission boundary for one model round. */
-function getToolsForUser(toolCtx = {}) {
+function getToolsForUser(toolCtx) {
+  if (!toolCtx || !SUPPORTED_TOOL_PLATFORMS.has(toolCtx.platform)) {
+    throw new TypeError('getToolsForUser requires an explicit supported platform.');
+  }
   const isActiveMember = Boolean(toolCtx.isActiveMember);
   const isAdmin = Boolean(toolCtx.isAdmin);
   const isWhatsApp = constants.isWhatsAppPlatform(toolCtx.platform);

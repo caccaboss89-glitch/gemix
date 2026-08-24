@@ -51,6 +51,10 @@ async function _sweepStaleWorkspaces() {
   for (const s of states) {
     if (!s.lastActivityAt) continue;
     if (now - s.lastActivityAt < constants.WORKSPACE_TTL_MS) continue;
+    // Never wipe a workspace while a foreground mutation is still holding the
+    // cross-process lock. An expired lock is safe to ignore and will be reaped
+    // by the next mutating tool call.
+    if (s.lock && Number(s.lock.expiresAt) > now) continue;
 
     const workspaceId = s.workspaceId;
     if (!workspaceId) {

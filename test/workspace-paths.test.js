@@ -5,8 +5,11 @@
 // the happy path.
 
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { getWorkspaceMetaDir } from '../src/utils/workspaceId.js';
 import {
   ROOT,
   parseAgentPath,
@@ -122,4 +125,33 @@ test('the refusal names both roots so the model can correct itself', () => {
   assert.equal(err.success, false);
   assert.match(err.error, /workspace\/</);
   assert.match(err.error, /attachments\/</);
+});
+
+test('a missing leaf below an outward symlink is refused', (t) => {
+  const workspaceId = `user:path-escape-${process.pid}@c.us`;
+  const base = hostRoot(workspaceId, ROOT.WORKSPACE);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-path-escape-'));
+  fs.mkdirSync(base, { recursive: true });
+  try {
+    try { fs.symlinkSync(outside, path.join(base, 'escape'), 'dir'); }
+    catch (err) { t.skip(`symlinks unavailable: ${err.message}`); return; }
+    assert.equal(resolveAgentPath(workspaceId, 'workspace/escape/new.txt'), null);
+  } finally {
+    fs.rmSync(getWorkspaceMetaDir(workspaceId), { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('mutations reject an internal symlink even when reads remain contained', (t) => {
+  const workspaceId = `user:path-write-link-${process.pid}@c.us`;
+  const base = hostRoot(workspaceId, ROOT.WORKSPACE);
+  fs.mkdirSync(path.join(base, 'real'), { recursive: true });
+  try {
+    try { fs.symlinkSync(path.join(base, 'real'), path.join(base, 'alias'), 'dir'); }
+    catch (err) { t.skip(`symlinks unavailable: ${err.message}`); return; }
+    assert.ok(resolveAgentPath(workspaceId, 'workspace/alias/new.txt'));
+    assert.equal(resolveAgentPath(workspaceId, 'workspace/alias/new.txt', { forWrite: true }), null);
+  } finally {
+    fs.rmSync(getWorkspaceMetaDir(workspaceId), { recursive: true, force: true });
+  }
 });

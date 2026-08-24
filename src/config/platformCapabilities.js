@@ -114,8 +114,12 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   const cap = CAPS[profile] || CAPS[PROFILE.WA_DEDICATED_PRIVATE];
   const isActiveMember = opts.isActiveMember !== false;
 
-  const memberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL, TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES];
-  if (!isActiveMember && memberOnly.includes(toolName)) {
+  const allPlatformMemberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL];
+  if (!isActiveMember && allPlatformMemberOnly.includes(toolName)) {
+    return `"${toolName}" is only available to active server members.`;
+  }
+  const whatsAppMemberOnly = [TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES];
+  if (!isActiveMember && whatsAppMemberOnly.includes(toolName)) {
     return `"${toolName}" is only available to active server members on WhatsApp.`;
   }
 
@@ -332,8 +336,8 @@ function profileHasMediaQuota(profile) {
 
 /**
  * Body of "What you can and cannot see": what reaches you, in what shape, and
- * what never does. Weekly media quota counts move with the Runtime block, and
- * how a file is opened stays in the read_file description.
+ * what never does. Weekly media quota counts move with the Runtime block; the
+ * local-file inspection workflow lives in the shared workspace section.
  */
 function buildVisibilityLines(profile) {
   const cap = CAPS[profile];
@@ -355,8 +359,8 @@ function buildVisibilityLines(profile) {
     `Incoming media: audio longer than ${MAX_AUDIO_DURATION_S}s and video longer than ${MAX_VIDEO_DURATION_S}s are dropped `
     + 'and replaced inline with a "(too long, max Ns)" note. If a file is still attached, it passed the check — read it.',
     historyLine,
-    'You can look at web images by URL and at videos inside X posts. Any other file you can only read '
-    + 'when it is in this chat.'
+    'You can look at web images by URL and at videos inside X posts. Any other remote file must be attached '
+    + 'to this chat or downloaded into workspace/ before you can read it.'
   ];
   if (cap.isDiscord) {
     lines.push(

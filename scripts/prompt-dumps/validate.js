@@ -200,6 +200,9 @@ function _validateNoStaleClaims(staticPart, prompt, caseId) {
   if (/First message of this thread/.test(staticPart)) {
     ISSUES.push({ caseId, msg: 'static must not claim a first-turn-only title rule' });
   }
+  if (/Any other file you can only read when it is in this chat/.test(prompt)) {
+    ISSUES.push({ caseId, msg: 'visibility must account for files downloaded into the workspace' });
+  }
 }
 
 /** Turn-varying material must sit in Runtime, never in the cached static prefix. */
@@ -370,6 +373,9 @@ function _validateThisChat(staticPart, id, caseId) {
   const chat = _promptSection(staticPart, 'This chat');
   if (!chat) return;
   if (!WHATSAPP_CASES.includes(id)) {
+    if (!chat.includes('Platform: Discord.')) {
+      ISSUES.push({ caseId, msg: 'Discord This chat section must name the platform explicitly' });
+    }
     if (/system appends/.test(chat)) {
       ISSUES.push({ caseId, msg: 'Discord appends no footer or source list' });
     }
@@ -377,6 +383,9 @@ function _validateThisChat(staticPart, id, caseId) {
       ISSUES.push({ caseId, msg: `Discord must not mention ${PRIVACY_WIPE_COMMAND} (WhatsApp-only)` });
     }
     return;
+  }
+  if (!chat.includes('Platform: WhatsApp.')) {
+    ISSUES.push({ caseId, msg: 'WhatsApp This chat section must name the platform explicitly' });
   }
   for (const token of ['*bold*', '```', '"- " bullets', '"1. " numbered lists']) {
     if (!chat.includes(token)) {
@@ -405,6 +414,22 @@ function _validateThisChat(staticPart, id, caseId) {
     ISSUES.push({ caseId, msg: 'privacy command line must say it never reaches the model and what a readable attempt means' });
   } else if (!/never bring that up yourself/.test(chat)) {
     ISSUES.push({ caseId, msg: 'privacy command line missing the silent-acceptance rule' });
+  }
+}
+
+/** File inspection strategy belongs to the workspace, not to one tool schema. */
+function _validateWorkspaceGuidance(staticPart, caseId) {
+  const workspace = _promptSection(staticPart, 'Your workspace');
+  if (!workspace) return;
+  if (!/standard gateway that brings its contents into your context/.test(workspace)) {
+    ISSUES.push({ caseId, msg: 'workspace guidance must identify read_file as the standard context gateway' });
+  }
+  if (/only way to open a file/.test(workspace)) {
+    ISSUES.push({ caseId, msg: 'workspace guidance must not contradict shell-based file processing' });
+  }
+  if (!/result is incomplete or insufficient/.test(workspace) || !/missing pages or tables/.test(workspace)
+    || !/pages or slide images/.test(workspace) || !/use `shell`/.test(workspace)) {
+    ISSUES.push({ caseId, msg: 'workspace guidance lacks the fallback for incomplete document extraction' });
   }
 }
 
@@ -492,12 +517,13 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
   _validateAudience(staticPart, id, caseId);
   _validateVisibility(staticPart, caseId);
   _validateThisChat(staticPart, id, caseId);
+  _validateWorkspaceGuidance(staticPart, caseId);
   _validateQuotaLine(dynamicPart, id, caseId);
   _validateSettingsBlocks(dynamicPart, prompt, id, caseId);
   validateNoImplLeaks(prompt, caseId, 'system prompt');
 }
 
-// -- Build sub-agent -------------------------------------------------------
+// -- Workspace runtime -----------------------------------------------------
 
 /**
  * The workspace-runtime dump is where the "no secret reaches the container"
@@ -536,12 +562,11 @@ function _validateWorkspaceToolDescriptions(platform) {
     ISSUES.push({ caseId: 'workspace', msg: 'the build sub-agent tool is still offered to the model' });
   }
   const readFile = byName.get('read_file') || '';
-  if (!/only way to open one/i.test(readFile)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'read_file description does not state it is the universal gateway' });
+  if (!/bring a supported local file into your context/i.test(readFile)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'read_file description does not state its context-ingestion role' });
   }
-  if (!/long or complex documents/i.test(readFile) || !/shell/i.test(readFile)
-    || !/page or slide images/i.test(readFile)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'read_file description lacks the shell fallback for incomplete document extraction' });
+  if (/whatever its format|only way to open|long or complex documents|use shell/i.test(readFile)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'read_file schema contains workspace-level strategy guidance' });
   }
   const editFile = byName.get('edit_file') || '';
   if (!/exactly once/i.test(editFile)) {

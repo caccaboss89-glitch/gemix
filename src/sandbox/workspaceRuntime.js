@@ -17,8 +17,8 @@
 //
 // Nothing else is mounted and no credential is passed in. The container runs
 // GemiX's own tools and whatever the model asks for, so it gets no bearer, no
-// refresh token and no API key — that is the whole reason the old Grok Build
-// exec, which injected XAI_API_KEY into the environment, is gone.
+// refresh token and no API key. Provider calls and their credentials remain
+// host-owned and outside the model-controlled runtime.
 //
 // Notes:
 //   - The base image ENTRYPOINT is overridden with `Cmd:['sleep','infinity']`

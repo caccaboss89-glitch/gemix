@@ -36,7 +36,7 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
     return { success: false, error: 'Missing required argument "content" (pass an empty string for an empty file).' };
   }
 
-  const resolved = resolveAgentPath(workspaceId, raw);
+  const resolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
   if (!resolved) return invalidPathError(raw);
   if (!resolved.writable) {
     return {
@@ -46,16 +46,20 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
   }
 
   return runWorkspaceMutation(workspaceId, opts, async () => {
-    const committed = await commitWorkspaceText(workspaceId, resolved, args.content);
+    // Resolve again under the mutation lock so a parent cannot be exchanged
+    // for a symlink between validation and serialization.
+    const lockedResolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
+    if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
+    const committed = await commitWorkspaceText(workspaceId, lockedResolved, args.content);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;
     return {
       success: true,
-      path: resolved.display,
+      path: lockedResolved.display,
       bytes,
       message: quota.ok
-        ? `Wrote ${bytes} byte(s) to ${resolved.display}.`
-        : `Wrote ${bytes} byte(s) to ${resolved.display}. ${quota.message}`,
+        ? `Wrote ${bytes} byte(s) to ${lockedResolved.display}.`
+        : `Wrote ${bytes} byte(s) to ${lockedResolved.display}. ${quota.message}`,
       ...quotaResultFields(quota)
     };
   });

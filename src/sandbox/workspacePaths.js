@@ -100,28 +100,72 @@ function hostRoot(workspaceId, root) {
 /**
  * Host path for a `{root, relPath}` pair, refusing anything outside the root.
  *
- * Containment is checked twice: once on the lexical path, and again on the
- * real path when the entry exists, so a symlink planted from inside the
- * container cannot hand back a host file.
+ * Containment is checked twice: once on the lexical path, and again after
+ * resolving the nearest existing ancestor. The latter also protects a missing
+ * destination whose parent is a symlink. Mutations additionally reject every
+ * existing symlink component to keep path identity stable until commit.
  *
+ * @param {object} [opts]
+ * @param {boolean} [opts.forWrite]
  * @returns {string|null}
  */
-function hostPathFor(workspaceId, root, relPath) {
+function hostPathFor(workspaceId, root, relPath, opts = {}) {
   const base = hostRoot(workspaceId, root);
   if (!base) return null;
   const abs = path.resolve(base, relPath || '');
   const rel = path.relative(base, abs);
   if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
 
-  let real;
-  try { real = fs.realpathSync(abs); }
-  catch { return abs; } // does not exist yet: the lexical check is all there is
-  let realBase;
-  try { realBase = fs.realpathSync(base); }
-  catch { return abs; }
+  if (opts.forWrite && _hasExistingSymlink(base, rel)) return null;
+
+  const realBase = _prospectiveRealPath(base);
+  const real = _prospectiveRealPath(abs);
+  if (!realBase || !real) return null;
   const realRel = path.relative(realBase, real);
   if (realRel.startsWith('..') || path.isAbsolute(realRel)) return null;
   return abs;
+}
+
+/** Canonicalize an existing path, or its nearest existing ancestor plus tail. */
+function _prospectiveRealPath(target) {
+  let existing = target;
+  while (true) {
+    try {
+      fs.lstatSync(existing);
+      break;
+    } catch (err) {
+      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') return null;
+      const parent = path.dirname(existing);
+      if (parent === existing) return null;
+      existing = parent;
+    }
+  }
+  try {
+    const realExisting = fs.realpathSync(existing);
+    return path.resolve(realExisting, path.relative(existing, target));
+  } catch {
+    return null;
+  }
+}
+
+/** Whether an existing component below `base` is a symbolic link. */
+function _hasExistingSymlink(base, relPath) {
+  let current = base;
+  try {
+    if (fs.lstatSync(current).isSymbolicLink()) return true;
+  } catch (err) {
+    if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') return true;
+  }
+  for (const segment of relPath.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) return true;
+    } catch (err) {
+      if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -129,12 +173,14 @@ function hostPathFor(workspaceId, root, relPath) {
  *
  * @param {string} workspaceId
  * @param {string} raw - path as the model wrote it
+ * @param {object} [opts]
+ * @param {boolean} [opts.forWrite] - reject existing symlink components
  * @returns {{ root, relPath, display, containerPath, abs, writable }|null}
  */
-function resolveAgentPath(workspaceId, raw) {
+function resolveAgentPath(workspaceId, raw, opts = {}) {
   const parsed = parseAgentPath(raw);
   if (!parsed) return null;
-  const abs = hostPathFor(workspaceId, parsed.root, parsed.relPath);
+  const abs = hostPathFor(workspaceId, parsed.root, parsed.relPath, opts);
   if (!abs) return null;
   return {
     ...parsed,

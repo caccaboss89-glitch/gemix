@@ -9,18 +9,33 @@ import { checkWorkspaceQuota } from '../../sandbox/workspaceFs.js';
 import { withWorkspaceLock } from '../../utils/workspaceState.js';
 
 const ATOMIC_WRITE_SCRIPT = [
-  'set -eu',
+  'set -efu',
   'dest="$1"',
+  'allowed_root="${2:-/workspace}"',
   'dir="$(dirname -- "$dest")"',
+  'root_real="$(realpath -e -- "$allowed_root")"',
+  'case "$dest" in "$allowed_root"/*) ;; *) echo "destination is outside the workspace" >&2; exit 73 ;; esac',
+  'check_parent() {',
+  '  relative="${dir#"$allowed_root"}"',
+  '  old_ifs="$IFS"; IFS="/"; set -- $relative; IFS="$old_ifs"',
+  '  current="$allowed_root"',
+  '  for component do',
+  '    [ -n "$component" ] || continue',
+  '    current="$current/$component"',
+  '    if [ -L "$current" ]; then echo "symbolic-link parent refused: $current" >&2; exit 73; fi',
+  '  done',
+  '  parent_real="$(realpath -m -- "$dir")"',
+  '  case "$parent_real" in "$root_real"|"$root_real"/*) ;; *) echo "parent resolves outside the workspace" >&2; exit 73 ;; esac',
+  '}',
+  'check_parent',
   'mkdir -p -- "$dir"',
-  // The prefix is private to this writer. A previous SIGKILL can bypass the
-  // trap, so the next serialized mutation removes any abandoned temporary.
-  'find "$dir" -maxdepth 1 -type f -name ".gemix-write.*" -delete',
+  'check_parent',
   'tmp="$(mktemp "$dir/.gemix-write.XXXXXX")"',
   'cleanup() { rm -f -- "$tmp"; }',
   'trap cleanup EXIT HUP INT TERM',
   'cat > "$tmp"',
   'if [ -f "$dest" ]; then chmod --reference="$dest" "$tmp"; else chmod 0644 "$tmp"; fi',
+  'check_parent',
   // Same-directory rename is atomic. -T also replaces a symlink entry instead
   // of treating a symlink-to-directory as a destination directory.
   'mv -fT -- "$tmp" "$dest"',
@@ -38,7 +53,7 @@ async function runWorkspaceMutation(workspaceId, opts = {}, fn) {
 
 async function commitWorkspaceText(workspaceId, resolved, content) {
   const run = await workspaceRuntime.execInWorkspace(workspaceId, {
-    command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', resolved.containerPath],
+    command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', resolved.containerPath, '/workspace'],
     input: content
   });
   if (run.rc !== 0) {

@@ -4,7 +4,7 @@
 // wrappers, and the envelope is the fixed `{ success, message?, error?, ... }`
 // object, optionally followed by content parts.
 //
-// `read_file`: the one way the model reads anything on disk.
+// `read_file`: the standard model-facing gateway for ingesting supported local files.
 //
 // The model does not pick a parser and does not know one exists. It names a
 // path; the ParserRegistry decides what to run, and this returns a JSON

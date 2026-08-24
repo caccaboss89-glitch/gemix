@@ -8,7 +8,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getToolsForUser } from '../src/ai/tools.js';
 import constants from '../src/config/constants.js';
-import { TOOL } from '../src/config/platformCapabilities.js';
+import envConfig from '../src/config/env.js';
+import {
+  PROFILE,
+  TOOL,
+  toolUnavailableMessage
+} from '../src/config/platformCapabilities.js';
+import { _resetActiveProfileForTests } from '../src/ai/providers/providerProfile.js';
 import { TOOL_EXECUTORS } from '../src/tools/executors/index.js';
 import { MEDIA_TOOL_EXECUTORS } from '../src/tools/executors/media.js';
 import { WEB_TOOL_EXECUTORS } from '../src/tools/executors/web.js';
@@ -75,11 +81,53 @@ test('catalog composition never emits duplicate tool identifiers', () => {
   }
 });
 
-test('every GemiX function tool has exactly one registered executor', () => {
-  const expected = Object.values(TOOL)
-    .filter(name => name !== TOOL.X_SEARCH)
-    .sort();
-  assert.deepEqual(Object.keys(TOOL_EXECUTORS).sort(), expected);
+test('tool composition fails closed without an explicit supported platform', () => {
+  assert.throws(() => getToolsForUser(), /explicit supported platform/);
+  assert.throws(() => getToolsForUser({ platform: 'unknown' }), /explicit supported platform/);
+});
+
+test('every function offered by the complete context matrix has exactly one executor', () => {
+  const savedProvider = envConfig.AI_PROVIDER;
+  envConfig.AI_PROVIDER = 'xai';
+  _resetActiveProfileForTests();
+  try {
+    const offered = new Set();
+    for (const platform of [
+      constants.PLATFORM_DISCORD,
+      constants.PLATFORM_WA_DEDICATED,
+      constants.PLATFORM_WA_PERSONAL
+    ]) {
+      for (const isGroup of [false, true]) {
+        for (const isActiveMember of [false, true]) {
+          for (const isAdmin of [false, true]) {
+            for (const tool of getToolsForUser({ platform, isGroup, isActiveMember, isAdmin })) {
+              if (tool.function?.name) offered.add(tool.function.name);
+            }
+          }
+        }
+      }
+    }
+
+    const actual = [...offered].sort();
+    const registered = Object.keys(TOOL_EXECUTORS).sort();
+    const declared = Object.values(TOOL).filter(name => name !== TOOL.X_SEARCH).sort();
+    assert.deepEqual(registered, actual, 'executor registry drifted from live offered schemas');
+    assert.deepEqual(declared, actual, 'capability constants drifted from live offered schemas');
+  } finally {
+    envConfig.AI_PROVIDER = savedProvider;
+    _resetActiveProfileForTests();
+  }
+});
+
+test('membership refusals describe the platform boundary accurately', () => {
+  assert.equal(
+    toolUnavailableMessage(TOOL.SEND_EMAIL, PROFILE.DISCORD_THREAD, { isActiveMember: false }),
+    '"send_email" is only available to active server members.'
+  );
+  assert.equal(
+    toolUnavailableMessage(TOOL.READ_SENT_MESSAGES, PROFILE.WA_DEDICATED_PRIVATE, { isActiveMember: false }),
+    '"read_sent_messages" is only available to active server members on WhatsApp.'
+  );
 });
 
 test('media and web executor domains do not contain misplaced tools', () => {

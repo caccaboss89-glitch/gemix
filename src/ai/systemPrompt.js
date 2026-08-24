@@ -152,7 +152,7 @@ function _buildOpening(cap) {
 function _buildChatLines(ctx, cap, profile) {
   if (cap.isDiscord) {
     return [
-      'A forum thread in the "gemix" channel. You are here to help with the Statute (Statuto Albertino) '
+      'Platform: Discord. A forum thread in the "gemix" channel. You are here to help with the Statute (Statuto Albertino) '
       + 'and to produce Art. 6 formal PDF requests.',
       'Markdown renders here, tables aside.'
     ];
@@ -164,7 +164,7 @@ function _buildChatLines(ctx, cap, profile) {
       ? escapeXml(ctx.personalOtherUserName)
       : 'the other participant';
     lines.push(
-      'The admin\'s own WhatsApp account, in a chat with one other person. Reply only when the message '
+      'Platform: WhatsApp. The admin\'s own account, in a chat with one other person. Reply only when the message '
       + 'contains @gemix. History, memory and workspace are shared between the two of them.',
       `In the chat: ${escapeXml(envConfig.ADMIN_NAME)} (the account owner) and ${otherName}.`,
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
@@ -174,14 +174,14 @@ function _buildChatLines(ctx, cap, profile) {
     );
   } else if (ctx.isGroup) {
     lines.push(
-      `The group "${escapeXml(ctx.groupName) || 'unknown'}" on the dedicated GemiX account. Reply when you are `
+      `Platform: WhatsApp. The group "${escapeXml(ctx.groupName) || 'unknown'}" on the dedicated GemiX account. Reply when you are `
       + '@mentioned, or when someone replies to one of your messages.',
       'When you name another member in a reply — anyone other than the person writing — you must mention them '
       + 'as @<phone digits>: no plus sign, and no display name after the @.'
     );
   } else {
     lines.push(
-      'A private chat on the dedicated GemiX account. Reply to every message.',
+      'Platform: WhatsApp. A private chat on the dedicated GemiX account. Reply to every message.',
       `In the chat: just you and ${escapeXml(ctx.userName)}.`,
       'You cannot mention anyone in a private chat, neither the user nor yourself: mentions only work '
       + 'in groups. Name people plainly.'
@@ -364,10 +364,8 @@ function _renderWorkspace(ws) {
 }
 
 /**
- * The workspace rules the model needs before it touches a file: what the two
- * areas are, which one it may write to, the quota and the TTL. These used to be
- * the build sub-agent's own rules; the main agent owns the workspace now, so
- * they belong in its prompt.
+ * The workspace rules the model needs before it touches a file: namespace,
+ * inspection workflow, writable area, quota, TTL and network behavior.
  */
 function _buildWorkspaceLines() {
   return [
@@ -375,9 +373,13 @@ function _buildWorkspaceLines() {
     + '`attachments/` holds this chat\'s files, mounted read-only: to change one, copy it into `workspace/` first.',
     'One path namespace covers everything: the path `list_files` shows you is the same string you pass to `read_file`, '
     + 'to `shell`, and to `attachments` in your final reply. Never invent a path or shorten one to its filename.',
-    '`read_file` is the only way to open a file. Reading, listing and searching are free and instant — look before '
-    + 'you assume, and never tell the user a file is missing without checking. A file that only exists at a URL is '
-    + 'in neither area yet: download it with `shell` into `workspace/`, then read it there.',
+    'Start with `read_file` whenever you need to inspect a local file: it is the standard gateway that brings its '
+    + 'contents into your context. Listing and searching are fast, while reading may need format-specific parsing — look before you assume, '
+    + 'and never tell the user a file is missing without checking.',
+    'If its result is incomplete or insufficient for the task — for example clipped text, missing pages or tables, '
+    + 'or inadequate structure — use `shell` to extract the relevant text, pages or slide images into `workspace/`, then '
+    + 'inspect those outputs with `read_file`. A file that exists only at a URL is in neither area yet: download it '
+    + 'with `shell` into `workspace/`, then inspect it there.',
     'The same file can exist in both areas at once (you made it, you sent it, it came back in the chat). That is '
     + 'normal: work from whichever copy the user means.',
     `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `

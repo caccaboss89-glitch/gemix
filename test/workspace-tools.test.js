@@ -6,7 +6,9 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test, { after, before } from 'node:test';
 import constants from '../src/config/constants.js';
 import { getWorkspaceMetaDir, getWorkspacePath } from '../src/utils/workspaceId.js';
@@ -15,8 +17,13 @@ import { searchFiles } from '../src/tools/workspace/searchFiles.js';
 import { readFile, READ_ERROR } from '../src/tools/workspace/readFile.js';
 import { writeFile } from '../src/tools/workspace/writeFile.js';
 import { editFile } from '../src/tools/workspace/editFile.js';
+import { ATOMIC_WRITE_SCRIPT } from '../src/tools/workspace/mutation.js';
 import { shell } from '../src/tools/workspace/shell.js';
-import { checkWorkspaceQuota, listFilesUnder } from '../src/sandbox/workspaceFs.js';
+import {
+  checkWorkspaceQuota,
+  ensureWorkspaceWritable,
+  listFilesUnder
+} from '../src/sandbox/workspaceFs.js';
 import workspaceRuntime from '../src/sandbox/workspaceRuntime.js';
 import { isProbablyText } from '../src/tools/workspace/textFiles.js';
 import { TurnBudget } from '../src/utils/turnBudget.js';
@@ -215,6 +222,7 @@ test('write_file uses the atomic writer and reports a successful full write', as
     assert.equal(fs.readFileSync(destination, 'utf-8'), 'complete content\n');
     assert.match(commandScript, /mktemp/);
     assert.match(commandScript, /mv -fT/);
+    assert.doesNotMatch(commandScript, /find .*\.gemix-write/);
     assert.doesNotMatch(commandScript, /cat > "\$1"/);
   } finally {
     workspaceRuntime.execInWorkspace = realExec;
@@ -242,6 +250,56 @@ test('write_file failure leaves an existing destination untouched', async () => 
     assert.equal(fs.readFileSync(destination, 'utf-8'), 'original\n');
   } finally {
     workspaceRuntime.execInWorkspace = realExec;
+  }
+});
+
+test('the production atomic writer runs end-to-end without deleting unrelated files', {
+  skip: process.platform !== 'linux'
+}, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-atomic-'));
+  const destination = path.join(root, 'nested', 'result.txt');
+  const unrelated = path.join(root, 'nested', '.gemix-write.user-file');
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.writeFileSync(destination, 'old content', 'utf-8');
+  fs.chmodSync(destination, 0o640);
+  fs.writeFileSync(unrelated, 'keep me', 'utf-8');
+  try {
+    const run = spawnSync('/bin/bash', [
+      '-c',
+      ATOMIC_WRITE_SCRIPT,
+      'workspace_text_write_test',
+      destination,
+      root
+    ], { input: 'new complete content\n', encoding: 'utf-8' });
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+    assert.equal(fs.readFileSync(destination, 'utf-8'), 'new complete content\n');
+    assert.equal(fs.statSync(destination).mode & 0o777, 0o640);
+    assert.equal(fs.readFileSync(unrelated, 'utf-8'), 'keep me');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the production atomic writer rejects a symlink parent', {
+  skip: process.platform !== 'linux'
+}, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-atomic-root-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-atomic-outside-'));
+  fs.symlinkSync(outside, path.join(root, 'escape'), 'dir');
+  try {
+    const run = spawnSync('/bin/bash', [
+      '-c',
+      ATOMIC_WRITE_SCRIPT,
+      'workspace_text_write_test',
+      path.join(root, 'escape', 'result.txt'),
+      root
+    ], { input: 'must not escape', encoding: 'utf-8' });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /symbolic-link parent refused|outside the workspace/);
+    assert.equal(fs.existsSync(path.join(outside, 'result.txt')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
   }
 });
 
@@ -403,6 +461,24 @@ test('listFilesUnder skips symlinks so a planted link cannot widen a listing', (
     assert.equal(listing.files.some(f => f.relPath.startsWith('escape/')), false);
   } finally {
     fs.unlinkSync(linkPath);
+  }
+});
+
+test('permission normalization never follows a symlink outside the workspace', {
+  skip: process.platform !== 'linux'
+}, () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-writable-'));
+  const target = path.join(outside, 'protected.txt');
+  const link = path.join(ROOT, 'permission-escape');
+  fs.writeFileSync(target, 'outside');
+  fs.chmodSync(target, 0o600);
+  fs.symlinkSync(outside, link, 'dir');
+  try {
+    ensureWorkspaceWritable(WORKSPACE_ID);
+    assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  } finally {
+    fs.unlinkSync(link);
+    fs.rmSync(outside, { recursive: true, force: true });
   }
 });
 

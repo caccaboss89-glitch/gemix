@@ -4,8 +4,9 @@
 //
 // Per-conversation layout under data/users/<workspaceSlug>/ :
 //   build_workspace/        <- /workspace, writable by the agent
-//   attachments/            <- /attachments, read-only projection (phase 4)
-//   .build_state.json       <- activity + lock (see utils/workspaceState.js)
+//   attachments/            <- /attachments, read-only projection
+//   .build_state.json       <- activity timestamp (see utils/workspaceState.js)
+//   .workspace_lock/        <- atomic mutation mutex (same module)
 //
 // Reads run here, in-process, because they only ever execute GemiX's own code
 // and a docker exec per listing would cost more than the read itself. Writes
@@ -69,9 +70,10 @@ function sandboxUserString() {
 }
 
 /**
- * Make the workspace tree writable on the host. The container runs as the same
- * UID/GID as Node; this fixes legacy files from older containers and
- * normalizes permissions on directories.
+ * Make the app-owned workspace root writable. Files below it are created by
+ * the container with the same UID/GID as Node and need no recursive repair.
+ * Avoiding a recursive chmod also means model-created symlinks are never
+ * traversed by a privileged host operation.
  */
 function ensureWorkspaceWritable(workspaceId) {
   const root = getWorkspacePath(workspaceId);
@@ -82,32 +84,17 @@ function ensureWorkspaceWritable(workspaceId) {
   if (uid === null || uid === undefined || gid === null || gid === undefined) return;
 
   const isRoot = process.getuid && process.getuid() === 0;
+  let st;
+  try { st = fs.lstatSync(root); }
+  catch { return; }
+  if (!st.isDirectory() || st.isSymbolicLink()) return;
 
-  const walk = (p) => {
-    let st;
-    try { st = fs.statSync(p); }
-    catch { return; }
-
-    try {
-      if (isRoot) {
-        if (st.uid !== uid || st.gid !== gid) fs.chownSync(p, uid, gid);
-        fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
-      } else if (st.uid === uid) {
-        fs.chmodSync(p, st.isDirectory() ? 0o777 : 0o666);
-      }
-      // Foreign-owned entries (legacy sandbox uid): skip — container recreate fixes new files.
-    } catch (err) {
-      log.warn(`ensureWorkspaceWritable ${p}: ${err.message}`);
-    }
-
-    if (st.isDirectory()) {
-      let entries;
-      try { entries = fs.readdirSync(p); }
-      catch { return; }
-      for (const entry of entries) walk(path.join(p, entry));
-    }
-  };
-  walk(root);
+  try {
+    if (isRoot && (st.uid !== uid || st.gid !== gid)) fs.chownSync(root, uid, gid);
+    if (isRoot || st.uid === uid) fs.chmodSync(root, 0o777);
+  } catch (err) {
+    log.warn(`ensureWorkspaceWritable ${root}: ${err.message}`);
+  }
 }
 
 /**
