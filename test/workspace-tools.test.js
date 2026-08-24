@@ -1,11 +1,8 @@
 // test/workspace-tools.test.js
 //
-// The host-side half of the filesystem tools: listing, searching, reading, and
-// every guard the mutating tools apply before they reach the container.
-//
-// The success paths of write_file / edit_file / shell need Docker and are not
-// covered here; what is covered is that they refuse the wrong thing early,
-// which is where the security boundary actually sits.
+// Filesystem tools: host-side reads and guards plus container-write orchestration.
+// The runtime is stubbed for mutation success/failure paths so the unit suite
+// verifies content, atomic command shape and result envelopes without Docker.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -197,6 +194,57 @@ test('write_file needs both a path and content', async () => {
   assert.equal((await writeFile({ path: 'workspace/a.txt' }, WORKSPACE_ID)).success, false);
 });
 
+test('write_file uses the atomic writer and reports a successful full write', async () => {
+  const destination = path.join(ROOT, 'nested', 'new.txt');
+  const realExec = workspaceRuntime.execInWorkspace;
+  let commandScript = '';
+  workspaceRuntime.execInWorkspace = async (_id, spec) => {
+    commandScript = spec.command[2];
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, spec.input, 'utf-8');
+    return { rc: 0, stdout: '', stderr: '', durationMs: 1, timedOut: false, truncated: false };
+  };
+  try {
+    const res = await writeFile(
+      { path: 'workspace/nested/new.txt', content: 'complete content\n' },
+      WORKSPACE_ID
+    );
+    assert.equal(res.success, true);
+    assert.equal(res.path, 'workspace/nested/new.txt');
+    assert.equal(res.bytes, Buffer.byteLength('complete content\n'));
+    assert.equal(fs.readFileSync(destination, 'utf-8'), 'complete content\n');
+    assert.match(commandScript, /mktemp/);
+    assert.match(commandScript, /mv -fT/);
+    assert.doesNotMatch(commandScript, /cat > "\$1"/);
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
+});
+
+test('write_file failure leaves an existing destination untouched', async () => {
+  const destination = write('preserved.txt', 'original\n');
+  const realExec = workspaceRuntime.execInWorkspace;
+  workspaceRuntime.execInWorkspace = async () => ({
+    rc: 1,
+    stdout: '',
+    stderr: 'simulated write failure',
+    durationMs: 1,
+    timedOut: false,
+    truncated: false
+  });
+  try {
+    const res = await writeFile(
+      { path: 'workspace/preserved.txt', content: 'replacement\n' },
+      WORKSPACE_ID
+    );
+    assert.equal(res.success, false);
+    assert.match(res.error, /simulated write failure/);
+    assert.equal(fs.readFileSync(destination, 'utf-8'), 'original\n');
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
+});
+
 test('edit_file refuses text that is not in the file', async () => {
   const res = await editFile(
     { path: 'workspace/notes.md', oldText: 'not present', newText: 'x' },
@@ -212,6 +260,53 @@ test('edit_file refuses an ambiguous match unless replaceAll is set', async () =
   assert.equal(res.success, false);
   assert.match(res.error, /matches 2 times/);
   assert.match(res.error, /replaceAll=true/);
+});
+
+test('edit_file keeps the read-transform-write lock through a successful exact edit', async () => {
+  const destination = write('editable.txt', 'before alpha after\n');
+  const realExec = workspaceRuntime.execInWorkspace;
+  workspaceRuntime.execInWorkspace = async (_id, spec) => {
+    fs.writeFileSync(destination, spec.input, 'utf-8');
+    return { rc: 0, stdout: '', stderr: '', durationMs: 1, timedOut: false, truncated: false };
+  };
+  try {
+    const res = await editFile({
+      path: 'workspace/editable.txt',
+      oldText: 'alpha',
+      newText: 'beta'
+    }, WORKSPACE_ID);
+    assert.equal(res.success, true);
+    assert.equal(res.replacements, 1);
+    assert.equal(res.bytes, Buffer.byteLength('before beta after\n'));
+    assert.equal(fs.readFileSync(destination, 'utf-8'), 'before beta after\n');
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
+});
+
+test('edit_file failure leaves the text it read unchanged', async () => {
+  const destination = write('edit-preserved.txt', 'keep alpha intact\n');
+  const realExec = workspaceRuntime.execInWorkspace;
+  workspaceRuntime.execInWorkspace = async () => ({
+    rc: 1,
+    stdout: '',
+    stderr: 'simulated edit failure',
+    durationMs: 1,
+    timedOut: false,
+    truncated: false
+  });
+  try {
+    const res = await editFile({
+      path: 'workspace/edit-preserved.txt',
+      oldText: 'alpha',
+      newText: 'beta'
+    }, WORKSPACE_ID);
+    assert.equal(res.success, false);
+    assert.match(res.error, /simulated edit failure/);
+    assert.equal(fs.readFileSync(destination, 'utf-8'), 'keep alpha intact\n');
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
 });
 
 test('edit_file refuses a binary file', async () => {

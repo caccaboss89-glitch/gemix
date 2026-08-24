@@ -214,7 +214,11 @@ test('both web tools are function tools on every profile, never provider-hosted'
     for (const provider of ['xai', 'chatgpt']) {
       envConfig.AI_PROVIDER = provider;
       _resetActiveProfileForTests();
-      const tools = getToolsForUser(true, false, { platform: constants.PLATFORM_WA_DEDICATED });
+      const tools = getToolsForUser({
+        isActiveMember: true,
+        isAdmin: false,
+        platform: constants.PLATFORM_WA_DEDICATED
+      });
       for (const name of ['search_web', 'read_page']) {
         const found = tools.find((t) => t.function?.name === name);
         assert.ok(found, `${name} missing on ${provider}`);

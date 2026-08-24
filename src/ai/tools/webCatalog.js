@@ -53,10 +53,4 @@ const TOOL_SEARCH_IMAGE = makeTool({
   required: ['query']
 });
 
-const TOOL_READ_MUSIC_STATS = makeTool({
-  name: 'read_music_stats',
-  description: 'Read music listening statistics.',
-  properties: {}
-});
-
-export { TOOL_READ_MUSIC_STATS, TOOL_READ_PAGE, TOOL_SEARCH_IMAGE, TOOL_SEARCH_WEB };
+export { TOOL_READ_PAGE, TOOL_SEARCH_IMAGE, TOOL_SEARCH_WEB };

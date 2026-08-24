@@ -3,7 +3,7 @@
 // Delivers "please wait" banners for slow tools to the active conversation.
 // Used by the main brain via userCtx.sendIntermediateNotification.
 //
-// Tools that trigger notifications (see tools/index.js):
+// Tools that trigger notifications (see tools/executors/media.js):
 //   - generate_image → kind 'image_gen'
 //   - generate_video → kind 'video_gen'
 //

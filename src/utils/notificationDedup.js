@@ -3,12 +3,11 @@
 // Per-call intermediate notification dedup.
 //
 // GemiX can run multiple tool rounds within a single AI call. Without dedup,
-// each round that triggers a slow operation (image_gen, video_gen, build)
+// each round that triggers a slow operation (image_gen or video_gen)
 // would fire the same "please wait" banner repeatedly.
 //
-// This module tracks which (call, kind) pairs have already been notified. Most
-// banners are one fixed line written at the call site in tools/index.js; the
-// build one is built here because it is also referenced elsewhere.
+// This module tracks which (call, kind) pairs have already been notified. Each
+// banner is a fixed line at its media executor call site.
 //
 // Usage pattern (handler.js):
 //   ctx.requestId = <unique id generated once per handleMessage invocation>

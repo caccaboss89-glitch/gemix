@@ -495,7 +495,11 @@ async function handleMessage(ctx) {
       // Static prefix stays byte-identical unless the tool fingerprint changes.
       reloadSettings(ctx, ui);
 
-      const roundTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
+      const roundTools = getToolsForUser({
+        ...userCtx,
+        isActiveMember,
+        isAdmin: userIsAdmin
+      });
       currentRoundTools = roundTools;
       const nextFp = promptToolsFingerprint(ctx);
       if (nextFp !== toolsFp) {
@@ -688,7 +692,11 @@ async function handleMessage(ctx) {
     let wrapUpVoice = false;
     try {
       reloadSettings(ctx, ui);
-      const wrapUpTools = getToolsForUser(isActiveMember, userIsAdmin, userCtx);
+      const wrapUpTools = getToolsForUser({
+        ...userCtx,
+        isActiveMember,
+        isAdmin: userIsAdmin
+      });
       const nextFp = promptToolsFingerprint(ctx);
       if (nextFp !== toolsFp) {
         staticInstructions = buildStaticInstructions(ctx);

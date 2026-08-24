@@ -16,27 +16,34 @@ import {
   buildScheduleTasksTool,
   buildWhatsAppTool
 } from './tools/deliveryCatalog.js';
-import { TOOL_GENERATE_VIDEO, buildGenerateImageTool } from './tools/mediaCatalog.js';
+import { TOOL_GENERATE_FORMAL_REQUEST_PDF } from './tools/documentCatalog.js';
 import {
-  TOOL_BUG_REPORT,
-  TOOL_GENERATE_FORMAL_REQUEST_PDF,
   TOOL_GENERATE_MUSIC,
-  TOOL_TOGGLE_RELEASE_NOTIFY,
-  buildManagePreferencesTool
-} from './tools/preferenceCatalog.js';
-import { validateToolArgs } from './tools/schema.js';
-import {
+  TOOL_GENERATE_VIDEO,
   TOOL_READ_MUSIC_STATS,
-  TOOL_READ_PAGE,
-  TOOL_SEARCH_IMAGE,
-  TOOL_SEARCH_WEB
-} from './tools/webCatalog.js';
+  buildGenerateImageTool
+} from './tools/mediaCatalog.js';
+import { TOOL_TOGGLE_RELEASE_NOTIFY, buildManagePreferencesTool } from './tools/preferenceCatalog.js';
+import { validateToolArgs } from './tools/schema.js';
+import { TOOL_BUG_REPORT } from './tools/systemCatalog.js';
+import { TOOL_READ_PAGE, TOOL_SEARCH_IMAGE, TOOL_SEARCH_WEB } from './tools/webCatalog.js';
 import { workspaceTools } from './tools/workspaceCatalog.js';
 
-function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
-  const isWhatsApp = constants.isWhatsAppPlatform(userCtx.platform);
-  const isWhatsAppGroup = isWhatsApp && Boolean(userCtx.isGroup);
-  const isDiscord = userCtx.platform === constants.PLATFORM_DISCORD;
+/**
+ * @typedef {object} ToolContext
+ * @property {boolean} [isActiveMember]
+ * @property {boolean} [isAdmin]
+ * @property {string} [platform]
+ * @property {boolean} [isGroup]
+ */
+
+/** Build the exact tool permission boundary for one model round. */
+function getToolsForUser(toolCtx = {}) {
+  const isActiveMember = Boolean(toolCtx.isActiveMember);
+  const isAdmin = Boolean(toolCtx.isAdmin);
+  const isWhatsApp = constants.isWhatsAppPlatform(toolCtx.platform);
+  const isWhatsAppGroup = isWhatsApp && Boolean(toolCtx.isGroup);
+  const isDiscord = toolCtx.platform === constants.PLATFORM_DISCORD;
   const profile = resolveProviderProfile();
   const tools = [TOOL_SEARCH_WEB, TOOL_READ_PAGE, TOOL_SEARCH_IMAGE];
 
@@ -67,7 +74,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
     tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
     tools.push(buildReadMyTasksTool(isWhatsAppGroup));
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
-    const isPersonalChat = userCtx.platform === constants.PLATFORM_WA_PERSONAL;
+    const isPersonalChat = toolCtx.platform === constants.PLATFORM_WA_PERSONAL;
     tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }
@@ -96,7 +103,9 @@ function syncProfileToolSets(caps, profileEnum) {
   for (const profile of Object.values(profileEnum)) {
     const cap = caps[profile];
     if (!cap) continue;
-    cap.tools = toolNamesToSet(getToolsForUser(true, false, {
+    cap.tools = toolNamesToSet(getToolsForUser({
+      isActiveMember: true,
+      isAdmin: false,
       platform: cap.platform,
       isGroup: Boolean(cap.isGroup)
     }));

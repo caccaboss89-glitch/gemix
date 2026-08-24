@@ -20,8 +20,8 @@ import constants from '../../config/constants.js';
 import workspaceRuntime from '../../sandbox/workspaceRuntime.js';
 import { checkWorkspaceQuota } from '../../sandbox/workspaceFs.js';
 import { ROOT, invalidPathError, resolveAgentPath, toContainerPath } from '../../sandbox/workspacePaths.js';
-import { withWorkspaceLock } from '../../utils/workspaceState.js';
 import { callTimeoutWithin } from '../../utils/turnBudget.js';
+import { quotaResultFields, runWorkspaceMutation } from './mutation.js';
 
 /**
  * @param {object} args
@@ -54,7 +54,7 @@ async function shell(args = {}, workspaceId, opts = {}) {
   );
   const cappedSec = Math.round(timeoutMs / 1000);
 
-  return withWorkspaceLock(workspaceId, { ownerId: opts.lockOwnerId }, async () => {
+  return runWorkspaceMutation(workspaceId, opts, async () => {
     const run = await workspaceRuntime.execInWorkspace(workspaceId, {
       command,
       timeoutMs,
@@ -74,13 +74,10 @@ async function shell(args = {}, workspaceId, opts = {}) {
       duration_ms: run.durationMs,
       stdout: run.stdout,
       stderr: run.stderr,
-      ...(quota.ok ? {} : { quota_exceeded: true, quota_mb: constants.WORKSPACE_QUOTA_MB }),
+      ...quotaResultFields(quota),
       ...(run.rc === 0 && !run.timedOut ? {} : { error: `Command exited with code ${run.rc}.` }),
       message: notes.join(' ') || `Exit ${run.rc} in ${run.durationMs} ms.`
     };
-  }).catch((err) => {
-    if (err.code === 'EWORKSPACEBUSY') return { success: false, error: err.message };
-    throw err;
   });
 }
 

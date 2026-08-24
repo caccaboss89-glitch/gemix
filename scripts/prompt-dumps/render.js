@@ -38,6 +38,7 @@ import {
 } from '../../src/utils/toolCallExecution.js';
 import { formatMediaQuotaResetLabel } from '../../src/utils/mediaUsageLimits.js';
 import workspaceRuntime from '../../src/sandbox/workspaceRuntime.js';
+import { ATOMIC_WRITE_SCRIPT } from '../../src/tools/workspace/mutation.js';
 import { CASES } from './cases.js';
 
 /** Tool names the workspace-runtime dump quotes verbatim. */
@@ -124,8 +125,8 @@ function renderResponseFormat(fmt) {
 // -- Tool error catalog ----------------------------------------------------
 
 // Deterministic per-tool runtime errors the system can return, mirroring the
-// tool implementations (tools/index.js, scheduler.js, imagineGenerator.js,
-// tools/workspace/*.js, preferences.js). Kept here as an audit catalog; update
+// tool implementations (tools/executors/*.js and their domain modules). Kept
+// here as an audit catalog; update
 // it when a tool's error strings change. Only entries for tools live in the
 // case are dumped.
 const TOOL_RUNTIME_ERRORS = {
@@ -415,7 +416,11 @@ function renderCase(id) {
     isGroup: ctx.isGroup,
     chatId: ctx.chatId
   };
-  const tools = getToolsForUser(Boolean(identity.isActiveMember), Boolean(identity.isAdmin), userCtx);
+  const tools = getToolsForUser({
+    ...userCtx,
+    isActiveMember: Boolean(identity.isActiveMember),
+    isAdmin: Boolean(identity.isAdmin)
+  });
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
   const responseFormat = buildGemixResponseFormat({
     includeTitle: isDiscord,
@@ -453,9 +458,14 @@ function renderWorkspaceRuntimeDump() {
     timeoutMs: SHELL_TIMEOUT_DEFAULT_MS
   });
   const writeSpec = workspaceRuntime.buildExecSpec({
-    command: ['/bin/bash', '-c', 'mkdir -p "$(dirname "$1")" && cat > "$1"', 'write_file', '/workspace/report.md']
+    command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', '/workspace/report.md']
   });
-  const tools = getToolsForUser(true, true, { platform: PLATFORM_WA_DEDICATED, isGroup: false });
+  const tools = getToolsForUser({
+    isActiveMember: true,
+    isAdmin: true,
+    platform: PLATFORM_WA_DEDICATED,
+    isGroup: false
+  });
   const workspaceTools = tools.filter(t => WORKSPACE_TOOL_NAMES.has(t?.function?.name));
 
   return [

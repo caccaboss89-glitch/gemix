@@ -36,7 +36,9 @@ async function withProvider(provider, fn) {
 }
 
 function effortSchema() {
-  const tools = getToolsForUser(true, false, {
+  const tools = getToolsForUser({
+    isActiveMember: true,
+    isAdmin: false,
     platform: constants.PLATFORM_WA_DEDICATED,
     isGroup: false
   });

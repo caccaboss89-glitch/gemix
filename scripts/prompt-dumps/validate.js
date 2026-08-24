@@ -524,7 +524,7 @@ function _validateWorkspaceExecEnv(dump) {
 
 /** The workspace tool descriptions, read off the live schema. */
 function _validateWorkspaceToolDescriptions(platform) {
-  const tools = getToolsForUser(true, true, { platform, isGroup: false });
+  const tools = getToolsForUser({ isActiveMember: true, isAdmin: true, platform, isGroup: false });
   const byName = new Map(tools.filter(t => t?.function).map(t => [t.function.name, t.function.description || '']));
 
   for (const name of ['list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell']) {

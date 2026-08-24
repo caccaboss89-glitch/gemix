@@ -1,7 +1,7 @@
 // src/ai/tools/mediaCatalog.js
 //
-// Provider-bound generation schemas. generate_image keeps one public name but
-// advertises only parameters the selected backend actually implements.
+// Media schemas. Image and video advertise only parameters implemented by the
+// selected backend; music and listening stats remain GemiX-owned.
 
 import constants from '../../config/constants.js';
 import {
@@ -98,4 +98,22 @@ const TOOL_GENERATE_VIDEO = makeTool({
   required: ['prompt']
 });
 
-export { TOOL_GENERATE_VIDEO, buildGenerateImageTool };
+const TOOL_GENERATE_MUSIC = makeTool({
+  name: 'generate_music',
+  description: 'Create a 30-second music clip from a prompt. The clip is saved in your workspace.',
+  properties: { prompt: { type: 'string', description: 'Detailed description of style, instruments, and mood.' } },
+  required: ['prompt']
+});
+
+const TOOL_READ_MUSIC_STATS = makeTool({
+  name: 'read_music_stats',
+  description: 'Read music listening statistics.',
+  properties: {}
+});
+
+export {
+  TOOL_GENERATE_MUSIC,
+  TOOL_GENERATE_VIDEO,
+  TOOL_READ_MUSIC_STATS,
+  buildGenerateImageTool
+};

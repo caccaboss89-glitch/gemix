@@ -66,7 +66,9 @@ function _indentLines(text, depth) {
 }
 
 function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
-  const tools = getToolsForUser(isActiveMember, isAdmin, {
+  const tools = getToolsForUser({
+    isActiveMember,
+    isAdmin,
     platform: ctx.platform,
     isGroup: ctx.isGroup
   });

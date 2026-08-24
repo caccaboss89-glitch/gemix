@@ -295,7 +295,7 @@ const paramsOf = (tools, name) => {
 
 test('on xAI the model sees the provider-native tools and the ratio schema', () => {
   const tools = withDeployment({ provider: 'xai', cloudflare: true },
-    () => getToolsForUser(true, false, whatsappCtx));
+    () => getToolsForUser({ ...whatsappCtx, isActiveMember: true, isAdmin: false }));
 
   assert.ok(names(tools).includes('x_search'));
   assert.ok(names(tools).includes('generate_video'));
@@ -304,7 +304,7 @@ test('on xAI the model sees the provider-native tools and the ratio schema', () 
 
 test('on a profile without them, the native tools are absent rather than broken', () => {
   const tools = withDeployment({ provider: 'chatgpt', cloudflare: true },
-    () => getToolsForUser(true, false, whatsappCtx));
+    () => getToolsForUser({ ...whatsappCtx, isActiveMember: true, isAdmin: false }));
 
   assert.equal(names(tools).includes('x_search'), false, 'X search is xAI-specific');
   assert.equal(names(tools).includes('generate_video'), false, 'no video backend, no tool');
@@ -315,7 +315,7 @@ test('on a profile without them, the native tools are absent rather than broken'
 
 test('with no image backend at all the tool is withheld, not left to fail', () => {
   const tools = withDeployment({ provider: 'chatgpt', cloudflare: false },
-    () => getToolsForUser(true, false, whatsappCtx));
+    () => getToolsForUser({ ...whatsappCtx, isActiveMember: true, isAdmin: false }));
 
   assert.equal(paramsOf(tools, 'generate_image'), null);
   assert.ok(names(tools).includes('generate_music'), 'music has its own backend and stays');
@@ -324,7 +324,7 @@ test('with no image backend at all the tool is withheld, not left to fail', () =
 test('the GemiX-owned tools are on every profile', () => {
   for (const provider of ['xai', 'chatgpt']) {
     const tools = withDeployment({ provider, cloudflare: false },
-      () => getToolsForUser(true, false, whatsappCtx));
+      () => getToolsForUser({ ...whatsappCtx, isActiveMember: true, isAdmin: false }));
     for (const name of ['search_web', 'search_image', 'read_file', 'shell']) {
       assert.ok(names(tools).includes(name), `${name} missing on ${provider}`);
     }

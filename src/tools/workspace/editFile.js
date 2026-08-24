@@ -15,14 +15,13 @@
 // container, same as write_file, so both mutations follow one path.
 
 import fs from 'fs';
-import constants from '../../config/constants.js';
-import workspaceRuntime from '../../sandbox/workspaceRuntime.js';
-import { checkWorkspaceQuota } from '../../sandbox/workspaceFs.js';
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { isProbablyText } from './textFiles.js';
-import { withWorkspaceLock } from '../../utils/workspaceState.js';
-
-const WRITE_SCRIPT = 'cat > "$1"';
+import {
+  commitWorkspaceText,
+  quotaResultFields,
+  runWorkspaceMutation
+} from './mutation.js';
 
 function _countOccurrences(haystack, needle) {
   let count = 0;
@@ -64,7 +63,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     };
   }
 
-  return withWorkspaceLock(workspaceId, { ownerId: opts.lockOwnerId }, async () => {
+  return runWorkspaceMutation(workspaceId, opts, async () => {
     let buffer;
     try {
       const stat = fs.statSync(resolved.abs);
@@ -100,32 +99,20 @@ async function editFile(args = {}, workspaceId, opts = {}) {
       ? before.split(args.oldText).join(args.newText)
       : before.replace(args.oldText, args.newText);
 
-    const run = await workspaceRuntime.execInWorkspace(workspaceId, {
-      command: ['/bin/bash', '-c', WRITE_SCRIPT, 'edit_file', resolved.containerPath],
-      input: after
-    });
-    if (run.rc !== 0) {
-      return {
-        success: false,
-        error: `Could not write ${resolved.display}: ${(run.stderr || run.stdout || `exit ${run.rc}`).trim().slice(0, 400)}`
-      };
-    }
-
-    const quota = checkWorkspaceQuota(workspaceId);
+    const committed = await commitWorkspaceText(workspaceId, resolved, after);
+    if (!committed.success) return committed;
+    const { bytes, quota } = committed;
     const replaced = args.replaceAll ? occurrences : 1;
     return {
       success: true,
       path: resolved.display,
       replacements: replaced,
-      bytes: Buffer.byteLength(after, 'utf-8'),
+      bytes,
       message: quota.ok
         ? `Replaced ${replaced} occurrence(s) in ${resolved.display}.`
         : `Replaced ${replaced} occurrence(s) in ${resolved.display}. ${quota.message}`,
-      ...(quota.ok ? {} : { quota_exceeded: true, quota_mb: constants.WORKSPACE_QUOTA_MB })
+      ...quotaResultFields(quota)
     };
-  }).catch((err) => {
-    if (err.code === 'EWORKSPACEBUSY') return { success: false, error: err.message };
-    throw err;
   });
 }
 
