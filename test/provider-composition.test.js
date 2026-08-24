@@ -55,7 +55,7 @@ test('the minimum wire contract names every flag the spec requires', () => {
 });
 
 test('GemiX-owned features cannot be bound to a provider backend', () => {
-  for (const feature of [FEATURE.SEARCH_WEB, FEATURE.READ_PAGE, FEATURE.IMAGE_SEARCH,
+  for (const feature of [FEATURE.SEARCH_WEB, FEATURE.READ_PAGE, FEATURE.SEARCH_IMAGE,
     FEATURE.WORKSPACE, FEATURE.FILESYSTEM, FEATURE.SHELL, FEATURE.MUSIC_GENERATION]) {
     assert.throws(
       () => defineFeatureBindings({ [feature]: 'provider-hosted' }),
@@ -68,7 +68,7 @@ test('GemiX-owned features cannot be bound to a provider backend', () => {
 test('a profile with no overrides gets the GemiX baselines', () => {
   const profile = { features: defineFeatureBindings({}) };
   assert.equal(backendFor(profile, FEATURE.SEARCH_WEB), 'gemix-web');
-  assert.equal(backendFor(profile, FEATURE.IMAGE_SEARCH), 'gemix-image-search');
+  assert.equal(backendFor(profile, FEATURE.SEARCH_IMAGE), 'gemix-image-search');
   assert.equal(backendFor(profile, FEATURE.MUSIC_GENERATION), 'openrouter-lyria');
   assert.equal(backendFor(profile, FEATURE.GENERATE_IMAGE), 'cloudflare-flux');
   assert.equal(backendFor(profile, FEATURE.STT), 'cloudflare-whisper');

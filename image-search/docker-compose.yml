@@ -1,7 +1,7 @@
 # GemiX web stack — SearXNG plus the agent-search sidecar (free, self-hosted).
 #
 # One SearXNG instance serves both search tools:
-#   web_image_search -> SearXNG JSON directly, on 127.0.0.1:8888
+#   search_image -> SearXNG JSON directly, on 127.0.0.1:8888
 #   search_web / read_page -> the agent-search sidecar, on 127.0.0.1:3939
 # The sidecar adds cross-engine dedup and scoring to /search, and an escalating
 # extraction chain (direct fetch -> readability -> UA rotation -> browser render
@@ -27,7 +27,7 @@
 #   curl -sS 'http://127.0.0.1:3939/health'
 #
 # Optional in GemiX .env (commented by default; env.js defaults are the same URLs):
-#   # IMAGE_SEARCH_BASE_URL=http://127.0.0.1:8888
+#   # SEARCH_IMAGE_BASE_URL=http://127.0.0.1:8888
 #   # AGENT_SEARCH_BASE_URL=http://127.0.0.1:3939
 #   # AGENT_SEARCH_TOKEN=            (only if you set AGENT_SEARCH_TOKEN below too)
 

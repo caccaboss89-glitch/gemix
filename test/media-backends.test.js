@@ -87,7 +87,7 @@ test('the search and workspace features stay GemiX-owned on every profile', () =
   for (const id of ['xai', 'chatgpt']) {
     const profile = getProviderProfile(id);
     assert.equal(backendFor(profile, FEATURE.SEARCH_WEB), 'gemix-web');
-    assert.equal(backendFor(profile, FEATURE.IMAGE_SEARCH), 'gemix-image-search');
+    assert.equal(backendFor(profile, FEATURE.SEARCH_IMAGE), 'gemix-image-search');
     assert.equal(backendFor(profile, FEATURE.SHELL), 'gemix');
     assert.equal(backendFor(profile, FEATURE.MUSIC_GENERATION), 'openrouter-lyria');
   }
@@ -300,8 +300,10 @@ test('the GemiX-owned tools are on every profile', () => {
   for (const provider of ['xai', 'chatgpt']) {
     const tools = withDeployment({ provider, cloudflare: false },
       () => getToolsForUser(true, false, whatsappCtx));
-    for (const name of ['search_web', 'web_image_search', 'read_file', 'shell']) {
+    for (const name of ['search_web', 'search_image', 'read_file', 'shell']) {
       assert.ok(names(tools).includes(name), `${name} missing on ${provider}`);
     }
+    assert.equal(names(tools).includes('web_image_search'), false, 'legacy image tool name must stay gone');
+    assert.equal(names(tools).includes('search_images'), false, 'xAI hosted tool name must stay reserved');
   }
 });

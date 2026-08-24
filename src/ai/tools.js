@@ -237,10 +237,10 @@ const TOOL_READ_PAGE = makeTool({
   required: ['url']
 });
 
-// Named web_image_search (not search_images): xAI reserves search_images for its
+// Named search_image (not search_images): xAI reserves search_images for its
 // server-side image tool; reusing that name as a client function caused empty replies.
-const TOOL_WEB_IMAGE_SEARCH = makeTool({
-  name: 'web_image_search',
+const TOOL_SEARCH_IMAGE = makeTool({
+  name: 'search_image',
   description:
     'Search the web for existing images (provides direct image URLs). Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
     + 'put chosen `url` values in final `attachments` to send them. '
@@ -253,8 +253,8 @@ const TOOL_WEB_IMAGE_SEARCH = makeTool({
     count: {
       type: 'integer',
       description:
-        `How many image results to return (${constants.IMAGE_SEARCH_MIN_COUNT}–${constants.IMAGE_SEARCH_MAX_COUNT}, `
-        + `default ${constants.IMAGE_SEARCH_DEFAULT_COUNT}).`
+        `How many image results to return (${constants.SEARCH_IMAGE_MIN_COUNT}–${constants.SEARCH_IMAGE_MAX_COUNT}, `
+        + `default ${constants.SEARCH_IMAGE_DEFAULT_COUNT}).`
     }
   },
   required: ['query']
@@ -906,7 +906,7 @@ function getToolsForUser(isActiveMember, isAdmin, userCtx = {}) {
   // already in this chat are not here: they are paths under attachments/, and
   // read_file opens them.
   const profile = resolveProviderProfile();
-  tools.push(TOOL_SEARCH_WEB, TOOL_READ_PAGE, TOOL_WEB_IMAGE_SEARCH);
+  tools.push(TOOL_SEARCH_WEB, TOOL_READ_PAGE, TOOL_SEARCH_IMAGE);
   if (isFeatureAvailable(profile, FEATURE.X_SEARCH)) tools.push(XAI_X_SEARCH_TOOL);
 
   // 2) Media generation (WhatsApp). Weekly quota is the real cap

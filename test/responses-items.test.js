@@ -71,7 +71,7 @@ test('an object result is serialized rather than passed as an object', () => {
 test('a tool that attaches files splits envelope from labelled parts', () => {
   const items = toolResultItems('c1', [
     { type: 'input_text', text: '{"success":true,"count":1}' },
-    { type: 'input_text', text: '[web_image_search IMAGE_0]' },
+    { type: 'input_text', text: '[search_image IMAGE_0]' },
     IMG
   ]);
 
@@ -81,7 +81,7 @@ test('a tool that attaches files splits envelope from labelled parts', () => {
   // The label has to travel with the image: folded into the output string it
   // would name nothing.
   assert.deepEqual(items[1].content, [
-    { type: 'input_text', text: '[web_image_search IMAGE_0]' },
+    { type: 'input_text', text: '[search_image IMAGE_0]' },
     IMG
   ]);
   assert.equal(items[1].role, 'user');

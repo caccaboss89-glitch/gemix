@@ -32,7 +32,7 @@ import { editFile } from './workspace/editFile.js';
 import { shell } from './workspace/shell.js';
 import { stageToolOutput } from './workspace/toolOutput.js';
 import { musicCreator } from './musicCreator.js';
-import { searchImages } from './imageSearch.js';
+import { searchImage } from './searchImage.js';
 import { readPage, searchWeb } from './searchWeb.js';
 import { getGroupTaskFileId } from '../utils/userIdentifier.js';
 import { sanitizeFilename } from '../utils/text.js';
@@ -112,8 +112,8 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       break;
     }
 
-    case 'web_image_search': {
-      result = await searchImages(args);
+    case 'search_image': {
+      result = await searchImage(args);
       break;
     }
 

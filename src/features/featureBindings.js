@@ -18,7 +18,7 @@
 const FEATURE = Object.freeze({
   SEARCH_WEB: 'search_web',
   READ_PAGE: 'read_page',
-  IMAGE_SEARCH: 'image_search',
+  SEARCH_IMAGE: 'search_image',
   X_SEARCH: 'x_search',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
@@ -41,7 +41,7 @@ const UNAVAILABLE = 'unavailable';
 const GEMIX_OWNED = Object.freeze({
   [FEATURE.SEARCH_WEB]: 'gemix-web',
   [FEATURE.READ_PAGE]: 'gemix-web',
-  [FEATURE.IMAGE_SEARCH]: 'gemix-image-search',
+  [FEATURE.SEARCH_IMAGE]: 'gemix-image-search',
   [FEATURE.WORKSPACE]: 'gemix',
   [FEATURE.FILESYSTEM]: 'gemix',
   [FEATURE.SHELL]: 'gemix',

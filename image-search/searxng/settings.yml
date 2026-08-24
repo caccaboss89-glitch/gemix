@@ -1,4 +1,4 @@
-# SearXNG config for the GemiX web stack: images for web_image_search, and the
+# SearXNG config for the GemiX web stack: images for search_image, and the
 # general category that the agent-search sidecar queries for search_web.
 # use_default_settings keeps the full engine catalog; we only override what we
 # need. The general engines (DuckDuckGo, Brave, Bing, Wikipedia, ...) come from

@@ -613,7 +613,7 @@ async function handleMessage(ctx) {
           if (reply.items.length > 0) input.push(...reply.items);
           input.push(userItem(wrapSystemReminder(
             'Your previous output was empty: no tool call and no structured reply. '
-            + 'Immediately call any tools you need (e.g. web_image_search for web photos) '
+            + 'Immediately call any tools you need (e.g. search_image for web photos) '
             + 'or send a valid structured reply. Never leave the reply empty.'
           )));
           continue;

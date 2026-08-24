@@ -1,4 +1,4 @@
-// src/tools/imageSearch.js
+// src/tools/searchImage.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -8,7 +8,7 @@
 // Returns direct https image file URLs for delivery through final `attachments`,
 // and attaches each found image inline as vision content (input_image) so the
 // model can see them — same multimodal tool-result pattern as read_sent_messages.
-// Config: envConfig.IMAGE_SEARCH_BASE_URL (default http://127.0.0.1:8888).
+// Config: envConfig.SEARCH_IMAGE_BASE_URL (default http://127.0.0.1:8888).
 
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
@@ -16,9 +16,9 @@ import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
 import { inlineImagePartFromBuffer  } from './workspace/inlineImage.js';
 import { createLogger  } from '../utils/logger.js';
 
-const log = createLogger('ImageSearch');
+const log = createLogger('SearchImage');
 
-const { IMAGE_SEARCH_DEFAULT_COUNT, IMAGE_SEARCH_MIN_COUNT, IMAGE_SEARCH_MAX_COUNT } = constants;
+const { SEARCH_IMAGE_DEFAULT_COUNT, SEARCH_IMAGE_MIN_COUNT, SEARCH_IMAGE_MAX_COUNT } = constants;
 const SEARCH_TIMEOUT_MS = 25_000;
 const VISION_DOWNLOAD_TIMEOUT_MS = 20_000;
 const MAX_QUERY_LEN = 300;
@@ -45,8 +45,8 @@ function _cleanQuery(raw) {
  */
 function _clampCount(raw) {
   const n = Number(raw);
-  if (!Number.isFinite(n)) return IMAGE_SEARCH_DEFAULT_COUNT;
-  return Math.min(IMAGE_SEARCH_MAX_COUNT, Math.max(IMAGE_SEARCH_MIN_COUNT, Math.floor(n)));
+  if (!Number.isFinite(n)) return SEARCH_IMAGE_DEFAULT_COUNT;
+  return Math.min(SEARCH_IMAGE_MAX_COUNT, Math.max(SEARCH_IMAGE_MIN_COUNT, Math.floor(n)));
 }
 
 /**
@@ -148,18 +148,18 @@ async function _buildVisionPart(imgUrl, index) {
  * @param {number} [args.count]
  * @returns {Promise<object|Array>}
  */
-async function searchImages(args = {}) {
+async function searchImage(args = {}) {
   const query = _cleanQuery(args.query);
   if (!query) {
     return { success: false, error: 'Missing required argument "query".' };
   }
 
   const count = _clampCount(args.count);
-  const base = String(envConfig.IMAGE_SEARCH_BASE_URL || '').replace(/\/+$/, '');
+  const base = String(envConfig.SEARCH_IMAGE_BASE_URL || '').replace(/\/+$/, '');
   if (!base || !/^https?:\/\//i.test(base)) {
     return {
       success: false,
-      error: 'Image search is not configured (envConfig.IMAGE_SEARCH_BASE_URL is invalid).'
+      error: 'Image search is not configured (SEARCH_IMAGE_BASE_URL is invalid).'
     };
   }
 
@@ -245,7 +245,7 @@ async function searchImages(args = {}) {
     };
   }
 
-  // Build vision previews in parallel (download + re-host for xAI).
+  // Build provider-neutral inline vision previews in parallel.
   const visionSettled = await Promise.all(
     images.map((img, i) => _buildVisionPart(img.url, i))
   );
@@ -263,7 +263,7 @@ async function searchImages(args = {}) {
     if (img.engine) entry.engine = img.engine;
     if (v && v.part) {
       nativeParts.push(
-        { type: 'input_text', text: `[web_image_search IMAGE_${i}]` },
+        { type: 'input_text', text: `[search_image IMAGE_${i}]` },
         v.part
       );
     } else if (v && v.error) {
@@ -296,6 +296,6 @@ async function searchImages(args = {}) {
 }
 
 export {
-  searchImages
+  searchImage
 
 };

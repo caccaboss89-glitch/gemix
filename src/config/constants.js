@@ -131,7 +131,7 @@ export default {
   /** Images pulled out of a document and attached to the tool result. */
   PARSE_MAX_EMBEDDED_IMAGES: 4,
 
-  // Media. The reference-image caps and the image-search counts live here
+  // Media. The reference-image caps and the search_image result counts live here
   // rather than in the tool modules because the tool *schemas* quote them:
   // importing them from src/ai/tools.js the other way round closes a cycle
   // through the dispatcher, which then breaks depending on which module the
@@ -139,9 +139,9 @@ export default {
   MAX_IMAGE_BYTES: 8 * 1024 * 1024,
   MAX_REF_IMAGES_FOR_IMAGE: 3,
   MAX_REF_IMAGES_FOR_VIDEO: 7,
-  IMAGE_SEARCH_DEFAULT_COUNT: 2,
-  IMAGE_SEARCH_MIN_COUNT: 1,
-  IMAGE_SEARCH_MAX_COUNT: 10,
+  SEARCH_IMAGE_DEFAULT_COUNT: 2,
+  SEARCH_IMAGE_MIN_COUNT: 1,
+  SEARCH_IMAGE_MAX_COUNT: 10,
   SEARCH_WEB_DEFAULT_COUNT: 8,
   SEARCH_WEB_MIN_COUNT: 1,
   SEARCH_WEB_MAX_COUNT: 20,

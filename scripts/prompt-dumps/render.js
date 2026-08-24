@@ -244,9 +244,9 @@ const TOOL_RUNTIME_ERRORS = {
     'Invalid language: "<value>". Use one of: <list>.',
     'Memory exceeds the 1000 character limit (<n> chars).'
   ],
-  web_image_search: [
+  search_image: [
     'Missing required argument "query".',
-    'Image search is not configured (IMAGE_SEARCH_BASE_URL is invalid).',
+    'Image search is not configured (SEARCH_IMAGE_BASE_URL is invalid).',
     'Image search service rejected JSON format (enable "json" under search.formats in SearXNG settings.yml).',
     'Image search service returned HTTP <status>. Is SearXNG running at <base>?',
     'Image search service returned invalid JSON. Check SearXNG logs and that format=json is enabled.',
@@ -257,7 +257,7 @@ const TOOL_RUNTIME_ERRORS = {
 // All tool names that can surface a context/permission error from the system,
 // per profile. Used to dump the exact "unavailable" message GemiX gets back.
 const ALL_TOOL_NAMES = [
-  'search_web', 'x_search', 'web_image_search', 'generate_music', 'generate_image', 'generate_video',
+  'search_web', 'x_search', 'search_image', 'generate_music', 'generate_image', 'generate_video',
   'list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell', 'send_whatsapp_message',
   'send_email', 'schedule_tasks', 'read_my_tasks', 'remove_my_tasks',
   'manage_preferences', 'toggle_release_notify',

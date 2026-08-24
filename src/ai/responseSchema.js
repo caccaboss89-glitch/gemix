@@ -50,7 +50,7 @@ function _attachmentsFieldDesc() {
   return 'The ONLY way to send files in this chat. Use null when you are sending nothing. '
     + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
     + '(image/video/audio/PDF/etc. — never a page/article/post link; '
-    + `${xMedia}for web images use the \`url\` fields from web_image_search). `
+    + `${xMedia}for web images use the \`url\` fields from search_image). `
     + 'Never other file syntax (e.g. render_components).';
 }
 

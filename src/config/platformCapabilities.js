@@ -24,7 +24,7 @@ const TOOL = {
   SEARCH_WEB: 'search_web',
   READ_PAGE: 'read_page',
   X_SEARCH: 'x_search',
-  WEB_IMAGE_SEARCH: 'web_image_search',
+  SEARCH_IMAGE: 'search_image',
   GENERATE_MUSIC: 'generate_music',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
