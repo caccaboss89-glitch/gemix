@@ -1,4 +1,4 @@
-// src/tools/webSearch.js
+// src/tools/searchWeb.js
 //
 // Tool directives: all tool-facing text is in English, uses no emojis, no XML
 // wrappers, and results are returned as plain objects so the dispatcher
@@ -14,12 +14,12 @@
 // cost for that page alone.
 
 import constants from '../config/constants.js';
-import { WEB_ERROR, readWebPage, searchWeb } from '../web/agentSearch.js';
+import { WEB_ERROR, readWebPage, searchWeb as queryAgentSearch } from '../web/agentSearch.js';
 
 const {
-  WEB_SEARCH_DEFAULT_COUNT,
-  WEB_SEARCH_MIN_COUNT,
-  WEB_SEARCH_MAX_COUNT,
+  SEARCH_WEB_DEFAULT_COUNT,
+  SEARCH_WEB_MIN_COUNT,
+  SEARCH_WEB_MAX_COUNT,
   READ_PAGE_MAX_CHARS
 } = constants;
 
@@ -38,8 +38,8 @@ function _cleanQuery(raw) {
 
 function _clampCount(raw) {
   const n = Number(raw);
-  if (!Number.isFinite(n)) return WEB_SEARCH_DEFAULT_COUNT;
-  return Math.min(WEB_SEARCH_MAX_COUNT, Math.max(WEB_SEARCH_MIN_COUNT, Math.floor(n)));
+  if (!Number.isFinite(n)) return SEARCH_WEB_DEFAULT_COUNT;
+  return Math.min(SEARCH_WEB_MAX_COUNT, Math.max(SEARCH_WEB_MIN_COUNT, Math.floor(n)));
 }
 
 /**
@@ -69,11 +69,11 @@ function _failureMessage(code, error) {
  *   research badge is accumulated here, the same way native search stats were.
  * @returns {Promise<object>}
  */
-async function webSearch(args = {}, responseCtx = null) {
+async function searchWeb(args = {}, responseCtx = null) {
   const query = _cleanQuery(args.query);
   if (!query) return { success: false, error: 'Missing required argument "query".' };
 
-  const res = await searchWeb({ query, count: _clampCount(args.count) });
+  const res = await queryAgentSearch({ query, count: _clampCount(args.count) });
   if (!res.ok) return { success: false, error: _failureMessage(res.code, res.error) };
 
   if (res.results.length === 0) {
@@ -135,4 +135,4 @@ async function readPage(args = {}) {
   };
 }
 
-export { readPage, webSearch };
+export { readPage, searchWeb };

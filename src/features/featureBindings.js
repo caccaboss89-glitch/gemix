@@ -16,7 +16,7 @@
 
 /** Every feature a profile can bind. */
 const FEATURE = Object.freeze({
-  WEB_SEARCH: 'web_search',
+  SEARCH_WEB: 'search_web',
   READ_PAGE: 'read_page',
   IMAGE_SEARCH: 'image_search',
   X_SEARCH: 'x_search',
@@ -39,7 +39,7 @@ const UNAVAILABLE = 'unavailable';
  * provider never decides whether GemiX can search, read a file or run a shell.
  */
 const GEMIX_OWNED = Object.freeze({
-  [FEATURE.WEB_SEARCH]: 'gemix-web',
+  [FEATURE.SEARCH_WEB]: 'gemix-web',
   [FEATURE.READ_PAGE]: 'gemix-web',
   [FEATURE.IMAGE_SEARCH]: 'gemix-image-search',
   [FEATURE.WORKSPACE]: 'gemix',

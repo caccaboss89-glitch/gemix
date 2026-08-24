@@ -21,7 +21,7 @@ const PROFILE = {
 
 /** Tool names that may appear at runtime (before admin/active-member trimming). */
 const TOOL = {
-  WEB_SEARCH: 'search_web',
+  SEARCH_WEB: 'search_web',
   READ_PAGE: 'read_page',
   X_SEARCH: 'x_search',
   WEB_IMAGE_SEARCH: 'web_image_search',
@@ -278,7 +278,7 @@ function buildAnswerLines(profile, opts = {}) {
     + 'If something stays unconfirmed, say so plainly. Never guess, never rush.'
   );
 
-  if (has(TOOL.WEB_SEARCH) || has(TOOL.X_SEARCH)) {
+  if (has(TOOL.SEARCH_WEB) || has(TOOL.X_SEARCH)) {
     let search = 'Search before you answer anything factual that is not already in the history or the settings: news, people, '
       + 'products, events, social posts and screenshots, references you do not recognise. Search first, never guess.';
     if (has(TOOL.READ_PAGE)) {

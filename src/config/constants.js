@@ -142,9 +142,9 @@ export default {
   IMAGE_SEARCH_DEFAULT_COUNT: 2,
   IMAGE_SEARCH_MIN_COUNT: 1,
   IMAGE_SEARCH_MAX_COUNT: 10,
-  WEB_SEARCH_DEFAULT_COUNT: 8,
-  WEB_SEARCH_MIN_COUNT: 1,
-  WEB_SEARCH_MAX_COUNT: 20,
+  SEARCH_WEB_DEFAULT_COUNT: 8,
+  SEARCH_WEB_MIN_COUNT: 1,
+  SEARCH_WEB_MAX_COUNT: 20,
   /** Ceiling on one read_page result, so a long article cannot eat the round. */
   READ_PAGE_MAX_CHARS: 60_000,
   // Ceiling on a video GemiX downloads or generates, before it ever touches disk.

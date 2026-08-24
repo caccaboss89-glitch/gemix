@@ -33,7 +33,7 @@ import { shell } from './workspace/shell.js';
 import { stageToolOutput } from './workspace/toolOutput.js';
 import { musicCreator } from './musicCreator.js';
 import { searchImages } from './imageSearch.js';
-import { readPage, webSearch } from './webSearch.js';
+import { readPage, searchWeb } from './searchWeb.js';
 import { getGroupTaskFileId } from '../utils/userIdentifier.js';
 import { sanitizeFilename } from '../utils/text.js';
 import { resolveWorkspaceId } from '../utils/workspaceId.js';
@@ -103,7 +103,7 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     case 'search_web': {
       // responseCtx carries the source count for the research badge, the same
       // role the provider's own search statistics used to fill.
-      result = await webSearch(args, responseCtx);
+      result = await searchWeb(args, responseCtx);
       break;
     }
 

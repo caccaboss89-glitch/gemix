@@ -214,8 +214,8 @@ const TOOL_SEARCH_WEB = makeTool({
     count: {
       type: 'integer',
       description:
-        `How many results to return (${constants.WEB_SEARCH_MIN_COUNT}-${constants.WEB_SEARCH_MAX_COUNT}, `
-        + `default ${constants.WEB_SEARCH_DEFAULT_COUNT}).`
+        `How many results to return (${constants.SEARCH_WEB_MIN_COUNT}-${constants.SEARCH_WEB_MAX_COUNT}, `
+        + `default ${constants.SEARCH_WEB_DEFAULT_COUNT}).`
     }
   },
   required: ['query']

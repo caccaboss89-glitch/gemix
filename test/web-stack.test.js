@@ -1,11 +1,11 @@
-// test/web-stack.test.js
+﻿// test/web-stack.test.js
 //
-// The GemiX-owned web tools (spec §10, §18.9): search_web finds pages,
+// The GemiX-owned web tools (spec Â§10, Â§18.9): search_web finds pages,
 // read_page opens one, and both run on our own stack on every provider profile.
 //
 // The sidecar is stubbed at the fetch boundary, so what is under test is the
-// contract GemiX guarantees — the request it sends, what it does with a
-// degraded or hostile answer, and what the model ends up seeing — not the
+// contract GemiX guarantees â€” the request it sends, what it does with a
+// degraded or hostile answer, and what the model ends up seeing â€” not the
 // upstream project's behaviour.
 
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ import test, { afterEach, beforeEach } from 'node:test';
 import constants from '../src/config/constants.js';
 import envConfig from '../src/config/env.js';
 import { getToolsForUser } from '../src/ai/tools.js';
-import { readPage, webSearch } from '../src/tools/webSearch.js';
+import { readPage, searchWeb } from '../src/tools/searchWeb.js';
 import { _resetActiveProfileForTests } from '../src/ai/providers/providerProfile.js';
 
 const realFetch = globalThis.fetch;
@@ -53,7 +53,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 test('a search asks for snippets, not for ten page extractions', async () => {
   stubSidecar(200, { results: [HIT], meta: { engines_used: ['duckduckgo'] } });
-  await webSearch({ query: 'kreuzberg release notes' });
+  await searchWeb({ query: 'kreuzberg release notes' });
 
   const params = lastParams();
   assert.equal(params.get('q'), 'kreuzberg release notes');
@@ -63,7 +63,7 @@ test('a search asks for snippets, not for ten page extractions', async () => {
 
 test('results reach the model as title, url and snippet only', async () => {
   stubSidecar(200, { results: [HIT], meta: {} });
-  const res = await webSearch({ query: 'x' });
+  const res = await searchWeb({ query: 'x' });
 
   assert.equal(res.success, true);
   assert.deepEqual(Object.keys(res.results[0]), ['title', 'url', 'snippet']);
@@ -72,22 +72,22 @@ test('results reach the model as title, url and snippet only', async () => {
 
 test('the count is clamped instead of passed through', async () => {
   stubSidecar(200, { results: [], meta: {} });
-  await webSearch({ query: 'x', count: 500 });
-  assert.equal(Number(lastParams().get('count')), constants.WEB_SEARCH_MAX_COUNT);
+  await searchWeb({ query: 'x', count: 500 });
+  assert.equal(Number(lastParams().get('count')), constants.SEARCH_WEB_MAX_COUNT);
 
-  await webSearch({ query: 'x', count: 'many' });
-  assert.equal(Number(lastParams().get('count')), constants.WEB_SEARCH_DEFAULT_COUNT);
+  await searchWeb({ query: 'x', count: 'many' });
+  assert.equal(Number(lastParams().get('count')), constants.SEARCH_WEB_DEFAULT_COUNT);
 });
 
 test('a result with no usable URL is dropped rather than shown', async () => {
   stubSidecar(200, { results: [HIT, { title: 'ghost', snippet: 'no url' }], meta: {} });
-  const res = await webSearch({ query: 'x' });
+  const res = await searchWeb({ query: 'x' });
   assert.equal(res.results.length, 1);
 });
 
 test('an empty result set is a real answer, and says what to do next', async () => {
   stubSidecar(200, { results: [], meta: { upstream_status: 'ok' } });
-  const res = await webSearch({ query: 'nothing at all' });
+  const res = await searchWeb({ query: 'nothing at all' });
 
   assert.equal(res.success, true);
   assert.deepEqual(res.results, []);
@@ -99,7 +99,7 @@ test('a partly-dead upstream still answers, and says the engines fell short', as
     results: [],
     meta: { upstream_status: 'degraded', unresponsive_engines: ['google'] }
   });
-  const res = await webSearch({ query: 'x' });
+  const res = await searchWeb({ query: 'x' });
 
   assert.equal(res.success, true, 'degraded is not failed');
   assert.match(res.message, /did not answer/);
@@ -108,7 +108,7 @@ test('a partly-dead upstream still answers, and says the engines fell short', as
 test('the sources found feed the research badge', async () => {
   stubSidecar(200, { results: [HIT, { ...HIT, url: 'https://example.org/b' }], meta: {} });
   const responseCtx = { researchStats: null };
-  await webSearch({ query: 'x' }, responseCtx);
+  await searchWeb({ query: 'x' }, responseCtx);
 
   assert.equal(responseCtx.researchStats.webSources, 2);
   assert.equal(responseCtx.researchStats.xPosts, 0);
@@ -116,7 +116,7 @@ test('the sources found feed the research badge', async () => {
 
 test('a missing query never reaches the network', async () => {
   stubSidecar(200, { results: [], meta: {} });
-  const res = await webSearch({});
+  const res = await searchWeb({});
 
   assert.equal(res.success, false);
   assert.equal(calls.length, 0);
@@ -126,12 +126,12 @@ test('a missing query never reaches the network', async () => {
 
 test('a rate limit tells the model to wait, an auth failure tells it not to retry', async () => {
   stubSidecar(429, 'slow down');
-  const limited = await webSearch({ query: 'x' });
+  const limited = await searchWeb({ query: 'x' });
   assert.equal(limited.success, false);
   assert.match(limited.error, /Try again in a moment/);
 
   stubSidecar(403, 'nope');
-  const denied = await webSearch({ query: 'x' });
+  const denied = await searchWeb({ query: 'x' });
   assert.equal(denied.success, false);
   assert.match(denied.error, /operator, not a retry/);
 });
@@ -139,7 +139,7 @@ test('a rate limit tells the model to wait, an auth failure tells it not to retr
 test('an unreachable sidecar is reported as such, not as an empty web', async () => {
   calls = [];
   globalThis.fetch = async () => { throw new Error('ECONNREFUSED'); };
-  const res = await webSearch({ query: 'x' });
+  const res = await searchWeb({ query: 'x' });
 
   assert.equal(res.success, false);
   assert.match(res.error, /unreachable/i);
@@ -147,7 +147,7 @@ test('an unreachable sidecar is reported as such, not as an empty web', async ()
 
 test('a malformed body is a failure, not a silent empty result', async () => {
   stubSidecar(200, 'not json at all');
-  const res = await webSearch({ query: 'x' });
+  const res = await searchWeb({ query: 'x' });
   assert.equal(res.success, false);
   assert.match(res.error, /malformed/i);
 });
@@ -206,7 +206,7 @@ test('a non-URL is refused before the network', async () => {
   assert.equal(calls.length, 0);
 });
 
-// -- ownership (§2.4) ---------------------------------------------------------
+// -- ownership (Â§2.4) ---------------------------------------------------------
 
 test('both web tools are function tools on every profile, never provider-hosted', () => {
   const saved = envConfig.AI_PROVIDER;
@@ -235,12 +235,12 @@ test('a token is sent only when one is configured', async () => {
   try {
     envConfig.AGENT_SEARCH_TOKEN = '';
     stubSidecar(200, { results: [], meta: {} });
-    await webSearch({ query: 'x' });
+    await searchWeb({ query: 'x' });
     assert.equal(calls[0].headers.Authorization, undefined);
 
     envConfig.AGENT_SEARCH_TOKEN = 'secret-value';
     stubSidecar(200, { results: [], meta: {} });
-    await webSearch({ query: 'x' });
+    await searchWeb({ query: 'x' });
     assert.equal(calls[0].headers.Authorization, 'Bearer secret-value');
     // A credential belongs in the header, never in a URL that gets logged.
     assert.equal(calls[0].url.includes('secret-value'), false);

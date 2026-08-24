@@ -86,7 +86,7 @@ test('a subscription backend is not treated as the whole product line', () => {
 test('the search and workspace features stay GemiX-owned on every profile', () => {
   for (const id of ['xai', 'chatgpt']) {
     const profile = getProviderProfile(id);
-    assert.equal(backendFor(profile, FEATURE.WEB_SEARCH), 'gemix-web');
+    assert.equal(backendFor(profile, FEATURE.SEARCH_WEB), 'gemix-web');
     assert.equal(backendFor(profile, FEATURE.IMAGE_SEARCH), 'gemix-image-search');
     assert.equal(backendFor(profile, FEATURE.SHELL), 'gemix');
     assert.equal(backendFor(profile, FEATURE.MUSIC_GENERATION), 'openrouter-lyria');
