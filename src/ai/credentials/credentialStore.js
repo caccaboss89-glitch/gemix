@@ -323,7 +323,6 @@ function listProviders() {
 }
 
 export {
-  STORE_DIR,
   readPool,
   updatePool,
   updateAccountExclusive,

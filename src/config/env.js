@@ -7,6 +7,10 @@
 import 'dotenv/config';
 
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
+const toIntInRange = (val, min, max, defaultVal) => {
+  const n = parseInt(val, 10);
+  return Number.isInteger(n) && n >= min && n <= max ? n : defaultVal;
+};
 
 const XAI_USE_API_KEY = toBool(process.env.XAI_USE_API_KEY, false);
 
@@ -147,18 +151,9 @@ export default {
 
   // Weekly media quota reset (Europe/Rome). Used for period keys + prompt/tool wording.
   // Weekday: 0=Sunday … 6=Saturday (default Monday=1). Hour 0–23, minute 0–59 (default 00:00).
-  MEDIA_WEEKLY_RESET_WEEKDAY: (() => {
-    const n = parseInt(process.env.MEDIA_WEEKLY_RESET_WEEKDAY, 10);
-    return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 1;
-  })(),
-  MEDIA_WEEKLY_RESET_HOUR: (() => {
-    const n = parseInt(process.env.MEDIA_WEEKLY_RESET_HOUR, 10);
-    return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 0;
-  })(),
-  MEDIA_WEEKLY_RESET_MINUTE: (() => {
-    const n = parseInt(process.env.MEDIA_WEEKLY_RESET_MINUTE, 10);
-    return Number.isInteger(n) && n >= 0 && n <= 59 ? n : 0;
-  })(),
+  MEDIA_WEEKLY_RESET_WEEKDAY: toIntInRange(process.env.MEDIA_WEEKLY_RESET_WEEKDAY, 0, 6, 1),
+  MEDIA_WEEKLY_RESET_HOUR: toIntInRange(process.env.MEDIA_WEEKLY_RESET_HOUR, 0, 23, 0),
+  MEDIA_WEEKLY_RESET_MINUTE: toIntInRange(process.env.MEDIA_WEEKLY_RESET_MINUTE, 0, 59, 0),
 
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   FFPROBE_PATH: process.env.FFPROBE_PATH || 'ffprobe',

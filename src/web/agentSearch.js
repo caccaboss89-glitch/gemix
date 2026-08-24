@@ -188,7 +188,6 @@ async function readWebPage({ url, maxChars, signal }) {
 
 export {
   WEB_ERROR,
-  isAgentSearchConfigured,
   readWebPage,
   searchWeb
 };

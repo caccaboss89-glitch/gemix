@@ -153,7 +153,5 @@ const xaiResponsesExtensions = Object.freeze({
 
 export {
   xaiResponsesExtensions,
-  XAI_X_SEARCH_TOOL,
-  XAI_REPLAYABLE_ITEM_TYPES,
-  XAI_SERVER_SIDE_ITEM_TYPES
+  XAI_X_SEARCH_TOOL
 };

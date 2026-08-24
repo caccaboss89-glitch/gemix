@@ -306,7 +306,6 @@ async function parseVideo(absPath, opts = {}) {
 
 export {
   AUDIO_EXTS,
-  IMAGE_EXTS,
   VIDEO_EXTS,
   familyOf,
   parseAudio,

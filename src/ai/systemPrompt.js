@@ -65,23 +65,26 @@ function _indentLines(text, depth) {
   return text.split('\n').map(l => (l.length ? pad + l : l)).join('\n');
 }
 
-function _resolvePromptTools(ctx, isActiveMember, isAdmin) {
-  const tools = getToolsForUser({
-    isActiveMember,
-    isAdmin,
+/**
+ * The tool set this conversation is offered. The one way to derive it from a
+ * context, so the prompt and the fingerprint can never describe different sets.
+ */
+function resolvePromptTools(ctx) {
+  return getToolsForUser({
+    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
+    isAdmin: Boolean(ctx.userIdentity?.isAdmin),
     platform: ctx.platform,
     isGroup: ctx.isGroup
   });
-  return { toolNames: toolNamesToSet(tools) };
 }
 
-/** Stable fingerprint of live tool names for mid-turn static rebuild detection. */
-function promptToolsFingerprint(ctx) {
-  const isActiveMember = Boolean(ctx.userIdentity?.isActiveMember);
-  const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
-  const { toolNames } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
-  const names = [...toolNames].sort();
-  return names.join(',');
+/**
+ * Stable fingerprint of a tool set, for mid-turn static rebuild detection.
+ * Pure: the caller passes the tools it is actually offering this round, so
+ * nothing is resolved a second time and the two cannot drift apart.
+ */
+function toolsFingerprint(tools) {
+  return [...toolNamesToSet(tools)].sort().join(',');
 }
 
 function _callerLineInner(ctx, promptOpts) {
@@ -94,20 +97,24 @@ function _callerLineInner(ctx, promptOpts) {
  * Profile / membership / tools for this conversation — no turn-varying fields.
  * Sections run identity → this chat → audience → how the input is shaped →
  * what is visible → how to behave, so the operating rules land last.
+ *
+ * @param {object} ctx
+ * @param {Array} [tools] - the set offered this round; resolved from ctx when
+ *   absent, so a rebuild always describes the same tools it was fingerprinted on.
  */
-function buildStaticInstructions(ctx) {
+function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx)) {
   const isActiveMember = Boolean(ctx.userIdentity?.isActiveMember);
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
-  const { toolNames } = _resolvePromptTools(ctx, isActiveMember, isAdmin);
+  const toolNames = toolNamesToSet(tools);
   // Discord Thread title / conversation_title guidance live only in Runtime.
   const promptOpts = { isActiveMember, toolNames };
 
   const sections = [_buildOpening(cap)];
 
   sections.push(_section('This chat', _buildChatLines(ctx, cap, profile)));
-  sections.push(_section('Who you are talking to', _buildAudienceLines(ctx, cap, profile, promptOpts, isAdmin)));
+  sections.push(_section('Who you are talking to', _buildAudienceLines(cap, profile, promptOpts, isAdmin)));
   sections.push(_section('Program-owned turns', [PROGRAM_ITEMS_RULE]));
   sections.push(_section('What you can and cannot see', buildVisibilityLines(profile)));
   sections.push(_section('How you answer', buildAnswerLines(profile, promptOpts)));
@@ -217,7 +224,7 @@ function _buildChatLines(ctx, cap, profile) {
  * one, so it is stated outright. The roster stays an XML data block; how to
  * address people around it is prose.
  */
-function _buildAudienceLines(ctx, cap, profile, promptOpts, isAdmin) {
+function _buildAudienceLines(cap, profile, promptOpts, isAdmin) {
   const lines = buildAudienceLines(profile, promptOpts);
   if (!promptOpts.isActiveMember) return lines;
 
@@ -335,8 +342,7 @@ function _renderCurrentSettings(ctx) {
     `Memory: ${escapeXml(settings.memory)} (${mark('memory')})`,
     `Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`
   ];
-  const body = _indentLines(lines.join('\n'), 1);
-  return `<CurrentSettings scope="${scope}">\n${body}\n</CurrentSettings>`;
+  return _block(`CurrentSettings scope="${scope}"`, lines, 'CurrentSettings');
 }
 
 /**
@@ -349,18 +355,17 @@ function _renderCurrentSettings(ctx) {
 function _renderWorkspace(ws) {
   const total = ws?.total ?? 0;
   if (total === 0) {
-    return (
-      '<Workspace files="0">\n'
-      + '    (empty — authoritative; nothing to look for)\n'
-      + `    If the user asks for a file you made earlier, explain it expired (${constants.WORKSPACE_TTL_LABEL} without activity).\n`
-      + '</Workspace>'
-    );
+    return _block('Workspace files="0"', [
+      '(empty — authoritative; nothing to look for)',
+      `If the user asks for a file you made earlier, explain it expired (${constants.WORKSPACE_TTL_LABEL} without activity).`
+    ], 'Workspace');
   }
-  const items = (ws.files || []).map(f => `    - workspace/${f.relPath}`).join('\n');
-  const dirs = (ws.dirs || []).map(d => `    - workspace/${d}/`).join('\n');
-  const body = [items, dirs].filter(Boolean).join('\n');
-  const more = ws.more ? '\n    ... and more' : '';
-  return `<Workspace files="${total}">\n${body}${more}\n</Workspace>`;
+  const lines = [
+    ...(ws.files || []).map(f => `- workspace/${f.relPath}`),
+    ...(ws.dirs || []).map(d => `- workspace/${d}/`)
+  ];
+  if (ws.more) lines.push('... and more');
+  return _block(`Workspace files="${total}"`, lines, 'Workspace');
 }
 
 /**
@@ -395,9 +400,15 @@ function _section(heading, lines) {
   return `## ${heading}\n${lines.join('\n')}`;
 }
 
-function _block(tag, lines) {
+/**
+ * One XML data block, body indented a level in.
+ * @param {string} open - opening tag, attributes included
+ * @param {string[]} lines
+ * @param {string} [close] - closing tag name, when `open` carries attributes
+ */
+function _block(open, lines, close = open) {
   const body = _indentLines(lines.join('\n'), 1);
-  return `<${tag}>\n${body}\n</${tag}>`;
+  return `<${open}>\n${body}\n</${close}>`;
 }
 
 /** Wrap already-rendered blocks under a macro tag, indenting each one level. */
@@ -409,6 +420,6 @@ function _macro(tag, blocks) {
 export {
   buildStaticInstructions,
   buildDynamicRuntimeContext,
-  promptToolsFingerprint
-
+  resolvePromptTools,
+  toolsFingerprint
 };

@@ -8,7 +8,12 @@ import { getCapabilities } from '../config/platformCapabilities.js';
 import { projectUserVoiceMessages } from '../attachments/voiceProjection.js';
 import { collectVisibleAttachmentNames, reconcileProjection } from '../attachments/projection.js';
 import { systemItem, userItem } from './responsesItems.js';
-import { buildDynamicRuntimeContext, buildStaticInstructions, promptToolsFingerprint } from './systemPrompt.js';
+import {
+  buildDynamicRuntimeContext,
+  buildStaticInstructions,
+  resolvePromptTools,
+  toolsFingerprint
+} from './systemPrompt.js';
 import { applyPastVoiceRepliesToHistory } from '../utils/voiceTranscripts.js';
 import { createLogger } from '../utils/logger.js';
 import { resolveWorkspaceId } from '../utils/workspaceId.js';
@@ -135,8 +140,11 @@ async function prepareTurn(ctx, ui) {
 
   const workspaceId = await _prepareWorkspace(ctx);
   const normalized = await _normalizeConversation(ctx, workspaceId, allowVoice);
-  const staticInstructions = buildStaticInstructions(ctx);
-  const toolsFp = promptToolsFingerprint(ctx);
+  // One resolution feeds both the prefix and its fingerprint, so the handler's
+  // mid-turn check compares like with like.
+  const promptTools = resolvePromptTools(ctx);
+  const staticInstructions = buildStaticInstructions(ctx, promptTools);
+  const toolsFp = toolsFingerprint(promptTools);
   const input = [systemItem(staticInstructions)];
   input[0]._staticPrefix = true;
   if (normalized.history.length > 0) input.push(...normalized.history);

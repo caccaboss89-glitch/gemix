@@ -42,7 +42,5 @@ async function fetchHistoryWithTimeout(buildFn, log, label) {
 }
 
 export {
-  fetchHistoryWithTimeout,
-  normalizeHistoryLoad
-
+  fetchHistoryWithTimeout
 };

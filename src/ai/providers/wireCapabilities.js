@@ -78,7 +78,6 @@ function validateWireCapabilities(capabilities) {
 }
 
 export {
-  WIRE_CAPABILITY,
   REQUIRED_WIRE_CAPABILITIES,
   defineWireCapabilities,
   validateWireCapabilities

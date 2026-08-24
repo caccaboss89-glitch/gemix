@@ -49,7 +49,6 @@ test('an image of the current message travels inline as base64, never as a URL',
   assert.equal(r.contentParts.length, 1);
   assert.equal(r.contentParts[0].type, 'input_image');
   assert.match(r.contentParts[0].image_url, /^data:image\/png;base64,/);
-  assert.equal(r.bumpImageCount, true);
 });
 
 test('the same image in history is a tag only', async () => {

@@ -10,23 +10,21 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 import constants from '../config/constants.js';
 import { getXaiServiceAuth, markXaiServiceStatus  } from './credentials/xaiServiceCredentials.js';
 import { createLogger  } from '../utils/logger.js';
 import { signalWithTimeout, sleepWithin } from '../utils/turnBudget.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
 const LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days (monthly retention)
 const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour (scan interval; age gate is monthly)
 const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
-
-import crypto from 'crypto';
 
 // Throttle window for _enforceLogDirQuota: the scan itself is O(n) (readdir +
 // one statSync per file), so running it on every single log write — up to
@@ -116,7 +114,12 @@ function _getLogFilePath(prefix, timestamp) {
   return path.join(apiLogDir, `${prefix}-${sanitized}-${rand}.json`);
 }
 
-function logApiRequest(modelName, apiUrl, body, extra = {}) {
+/**
+ * Write a request/response log entry under `${prefix}-<timestamp>-<rand>.json`.
+ * Shared by logApiRequest and logApiResponse, which differ only in the log
+ * kind/prefix and the field name the body is stored under.
+ */
+function _writeApiLog(kind, bodyField, modelName, apiUrl, body, extra = {}) {
   try {
     ensureLogDir();
     _enforceLogDirQuota();
@@ -125,40 +128,22 @@ function logApiRequest(modelName, apiUrl, body, extra = {}) {
       timestamp: now,
       model: modelName,
       apiUrl,
-      requestBody: body,
+      [bodyField]: body,
       ...extra
     };
-    const serialized = JSON.stringify(entry, null, 2);
-    const filePath = _getLogFilePath('api-request', now);
-    fs.writeFileSync(filePath, serialized);
+    const filePath = _getLogFilePath(`api-${kind}`, now);
+    fs.writeFileSync(filePath, JSON.stringify(entry, null, 2));
     return filePath;
   } catch (err) {
-    log.warn(`Failed to write API request log: ${err.message}`);
+    log.warn(`Failed to write API ${kind} log: ${err.message}`);
     return null;
   }
 }
 
-function logApiResponse(modelName, apiUrl, responseBody, extra = {}) {
-  try {
-    ensureLogDir();
-    _enforceLogDirQuota();
-    const now = new Date().toISOString();
-    const responseLogFile = _getLogFilePath('api-response', now);
-    const entry = {
-      timestamp: now,
-      model: modelName,
-      apiUrl,
-      responseBody,
-      ...extra
-    };
-    const serialized = JSON.stringify(entry, null, 2);
-    fs.writeFileSync(responseLogFile, serialized);
-    return responseLogFile;
-  } catch (err) {
-    log.warn(`Failed to write API response log: ${err.message}`);
-    return null;
-  }
-}
+const logApiRequest = (modelName, apiUrl, body, extra = {}) =>
+  _writeApiLog('request', 'requestBody', modelName, apiUrl, body, extra);
+const logApiResponse = (modelName, apiUrl, responseBody, extra = {}) =>
+  _writeApiLog('response', 'responseBody', modelName, apiUrl, responseBody, extra);
 
 function _formatRateLimitLog(status, errBody, headers) {
   const parts = [`HTTP ${status} (rate limit / quota)`];
@@ -195,62 +180,28 @@ function _isOAuthCredentialError(errMsg) {
 }
 
 /**
- * True when errMsg is an xAI HTTP 403 spending-limit body
- * (`personal-team-blocked:spending-limit`), either as a bare
- * `HTTP 403: {...}` line or nested inside a longer error string.
+ * The `code` field of a `HTTP 403: {...}` JSON body, tolerant of trailing
+ * junk after the JSON (e.g. wrapped rethrow suffixes). Returns null when the
+ * message carries no such marker or the body doesn't parse.
  * @param {string} errMsg
- * @returns {boolean}
+ * @returns {string|null}
  */
-function _isGrokCreditExhaustedHttpBody(errMsg) {
-  if (!errMsg || typeof errMsg !== 'string') return false;
+function _http403Code(errMsg) {
+  if (!errMsg || typeof errMsg !== 'string') return null;
   const marker = 'HTTP 403:';
   const idx = errMsg.indexOf(marker);
-  const candidate = (idx === -1 ? errMsg : errMsg.slice(idx + marker.length)).trim();
-  if (!candidate.startsWith('{')) return false;
-  const tryParse = (raw) => {
-    try {
-      return JSON.parse(raw)?.code === 'personal-team-blocked:spending-limit';
-    } catch {
-      return false;
-    }
-  };
-  if (tryParse(candidate)) return true;
-  // Trailing junk after JSON (e.g. wrapped rethrow suffixes)
-  const end = candidate.lastIndexOf('}');
-  return end > 0 && tryParse(candidate.slice(0, end + 1));
-}
-
-/**
- * True when errMsg is the xAI HTTP 403 OAuth "bad-credentials" body
- * (`unauthenticated:bad-credentials` / "OAuth2 access token could not be
- * validated"). Once the SuperGrok team credits run out, xAI's spending-limit
- * body morphs into this after a while, so in this deployment it means the same
- * thing: credits exhausted, not a transient auth failure worth alerting the
- * admin. Accepts a bare `HTTP 403: {...}` line or one nested in a longer string.
- * @param {string} errMsg
- * @returns {boolean}
- */
-function _isOAuthUnauthenticatedHttp403Body(errMsg) {
-  if (!errMsg || typeof errMsg !== 'string') return false;
-  const marker = 'HTTP 403:';
-  const idx = errMsg.indexOf(marker);
-  if (idx === -1) return false;
+  if (idx === -1) return null;
   const candidate = errMsg.slice(idx + marker.length).trim();
-  const codeIsUnauthenticated = (raw) => {
+  if (!candidate.startsWith('{')) return null;
+  const end = candidate.lastIndexOf('}');
+  for (const raw of [candidate, end > 0 ? candidate.slice(0, end + 1) : null]) {
+    if (!raw) continue;
     try {
       const code = JSON.parse(raw)?.code;
-      return typeof code === 'string' && code.startsWith('unauthenticated');
-    } catch {
-      return false;
-    }
-  };
-  if (candidate.startsWith('{')) {
-    if (codeIsUnauthenticated(candidate)) return true;
-    const end = candidate.lastIndexOf('}');
-    if (end > 0 && codeIsUnauthenticated(candidate.slice(0, end + 1))) return true;
+      if (typeof code === 'string') return code;
+    } catch { /* try the trimmed variant */ }
   }
-  // Fallback on the human-readable OAuth validation message.
-  return /could not be validated/i.test(candidate);
+  return null;
 }
 
 /** Stable error.code set by callApiWithRetry (English message kept for logs). */
@@ -261,12 +212,21 @@ const GROK_CREDIT_EXHAUSTED_CODE = 'GROK_CREDIT_EXHAUSTED';
  * instead of notifying the admin is the whole point: a spent weekly allowance is
  * an expected state, and the tool result already tells the model what happened.
  * The main brain has its own typed equivalent (transport QUOTA + errorPolicy).
+ *
+ * Covers the bare spending-limit body (`personal-team-blocked:spending-limit`)
+ * and its later form: once the SuperGrok team credits run out, xAI's
+ * spending-limit body morphs into an OAuth "bad-credentials" body
+ * (`unauthenticated:bad-credentials` / "OAuth2 access token could not be
+ * validated"), which in this deployment means the same thing.
  * @param {string|null|undefined} errMsg
  * @returns {boolean}
  */
 function _isGrokCreditExhaustedError(errMsg) {
   if (typeof errMsg !== 'string' || !errMsg) return false;
-  return _isGrokCreditExhaustedHttpBody(errMsg) || _isOAuthUnauthenticatedHttp403Body(errMsg);
+  const code = _http403Code(errMsg);
+  if (code === 'personal-team-blocked:spending-limit') return true;
+  if (code && code.startsWith('unauthenticated')) return true;
+  return errMsg.includes('HTTP 403:') && /could not be validated/i.test(errMsg);
 }
 
 /**
@@ -403,6 +363,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   let forceCredentialRefresh = false;
   let rejectedAccountId = null;
   let credentialRefreshAttempted = false;
+  let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let requestAccountId = null;
@@ -437,6 +398,10 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
           await markXaiServiceStatus('auth_failed', requestAccountId);
           forceCredentialRefresh = true;
           rejectedAccountId = requestAccountId;
+          lastError = new Error(errMsg);
+          // A refresh is not a failed attempt: give back the budget so the
+          // retry still happens when the rejection landed on the last one.
+          attempt--;
           continue;
         }
 
@@ -447,6 +412,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
       return res;
     } catch (err) {
       if (callerSignal?.aborted) throw callerSignal.reason || err;
+      lastError = err;
       const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError';
       const isRetryable = isTimeout
         || (err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message))
@@ -459,7 +425,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
       throw err;
     }
   }
-  throw new Error('xAI authenticated fetch failed');
+  throw lastError || new Error('xAI authenticated fetch failed: retry budget exhausted');
 }
 
 export {

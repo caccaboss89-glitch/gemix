@@ -78,8 +78,6 @@ const ALLOWED_VIDEO_ASPECT_RATIOS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4'
 // They live in constants.js because the tool schemas quote them too.
 const { MAX_REF_IMAGES_FOR_IMAGE, MAX_REF_IMAGES_FOR_VIDEO } = constants;
 
-// Fixed video parameters (resolution/duration live in config/constants.js).
-
 // Generated image/video download cap (same as the ingress video limit).
 const GENERATED_MEDIA_MAX_BYTES = constants.MAX_VIDEO_BYTES;
 
@@ -104,60 +102,78 @@ function _cleanPrompt(prompt) {
 }
 
 /**
- * Resolve reference-image entries into values the Imagine endpoints accept.
+ * Read one local reference image off disk, with the type and size checks that
+ * make a bad reference cost no round trip.
  *
- * A public URL is passed through untouched; a namespace path becomes an inline
- * base64 data URL, which is what keeps a user file off any third-party host on
- * the way to the provider. Count, type and size are validated here so a bad
- * reference costs no round trip.
- *
- * Returns { ok:true, urls:[] } or { ok:false, reason }.
+ * @returns {{ ok: true, buffer: Buffer, name: string, mime: string }|{ ok: false, reason: string }}
  */
-function _resolveReferenceImageUrls(refList, max, workspaceId) {
+function _openReferenceImage(entry, workspaceId) {
+  const found = resolveLocalFileEntry(entry, workspaceId);
+  if (!found) {
+    return { ok: false, reason: `Reference image "${entry}" does not exist. Pass the path exactly as you saw it.` };
+  }
+  const ext = path.extname(found.name).toLowerCase();
+  if (!INLINE_IMAGE_EXTS.has(ext)) {
+    return {
+      ok: false,
+      reason: `Reference "${entry}" is not a supported image type (allowed: ${[...INLINE_IMAGE_EXTS].join(', ')}).`
+    };
+  }
+  let opened;
+  try {
+    opened = readAgentFileBuffer(workspaceId, found.display, constants.MAX_IMAGE_BYTES);
+  } catch (err) {
+    if (err?.code === 'EFILETOOLARGE') {
+      return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
+    }
+    return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
+  }
+  if (!opened) return { ok: false, reason: `Cannot safely read reference "${entry}".` };
+  if (opened.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
+  return { ok: true, buffer: opened.buffer, name: found.name, mime: mimeForExtension(ext, 'image/png') };
+}
+
+/**
+ * Resolve reference-image entries into the shape one backend accepts.
+ *
+ * The count cap is enforced here for every backend, since it is the tool schema
+ * that advertises it. A local file is read off disk either way: as an inline
+ * base64 data URL, which keeps a user file off any third-party host on the way
+ * to the provider, or as raw bytes for a backend that uploads them itself.
+ *
+ * A public URL only travels where the backend takes one. Fetching it here to
+ * re-upload it would be a different decision from the one the model made.
+ *
+ * @param {string[]} refList
+ * @param {{ max: number, shape: 'data-url'|'bytes', allowUrls: boolean }} opts
+ * @param {string} workspaceId
+ * @returns {{ ok: true, items: Array }|{ ok: false, reason: string }}
+ */
+function _resolveReferenceImages(refList, { max, shape, allowUrls }, workspaceId) {
   if (refList.length > max) {
     return { ok: false, reason: `Too many reference images (${refList.length}). Max allowed: ${max}.` };
   }
-  const urls = [];
+  const items = [];
   for (const raw of refList) {
-    if (typeof raw !== 'string' || !raw.trim()) {
+    const entry = typeof raw === 'string' ? raw.trim() : '';
+    if (!entry) {
       return { ok: false, reason: 'Each reference image must be a workspace/attachments path or a public https URL.' };
     }
-    const entry = raw.trim();
-
-    // Public URLs (e.g. images found via web/X search) pass straight through.
     if (/^https?:\/\//i.test(entry)) {
-      urls.push(entry);
+      if (!allowUrls) {
+        return { ok: false, reason: 'This backend takes reference images from this chat, not from a URL. '
+          + 'Download it into the workspace with shell first, then pass that path.' };
+      }
+      items.push(entry);
       continue;
     }
-
-    const found = resolveLocalFileEntry(entry, workspaceId);
-    if (!found) {
-      return { ok: false, reason: `Reference image "${entry}" does not exist. Pass the path exactly as you saw it.` };
-    }
-
-    const ext = path.extname(found.name).toLowerCase();
-    if (!INLINE_IMAGE_EXTS.has(ext)) {
-      return {
-        ok: false,
-        reason: `Reference "${entry}" is not a supported image type (allowed: ${[...INLINE_IMAGE_EXTS].join(', ')}).`
-      };
-    }
-
-    let opened;
-    try {
-      opened = readAgentFileBuffer(workspaceId, found.display, constants.MAX_IMAGE_BYTES);
-    } catch (err) {
-      if (err?.code === 'EFILETOOLARGE') {
-        return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
-      }
-      return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
-    }
-    if (!opened) return { ok: false, reason: `Cannot safely read reference "${entry}".` };
-    if (opened.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-
-    urls.push(`data:${mimeForExtension(ext, 'image/png')};base64,${opened.buffer.toString('base64')}`);
+    const opened = _openReferenceImage(entry, workspaceId);
+    if (!opened.ok) return opened;
+    items.push(shape === 'data-url'
+      ? `data:${opened.mime};base64,${opened.buffer.toString('base64')}`
+      : { buffer: opened.buffer, name: opened.name, mime: opened.mime });
   }
-  return { ok: true, urls };
+  return { ok: true, items };
 }
 
 /**
@@ -196,12 +212,16 @@ async function _xaiImagineSubmit({
   buildRequest,
   signal
 }) {
-  const refs = _resolveReferenceImageUrls(refList, maxRefs, workspaceId);
+  const refs = _resolveReferenceImages(
+    refList,
+    { max: maxRefs, shape: 'data-url', allowUrls: true },
+    workspaceId
+  );
   if (!refs.ok) return { ok: false, reason: refs.reason };
   try {
-    const { endpointPath, body } = buildRequest(refs.urls);
+    const { endpointPath, body } = buildRequest(refs.items);
     const data = await _xaiJsonRequest(label, endpointPath, body, timeoutMs, signal);
-    return { ok: true, data, refs };
+    return { ok: true, data, refCount: refs.items.length };
   } catch (err) {
     return { ok: false, reason: err.message };
   }
@@ -214,48 +234,6 @@ function _extFromGeneratedMedia(url, mimeType, fallbackExt) {
   }
   const m = String(url || '').match(/\.(png|jpe?g|webp|mp4|webm|mov)(?:\?|$)/i);
   return (m && m[1]) ? m[1].toLowerCase() : fallbackExt;
-}
-
-/**
- * Reference images as raw bytes, for a backend that uploads them rather than
- * being handed a URL. A public URL is not fetched here: FLUX takes a binary
- * field, and downloading someone else's URL to re-upload it is a different
- * decision from the one the model made.
- *
- * @returns {{ ok: true, images: Array }|{ ok: false, reason: string }}
- */
-function _readReferenceBuffers(refList, workspaceId) {
-  const images = [];
-  for (const raw of refList) {
-    const entry = typeof raw === 'string' ? raw.trim() : '';
-    if (!entry) continue;
-    if (/^https?:\/\//i.test(entry)) {
-      return { ok: false, reason: 'This backend takes reference images from this chat, not from a URL. '
-        + 'Download it into the workspace with shell first, then pass that path.' };
-    }
-    const found = resolveLocalFileEntry(entry, workspaceId);
-    if (!found) return { ok: false, reason: `Reference image "${entry}" does not exist.` };
-    const ext = path.extname(found.name).toLowerCase();
-    if (!INLINE_IMAGE_EXTS.has(ext)) {
-      return { ok: false, reason: `Reference "${entry}" is not a supported image type.` };
-    }
-    try {
-      const opened = readAgentFileBuffer(workspaceId, found.display, constants.MAX_IMAGE_BYTES);
-      if (!opened) return { ok: false, reason: `Cannot safely read reference "${entry}".` };
-      if (opened.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-      images.push({
-        buffer: opened.buffer,
-        name: found.name,
-        mime: mimeForExtension(ext, 'image/png')
-      });
-    } catch (err) {
-      if (err?.code === 'EFILETOOLARGE') {
-        return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
-      }
-      return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
-    }
-  }
-  return { ok: true, images };
 }
 
 /** Land the generated bytes in the workspace under a name taken from the prompt. */
@@ -300,7 +278,10 @@ async function _xaiJsonRequest(label, endpointPath, body, timeoutMs, signal) {
  * @param {string[]} [args.reference_images] - namespace paths or public https URLs (max 3).
  * @param {string} [args.aspect_ratio] - pure text-to-image only (edits respect the input image).
  * @param {object} userCtx
- * @returns {Promise<{ success: boolean, message?: string, path?: string, error?: string }>}
+ * @returns {Promise<object|Array>} the `{ success, message?, path?, error? }` envelope,
+ *   or — when the generated image is put in front of the model —
+ *   `[input_text(envelope JSON), input_image]`, the multipart tool result the
+ *   dispatcher forwards as it is.
  */
 async function generateImage(args, userCtx) {
   if (!envConfig.IMAGE_GEN_MODEL) return { success: false, error: 'envConfig.IMAGE_GEN_MODEL is not configured.' };
@@ -443,18 +424,22 @@ async function _attemptXaiImage({ prompt, refList, aspect, workspaceId, signal }
     ok: true,
     buffer,
     ext: _extFromGeneratedMedia(item.url, item.mime_type, 'jpg'),
-    refCount: submit.refs.urls.length
+    refCount: submit.refCount
   };
 }
 
 /** One attempt on Cloudflare FLUX, with references read off disk as bytes. */
 async function _attemptFluxImage({ prompt, refList, size, workspaceId, signal }) {
-  const refs = _readReferenceBuffers(refList, workspaceId);
+  const refs = _resolveReferenceImages(
+    refList,
+    { max: MAX_REF_IMAGES_FOR_IMAGE, shape: 'bytes', allowUrls: false },
+    workspaceId
+  );
   if (!refs.ok) return { ok: false, error: refs.reason, code: 'MALFORMED' };
 
-  const result = await generateWithFlux({ prompt, size, references: refs.images, signal });
+  const result = await generateWithFlux({ prompt, size, references: refs.items, signal });
   if (!result.ok) return { ok: false, error: result.error, code: result.code };
-  return { ok: true, buffer: result.buffer, ext: result.ext, refCount: refs.images.length };
+  return { ok: true, buffer: result.buffer, ext: result.ext, refCount: refs.items.length };
 }
 
 /**
@@ -561,7 +546,7 @@ async function generateVideo(args, userCtx) {
       return { success: false, error: `Video generation failed: ${submitResult.reason}` };
     }
     const submit = submitResult.data;
-    const refsForNote = submitResult.refs;
+    const refCount = submitResult.refCount;
 
     const requestId = submit?.request_id;
     if (!requestId || typeof requestId !== 'string') {
@@ -600,9 +585,7 @@ async function generateVideo(args, userCtx) {
     }
 
     const truncNote = truncated ? ' (prompt was truncated)' : '';
-    const refNote = refsForNote.urls.length > 0
-      ? ` Used ${refsForNote.urls.length} reference image(s).`
-      : '';
+    const refNote = refCount > 0 ? ` Used ${refCount} reference image(s).` : '';
     quota.commit();
     return {
       success: true,
@@ -625,7 +608,6 @@ async function _pollVideoResult(requestId, signal) {
   const label = 'Grok-Imagine-Video-Poll';
   let consecutive429 = 0;
   while (Date.now() < deadline) {
-    await sleepWithin(VIDEO_POLL_INTERVAL_MS, signal);
     if (signal?.aborted) throw signal.reason || new DOMException('Aborted', 'AbortError');
 
     const { baseUrl } = await getXaiServiceAuth();
@@ -650,6 +632,7 @@ async function _pollVideoResult(requestId, signal) {
         throw err;
       }
       log.warn(`   video poll retry (${requestId}): ${msg}`);
+      await sleepWithin(VIDEO_POLL_INTERVAL_MS, signal);
       continue;
     }
 
@@ -671,6 +654,7 @@ async function _pollVideoResult(requestId, signal) {
       throw new Error(_videoPollFailureMessage(data, status || 'unknown'));
     }
     log.debug(`   video ${requestId}: status=${status || 'pending'}`);
+    await sleepWithin(VIDEO_POLL_INTERVAL_MS, signal);
   }
   throw new Error(`Timed out after ${Math.round(VIDEO_POLL_TIMEOUT_MS / 1000)}s waiting for the video.`);
 }

@@ -104,9 +104,12 @@ function _tagResult(name, { expired = false, note = '' } = {}) {
  * Materialize one file into the projection, re-downloading from the platform
  * when the durable copy is gone.
  *
+ * @param {object} opts - the ingestAttachment options
+ * @param {Buffer|null} [prefetched] - bytes an earlier step already pulled, so
+ *   the platform is never asked for the same file twice in one ingestion
  * @returns {Promise<{ name: string, abs: string }|null>}
  */
-async function _materialize(opts) {
+async function _materialize(opts, prefetched = null) {
   const { workspaceId, historyStorageId, syncedPath, name, fetchBuffer } = opts;
 
   const historyAbs = syncedPath ? resolveHistoryAbsPath(historyStorageId, syncedPath) : null;
@@ -118,12 +121,14 @@ async function _materialize(opts) {
   // Rehydration: the local raw expired (or never landed) but the platform can
   // still hand it back. Recovering here is what keeps a returning history entry
   // a live tag instead of an expired one.
-  if (typeof fetchBuffer !== 'function') return null;
-  let buffer;
-  try { buffer = await fetchBuffer(); }
-  catch (err) {
-    log.debug(`Rehydration of ${name} failed: ${err.message}`);
-    return null;
+  let buffer = prefetched;
+  if (!buffer) {
+    if (typeof fetchBuffer !== 'function') return null;
+    try { buffer = await fetchBuffer(); }
+    catch (err) {
+      log.debug(`Rehydration of ${name} failed: ${err.message}`);
+      return null;
+    }
   }
   if (!buffer || !buffer.length) return null;
 
@@ -154,7 +159,9 @@ async function _materialize(opts) {
  * @param {string} [opts.platformAttachmentId]
  * @param {boolean} [opts.inline] - current message or the one it replies to
  * @param {number} [opts.imagesInlined] - running per-turn count
- * @returns {Promise<{ tag, name, syncedPath, contentParts, textFragment, bumpImageCount? }>}
+ * @returns {Promise<{ tag, name, syncedPath, contentParts, textFragment }>}
+ *   contentParts holds the inline image when there is one, and is what callers
+ *   count against the per-turn cap.
  */
 async function ingestAttachment(opts) {
   const {
@@ -174,10 +181,12 @@ async function ingestAttachment(opts) {
   const kind = mediaKindFor(displayName, contentType);
   let overDurationLimit = null;
   let durationNote = '';
+  // Bytes the duration probe had to pull; handed to _materialize so one
+  // ingestion never downloads the same file twice.
+  let probeBuffer = null;
   if (kind === 'audio' || kind === 'video') {
     try {
       const historyAbsPath = syncedPath ? resolveHistoryAbsPath(opts.historyStorageId, syncedPath) : null;
-      let probeBuffer = null;
       if (!historyAbsPath && !(Number(metadataDurationSec) > 0) && typeof opts.fetchBuffer === 'function') {
         probeBuffer = await opts.fetchBuffer();
       }
@@ -203,7 +212,7 @@ async function ingestAttachment(opts) {
   const unreadable = isNonReadableExt(_extOf(displayName));
   const note = unreadable ? UNREADABLE_NOTE : durationNote;
 
-  const materialized = await _materialize(opts);
+  const materialized = await _materialize(opts, probeBuffer);
   if (!materialized) {
     // The invariant in its explicit form: no live tag without a file.
     return { ..._tagResult(displayName, { expired: true }), syncedPath };
@@ -226,7 +235,7 @@ async function ingestAttachment(opts) {
 
   const part = inlineImagePart(materialized.abs);
   if (!part) return result;
-  return { ...result, contentParts: [part], bumpImageCount: true };
+  return { ...result, contentParts: [part] };
 }
 
 export {

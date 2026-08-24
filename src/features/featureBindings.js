@@ -120,8 +120,6 @@ function fallbackBackendFor(backend) {
 export {
   FEATURE,
   UNAVAILABLE,
-  GEMIX_OWNED,
-  BASELINE,
   defineFeatureBindings,
   backendFor,
   isFeatureAvailable,

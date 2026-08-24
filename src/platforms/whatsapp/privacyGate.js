@@ -20,6 +20,7 @@ import {
 } from '../../config/systemMessages.js';
 import { hasBeenInformed, markInformed  } from '../../utils/privacyConsent.js';
 import { wipeWhatsAppUserData  } from '../../utils/privacyWipe.js';
+import { systemReply } from '../../utils/replyEnvelope.js';
 
 /**
  * True when a message body is exactly the wipe command. Deliberately strict:
@@ -38,19 +39,6 @@ function _batchIsWipeCommand(entries) {
   const msg = entries[0] && entries[0].msg;
   if (!msg || msg.hasMedia) return false;
   return isPrivacyWipeCommand(msg.body);
-}
-
-/** Response envelope for the platform sender: system message, no model behind it. */
-function _systemReply(text) {
-  return {
-    text,
-    voiceBuffer: null,
-    isVoiceOnly: false,
-    attachments: [],
-    discordTitle: '',
-    modelUsed: null,
-    systemMessage: true
-  };
 }
 
 /**
@@ -84,7 +72,7 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
         taskFileId: identity.taskFileId
       });
       return {
-        response: _systemReply(
+        response: systemReply(
           ok ? buildPrivacyWipeDoneMessage({ isActiveMember }) : PRIVACY_WIPE_FAILED_MESSAGE
         )
       };
@@ -97,7 +85,7 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
     const hasAttachments = entries.some(e => e && e.msg && e.msg.hasMedia);
     log.info(`   First request from ${waJid} — sending the privacy notice instead (attachments not downloaded)`);
     return {
-      response: _systemReply(buildPrivacyNoticeMessage({ isActiveMember, hasAttachments })),
+      response: systemReply(buildPrivacyNoticeMessage({ isActiveMember, hasAttachments })),
       // Only after the notice is really on its way: a delivery failure must
       // leave the person un-informed so the next message shows it again.
       onDelivered: () => markInformed(waJid)

@@ -9,8 +9,8 @@
 import pkg from 'whatsapp-web.js';
 const { MessageMedia } = pkg;
 import constants from '../../config/constants.js';
-import { formatWhatsAppPollText } from '../../utils/pollParser.js';
-import { isSpecialNonMediaMessage, formatSpecialMessageText, formatWhatsAppContactText } from '../../utils/waSpecialMessages.js';
+import { isSpecialNonMediaMessage, formatSpecialMessageText } from '../../utils/waSpecialMessages.js';
+import { participantPhoneDigits, pickCaptionMessage, specialMessageText } from './messageText.js';
 import { formatTimestamp } from '../../utils/time.js';
 import { hasScheduledFooter } from '../../utils/footer.js';
 import { buildPersonalGemixFlags } from '../../utils/personalWaHistory.js';
@@ -52,7 +52,7 @@ import { processWhatsAppQuotedReply } from '../../utils/quoteIngress.js';
 import { groupWhatsAppMessages } from '../../utils/waAlbumGroup.js';
 import { whatsAppReactionTagForMessages } from '../../utils/reactions.js';
 
-const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED } = constants;
+const { MAX_HISTORY, PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED, WA_TEXT_CHUNK_CHARS } = constants;
 
 const log = createLogger('WhatsAppResponse');
 
@@ -64,11 +64,29 @@ function _waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
 }
 
+/**
+ * One chat.fetchMessages per turn, shared by the history build and the quote
+ * window. The quote window is the full MAX_HISTORY slice, current-batch keys
+ * included: those are excluded from the history array later, but a reply to one
+ * of them is still a reply to something the model can see.
+ *
+ * @param {object} chat - whatsapp-web.js Chat
+ * @returns {Promise<{ windowMessages: object[], recentMessageIds: Set<string> }>}
+ */
+async function fetchWhatsAppMessageWindow(chat) {
+  const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
+  const windowMessages = rawMessages.slice(-MAX_HISTORY);
+  return {
+    windowMessages,
+    recentMessageIds: new Set(windowMessages.map(_waMessageKey).filter(Boolean))
+  };
+}
+
+/** The quote window for one message's chat, when no window was prefetched. */
 async function getRecentWhatsAppMessageIds(msg) {
   try {
     const chat = await msg.getChat();
-    const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
-    return new Set(rawMessages.slice(-MAX_HISTORY).map(_waMessageKey).filter(Boolean));
+    return (await fetchWhatsAppMessageWindow(chat)).recentMessageIds;
   } catch {
     return new Set();
   }
@@ -83,17 +101,16 @@ async function getRecentWhatsAppMessageIds(msg) {
  * @param {string} userId - storage id for media sync
  * @param {Set<string>|string|null} [excludeKeys] - WhatsApp message keys (from _waMessageKey) to exclude from history.
  *   Current-batch messages are excluded from history (the user turn containing attachment tags/inline content is provided as the final turn instead).
+ * @param {{ windowMessages: object[], recentMessageIds: Set<string> }} [prefetched]
+ *   the turn's window from fetchWhatsAppMessageWindow; fetched here when absent
  * @returns {Promise<Array>} Responses items: user turns as role items, GemiX's
  *   own replies as assistant `message` items
  */
-async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) {
+async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null, prefetched = null) {
   const workspaceId = resolveChatWorkspaceId(platform, chat, userId);
-  const rawMessages = await chat.fetchMessages({ limit: MAX_HISTORY + 5 });
-  const windowMessages = rawMessages.slice(-MAX_HISTORY);
-  // Quote window = full MAX_HISTORY slice (incl. current-batch keys later excluded
-  // from the history array). Matches getRecentWhatsAppMessageIds / current-turn logic.
-  const recentMessageIds = new Set(windowMessages.map(_waMessageKey).filter(Boolean));
-  let messages = windowMessages;
+  const window = prefetched || await fetchWhatsAppMessageWindow(chat);
+  const recentMessageIds = window.recentMessageIds;
+  let messages = window.windowMessages;
 
   // Exclude current message(s) being processed (they form the final user turn and are omitted from the history array)
   if (excludeKeys) {
@@ -106,20 +123,11 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
 
   const isGroup = Boolean(chat?.isGroup);
 
-  // Fast first level for LID tag resolution: phone numbers of the group's
-  // current participants. Long @<digits> tags already matching one of these
-  // are real phone tags; the rest are LIDs resolved via getContactLidAndPhone
-  // (resolveLidTagsInBody), with a per-pass cache to avoid duplicate lookups.
-  const knownGroupPhones = new Set();
+  // Long @<digits> tags matching a current participant are real phone tags; the
+  // rest are LIDs resolved via getContactLidAndPhone (resolveLidTagsInBody),
+  // with a per-pass cache to avoid duplicate lookups.
+  const knownGroupPhones = isGroup ? participantPhoneDigits(chat) : new Set();
   const lidTagCache = new Map();
-  if (isGroup && Array.isArray(chat?.participants)) {
-    for (const p of chat.participants) {
-      if (p?.id?.server === 'c.us' && p.id.user) {
-        const digits = p.id.user.toString().replace(/\D/g, '');
-        if (digits) knownGroupPhones.add(digits);
-      }
-    }
-  }
 
   const personalGemixFlags = platform === PLATFORM_WA_PERSONAL
     ? buildPersonalGemixFlags(messages)
@@ -190,12 +198,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     const meta = await resolveHistorySenderMeta(primaryMsg, primaryMi);
     const { senderName, isGemiX, isFromBot, isSystemEvent } = meta;
 
-    // Caption / special text only from the first non-empty body in the album
-    // (WA puts the shared caption on one item, usually the first).
-    let captionMsg = primaryMsg;
-    for (const m of groupMsgs) {
-      if ((m.body || '').trim()) { captionMsg = m; break; }
-    }
+    const captionMsg = pickCaptionMessage(groupMsgs);
 
     const ts = formatTimestamp(primaryMsg.timestamp * 1000);
     const mentionContacts = await _resolveMentionsForMessage(captionMsg, isGroup);
@@ -205,18 +208,8 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     }
     let textContent = cleanIncomingText(rawBody);
 
-    const specialText = formatSpecialMessageText(captionMsg);
-    if (specialText !== null) {
-      textContent = specialText;
-    } else if (captionMsg.type === 'vcard' || captionMsg.type === 'multi_vcard') {
-      textContent = formatWhatsAppContactText(captionMsg.body || textContent || '');
-    } else if (captionMsg.type === 'poll_creation') {
-      try {
-        textContent = formatWhatsAppPollText(captionMsg, `[Poll] ${textContent || ''}`);
-      } catch {
-        textContent = '[Poll]';
-      }
-    }
+    const specialText = specialMessageText(captionMsg, textContent);
+    if (specialText !== null) textContent = specialText;
 
     // Multi-attach album: ingest every item's media into this single turn.
     for (let gi = 0; gi < groupMsgs.length; gi++) {
@@ -305,24 +298,13 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
  */
 async function _sendTextWithRetry(chat, text, mentions = []) {
   const cleanedText = normalizeMarkdown(stripOutgoingDeliveryArtifacts(text));
-  const chunkSize = 40000;
   const chunks = [];
-  for (let i = 0; i < cleanedText.length; i += chunkSize) {
-    chunks.push(cleanedText.slice(i, i + chunkSize));
+  for (let i = 0; i < cleanedText.length; i += WA_TEXT_CHUNK_CHARS) {
+    chunks.push(cleanedText.slice(i, i + WA_TEXT_CHUNK_CHARS));
   }
   const sendOptions = Array.isArray(mentions) && mentions.length > 0 ? { mentions } : undefined;
   for (const chunk of chunks) {
-    let attempts = 3;
-    while (attempts > 0) {
-      try {
-        await chat.sendMessage(chunk, sendOptions);
-        break;
-      } catch (err) {
-        attempts--;
-        if (attempts === 0) throw err;
-        await new Promise(r => setTimeout(r, 2000));
-      }
-    }
+    await withWaPuppeteerRetry(() => chat.sendMessage(chunk, sendOptions), { retries: 2, delayMs: 2000 });
   }
 }
 
@@ -351,14 +333,15 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
   // Strip the tags GemiX must never send (Meta AI everywhere; its own @gemix on
   // the personal account) and, in groups, turn the @<number> tags it kept into
   // real WhatsApp mentions.
+  let outgoingText = typeof responseData.text === 'string' ? responseData.text : '';
   let outgoingMentions = [];
-  if (typeof responseData.text === 'string' && responseData.text.trim()) {
-    responseData.text = normalizeOutgoingMentionTags(responseData.text);
-    responseData.text = stripDisallowedOutgoingMentions(responseData.text, { isPersonal });
-    if (isGroup) outgoingMentions = collectMentionJids(responseData.text);
+  if (outgoingText.trim()) {
+    outgoingText = normalizeOutgoingMentionTags(outgoingText);
+    outgoingText = stripDisallowedOutgoingMentions(outgoingText, { isPersonal });
+    if (isGroup) outgoingMentions = collectMentionJids(outgoingText);
   }
 
-  const hasText = typeof responseData.text === 'string' && responseData.text.trim().length > 0;
+  const hasText = outgoingText.trim().length > 0;
   const hasVoice = responseData.isVoiceOnly && responseData.voiceBuffer;
   const hasAttachments = Array.isArray(responseData.attachments) && responseData.attachments.length > 0;
   if (!hasText && !hasVoice && !hasAttachments) {
@@ -385,7 +368,7 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
   }
 
   if (hasText) {
-    await _sendTextWithRetry(chat, responseData.text, outgoingMentions);
+    await _sendTextWithRetry(chat, outgoingText, outgoingMentions);
   }
 
   if (hasAttachments) {
@@ -497,39 +480,20 @@ async function buildIncomingContentPartsFromMessages(
   const includeQuotedMedia = options.includeQuotedMedia !== false;
   const contentParts = [];
 
-  // Shared caption lives on one album item (usually the first with body).
-  let captionMsg = messages[0];
-  for (const m of messages) {
-    if ((m.body || '').trim()) { captionMsg = m; break; }
-  }
+  const captionMsg = pickCaptionMessage(messages);
   const primaryMsg = messages[0];
 
   const mentionContacts = await _resolveMentionsForMessage(captionMsg, isGroup);
   let textBody = _replaceMentionsInBody(captionMsg.body || '', mentionContacts);
   if (isGroup) {
-    const knownPhones = new Set();
-    try {
-      const chat = await captionMsg.getChat();
-      if (Array.isArray(chat?.participants)) {
-        for (const p of chat.participants) {
-          if (p?.id?.server === 'c.us' && p.id.user) {
-            const d = p.id.user.toString().replace(/\D/g, '');
-            if (d) knownPhones.add(d);
-          }
-        }
-      }
-    } catch { /* best effort */ }
+    let knownPhones = new Set();
+    try { knownPhones = participantPhoneDigits(await captionMsg.getChat()); }
+    catch { /* best effort */ }
     textBody = await _resolveLidTagsInBody(textBody, knownPhones);
   }
 
-  const specialText = formatSpecialMessageText(captionMsg);
-  if (specialText !== null) {
-    textBody = specialText;
-  } else if (captionMsg.type === 'vcard' || captionMsg.type === 'multi_vcard') {
-    textBody = formatWhatsAppContactText(captionMsg.body || textBody || '');
-  } else if (captionMsg.type === 'poll_creation') {
-    textBody = formatWhatsAppPollText(captionMsg, `[Poll] ${textBody}`);
-  }
+  const specialText = specialMessageText(captionMsg, textBody);
+  if (specialText !== null) textBody = specialText;
 
   const currentWorkspaceId = resolveChatWorkspaceId(platform, { id: { _serialized: chatId }, isGroup }, userId);
 
@@ -618,9 +582,9 @@ function waMessageHasUsableContent(msg) {
 export {
   buildWhatsAppHistory,
   buildIncomingContentPartsFromMessages,
+  fetchWhatsAppMessageWindow,
   sendWhatsAppResponse,
   getRecentWhatsAppMessageIds,
   waMessageHasUsableContent,
   _waMessageKey
-
 };

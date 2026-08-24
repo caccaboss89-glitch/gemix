@@ -100,13 +100,36 @@ function _voiceNamesIn(text) {
   return names;
 }
 
-/** Replace the attachment tag for one clip, in every form it takes. */
-function _replaceTag(text, name, replacement) {
-  const pattern = new RegExp(
-    `\\[Attachment(?:\\s*\\(expired\\))?:\\s*(?:attachments/|history/)?${_escapeRegExp(name)}\\]`,
-    'g'
-  );
-  return text.replace(pattern, replacement);
+/** The compiled tag pattern for one clip, and the tag that replaces a match. */
+function _buildPattern(name, record) {
+  return {
+    regex: new RegExp(
+      `\\[Attachment(?:\\s*\\(expired\\))?:\\s*(?:attachments/|history/)?${_escapeRegExp(name)}\\]`,
+      'g'
+    ),
+    replacement: _voiceTag(name, record)
+  };
+}
+
+/**
+ * `contentHashOf` result cache, keyed by absolute path and validated against
+ * size + mtime — turns most calls into a stat instead of a full read, since
+ * the same window of clips gets re-inspected on every turn to confirm a
+ * cache hit. Bounded so a long-lived process does not keep an entry for every
+ * clip it ever saw: past the cap the whole map is dropped, since a rebuild
+ * costs one read per clip still in the current window.
+ */
+const _hashCache = new Map();
+const HASH_CACHE_MAX_ENTRIES = 512;
+
+/** contentHashOf(file), reusing a prior hash while size and mtime match. */
+function _contentHashOfFile(absPath, stat) {
+  const hit = _hashCache.get(absPath);
+  if (hit && hit.size === stat.size && hit.mtimeMs === stat.mtimeMs) return hit.hash;
+  const hash = contentHashOf(fs.readFileSync(absPath));
+  if (_hashCache.size >= HASH_CACHE_MAX_ENTRIES) _hashCache.clear();
+  _hashCache.set(absPath, { size: stat.size, mtimeMs: stat.mtimeMs, hash });
+  return hash;
 }
 
 /**
@@ -117,15 +140,15 @@ function _inspect(storageId, name, opts) {
   const absPath = resolveHistoryAbsPath(storageId, name);
   if (!absPath) return null;
 
-  let buffer;
-  try { buffer = fs.readFileSync(absPath); }
+  let stat;
+  try { stat = fs.statSync(absPath); }
   catch (err) {
     log.warn(`Voice note "${name}" is unreadable: ${err.message}`);
     return { absPath, contentHash: null, cached: { status: STT_STATUS.ERROR, text: '' } };
   }
-  if (buffer.length === 0) return { absPath, contentHash: null, cached: { status: STT_STATUS.ERROR, text: '' } };
+  if (stat.size === 0) return { absPath, contentHash: null, cached: { status: STT_STATUS.ERROR, text: '' } };
 
-  const contentHash = contentHashOf(buffer);
+  const contentHash = _contentHashOfFile(absPath, stat);
   return {
     absPath,
     contentHash,
@@ -212,10 +235,10 @@ async function _resolveAll(names, storageId, opts) {
 }
 
 /** Apply the replacements to one message content (string or parts array). */
-function _projectContent(content, resolved) {
+function _projectContent(content, patterns) {
   if (typeof content === 'string') {
     let next = content;
-    for (const [name, record] of resolved) next = _replaceTag(next, name, _voiceTag(name, record));
+    for (const { regex, replacement } of patterns.values()) next = next.replace(regex, replacement);
     return next === content ? content : next;
   }
   if (!Array.isArray(content)) return content;
@@ -224,7 +247,7 @@ function _projectContent(content, resolved) {
   const parts = content.map((part) => {
     if (!part || part.type !== 'input_text' || typeof part.text !== 'string') return part;
     let next = part.text;
-    for (const [name, record] of resolved) next = _replaceTag(next, name, _voiceTag(name, record));
+    for (const { regex, replacement } of patterns.values()) next = next.replace(regex, replacement);
     if (next === part.text) return part;
     changed = true;
     return { ...part, text: next };
@@ -286,22 +309,24 @@ async function projectUserVoiceMessages({ history, current, storageId }, opts = 
 
   if (resolved.size === 0) return { history: safeHistory, current, projected: 0 };
 
+  const patterns = new Map([...resolved].map(([name, record]) => [name, _buildPattern(name, record)]));
+
   const nextHistory = safeHistory.map((msg) => {
     if (!msg || msg.role !== 'user') return msg;
-    const content = _projectContent(msg.content, resolved);
+    const content = _projectContent(msg.content, patterns);
     return content === msg.content ? msg : { ...msg, content };
   });
+  const nextCurrent = _projectContent(current, patterns);
 
-  return {
-    history: nextHistory,
-    current: _projectContent(current, resolved),
-    projected: resolved.size
-  };
+  let projected = 0;
+  for (const record of resolved.values()) {
+    if (record.status === STT_STATUS.OK && record.text) projected++;
+  }
+
+  return { history: nextHistory, current: nextCurrent, projected };
 }
 
 export {
   VOICE_AUDIO_EXTS,
-  MAX_CONCURRENT_TRANSCRIPTIONS,
-  MAX_NEW_TRANSCRIPTIONS_PER_TURN,
   projectUserVoiceMessages
 };

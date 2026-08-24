@@ -195,7 +195,9 @@ async function resolveDeliverySelection(entries, workspaceId = null, opts = {}) 
     let opened;
     try { opened = readAgentFileBuffer(workspaceId, local.display, remainingBytes); }
     catch (err) {
-      if (err?.code !== 'EFILETOOLARGE') throw err;
+      if (err?.code !== 'EFILETOOLARGE') {
+        log.warn(`delivery file unreadable (${entry}): ${err.message}`);
+      }
       missing.push(entry);
       continue;
     }
@@ -216,9 +218,6 @@ async function resolveDeliverySelection(entries, workspaceId = null, opts = {}) 
 
 export {
   resolveDeliverySelection,
-  resolveLocalFileEntry,
-  resolveUrlEntry,
-  MAX_DELIVERY_SELECTION_ITEMS,
-  MAX_DELIVERY_SELECTION_BYTES
+  resolveLocalFileEntry
 
 };

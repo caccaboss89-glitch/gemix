@@ -9,9 +9,6 @@
 // Exposes toggleReleaseNotify, enableReleaseNotify, and getSubscribedChats
 // for use by handler and admin flows. In-memory Map with disk backup.
 
-import fs from 'fs';
-import path from 'path';
-import constants from '../config/constants.js';
 import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
 
 /** @type {Map<string, string>} chatId -> waJid (delivery target) */
@@ -21,20 +18,6 @@ function _load() {
   const state = getSystemState('releases');
   if (state && state.subscriptions) {
     subscribedChats = new Map(Object.entries(state.subscriptions));
-    return;
-  }
-
-  // Fallback: try loading from JSON file if systemState entry missing
-  const OLD_FILE = path.join(constants.DATA_DIR, 'releaseNotifyChats.json');
-  if (fs.existsSync(OLD_FILE)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
-      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        subscribedChats = new Map(Object.entries(raw));
-        // Migrate into systemState immediately so subscriptions are not RAM-only.
-        _save().catch(() => { /* best-effort; next enable/toggle will retry */ });
-      }
-    } catch { }
   }
 }
 

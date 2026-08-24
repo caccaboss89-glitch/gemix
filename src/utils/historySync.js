@@ -14,11 +14,9 @@ import { withKeyedLock  } from './keyedLock.js';
 
 const log = createLogger('HistorySync');
 
-// Age cap on on-disk history attachments when reference-based prune is skipped
-// (history fetch timeout/incomplete). Files older than this TTL are removed;
-// the next successful history rebuild re-syncs media from the last MAX_HISTORY messages.
 // Retention of the durable history store, shared with the workspace and the
-// attachment projection so one conversation expires as a whole.
+// attachment projection so one conversation expires as a whole. See
+// sweepHistoryStore for how it is applied.
 const HISTORY_RETENTION_MS = constants.WORKSPACE_TTL_MS;
 const GEMIX_VOICE_TEXT_CACHE_FILE = path.join(constants.DATA_DIR, 'gemixVoiceTextCache.json');
 const RECENT_VOICE_MAX_ENTRIES = 200;
@@ -157,7 +155,11 @@ function forgetRecentVoiceText(chatId) {
   }
 }
 
-function retrieveRecentVoiceText(chatId, msgTimestampMs) {
+/**
+ * The cached voice text closest in time to a message in the same chat.
+ * @returns {{ index: number, text: string }|null}
+ */
+function _matchRecentVoiceText(chatId, msgTimestampMs) {
   if (!chatId || !msgTimestampMs) return null;
   let bestIdx = -1;
   let bestDiff = Infinity;
@@ -169,12 +171,17 @@ function retrieveRecentVoiceText(chatId, msgTimestampMs) {
       bestIdx = i;
     }
   }
-  if (bestIdx >= 0 && bestDiff <= RECENT_VOICE_MATCH_TOLERANCE_MS) {
-    return recentVoiceEntries[bestIdx].text;
-  }
-  return null;
+  if (bestIdx < 0 || bestDiff > RECENT_VOICE_MATCH_TOLERANCE_MS) return null;
+  return { index: bestIdx, text: recentVoiceEntries[bestIdx].text };
 }
 
+/** Drop one cached entry once its text has found its file for good. */
+function _dropRecentVoiceEntry(index) {
+  recentVoiceEntries.splice(index, 1);
+  _saveRecentVoiceEntries();
+}
+
+/** The meta id and entry pointing at this stored filename, if there is one. */
 function _findMetaEntry(meta, historyFilename) {
   for (const [id, entry] of Object.entries(meta)) {
     if (_getEntryFilename(entry) === historyFilename) {
@@ -182,6 +189,17 @@ function _findMetaEntry(meta, historyFilename) {
     }
   }
   return { id: null, entry: null };
+}
+
+/**
+ * The meta entry for one stored file, loaded from disk.
+ * @returns {object|null} null when the user, the name or the entry is missing
+ */
+function _loadEntryForFile(userId, historyFilename) {
+  const normalized = _normalizeHistoryFilename(historyFilename);
+  if (!userId || !normalized) return null;
+  const { metaFile } = getUserHistoryPaths(userId);
+  return _findMetaEntry(_loadMeta(metaFile, userId), normalized).entry;
 }
 
 function _upsertMetaEntry(meta, historyFilename) {
@@ -197,20 +215,8 @@ function _upsertMetaEntry(meta, historyFilename) {
 }
 
 function getStoredHistoryVoiceTranscription(userId, historyFilename) {
-  if (!userId || !historyFilename) return null;
-  const { metaFile } = getUserHistoryPaths(userId);
-  const normalized = _normalizeHistoryFilename(historyFilename);
-  if (!normalized) return null;
-
-  const meta = _loadMeta(metaFile, userId);
-  for (const entry of Object.values(meta)) {
-    if (_getEntryFilename(entry) !== normalized) continue;
-    if (!entry || typeof entry !== 'object' || !entry.voiceTranscription) return null;
-    const voice = entry.voiceTranscription;
-    if (typeof voice.text !== 'string' || !voice.text.trim()) return null;
-    return voice.text.trim();
-  }
-  return null;
+  const text = _loadEntryForFile(userId, historyFilename)?.voiceTranscription?.text;
+  return typeof text === 'string' && text.trim() ? text.trim() : null;
 }
 
 function storeHistoryVoiceTranscription(userId, historyFilename, text) {
@@ -243,22 +249,12 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
  * @returns {{ text: string, status: string }|null}
  */
 function getStoredUserTranscription(userId, historyFilename, fingerprint = {}) {
-  if (!userId || !historyFilename) return null;
-  const { metaFile } = getUserHistoryPaths(userId);
-  const normalized = _normalizeHistoryFilename(historyFilename);
-  if (!normalized) return null;
-
-  const meta = _loadMeta(metaFile, userId);
-  for (const entry of Object.values(meta)) {
-    if (_getEntryFilename(entry) !== normalized) continue;
-    const stored = entry && typeof entry === 'object' ? entry.userTranscription : null;
-    if (!stored || typeof stored !== 'object') return null;
-    if (fingerprint.contentHash && stored.contentHash !== fingerprint.contentHash) return null;
-    if (fingerprint.routeId && stored.routeId !== fingerprint.routeId) return null;
-    if ((fingerprint.language || '') !== (stored.language || '')) return null;
-    return { text: typeof stored.text === 'string' ? stored.text : '', status: stored.status || 'ok' };
-  }
-  return null;
+  const stored = _loadEntryForFile(userId, historyFilename)?.userTranscription;
+  if (!stored || typeof stored !== 'object') return null;
+  if (fingerprint.contentHash && stored.contentHash !== fingerprint.contentHash) return null;
+  if (fingerprint.routeId && stored.routeId !== fingerprint.routeId) return null;
+  if ((fingerprint.language || '') !== (stored.language || '')) return null;
+  return { text: typeof stored.text === 'string' ? stored.text : '', status: stored.status || 'ok' };
 }
 
 /**
@@ -304,10 +300,14 @@ function resolveGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestamp
   const stored = getStoredHistoryVoiceTranscription(userId, syncedPath);
   if (stored) return stored;
   if (!chatId || !msgTimestampMs) return null;
-  const recent = retrieveRecentVoiceText(chatId, msgTimestampMs);
-  if (!recent) return null;
-  storeHistoryVoiceTranscription(userId, syncedPath, recent);
-  return recent;
+  const match = _matchRecentVoiceText(chatId, msgTimestampMs);
+  if (!match) return null;
+  // Once the text belongs to a file it leaves the short cache, so the same
+  // reply can never be attributed to a second voice message in this chat.
+  if (storeHistoryVoiceTranscription(userId, syncedPath, match.text)) {
+    _dropRecentVoiceEntry(match.index);
+  }
+  return match.text;
 }
 
 /**
@@ -328,7 +328,9 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     const { historyDir, metaFile } = getUserHistoryPaths(userId);
     ensureDir(historyDir);
 
-    let meta = _loadMeta(metaFile, userId);
+    // Read once and write once: the per-user lock is what makes that safe,
+    // since no other sync for this user can interleave with this one.
+    const meta = _loadMeta(metaFile, userId);
 
     // If uniqueId exists and the entry is actually on disk, reuse it
     if (meta[uniqueId]) {
@@ -368,8 +370,6 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     const ext = extMatch ? `.${extMatch[1]}` : '';
     const baseName = extMatch ? cleanName.slice(0, -ext.length) : cleanName;
 
-    // Reload meta after fetch so concurrent inserts (serialized per user) are visible.
-    meta = _loadMeta(metaFile, userId);
     let finalName = cleanName;
     let counter = 1;
     const existingValues = new Set(Object.values(meta).map(_getEntryFilename).filter(Boolean));
@@ -387,9 +387,8 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
     const filePath = path.join(historyDir, finalName);
     try {
       fs.writeFileSync(filePath, buffer);
-      const freshMeta = _loadMeta(metaFile, userId);
-      freshMeta[uniqueId] = { filename: finalName };
-      _saveMeta(metaFile, freshMeta, userId);
+      meta[uniqueId] = { filename: finalName };
+      _saveMeta(metaFile, meta, userId);
       return finalName;
     } catch (err) {
       log.error(`Failed to save history file for user ${userId}: ${err.message}`);

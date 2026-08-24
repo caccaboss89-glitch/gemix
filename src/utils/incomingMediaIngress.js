@@ -102,7 +102,6 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     filename,
     overDurationLimit: ingress.overDurationLimit || null,
     durationNote: ingress.durationNote || null,
-    bumpImageCount: ingress.bumpImageCount === true,
     fetchBuffer
   };
 }
@@ -149,7 +148,6 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     textFragment: ingress.textFragment,
     contentParts: ingress.contentParts,
     syncedPath: ingress.syncedPath ?? syncedPath,
-    bumpImageCount: ingress.bumpImageCount === true,
     name: ingressName
   };
 }

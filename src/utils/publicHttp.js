@@ -165,9 +165,7 @@ async function openPublicHttp(raw, opts = {}) {
 }
 
 export {
-  MAX_REDIRECTS,
   isPublicIp,
   openPublicHttp,
-  parsePublicUrl,
-  resolvePublicAddress
+  parsePublicUrl
 };

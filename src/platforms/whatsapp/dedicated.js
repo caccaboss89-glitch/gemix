@@ -5,7 +5,13 @@
 // and delegates to the shared WhatsApp handler + batcher.
 // Only one instance (the "dedicated" client).
 
-import { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } from './shared.js';
+import {
+  buildWhatsAppHistory,
+  fetchWhatsAppMessageWindow,
+  sendWhatsAppResponse,
+  _waMessageKey,
+  waMessageHasUsableContent
+} from './shared.js';
 import { createWhatsAppClient, isWaClientReady } from './client.js';
 import { resolveWaSender } from '../../utils/waContact.js';
 import { materializeWhatsAppBatchContent } from '../../utils/batchContentRefresh.js';
@@ -52,6 +58,10 @@ async function onDedicatedMessage(msg) {
     log.warn('Dedicated client not ready — ignoring message (not queued)');
     return;
   }
+
+  // Pure check on the message alone, so it runs before any contact or chat
+  // lookup: nothing GemiX could answer means nothing worth fetching.
+  if (!waMessageHasUsableContent(msg)) return;
 
   const chat = await withWaPuppeteerRetry(() => msg.getChat(), { retries: 2, delayMs: 500 });
   const isGroup = chat.isGroup;
@@ -114,8 +124,6 @@ async function onDedicatedMessage(msg) {
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
-  if (!waMessageHasUsableContent(msg)) return;
-
   const messageKey = _waMessageKey(msg);
   if (!messageKey) log.warn('   WA dedicated message without stable key — may duplicate in history');
 
@@ -141,6 +149,15 @@ async function _handleDedicatedBatch(entries) {
   const first = entries[0];
   const { chat, isGroup, stopLockRenew } = first;
   let waPresence = null;
+  // One fetchMessages per turn, shared by the history build and the quote
+  // window. Closed over rather than stashed on a batch entry, which is not a
+  // channel the pipeline declares.
+  let messageWindow = null;
+
+  /** Group history is per chat; a private one is per person. */
+  const resolveHistoryUserId = (ents) => (isGroup
+    ? chat.id._serialized
+    : (pickLatestBatchEntry(ents) || ents[0]).phoneJid);
 
   await runTurnPipeline({
     log,
@@ -157,14 +174,18 @@ async function _handleDedicatedBatch(entries) {
     }),
     loadHistory: async ({ entries: ents }) => {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
-      const historyUserId = isGroup ? chat.id._serialized : (pickLatestBatchEntry(ents) || ents[0]).phoneJid;
+      const historyUserId = resolveHistoryUserId(ents);
       return fetchHistoryWithTimeout(
-        () => buildWhatsAppHistory(
-          chat,
-          PLATFORM_WA_DEDICATED,
-          historyUserId,
-          excludeKeys.size > 0 ? excludeKeys : null
-        ),
+        async () => {
+          messageWindow = await fetchWhatsAppMessageWindow(chat);
+          return buildWhatsAppHistory(
+            chat,
+            PLATFORM_WA_DEDICATED,
+            historyUserId,
+            excludeKeys.size > 0 ? excludeKeys : null,
+            messageWindow
+          );
+        },
         log,
         'WA-DEDICATED'
       );
@@ -175,12 +196,14 @@ async function _handleDedicatedBatch(entries) {
       return { stop: () => waPresence.stop() };
     },
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
-      const historyUserId = isGroup ? chat.id._serialized : (pickLatestBatchEntry(ents) || ents[0]).phoneJid;
+      const historyUserId = resolveHistoryUserId(ents);
       const { content, latestEntry } = await materializeWhatsAppBatchContent(ents, {
         chat,
         historyStorageId: historyUserId,
         isGroup,
-        platform: PLATFORM_WA_DEDICATED
+        platform: PLATFORM_WA_DEDICATED,
+        // Only missing if the history fetch above timed out before it landed.
+        recentMessageIds: messageWindow?.recentMessageIds || null
       });
       const lat = latestEntry || latest || ents[0];
       let groupParticipants = null;

@@ -6,6 +6,7 @@ import { resolveDeliverySelection } from '../utils/deliverySelection.js';
 import { buildResearchBadgeText } from '../utils/footer.js';
 import { createLogger } from '../utils/logger.js';
 import { sanitizeDiscordThreadTitle } from '../utils/discord.js';
+import { voiceReply } from '../utils/replyEnvelope.js';
 import { sanitizeVoiceMessageText, stripOutgoingDeliveryArtifacts } from '../utils/text.js';
 
 const log = createLogger('TurnReply');
@@ -53,19 +54,17 @@ async function buildVoiceReply({ rawResponseText, finalAttachments, budget, ctx,
     return null;
   }
 
-  return {
-    text: null,
+  return voiceReply({
     voiceBuffer,
-    isVoiceOnly: true,
     attachments: finalAttachments,
     discordTitle: responseCtx.discordTitle || '',
     modelUsed,
-    voiceTranscriptText: spoken,
-    voiceTranscriptChatId: ctx.chatId || ctx.groupId || null,
+    transcriptText: spoken,
+    transcriptChatId: ctx.chatId || ctx.groupId || null,
     researchFooter: ctx.platform === constants.PLATFORM_WA_DEDICATED
       ? buildResearchBadgeText(responseCtx.researchStats)
       : null
-  };
+  });
 }
 
 export { accumulateSearchStats, applyParsedTitle, buildVoiceReply, resolveFinalAttachments };

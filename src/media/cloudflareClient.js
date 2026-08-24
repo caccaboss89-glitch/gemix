@@ -121,7 +121,6 @@ async function callWorkersAi({ model, body, estimatedNeurons, signal, timeoutMs 
 }
 
 export {
-  API_BASE,
   CF_ERROR,
   REQUEST_TIMEOUT_MS,
   callWorkersAi,

@@ -23,9 +23,6 @@ import { invalidPathError, parseAgentPath } from '../../sandbox/workspacePaths.j
 import { PARSE_ERROR, parse } from '../../parsers/parserRegistry.js';
 import { inlineImagePartFromBuffer } from './inlineImage.js';
 
-/** Longest slice of a text file returned in one call. */
-const MAX_TEXT_BYTES = constants.WORKSPACE_OUTPUT_MAX_BYTES;
-
 /** Structured reasons a read can fail, so the model can act on them. */
 const READ_ERROR = PARSE_ERROR;
 
@@ -159,4 +156,4 @@ function _defaultMessage(result, attached) {
   return attached > 0 ? 'Parsed; images attached below.' : 'Parsed.';
 }
 
-export { readFile, READ_ERROR, MAX_TEXT_BYTES, MAX_ATTACHED_IMAGES };
+export { readFile, READ_ERROR };

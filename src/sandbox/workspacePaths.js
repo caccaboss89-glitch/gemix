@@ -208,7 +208,6 @@ export {
   parseAgentPath,
   resolveAgentPath,
   hostRoot,
-  hostPathFor,
   toDisplayPath,
   toContainerPath,
   isWritableRoot,

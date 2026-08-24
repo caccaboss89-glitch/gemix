@@ -66,6 +66,8 @@ export default {
   // responseLock TTL while a debounced batch waits or a turn pipeline runs
   BATCH_LOCK_TTL_MS: 5 * 60 * 1000,
   DISCORD_THREAD_NAME: 'gemix',
+  /** Ceiling on one outgoing WhatsApp text frame before GemiX splits it. */
+  WA_TEXT_CHUNK_CHARS: 40_000,
   SUPPORTED_MEDIA: ['image', 'audio', 'document', 'sticker', 'ptt', 'video'],
 
   // API

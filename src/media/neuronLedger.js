@@ -216,11 +216,9 @@ function resetLedger(now = Date.now()) {
 export {
   DAILY_NEURONS,
   LEDGER_FILE,
-  NEURONS_PER_AUDIO_SECOND,
   NEURONS_PER_INPUT_TILE,
   NEURONS_PER_OUTPUT_TILE,
   RESERVE_NEURONS,
-  RESERVATION_MAX_AGE_MS,
   estimateImageNeurons,
   estimateSttNeurons,
   ledgerSnapshot,

@@ -275,7 +275,7 @@ class OpenAIResponsesTransport {
         });
       }
       if (!assembler.hasOutputItems) {
-        throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model stream closed after deltas but before completing an output item.', {
+        throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model stream closed after deltas but before opening an output item.', {
           partial: true,
           requestId: upstreamRequestId
         });
@@ -299,8 +299,5 @@ class OpenAIResponsesTransport {
 }
 
 export {
-  OpenAIResponsesTransport,
-  MAX_COLD_ATTEMPTS,
-  MIN_TOKEN_REMAINING_MS,
-  DEFAULT_CALL_TIMEOUT_MS
+  OpenAIResponsesTransport
 };

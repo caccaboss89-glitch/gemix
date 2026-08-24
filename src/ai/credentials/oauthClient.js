@@ -236,7 +236,6 @@ async function loopbackLogin(descriptor, opts = {}) {
 }
 
 export {
-  LOGIN_TIMEOUT_MS,
   createPkcePair,
   buildAuthorizeUrl,
   exchangeAuthorizationCode,

@@ -88,7 +88,6 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
         const uniqueName = `buf_${crypto.randomBytes(12).toString('hex')}_${att.name || 'file'}`;
         filePath = path.join(TEMP_DIR, uniqueName);
         fs.writeFileSync(filePath, att.buffer);
-        att.filePath = filePath;
       }
 
       if (!filePath || !fs.existsSync(filePath)) {

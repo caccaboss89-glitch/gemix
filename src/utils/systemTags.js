@@ -4,7 +4,7 @@
 // input[]. Both are sent with role:user, never role:system:
 //   - xAI folds every extra role:system item into the leading system block, so
 //     the message does not stay where we put it and a turn-varying one busts
-//     progressive prefix cache (see ai/responsesAdapter.js).
+//     progressive prefix cache (see ai/transport/responsesProtocol.js).
 //   - role:assistant is worse: the model reads those as its own past words.
 //
 // <system-notification> — a message the PROGRAM delivered to the USER in this

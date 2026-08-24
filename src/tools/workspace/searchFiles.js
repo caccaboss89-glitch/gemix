@@ -118,4 +118,4 @@ function searchFiles(args = {}, workspaceId) {
   return { success: true, path: resolved.display, matches, message: notes.join(' ') };
 }
 
-export { searchFiles, MAX_MATCHES };
+export { searchFiles };

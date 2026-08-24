@@ -79,4 +79,4 @@ function listFiles(args = {}, workspaceId) {
   };
 }
 
-export { listFiles, MAX_ENTRIES };
+export { listFiles };

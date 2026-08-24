@@ -155,7 +155,7 @@ process.on('uncaughtException', (err) => {
       notifyAdmin('Uncaught Exception', formatProcessErrorForAdmin(err)).catch(() => {});
     }).catch(() => {});
   } catch {}
-  // Do not exit: PM2 will restart on hard crashes. The error is surfaced
-  // and the process continues running so in-flight tool sessions can
-  // complete.
+  // We deliberately don't exit: an uncaught exception here is almost always
+  // WhatsApp/Puppeteer noise, and terminating would cut off in-flight turns.
+  // A real process death (OOM, signal) is still handled by PM2.
 });

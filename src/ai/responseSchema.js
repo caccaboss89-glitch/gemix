@@ -286,8 +286,6 @@ function parseStructuredReply(raw) {
 }
 
 export {
-  MAX_REPLY_ATTACHMENTS,
   buildGemixResponseFormat,
   parseStructuredReply
-
 };

@@ -5,9 +5,6 @@
 // from the text and sent as separate WhatsApp media messages.
 // Persists last seen release ID via systemState.
 
-import fs from 'fs';
-import path from 'path';
-import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { getSubscribedChats } from '../tools/releaseNotify.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
@@ -25,18 +22,6 @@ function _loadState() {
   const state = getSystemState('releases');
   if (state && state.lastReleaseId) {
     lastCheckedReleaseId = state.lastReleaseId;
-    return;
-  }
-
-
-  const OLD_FILE = path.join(constants.DATA_DIR, 'releaseMonitor.json');
-  if (fs.existsSync(OLD_FILE)) {
-    try {
-      const oldState = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
-      if (oldState.lastReleaseId) {
-        lastCheckedReleaseId = oldState.lastReleaseId;
-      }
-    } catch { }
   }
 }
 

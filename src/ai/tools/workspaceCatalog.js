@@ -107,4 +107,4 @@ function workspaceTools() {
   ];
 }
 
-export { WORKSPACE_PATH_HINT, workspaceTools };
+export { workspaceTools };

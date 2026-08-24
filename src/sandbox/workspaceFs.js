@@ -159,13 +159,10 @@ function wipeWorkspace(workspaceId) {
 }
 
 export {
-  QUOTA_BYTES,
   ensureWorkspace,
   ensureAttachmentsDir,
   ensureWorkspaceWritable,
   sandboxUserString,
-  workspaceSizeBytes,
-  workspaceQuotaState,
   checkWorkspaceQuota,
   assertWorkspaceCapacity,
   wipeWorkspace

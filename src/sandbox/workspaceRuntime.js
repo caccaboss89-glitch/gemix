@@ -50,7 +50,13 @@ const PROXY_PORT = envConfig.GEMIX_SANDBOX_PROXY_PORT;
 const PROXY_URL = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
 const WORKSPACE_QUOTA_BYTES = constants.WORKSPACE_QUOTA_MB * 1024 * 1024;
 
-/** Map<workspaceId, WorkspaceContainerEntry> */
+/**
+ * Map<workspaceId, Promise<WorkspaceContainerEntry>>.
+ *
+ * The entry is the boot promise itself, not the container: a caller that
+ * arrives mid-boot awaits the same promise as the one that started it, so
+ * there is a single place where "is it ready" is answered.
+ */
 const _pool = new Map();
 
 function _boundedName(prefix, identity, nonce, maxLength = 63) {
@@ -208,65 +214,50 @@ async function _spawnContainer(workspaceId) {
   };
 }
 
+/** Whether Docker still reports this entry's container as running. */
+async function _isAlive(entry) {
+  try { return Boolean((await entry.container.inspect()).State?.Running); }
+  catch { return false; }
+}
+
 /**
  * Public API: get (or spawn) the running container for this workspace.
- * Concurrent calls share the same boot promise.
+ *
+ * Concurrent callers share one boot: whoever finds a pooled promise awaits it
+ * and then checks liveness, and a container Docker no longer reports as running
+ * is purged and replaced.
  */
 async function getOrCreate(workspaceId) {
   if (!workspaceId) throw new Error('workspaceId is required');
 
-  let entry = _pool.get(workspaceId);
-  if (entry && entry._bootPromise) {
-    await entry._bootPromise;
-    const ready = _pool.get(workspaceId);
-    if (!ready || !ready.container) {
-      throw new Error(`workspace container boot failed for ${workspaceId}`);
+  const pending = _pool.get(workspaceId);
+  if (pending) {
+    let entry = null;
+    try { entry = await pending; }
+    catch { /* that boot failed; fall through and start a new one */ }
+    if (entry && await _isAlive(entry)) {
+      entry.lastUsedAt = Date.now();
+      return entry;
     }
-    ready.lastUsedAt = Date.now();
-    return ready;
-  }
-  if (entry) {
-    // Validate the container is still alive on docker side.
-    try {
-      const info = await entry.container.inspect();
-      if (info.State && info.State.Running) {
-        entry.lastUsedAt = Date.now();
-        return entry;
-      }
-    } catch { /* container gone */ }
-    log.warn(`Stale workspace container for ${workspaceId}, recreating`);
-    await _killEntry(entry).catch(err => log.warn(`stale purge: ${err.message}`));
-    _pool.delete(workspaceId);
+    // Drop it only if nobody replaced it while we were awaiting.
+    if (_pool.get(workspaceId) === pending) _pool.delete(workspaceId);
+    if (entry) {
+      log.warn(`Stale workspace container for ${workspaceId}, recreating`);
+      await _killEntry(entry).catch(err => log.warn(`stale purge: ${err.message}`));
+    }
   }
 
-  // Another concurrent caller may have started boot while we were checking.
-  entry = _pool.get(workspaceId);
-  if (entry && entry._bootPromise) {
-    await entry._bootPromise;
-    const ready = _pool.get(workspaceId);
-    if (!ready || !ready.container) {
-      throw new Error(`workspace container boot failed for ${workspaceId}`);
-    }
-    ready.lastUsedAt = Date.now();
-    return ready;
-  }
-  if (entry && entry.container) {
+  const boot = _spawnContainer(workspaceId).then((entry) => {
     entry.lastUsedAt = Date.now();
+    log.info(`workspace container ready workspace=${workspaceId} container=${entry.containerName}`);
     return entry;
-  }
-
-  const bootPromise = _spawnContainer(workspaceId);
-  const placeholder = { _bootPromise: bootPromise };
-  _pool.set(workspaceId, placeholder);
+  });
+  _pool.set(workspaceId, boot);
 
   try {
-    const fresh = await bootPromise;
-    fresh.lastUsedAt = Date.now();
-    _pool.set(workspaceId, fresh);
-    log.info(`workspace container ready workspace=${workspaceId} container=${fresh.containerName}`);
-    return fresh;
+    return await boot;
   } catch (err) {
-    _pool.delete(workspaceId);
+    if (_pool.get(workspaceId) === boot) _pool.delete(workspaceId);
     throw err;
   }
 }
@@ -311,8 +302,13 @@ function buildExecSpec({ command, timeoutMs } = {}) {
   );
   let argv;
   if (Array.isArray(command)) {
-    argv = command.filter(a => typeof a === 'string');
-    if (argv.length === 0) throw new Error('buildExecSpec: empty command');
+    if (command.length === 0) throw new Error('buildExecSpec: empty command');
+    // A non-string entry is a caller bug: dropping it would run a command
+    // nobody asked for, so it is refused instead.
+    if (command.some(a => typeof a !== 'string')) {
+      throw new Error('buildExecSpec: every argv entry must be a string');
+    }
+    argv = command;
   } else if (typeof command === 'string' && command.trim()) {
     argv = ['/bin/bash', '-lc', command];
   } else {
@@ -423,10 +419,6 @@ async function execInWorkspace(workspaceId, opts = {}) {
 }
 
 async function _killEntry(entry) {
-  if (entry && entry._bootPromise) {
-    try { entry = await entry._bootPromise; }
-    catch { return; }
-  }
   if (!entry) return;
   if (entry.container) {
     try { await entry.container.stop({ t: 2 }); } catch { /* already stopped */ }
@@ -441,22 +433,28 @@ async function _killEntry(entry) {
 }
 
 async function shutdown(workspaceId) {
-  const entry = _pool.get(workspaceId);
-  if (!entry) return;
+  const pending = _pool.get(workspaceId);
+  if (!pending) return;
   _pool.delete(workspaceId);
+  let entry = null;
+  // A boot that never succeeded left nothing to tear down.
+  try { entry = await pending; } catch { return; }
   await _killEntry(entry);
   log.info(`workspace container shut down workspace=${workspaceId}`);
 }
 
 async function shutdownAll() {
-  const entries = [..._pool.values()];
+  const pending = [..._pool.values()];
   _pool.clear();
-  await Promise.all(entries.map(e => _killEntry(e).catch(err => log.warn(`shutdownAll: ${err.message}`))));
+  await Promise.all(pending.map(p => p
+    .then(_killEntry)
+    .catch(err => log.warn(`shutdownAll: ${err.message}`))));
 }
 
 /**
- * Best-effort startup cleanup of dangling workspace containers. Matches both
- * supported runtime-name prefixes (`gemix-ws-`, `gemix-bw-`) and their labels.
+ * Best-effort startup cleanup of dangling workspace containers: the names
+ * workspaceContainerName produces, plus the label _spawnContainer stamps on
+ * them, so a container whose name was truncated is still matched.
  */
 async function cleanupOrphanContainers() {
   let docker;
@@ -466,8 +464,8 @@ async function cleanupOrphanContainers() {
   try {
     const containers = await docker.listContainers({ all: true });
     const orphans = containers.filter(c =>
-      c.Names.some(n => n.startsWith('/gemix-ws-') || n.startsWith('/gemix-bw-'))
-      || (c.Labels && (c.Labels['gemix.kind'] === 'workspace-runtime' || c.Labels['gemix.kind'] === 'build-workspace'))
+      c.Names.some(n => n.startsWith('/gemix-ws-'))
+      || c.Labels?.['gemix.kind'] === 'workspace-runtime'
     );
     if (orphans.length > 0) {
       log.info(`Found ${orphans.length} orphan workspace container(s). Cleaning up...`);
@@ -510,14 +508,19 @@ async function cleanupOrphanContainers() {
 
 // -- Idle reaper -----------------------------------------------------------
 const _reaper = setInterval(() => {
-  const now = Date.now();
-  for (const [workspaceId, entry] of _pool.entries()) {
-    if (!entry.lastUsedAt) continue;
-    if (now - entry.lastUsedAt > constants.SANDBOX_IDLE_TTL_MS) {
-      log.info(`reaping idle workspace container ${workspaceId} (idle ${(now - entry.lastUsedAt) / 1000 | 0}s)`);
+  for (const [workspaceId, pending] of [..._pool.entries()]) {
+    pending.then((entry) => {
+      if (!entry?.lastUsedAt) return null;
+      // Re-read the clock after the await: the container may have been used
+      // again while this tick was resolving.
+      const idleMs = Date.now() - entry.lastUsedAt;
+      if (idleMs <= constants.SANDBOX_IDLE_TTL_MS) return null;
+      // Leave it alone if a replacement took its place in the pool.
+      if (_pool.get(workspaceId) !== pending) return null;
       _pool.delete(workspaceId);
-      _killEntry(entry).catch(err => log.warn(`reap kill failed: ${err.message}`));
-    }
+      log.info(`reaping idle workspace container ${workspaceId} (idle ${idleMs / 1000 | 0}s)`);
+      return _killEntry(entry);
+    }).catch(err => log.warn(`reap failed for ${workspaceId}: ${err.message}`));
   }
 }, 60_000);
 _reaper.unref();

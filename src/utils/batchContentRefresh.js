@@ -69,7 +69,10 @@ function mergeBatchUnitsToContent(units, fallbackLatest = null) {
  * are then fused into the single content of the turn.
  *
  * @param {Array} entries - batch entries with .msg, .userName, .phoneJid
- * @param {{ chat: object, historyStorageId: string, isGroup: boolean, platform: string }} opts
+ * @param {{ chat: object, historyStorageId: string, isGroup: boolean, platform: string,
+ *   recentMessageIds?: Set|null }} opts - recentMessageIds comes from the turn's
+ *   own message window when the caller already fetched one; otherwise it is
+ *   fetched here.
  * @returns {Promise<{ content: string|Array, latestEntry: object }>}
  */
 async function materializeWhatsAppBatchContent(entries, opts) {
@@ -80,7 +83,7 @@ async function materializeWhatsAppBatchContent(entries, opts) {
   }
 
   const latest = pickLatestBatchEntry(list) || list[list.length - 1];
-  const recentMessageIds = await getRecentWhatsAppMessageIds(latest.msg);
+  const recentMessageIds = opts.recentMessageIds || await getRecentWhatsAppMessageIds(latest.msg);
   const groups = groupWhatsAppBatchEntries(list);
 
   const units = [];

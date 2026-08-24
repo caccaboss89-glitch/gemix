@@ -6,8 +6,6 @@
 // Uses per-file locking via taskStore.
 
 import fs from 'fs';
-
-const fsPromises = fs.promises;
 import constants from '../config/constants.js';
 import { getRomeISO  } from '../utils/time.js';
 import { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped  } from '../utils/recurrence.js';
@@ -25,9 +23,13 @@ import { clearProjection, sweepExpiredAttachments } from '../attachments/project
 import { clearParserCache, sweepParserCache } from '../parsers/parserCache.js';
 import { sweepAllHistoryStores } from '../utils/historySync.js';
 
+const fsPromises = fs.promises;
+
 const log = createLogger('Scheduler');
 
 const TASK_DELIVERY_MAX_ATTEMPTS = 3;
+const RELEASE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
+const WORKSPACE_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 let dedicatedClient = null;
 let lastMusicWrapCheckDate = null;
@@ -93,10 +95,65 @@ function setSchedulerWaClient(client) {
   dedicatedClient = client;
 }
 
+/** Run `fn` every `everyMs`, logging whatever it throws. Never holds the process open. */
+function _startInterval(everyMs, fn, label) {
+  const timer = setInterval(() => {
+    Promise.resolve()
+      .then(fn)
+      .catch(err => log.error(`${label} error:`, err));
+  }, everyMs);
+  timer.unref();
+  return timer;
+}
+
 /**
- * Start the task scheduler.
- * Initializes the task directory and begins checking for due tasks at regular intervals.
- * Also triggers daily music wrap monitoring and the hourly workspace sweep.
+ * The day gate for the monthly music wrap. Stamped only after a definitive
+ * success or no-op, so a client that is not ready yet — or a stats fetch that
+ * failed — can still retry later on the same day.
+ */
+async function _runMusicWrapCheck() {
+  const todayDateString = new Date()
+    .toLocaleString('sv-SE', { timeZone: 'Europe/Rome' })
+    .split(' ')[0];
+  if (lastMusicWrapCheckDate === todayDateString) return;
+
+  log.info(`New date detected (${todayDateString}), checking MusicWrap...`);
+  if (await checkAndSendMusicWrap(dedicatedClient)) {
+    lastMusicWrapCheckDate = todayDateString;
+  }
+}
+
+/**
+ * The 15-minute gate for the GitHub release check. Without a WhatsApp client
+ * the check is a no-op that would only burn the gate, so it waits instead; once
+ * one is attached the gate is stamped even on failure, to avoid retrying a
+ * broken API every minute.
+ */
+async function _runReleaseCheck() {
+  if (!dedicatedClient) return;
+  if (Date.now() - lastReleaseCheckTime < RELEASE_CHECK_INTERVAL_MS) return;
+  try {
+    await checkNewRelease(dedicatedClient);
+  } finally {
+    lastReleaseCheckTime = Date.now();
+  }
+}
+
+/** One task cycle, skipped while the previous one is still running. */
+async function _runTaskCycle() {
+  if (_cycleInFlight) {
+    log.warn('Previous scheduler cycle still running — skipping overlapping tick');
+    return;
+  }
+  _cycleInFlight = true;
+  try { await checkAndExecuteTasks(); }
+  finally { _cycleInFlight = false; }
+}
+
+/**
+ * Start every periodic job: due tasks, the monthly music wrap, the release
+ * check and the workspace sweep. Each keeps its own clock and its own state, so
+ * a slow or failing one never delays the others.
  */
 function startScheduler() {
   if (!fs.existsSync(constants.TASKS_DIR)) {
@@ -105,28 +162,13 @@ function startScheduler() {
 
   log.info('Started. Checking every', constants.SCHEDULER_INTERVAL_MS / 1000, 'seconds.');
 
-  const schedulerInterval = setInterval(async () => {
-    if (_cycleInFlight) {
-      log.warn('Previous scheduler cycle still running — skipping overlapping tick');
-      return;
-    }
-    _cycleInFlight = true;
-    try {
-      await checkAndExecuteTasks();
-    } catch (err) {
-      log.error('Cycle error:', err);
-    } finally {
-      _cycleInFlight = false;
-    }
-  }, constants.SCHEDULER_INTERVAL_MS);
-  schedulerInterval.unref();
+  _startInterval(constants.SCHEDULER_INTERVAL_MS, _runTaskCycle, 'Task cycle');
+  _startInterval(constants.SCHEDULER_INTERVAL_MS, _runMusicWrapCheck, 'MusicWrap check');
+  _startInterval(constants.SCHEDULER_INTERVAL_MS, _runReleaseCheck, 'ReleaseMonitor check');
+  _startInterval(WORKSPACE_SWEEP_INTERVAL_MS, _sweepStaleWorkspaces, 'Workspace sweep');
 
-  // Hourly: wipe idle workspaces and expired attachments past the TTL.
-  const workspaceSweepInterval = setInterval(() => {
-    _sweepStaleWorkspaces().catch(err => log.error('Workspace sweep error:', err));
-  }, 60 * 60 * 1000);
-  workspaceSweepInterval.unref();
-  // Initial sweep at startup.
+  // Idle workspaces from a previous run are swept once at startup rather than
+  // waiting out the first hour.
   _sweepStaleWorkspaces().catch(err => log.error('Workspace initial sweep error:', err));
 }
 
@@ -137,10 +179,19 @@ function _taskIsDue(task, nowTime) {
 
 /**
  * Deliver a scheduled task to all configured WhatsApp destinations.
- * Throws if any destination fails so the task is not finalized/advanced;
- * a later cycle can retry (successful destinations may receive the message again).
+ *
+ * Throws if any destination fails, so the caller can retry the whole delivery;
+ * a destination that already succeeded may receive the message again. Once the
+ * retries are spent the occurrence is lost — a one-time task is dropped and a
+ * recurring one moves on to its next date (see _finalizeDueTasks).
  */
 async function _deliverTask(task) {
+  // Deliveries go out through whatsappSender's own client reference; this is
+  // the readiness gate for it, checked before any message is built.
+  if (!dedicatedClient) {
+    throw new Error('Dedicated WhatsApp client not available');
+  }
+
   let messageText = stripOutgoingDeliveryArtifacts(
     stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, ''))
   );
@@ -154,9 +205,6 @@ async function _deliverTask(task) {
 
   if (!attempts.length) {
     throw new Error('Task has no WhatsApp destinations configured');
-  }
-  if (!dedicatedClient) {
-    throw new Error('Dedicated WhatsApp client not available');
   }
 
   const errors = [];
@@ -211,62 +259,39 @@ function _finalizeDueTasks(data, dueTasks, handledIds) {
       updatedTasks.push(t);
       continue;
     }
-    if (!handledIds.has(t.id)) {
-      // Delivery failed after all retries: drop the task.
+    const recurrence = normalizePersistedRecurrence(t.recurrence);
+    const delivered = handledIds.has(t.id);
+
+    // A one-time task that never went out has nowhere left to go; a recurring
+    // one loses only this occurrence and keeps the series alive, so a few
+    // minutes of WhatsApp being unreachable cannot silently end a reminder.
+    if (!delivered && !recurrence) {
+      log.warn(`Task ${t.id} dropped: delivery failed after all attempts`);
       continue;
     }
-    const recurrence = normalizePersistedRecurrence(t.recurrence);
-    if (recurrence) {
-      // Hops over excluded dates and stops once UNTIL is passed.
-      const next = advanceOccurrence(t.scheduledAt, recurrence);
-      if (next) {
-        t.scheduledAt = next;
-        updatedTasks.push(t);
-        log.info(`Recurring task ${t.id} rescheduled: ${t.scheduledAt}`);
-      } else {
-        log.info(`Recurring task ${t.id} ended (recurrence end reached).`);
-      }
+    if (!recurrence) continue; // one-time, delivered: done, not re-added
+
+    // Hops over excluded dates and stops once UNTIL is passed.
+    const next = advanceOccurrence(t.scheduledAt, recurrence);
+    if (!next) {
+      log.info(`Recurring task ${t.id} ended (recurrence end reached).`);
+      continue;
     }
-    // One-time handled task: delivered and done, not re-added.
+    t.scheduledAt = next;
+    updatedTasks.push(t);
+    if (delivered) {
+      log.info(`Recurring task ${t.id} rescheduled: ${next}`);
+    } else {
+      log.warn(`Recurring task ${t.id}: occurrence lost (delivery failed), rescheduled: ${next}`);
+    }
   }
 
   data.tasks = updatedTasks;
   return data;
 }
 
+/** Deliver every task whose time has come, then rewrite the files they live in. */
 async function checkAndExecuteTasks() {
-  const now = new Date();
-  const romeTimeStr = now.toLocaleString('sv-SE', { timeZone: 'Europe/Rome' });
-  const todayDateString = romeTimeStr.split(' ')[0];
-
-  if (lastMusicWrapCheckDate !== todayDateString) {
-    log.info(`New date detected (${todayDateString}), checking MusicWrap...`);
-    try {
-      // Only stamp the day gate after a definitive success/no-op so client-not-ready
-      // or stats fetch failure can still retry later while it is the 1st.
-      const handled = await checkAndSendMusicWrap(dedicatedClient);
-      if (handled) {
-        lastMusicWrapCheckDate = todayDateString;
-      }
-    } catch (err) {
-      log.error('MusicWrap check error:', err);
-    }
-  }
-
-  if (now.getTime() - lastReleaseCheckTime >= 15 * 60 * 1000) {
-    // Stamp only after a real attempt with a client (null client no-ops and
-    // would otherwise burn the 15-minute gate before dedicated WA is ready).
-    if (dedicatedClient) {
-      try {
-        await checkNewRelease(dedicatedClient);
-        lastReleaseCheckTime = now.getTime();
-      } catch (err) {
-        log.error('ReleaseMonitor - error during check:', err);
-        lastReleaseCheckTime = now.getTime();
-      }
-    }
-  }
-
   let files;
   try {
     files = (await fsPromises.readdir(constants.TASKS_DIR)).filter(f => f.endsWith('.json'));
@@ -274,7 +299,7 @@ async function checkAndExecuteTasks() {
     return;
   }
 
-  const nowTime = now.getTime();
+  const nowTime = Date.now();
   for (const file of files) {
     const fileId = file.replace('.json', '');
     // Plain read: taking the write lock here rewrote every task file on every
@@ -287,7 +312,8 @@ async function checkAndExecuteTasks() {
     if (!dueTasks.length) continue;
 
     // "Handled" = delivered OR intentionally skipped (occurrence on an excepted
-    // date). Both advance a recurring task; only a failed delivery drops it.
+    // date). Both advance a recurring task; a failed delivery drops a one-time
+    // task and costs a recurring one only this occurrence.
     const handledIds = new Set();
     for (const task of dueTasks) {
       const norm = normalizePersistedRecurrence(task.recurrence);

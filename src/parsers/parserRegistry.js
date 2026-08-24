@@ -201,7 +201,6 @@ async function parse(absPath, opts = {}) {
 
 export {
   PARSE_ERROR,
-  REFUSED_EXTS,
   familyFor,
   _cacheParameters,
   parse

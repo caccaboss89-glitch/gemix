@@ -290,7 +290,6 @@ function listWorkspaceStates() {
 }
 
 export {
-  LOCK_MAX_TTL_MS,
   touchActivity,
   readWorkspaceActivity,
   acquireWorkspaceLock,

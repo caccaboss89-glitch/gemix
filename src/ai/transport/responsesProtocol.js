@@ -19,9 +19,6 @@
 //   3. Only item shapes on the profile's replay allowlist go back out; anything
 //      else is dropped rather than echoed at a backend that never sent it.
 
-/** Content part types accepted inside a user/system input item. */
-const INPUT_PART_TYPES = new Set(['input_text', 'input_image', 'input_file']);
-
 /** Item types every Responses provider accepts back in `input[]`. */
 const BASE_REPLAYABLE_ITEM_TYPES = Object.freeze([
   'reasoning',
@@ -254,6 +251,8 @@ class ResponseAssembler {
   constructor() {
     /** @type {Map<string, {order: number, item: object, done: boolean}>} */
     this._items = new Map();
+    /** @type {Map<string, string>} item id -> _items key, kept in sync by _upsert */
+    this._idToKey = new Map();
     this._order = 0;
     this.status = null;
     this.responseId = null;
@@ -271,6 +270,7 @@ class ResponseAssembler {
   }
 
   _upsert(key, item, done) {
+    if (item?.id) this._idToKey.set(item.id, key);
     const existing = this._items.get(key);
     if (!existing) {
       this._items.set(key, { order: this._order++, item, done });
@@ -324,12 +324,7 @@ class ResponseAssembler {
           const id = item.id;
           // Match by id so a final item lands on the entry the stream already
           // built for it instead of duplicating it.
-          let key = null;
-          if (id) {
-            for (const [candidate, entry] of this._items) {
-              if (entry.item?.id === id) { key = candidate; break; }
-            }
-          }
+          const key = id ? this._idToKey.get(id) : null;
           this._upsert(key || (id ? `id:${id}` : `ord:${this._order}`), item, true);
         }
       }
@@ -358,7 +353,7 @@ class ResponseAssembler {
     };
   }
 
-  /** True only after at least one complete output item has been assembled. */
+  /** True once at least one output item has been recorded, complete or not. */
   get hasOutputItems() {
     return this._items.size > 0;
   }
@@ -447,7 +442,6 @@ function readResponse(response, opts = {}) {
 }
 
 export {
-  INPUT_PART_TYPES,
   BASE_REPLAYABLE_ITEM_TYPES,
   wirePart,
   wireItem,

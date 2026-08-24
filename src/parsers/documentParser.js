@@ -247,9 +247,6 @@ async function parseDocument(absPath, opts = {}) {
 }
 
 export {
-  ARCHIVE_EXTS,
-  DOCUMENT_EXTS,
-  THIN_TEXT_CHARS_PER_PAGE,
   handlesExt,
   ocrAvailable,
   parseDocument

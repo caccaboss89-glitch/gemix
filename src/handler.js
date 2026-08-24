@@ -36,7 +36,7 @@ import {
 } from './ai/responsesItems.js';
 import {
   buildStaticInstructions,
-  promptToolsFingerprint
+  toolsFingerprint
 } from './ai/systemPrompt.js';
 import { prepareTurn, reloadSettings } from './ai/turnPreparation.js';
 import { executeToolRound } from './ai/toolRoundController.js';
@@ -68,6 +68,7 @@ import { providerFailureReply } from './ai/providers/errorPolicy.js';
 import { notifyAdmin } from './utils/adminNotifier.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
 import { wrapSystemReminder  } from './utils/systemTags.js';
+import { systemReply, textReply  } from './utils/replyEnvelope.js';
 
 const log = createLogger('Handler');
 
@@ -75,6 +76,25 @@ function extractPlainTextContent(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.find(p => p.type === 'input_text')?.text || '';
   return '';
+}
+
+/**
+ * The first token of a message, lowercased, for slash-command matching.
+ *
+ * Platform content arrives labelled as `[DATE, TIME] UserName: /command …`, so
+ * the token is taken after the colon that closes the label — the one right
+ * after "]", never a colon the body itself contains. Unlabelled content is
+ * matched from its own start.
+ *
+ * @param {string|Array} content - ctx.content
+ * @returns {string}
+ */
+function extractLeadingCommand(content) {
+  const text = extractPlainTextContent(content).trim().toLowerCase();
+  const bracketEndIdx = text.indexOf(']');
+  const separatorColonIdx = bracketEndIdx !== -1 ? text.indexOf(':', bracketEndIdx) : -1;
+  if (separatorColonIdx === -1) return text;
+  return text.substring(separatorColonIdx + 1).trim().split(/\s+/)[0] || text;
 }
 
 function getReleaseNotifyTarget(ctx, ui) {
@@ -117,61 +137,30 @@ async function handleMessage(ctx) {
     const ui = ctx.userIdentity;
     const isActiveMember = ui.isActiveMember;
     const userIsAdmin = Boolean(ui.isAdmin);
-    let maintenanceCommand = extractPlainTextContent(ctx.content).trim().toLowerCase();
-
-    // Extract command from formatted message: [DATE, TIME] UserName: /command ...
-    // Find the colon right after the "]" (the username separator, not one that
-    // may appear inside the message body itself) and extract the first token after it.
-    const bracketEndIdx = maintenanceCommand.indexOf(']');
-    const separatorColonIdx = bracketEndIdx !== -1
-      ? maintenanceCommand.indexOf(':', bracketEndIdx)
-      : -1;
-    if (separatorColonIdx !== -1) {
-      const afterColon = maintenanceCommand.substring(separatorColonIdx + 1).trim();
-      const firstToken = afterColon.split(/\s+/)[0];
-      if (firstToken) {
-        maintenanceCommand = firstToken;
-      }
-    }
-
-    const releaseNotifyTarget = getReleaseNotifyTarget(ctx, ui);
 
     // -- Maintenance gate --
     // Blocks every non-admin request with a fixed message. Admins always pass.
+    // Nothing above is parsed on the normal path: the command and its delivery
+    // target are only needed once the gate has actually closed.
     if (envConfig.MAINTENANCE_MODE && constants.MAINTENANCE_ADMIN_ONLY && !userIsAdmin) {
-      if (maintenanceCommand === constants.MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
-        const enableResult = enableReleaseNotify(releaseNotifyTarget.chatId, releaseNotifyTarget.waJid);
-        const alreadyEnabled = Boolean(enableResult.alreadyEnabled);
-        const text = alreadyEnabled
+      const command = extractLeadingCommand(ctx.content);
+      if (command === constants.MAINTENANCE_RELEASE_NOTIFY_COMMAND.toLowerCase()) {
+        const target = getReleaseNotifyTarget(ctx, ui);
+        const enableResult = enableReleaseNotify(target.chatId, target.waJid);
+        const text = enableResult.alreadyEnabled
           ? buildMaintenanceReleaseAlreadyEnabledMessage()
           : buildMaintenanceReleaseEnabledMessage();
-        if (ctx.platform === constants.PLATFORM_DISCORD && releaseNotifyTarget.waJid) {
+        if (ctx.platform === constants.PLATFORM_DISCORD && target.waJid) {
           try {
-            await sendWhatsAppDirect(releaseNotifyTarget.waJid, text);
+            await sendWhatsAppDirect(target.waJid, text);
           } catch (err) {
             log.warn(`maintenance release notify mirror to WhatsApp failed: ${err.message}`);
           }
         }
-        return {
-          text,
-          voiceBuffer: null,
-          isVoiceOnly: false,
-          attachments: [],
-          discordTitle: '',
-          modelUsed: null,
-          systemMessage: true
-        };
+        return systemReply(text);
       }
       log.info(`   Maintenance mode: ignoring non-admin request from ${ui.taskFileId}`);
-      return {
-        text: constants.MAINTENANCE_USER_MESSAGE,
-        voiceBuffer: null,
-        isVoiceOnly: false,
-        attachments: [],
-        discordTitle: '',
-        modelUsed: null,
-        systemMessage: true
-      };
+      return systemReply(constants.MAINTENANCE_USER_MESSAGE);
     }
 
     const prepared = await prepareTurn(ctx, ui);
@@ -187,6 +176,40 @@ async function handleMessage(ctx) {
         item._staticPrefix = true;
         input.unshift(item);
       }
+    };
+
+    /**
+     * Per-round state: the caller's latest preferences, the tools this round
+     * offers, a static prefix realigned whenever that set changed, and the
+     * reply schema. Shared by the agent loop and the forced wrap-up so the two
+     * can never prepare a call differently.
+     */
+    const prepareRound = () => {
+      // Picks up a manage_preferences change for this call's reasoning effort.
+      reloadSettings(ctx, ui);
+
+      const roundTools = getToolsForUser({
+        ...userCtx,
+        isActiveMember,
+        isAdmin: userIsAdmin
+      });
+      const nextFp = toolsFingerprint(roundTools);
+      if (nextFp !== toolsFp) {
+        // Keep the cached system prefix aligned with the tool set actually
+        // offered in this round.
+        staticInstructions = buildStaticInstructions(ctx, roundTools);
+        toolsFp = nextFp;
+        syncStaticPrefix();
+        log.info('   Static system prefix rebuilt (tool fingerprint changed mid-turn)');
+      }
+
+      // Discord keeps conversation_title in the strict schema on every turn.
+      // An empty value preserves the title and keeps the cached prefix stable.
+      const responseFormat = buildGemixResponseFormat({
+        includeTitle: isDiscord,
+        allowVoice
+      });
+      return { roundTools, responseFormat };
     };
 
     // One outbound message per destination per turn (per-round tool caps are
@@ -217,31 +240,7 @@ async function handleMessage(ctx) {
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
       log.info(`[${pLabel}] AI call (round ${rounds}/${constants.MAX_TOOL_ROUNDS})`);
 
-      // Pick up a manage_preferences change for this call's reasoning effort.
-      // Static prefix stays byte-identical unless the tool fingerprint changes.
-      reloadSettings(ctx, ui);
-
-      const roundTools = getToolsForUser({
-        ...userCtx,
-        isActiveMember,
-        isAdmin: userIsAdmin
-      });
-      const nextFp = promptToolsFingerprint(ctx);
-      if (nextFp !== toolsFp) {
-        // Keep the cached system prefix aligned with the tool set actually
-        // offered in this round.
-        staticInstructions = buildStaticInstructions(ctx);
-        toolsFp = nextFp;
-        syncStaticPrefix();
-        log.info('   Static system prefix rebuilt (tool fingerprint changed mid-turn)');
-      }
-
-      // Discord keeps conversation_title in the strict schema on every turn.
-      // An empty value preserves the title and keeps the cached prefix stable.
-      const responseFormat = buildGemixResponseFormat({
-        includeTitle: isDiscord,
-        allowVoice
-      });
+      const { roundTools, responseFormat } = prepareRound();
       const callOpts = {
         maxTurns: constants.MAX_TOOL_ROUNDS,
         requestId: ctx.requestId,
@@ -341,15 +340,10 @@ async function handleMessage(ctx) {
             ? '   Empty AI response after retry, sending fallback'
             : '   Empty AI response, sending fallback'
         );
-        return {
-          text: FALLBACK_ERROR_PREFIX,
-          voiceBuffer: null,
-          isVoiceOnly: false,
-          attachments: [],
+        return systemReply(FALLBACK_ERROR_PREFIX, {
           discordTitle: responseCtx.discordTitle || '',
-          modelUsed: lastModelUsed,
-          systemMessage: true
-        };
+          modelUsed: lastModelUsed
+        });
       }
 
       // ── Research badge ──────────────────────────────────────────────────
@@ -364,14 +358,12 @@ async function handleMessage(ctx) {
         }
       }
 
-      return {
+      return textReply({
         text: text || null,
-        voiceBuffer: null,
-        isVoiceOnly: false,
         attachments: finalAttachments,
         discordTitle: responseCtx.discordTitle || '',
         modelUsed: lastModelUsed
-      };
+      });
     }
 
     // ── Forced text wrap-up (work deadline or tool-round budget) ────────
@@ -383,22 +375,7 @@ async function handleMessage(ctx) {
     let wrapUpAttachments = [];
     let wrapUpVoice = false;
     try {
-      reloadSettings(ctx, ui);
-      const wrapUpTools = getToolsForUser({
-        ...userCtx,
-        isActiveMember,
-        isAdmin: userIsAdmin
-      });
-      const nextFp = promptToolsFingerprint(ctx);
-      if (nextFp !== toolsFp) {
-        staticInstructions = buildStaticInstructions(ctx);
-        toolsFp = nextFp;
-        syncStaticPrefix();
-      }
-      const responseFormat = buildGemixResponseFormat({
-        includeTitle: isDiscord,
-        allowVoice
-      });
+      const { roundTools: wrapUpTools, responseFormat } = prepareRound();
       const wrapUpNote = workBudgetLimitReached
         ? 'This turn reached its work deadline. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
@@ -441,16 +418,14 @@ async function handleMessage(ctx) {
       wrapUpText = appendResearchBadge(wrapUpText, responseCtx.researchStats);
     }
 
-    const wrapText = wrapUpText.trim() ? wrapUpText : FALLBACK_ERROR_PREFIX;
-    return {
-      text: wrapText,
-      voiceBuffer: null,
-      isVoiceOnly: false,
+    return textReply({
+      text: wrapUpText.trim() ? wrapUpText : FALLBACK_ERROR_PREFIX,
       attachments: wrapUpAttachments,
       discordTitle: responseCtx.discordTitle || '',
       modelUsed: lastModelUsed,
+      // An empty wrap-up means the fallback banner is going out instead.
       systemMessage: !wrapUpText.trim()
-    };
+    });
 
   } catch (err) {
     const platformLabel = (typeof ctx?.platform === 'string' && ctx.platform)
@@ -466,42 +441,26 @@ async function handleMessage(ctx) {
       if (providerReply.notifyAdmin) {
         await notifyAdmin('AI Provider', `${err.kind}: ${err.message}`).catch(() => {});
       }
-      return {
-        text: providerReply.text,
-        voiceBuffer: null,
-        isVoiceOnly: false,
-        attachments: [],
-        discordTitle: responseCtx.discordTitle || '',
-        modelUsed: null,
-        systemMessage: true
-      };
+      return systemReply(providerReply.text, {
+        discordTitle: responseCtx.discordTitle || ''
+      });
     }
 
     log.error(`\n❌ [${platformLabel}] HANDLER ERROR:`);
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
 
-    return {
-      text: FALLBACK_ERROR_PREFIX,
-      voiceBuffer: null,
-      isVoiceOnly: false,
-      attachments: [],
-      discordTitle: responseCtx.discordTitle || '',
-      modelUsed: null,
-      systemMessage: true
-    };
+    return systemReply(FALLBACK_ERROR_PREFIX, {
+      discordTitle: responseCtx.discordTitle || ''
+    });
   } finally {
-    // Durable history expires on the shared 4h sweep. The read-only attachment
-    // projection was already reconciled with this turn's visible context; its
-    // removal never deletes the durable raw used for later rehydration.
-    //
-    // Drop per-call notification dedup entries so subsequent AI calls can
-    // fire intermediate notifications.
+    // Drop the per-call notification dedup entries, so the next turn on this
+    // chat can fire its own intermediate notifications, and release both
+    // budgets' timers however the turn ended.
     try { clearCallNotifications(ctx); } catch { /* best effort */ }
     turnBudgets.work.dispose();
     turnBudgets.root.dispose();
   }
 }
 
-export { handleMessage
-};
+export { handleMessage };

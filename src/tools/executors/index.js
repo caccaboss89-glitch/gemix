@@ -13,7 +13,7 @@ import { WEB_TOOL_EXECUTORS } from './web.js';
 import { WORKSPACE_TOOL_EXECUTORS } from './workspace.js';
 
 function _mergeExecutorMaps(groups) {
-  const registry = {};
+  const registry = Object.create(null);
   for (const group of groups) {
     for (const [name, executor] of Object.entries(group)) {
       if (registry[name]) throw new Error(`Duplicate tool executor registration: ${name}`);
@@ -35,7 +35,7 @@ const TOOL_EXECUTORS = _mergeExecutorMaps([
 ]);
 
 function getToolExecutor(name) {
-  return TOOL_EXECUTORS[name] || null;
+  return Object.hasOwn(TOOL_EXECUTORS, name) ? TOOL_EXECUTORS[name] : null;
 }
 
 export { TOOL_EXECUTORS, getToolExecutor };

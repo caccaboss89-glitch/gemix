@@ -234,7 +234,7 @@ function stripSystemMessages(text) {
   const kept = [];
   for (const line of lines) {
     const trimmed = line.trimStart();
-    // isSystemMessage() looks at the leading prefix (anchored regexes), so it
+    // isSystemMessage() compares literal prefixes with startsWith(), so it
     // matches both bare system messages and paragraphs that start with one.
     if (trimmed && isSystemMessage(trimmed)) continue;
     kept.push(line);

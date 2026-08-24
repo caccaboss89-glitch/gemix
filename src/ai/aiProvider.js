@@ -152,7 +152,6 @@ function _setTransportForTests(transport) {
 export {
   callAI,
   getCredentialProvider,
-  getTransport,
   _resetProviderClientForTests,
   _setTransportForTests
 };

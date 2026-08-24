@@ -93,7 +93,9 @@ function readAgentFileBuffer(workspaceId, raw, maxBytes = constants.PARSE_MAX_DO
       if (read === 0) break;
       offset += read;
     }
-    return { ...opened, fd: undefined, buffer: offset === buffer.length ? buffer : buffer.subarray(0, offset) };
+    const safe = { ...opened, buffer: offset === buffer.length ? buffer : buffer.subarray(0, offset) };
+    delete safe.fd;
+    return safe;
   } finally {
     try { fs.closeSync(opened.fd); } catch { /* already closed */ }
   }
@@ -306,7 +308,6 @@ function stageUniqueWorkspaceBuffer(workspaceId, desiredName, buffer) {
 }
 
 export {
-  openAgentFile,
   readAgentFileBuffer,
   listAgentDirectory,
   snapshotAgentFile,

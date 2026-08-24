@@ -326,13 +326,10 @@ async function transcribeAudioFile(absPath, opts = {}) {
 export {
   STT_STATUS,
   STT_UNCONFIGURED_MESSAGE,
-  MAX_AUDIO_BYTES,
   contentHashOf,
   isSttConfigured,
   isCacheableSttStatus,
-  isXaiSttConfigured,
   normalizeSttLanguage,
-  resolveSttBackend,
   sttModelId,
   sttRouteId,
   transcribeAudioFile

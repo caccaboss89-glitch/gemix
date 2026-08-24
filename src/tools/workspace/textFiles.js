@@ -38,4 +38,4 @@ function isProbablyText(buffer) {
   return !decoded.includes('�');
 }
 
-export { isProbablyText, TEXT_SCAN_MAX_BYTES, SNIFF_BYTES };
+export { isProbablyText, TEXT_SCAN_MAX_BYTES };

@@ -6,7 +6,13 @@
 // per chat pair (not per caller). History: footer text opens a GemiX block; following
 // attachment-only fromMe messages stay GemiX until the other user writes or admin interrupts.
 
-import { buildWhatsAppHistory, sendWhatsAppResponse, _waMessageKey, waMessageHasUsableContent } from './shared.js';
+import {
+  buildWhatsAppHistory,
+  fetchWhatsAppMessageWindow,
+  sendWhatsAppResponse,
+  _waMessageKey,
+  waMessageHasUsableContent
+} from './shared.js';
 import { createWhatsAppClient } from './client.js';
 import { materializeWhatsAppBatchContent } from '../../utils/batchContentRefresh.js';
 import { getDedicatedClient, isDedicatedClientReady } from './dedicated.js';
@@ -100,6 +106,10 @@ async function onPersonalMessage(msg) {
 
   if (msg.fromMe && hasFooter(msg.body || '')) return;
 
+  // Pure check on the message alone, so it runs before any contact lookup:
+  // nothing GemiX could answer means nothing worth fetching.
+  if (!waMessageHasUsableContent(msg)) return;
+
   // A message from us in this personal chat is always the Account Owner — match
   // the label history uses, regardless of whether client.info.wid is populated
   // yet. Everyone else resolves through their contact card.
@@ -121,9 +131,6 @@ async function onPersonalMessage(msg) {
   log.info(`   User: ${userName}${msg.fromMe ? ' (YOU)' : ''}`);
   log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
-
-  // Admin↔user chat: shared history/workspace for the pair (not per-caller phoneJid).
-  if (!waMessageHasUsableContent(msg)) return;
 
   const messageKey = _waMessageKey(msg);
   if (!messageKey) log.warn('   WA personal message without stable key — may duplicate in history');
@@ -157,6 +164,12 @@ async function _handlePersonalBatch(entries) {
   const first = entries[0];
   const { chat, stopLockRenew } = first;
   let waPresence = null;
+  // One fetchMessages per turn, shared by the history build and the quote
+  // window. Closed over rather than stashed on a batch entry, which is not a
+  // channel the pipeline declares.
+  let messageWindow = null;
+  // Admin<->user chat: shared history/workspace for the pair, never per-caller.
+  const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);
 
   await runTurnPipeline({
     log,
@@ -173,14 +186,17 @@ async function _handlePersonalBatch(entries) {
     }),
     loadHistory: async ({ entries: ents }) => {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
-      const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);
       return fetchHistoryWithTimeout(
-        () => buildWhatsAppHistory(
-          chat,
-          PLATFORM_WA_PERSONAL,
-          historyStorageId,
-          excludeKeys.size > 0 ? excludeKeys : null
-        ),
+        async () => {
+          messageWindow = await fetchWhatsAppMessageWindow(chat);
+          return buildWhatsAppHistory(
+            chat,
+            PLATFORM_WA_PERSONAL,
+            historyStorageId,
+            excludeKeys.size > 0 ? excludeKeys : null,
+            messageWindow
+          );
+        },
         log,
         'WA-PERSONAL'
       );
@@ -191,12 +207,13 @@ async function _handlePersonalBatch(entries) {
       return { stop: () => waPresence.stop() };
     },
     buildHandlerCtx: async ({ entries: ents, history, historyLoadIncomplete, latest }) => {
-      const historyStorageId = resolvePersonalChatStorageId(chat.id._serialized);
       const { content, latestEntry } = await materializeWhatsAppBatchContent(ents, {
         chat,
         historyStorageId,
         isGroup: false,
-        platform: PLATFORM_WA_PERSONAL
+        platform: PLATFORM_WA_PERSONAL,
+        // Only missing if the history fetch above timed out before it landed.
+        recentMessageIds: messageWindow?.recentMessageIds || null
       });
       const lat = latestEntry || latest || ents[0];
       const personalOtherUserName = await resolvePersonalChatOtherName(chat);
@@ -218,13 +235,12 @@ async function _handlePersonalBatch(entries) {
       };
     },
     transformResponse: (response) => {
-      if (response.text) {
-        response.text = removeFooter(response.text);
-        if (!response.systemMessage) {
-          response.text = addFooter(response.text, getModelDisplayName(response.modelUsed));
-        }
+      if (!response.text) return response;
+      let text = removeFooter(response.text);
+      if (!response.systemMessage) {
+        text = addFooter(text, getModelDisplayName(response.modelUsed));
       }
-      return response;
+      return { ...response, text };
     },
     deliver: async (_ctx, response) => {
       await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_PERSONAL });

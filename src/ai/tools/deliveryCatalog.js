@@ -96,7 +96,6 @@ function buildReadSentMessagesTool(isAdmin) {
 }
 
 export {
-  MAX_DELIVERY_ATTACHMENTS,
   buildEmailTool,
   buildReadSentMessagesTool,
   buildWhatsAppTool

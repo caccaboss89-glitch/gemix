@@ -229,6 +229,8 @@ async function onDiscordMessage(msg) {
 
   if (parent.name.toLowerCase() !== DISCORD_THREAD_NAME) return;
 
+  if (!discordMessageHasUsableContent(msg)) return;
+
   const starterMessage = await channel.fetchStarterMessage().catch(() => null);
   if (starterMessage && msg.id === starterMessage.id) return;
 
@@ -250,8 +252,6 @@ async function onDiscordMessage(msg) {
     discordDisplayName: msg.author.displayName || msg.author.globalName,
     discordNickname: guildMember?.nickname
   });
-
-  if (!discordMessageHasUsableContent(msg)) return;
 
   const senderName = guildMember?.nickname || msg.author.displayName || msg.author.username;
   const historyStorageId = channel.id;
@@ -342,7 +342,7 @@ async function deliverDiscordResponse(channel, response) {
   };
 
   if (finalText) {
-    const chunks = finalText.length > 2000 ? splitDiscordMessage(finalText) : [finalText];
+    const chunks = splitDiscordMessage(finalText);
     if (chunks.length > 1) log.info(`   Message split into ${chunks.length} parts`);
 
     for (let i = 0; i < chunks.length; i++) {
@@ -406,10 +406,9 @@ async function _handleDiscordBatch(entries) {
       return fetchHistoryWithTimeout(
         async () => {
           messageWindow = await fetchDiscordMessageWindow(channel, starterMessageId);
-          const built = await buildDiscordHistory(
+          return buildDiscordHistory(
             channel, starterMessageId, historyStorageId, excludeMessageIds, messageWindow
           );
-          return built.history;
         },
         log,
         'DISCORD'
@@ -470,9 +469,11 @@ async function _handleDiscordBatch(entries) {
 /**
  * @param {Set<string>|string|null} [excludeMessageIds] - Discord message IDs to omit
  *   (current batch); the merged user turn is passed separately as ctx.content.
+ * @param {{raw: import('discord.js').Collection, recentMessageIds: Set<string>}} window
+ *   - shared with the quote window, one fetch per turn (see fetchDiscordMessageWindow)
+ * @returns {Promise<Array>} the history items, oldest first
  */
-async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds = null, prefetched = null) {
-  const window = prefetched || (await fetchDiscordMessageWindow(channel, starterMessageId));
+async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds, window) {
   const raw = window.raw;
   // Quote window from fetchDiscordMessageWindow (starter id is excluded there so
   // reply-to-starter is treated as outside recent model history).
@@ -563,7 +564,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
   const built = await mapWithConcurrency(messages, HISTORY_INGRESS_CONCURRENCY, processDiscordHistoryMessage);
   history.push(...built.filter(Boolean));
 
-  return { history, recentMessageIds };
+  return history;
 }
 
 export { initDiscord

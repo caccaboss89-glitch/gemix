@@ -27,7 +27,9 @@ const _batches = new Map();
  *
  * @param {string} key         Unique chat key (e.g. "wa_dedicated:<chatId>")
  * @param {object} entry       { ctx, contentParts } - raw pieces that the caller will merge
- * @param {Function} handler   async (mergedEntries: Array) => void - called with all entries
+ * @param {Function} handler   async (mergedEntries: Array) => void - called with all entries.
+ *   Only the first push for a key registers its handler; a handler passed on a
+ *   later push into the same open batch is ignored.
  */
 function pushMessage(key, entry, handler) {
   let batch = _batches.get(key);

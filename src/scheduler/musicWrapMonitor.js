@@ -6,9 +6,6 @@
 // Persists state via systemState.
 
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import constants from '../config/constants.js';
 import { ACTIVE_MEMBERS } from '../config/members.js';
 import { createLogger } from '../utils/logger.js';
 import { normalizeMarkdown } from '../utils/text.js';
@@ -26,19 +23,7 @@ const log = createLogger('MusicWrap');
  */
 function loadMonitorState() {
   const state = getSystemState('musicWrap');
-  if (state) return state;
-
-
-  const OLD_FILE = path.join(constants.DATA_DIR, 'musicWrapMonitor.json');
-  if (fs.existsSync(OLD_FILE)) {
-    try {
-      const oldState = JSON.parse(fs.readFileSync(OLD_FILE, 'utf-8'));
-
-      return oldState;
-    } catch { }
-  }
-
-  return { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
+  return state || { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
 }
 
 /**

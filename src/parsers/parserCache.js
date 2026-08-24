@@ -190,9 +190,7 @@ function clearParserCache(workspaceId) {
 }
 
 export {
-  CACHE_DIRNAME,
   GLOBAL_CAP_BYTES,
-  TTL_MS,
   cacheDir,
   cacheKey,
   hashFile,
