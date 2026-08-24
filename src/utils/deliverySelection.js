@@ -219,5 +219,4 @@ async function resolveDeliverySelection(entries, workspaceId = null, opts = {}) 
 export {
   resolveDeliverySelection,
   resolveLocalFileEntry
-
 };

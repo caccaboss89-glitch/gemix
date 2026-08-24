@@ -264,6 +264,36 @@ function advanceOccurrence(scheduledAtISO, rec) {
 }
 
 /**
+ * Advance a recurring task to its first occurrence strictly after `nowMs`.
+ * Occurrences between the stored date and that instant are skipped in one
+ * scheduler pass, so restarting after downtime cannot replay the backlog one
+ * tick at a time.
+ *
+ * @param {string} scheduledAtISO - Stored occurrence ISO.
+ * @param {object} rec - Normalized recurrence object.
+ * @param {number} [nowMs=Date.now()]
+ * @returns {{ next: string|null, skipped: number }}
+ */
+function advanceOccurrenceBeyond(scheduledAtISO, rec, nowMs = Date.now()) {
+  const boundary = Number(nowMs);
+  if (!Number.isFinite(boundary)) return { next: null, skipped: 0 };
+
+  let current = scheduledAtISO;
+  let skipped = 0;
+  // The scheduler only accepts dates within one year. Ten thousand iterations
+  // still cover every hourly occurrence in that window while bounding corrupt
+  // or hand-edited task data.
+  for (let i = 0; i < 10_000; i++) {
+    const next = advanceOccurrence(current, rec);
+    if (!next) return { next: null, skipped };
+    if (new Date(next).getTime() > boundary) return { next, skipped };
+    current = next;
+    skipped++;
+  }
+  return { next: null, skipped };
+}
+
+/**
  * Coerce a recurrence read back from a task file into the canonical shape.
  * @param {object|null} rec
  * @returns {{ freq: string, interval: number, byday: string[], exdate: string[], until: string|null }|null}
@@ -314,7 +344,7 @@ export {
   parseRecurrenceRule,
   normalizePersistedRecurrence,
   advanceOccurrence,
+  advanceOccurrenceBeyond,
   isDateSkipped,
   describeRecurrence
-
 };

@@ -101,12 +101,6 @@ async function materializeWhatsAppBatchContent(entries, opts) {
       recentMessageIds,
       { includeQuotedMedia: true }
     );
-    // Also stash on entries for any code that still reads contentParts
-    if (g.entries.length === 1) {
-      g.entries[0].contentParts = parts;
-    } else {
-      for (const ent of g.entries) ent.contentParts = parts;
-    }
     units.push({
       content: finalizeBatchContentParts(parts),
       entry: g.entries[g.entries.length - 1]
@@ -122,7 +116,7 @@ async function materializeWhatsAppBatchContent(entries, opts) {
  * single Message); every message in the debounce window is fused into the
  * single content of the turn.
  *
- * @param {Array} entries - batch entries with .msg, .userName, .contentParts optional
+ * @param {Array} entries - batch entries with .msg and .userName
  * @param {(entry: object, recentMessageIds: Set|null) => Promise<Array>} buildParts
  *   async builder for one message's contentParts
  * @param {{ recentMessageIds?: Set|null, pickLatest?: object|null }} [opts]
@@ -138,7 +132,6 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
   const units = [];
   for (const ent of list) {
     const parts = await buildParts(ent, recentMessageIds);
-    ent.contentParts = parts;
     units.push({
       content: finalizeBatchContentParts(parts),
       entry: ent
@@ -150,5 +143,4 @@ async function materializeDiscordBatchContent(entries, buildParts, opts = {}) {
 export {
   materializeWhatsAppBatchContent,
   materializeDiscordBatchContent
-
 };

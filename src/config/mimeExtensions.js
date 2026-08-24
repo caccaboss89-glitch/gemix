@@ -131,5 +131,4 @@ export {
   mimeBase,
   dottedExtensionForMime,
   mimeForExtension
-
 };

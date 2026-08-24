@@ -13,13 +13,14 @@ import { initDedicatedWhatsApp } from './platforms/whatsapp/dedicated.js';
 import { initPersonalWhatsApp } from './platforms/whatsapp/personal.js';
 import { initDiscord } from './platforms/discord/client.js';
 import { startScheduler, setSchedulerWaClient } from './scheduler/engine.js';
-import { setAdminNotifierClient } from './utils/adminNotifier.js';
+import { notifyAdmin, setAdminNotifierClient } from './utils/adminNotifier.js';
 import workspaceRuntime from './sandbox/workspaceRuntime.js';
 import { startInternalNotifyServer } from './utils/internalNotifyServer.js';
 import { startTempFileServer } from './utils/tempFileServer.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { runProviderPreflight, logFeatureBindings } from './ai/providers/preflight.js';
 import { getCredentialProvider } from './ai/aiProvider.js';
+import { initApiLogRetention } from './ai/apiClient.js';
 
 const { TASKS_DIR, DATA_DIR } = constants;
 const { STARTUP_SYSTEM_CLEANUP } = envConfig;
@@ -103,6 +104,8 @@ runStartupCleanup();
 
   initDiscord();
 
+  workspaceRuntime.init();
+  initApiLogRetention();
   startScheduler();
   startInternalNotifyServer();
   startTempFileServer();
@@ -141,20 +144,12 @@ function formatProcessErrorForAdmin(err) {
 
 process.on('unhandledRejection', (err) => {
   log.error('❌ Unhandled rejection:', err);
-  try {
-    import('./utils/adminNotifier.js').then(({ notifyAdmin }) => {
-      notifyAdmin('Unhandled Rejection', formatProcessErrorForAdmin(err)).catch(() => {});
-    }).catch(() => {});
-  } catch {}
+  notifyAdmin('Unhandled Rejection', formatProcessErrorForAdmin(err)).catch(() => {});
 });
 
 process.on('uncaughtException', (err) => {
   log.error('❌ Uncaught exception:', err);
-  try {
-    import('./utils/adminNotifier.js').then(({ notifyAdmin }) => {
-      notifyAdmin('Uncaught Exception', formatProcessErrorForAdmin(err)).catch(() => {});
-    }).catch(() => {});
-  } catch {}
+  notifyAdmin('Uncaught Exception', formatProcessErrorForAdmin(err)).catch(() => {});
   // We deliberately don't exit: an uncaught exception here is almost always
   // WhatsApp/Puppeteer noise, and terminating would cut off in-flight turns.
   // A real process death (OOM, signal) is still handled by PM2.

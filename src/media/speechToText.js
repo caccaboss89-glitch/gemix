@@ -45,6 +45,12 @@ const STT_STATUS = Object.freeze({
   ERROR: 'error'
 });
 
+/** Backend ids are identical to the feature-binding vocabulary. */
+const STT_BACKEND = Object.freeze({
+  XAI: 'xai-stt',
+  CLOUDFLARE: 'cloudflare-whisper'
+});
+
 const STT_UNCONFIGURED_MESSAGE =
   'Voice transcription is not configured on this deployment, so the spoken contents of this clip are unknown.';
 
@@ -65,9 +71,9 @@ function isXaiSttConfigured() {
  */
 function resolveSttBackend() {
   const bound = backendFor(resolveProviderProfile(), FEATURE.STT);
-  if (bound === 'xai-stt' && isXaiSttConfigured()) return bound;
-  const candidate = bound === 'xai-stt' ? fallbackBackendFor(bound) : bound;
-  if (candidate === 'cloudflare-whisper' && isCloudflareConfigured()) return candidate;
+  if (bound === STT_BACKEND.XAI && isXaiSttConfigured()) return bound;
+  const candidate = bound === STT_BACKEND.XAI ? fallbackBackendFor(bound) : bound;
+  if (candidate === STT_BACKEND.CLOUDFLARE && isCloudflareConfigured()) return candidate;
   return null;
 }
 
@@ -83,8 +89,8 @@ function normalizeSttLanguage(language) {
 
 /** The concrete model used by one backend. */
 function sttModelId(backend = resolveSttBackend()) {
-  if (backend === 'xai' || backend === 'xai-stt') return `xai:${envConfig.XAI_STT_PATH}`;
-  if (backend === 'cloudflare' || backend === 'cloudflare-whisper') return envConfig.CLOUDFLARE_STT_MODEL;
+  if (backend === STT_BACKEND.XAI) return `xai:${envConfig.XAI_STT_PATH}`;
+  if (backend === STT_BACKEND.CLOUDFLARE) return envConfig.CLOUDFLARE_STT_MODEL;
   return 'unconfigured';
 }
 
@@ -96,8 +102,8 @@ function sttRouteId() {
   const primary = resolveSttBackend();
   if (!primary) return 'unconfigured';
   const route = [sttModelId(primary)];
-  if (primary === 'xai-stt' && isCloudflareConfigured()) {
-    route.push(sttModelId('cloudflare-whisper'));
+  if (primary === STT_BACKEND.XAI && isCloudflareConfigured()) {
+    route.push(sttModelId(STT_BACKEND.CLOUDFLARE));
   }
   return route.join('>');
 }
@@ -153,10 +159,16 @@ function _toWav16k(absPath, signal) {
   });
 }
 
-/** Whatever the backend called the transcript. */
+/**
+ * Whatever the backend called the transcript. A missing field is a malformed
+ * response, while a present but empty string is a deterministic silent clip.
+ * @returns {{ok: true, text: string}|{ok: false}}
+ */
 function _extractTranscript(payload) {
+  if (!payload || typeof payload !== 'object') return { ok: false };
   const candidate = payload?.result?.text ?? payload?.text ?? payload?.transcript;
-  return typeof candidate === 'string' ? candidate.trim() : '';
+  if (typeof candidate !== 'string') return { ok: false };
+  return { ok: true, text: candidate.trim() };
 }
 
 /**
@@ -227,12 +239,18 @@ async function _transcribeCloudflare(absPath, buffer, opts) {
     const status = attempt.code === CF_ERROR.TRANSIENT && /in time/.test(attempt.error || '')
       ? STT_STATUS.TIMEOUT
       : STT_STATUS.ERROR;
-    return { ..._result(status, 'cloudflare'), message: attempt.error };
+    return { ..._result(status, STT_BACKEND.CLOUDFLARE), message: attempt.error };
   }
-  const transcript = _extractTranscript(attempt.payload);
-  return transcript
-    ? { ..._result(STT_STATUS.OK, 'cloudflare'), text: transcript, segments: _extractSegments(attempt.payload) }
-    : _result(STT_STATUS.NO_SPEECH, 'cloudflare');
+  const extracted = _extractTranscript(attempt.payload);
+  if (!extracted.ok) {
+    return {
+      ..._result(STT_STATUS.ERROR, STT_BACKEND.CLOUDFLARE),
+      message: 'Workers AI returned an unreadable transcription response.'
+    };
+  }
+  return extracted.text
+    ? { ..._result(STT_STATUS.OK, STT_BACKEND.CLOUDFLARE), text: extracted.text, segments: _extractSegments(attempt.payload) }
+    : _result(STT_STATUS.NO_SPEECH, STT_BACKEND.CLOUDFLARE);
 }
 
 // -- xAI ----------------------------------------------------------------------
@@ -252,10 +270,16 @@ async function _transcribeXai(absPath, buffer, opts) {
   const text = await res.text();
   let payload = null;
   try { payload = JSON.parse(text); } catch { /* handled below */ }
-  const transcript = _extractTranscript(payload);
-  return transcript
-    ? { ..._result(STT_STATUS.OK, 'xai'), text: transcript, segments: _extractSegments(payload) }
-    : _result(STT_STATUS.NO_SPEECH, 'xai');
+  const extracted = _extractTranscript(payload);
+  if (!extracted.ok) {
+    return {
+      ..._result(STT_STATUS.ERROR, STT_BACKEND.XAI),
+      message: 'xAI returned an unreadable transcription response.'
+    };
+  }
+  return extracted.text
+    ? { ..._result(STT_STATUS.OK, STT_BACKEND.XAI), text: extracted.text, segments: _extractSegments(payload) }
+    : _result(STT_STATUS.NO_SPEECH, STT_BACKEND.XAI);
 }
 
 /** A refusal about the content itself, which no other backend will reverse. */
@@ -284,17 +308,24 @@ async function transcribeAudioFile(absPath, opts = {}) {
     return _result(STT_STATUS.TOO_LONG, backend);
   }
 
+  let size;
+  try { size = fs.statSync(absPath).size; }
+  catch (err) {
+    log.warn(`Cannot read ${path.basename(absPath)} for transcription: ${err.message}`);
+    return _result(STT_STATUS.ERROR, backend);
+  }
+  if (size === 0) return _result(STT_STATUS.ERROR, backend);
+  if (size > MAX_AUDIO_BYTES) return _result(STT_STATUS.TOO_LONG, backend);
+
   let buffer;
   try { buffer = fs.readFileSync(absPath); }
   catch (err) {
     log.warn(`Cannot read ${path.basename(absPath)} for transcription: ${err.message}`);
     return _result(STT_STATUS.ERROR, backend);
   }
-  if (buffer.length === 0) return _result(STT_STATUS.ERROR, backend);
-  if (buffer.length > MAX_AUDIO_BYTES) return _result(STT_STATUS.TOO_LONG, backend);
 
   try {
-    if (backend === 'xai-stt') {
+    if (backend === STT_BACKEND.XAI) {
       try {
         return await _transcribeXai(absPath, buffer, opts);
       } catch (err) {
@@ -306,7 +337,7 @@ async function transcribeAudioFile(absPath, opts = {}) {
         if (err.name === 'AbortError' || err.name === 'TimeoutError') throw err;
         if (_isContentPolicyRefusal(err)) {
           log.warn('xAI refused the clip on content policy; not retrying elsewhere');
-          return { ..._result(STT_STATUS.CONTENT_POLICY, 'xai'), message: err.message };
+          return { ..._result(STT_STATUS.CONTENT_POLICY, STT_BACKEND.XAI), message: err.message };
         }
         if (!isCloudflareConfigured()) throw err;
         log.warn(`xAI transcription failed (${err.message}); falling back to Workers AI`);
@@ -324,6 +355,7 @@ async function transcribeAudioFile(absPath, opts = {}) {
 }
 
 export {
+  STT_BACKEND,
   STT_STATUS,
   STT_UNCONFIGURED_MESSAGE,
   contentHashOf,
@@ -332,5 +364,6 @@ export {
   normalizeSttLanguage,
   sttModelId,
   sttRouteId,
-  transcribeAudioFile
+  transcribeAudioFile,
+  _extractTranscript
 };

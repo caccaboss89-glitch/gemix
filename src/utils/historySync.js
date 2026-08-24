@@ -25,8 +25,9 @@ const RECENT_VOICE_MATCH_TOLERANCE_MS = 120_000;
 const RECENT_VOICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 let recentVoiceEntries = [];
+let recentVoiceEntriesLoaded = false;
 
-/** Per-user chain so concurrent syncFileToHistory RMW on history_meta.json cannot clobber. */
+/** Per-user chain: every read-modify-write of history_meta.json goes through it. */
 const _syncLocks = new Map();
 
 const _withSyncLock = (userId, fn) => withKeyedLock(_syncLocks, userId, fn);
@@ -92,6 +93,8 @@ function _normalizeHistoryFilename(historyFilename) {
 }
 
 function _loadRecentVoiceEntries() {
+  if (recentVoiceEntriesLoaded) return;
+  recentVoiceEntriesLoaded = true;
   try {
     if (fs.existsSync(GEMIX_VOICE_TEXT_CACHE_FILE)) {
       const raw = JSON.parse(fs.readFileSync(GEMIX_VOICE_TEXT_CACHE_FILE, 'utf-8'));
@@ -100,6 +103,10 @@ function _loadRecentVoiceEntries() {
   } catch {
     recentVoiceEntries = [];
   }
+}
+
+function _ensureRecentVoiceEntriesLoaded() {
+  if (!recentVoiceEntriesLoaded) _loadRecentVoiceEntries();
 }
 
 function _saveRecentVoiceEntries() {
@@ -115,6 +122,7 @@ function _saveRecentVoiceEntries() {
 }
 
 function _cleanupRecentVoiceEntries() {
+  _ensureRecentVoiceEntriesLoaded();
   const cutoff = Date.now() - RECENT_VOICE_MAX_AGE_MS;
   const before = recentVoiceEntries.length;
   recentVoiceEntries = recentVoiceEntries.filter(e => e && e.ts >= cutoff);
@@ -140,6 +148,7 @@ function storeRecentVoiceText(chatId, text, msgTimestampMs = null) {
  */
 function forgetRecentVoiceText(chatId) {
   if (!chatId) return true;
+  _ensureRecentVoiceEntriesLoaded();
   const before = recentVoiceEntries.length;
   recentVoiceEntries = recentVoiceEntries.filter(e => !e || e.chatId !== chatId);
   if (recentVoiceEntries.length === before) return true;
@@ -161,6 +170,7 @@ function forgetRecentVoiceText(chatId) {
  */
 function _matchRecentVoiceText(chatId, msgTimestampMs) {
   if (!chatId || !msgTimestampMs) return null;
+  _ensureRecentVoiceEntriesLoaded();
   let bestIdx = -1;
   let bestDiff = Infinity;
   for (let i = 0; i < recentVoiceEntries.length; i++) {
@@ -214,25 +224,23 @@ function _upsertMetaEntry(meta, historyFilename) {
   return { id, entry: meta[id], normalized };
 }
 
+/** Read, mutate and atomically rewrite one user's metadata under its lock. */
+function _mutateMeta(userId, mutate, afterSave = null) {
+  return _withSyncLock(userId, async () => {
+    const { metaFile } = getUserHistoryPaths(userId);
+    ensureDir(path.dirname(metaFile));
+    const meta = _loadMeta(metaFile, userId);
+    const changed = mutate(meta);
+    if (changed === false) return false;
+    const saved = _saveMeta(metaFile, meta, userId);
+    if (saved && afterSave) afterSave();
+    return saved;
+  });
+}
+
 function getStoredHistoryVoiceTranscription(userId, historyFilename) {
   const text = _loadEntryForFile(userId, historyFilename)?.voiceTranscription?.text;
   return typeof text === 'string' && text.trim() ? text.trim() : null;
-}
-
-function storeHistoryVoiceTranscription(userId, historyFilename, text) {
-  if (!userId || !historyFilename || !text) return false;
-  const { metaFile } = getUserHistoryPaths(userId);
-  const meta = _loadMeta(metaFile, userId);
-  const target = _upsertMetaEntry(meta, historyFilename);
-  if (!target.id || !target.normalized) return false;
-  meta[target.id] = {
-    ...target.entry,
-    voiceTranscription: {
-      text: String(text).trim(),
-      updatedAt: Date.now()
-    }
-  };
-  return _saveMeta(metaFile, meta, userId);
 }
 
 /**
@@ -264,50 +272,69 @@ function getStoredUserTranscription(userId, historyFilename, fingerprint = {}) {
  * @param {string} userId
  * @param {string} historyFilename
  * @param {{ text?: string, status: string, provider?: string, model?: string, contentHash?: string, routeId?: string, language?: string }} record
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-function storeUserTranscription(userId, historyFilename, record) {
+async function storeUserTranscription(userId, historyFilename, record) {
   if (!userId || !historyFilename || !record || !record.status) return false;
-  const { metaFile } = getUserHistoryPaths(userId);
-  const meta = _loadMeta(metaFile, userId);
-  const target = _upsertMetaEntry(meta, historyFilename);
-  if (!target.id || !target.normalized) return false;
-  meta[target.id] = {
-    ...target.entry,
-    userTranscription: {
-      text: typeof record.text === 'string' ? record.text.trim() : '',
-      status: record.status,
-      provider: record.provider || '',
-      model: record.model || '',
-      contentHash: record.contentHash || '',
-      routeId: record.routeId || '',
-      language: record.language || '',
-      updatedAt: Date.now()
-    }
-  };
-  return _saveMeta(metaFile, meta, userId);
+  return _mutateMeta(userId, (meta) => {
+    const target = _upsertMetaEntry(meta, historyFilename);
+    if (!target.id || !target.normalized) return false;
+    meta[target.id] = {
+      ...target.entry,
+      userTranscription: {
+        text: typeof record.text === 'string' ? record.text.trim() : '',
+        status: record.status,
+        provider: record.provider || '',
+        model: record.model || '',
+        contentHash: record.contentHash || '',
+        routeId: record.routeId || '',
+        language: record.language || '',
+        updatedAt: Date.now()
+      }
+    };
+  });
 }
 
 /**
- * Transcription for GemiX (bot) voice messages in chat history only.
- * History shows them as [Attachment: …] tags (assistant role cannot load audio);
- * reads history_meta first, otherwise matches the short cache written when
- * a voice reply is generated, then persists into history_meta.
- * Never used for end-user voice notes.
+ * Bind a GemiX voice file to the text of the reply that produced it. Reads the
+ * durable metadata first; otherwise claims the closest entry from the short
+ * generation-time cache and persists it before releasing that cache entry.
+ *
+ * @returns {Promise<string|null>} the transcript bound to the file, if any
  */
-function resolveGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestampMs) {
+async function bindGemixVoiceTranscription(userId, syncedPath, chatId, msgTimestampMs) {
   if (!userId || !syncedPath) return null;
-  const stored = getStoredHistoryVoiceTranscription(userId, syncedPath);
-  if (stored) return stored;
-  if (!chatId || !msgTimestampMs) return null;
-  const match = _matchRecentVoiceText(chatId, msgTimestampMs);
-  if (!match) return null;
-  // Once the text belongs to a file it leaves the short cache, so the same
-  // reply can never be attributed to a second voice message in this chat.
-  if (storeHistoryVoiceTranscription(userId, syncedPath, match.text)) {
-    _dropRecentVoiceEntry(match.index);
-  }
-  return match.text;
+  let boundText = null;
+  let claimedIndex = -1;
+
+  await _mutateMeta(userId, (meta) => {
+    const normalized = _normalizeHistoryFilename(syncedPath);
+    const stored = normalized
+      ? _findMetaEntry(meta, normalized).entry?.voiceTranscription?.text
+      : null;
+    if (typeof stored === 'string' && stored.trim()) {
+      boundText = stored.trim();
+      return false;
+    }
+    if (!chatId || !msgTimestampMs) return false;
+
+    const match = _matchRecentVoiceText(chatId, msgTimestampMs);
+    if (!match) return false;
+    const target = _upsertMetaEntry(meta, normalized);
+    if (!target.id || !target.normalized) return false;
+    boundText = match.text;
+    claimedIndex = match.index;
+    meta[target.id] = {
+      ...target.entry,
+      voiceTranscription: {
+        text: String(match.text).trim(),
+        updatedAt: Date.now()
+      }
+    };
+  }, () => {
+    if (claimedIndex >= 0) _dropRecentVoiceEntry(claimedIndex);
+  });
+  return boundText;
 }
 
 /**
@@ -412,71 +439,72 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
  * @param {object} [opts]
  * @param {number} [opts.maxAgeMs] - retention window; defaults to the workspace TTL
  * @param {number} [opts.now]
- * @returns {{deletedCount: number, kept: number}}
+ * @returns {Promise<{deletedCount: number, kept: number}>}
  */
-function sweepHistoryStore(userId, opts = {}) {
+async function sweepHistoryStore(userId, opts = {}) {
   if (!userId) return { deletedCount: 0, kept: 0 };
   const { historyDir, metaFile } = getUserHistoryPaths(userId);
   if (!fs.existsSync(historyDir)) return { deletedCount: 0, kept: 0 };
 
-  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
-  const maxAgeMs = Number.isFinite(opts.maxAgeMs) ? opts.maxAgeMs : HISTORY_RETENTION_MS;
+  return _withSyncLock(userId, async () => {
+    const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+    const maxAgeMs = Number.isFinite(opts.maxAgeMs) ? opts.maxAgeMs : HISTORY_RETENTION_MS;
 
-  let deletedCount = 0;
-  let kept = 0;
+    let deletedCount = 0;
+    let kept = 0;
 
-  let entries;
-  try { entries = fs.readdirSync(historyDir); }
-  catch (err) {
-    log.error(`sweepHistoryStore readdir failed for ${userId}: ${err.message}`);
-    return { deletedCount: 0, kept: 0 };
-  }
-
-  for (const entry of entries) {
-    const entryPath = path.join(historyDir, entry);
-    let stat;
-    try { stat = fs.statSync(entryPath); }
-    catch { continue; }
-
-    if ((now - stat.mtimeMs) <= maxAgeMs) { kept++; continue; }
-    try {
-      if (stat.isDirectory()) fs.rmSync(entryPath, { recursive: true, force: true });
-      else fs.unlinkSync(entryPath);
-      deletedCount++;
-    } catch (err) {
-      log.warn(`sweepHistoryStore remove failed for ${entry}: ${err.message}`);
+    let entries;
+    try { entries = fs.readdirSync(historyDir); }
+    catch (err) {
+      log.error(`sweepHistoryStore readdir failed for ${userId}: ${err.message}`);
+      return { deletedCount: 0, kept: 0 };
     }
-  }
 
-  // Sync meta file: drop entries whose target file/dir no longer exists.
-  if (deletedCount > 0 && fs.existsSync(metaFile)) {
-    try {
-      const meta = _loadMeta(metaFile, userId);
-      let changed = false;
-      for (const [id, entry] of Object.entries(meta)) {
-        const name = _getEntryFilename(entry);
-        if (!name) { delete meta[id]; changed = true; continue; }
-        // Strip trailing slash for fs.existsSync check
-        const diskName = name.endsWith('/') ? name.slice(0, -1) : name;
-        if (!fs.existsSync(path.join(historyDir, diskName))) {
-          delete meta[id];
-          changed = true;
-        }
+    for (const entry of entries) {
+      const entryPath = path.join(historyDir, entry);
+      let stat;
+      try { stat = fs.statSync(entryPath); }
+      catch { continue; }
+
+      if ((now - stat.mtimeMs) <= maxAgeMs) { kept++; continue; }
+      try {
+        if (stat.isDirectory()) fs.rmSync(entryPath, { recursive: true, force: true });
+        else fs.unlinkSync(entryPath);
+        deletedCount++;
+      } catch (err) {
+        log.warn(`sweepHistoryStore remove failed for ${entry}: ${err.message}`);
       }
-      if (changed) _saveMeta(metaFile, meta, userId);
-    } catch (err) {
-      log.warn(`sweepHistoryStore meta sync failed for ${userId}: ${err.message}`);
     }
-  }
 
-  if (deletedCount > 0) {
-    log.info(`sweepHistoryStore user=${userId} removed=${deletedCount} kept=${kept}`);
-  }
-  return { deletedCount, kept };
+    // Sync meta file: drop entries whose target file/dir no longer exists.
+    if (deletedCount > 0 && fs.existsSync(metaFile)) {
+      try {
+        const meta = _loadMeta(metaFile, userId);
+        let changed = false;
+        for (const [id, entry] of Object.entries(meta)) {
+          const name = _getEntryFilename(entry);
+          if (!name) { delete meta[id]; changed = true; continue; }
+          const diskName = name.endsWith('/') ? name.slice(0, -1) : name;
+          if (!fs.existsSync(path.join(historyDir, diskName))) {
+            delete meta[id];
+            changed = true;
+          }
+        }
+        if (changed) _saveMeta(metaFile, meta, userId);
+      } catch (err) {
+        log.warn(`sweepHistoryStore meta sync failed for ${userId}: ${err.message}`);
+      }
+    }
+
+    if (deletedCount > 0) {
+      log.info(`sweepHistoryStore user=${userId} removed=${deletedCount} kept=${kept}`);
+    }
+    return { deletedCount, kept };
+  });
 }
 
 /** Sweep every conversation's history store in one pass. */
-function sweepAllHistoryStores(now = Date.now()) {
+async function sweepAllHistoryStores(now = Date.now()) {
   let removed = 0;
   let dirs;
   try { dirs = fs.readdirSync(path.join(constants.DATA_DIR, 'users'), { withFileTypes: true }); }
@@ -484,17 +512,15 @@ function sweepAllHistoryStores(now = Date.now()) {
 
   for (const dirent of dirs) {
     if (!dirent.isDirectory()) continue;
-    removed += sweepHistoryStore(dirent.name, { now }).deletedCount;
+    removed += (await sweepHistoryStore(dirent.name, { now })).deletedCount;
   }
   return { removed };
 }
 
-_loadRecentVoiceEntries();
-
 export {
   getUserHistoryPaths,
   syncFileToHistory,
-  resolveGemixVoiceTranscription,
+  bindGemixVoiceTranscription,
   getStoredHistoryVoiceTranscription,
   getStoredUserTranscription,
   storeUserTranscription,

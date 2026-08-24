@@ -37,5 +37,4 @@ async function sendEmailDirect(toEmail, subject, body, attachments = []) {
   });
 }
 
-export { sendEmailDirect
-};
+export { sendEmailDirect };

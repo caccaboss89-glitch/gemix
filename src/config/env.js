@@ -8,11 +8,12 @@ import 'dotenv/config';
 
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
 const toIntInRange = (val, min, max, defaultVal) => {
-  const n = parseInt(val, 10);
+  const n = Number(val);
   return Number.isInteger(n) && n >= min && n <= max ? n : defaultVal;
 };
 
 const XAI_USE_API_KEY = toBool(process.env.XAI_USE_API_KEY, false);
+const GEMIX_TEMP_FILE_PORT = toIntInRange(process.env.GEMIX_TEMP_FILE_PORT, 1, 65535, 0);
 
 // Every value below must be set in .env (no || null in exports).
 const REQUIRED = [
@@ -39,6 +40,9 @@ const REQUIRED = [
   'GEMIX_TEMP_FILE_PORT'
 ];
 const missing = REQUIRED.filter((k) => !process.env[k] || !String(process.env[k]).trim());
+if (String(process.env.GEMIX_TEMP_FILE_PORT || '').trim() && !GEMIX_TEMP_FILE_PORT) {
+  missing.push('GEMIX_TEMP_FILE_PORT (must be a port number between 1 and 65535)');
+}
 
 // Per-profile requirements: only the selected AI_PROVIDER's settings are
 // mandatory, so a deployment never has to fill in credentials it does not use.
@@ -139,7 +143,7 @@ export default {
   GITHUB_REPO: process.env.GITHUB_REPO,
   GEMIX_NOTIFY_URL: process.env.GEMIX_NOTIFY_URL,
   GEMIX_PUBLIC_ATTACHMENT_BASE_URL: process.env.GEMIX_PUBLIC_ATTACHMENT_BASE_URL,
-  GEMIX_TEMP_FILE_PORT: process.env.GEMIX_TEMP_FILE_PORT,
+  GEMIX_TEMP_FILE_PORT,
 
   ADMIN_NAME: process.env.ADMIN_NAME,
   LEGAL_NAME: process.env.LEGAL_NAME,

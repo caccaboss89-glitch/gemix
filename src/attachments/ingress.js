@@ -222,7 +222,6 @@ async function ingestAttachment(opts) {
   const result = { ..._tagResult(finalName, { note }), syncedPath: syncedPath || finalName };
   if (overDurationLimit) {
     result.overDurationLimit = overDurationLimit;
-    result.durationNote = durationNote.trim();
   }
 
   if (unreadable || !inline || !isInlineableImage(finalName, contentType)) return result;

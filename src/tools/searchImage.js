@@ -301,5 +301,4 @@ async function searchImage(args = {}, opts = {}) {
 
 export {
   searchImage
-
 };

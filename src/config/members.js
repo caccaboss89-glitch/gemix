@@ -156,5 +156,4 @@ export {
   findMemberByEmail,
   resolveActiveMemberByName,
   isAdmin
-
 };

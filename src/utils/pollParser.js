@@ -77,5 +77,4 @@ function formatWhatsAppPollText(msg, textBody) {
 
 export {
   formatWhatsAppPollText
-
 };

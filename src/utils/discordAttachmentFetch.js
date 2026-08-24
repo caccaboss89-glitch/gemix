@@ -40,5 +40,4 @@ export {
   createDiscordAttachmentBufferFetcher,
   isDiscordAttachmentOversize,
   formatDiscordOversizeNote
-
 };

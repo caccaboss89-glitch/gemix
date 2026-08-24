@@ -90,5 +90,4 @@ export {
   resolveSettingsFileId,
   resolveStorageId,
   getUserRoot
-
 };

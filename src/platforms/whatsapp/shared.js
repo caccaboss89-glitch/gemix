@@ -19,7 +19,7 @@ import { wrapSystemNotification } from '../../utils/systemTags.js';
 import { buildAttachmentTag } from '../../attachments/ingress.js';
 import { resolveChatWorkspaceId } from '../../utils/workspaceId.js';
 import { assistantTextItem, userItem } from '../../ai/responsesItems.js';
-import { resolveGemixVoiceTranscription, storeRecentVoiceText } from '../../utils/historySync.js';
+import { bindGemixVoiceTranscription, storeRecentVoiceText } from '../../utils/historySync.js';
 import { ingressWaMessageMedia } from '../../utils/incomingMediaIngress.js';
 import {
   normalizeMarkdown,
@@ -126,8 +126,10 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null, 
   // Long @<digits> tags matching a current participant are real phone tags; the
   // rest are LIDs resolved via getContactLidAndPhone (resolveLidTagsInBody),
   // with a per-pass cache to avoid duplicate lookups.
-  const knownGroupPhones = isGroup ? participantPhoneDigits(chat) : new Set();
-  const lidTagCache = new Map();
+  const lidCtx = {
+    phones: isGroup ? participantPhoneDigits(chat) : new Set(),
+    cache: new Map()
+  };
 
   const personalGemixFlags = platform === PLATFORM_WA_PERSONAL
     ? buildPersonalGemixFlags(messages)
@@ -191,9 +193,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null, 
 
   async function processHistoryGroup(group) {
     const groupMsgs = group.messages;
-    const indices = [];
-    for (let k = group.start; k < group.end; k++) indices.push(k);
-    const primaryMi = indices[0];
+    const primaryMi = group.start;
     const primaryMsg = groupMsgs[0];
     const meta = await resolveHistorySenderMeta(primaryMsg, primaryMi);
     const { senderName, isGemiX, isFromBot, isSystemEvent } = meta;
@@ -204,7 +204,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null, 
     const mentionContacts = await _resolveMentionsForMessage(captionMsg, isGroup);
     let rawBody = _replaceMentionsInBody(captionMsg.body || '', mentionContacts);
     if (isGroup) {
-      rawBody = await _resolveLidTagsInBody(rawBody, knownGroupPhones, lidTagCache);
+      rawBody = await _resolveLidTagsInBody(rawBody, lidCtx.phones, lidCtx.cache);
     }
     let textContent = cleanIncomingText(rawBody);
 
@@ -231,7 +231,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null, 
       });
       if (platform !== PLATFORM_WA_PERSONAL && isGemiX
           && (msg.type === 'audio' || msg.type === 'ptt') && mediaIngress.syncedPath) {
-        resolveGemixVoiceTranscription(
+        await bindGemixVoiceTranscription(
           userId, mediaIngress.syncedPath, chat.id._serialized, (msg.timestamp || 0) * 1000
         );
       }
@@ -255,7 +255,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null, 
           recentMessageIds,
           isGroup,
           platform,
-          { includeQuotedMedia: false, workspaceId }
+          { includeQuotedMedia: false, workspaceId, lidCtx }
         );
         if (quoted.prefix) {
           textContent = `${quoted.prefix}${textContent || ''}`.trimEnd();
@@ -350,7 +350,10 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
 
   if (hasVoice) {
     const media = new MessageMedia('audio/ogg', responseData.voiceBuffer.toString('base64'), 'voice.ogg');
-    await chat.sendMessage(media, { sendAudioAsVoice: true });
+    await withWaPuppeteerRetry(
+      () => chat.sendMessage(media, { sendAudioAsVoice: true }),
+      { retries: 2, delayMs: 2000 }
+    );
     if (responseData.voiceTranscriptText) {
       storeRecentVoiceText(
         responseData.voiceTranscriptChatId || chat.id?._serialized,
@@ -485,11 +488,11 @@ async function buildIncomingContentPartsFromMessages(
 
   const mentionContacts = await _resolveMentionsForMessage(captionMsg, isGroup);
   let textBody = _replaceMentionsInBody(captionMsg.body || '', mentionContacts);
+  const lidCtx = { phones: new Set(), cache: new Map() };
   if (isGroup) {
-    let knownPhones = new Set();
-    try { knownPhones = participantPhoneDigits(await captionMsg.getChat()); }
+    try { lidCtx.phones = participantPhoneDigits(await captionMsg.getChat()); }
     catch { /* best effort */ }
-    textBody = await _resolveLidTagsInBody(textBody, knownPhones);
+    textBody = await _resolveLidTagsInBody(textBody, lidCtx.phones, lidCtx.cache);
   }
 
   const specialText = specialMessageText(captionMsg, textBody);
@@ -504,7 +507,7 @@ async function buildIncomingContentPartsFromMessages(
   if (quoteMsg) {
     const quotedContent = await processWhatsAppQuotedReply(
       quoteMsg, chatId, userId, recentIds, isGroup, platform,
-      { includeQuotedMedia, workspaceId: currentWorkspaceId }
+      { includeQuotedMedia, workspaceId: currentWorkspaceId, lidCtx }
     );
     if (quotedContent && quotedContent.prefix) {
       textBody = quotedContent.prefix + textBody;

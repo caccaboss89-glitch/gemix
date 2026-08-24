@@ -39,9 +39,11 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Lint
-        run: npx eslint . --ext .js
+        run: npm run lint
       - name: Unit tests
         run: npm run test:unit
+      - name: Prompt dumps
+        run: npm run test:dumps
       - name: Sandbox quota tests
         working-directory: sandbox
         run: python -m unittest test_quota_guard.py

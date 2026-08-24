@@ -2,13 +2,13 @@
 //
 // Core periodic scheduler: executes due tasks from per-user/group JSON files,
 // advances recurring tasks, delivers via WhatsApp (using dedicated client),
-// and runs background sweeps (idle workspaces, stale history, daily music wrap, release checks).
+// and runs background sweeps (idle workspaces, stale history, monthly music wrap, release checks).
 // Uses per-file locking via taskStore.
 
 import fs from 'fs';
 import constants from '../config/constants.js';
 import { getRomeISO  } from '../utils/time.js';
-import { advanceOccurrence, normalizePersistedRecurrence, isDateSkipped  } from '../utils/recurrence.js';
+import { advanceOccurrenceBeyond, normalizePersistedRecurrence, isDateSkipped  } from '../utils/recurrence.js';
 import { addScheduledFooter  } from '../utils/footer.js';
 import { checkAndSendMusicWrap  } from './musicWrapMonitor.js';
 import { checkNewRelease  } from './releaseMonitor.js';
@@ -22,6 +22,7 @@ import { wipeWorkspace  } from '../sandbox/workspaceFs.js';
 import { clearProjection, sweepExpiredAttachments } from '../attachments/projection.js';
 import { clearParserCache, sweepParserCache } from '../parsers/parserCache.js';
 import { sweepAllHistoryStores } from '../utils/historySync.js';
+import { sleepWithin } from '../utils/turnBudget.js';
 
 const fsPromises = fs.promises;
 
@@ -83,7 +84,7 @@ async function _sweepStaleWorkspaces() {
   try { sweepParserCache(now); }
   catch (err) { log.warn(`parser cache sweep failed: ${err.message}`); }
 
-  try { sweepAllHistoryStores(now); }
+  try { await sweepAllHistoryStores(now); }
   catch (err) { log.warn(`history store sweep failed: ${err.message}`); }
 }
 
@@ -244,7 +245,7 @@ async function _executeTaskWithRetries(task) {
         return false;
       }
       const delayMs = TASK_DELIVERY_BACKOFF_MS[attempt - 1] ?? TASK_DELIVERY_BACKOFF_MS[TASK_DELIVERY_BACKOFF_MS.length - 1];
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await sleepWithin(delayMs);
     }
   }
   return false;
@@ -271,11 +272,15 @@ function _finalizeDueTasks(data, dueTasks, handledIds) {
     }
     if (!recurrence) continue; // one-time, delivered: done, not re-added
 
-    // Hops over excluded dates and stops once UNTIL is passed.
-    const next = advanceOccurrence(t.scheduledAt, recurrence);
+    // Skip every additional occurrence missed during downtime and resume from
+    // the first future date, while still respecting EXDATE and UNTIL.
+    const { next, skipped } = advanceOccurrenceBeyond(t.scheduledAt, recurrence);
     if (!next) {
       log.info(`Recurring task ${t.id} ended (recurrence end reached).`);
       continue;
+    }
+    if (skipped > 0) {
+      log.warn(`Recurring task ${t.id}: ${skipped} missed occurrence(s) skipped, next: ${next}`);
     }
     t.scheduledAt = next;
     updatedTasks.push(t);

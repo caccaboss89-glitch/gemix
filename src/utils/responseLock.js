@@ -11,10 +11,12 @@ const DEFAULT_TTL_MS = 2 * 60 * 1000; // 2 minutes
 function _now() { return Date.now(); }
 
 function _armExpiry(key, lockId, ttl) {
-  return setTimeout(() => {
+  const timer = setTimeout(() => {
     const cur = locks.get(key);
     if (cur && cur.lockId === lockId) locks.delete(key);
   }, ttl + 1000);
+  timer.unref?.();
+  return timer;
 }
 
 /**

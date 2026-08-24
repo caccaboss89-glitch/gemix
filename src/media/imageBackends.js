@@ -180,7 +180,7 @@ async function generateWithFlux({ prompt, size, references = [], signal }) {
   if (buffer.length === 0) {
     return { ok: false, code: CF_ERROR.MALFORMED, error: 'Workers AI returned an empty image.' };
   }
-  return { ok: true, buffer, ext: 'png', width, height };
+  return { ok: true, buffer, ext: 'png' };
 }
 
 export {

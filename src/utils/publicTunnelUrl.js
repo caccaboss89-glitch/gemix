@@ -30,5 +30,4 @@ function getPublicBaseUrl() {
   return localFallback;
 }
 
-export { getPublicBaseUrl
-};
+export { getPublicBaseUrl };

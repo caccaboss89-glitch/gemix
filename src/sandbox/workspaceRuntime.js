@@ -83,7 +83,8 @@ function workspaceNetworkCreateOptions(workspaceId, networkName) {
     Internal: true,
     Labels: {
       'gemix.kind': 'workspace-network',
-      'gemix.workspaceId': workspaceId
+      'gemix.workspaceId': workspaceId,
+      'gemix.ownerPid': String(process.pid)
     }
   };
 }
@@ -175,7 +176,8 @@ async function _spawnContainer(workspaceId) {
     HostConfig: hostConfig,
     Labels: {
       'gemix.kind': 'workspace-runtime',
-      'gemix.workspaceId': workspaceId
+      'gemix.workspaceId': workspaceId,
+      'gemix.ownerPid': String(process.pid)
     }
   };
 
@@ -452,9 +454,29 @@ async function shutdownAll() {
 }
 
 /**
- * Best-effort startup cleanup of dangling workspace containers: the names
- * workspaceContainerName produces, plus the label _spawnContainer stamps on
- * them, so a container whose name was truncated is still matched.
+ * Whether a process id still names a live host process. EPERM means the
+ * process exists but this account cannot signal it, which is still alive.
+ */
+function _pidIsAlive(rawPid) {
+  const pid = Number(rawPid);
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
+function _ownedResourceIsOrphan(labels) {
+  const ownerPid = labels?.['gemix.ownerPid'];
+  return !ownerPid || ownerPid === String(process.pid) || !_pidIsAlive(ownerPid);
+}
+
+/**
+ * Best-effort startup cleanup of dangling workspace resources. Legacy entries
+ * without an owner are removable; resources owned by another live GemiX
+ * process are left untouched.
  */
 async function cleanupOrphanContainers() {
   let docker;
@@ -463,10 +485,11 @@ async function cleanupOrphanContainers() {
 
   try {
     const containers = await docker.listContainers({ all: true });
-    const orphans = containers.filter(c =>
-      c.Names.some(n => n.startsWith('/gemix-ws-'))
-      || c.Labels?.['gemix.kind'] === 'workspace-runtime'
-    );
+    const orphans = containers.filter((c) => {
+      const isWorkspace = c.Names.some(n => n.startsWith('/gemix-ws-'))
+        || c.Labels?.['gemix.kind'] === 'workspace-runtime';
+      return isWorkspace && _ownedResourceIsOrphan(c.Labels);
+    });
     if (orphans.length > 0) {
       log.info(`Found ${orphans.length} orphan workspace container(s). Cleaning up...`);
     }
@@ -487,7 +510,8 @@ async function cleanupOrphanContainers() {
       }
     }
 
-    const networks = await docker.listNetworks({ filters: { label: ['gemix.kind=workspace-network'] } });
+    const networks = (await docker.listNetworks({ filters: { label: ['gemix.kind=workspace-network'] } }))
+      .filter(info => _ownedResourceIsOrphan(info.Labels));
     for (const networkInfo of networks) {
       try {
         const network = docker.getNetwork(networkInfo.Id);
@@ -506,8 +530,9 @@ async function cleanupOrphanContainers() {
   }
 }
 
-// -- Idle reaper -----------------------------------------------------------
-const _reaper = setInterval(() => {
+// -- Background lifecycle ---------------------------------------------------
+
+function _reapIdleContainers() {
   for (const [workspaceId, pending] of [..._pool.entries()]) {
     pending.then((entry) => {
       if (!entry?.lastUsedAt) return null;
@@ -522,12 +547,22 @@ const _reaper = setInterval(() => {
       return _killEntry(entry);
     }).catch(err => log.warn(`reap failed for ${workspaceId}: ${err.message}`));
   }
-}, 60_000);
-_reaper.unref();
+}
 
-cleanupOrphanContainers().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
+let _reaper = null;
+
+/** Start the idle reaper and one-shot orphan cleanup. Idempotent. */
+function init() {
+  if (_reaper) return;
+  _reaper = setInterval(_reapIdleContainers, 60_000);
+  _reaper.unref();
+  cleanupOrphanContainers().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
+}
+
+export { _ownedResourceIsOrphan };
 
 export default {
+  init,
   execInWorkspace,
   buildExecSpec,
   containerEnv,

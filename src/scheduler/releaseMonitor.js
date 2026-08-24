@@ -307,5 +307,4 @@ async function checkNewRelease(waClient) {
   }
 }
 
-export { checkNewRelease
-};
+export { checkNewRelease };

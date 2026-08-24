@@ -147,5 +147,4 @@ class WhatsAppPresence {
   }
 }
 
-export { WhatsAppPresence
-};
+export { WhatsAppPresence };

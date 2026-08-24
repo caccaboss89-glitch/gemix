@@ -243,5 +243,4 @@ export {
   readSentRecords,
   resolveStoredAttachmentPath,
   deleteSentMessages
-
 };

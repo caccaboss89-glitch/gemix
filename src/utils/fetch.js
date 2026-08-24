@@ -247,5 +247,4 @@ export {
   downloadPublicFile,
   downloadPublicFileToDisk,
   readResponseBodyWithTimeout, _filenameFromPublicUrl as filenameFromPublicUrl
-
 };

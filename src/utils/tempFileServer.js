@@ -30,7 +30,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const log = createLogger('TempFileServer');
 
 // Configuration (GEMIX_TEMP_FILE_PORT is required — env.js fails fast if unset).
-const PORT = parseInt(envConfig.GEMIX_TEMP_FILE_PORT, 10);
+const PORT = envConfig.GEMIX_TEMP_FILE_PORT;
 // Default TTL kept for backward compatibility (existing fallback callers
 // did not pass ttlMs). Equivalent to constants.TUNNEL_TOKEN_TTL_TEMP_MS.
 const DEFAULT_EXPIRATION_MS = constants.TUNNEL_TOKEN_TTL_TEMP_MS;
@@ -114,14 +114,18 @@ function _detectMime(originalName) {
 }
 
 /**
- * Decide the Content-Disposition for a given MIME. Inline for media a
- * browser can preview (PDF, images, audio, video, text); attachment for
- * unknown types so that a leaked link triggers a download dialog and not
- * e.g. arbitrary execution in a browser.
+ * Decide the Content-Disposition for a given MIME. Passive browser media and
+ * plain text may render inline; unknown types and active documents such as
+ * HTML, SVG and XML are downloads so they cannot execute on the tunnel origin.
  */
 function _detectDisposition(mimetype) {
-  if (mimetype === 'application/octet-stream') return 'attachment';
-  return 'inline';
+  const mime = String(mimetype || '').split(';', 1)[0].trim().toLowerCase();
+  const safeInline = mime === 'application/pdf'
+    || mime === 'text/plain'
+    || mime.startsWith('audio/')
+    || mime.startsWith('video/')
+    || (mime.startsWith('image/') && mime !== 'image/svg+xml');
+  return safeInline ? 'inline' : 'attachment';
 }
 
 /**
@@ -348,8 +352,8 @@ function startTempFileServer() {
 
         // Build Content-Disposition with quote escaping + RFC 5987 UTF-8.
         // Disposition mode (inline vs attachment) was decided at registration:
-        //   - inline for media a browser can preview (PDF/audio/video/image/text),
-        //   - attachment for unknown types (download dialog, defensive).
+        //   - inline for passive media, PDF and plain text;
+        //   - attachment for unknown types and active documents.
         const escapedName = entry.originalName.replace(/"/g, '\\"');
         const encodedName = encodeURIComponent(entry.originalName);
         const disposition = entry.disposition || 'attachment';
@@ -411,6 +415,6 @@ export {
   startTempFileServer,
   registerTempFile,
   tempDirForOwner,
-  TEMP_DIR
-
+  TEMP_DIR,
+  _detectDisposition
 };

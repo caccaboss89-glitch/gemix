@@ -65,5 +65,4 @@ function startInternalNotifyServer() {
   });
 }
 
-export { startInternalNotifyServer
-};
+export { startInternalNotifyServer };

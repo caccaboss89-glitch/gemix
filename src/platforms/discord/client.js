@@ -467,6 +467,9 @@ async function _handleDiscordBatch(entries) {
 }
 
 /**
+ * @param {import('discord.js').TextChannel|import('discord.js').ThreadChannel} channel
+ * @param {string|null} starterMessageId - starter message excluded from history
+ * @param {string} historyStorageId - history storage identifier
  * @param {Set<string>|string|null} [excludeMessageIds] - Discord message IDs to omit
  *   (current batch); the merged user turn is passed separately as ctx.content.
  * @param {{raw: import('discord.js').Collection, recentMessageIds: Set<string>}} window
@@ -567,5 +570,4 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
   return history;
 }
 
-export { initDiscord
-};
+export { initDiscord };

@@ -38,5 +38,4 @@ async function removeTasks(taskIds, fileId) {
   return result;
 }
 
-export { removeTasks
-};
+export { removeTasks };

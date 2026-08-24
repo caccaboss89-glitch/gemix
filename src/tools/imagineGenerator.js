@@ -34,6 +34,7 @@ import { stageToolOutput  } from './workspace/toolOutput.js';
 import { INLINE_IMAGE_EXTS, inlineImagePartFromBuffer  } from './workspace/inlineImage.js';
 import {
   BACKEND,
+  FLUX_MAX_REFERENCES,
   FLUX_SIZES,
   failurePlan,
   generateWithFlux,
@@ -136,10 +137,10 @@ function _openReferenceImage(entry, workspaceId) {
 /**
  * Resolve reference-image entries into the shape one backend accepts.
  *
- * The count cap is enforced here for every backend, since it is the tool schema
- * that advertises it. A local file is read off disk either way: as an inline
- * base64 data URL, which keeps a user file off any third-party host on the way
- * to the provider, or as raw bytes for a backend that uploads them itself.
+ * The caller supplies the cap advertised for its backend. A local file is read
+ * off disk either way: as an inline base64 data URL, which keeps a user file
+ * off any third-party host on the way to the provider, or as raw bytes for a
+ * backend that uploads them itself.
  *
  * A public URL only travels where the backend takes one. Fetching it here to
  * re-upload it would be a different decision from the one the model made.
@@ -432,7 +433,7 @@ async function _attemptXaiImage({ prompt, refList, aspect, workspaceId, signal }
 async function _attemptFluxImage({ prompt, refList, size, workspaceId, signal }) {
   const refs = _resolveReferenceImages(
     refList,
-    { max: MAX_REF_IMAGES_FOR_IMAGE, shape: 'bytes', allowUrls: false },
+    { max: FLUX_MAX_REFERENCES, shape: 'bytes', allowUrls: false },
     workspaceId
   );
   if (!refs.ok) return { ok: false, error: refs.reason, code: 'MALFORMED' };
@@ -627,6 +628,8 @@ async function _pollVideoResult(requestId, signal) {
         if (consecutive429 >= MAX_CONSECUTIVE_429_POLLS) {
           throw new Error(`Rate limited too many times (${MAX_CONSECUTIVE_429_POLLS} consecutive 429s): ${msg}`);
         }
+      } else {
+        consecutive429 = 0;
       }
       if (!_isRetryablePollException(err)) {
         throw err;
@@ -662,5 +665,4 @@ async function _pollVideoResult(requestId, signal) {
 export {
   generateImage,
   generateVideo
-
 };

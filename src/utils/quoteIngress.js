@@ -39,7 +39,8 @@ function _outsideResult() {
  * Resolve one WhatsApp message into a single reply-prefix line (+ optional media).
  * @param {object} quoted
  * @param {{ isGroup?: boolean, historyStorageId?: string, includeMedia?: boolean,
- *   workspaceId?: string|null, imagesInlined?: number }} opts
+ *   workspaceId?: string|null, imagesInlined?: number,
+ *   lidCtx?: {phones: Set<string>, cache: Map<string, string|null>} }} opts
  * @returns {Promise<{ prefix: string, mediaParts: Array }>}
  */
 async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
@@ -48,7 +49,8 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
     historyStorageId = null,
     includeMedia = true,
     workspaceId = null,
-    imagesInlined = 0
+    imagesInlined = 0,
+    lidCtx = { phones: new Set(), cache: new Map() }
   } = opts;
 
   const quotedSpecial = formatSpecialMessageText(quoted);
@@ -66,7 +68,7 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
     if (questionBase) {
       const mentionContacts = await resolveMentionsForMessage(quoted, isGroup);
       questionBase = replaceMentionsInBody(questionBase, mentionContacts);
-      if (isGroup) questionBase = await resolveLidTagsInBody(questionBase, new Set());
+      if (isGroup) questionBase = await resolveLidTagsInBody(questionBase, lidCtx.phones, lidCtx.cache);
     }
     const pollText = formatWhatsAppPollText(quoted, `[Poll] ${questionBase}`);
     return { prefix: `[In reply to: ${pollText}]\n`, mediaParts: [] };
@@ -76,7 +78,7 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
   if (quoted.body) {
     const mentionContacts = await resolveMentionsForMessage(quoted, isGroup);
     let rawQuoted = replaceMentionsInBody(quoted.body, mentionContacts);
-    if (isGroup) rawQuoted = await resolveLidTagsInBody(rawQuoted, new Set());
+    if (isGroup) rawQuoted = await resolveLidTagsInBody(rawQuoted, lidCtx.phones, lidCtx.cache);
     quotedText = cleanIncomingText(rawQuoted);
   }
 
@@ -119,7 +121,8 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
  * @param {boolean} [isGroup=false]
  * @param {string} [platform]
  * @param {{ maxChainDepth?: number, includeQuotedMedia?: boolean,
- *   workspaceId?: string|null, imagesInlined?: number }} [options]
+ *   workspaceId?: string|null, imagesInlined?: number,
+ *   lidCtx?: {phones: Set<string>, cache: Map<string, string|null>} }} [options]
  */
 async function processWhatsAppQuotedReply(
   msg,
@@ -136,6 +139,7 @@ async function processWhatsAppQuotedReply(
 
   const maxChainDepth = options.maxChainDepth ?? MAX_REPLY_CHAIN_DEPTH;
   const includeQuotedMedia = options.includeQuotedMedia !== false;
+  const lidCtx = options.lidCtx || { phones: new Set(), cache: new Map() };
 
   try {
     const levels = [];
@@ -178,7 +182,8 @@ async function processWhatsAppQuotedReply(
         historyStorageId,
         includeMedia: includeQuotedMedia && depth === 0,
         workspaceId: options.workspaceId || null,
-        imagesInlined: options.imagesInlined || 0
+        imagesInlined: options.imagesInlined || 0,
+        lidCtx
       });
       levels.push(level);
       if (level.mediaParts?.length) mediaParts.push(...level.mediaParts);
@@ -330,5 +335,4 @@ export {
   processWhatsAppQuotedReply,
   processDiscordQuotedReply,
   MAX_REPLY_CHAIN_DEPTH
-
 };

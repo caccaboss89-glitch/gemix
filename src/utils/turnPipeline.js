@@ -141,5 +141,4 @@ async function runTurnPipeline(opts) {
   }
 }
 
-export { runTurnPipeline
-};
+export { runTurnPipeline };

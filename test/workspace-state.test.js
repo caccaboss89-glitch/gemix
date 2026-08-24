@@ -102,16 +102,38 @@ test('an expired generation is reaped without letting its old token release the 
   releaseWorkspaceLock(workspaceId, replacement);
 });
 
-test('activity updates serialize with mutations and become visible after the lock', async () => {
+test('activity updates do not wait for a workspace mutation', async () => {
   const workspaceId = IDS[4];
   const mutation = await acquireWorkspaceLock(workspaceId, { ownerId: 'mutation', waitMs: 0 });
-  let settled = false;
-  const touching = touchActivity(workspaceId).then(() => { settled = true; });
-  await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(settled, false);
-  releaseWorkspaceLock(workspaceId, mutation);
-  await touching;
-  const state = readWorkspaceActivity(workspaceId);
-  assert.equal(state.workspaceId, workspaceId);
-  assert.ok(Date.now() - state.lastActivityAt < 2_000);
+  try {
+    touchActivity(workspaceId);
+    const state = readWorkspaceActivity(workspaceId);
+    assert.equal(state.workspaceId, workspaceId);
+    assert.ok(Date.now() - state.lastActivityAt < 2_000);
+    await assert.rejects(
+      acquireWorkspaceLock(workspaceId, { ownerId: 'still-locked', waitMs: 0 }),
+      err => err?.code === 'EWORKSPACEBUSY'
+    );
+  } finally {
+    releaseWorkspaceLock(workspaceId, mutation);
+  }
+});
+
+test('an aborted turn stops waiting for a workspace lock promptly', async () => {
+  const workspaceId = IDS[4];
+  const mutation = await acquireWorkspaceLock(workspaceId, { ownerId: 'mutation', waitMs: 0 });
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const waiting = acquireWorkspaceLock(workspaceId, {
+    ownerId: 'aborted',
+    waitMs: 5_000,
+    signal: controller.signal
+  });
+  setTimeout(() => controller.abort(), 20);
+  try {
+    await assert.rejects(waiting, err => err?.code === 'EWORKSPACEBUSY');
+    assert.ok(Date.now() - startedAt < 1_000);
+  } finally {
+    releaseWorkspaceLock(workspaceId, mutation);
+  }
 });

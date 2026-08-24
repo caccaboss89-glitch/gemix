@@ -103,10 +103,15 @@ function cleanupOldLogs() {
   }
 }
 
-// Cleanup on startup and periodically
-cleanupOldLogs();
-const _logCleanupInterval = setInterval(cleanupOldLogs, LOG_CLEANUP_INTERVAL_MS);
-_logCleanupInterval.unref();
+let _logCleanupInterval = null;
+
+/** Start API-log retention after application startup. Idempotent. */
+function initApiLogRetention() {
+  if (_logCleanupInterval) return;
+  cleanupOldLogs();
+  _logCleanupInterval = setInterval(cleanupOldLogs, LOG_CLEANUP_INTERVAL_MS);
+  _logCleanupInterval.unref();
+}
 
 function _getLogFilePath(prefix, timestamp) {
   const sanitized = timestamp.replace(/[:.]/g, '-');
@@ -141,9 +146,24 @@ function _writeApiLog(kind, bodyField, modelName, apiUrl, body, extra = {}) {
 }
 
 const logApiRequest = (modelName, apiUrl, body, extra = {}) =>
-  _writeApiLog('request', 'requestBody', modelName, apiUrl, body, extra);
+  _writeApiLog('request', 'requestBody', modelName, apiUrl, _redactInlineData(body), extra);
 const logApiResponse = (modelName, apiUrl, responseBody, extra = {}) =>
   _writeApiLog('response', 'responseBody', modelName, apiUrl, responseBody, extra);
+
+/** Replace inline base64 payloads with a size marker before logging them. */
+function _redactInlineData(value) {
+  if (typeof value === 'string') {
+    const comma = value.indexOf(',');
+    return /^data:[^;]+;base64,/i.test(value)
+      ? `${value.slice(0, comma + 1)}<${value.length - comma - 1} chars omitted>`
+      : value;
+  }
+  if (Array.isArray(value)) return value.map(_redactInlineData);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, _redactInlineData(child)]));
+  }
+  return value;
+}
 
 function _formatRateLimitLog(status, errBody, headers) {
   const parts = [`HTTP ${status} (rate limit / quota)`];
@@ -239,6 +259,8 @@ function _isGrokCreditExhaustedError(errMsg) {
  * @param {string} modelName - Model name for logging (e.g., 'Grok-Imagine')
  * @param {string} apiUrl - Full API endpoint URL
  * @param {object} body - Request body
+ * @param {object} [logExtra] - Extra fields merged into the request log entry
+ * @param {number} [timeoutMs] - Per-attempt request ceiling
  * @param {object} [opts]
  * @param {AbortSignal} [opts.signal] - caller cancellation / absolute turn deadline
  * @returns {Promise<Response>} The raw fetch Response
@@ -431,5 +453,7 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
 export {
   callApiWithRetry,
   logApiResponse,
-  fetchXaiWithOAuthRetry
+  fetchXaiWithOAuthRetry,
+  initApiLogRetention,
+  _redactInlineData
 };

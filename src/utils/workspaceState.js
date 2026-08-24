@@ -22,6 +22,7 @@ import crypto from 'crypto';
 import { getWorkspaceMetaDir  } from './workspaceId.js';
 import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
+import { sleepWithin } from './turnBudget.js';
 
 const log = createLogger('WorkspaceState');
 
@@ -69,20 +70,17 @@ function _writeState(workspaceId, state) {
 }
 
 /**
- * Update the user-activity timestamp for this workspace. Called by handler.js
- * on every main turn.
- *
- * Also stores the workspaceId in the state.
+ * Update the user-activity timestamp for this workspace, once per main turn.
+ * The state file is outside the workspace tree and _writeState replaces it
+ * atomically, so this bookkeeping must not contend with a long-running shell
+ * for the workspace mutation lock.
  */
-async function touchActivity(workspaceId) {
+function touchActivity(workspaceId) {
   if (!workspaceId) return;
-  return withWorkspaceLock(workspaceId, { ownerId: `activity:${process.pid}` }, async () => {
-    const state = _readState(workspaceId);
-    delete state.lock;
-    state.lastActivityAt = Date.now();
-    state.workspaceId = workspaceId;
-    _writeState(workspaceId, state);
-  });
+  const state = _readState(workspaceId);
+  state.lastActivityAt = Date.now();
+  state.workspaceId = workspaceId;
+  _writeState(workspaceId, state);
 }
 
 function readWorkspaceActivity(workspaceId) {
@@ -157,18 +155,24 @@ function _reapExpiredLock(lockDir, now) {
 /**
  * Try to acquire the mutation lock for this workspace, polling up to
  * constants.WORKSPACE_LOCK_WAIT_MS. Returns an ownership token on success or
- * throws on timeout.
+ * throws on timeout or when the caller's signal is aborted.
  *
  * Stale locks (held longer than LOCK_MAX_TTL_MS) are reaped automatically.
  */
 async function acquireWorkspaceLock(workspaceId, opts = {}) {
   const ownerId = opts.ownerId || crypto.randomBytes(8).toString('hex');
   const waitMs = Number.isFinite(opts.waitMs) ? opts.waitMs : constants.WORKSPACE_LOCK_WAIT_MS;
+  const signal = opts.signal || null;
   const start = Date.now();
   const lockDir = _lockDir(workspaceId);
   if (!lockDir) throw new Error('Cannot resolve workspace lock directory.');
 
   while (true) {
+    if (signal?.aborted) {
+      const err = new Error('The workspace lock wait ended because this turn ended.');
+      err.code = 'EWORKSPACEBUSY';
+      throw err;
+    }
     const now = Date.now();
     try {
       fs.mkdirSync(lockDir);
@@ -202,7 +206,7 @@ async function acquireWorkspaceLock(workspaceId, opts = {}) {
       err.code = 'EWORKSPACEBUSY';
       throw err;
     }
-    await new Promise(r => setTimeout(r, 500));
+    await sleepWithin(500, signal);
   }
 }
 

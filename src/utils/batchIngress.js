@@ -47,5 +47,4 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel }) 
 export {
   enqueueBatchedTurn,
   peekPendingBatchLastEntry
-
 };

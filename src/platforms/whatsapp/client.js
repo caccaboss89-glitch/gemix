@@ -127,7 +127,5 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   return client;
 }
 
-export { createWhatsAppClient
-};
-export { _isReady as isWaClientReady
-};
+export { createWhatsAppClient };
+export { _isReady as isWaClientReady };

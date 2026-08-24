@@ -216,5 +216,4 @@ export {
   formatMediaQuotaResetLabel,
   clearMediaUsage,
   reserveGeneration
-
 };

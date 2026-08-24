@@ -113,5 +113,4 @@ function applyPastVoiceRepliesToHistory(history, storageId) {
 
 export {
   applyPastVoiceRepliesToHistory
-
 };

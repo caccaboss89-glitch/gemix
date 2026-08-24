@@ -6,16 +6,16 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { execFile  } from 'child_process';
-import { promisify  } from 'util';
-import { registerTempFile, TEMP_DIR  } from './tempFileServer.js';
-import { createLogger  } from './logger.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { registerTempFile, TEMP_DIR } from './tempFileServer.js';
+import { createLogger } from './logger.js';
 import {
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE
 } from '../config/systemMessages.js';
-import { shouldWhatsAppUseTempLink, readAttachmentBuffer, uniqueAttachmentName  } from './attachments.js';
-import { partitionAttachments, PLATFORM, hasExternalUrl  } from './attachmentDelivery.js';
+import { shouldWhatsAppUseTempLink, readAttachmentBuffer, uniqueAttachmentName } from './attachments.js';
+import { partitionAttachments, PLATFORM, hasExternalUrl } from './attachmentDelivery.js';
 
 const log = createLogger('AttachmentFallback');
 const execFileAsync = promisify(execFile);
@@ -78,20 +78,10 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
         continue;
       }
 
-      let filePath = att.filePath;
-      const pathExists = typeof filePath === 'string' && fs.existsSync(filePath);
-
-      if (!pathExists && Buffer.isBuffer(att.buffer)) {
-        if (!fs.existsSync(TEMP_DIR)) {
-          fs.mkdirSync(TEMP_DIR, { recursive: true });
-        }
-        const uniqueName = `buf_${crypto.randomBytes(12).toString('hex')}_${att.name || 'file'}`;
-        filePath = path.join(TEMP_DIR, uniqueName);
-        fs.writeFileSync(filePath, att.buffer);
-      }
+      const filePath = _materializeAttachmentPath(att);
 
       if (!filePath || !fs.existsSync(filePath)) {
-        log.warn(`Attachment file not found: ${filePath}`);
+        log.warn(`Attachment file not found: ${att.name || 'unknown'}`);
         continue;
       }
 
@@ -332,5 +322,4 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
 export {
   buildFallbackAttachmentMessage,
   sendAttachmentsWithFallback
-
 };

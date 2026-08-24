@@ -10,7 +10,9 @@ import test, { after } from 'node:test';
 import constants from '../src/config/constants.js';
 import { _cacheParameters } from '../src/parsers/parserRegistry.js';
 import {
+  STT_BACKEND,
   STT_STATUS,
+  _extractTranscript,
   isCacheableSttStatus,
   sttModelId,
   sttRouteId
@@ -41,10 +43,10 @@ test('read_file cache parameters include normalized language and the complete ST
   assert.equal('sttRoute' in document, false);
 });
 
-test('voice-history cache hits only the exact bytes, route and language', () => {
+test('voice-history cache hits only the exact bytes, route and language', async () => {
   fs.mkdirSync(historyDir, { recursive: true });
   fs.writeFileSync(`${historyDir}/${NAME}`, Buffer.from('audio'));
-  assert.equal(storeUserTranscription(STORAGE_ID, NAME, {
+  assert.equal(await storeUserTranscription(STORAGE_ID, NAME, {
     text: 'ciao',
     status: STT_STATUS.OK,
     contentHash: 'hash-a',
@@ -76,6 +78,13 @@ test('transient STT outcomes are retried while deterministic outcomes are cachea
 });
 
 test('the stored model id identifies the backend that actually answered', () => {
-  assert.notEqual(sttModelId('xai-stt'), sttModelId('cloudflare-whisper'));
-  assert.match(sttModelId('xai-stt'), /^xai:/);
+  assert.notEqual(sttModelId(STT_BACKEND.XAI), sttModelId(STT_BACKEND.CLOUDFLARE));
+  assert.match(sttModelId(STT_BACKEND.XAI), /^xai:/);
+});
+
+test('a missing transcript field is malformed, not deterministic silence', () => {
+  assert.deepEqual(_extractTranscript(null), { ok: false });
+  assert.deepEqual(_extractTranscript({ result: { unexpected: true } }), { ok: false });
+  assert.deepEqual(_extractTranscript({ text: '   ' }), { ok: true, text: '' });
+  assert.deepEqual(_extractTranscript({ result: { text: ' hello ' } }), { ok: true, text: 'hello' });
 });

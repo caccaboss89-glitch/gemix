@@ -5,14 +5,12 @@
 // Provides basic escaping for &, <, >, and " characters.
 
 /**
- * Escape XML special characters in a string.
- * @param {string} str - Input string
+ * Escape XML special characters and always return an interpolation-safe string.
+ * @param {*} value
  * @returns {string} Escaped string safe for XML attribute/content use
  */
-function escapeXml(str) {
-  if (!str) return str;
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function escapeXml(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-export { escapeXml
-};
+export { escapeXml };

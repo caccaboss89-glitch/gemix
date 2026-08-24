@@ -101,7 +101,6 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     mimetype,
     filename,
     overDurationLimit: ingress.overDurationLimit || null,
-    durationNote: ingress.durationNote || null,
     fetchBuffer
   };
 }

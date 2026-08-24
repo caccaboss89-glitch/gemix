@@ -246,5 +246,4 @@ export {
   isReviewDue,
   markReviewed,
   resolveMemoryContent
-
 };

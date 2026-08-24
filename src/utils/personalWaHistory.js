@@ -103,5 +103,4 @@ function buildPersonalGemixFlags(messages) {
 
 export {
   buildPersonalGemixFlags
-
 };

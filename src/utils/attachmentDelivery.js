@@ -91,5 +91,4 @@ export {
   hasExternalUrl,
   partitionAttachments,
   sendWhatsAppAttachment
-
 };

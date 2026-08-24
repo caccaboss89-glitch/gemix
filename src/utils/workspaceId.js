@@ -124,5 +124,4 @@ export {
   getWorkspacePath,
   getAttachmentsPath,
   getWorkspaceMetaDir
-
 };

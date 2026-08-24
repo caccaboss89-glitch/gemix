@@ -233,5 +233,4 @@ export {
   normalizeOutgoingMentionTags,
   containsMetaAiTag,
   collectMentionJids
-
 };

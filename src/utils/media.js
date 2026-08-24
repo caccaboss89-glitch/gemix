@@ -23,5 +23,4 @@ function extractAttachmentTagPaths(text) {
 export {
   isSupportedMedia,
   extractAttachmentTagPaths
-
 };

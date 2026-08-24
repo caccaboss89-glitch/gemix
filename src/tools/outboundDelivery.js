@@ -69,5 +69,4 @@ export {
   resolveOutboundAttachments,
   alreadyContactedError,
   recordOutbound
-
 };

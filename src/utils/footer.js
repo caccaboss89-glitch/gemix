@@ -146,5 +146,4 @@ export {
   removeScheduledFooter,
   buildResearchBadgeText,
   appendResearchBadge
-
 };

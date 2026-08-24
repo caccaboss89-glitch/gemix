@@ -281,5 +281,4 @@ async function readSentMessages(args, userCtx) {
   return payload;
 }
 
-export { readSentMessages
-};
+export { readSentMessages };

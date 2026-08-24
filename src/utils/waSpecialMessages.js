@@ -172,5 +172,4 @@ export {
   isSpecialNonMediaMessage,
   formatWhatsAppContactText,
   formatSpecialMessageText
-
 };

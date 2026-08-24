@@ -125,13 +125,13 @@ test('a workspace path in the final reply resolves to a real file', async () => 
     const wrong = await resolveDeliverySelection(['workspace/report.txt'], { researchStats: null });
     assert.equal(wrong.attachments.length, 0, 'a non-workspaceId must not silently resolve');
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(path.dirname(root), { recursive: true, force: true });
   }
 });
 
 // -- history retention -------------------------------------------------------
 
-test('the history store keeps what is in use and drops only what aged out', () => {
+test('the history store keeps what is in use and drops only what aged out', async () => {
   const userId = `test_history_sweep_${process.pid}`;
   const { historyDir } = getUserHistoryPaths(userId);
   fs.mkdirSync(historyDir, { recursive: true });
@@ -144,7 +144,7 @@ test('the history store keeps what is in use and drops only what aged out', () =
   fs.utimesSync(stale, longAgo, longAgo);
 
   try {
-    const res = sweepHistoryStore(userId);
+    const res = await sweepHistoryStore(userId);
     // The turn that referenced them is long out of the 30-message window; that
     // is not a reason to delete anything; retention is based on age and reuse.
     assert.equal(fs.existsSync(fresh), true, 'a recently used file stays');
@@ -156,8 +156,8 @@ test('the history store keeps what is in use and drops only what aged out', () =
   }
 });
 
-test('the sweep leaves a store it cannot read alone', () => {
-  const res = sweepHistoryStore(`test_missing_${process.pid}_${Math.random().toString(36).slice(2)}`);
+test('the sweep leaves a store it cannot read alone', async () => {
+  const res = await sweepHistoryStore(`test_missing_${process.pid}_${Math.random().toString(36).slice(2)}`);
   assert.deepEqual(res, { deletedCount: 0, kept: 0 });
-  assert.deepEqual(sweepHistoryStore(''), { deletedCount: 0, kept: 0 });
+  assert.deepEqual(await sweepHistoryStore(''), { deletedCount: 0, kept: 0 });
 });

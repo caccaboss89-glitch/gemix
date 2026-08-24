@@ -102,5 +102,4 @@ async function update(moduleName, newState) {
 export {
   get,
   update
-
 };

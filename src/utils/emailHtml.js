@@ -190,5 +190,4 @@ export {
   resolveInlineImages,
   appendHtmlBlock,
   buildNoticeBlock
-
 };

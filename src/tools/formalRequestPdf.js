@@ -186,5 +186,4 @@ function generateFormalRequestPdf({ fullName, title, motivation, requesterSignat
   });
 }
 
-export { generateFormalRequestPdf
-};
+export { generateFormalRequestPdf };

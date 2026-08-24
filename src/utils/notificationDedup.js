@@ -108,5 +108,4 @@ export {
   markNotifiedInCall,
   unmarkNotifiedInCall,
   clearCallNotifications
-
 };

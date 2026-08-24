@@ -207,5 +207,4 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   return !anyFailed;
 }
 
-export { checkAndSendMusicWrap
-};
+export { checkAndSendMusicWrap };

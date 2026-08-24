@@ -88,5 +88,4 @@ export {
   attachmentFilenameHints,
   stripRedundantAttachmentCaption,
   stripRedundantFilenameBesideAttachmentTag
-
 };

@@ -238,5 +238,4 @@ export {
   buildPrivacyNoticeMessage,
   buildPrivacyWipeDoneMessage,
   isSystemMessage
-
 };

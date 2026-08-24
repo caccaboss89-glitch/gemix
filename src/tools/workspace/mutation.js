@@ -44,7 +44,10 @@ const ATOMIC_WRITE_SCRIPT = [
 
 async function runWorkspaceMutation(workspaceId, opts = {}, fn) {
   try {
-    return await withWorkspaceLock(workspaceId, { ownerId: opts.lockOwnerId }, fn);
+    return await withWorkspaceLock(workspaceId, {
+      ownerId: opts.lockOwnerId,
+      signal: opts.budget?.signal
+    }, fn);
   } catch (err) {
     if (err.code === 'EWORKSPACEBUSY') return { success: false, error: err.message };
     throw err;

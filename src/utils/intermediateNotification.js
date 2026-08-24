@@ -130,5 +130,4 @@ async function sendIntermediateNotification(ctx, kind, message) {
 
 export {
   sendIntermediateNotification
-
 };
