@@ -36,8 +36,10 @@ import {
   STT_STATUS,
   STT_UNCONFIGURED_MESSAGE,
   contentHashOf,
+  isCacheableSttStatus,
   isSttConfigured,
-  sttModelId,
+  normalizeSttLanguage,
+  sttRouteId,
   transcribeAudioFile
 } from '../media/speechToText.js';
 import { createLogger } from '../utils/logger.js';
@@ -61,6 +63,7 @@ const MAX_NEW_TRANSCRIPTIONS_PER_TURN = 8;
 const STATUS_NOTE = {
   [STT_STATUS.NO_SPEECH]: 'status="no_speech"',
   [STT_STATUS.TOO_LONG]: 'status="too_long"',
+  [STT_STATUS.CONTENT_POLICY]: 'status="content_policy"',
   [STT_STATUS.TIMEOUT]: 'status="timeout"',
   [STT_STATUS.UNCONFIGURED]: 'status="unconfigured"',
   [STT_STATUS.ERROR]: 'status="error"'
@@ -110,7 +113,7 @@ function _replaceTag(text, name, replacement) {
  * What is already known about one clip, without calling anything.
  * @returns {{absPath: string, contentHash: string|null, cached: object|null}|null}
  */
-function _inspect(storageId, name) {
+function _inspect(storageId, name, opts) {
   const absPath = resolveHistoryAbsPath(storageId, name);
   if (!absPath) return null;
 
@@ -126,29 +129,37 @@ function _inspect(storageId, name) {
   return {
     absPath,
     contentHash,
-    cached: getStoredUserTranscription(storageId, name, contentHash, sttModelId())
+    cached: getStoredUserTranscription(storageId, name, {
+      contentHash,
+      routeId: sttRouteId(),
+      language: normalizeSttLanguage(opts.language)
+    })
   };
 }
 
-/** Transcribe one clip and remember the outcome, whatever it is. */
+/** Transcribe one clip and remember only deterministic outcomes. */
 async function _transcribe(storageId, name, info, opts) {
-  const durationSec = await getMediaDurationSecFromPath(info.absPath).catch(() => 0);
+  const durationSec = await getMediaDurationSecFromPath(info.absPath, opts.signal).catch(() => 0);
   const result = await transcribeAudioFile(info.absPath, {
     durationSec,
     language: opts.language,
     signal: opts.signal
   });
 
-  try {
-    await storeUserTranscription(storageId, name, {
-      text: result.text,
-      status: result.status,
-      provider: result.provider,
-      model: result.model,
-      contentHash: info.contentHash
-    });
-  } catch (err) {
-    log.warn(`Could not cache the transcript of "${name}": ${err.message}`);
+  if (isCacheableSttStatus(result.status)) {
+    try {
+      await storeUserTranscription(storageId, name, {
+        text: result.text,
+        status: result.status,
+        provider: result.provider,
+        model: result.model,
+        contentHash: info.contentHash,
+        routeId: sttRouteId(),
+        language: normalizeSttLanguage(opts.language)
+      });
+    } catch (err) {
+      log.warn(`Could not cache the transcript of "${name}": ${err.message}`);
+    }
   }
   return { status: result.status, text: result.text, message: result.message };
 }
@@ -162,7 +173,7 @@ async function _resolveAll(names, storageId, opts) {
   const pending = [];
 
   for (const name of names) {
-    const info = _inspect(storageId, name);
+    const info = _inspect(storageId, name, opts);
     if (!info) continue;
     if (info.cached) resolved.set(name, info.cached);
     else pending.push({ name, info });

@@ -27,6 +27,7 @@ import envConfig from '../config/env.js';
 import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
 import { FEATURE, backendFor  } from '../features/featureBindings.js';
 import { resolveProviderProfile  } from '../ai/providers/providerProfile.js';
+import { signalWithTimeout } from '../utils/turnBudget.js';
 
 const log = createLogger('TTS');
 
@@ -144,29 +145,24 @@ function convertMp3ToWhatsAppOpus(mp3Buffer, opts = {}) {
 /**
  * Generate voice audio using the direct xAI TTS endpoint (primary) with
  * Google Translate TTS fallback.
- * Enforces a global timeout; on expiry aborts ffmpeg and swallows the losing branch.
+ * Enforces a global timeout and the caller's absolute turn deadline.
  * @param {string} text - Text to convert to speech (max 1000 characters).
  *   May contain xAI speech tags ([pause], <soft>...</soft>, ...) - GemiX
  *   writes them directly; they are stripped for the Google fallback.
  * @param {object} [settings] - Per-chat settings { voice, language }; defaults when omitted.
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal] - caller cancellation / absolute turn deadline
  * @returns {Promise<Buffer>} OGG/Opus audio buffer (48kHz mono, iOS-optimized WhatsApp format)
  */
-async function generateVoice(text, settings = {}) {
-  const controller = new AbortController();
-  let timeoutId;
-  const work = _generateVoice(text, settings, controller.signal);
-  // Losing race branch must not surface as unhandledRejection.
-  work.catch(() => {});
-  const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => {
-      controller.abort();
-      reject(new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`));
-    }, VOICE_GENERATION_TIMEOUT_MS);
-  });
+async function generateVoice(text, settings = {}, opts = {}) {
+  const signal = signalWithTimeout(opts.signal, VOICE_GENERATION_TIMEOUT_MS);
   try {
-    return await Promise.race([work, timeout]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
+    return await _generateVoice(text, settings, signal);
+  } catch (err) {
+    if (signal.aborted && !opts.signal?.aborted) {
+      throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
+    }
+    throw err;
   }
 }
 
@@ -189,7 +185,7 @@ async function _generateVoice(text, settings, signal) {
   if (xaiPrimary) {
     try {
       if (signal?.aborted) throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
-      const mp3Buffer = await xaiTTS(text, voiceId, language);
+      const mp3Buffer = await xaiTTS(text, voiceId, language, signal);
       return await convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
     } catch (err) {
       if (signal?.aborted) throw err;
@@ -224,7 +220,7 @@ async function _generateVoice(text, settings, signal) {
  * Call `POST /v1/tts` and return the MP3 buffer. Authenticates through the
  * shared xAI CredentialProvider, same as every other xAI endpoint.
  */
-async function xaiTTS(text, voiceId, language) {
+async function xaiTTS(text, voiceId, language, signal) {
   const { baseUrl } = await getXaiServiceAuth();
   const res = await fetchXaiWithOAuthRetry(`${baseUrl}/tts`, {
     method: 'POST',
@@ -235,7 +231,7 @@ async function xaiTTS(text, voiceId, language) {
       language,
       output_format: TTS_OUTPUT_FORMAT
     })
-  }, { timeoutMs: TTS_REQUEST_TIMEOUT_MS, maxAttempts: 2 });
+  }, { timeoutMs: TTS_REQUEST_TIMEOUT_MS, maxAttempts: 2, signal });
 
   const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), TTS_REQUEST_TIMEOUT_MS));
   if (buffer.length === 0) {
@@ -259,7 +255,7 @@ async function googleTranslateTTS(text, language, signal) {
   const buffers = await Promise.all(
     urls.map(async ({ url }) => {
       if (signal?.aborted) throw new Error('TTS aborted');
-      const res = await fetchWithTimeout(url);
+      const res = await fetchWithTimeout(url, { signal });
       if (!res.ok) throw new Error(`TTS download failed: ${res.status}`);
       return Buffer.from(await res.arrayBuffer());
     })

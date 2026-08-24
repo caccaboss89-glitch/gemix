@@ -67,13 +67,15 @@ function _failureMessage(code, error) {
  * @param {number} [args.count]
  * @param {object} [responseCtx] - per-turn context; the source count for the
  *   research badge is accumulated here, the same way native search stats were.
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal]
  * @returns {Promise<object>}
  */
-async function searchWeb(args = {}, responseCtx = null) {
+async function searchWeb(args = {}, responseCtx = null, opts = {}) {
   const query = _cleanQuery(args.query);
   if (!query) return { success: false, error: 'Missing required argument "query".' };
 
-  const res = await queryAgentSearch({ query, count: _clampCount(args.count) });
+  const res = await queryAgentSearch({ query, count: _clampCount(args.count), signal: opts.signal });
   if (!res.ok) return { success: false, error: _failureMessage(res.code, res.error) };
 
   if (res.results.length === 0) {
@@ -109,9 +111,11 @@ async function searchWeb(args = {}, responseCtx = null) {
  *
  * @param {object} args
  * @param {string} args.url
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal]
  * @returns {Promise<object>}
  */
-async function readPage(args = {}) {
+async function readPage(args = {}, opts = {}) {
   const url = typeof args.url === 'string' ? args.url.trim() : '';
   if (!url) return { success: false, error: 'Missing required argument "url".' };
   if (!/^https?:\/\//i.test(url)) {
@@ -120,7 +124,7 @@ async function readPage(args = {}) {
 
   // One character over the cap, so a page that fills it exactly is not reported
   // as truncated and one that overflows is caught before it reaches the model.
-  const res = await readWebPage({ url, maxChars: READ_PAGE_MAX_CHARS + 1 });
+  const res = await readWebPage({ url, maxChars: READ_PAGE_MAX_CHARS + 1, signal: opts.signal });
   if (!res.ok) return { success: false, error: _failureMessage(res.code, res.error) };
 
   const truncated = res.content.length > READ_PAGE_MAX_CHARS;

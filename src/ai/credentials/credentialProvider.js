@@ -66,7 +66,7 @@ class CredentialProvider {
    * @param {string|null} [accountId]
    */
   // eslint-disable-next-line no-unused-vars
-  markStatus(status, accountId = null) { /* stateless providers have nothing to record */ }
+  async markStatus(status, accountId = null) { /* stateless providers have nothing to record */ }
 
   /** Human-readable source description for startup logs (never a secret). */
   describe() {

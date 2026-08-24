@@ -27,4 +27,7 @@ scripts/output-regenerate-prompt-dumps/
 package-lock.json
 SERVER_SETUP.md
 sandbox/README.md
+# Local specifications, implementation research, probes and historical
+# archives. They are development-only material and are intentionally neither
+# versioned nor deployed to the VPS.
 docs/

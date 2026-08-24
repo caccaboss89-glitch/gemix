@@ -45,6 +45,7 @@ import { sanitizeFilename  } from '../utils/text.js';
 import { createLogger  } from '../utils/logger.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
+import { sleepWithin } from '../utils/turnBudget.js';
 
 const log = createLogger('ImagineGenerator');
 
@@ -173,8 +174,8 @@ function _classifyXaiFailure(message) {
   return 'MALFORMED';
 }
 
-async function _downloadMedia(url) {
-  const res = await fetchWithTimeout(url, {}, VIDEO_DOWNLOAD_TIMEOUT_MS);
+async function _downloadMedia(url, signal) {
+  const res = await fetchWithTimeout(url, { signal }, VIDEO_DOWNLOAD_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`Download failed: HTTP ${res.status}`);
   }
@@ -192,12 +193,20 @@ async function _downloadMedia(url) {
  * Resolve the references, then POST to an Imagine endpoint. References travel
  * inline, so there is no hosted URL that can go stale between the two steps.
  */
-async function _xaiImagineSubmit({ label, timeoutMs, refList, maxRefs, workspaceId, buildRequest }) {
+async function _xaiImagineSubmit({
+  label,
+  timeoutMs,
+  refList,
+  maxRefs,
+  workspaceId,
+  buildRequest,
+  signal
+}) {
   const refs = _resolveReferenceImageUrls(refList, maxRefs, workspaceId);
   if (!refs.ok) return { ok: false, reason: refs.reason };
   try {
     const { endpointPath, body } = buildRequest(refs.urls);
-    const data = await _xaiJsonRequest(label, endpointPath, body, timeoutMs);
+    const data = await _xaiJsonRequest(label, endpointPath, body, timeoutMs, signal);
     return { ok: true, data, refs };
   } catch (err) {
     return { ok: false, reason: err.message };
@@ -279,10 +288,10 @@ function _videoPollFailureMessage(data, status) {
   return `generation status "${status || 'failed'}"`;
 }
 
-async function _xaiJsonRequest(label, endpointPath, body, timeoutMs) {
+async function _xaiJsonRequest(label, endpointPath, body, timeoutMs, signal) {
   const { baseUrl } = await getXaiServiceAuth();
   const url = `${baseUrl}${endpointPath}`;
-  const res = await callApiWithRetry(label, url, body, {}, timeoutMs);
+  const res = await callApiWithRetry(label, url, body, {}, timeoutMs, { signal });
   const data = await res.json();
   logApiResponse(label, url, data);
   return data;
@@ -317,6 +326,7 @@ async function generateImage(args, userCtx) {
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
+  const signal = userCtx?.turnBudget?.signal;
 
   // Each backend validates only the arguments its own schema advertises: the
   // xAI variant takes an aspect ratio, FLUX takes a named size, and neither
@@ -348,7 +358,16 @@ async function generateImage(args, userCtx) {
   if (!quota.ok) return { success: false, error: quota.error };
 
   try {
-    const attempt = await _runImageChain({ primary, fallback, prompt, refList, aspect, size, workspaceId });
+    const attempt = await _runImageChain({
+      primary,
+      fallback,
+      prompt,
+      refList,
+      aspect,
+      size,
+      workspaceId,
+      signal
+    });
     if (!attempt.ok) {
       return { success: false, error: `Image generation failed: ${attempt.error}` };
     }
@@ -385,13 +404,14 @@ async function generateImage(args, userCtx) {
  * One attempt on the xAI Imagine image endpoints.
  * No references -> /images/generations; 1-3 references -> /images/edits.
  */
-async function _attemptXaiImage({ prompt, refList, aspect, workspaceId }) {
+async function _attemptXaiImage({ prompt, refList, aspect, workspaceId, signal }) {
   const submit = await _xaiImagineSubmit({
     label: 'Grok-Imagine-Image',
     timeoutMs: IMAGE_TIMEOUT_MS,
     refList,
     maxRefs: MAX_REF_IMAGES_FOR_IMAGE,
     workspaceId,
+    signal,
     buildRequest: (urls) => {
       const body = {
         model: envConfig.IMAGE_GEN_MODEL,
@@ -420,7 +440,7 @@ async function _attemptXaiImage({ prompt, refList, aspect, workspaceId }) {
 
   let buffer;
   try {
-    buffer = await _downloadMedia(item.url);
+    buffer = await _downloadMedia(item.url, signal);
   } catch (err) {
     return { ok: false, error: `Image load failed: ${err.message}`, code: 'TRANSIENT' };
   }
@@ -433,11 +453,11 @@ async function _attemptXaiImage({ prompt, refList, aspect, workspaceId }) {
 }
 
 /** One attempt on Cloudflare FLUX, with references read off disk as bytes. */
-async function _attemptFluxImage({ prompt, refList, size, workspaceId }) {
+async function _attemptFluxImage({ prompt, refList, size, workspaceId, signal }) {
   const refs = _readReferenceBuffers(refList, workspaceId);
   if (!refs.ok) return { ok: false, error: refs.reason, code: 'MALFORMED' };
 
-  const result = await generateWithFlux({ prompt, size, references: refs.images });
+  const result = await generateWithFlux({ prompt, size, references: refs.images, signal });
   if (!result.ok) return { ok: false, error: result.error, code: result.code };
   return { ok: true, buffer: result.buffer, ext: result.ext, refCount: refs.images.length };
 }
@@ -446,13 +466,14 @@ async function _attemptFluxImage({ prompt, refList, size, workspaceId }) {
  * Try the primary, then the fallback, under the §18.13 rules. Never more than
  * one retry per backend and never a third backend, so this always terminates.
  */
-async function _runImageChain({ primary, fallback, prompt, refList, aspect, size, workspaceId }) {
+async function _runImageChain({ primary, fallback, prompt, refList, aspect, size, workspaceId, signal }) {
   const run = (backend) => (backend === BACKEND.XAI
-    ? _attemptXaiImage({ prompt, refList, aspect, workspaceId })
-    : _attemptFluxImage({ prompt, refList, size, workspaceId }));
+    ? _attemptXaiImage({ prompt, refList, aspect, workspaceId, signal })
+    : _attemptFluxImage({ prompt, refList, size, workspaceId, signal }));
 
   let attempt = await run(primary);
   if (attempt.ok) return { ...attempt, backend: primary };
+  if (signal?.aborted) return attempt;
 
   const plan = failurePlan(attempt.code);
   if (plan.cooldown) startCooldown(primary);
@@ -461,6 +482,7 @@ async function _runImageChain({ primary, fallback, prompt, refList, aspect, size
     log.info(`   ${primary} failed (${attempt.code}); one more attempt before falling back`);
     attempt = await run(primary);
     if (attempt.ok) return { ...attempt, backend: primary };
+    if (signal?.aborted) return attempt;
   }
 
   if (!plan.fallBack || !fallback) return attempt;
@@ -496,6 +518,7 @@ async function generateVideo(args, userCtx) {
   }
 
   const refList = Array.isArray(args && args.reference_images) ? args.reference_images : [];
+  const signal = userCtx?.turnBudget?.signal;
 
   const aspect = (args && typeof args.aspect_ratio === 'string' && args.aspect_ratio.trim())
     ? args.aspect_ratio.trim()
@@ -521,6 +544,7 @@ async function generateVideo(args, userCtx) {
       refList,
       maxRefs: MAX_REF_IMAGES_FOR_VIDEO,
       workspaceId,
+      signal,
       buildRequest: (urls) => {
         const body = {
           model: envConfig.VIDEO_GEN_MODEL,
@@ -552,16 +576,22 @@ async function generateVideo(args, userCtx) {
 
     let videoUrl;
     try {
-      videoUrl = await _pollVideoResult(requestId);
+      videoUrl = await _pollVideoResult(requestId, signal);
     } catch (err) {
+      if (signal?.aborted) {
+        return { success: false, error: 'Video generation stopped because this turn ended.' };
+      }
       await notifyAdmin('GenerateVideo', `Polling ${requestId} failed: ${err.message}`);
       return { success: false, error: `Video generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
     }
 
     let buffer;
     try {
-      buffer = await _downloadMedia(videoUrl);
+      buffer = await _downloadMedia(videoUrl, signal);
     } catch (err) {
+      if (signal?.aborted) {
+        return { success: false, error: 'Video download stopped because this turn ended.' };
+      }
       await notifyAdmin('GenerateVideo', `Load media from ${videoUrl} failed: ${err.message}`);
       return { success: false, error: `Video load failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
     }
@@ -595,19 +625,21 @@ async function generateVideo(args, userCtx) {
  * Poll GET /v1/videos/{request_id} until status "done", then return the
  * video URL. Throws on failure status or timeout.
  */
-async function _pollVideoResult(requestId) {
+async function _pollVideoResult(requestId, signal) {
   const deadline = Date.now() + VIDEO_POLL_TIMEOUT_MS;
   const label = 'Grok-Imagine-Video-Poll';
   let consecutive429 = 0;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, VIDEO_POLL_INTERVAL_MS));
+    await sleepWithin(VIDEO_POLL_INTERVAL_MS, signal);
+    if (signal?.aborted) throw signal.reason || new DOMException('Aborted', 'AbortError');
 
     const { baseUrl } = await getXaiServiceAuth();
     const url = `${baseUrl}/videos/${encodeURIComponent(requestId)}`;
     let data;
     try {
       const res = await fetchXaiWithOAuthRetry(url, { method: 'GET' }, {
-        timeoutMs: VIDEO_POLL_FETCH_TIMEOUT_MS
+        timeoutMs: VIDEO_POLL_FETCH_TIMEOUT_MS,
+        signal
       });
       consecutive429 = 0;
       data = await res.json();

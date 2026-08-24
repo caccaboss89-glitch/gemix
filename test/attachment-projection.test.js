@@ -14,10 +14,12 @@ import {
   ATTACHMENT_TTL_MS,
   attachmentDisplayPath,
   clearProjection,
+  collectVisibleAttachmentNames,
   isProjected,
   projectBuffer,
   projectFile,
   projectionRoot,
+  reconcileProjection,
   sweepExpiredAttachments,
   touchProjected,
   unprojectFile
@@ -119,6 +121,39 @@ test('unproject removes one file and clearProjection removes the lot', () => {
   clearProjection(WORKSPACE_ID);
   assert.equal(fs.existsSync(ATTACHMENTS), false);
   fs.mkdirSync(ATTACHMENTS, { recursive: true });
+});
+
+test('visible-context reconciliation removes only files that left the context', () => {
+  projectBuffer(WORKSPACE_ID, 'visible.pdf', Buffer.from('v'));
+  projectBuffer(WORKSPACE_ID, 'voice.ogg', Buffer.from('a'));
+  projectBuffer(WORKSPACE_ID, 'expired.txt', Buffer.from('e'));
+  projectBuffer(WORKSPACE_ID, 'old.txt', Buffer.from('o'));
+
+  const names = collectVisibleAttachmentNames([
+    { role: 'user', content: '[Attachment: attachments/visible.pdf]' },
+    { role: 'user', content: '<PastVoice file="attachments/voice.ogg">hello</PastVoice>' },
+    { role: 'user', content: '[Attachment (expired): attachments/expired.txt]' },
+    { role: 'assistant', content: [{ type: 'output_text', text: '[Attachment: workspace/result.txt]' }] }
+  ]);
+  assert.deepEqual([...names].sort(), ['visible.pdf', 'voice.ogg']);
+
+  const result = reconcileProjection(WORKSPACE_ID, names);
+  assert.deepEqual(result, { removed: 2, kept: 2, missing: 0 });
+  assert.equal(isProjected(WORKSPACE_ID, 'visible.pdf'), true);
+  assert.equal(isProjected(WORKSPACE_ID, 'voice.ogg'), true);
+  assert.equal(isProjected(WORKSPACE_ID, 'expired.txt'), false);
+  assert.equal(isProjected(WORKSPACE_ID, 'old.txt'), false);
+});
+
+test('a file removed from the projection can be rehydrated from durable history', () => {
+  const durable = source('returning.txt', 'still durable');
+  projectFile(WORKSPACE_ID, durable);
+  reconcileProjection(WORKSPACE_ID, new Set());
+  assert.equal(isProjected(WORKSPACE_ID, 'returning.txt'), false);
+  assert.equal(fs.existsSync(durable), true);
+
+  const restored = projectFile(WORKSPACE_ID, durable);
+  assert.equal(fs.readFileSync(restored.abs, 'utf8'), 'still durable');
 });
 
 test('media kind and inlineability come from extension or content type', () => {

@@ -20,7 +20,7 @@ const log = createLogger('MusicCreator');
 
 const pendingGenerations = new Set();
 
-async function callLyriaStreaming(model, apiUrl, body, apiKey) {
+async function callLyriaStreaming(model, apiUrl, body, apiKey, signal) {
   const timeoutMs = 180000;
 
   const audioChunks = [];
@@ -37,7 +37,8 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
         'HTTP-Referer': envConfig.OPENROUTER_HTTP_REFERER,
         'X-Title': 'GemiX Music Tool'
       },
-      body: JSON.stringify({ ...body, stream: true })
+      body: JSON.stringify({ ...body, stream: true }),
+      signal
     }, timeoutMs);
 
     if (!res.ok) {
@@ -86,6 +87,7 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey) {
     return { audio: { data: fullAudioBase64 } };
 
   } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
     if (err.name === 'AbortError') {
       throw new Error(`Music generation timed out after ${timeoutMs / 1000}s`);
     }
@@ -101,6 +103,7 @@ async function musicCreator(prompt, userCtx) {
 
   const userId = userCtx.waJid || userCtx.userId;
   const userIsAdmin = Boolean(userCtx.isAdmin);
+  const signal = userCtx.turnBudget?.signal;
 
   // One in-flight generation per user (independent of the weekly quota below).
   if (!userIsAdmin && pendingGenerations.has(userId)) {
@@ -155,7 +158,7 @@ async function musicCreator(prompt, userCtx) {
       })
     };
 
-    const result = await callLyriaStreaming(model, apiUrl, body, apiKey);
+    const result = await callLyriaStreaming(model, apiUrl, body, apiKey, signal);
 
     if (result.audio.data && result.audio.data.length > 100) {
       let audioBase64 = result.audio.data;
@@ -164,7 +167,7 @@ async function musicCreator(prompt, userCtx) {
       const rawBuffer = Buffer.from(audioBase64, 'base64');
       let buffer;
       try {
-        buffer = await convertMp3ToWhatsAppOpus(rawBuffer);
+        buffer = await convertMp3ToWhatsAppOpus(rawBuffer, { signal });
       } catch (err) {
         log.error(`Audio transcode failed: ${err.message}`);
         return {
@@ -195,6 +198,12 @@ async function musicCreator(prompt, userCtx) {
     };
 
   } catch (err) {
+    if (signal?.aborted) {
+      return {
+        toolResult: { success: false, error: 'Music generation stopped because this turn ended.' },
+        attachments: []
+      };
+    }
     log.error(`Music generation failed: ${err.message}`);
     await notifyAdmin('MusicCreator', `Generation failed for ${userId}: ${err.message}`);
     return {

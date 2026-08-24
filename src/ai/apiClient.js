@@ -18,6 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import constants from '../config/constants.js';
 import { getXaiServiceAuth, markXaiServiceStatus  } from './credentials/xaiServiceCredentials.js';
 import { createLogger  } from '../utils/logger.js';
+import { signalWithTimeout, sleepWithin } from '../utils/turnBudget.js';
 
 const log = createLogger('API');
 const apiLogDir = path.resolve(__dirname, '..', 'logs');
@@ -278,20 +279,36 @@ function _isGrokCreditExhaustedError(errMsg) {
  * @param {string} modelName - Model name for logging (e.g., 'Grok-Imagine')
  * @param {string} apiUrl - Full API endpoint URL
  * @param {object} body - Request body
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal] - caller cancellation / absolute turn deadline
  * @returns {Promise<Response>} The raw fetch Response
  */
-async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutMs = constants.API_TIMEOUT_MS) {
+async function callApiWithRetry(
+  modelName,
+  apiUrl,
+  body,
+  logExtra = {},
+  timeoutMs = constants.API_TIMEOUT_MS,
+  opts = {}
+) {
   logApiRequest(modelName, apiUrl, body, logExtra);
+  const callerSignal = opts.signal || null;
   let forceCredentialRefresh = false;
+  let rejectedAccountId = null;
   let credentialRefreshAttempted = false;
   for (let attempt = 1; attempt <= constants.MAX_API_RETRIES; attempt++) {
-    let timer;
     const attemptStarted = Date.now();
+    let requestAccountId = null;
     try {
-      const { token } = await getXaiServiceAuth({ forceRefresh: forceCredentialRefresh });
+      if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
+      const { token, accountId } = await getXaiServiceAuth({
+        forceRefresh: forceCredentialRefresh,
+        accountId: rejectedAccountId
+      });
+      requestAccountId = accountId;
       forceCredentialRefresh = false;
-      const controller = new AbortController();
-      timer = setTimeout(() => controller.abort(), timeoutMs);
+      rejectedAccountId = null;
+      const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
 
       const res = await fetch(apiUrl, {
         method: 'POST',
@@ -300,9 +317,8 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(body),
-        signal: controller.signal
+        signal: operationSignal
       });
-      clearTimeout(timer);
       const duration = Date.now() - attemptStarted;
 
       if (!res.ok) {
@@ -315,11 +331,14 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
       }
 
       log.debug(`   Model: ${modelName} - ${duration}ms${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+      await markXaiServiceStatus('ok', requestAccountId);
       return res;
     } catch (err) {
-      if (timer) clearTimeout(timer);
+      if (callerSignal?.aborted) throw callerSignal.reason || err;
       const attemptMs = Date.now() - attemptStarted;
-      const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('524'));
+      const isTimeout = err.name === 'AbortError'
+        || err.name === 'TimeoutError'
+        || (err.message && err.message.includes('524'));
       const isNetworkError = err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message);
       const is429 = err.message && /^HTTP 429/.test(err.message);
       const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (401|429|500|502|503|504)/.test(err.message));
@@ -329,8 +348,9 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
 
       if (_isOAuthCredentialError(errMsg) && !credentialRefreshAttempted) {
         credentialRefreshAttempted = true;
-        markXaiServiceStatus('auth_failed');
+        await markXaiServiceStatus('auth_failed', requestAccountId);
         forceCredentialRefresh = true;
+        rejectedAccountId = requestAccountId;
         // A refresh is not a failed attempt: give back the budget so the retry
         // still happens when the rejection landed on the last one.
         attempt--;
@@ -347,13 +367,14 @@ async function callApiWithRetry(modelName, apiUrl, body, logExtra = {}, timeoutM
           `   API attempt ${attempt}/${constants.MAX_API_RETRIES} failed after ${Math.round(attemptMs / 1000)}s: ${errMsg}`
           + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${constants.MAX_API_RETRIES}${waitHint}...`
         );
-        await new Promise(r => setTimeout(r, delay));
+        await sleepWithin(delay, callerSignal);
+        if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
         continue;
       }
 
       log.error(`   API error after ${attempt} attempt(s), last try ${Math.round(attemptMs / 1000)}s: ${errMsg}`);
       if (_isGrokCreditExhaustedError(errMsg)) {
-        markXaiServiceStatus('quota');
+        await markXaiServiceStatus('quota', requestAccountId);
         const creditErr = new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
         creditErr.code = GROK_CREDIT_EXHAUSTED_CODE;
         throw creditErr;
@@ -380,33 +401,30 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : constants.MAX_API_RETRIES;
   const callerSignal = opts.signal || null;
   let forceCredentialRefresh = false;
+  let rejectedAccountId = null;
   let credentialRefreshAttempted = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let timer;
+    let requestAccountId = null;
     try {
-      const { token } = await getXaiServiceAuth({ forceRefresh: forceCredentialRefresh });
-      forceCredentialRefresh = false;
       if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
-      const controller = new AbortController();
-      timer = setTimeout(() => controller.abort(), timeoutMs);
-      const onCallerAbort = () => controller.abort(callerSignal.reason);
-      callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+      const { token, accountId } = await getXaiServiceAuth({
+        forceRefresh: forceCredentialRefresh,
+        accountId: rejectedAccountId
+      });
+      requestAccountId = accountId;
+      forceCredentialRefresh = false;
+      rejectedAccountId = null;
+      const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
 
-      let res;
-      try {
-        res = await fetch(url, {
-          ...options,
-          headers: {
-            ...(options.headers || {}),
-            Authorization: `Bearer ${token}`
-          },
-          signal: controller.signal
-        });
-      } finally {
-        callerSignal?.removeEventListener('abort', onCallerAbort);
-      }
-      clearTimeout(timer);
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+          Authorization: `Bearer ${token}`
+        },
+        signal: operationSignal
+      });
       if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
 
       if (!res.ok) {
@@ -416,23 +434,26 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
 
         if (_isOAuthCredentialError(errMsg) && !credentialRefreshAttempted) {
           credentialRefreshAttempted = true;
-          markXaiServiceStatus('auth_failed');
+          await markXaiServiceStatus('auth_failed', requestAccountId);
           forceCredentialRefresh = true;
+          rejectedAccountId = requestAccountId;
           continue;
         }
 
         throw new Error(errMsg);
       }
 
+      await markXaiServiceStatus('ok', requestAccountId);
       return res;
     } catch (err) {
-      if (timer) clearTimeout(timer);
-      const isTimeout = err.name === 'AbortError';
+      if (callerSignal?.aborted) throw callerSignal.reason || err;
+      const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError';
       const isRetryable = isTimeout
         || (err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message))
         || (err.message && /^HTTP (401|429|500|502|503|504)/.test(err.message));
       if (isRetryable && attempt < maxAttempts) {
-        await new Promise(r => setTimeout(r, attempt * 2000));
+        await sleepWithin(attempt * 2000, callerSignal);
+        if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
         continue;
       }
       throw err;

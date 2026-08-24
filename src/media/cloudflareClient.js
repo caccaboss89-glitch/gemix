@@ -13,8 +13,9 @@
 // properties 'multipart'"). Both shapes live here rather than in the callers.
 
 import envConfig from '../config/env.js';
-import { canAfford, recordSpend } from './neuronLedger.js';
+import { reserveNeurons } from './neuronLedger.js';
 import { createLogger } from '../utils/logger.js';
+import { signalWithTimeout } from '../utils/turnBudget.js';
 
 const log = createLogger('Cloudflare');
 
@@ -75,23 +76,38 @@ async function callWorkersAi({ model, body, estimatedNeurons, signal, timeoutMs 
     return { ok: false, code: CF_ERROR.UNCONFIGURED, error: 'Cloudflare Workers AI is not configured.' };
   }
 
-  const budget = canAfford(estimatedNeurons);
-  if (!budget.ok) {
-    return { ok: false, code: CF_ERROR.BUDGET, error: budget.reason };
+  const reservation = await reserveNeurons(estimatedNeurons);
+  if (!reservation.ok) {
+    return { ok: false, code: CF_ERROR.BUDGET, error: reservation.reason };
   }
 
   const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
-  let res;
+  let committed = false;
   try {
-    res = await fetch(_url(model), {
+    const res = await fetch(_url(model), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${envConfig.CLOUDFLARE_AI_API_TOKEN}`,
         ...(isForm ? {} : { 'Content-Type': 'application/json' })
       },
       body: isForm ? body : JSON.stringify(body),
-      signal: signal || AbortSignal.timeout(timeoutMs)
+      signal: signalWithTimeout(signal, timeoutMs)
     });
+    const raw = await res.text();
+    let payload = null;
+    try { payload = JSON.parse(raw); } catch { /* reported through the classifier */ }
+
+    if (!res.ok || payload?.success === false) {
+      const message = _errorMessage(payload, raw);
+      const code = classifyFailure(res.status, message);
+      log.warn(`Workers AI ${model} failed (HTTP ${res.status}, ${code}): ${message}`);
+      return { ok: false, code, error: message, status: res.status };
+    }
+
+    // Only a call that produced something consumes the reservation.
+    committed = await reservation.commit();
+    if (!committed) log.warn(`Workers AI ${model} succeeded but its neuron reservation could not be committed`);
+    return { ok: true, payload, status: res.status };
   } catch (err) {
     const timedOut = err.name === 'AbortError' || err.name === 'TimeoutError';
     return {
@@ -99,23 +115,9 @@ async function callWorkersAi({ model, body, estimatedNeurons, signal, timeoutMs 
       code: CF_ERROR.TRANSIENT,
       error: timedOut ? 'Cloudflare did not answer in time.' : `Cloudflare is unreachable: ${err.message}`
     };
+  } finally {
+    if (!committed) await reservation.release();
   }
-
-  const raw = await res.text();
-  let payload = null;
-  try { payload = JSON.parse(raw); } catch { /* reported through the classifier */ }
-
-  if (!res.ok || payload?.success === false) {
-    const message = _errorMessage(payload, raw);
-    const code = classifyFailure(res.status, message);
-    log.warn(`Workers AI ${model} failed (HTTP ${res.status}, ${code}): ${message}`);
-    return { ok: false, code, error: message, status: res.status };
-  }
-
-  // Only a call that produced something is charged: a refusal costs nothing on
-  // Cloudflare's side either.
-  recordSpend(estimatedNeurons);
-  return { ok: true, payload, status: res.status };
 }
 
 export {

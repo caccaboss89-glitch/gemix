@@ -11,7 +11,7 @@ import path from 'node:path';
 import test, { after, before } from 'node:test';
 import constants from '../src/config/constants.js';
 import { getUserHistoryPaths, storeUserTranscription } from '../src/utils/historySync.js';
-import { contentHashOf, isSttConfigured, sttModelId } from '../src/media/speechToText.js';
+import { contentHashOf, isSttConfigured, sttModelId, sttRouteId } from '../src/media/speechToText.js';
 import { projectUserVoiceMessages } from '../src/attachments/voiceProjection.js';
 import { applyPastVoiceRepliesToHistory } from '../src/utils/voiceTranscripts.js';
 import { assistantTextItem } from '../src/ai/responsesItems.js';
@@ -27,7 +27,9 @@ function cacheTranscript(name, text, status = 'ok') {
     status,
     provider: 'test',
     model: sttModelId(),
-    contentHash: contentHashOf(CLIP)
+    contentHash: contentHashOf(CLIP),
+    routeId: sttRouteId(),
+    language: ''
   });
 }
 

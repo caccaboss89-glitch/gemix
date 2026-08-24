@@ -77,6 +77,9 @@ export default {
   // after the reply stopped being useful. Wide on purpose: video generation
   // and long shell work are legitimate, a fifty-round loop is not.
   TURN_BUDGET_MS: 20 * 60 * 1000,
+  // Kept inside the one turn deadline for a final tool-free answer after the
+  // work phase ends. Normal model/tool calls use the preceding work budget.
+  TURN_WRAP_UP_RESERVE_MS: 60 * 1000,
   FETCH_TIMEOUT_MS: 60_000,
   MAX_TOKENS: 64_000,
   // Main brain outer loop (client-side tool rounds). When exhausted the

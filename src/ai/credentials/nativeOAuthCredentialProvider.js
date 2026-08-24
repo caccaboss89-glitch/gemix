@@ -123,6 +123,43 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
   }
 
   /**
+   * Find the next account that can actually authorize a request. An access
+   * token being present is not enough: expired candidates are refreshed before
+   * they are returned, and unusable candidates are marked and skipped.
+   */
+  async _rotateToUsableAccount(failedAccountId, originalError, opts = {}) {
+    const candidates = orderPool(readPool(this.pool)).filter(a => a.id !== failedAccountId);
+    let lastError = originalError;
+
+    for (let account of candidates) {
+      this._currentAccountId = account.id;
+      if (!this._needsRefresh(account, opts.minRemainingMs)) {
+        log.warn(`${this.pool}: rotating to account "${account.id}"`);
+        return this._toCredential(account);
+      }
+
+      try {
+        account = await this._refreshAccount(account);
+        this._currentAccountId = account.id;
+        log.warn(`${this.pool}: rotating to refreshed account "${account.id}"`);
+        return this._toCredential(account);
+      } catch (err) {
+        lastError = err;
+        const stillValid = account.accessToken
+          && (account.expiresAtMs === null || account.expiresAtMs > Date.now());
+        log.warn(`${this.pool}: candidate account "${account.id}" could not refresh (${err.message})`);
+        if (stillValid) return this._toCredential(account);
+        await patchAccount(this.pool, account.id, {
+          lastStatus: 'auth_failed',
+          lastStatusAt: Date.now()
+        });
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
    * A credential valid for at least `minRemainingMs`, refreshing first when the
    * stored one is too close to expiry.
    *
@@ -145,11 +182,7 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
         log.warn(`${this.pool}: proactive refresh of "${account.id}" failed (${err.message})`);
         if (!stillValid) {
           await patchAccount(this.pool, account.id, { lastStatus: 'auth_failed', lastStatusAt: Date.now() });
-          const next = orderPool(readPool(this.pool)).find(a => a.id !== account.id && a.accessToken);
-          if (!next) throw err;
-          log.warn(`${this.pool}: rotating to account "${next.id}"`);
-          this._currentAccountId = next.id;
-          return this._toCredential(next);
+          return this._rotateToUsableAccount(account.id, err, opts);
         }
       }
     }
@@ -161,19 +194,17 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
    * Force a refresh after the provider rejected the current credential.
    * The transport calls this at most once per request.
    */
-  async refresh() {
-    const account = this._pickAccount();
+  async refresh(opts = {}) {
+    const accounts = readPool(this.pool);
+    const requestedId = opts.accountId || this._currentAccountId;
+    const account = (requestedId && accounts.find(a => a.id === requestedId)) || this._pickAccount();
     try {
       const refreshed = await this._refreshAccount(account);
       this._currentAccountId = refreshed.id;
       return this._toCredential(refreshed);
     } catch (err) {
       await patchAccount(this.pool, account.id, { lastStatus: 'auth_failed', lastStatusAt: Date.now() });
-      const next = orderPool(readPool(this.pool)).find(a => a.id !== account.id && a.accessToken);
-      if (!next) throw err;
-      log.warn(`${this.pool}: account "${account.id}" could not be refreshed; rotating to "${next.id}"`);
-      this._currentAccountId = next.id;
-      return this._toCredential(next);
+      return this._rotateToUsableAccount(account.id, err, opts);
     }
   }
 
@@ -182,13 +213,16 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
    * Repeating the same status is not re-persisted: an `ok` on every call would
    * rewrite the store several times a turn for no new information.
    */
-  markStatus(status, accountId = null) {
+  async markStatus(status, accountId = null) {
     const id = accountId || this._currentAccountId;
     if (!id) return;
     const current = readPool(this.pool).find(a => a.id === id);
     if (!current || current.lastStatus === status) return;
-    patchAccount(this.pool, id, { lastStatus: status, lastStatusAt: Date.now() })
-      .catch(err => log.warn(`${this.pool}: cannot record status for "${id}": ${err.message}`));
+    try {
+      await patchAccount(this.pool, id, { lastStatus: status, lastStatusAt: Date.now() });
+    } catch (err) {
+      log.warn(`${this.pool}: cannot record status for "${id}": ${err.message}`);
+    }
   }
 
   describe() {

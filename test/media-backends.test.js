@@ -29,11 +29,10 @@ import {
   NEURONS_PER_INPUT_TILE,
   NEURONS_PER_OUTPUT_TILE,
   RESERVE_NEURONS,
-  canAfford,
   estimateImageNeurons,
   estimateSttNeurons,
   ledgerSnapshot,
-  recordSpend,
+  reserveNeurons,
   remainingNeurons,
   resetLedger,
   tilesFor
@@ -202,36 +201,62 @@ test('transcription is charged by audio length', () => {
   assert.ok(estimateSttNeurons(0) > 0, 'a clip always costs something');
 });
 
-test('images and speech draw on one shared allowance', () => {
+async function commitSpend(cost, now = Date.now()) {
+  const reservation = await reserveNeurons(cost, now);
+  assert.equal(reservation.ok, true, reservation.reason);
+  assert.equal(await reservation.commit(), true);
+}
+
+test('images and speech draw on one shared allowance', async () => {
   const start = remainingNeurons();
-  recordSpend(estimateImageNeurons({ width: 1024, height: 1024 }));
+  await commitSpend(estimateImageNeurons({ width: 1024, height: 1024 }));
   const afterImage = remainingNeurons();
   assert.ok(afterImage < start);
 
-  recordSpend(estimateSttNeurons(300));
+  await commitSpend(estimateSttNeurons(300));
   assert.ok(remainingNeurons() < afterImage, 'the transcription came out of the same pool');
 });
 
-test('the allowance is refused before the call, with the numbers in the message', () => {
-  recordSpend(DAILY_NEURONS);
-  const verdict = canAfford(50);
+test('the allowance is refused before the call, with the numbers in the message', async () => {
+  await commitSpend(DAILY_NEURONS - RESERVE_NEURONS);
+  const verdict = await reserveNeurons(50);
   assert.equal(verdict.ok, false);
   assert.match(verdict.reason, /allowance for today is spent/);
   assert.match(verdict.reason, /00:00 UTC/);
 });
 
-test('a reserve is kept back rather than spending down to the last neuron', () => {
+test('a reserve is kept back rather than spending down to the last neuron', async () => {
   assert.equal(remainingNeurons(), DAILY_NEURONS - RESERVE_NEURONS);
-  assert.equal(canAfford(DAILY_NEURONS - RESERVE_NEURONS).ok, true);
-  assert.equal(canAfford(DAILY_NEURONS - RESERVE_NEURONS + 1).ok, false);
+  const exact = await reserveNeurons(DAILY_NEURONS - RESERVE_NEURONS);
+  assert.equal(exact.ok, true);
+  await exact.release();
+  const over = await reserveNeurons(DAILY_NEURONS - RESERVE_NEURONS + 1);
+  assert.equal(over.ok, false);
 });
 
-test('the count rolls over on the UTC day Cloudflare resets on', () => {
-  recordSpend(500);
+test('the count rolls over on the UTC day Cloudflare resets on', async () => {
+  await commitSpend(500);
   assert.ok(ledgerSnapshot().spent >= 500);
   const tomorrow = Date.now() + 25 * 60 * 60 * 1000;
   assert.equal(ledgerSnapshot(tomorrow).spent, 0);
   assert.equal(remainingNeurons(tomorrow), DAILY_NEURONS - RESERVE_NEURONS);
+});
+
+test('parallel reservations cannot collectively overspend the remaining allowance', async () => {
+  const available = DAILY_NEURONS - RESERVE_NEURONS;
+  await commitSpend(available - 100);
+
+  const [first, second] = await Promise.all([
+    reserveNeurons(75),
+    reserveNeurons(75)
+  ]);
+  assert.equal([first.ok, second.ok].filter(Boolean).length, 1);
+  const accepted = first.ok ? first : second;
+  const refused = first.ok ? second : first;
+  assert.match(refused.reason, /allowance for today is spent/);
+  assert.equal(ledgerSnapshot().reserved, 75);
+  await accepted.release();
+  assert.equal(ledgerSnapshot().reserved, 0);
 });
 
 // -- what the model is actually offered (§18.12) ------------------------------

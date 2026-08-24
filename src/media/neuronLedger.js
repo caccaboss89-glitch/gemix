@@ -20,8 +20,10 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
+import { withKeyedLock } from '../utils/keyedLock.js';
 
 const log = createLogger('NeuronLedger');
 
@@ -44,6 +46,8 @@ const NEURONS_PER_AUDIO_SECOND = 0.0929;
 const RESERVE_NEURONS = 200;
 
 const LEDGER_FILE = path.join(constants.DATA_DIR, 'neuron_ledger.json');
+const RESERVATION_MAX_AGE_MS = 30 * 60 * 1000;
+const ledgerLocks = new Map();
 
 /** UTC day, because that is the boundary Cloudflare resets on. */
 function _today(now = Date.now()) {
@@ -59,13 +63,16 @@ function _load() {
 }
 
 function _save(state) {
+  const tmp = `${LEDGER_FILE}.tmp`;
   try {
     fs.mkdirSync(path.dirname(LEDGER_FILE), { recursive: true });
-    fs.writeFileSync(LEDGER_FILE, JSON.stringify(state));
+    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.renameSync(tmp, LEDGER_FILE);
+    return true;
   } catch (err) {
-    // A ledger that cannot be written must not stop a generation: the worst
-    // case is that Cloudflare enforces the limit itself, with a 429.
+    try { fs.unlinkSync(tmp); } catch { /* nothing staged */ }
     log.warn(`Cannot persist the neuron ledger: ${err.message}`);
+    return false;
   }
 }
 
@@ -73,8 +80,25 @@ function _save(state) {
 function _state(now = Date.now()) {
   const state = _load();
   const day = _today(now);
-  if (state.day !== day) return { day, spent: 0, calls: 0 };
-  return state;
+  if (state.day !== day) return { day, spent: 0, calls: 0, reservations: {} };
+  const reservations = {};
+  for (const [id, reservation] of Object.entries(state.reservations || {})) {
+    const createdAt = Number(reservation?.createdAt);
+    const cost = Math.max(0, Number(reservation?.cost) || 0);
+    if (!createdAt || now - createdAt > RESERVATION_MAX_AGE_MS) continue;
+    reservations[id] = { cost, createdAt };
+  }
+  return {
+    day,
+    spent: Math.max(0, Number(state.spent) || 0),
+    calls: Math.max(0, Number(state.calls) || 0),
+    reservations
+  };
+}
+
+function _reservedNeurons(state) {
+  return Object.values(state.reservations || {})
+    .reduce((sum, reservation) => sum + Math.max(0, Number(reservation.cost) || 0), 0);
 }
 
 /** Tiles a WxH image occupies, at Cloudflare's 512x512 tile size. */
@@ -102,33 +126,74 @@ function estimateSttNeurons(durationSec) {
 /** What is left today, after the reserve. */
 function remainingNeurons(now = Date.now()) {
   const state = _state(now);
-  return Math.max(0, DAILY_NEURONS - RESERVE_NEURONS - state.spent);
+  return Math.max(0, DAILY_NEURONS - RESERVE_NEURONS - state.spent - _reservedNeurons(state));
+}
+
+async function _settleReservation(id, commit, now = Date.now()) {
+  return withKeyedLock(ledgerLocks, LEDGER_FILE, async () => {
+    const state = _state(now);
+    const reservation = state.reservations[id];
+    if (!reservation) return false;
+    delete state.reservations[id];
+    if (commit) {
+      state.spent = Math.round((state.spent + reservation.cost) * 100) / 100;
+      state.calls += 1;
+    }
+    return _save(state);
+  });
 }
 
 /**
- * Whether a call of this estimated cost fits in what is left.
- * @returns {{ ok: boolean, remaining: number, estimated: number, reason?: string }}
+ * Atomically reserve estimated cost before network work starts. Parallel calls
+ * see each other's pending reservations, so only calls that fit can launch.
  */
-function canAfford(estimated, now = Date.now()) {
-  const remaining = remainingNeurons(now);
-  if (estimated <= remaining) return { ok: true, remaining, estimated };
-  return {
-    ok: false,
-    remaining,
-    estimated,
-    reason: 'The free Cloudflare Workers AI allowance for today is spent '
-      + `(${Math.round(remaining)} of ${DAILY_NEURONS} neurons left, this call needs about `
-      + `${Math.round(estimated)}). It resets at 00:00 UTC.`
-  };
-}
+async function reserveNeurons(estimated, now = Date.now()) {
+  const cost = Math.max(0, Number(estimated) || 0);
+  return withKeyedLock(ledgerLocks, LEDGER_FILE, async () => {
+    const state = _state(now);
+    const remaining = Math.max(
+      0,
+      DAILY_NEURONS - RESERVE_NEURONS - state.spent - _reservedNeurons(state)
+    );
+    if (cost > remaining) {
+      return {
+        ok: false,
+        remaining,
+        estimated: cost,
+        reason: 'The free Cloudflare Workers AI allowance for today is spent '
+          + `(${Math.round(remaining)} of ${DAILY_NEURONS} neurons left, this call needs about `
+          + `${Math.round(cost)}). It resets at 00:00 UTC.`
+      };
+    }
 
-/** Record what a call is believed to have cost. */
-function recordSpend(estimated, now = Date.now()) {
-  const state = _state(now);
-  state.spent = Math.round((state.spent + Math.max(0, estimated)) * 100) / 100;
-  state.calls += 1;
-  _save(state);
-  return state.spent;
+    const id = crypto.randomUUID();
+    state.reservations[id] = { cost, createdAt: now };
+    if (!_save(state)) {
+      return {
+        ok: false,
+        remaining,
+        estimated: cost,
+        reason: 'The local Cloudflare allowance ledger could not be persisted, so this call was not started.'
+      };
+    }
+
+    let settled = false;
+    return {
+      ok: true,
+      remaining,
+      estimated: cost,
+      async commit() {
+        if (settled) return false;
+        settled = await _settleReservation(id, true);
+        return settled;
+      },
+      async release() {
+        if (settled) return false;
+        settled = await _settleReservation(id, false);
+        return settled;
+      }
+    };
+  });
 }
 
 /** Today's figures, for the Runtime block and for diagnostics. */
@@ -137,6 +202,7 @@ function ledgerSnapshot(now = Date.now()) {
   return {
     day: state.day,
     spent: state.spent,
+    reserved: _reservedNeurons(state),
     calls: state.calls,
     remaining: remainingNeurons(now),
     dailyLimit: DAILY_NEURONS
@@ -145,7 +211,7 @@ function ledgerSnapshot(now = Date.now()) {
 
 /** Reset today's count. Tests, and the operator command that follows a mis-count. */
 function resetLedger(now = Date.now()) {
-  _save({ day: _today(now), spent: 0, calls: 0 });
+  _save({ day: _today(now), spent: 0, calls: 0, reservations: {} });
 }
 
 export {
@@ -155,11 +221,11 @@ export {
   NEURONS_PER_INPUT_TILE,
   NEURONS_PER_OUTPUT_TILE,
   RESERVE_NEURONS,
-  canAfford,
+  RESERVATION_MAX_AGE_MS,
   estimateImageNeurons,
   estimateSttNeurons,
   ledgerSnapshot,
-  recordSpend,
+  reserveNeurons,
   remainingNeurons,
   resetLedger,
   tilesFor

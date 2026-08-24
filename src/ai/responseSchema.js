@@ -2,8 +2,9 @@
 //
 // Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
 //
-// Main brain (GemiX): fixed schema on every round — `response` (required) plus
-// optional `attachments`, plus `conversation_title` on every Discord turn
+// Main brain (GemiX): fixed schema on every round — `response` plus nullable
+// `attachments` (semantically optional, structurally required for strict JSON
+// Schema and a stable cached prefix), plus `conversation_title` on every Discord turn
 // (required key, empty string = keep the current title), and a leading `voice`
 // boolean on WA dedicated only. The schema rides on the same HTTP call as tools
 // (no extra round). Per xAI docs, json_schema applies only to the final
@@ -63,7 +64,7 @@ const TITLE_FIELD_DESC =
 
 /**
  * Build the fixed main-brain text.format schema for the current round:
- * `response` (required) + optional `attachments`, plus `conversation_title`
+ * `response` + nullable `attachments` (required key), plus `conversation_title`
  * (required key) on Discord, plus a leading `voice` boolean on WA dedicated
  * (decides voice vs text for the current-chat reply).
  *

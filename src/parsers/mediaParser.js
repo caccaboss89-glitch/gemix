@@ -23,7 +23,7 @@ import { spawn } from 'child_process';
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { getMediaDurationSecFromPath } from '../utils/mediaDuration.js';
-import { STT_STATUS, transcribeAudioFile } from '../media/speechToText.js';
+import { STT_STATUS, isCacheableSttStatus, transcribeAudioFile } from '../media/speechToText.js';
 import { PARSE_ERROR } from './parseErrors.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -64,20 +64,38 @@ function _scratchDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-parse-'));
 }
 
-function _runFfmpeg(args, timeoutMs = FFMPEG_TIMEOUT_MS) {
+function _runFfmpeg(args, timeoutMs = FFMPEG_TIMEOUT_MS, signal) {
   return new Promise((resolve) => {
+    if (signal?.aborted) return resolve({ ok: false, aborted: true, error: 'ffmpeg aborted' });
     let child;
     try { child = spawn(envConfig.FFMPEG_PATH, args); }
     catch (err) { return resolve({ ok: false, error: err.message }); }
 
     let stderr = '';
-    const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, timeoutMs);
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killer);
+      signal?.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+    const onAbort = () => {
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      finish({ ok: false, aborted: true, error: 'ffmpeg aborted' });
+    };
+    const killer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      finish({ ok: false, error: `ffmpeg timed out after ${timeoutMs / 1000}s` });
+    }, timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
     child.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
     child.stdout.on('data', () => { /* drained so ffmpeg does not block */ });
-    child.on('error', (err) => { clearTimeout(killer); resolve({ ok: false, error: err.message }); });
+    child.on('error', (err) => finish({ ok: false, error: err.message }));
     child.on('close', (code) => {
-      clearTimeout(killer);
-      resolve(code === 0 ? { ok: true } : { ok: false, error: stderr.trim().split('\n').pop() || `ffmpeg exited ${code}` });
+      finish(code === 0
+        ? { ok: true }
+        : { ok: false, error: stderr.trim().split('\n').pop() || `ffmpeg exited ${code}` });
     });
   });
 }
@@ -142,6 +160,8 @@ function _sttOutcome(result, durationSec, { timed = false } = {}) {
     notes.push(`This is ${_timecode(durationSec)} long, past the transcription limit. Cut a segment with shell and read that.`);
   } else if (result.status === STT_STATUS.UNCONFIGURED) {
     notes.push(result.message || 'Speech-to-text is not configured on this deployment.');
+  } else if (result.status === STT_STATUS.CONTENT_POLICY) {
+    notes.push('This audio could not be transcribed because the speech service refused its content.');
   } else {
     notes.push(result.message || 'Transcription failed for this file.');
   }
@@ -150,7 +170,7 @@ function _sttOutcome(result, durationSec, { timed = false } = {}) {
 
 /** Audio: what was said, or an honest note about why there is nothing. */
 async function parseAudio(absPath, opts = {}) {
-  const durationSec = await getMediaDurationSecFromPath(absPath).catch(() => 0);
+  const durationSec = await getMediaDurationSecFromPath(absPath, opts.signal).catch(() => 0);
   const result = await transcribeAudioFile(absPath, {
     durationSec,
     language: opts.language,
@@ -159,6 +179,7 @@ async function parseAudio(absPath, opts = {}) {
   const { content, notes } = _sttOutcome(result, durationSec);
   return {
     ok: true,
+    cacheable: isCacheableSttStatus(result.status),
     kind: 'audio',
     content,
     metadata: {
@@ -172,12 +193,13 @@ async function parseAudio(absPath, opts = {}) {
 }
 
 /** Pull the audio track out as a mono 16 kHz wav, which is what STT wants anyway. */
-async function _extractAudioTrack(absPath, dir) {
+async function _extractAudioTrack(absPath, dir, signal) {
   const wav = path.join(dir, 'track.wav');
   const run = await _runFfmpeg([
     '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
     '-i', absPath, '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', wav
-  ]);
+  ], FFMPEG_TIMEOUT_MS, signal);
+  if (run.aborted) throw signal?.reason || new DOMException('Aborted', 'AbortError');
   if (!run.ok) return { ok: false, error: run.error };
   try {
     return fs.statSync(wav).size > 0 ? { ok: true, wav } : { ok: false, error: 'the clip has no audio track' };
@@ -187,7 +209,7 @@ async function _extractAudioTrack(absPath, dir) {
 }
 
 /** Sample frames evenly across the clip, so the whole thing is represented. */
-async function _extractFrames(absPath, dir, durationSec, wanted) {
+async function _extractFrames(absPath, dir, durationSec, wanted, signal) {
   const frames = [];
   const count = Math.max(1, Math.min(wanted, constants.PARSE_MAX_VIDEO_FRAMES));
   // Offsets sit at the middle of each slice: the first frame of a video is
@@ -199,7 +221,8 @@ async function _extractFrames(absPath, dir, durationSec, wanted) {
       '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
       '-ss', at.toFixed(2), '-i', absPath, '-frames:v', '1',
       '-vf', 'scale=\'min(1024,iw)\':-2', '-q:v', '4', out
-    ], 30_000);
+    ], 30_000, signal);
+    if (run.aborted) throw signal?.reason || new DOMException('Aborted', 'AbortError');
     if (!run.ok) break;
     try {
       const buffer = fs.readFileSync(out);
@@ -217,7 +240,7 @@ async function _extractFrames(absPath, dir, durationSec, wanted) {
  * @returns {Promise<object>}
  */
 async function parseVideo(absPath, opts = {}) {
-  const durationSec = await getMediaDurationSecFromPath(absPath).catch(() => 0);
+  const durationSec = await getMediaDurationSecFromPath(absPath, opts.signal).catch(() => 0);
   if (durationSec > constants.MAX_VIDEO_DURATION_S) {
     return {
       ok: false,
@@ -234,7 +257,7 @@ async function parseVideo(absPath, opts = {}) {
   let transcribedBy;
 
   try {
-    const track = await _extractAudioTrack(absPath, dir);
+    const track = await _extractAudioTrack(absPath, dir, opts.signal);
     if (track.ok) {
       const result = await transcribeAudioFile(track.wav, {
         durationSec,
@@ -251,12 +274,19 @@ async function parseVideo(absPath, opts = {}) {
       notes.push(`No transcript: ${track.error}.`);
     }
 
-    const frames = await _extractFrames(absPath, dir, durationSec, constants.PARSE_MAX_VIDEO_FRAMES);
+    const frames = await _extractFrames(
+      absPath,
+      dir,
+      durationSec,
+      constants.PARSE_MAX_VIDEO_FRAMES,
+      opts.signal
+    );
     if (frames.length === 0) notes.push('No frames could be extracted from this clip.');
     else notes.push(`${frames.length} frame(s) sampled across the clip, labelled with their timecode.`);
 
     return {
       ok: true,
+      cacheable: transcriptStatus === 'skipped' || isCacheableSttStatus(transcriptStatus),
       kind: 'video',
       content,
       metadata: {

@@ -65,9 +65,10 @@ function _classifyStatus(status) {
  * @param {string} path - endpoint path, e.g. '/search'
  * @param {Record<string, string>} params
  * @param {number} timeoutMs
+ * @param {AbortSignal} [signal]
  * @returns {Promise<{ok: true, data: object}|{ok: false, code: string, error: string}>}
  */
-async function _get(path, params, timeoutMs) {
+async function _get(path, params, timeoutMs, signal) {
   if (!isAgentSearchConfigured()) {
     return {
       ok: false,
@@ -84,7 +85,7 @@ async function _get(path, params, timeoutMs) {
 
   let res;
   try {
-    res = await fetchWithTimeout(url.toString(), { method: 'GET', headers: _headers() }, timeoutMs);
+    res = await fetchWithTimeout(url.toString(), { method: 'GET', headers: _headers(), signal }, timeoutMs);
   } catch (err) {
     log.warn(`${path} request failed: ${err.message}`);
     return {
@@ -119,10 +120,11 @@ async function _get(path, params, timeoutMs) {
  * @param {object} req
  * @param {string} req.query
  * @param {number} req.count
+ * @param {AbortSignal} [req.signal]
  * @returns {Promise<{ok: true, results: Array, meta: object}|{ok: false, code: string, error: string}>}
  */
-async function searchWeb({ query, count }) {
-  const res = await _get('/search', { q: query, count, fetch: 'false' }, SEARCH_TIMEOUT_MS);
+async function searchWeb({ query, count, signal }) {
+  const res = await _get('/search', { q: query, count, fetch: 'false' }, SEARCH_TIMEOUT_MS, signal);
   if (!res.ok) return res;
 
   const raw = Array.isArray(res.data?.results) ? res.data.results : [];
@@ -153,11 +155,12 @@ async function searchWeb({ query, count }) {
  * @param {object} req
  * @param {string} req.url
  * @param {number} [req.maxChars]
+ * @param {AbortSignal} [req.signal]
  * @returns {Promise<{ok: true, content: string, strategy: string, chars: number, trustTier: string}
  *   |{ok: false, code: string, error: string}>}
  */
-async function readWebPage({ url, maxChars }) {
-  const res = await _get('/read', { url, max_chars: maxChars }, READ_TIMEOUT_MS);
+async function readWebPage({ url, maxChars, signal }) {
+  const res = await _get('/read', { url, max_chars: maxChars }, READ_TIMEOUT_MS, signal);
   if (!res.ok) return res;
 
   const data = res.data || {};

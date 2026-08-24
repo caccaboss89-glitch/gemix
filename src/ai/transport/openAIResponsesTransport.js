@@ -141,9 +141,12 @@ class OpenAIResponsesTransport {
         // One credential refresh per request, then the failure stands.
         if (kind === TRANSPORT_ERROR.AUTH && !refreshedOnce) {
           refreshedOnce = true;
-          this.credentials.markStatus('auth_failed', credential.accountId);
+          await this.credentials.markStatus('auth_failed', credential.accountId);
           try {
-            await this.credentials.refresh({ minRemainingMs: MIN_TOKEN_REMAINING_MS });
+            await this.credentials.refresh({
+              accountId: credential.accountId,
+              minRemainingMs: MIN_TOKEN_REMAINING_MS
+            });
             // A successful refresh is not a failed attempt: give the budget back.
             attempt--;
             this._log.info('credential refreshed after an auth failure; retrying once');
@@ -153,7 +156,9 @@ class OpenAIResponsesTransport {
           }
         }
 
-        if (kind === TRANSPORT_ERROR.QUOTA) this.credentials.markStatus('quota', credential.accountId);
+        if (kind === TRANSPORT_ERROR.QUOTA) {
+          await this.credentials.markStatus('quota', credential.accountId);
+        }
 
         const explicitWait = retryAfterMs(res.headers, budget.remainingMs);
         if (isRetryableKind(kind) && attempt < MAX_COLD_ATTEMPTS) {
@@ -194,7 +199,7 @@ class OpenAIResponsesTransport {
         throw err;
       }
 
-      this.credentials.markStatus('ok', credential.accountId);
+      await this.credentials.markStatus('ok', credential.accountId);
       this._log.info(
         `model=${wireBody.model} effort=${wireBody.reasoning?.effort ?? 'n/a'} `
         + `status=${assembled.response.status ?? 'unknown'} items=${assembled.response.output.length} `

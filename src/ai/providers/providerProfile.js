@@ -35,10 +35,14 @@ const PROVIDER = Object.freeze({
 
 /** Ordered reasoning-effort scale the xAI Responses API accepts. */
 const XAI_EFFORTS = Object.freeze(['low', 'medium', 'high']);
-/** Ordered effort scale the Codex model catalog reports. */
-const CODEX_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
+/** GPT-5.6 Responses scale, including the supported non-reasoning mode. */
+const GPT_56_EFFORTS = Object.freeze(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 /** Ordered generic Responses scale: the three efforts the API documents. */
 const GENERIC_EFFORTS = Object.freeze(['low', 'medium', 'high']);
+
+function _chatgptEfforts(model) {
+  return /^gpt-5\.6(?:-|$)/i.test(String(model || '')) ? GPT_56_EFFORTS : GENERIC_EFFORTS;
+}
 
 /** Display brand for footers, badges and the prompt opening. */
 function _xaiDisplayName(model) {
@@ -110,7 +114,7 @@ function _buildChatgptProfile() {
     displayName: _chatgptDisplayName(envConfig.CHATGPT_MODEL),
     baseUrl: envConfig.CHATGPT_BASE_URL,
     defaultEffort: 'high',
-    supportedEfforts: CODEX_EFFORTS,
+    supportedEfforts: _chatgptEfforts(envConfig.CHATGPT_MODEL),
     wire: defineWireCapabilities({
       supportsResponses: true,
       supportsSse: true,

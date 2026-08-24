@@ -89,6 +89,13 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     }
   }
 
+  if (userCtx.turnBudget?.expired) {
+    return {
+      toolCallId: toolCall.id,
+      result: JSON.stringify({ success: false, error: 'This turn ended before the tool could start.' })
+    };
+  }
+
   let result;
 
   try {
@@ -103,17 +110,17 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
     case 'search_web': {
       // responseCtx carries the source count for the research badge, the same
       // role the provider's own search statistics used to fill.
-      result = await searchWeb(args, responseCtx);
+      result = await searchWeb(args, responseCtx, { signal: userCtx.turnBudget?.signal });
       break;
     }
 
     case 'read_page': {
-      result = await readPage(args);
+      result = await readPage(args, { signal: userCtx.turnBudget?.signal });
       break;
     }
 
     case 'search_image': {
-      result = await searchImage(args);
+      result = await searchImage(args, { signal: userCtx.turnBudget?.signal });
       break;
     }
 
@@ -158,7 +165,12 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       // ceiling, and what is left of the turn can be shorter.
       if (name === 'list_files') result = listFiles(args, workspaceId);
       else if (name === 'search_files') result = searchFiles(args, workspaceId);
-      else if (name === 'read_file') result = await readFile(args, workspaceId, { signal: userCtx.turnBudget?.signal });
+      else if (name === 'read_file') {
+        result = await readFile(args, workspaceId, {
+          language: userCtx.settings?.language,
+          signal: userCtx.turnBudget?.signal
+        });
+      }
       else if (name === 'write_file') result = await writeFile(args, workspaceId, lockOpts);
       else if (name === 'edit_file') result = await editFile(args, workspaceId, lockOpts);
       else result = await shell(args, workspaceId, { ...lockOpts, budget: userCtx.turnBudget || null });
@@ -315,9 +327,14 @@ async function executeTool(toolCall, userCtx, responseCtx, deliveryCtx, toolDefs
       result = { success: false, error: `Tool "${name}" not recognized.` };
     }
   } catch (err) {
-    log.error(`   Unhandled tool error (${name}): ${err.message}`, err.stack);
-    await notifyAdmin(`Tool Execution (${name})`, `Unhandled error: ${err.message}`);
-    result = { success: false, error: `Error executing ${name}: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    if (userCtx.turnBudget?.signal.aborted) {
+      log.info(`   Tool stopped at turn deadline (${name})`);
+      result = { success: false, error: `Tool ${name} stopped because this turn ended.` };
+    } else {
+      log.error(`   Unhandled tool error (${name}): ${err.message}`, err.stack);
+      await notifyAdmin(`Tool Execution (${name})`, `Unhandled error: ${err.message}`);
+      result = { success: false, error: `Error executing ${name}: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
+    }
   }
 
   let finalResult;

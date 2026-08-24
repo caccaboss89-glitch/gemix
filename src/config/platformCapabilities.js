@@ -122,11 +122,6 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   if (toolName === TOOL.MANAGE_PREFERENCES && cap.isDiscord) {
     return 'Saved preferences (manage_preferences) are not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for saved preferences.';
   }
-  const workspaceTools = [TOOL.LIST_FILES, TOOL.SEARCH_FILES, TOOL.READ_FILE, TOOL.WRITE_FILE, TOOL.EDIT_FILE, TOOL.SHELL];
-  if (workspaceTools.includes(toolName) && cap.isDiscord) {
-    return `"${toolName}" is not available on Discord: there is no workspace here. `
-      + 'Tell the user to use the dedicated GemiX WhatsApp account for anything involving files.';
-  }
   if ((toolName === TOOL.SCHEDULE || toolName === TOOL.READ_TASKS || toolName === TOOL.REMOVE_TASKS) && cap.isDiscord) {
     return `"${toolName}" is not available on Discord. Tell the user to use the dedicated GemiX WhatsApp account for scheduled reminders.`;
   }

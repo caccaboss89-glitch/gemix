@@ -107,6 +107,11 @@ test('buildResponsesBody is SSE-only and stateless by construction', () => {
   assert.equal('text' in body, false);
 });
 
+test('buildResponsesBody preserves the supported no-reasoning effort', () => {
+  const body = buildResponsesBody({ model: 'gpt-5.6-sol', input: [], reasoningEffort: 'none' });
+  assert.deepEqual(body.reasoning, { effort: 'none' });
+});
+
 test('buildResponsesBody attaches strict structured output as text.format', () => {
   const format = { type: 'json_schema', name: 'gemix_reply', strict: true, schema: {} };
   const body = buildResponsesBody({ model: 'm', input: [], responseFormat: format });
@@ -150,5 +155,4 @@ test('readResponse extracts text, tool calls and replay items', () => {
   assert.equal(read.replayItems.length, 3);
   assert.equal(read.status, 'completed');
 });
-
 

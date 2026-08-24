@@ -45,6 +45,12 @@ function effortSchema() {
 }
 
 test('each provider exposes its full effort scale and defaults chats to its maximum', async () => {
+  const expected = {
+    xai: ['low', 'medium', 'high'],
+    chatgpt: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    openrouter: ['low', 'medium', 'high'],
+    custom: ['low', 'medium', 'high']
+  };
   for (const provider of ['xai', 'chatgpt', 'openrouter', 'custom']) {
     await withProvider(provider, () => {
       const profile = resolveProviderProfile();
@@ -52,6 +58,7 @@ test('each provider exposes its full effort scale and defaults chats to its maxi
       const maximum = profile.supportedEfforts[profile.supportedEfforts.length - 1];
       const schema = effortSchema();
 
+      assert.deepEqual(profile.supportedEfforts, expected[provider]);
       assert.deepEqual(policy.supportedEfforts, profile.supportedEfforts);
       assert.equal(policy.chatDefaultEffort, maximum);
       assert.equal(defaultSettings().effort, maximum);
@@ -59,6 +66,22 @@ test('each provider exposes its full effort scale and defaults chats to its maxi
       assert.match(schema.description, new RegExp(`default ${maximum}\\b`));
     });
   }
+});
+
+test('ChatGPT 5.6 accepts none as an explicit no-reasoning preference', async (t) => {
+  const fileId = `test_effort_none_${process.pid}_${Date.now()}`;
+  const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
+  t.after(() => {
+    try { fs.unlinkSync(filePath); } catch { /* already absent */ }
+  });
+
+  await withProvider('chatgpt', async () => {
+    assert.ok(activeEffortPolicy().supportedEfforts.includes('none'));
+    const result = await managePreferences({ effort: 'none' }, fileId);
+    assert.equal(result.success, true);
+    assert.equal(readSettings(fileId).effort, 'none');
+    assert.ok(effortSchema().enum.includes('none'));
+  });
 });
 
 test('every supported effort persists, while a provider-only value degrades without being erased', async (t) => {

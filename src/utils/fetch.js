@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import constants from '../config/constants.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from './adminNotifier.js';
+import { signalWithTimeout } from './turnBudget.js';
 
 function _downloadTimeoutMs(maxBytes, optsTimeout) {
   if (Number.isFinite(optsTimeout)) return optsTimeout;
@@ -90,7 +91,7 @@ async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
 }
 
 /**
- * Fetch with automatic timeout via AbortController.
+ * Fetch with automatic timeout, preserving any caller cancellation.
  * Wraps native fetch with a configurable timeout (default: constants.FETCH_TIMEOUT_MS from constants).
  * @param {string} url - The URL to fetch
  * @param {object} [options={}] - Standard fetch options (method, headers, body, etc.)
@@ -98,19 +99,20 @@ async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
  * @returns {Promise<Response>} The fetch Response object
  */
 async function fetchWithTimeout(url, options = {}, timeoutMs = constants.FETCH_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const callerSignal = options.signal || null;
+  const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
 
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(url, { ...options, signal: operationSignal });
     return res;
   } catch (err) {
-    if (err.name === 'AbortError') {
+    if (callerSignal?.aborted) {
+      throw callerSignal.reason || err;
+    }
+    if (operationSignal.aborted || err.name === 'AbortError' || err.name === 'TimeoutError') {
       throw new Error(`Timeout (${timeoutMs / 1000}s) reached for ${url}`);
     }
     throw err;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -153,6 +155,7 @@ async function fetchExternal(url, options = {}, source = null, timeoutMs = const
  * @param {object} [opts]
  * @param {number} [opts.maxBytes=62914560] - 60 MB default cap.
  * @param {number} [opts.timeoutMs]
+ * @param {AbortSignal} [opts.signal]
  * @returns {Promise<{ buffer: Buffer, mimetype: string, filename: string }>}
  */
 async function downloadPublicFile(url, opts = {}) {
@@ -163,6 +166,7 @@ async function downloadPublicFile(url, opts = {}) {
   const clean = url.trim();
   const timeoutMs = _downloadTimeoutMs(maxBytes, opts.timeoutMs);
   const res = await fetchWithTimeout(clean, {
+    signal: opts.signal,
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'Accept': '*/*'
@@ -200,6 +204,7 @@ function _filenameFromPublicUrl(url) {
  * @param {object} [opts]
  * @param {number} [opts.maxBytes=104857600] - 100 MB default cap.
  * @param {number} [opts.timeoutMs]
+ * @param {AbortSignal} [opts.signal]
  * @returns {Promise<{ filePath: string, mimetype: string, filename: string, size: number }>}
  */
 async function downloadPublicFileToDisk(url, destPath, opts = {}) {
@@ -213,6 +218,7 @@ async function downloadPublicFileToDisk(url, destPath, opts = {}) {
   const clean = url.trim();
   const timeoutMs = _downloadTimeoutMs(maxBytes, opts.timeoutMs);
   const res = await fetchWithTimeout(clean, {
+    signal: opts.signal,
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'Accept': '*/*'

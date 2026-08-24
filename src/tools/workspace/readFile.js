@@ -80,7 +80,7 @@ async function readFile(args = {}, workspaceId, opts = {}) {
     workspaceId,
     offset: args.offset,
     limit: args.limit,
-    language: args.language,
+    language: opts.language,
     signal: opts.signal
   });
 

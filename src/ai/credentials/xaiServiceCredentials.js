@@ -21,12 +21,13 @@ const MIN_REMAINING_MS = 2 * 60 * 1000;
  *
  * @param {object} [opts]
  * @param {boolean} [opts.forceRefresh] - after the provider rejected the token
+ * @param {string} [opts.accountId] - exact account whose token was rejected
  * @returns {Promise<{ token: string, baseUrl: string, accountId: string|null }>}
  */
 async function getXaiServiceAuth(opts = {}) {
   const provider = xaiCredentialProvider();
   const credential = opts.forceRefresh
-    ? await provider.refresh({ minRemainingMs: MIN_REMAINING_MS })
+    ? await provider.refresh({ accountId: opts.accountId, minRemainingMs: MIN_REMAINING_MS })
     : await provider.get({ minRemainingMs: MIN_REMAINING_MS });
   return {
     token: credential.accessToken,
@@ -36,8 +37,8 @@ async function getXaiServiceAuth(opts = {}) {
 }
 
 /** Record the outcome of an xAI service call on the shared pool. */
-function markXaiServiceStatus(status, accountId = null) {
-  xaiCredentialProvider().markStatus(status, accountId);
+async function markXaiServiceStatus(status, accountId = null) {
+  await xaiCredentialProvider().markStatus(status, accountId);
 }
 
 export { getXaiServiceAuth, markXaiServiceStatus };

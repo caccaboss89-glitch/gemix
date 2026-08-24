@@ -4,7 +4,7 @@
 //
 // `read_file` calls `parse()` and gets back a single shape, whatever the file
 // was. That indirection is the point: the tool contract the model sees does not
-// change when Kreuzberg is swapped, when OCR arrives, or when a future profile
+// change when Kreuzberg or OCR is swapped, or when a future profile
 // declares native audio input. The model never learns a parser exists.
 //
 // Every result is `{ ok, kind, content, metadata, images, notes }`. `images`
@@ -26,6 +26,7 @@ import { handlesExt as isDocumentExt, parseDocument } from './documentParser.js'
 import { familyOf as mediaFamilyOf, parseAudio, parseImage, parseVideo } from './mediaParser.js';
 import { cacheKey, hashFile, readCache, writeCache } from './parserCache.js';
 import { createLogger } from '../utils/logger.js';
+import { normalizeSttLanguage, sttRouteId } from '../media/speechToText.js';
 
 const log = createLogger('ParserRegistry');
 
@@ -46,6 +47,15 @@ function familyFor(ext) {
 
 /** Parsers whose work is expensive enough to be worth caching. */
 const CACHEABLE = new Set(['document', 'audio', 'video']);
+
+function _cacheParameters(family, ext, opts) {
+  const params = { ext, ocr: opts.ocr !== false };
+  if (family === 'audio' || family === 'video') {
+    params.language = normalizeSttLanguage(opts.language);
+    params.sttRoute = sttRouteId();
+  }
+  return params;
+}
 
 function _fail(code, error) {
   return { ok: false, error_code: code, error };
@@ -172,14 +182,14 @@ async function parse(absPath, opts = {}) {
   if (cacheable) {
     const contentHash = hashFile(absPath);
     if (contentHash) {
-      key = cacheKey(contentHash, family, { ext, ocr: opts.ocr !== false });
+      key = cacheKey(contentHash, family, _cacheParameters(family, ext, opts));
       const hit = readCache(opts.workspaceId, key);
       if (hit) return { ..._fromCache(hit), cached: true };
     }
   }
 
   const result = await _dispatch(family, absPath, ext, stat, opts);
-  if (key && result.ok) {
+  if (key && result.ok && result.cacheable !== false) {
     // A transient failure must not be remembered as this file's content, so
     // only a successful parse is stored.
     writeCache(opts.workspaceId, key, _toCacheable(result));
@@ -192,5 +202,6 @@ export {
   PARSE_ERROR,
   REFUSED_EXTS,
   familyFor,
+  _cacheParameters,
   parse
 };

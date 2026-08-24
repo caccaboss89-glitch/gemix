@@ -120,11 +120,12 @@ function _sniffImageType(buffer) {
  * The bytes never touch disk: a hit the model only looks at is not a file.
  * @returns {Promise<{ part: object|null, error?: string }>}
  */
-async function _buildVisionPart(imgUrl, index) {
+async function _buildVisionPart(imgUrl, index, signal) {
   try {
     const dl = await downloadPublicFile(imgUrl, {
       maxBytes: constants.MAX_IMAGE_BYTES,
-      timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS
+      timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS,
+      signal
     });
     const sniffed = _sniffImageType(dl.buffer);
     if (!sniffed) {
@@ -146,9 +147,11 @@ async function _buildVisionPart(imgUrl, index) {
  * @param {object} args
  * @param {string} args.query
  * @param {number} [args.count]
+ * @param {object} [opts]
+ * @param {AbortSignal} [opts.signal]
  * @returns {Promise<object|Array>}
  */
-async function searchImage(args = {}) {
+async function searchImage(args = {}, opts = {}) {
   const query = _cleanQuery(args.query);
   if (!query) {
     return { success: false, error: 'Missing required argument "query".' };
@@ -176,6 +179,7 @@ async function searchImage(args = {}) {
   try {
     const res = await fetchWithTimeout(url.toString(), {
       method: 'GET',
+      signal: opts.signal,
       headers: {
         Accept: 'application/json',
         'User-Agent': 'GemiX-ImageSearch/1.0'
@@ -247,7 +251,7 @@ async function searchImage(args = {}) {
 
   // Build provider-neutral inline vision previews in parallel.
   const visionSettled = await Promise.all(
-    images.map((img, i) => _buildVisionPart(img.url, i))
+    images.map((img, i) => _buildVisionPart(img.url, i, opts.signal))
   );
 
   const nativeParts = [];

@@ -39,6 +39,7 @@ const STT_STATUS = Object.freeze({
   OK: 'ok',
   NO_SPEECH: 'no_speech',
   TOO_LONG: 'too_long',
+  CONTENT_POLICY: 'content_policy',
   TIMEOUT: 'timeout',
   UNCONFIGURED: 'unconfigured',
   ERROR: 'error'
@@ -75,11 +76,38 @@ function isSttConfigured() {
   return resolveSttBackend() !== null;
 }
 
-/** The model that produced a transcript, and half of the cache key. */
-function sttModelId() {
-  return resolveSttBackend() === 'xai-stt'
-    ? `xai:${envConfig.XAI_STT_PATH}`
-    : envConfig.CLOUDFLARE_STT_MODEL;
+/** Normalize a BCP-47 hint for cache comparison without changing API input. */
+function normalizeSttLanguage(language) {
+  return String(language || '').trim().toLowerCase();
+}
+
+/** The concrete model used by one backend. */
+function sttModelId(backend = resolveSttBackend()) {
+  if (backend === 'xai' || backend === 'xai-stt') return `xai:${envConfig.XAI_STT_PATH}`;
+  if (backend === 'cloudflare' || backend === 'cloudflare-whisper') return envConfig.CLOUDFLARE_STT_MODEL;
+  return 'unconfigured';
+}
+
+/**
+ * The configured transcription chain. Cache entries remain valid when the
+ * primary temporarily falls back, but not after the chain itself changes.
+ */
+function sttRouteId() {
+  const primary = resolveSttBackend();
+  if (!primary) return 'unconfigured';
+  const route = [sttModelId(primary)];
+  if (primary === 'xai-stt' && isCloudflareConfigured()) {
+    route.push(sttModelId('cloudflare-whisper'));
+  }
+  return route.join('>');
+}
+
+/** Outcomes that are deterministic for the same bytes, route and language. */
+function isCacheableSttStatus(status) {
+  return status === STT_STATUS.OK
+    || status === STT_STATUS.NO_SPEECH
+    || status === STT_STATUS.TOO_LONG
+    || status === STT_STATUS.CONTENT_POLICY;
 }
 
 /** Identifier for the cache: same bytes and same model means same transcript. */
@@ -88,7 +116,7 @@ function contentHashOf(buffer) {
 }
 
 function _result(status, provider, extra = {}) {
-  return { status, text: '', provider, model: sttModelId(), ...extra };
+  return { status, text: '', provider, model: sttModelId(provider), ...extra };
 }
 
 /**
@@ -277,7 +305,7 @@ async function transcribeAudioFile(absPath, opts = {}) {
         if (err.name === 'AbortError' || err.name === 'TimeoutError') throw err;
         if (_isContentPolicyRefusal(err)) {
           log.warn('xAI refused the clip on content policy; not retrying elsewhere');
-          return { ..._result(STT_STATUS.ERROR, 'xai'), message: err.message };
+          return { ..._result(STT_STATUS.CONTENT_POLICY, 'xai'), message: err.message };
         }
         if (!isCloudflareConfigured()) throw err;
         log.warn(`xAI transcription failed (${err.message}); falling back to Workers AI`);
@@ -300,8 +328,11 @@ export {
   MAX_AUDIO_BYTES,
   contentHashOf,
   isSttConfigured,
+  isCacheableSttStatus,
   isXaiSttConfigured,
+  normalizeSttLanguage,
   resolveSttBackend,
   sttModelId,
+  sttRouteId,
   transcribeAudioFile
 };

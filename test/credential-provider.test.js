@@ -69,6 +69,29 @@ function tokenEndpoint({ expiresIn = 3600, fail = false } = {}) {
   return impl;
 }
 
+/** First exchange fails, the next one succeeds: exercises pool failover. */
+function failThenSucceedEndpoint() {
+  let n = 0;
+  const impl = async () => {
+    n++;
+    impl.calls = n;
+    if (n === 1) {
+      return { ok: false, status: 400, text: async () => JSON.stringify({ error: 'invalid_grant' }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        access_token: `access-${n}`,
+        refresh_token: `refresh-${n}`,
+        expires_in: 3600
+      })
+    };
+  };
+  impl.calls = 0;
+  return impl;
+}
+
 test('a token far from expiry is handed over without a refresh', async () => {
   const pool = poolName('fresh');
   await updatePool(pool, () => [{
@@ -147,6 +170,22 @@ test('a refresh that fails rotates to the next account and marks the dead one', 
   assert.equal(readPool(pool).find(a => a.id === 'dead').lastStatus, 'auth_failed');
 });
 
+test('an expired spare is refreshed before failover returns it', async () => {
+  const pool = poolName('rotate-refresh-spare');
+  await updatePool(pool, () => [
+    { id: 'dead', accessToken: 'expired-a', refreshToken: 'r0', expiresAtMs: Date.now() - 2000, priority: 0, lastStatus: 'ok' },
+    { id: 'spare', accessToken: 'expired-b', refreshToken: 'r1', expiresAtMs: Date.now() - 1000, priority: 1, lastStatus: 'ok' }
+  ]);
+  const fetchImpl = failThenSucceedEndpoint();
+  const provider = new TestProvider({ pool, fetchImpl });
+
+  const credential = await provider.get();
+  assert.equal(credential.accountId, 'spare');
+  assert.equal(credential.accessToken, 'access-2');
+  assert.equal(fetchImpl.calls, 2);
+  assert.equal(readPool(pool).find(a => a.id === 'spare').accessToken, 'access-2');
+});
+
 test('a failed refresh on the last usable account surfaces the error', async () => {
   const pool = poolName('no-spare');
   await updatePool(pool, () => [{
@@ -187,6 +226,21 @@ test('refresh() forces an exchange even on a token that looks fine', async () =>
   assert.equal(fetchImpl.calls, 1);
 });
 
+test('refresh targets the account rejected by the transport', async () => {
+  const pool = poolName('forced-account');
+  await updatePool(pool, () => [
+    { id: 'a', accessToken: 'a-live', refreshToken: 'ra', expiresAtMs: null, priority: 0, lastStatus: 'ok' },
+    { id: 'b', accessToken: 'b-live', refreshToken: 'rb', expiresAtMs: null, priority: 1, lastStatus: 'ok' }
+  ]);
+  const provider = new TestProvider({ pool, fetchImpl: tokenEndpoint() });
+  await provider.get();
+
+  const credential = await provider.refresh({ accountId: 'b' });
+  assert.equal(credential.accountId, 'b');
+  assert.equal(credential.accessToken, 'access-1');
+  assert.equal(readPool(pool).find(a => a.id === 'a').accessToken, 'a-live');
+});
+
 test('markStatus records a change and skips a repeat', async () => {
   const pool = poolName('status');
   await updatePool(pool, () => [{
@@ -195,14 +249,12 @@ test('markStatus records a change and skips a repeat', async () => {
   const provider = new TestProvider({ pool, fetchImpl: tokenEndpoint() });
   await provider.get();
 
-  provider.markStatus('quota');
-  await new Promise(r => setImmediate(r));
+  await provider.markStatus('quota');
   const marked = readPool(pool)[0];
   assert.equal(marked.lastStatus, 'quota');
   assert.ok(Number.isFinite(marked.lastStatusAt));
 
-  provider.markStatus('quota');
-  await new Promise(r => setImmediate(r));
+  await provider.markStatus('quota');
   assert.equal(readPool(pool)[0].lastStatusAt, marked.lastStatusAt);
 });
 

@@ -230,20 +230,19 @@ function storeHistoryVoiceTranscription(userId, historyFilename, text) {
 }
 
 /**
- * Stored transcription of a USER voice note, valid only for the exact bytes and
- * the exact model that produced it.
+ * Stored transcription of a USER voice note, valid only for the exact bytes,
+ * configured STT route and language hint that produced it.
  *
- * The hash is what makes the cache safe across a backend switch or a re-sent
- * clip: a different file, or a different STT model, is a cache miss rather than
- * a stale transcript attributed to the wrong audio.
+ * The complete fingerprint keeps the cache safe across a re-sent clip, route
+ * change or language change: any difference is a miss rather than a stale
+ * transcript attributed to the wrong audio or decoding setup.
  *
  * @param {string} userId
  * @param {string} historyFilename
- * @param {string} contentHash
- * @param {string} model
+ * @param {{contentHash?: string, routeId?: string, language?: string}} fingerprint
  * @returns {{ text: string, status: string }|null}
  */
-function getStoredUserTranscription(userId, historyFilename, contentHash, model) {
+function getStoredUserTranscription(userId, historyFilename, fingerprint = {}) {
   if (!userId || !historyFilename) return null;
   const { metaFile } = getUserHistoryPaths(userId);
   const normalized = _normalizeHistoryFilename(historyFilename);
@@ -254,20 +253,21 @@ function getStoredUserTranscription(userId, historyFilename, contentHash, model)
     if (_getEntryFilename(entry) !== normalized) continue;
     const stored = entry && typeof entry === 'object' ? entry.userTranscription : null;
     if (!stored || typeof stored !== 'object') return null;
-    if (contentHash && stored.contentHash !== contentHash) return null;
-    if (model && stored.model !== model) return null;
+    if (fingerprint.contentHash && stored.contentHash !== fingerprint.contentHash) return null;
+    if (fingerprint.routeId && stored.routeId !== fingerprint.routeId) return null;
+    if ((fingerprint.language || '') !== (stored.language || '')) return null;
     return { text: typeof stored.text === 'string' ? stored.text : '', status: stored.status || 'ok' };
   }
   return null;
 }
 
 /**
- * Remember the outcome of transcribing a user voice note — including the
- * failures, so a clip that cannot be transcribed is not retried on every turn.
+ * Persist an outcome selected by the caller. Voice projection stores only
+ * deterministic results; timeouts and service failures must be retried later.
  *
  * @param {string} userId
  * @param {string} historyFilename
- * @param {{ text?: string, status: string, provider?: string, model?: string, contentHash?: string }} record
+ * @param {{ text?: string, status: string, provider?: string, model?: string, contentHash?: string, routeId?: string, language?: string }} record
  * @returns {boolean}
  */
 function storeUserTranscription(userId, historyFilename, record) {
@@ -284,6 +284,8 @@ function storeUserTranscription(userId, historyFilename, record) {
       provider: record.provider || '',
       model: record.model || '',
       contentHash: record.contentHash || '',
+      routeId: record.routeId || '',
+      language: record.language || '',
       updatedAt: Date.now()
     }
   };

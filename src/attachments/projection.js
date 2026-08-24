@@ -9,11 +9,11 @@
 // has a real file behind it, reachable with `read_file` and visible in the
 // container at `/attachments/x`.
 //
-// Retention is 4h sliding from last use, not from arrival: projecting a file
-// again refreshes its mtime, so a conversation that keeps coming back to the
-// same document keeps it. The hourly sweep drops whatever has gone quiet. The
-// old post-turn referential prune is gone — it deleted files the next turn
-// still wanted, which is exactly the invariant this replaces.
+// The projection follows the visible context exactly. At the start of a turn,
+// files no longer referenced by a live attachment or past-voice tag are removed
+// from this view without touching the durable history copy. If that message
+// later returns to the context, ingress rehydrates the projection from history
+// or from the platform. The 4h sweep remains a crash/idle cleanup boundary.
 //
 // The projection is a copy, not a hard link: a link would share an inode with
 // the history file, so refreshing the projection's mtime would silently rewrite
@@ -44,6 +44,92 @@ function _projectedPath(workspaceId, name) {
   const base = path.basename(String(name || ''));
   if (!root || !base || base === '.' || base === '..') return null;
   return path.join(root, base);
+}
+
+function _visibleName(rawPath) {
+  const normalized = String(rawPath || '').trim().replace(/\\/g, '/');
+  if (!normalized) return null;
+  if (normalized.startsWith('workspace/')) return null;
+  const withoutRoot = normalized.replace(/^(?:\/)?(?:attachments|history)\//, '');
+  const base = path.basename(withoutRoot);
+  return base && base !== '.' && base !== '..' ? base : null;
+}
+
+function _namesInText(text, names) {
+  if (typeof text !== 'string' || !text) return;
+
+  // Expired tags deliberately do not retain a file in the live projection.
+  const attachment = /\[Attachment:\s*([^\]\n\r]+)\]/g;
+  let match;
+  while ((match = attachment.exec(text)) !== null) {
+    const name = _visibleName(match[1]);
+    if (name) names.add(name);
+  }
+
+  // Voice tags replace attachment tags before the provider call but still
+  // expose the raw audio through their file attribute.
+  const voice = /<PastVoice(?:Reply)?\b[^>]*\bfile=["']([^"']+)["'][^>]*>/g;
+  while ((match = voice.exec(text)) !== null) {
+    const name = _visibleName(match[1]);
+    if (name) names.add(name);
+  }
+}
+
+function _collectContent(value, names) {
+  if (typeof value === 'string') {
+    _namesInText(value, names);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) _collectContent(entry, names);
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  if (typeof value.text === 'string') _namesInText(value.text, names);
+  if (value.content !== undefined) _collectContent(value.content, names);
+}
+
+/** Basenames referenced by the visible Responses history/current content. */
+function collectVisibleAttachmentNames(...values) {
+  const names = new Set();
+  for (const value of values) _collectContent(value, names);
+  return names;
+}
+
+/**
+ * Make the read-only projection match the current visible context.
+ * Durable history files are never touched; they are the rehydration source.
+ *
+ * @param {string} workspaceId
+ * @param {Iterable<string>} visibleNames
+ * @returns {{ removed: number, kept: number, missing: number }}
+ */
+function reconcileProjection(workspaceId, visibleNames) {
+  const root = getAttachmentsPath(workspaceId);
+  const wanted = new Set([...visibleNames].map(_visibleName).filter(Boolean));
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); }
+  catch { return { removed: 0, kept: 0, missing: wanted.size }; }
+
+  let removed = 0;
+  let kept = 0;
+  const present = new Set();
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (wanted.has(entry.name)) {
+      present.add(entry.name);
+      touchProjected(workspaceId, entry.name);
+      kept++;
+      continue;
+    }
+    try {
+      fs.unlinkSync(path.join(root, entry.name));
+      removed++;
+    } catch (err) {
+      log.debug(`reconcile ${entry.name}: ${err.message}`);
+    }
+  }
+  return { removed, kept, missing: [...wanted].filter(name => !present.has(name)).length };
 }
 
 /** True when the file is currently materialized in the projection. */
@@ -138,10 +224,9 @@ function unprojectFile(workspaceId, name) {
 /**
  * Drop projected files nothing has touched for the retention window.
  *
- * Runs on the same hourly schedule as the workspace sweep. Sweeping by mtime
- * rather than by a reference list is deliberate: the reference list is exactly
- * what went wrong before, because a file can leave the visible window for one
- * turn and be needed again on the next.
+ * Runs on the same hourly schedule as the workspace sweep. Per-turn
+ * reconciliation normally removes files as soon as they leave the context;
+ * this catches abandoned projections after crashes or idle conversations.
  *
  * @param {number} [now]
  * @returns {{ removed: number, kept: number }}
@@ -192,10 +277,12 @@ function projectionRoot(workspaceId) {
 export {
   ATTACHMENT_TTL_MS,
   attachmentDisplayPath,
+  collectVisibleAttachmentNames,
   isProjected,
   touchProjected,
   projectFile,
   projectBuffer,
+  reconcileProjection,
   unprojectFile,
   sweepExpiredAttachments,
   clearProjection,

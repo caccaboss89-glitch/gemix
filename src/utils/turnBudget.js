@@ -28,9 +28,12 @@ class TurnBudget {
     this._controller = new AbortController();
     this._timer = setTimeout(() => this._controller.abort(), ms);
     this._timer.unref?.();
+    this._parentSignal = parentSignal || null;
+    this._onParentAbort = null;
     if (parentSignal) {
-      if (parentSignal.aborted) this._controller.abort();
-      else parentSignal.addEventListener('abort', () => this._controller.abort(), { once: true });
+      this._onParentAbort = () => this._controller.abort(parentSignal.reason);
+      if (parentSignal.aborted) this._onParentAbort();
+      else parentSignal.addEventListener('abort', this._onParentAbort, { once: true });
     }
   }
 
@@ -62,7 +65,29 @@ class TurnBudget {
   /** Release the timer once the turn is over. */
   dispose() {
     clearTimeout(this._timer);
+    if (this._parentSignal && this._onParentAbort) {
+      this._parentSignal.removeEventListener('abort', this._onParentAbort);
+    }
   }
+}
+
+/**
+ * One root deadline and an earlier work phase that leaves time for wrap-up.
+ * Both share the root signal; disposing one never extends the other.
+ */
+function createTurnBudgets(totalMs, wrapUpReserveMs) {
+  const total = Math.max(0, Number(totalMs) || 0);
+  const reserve = Math.min(total, Math.max(0, Number(wrapUpReserveMs) || 0));
+  const root = new TurnBudget(total);
+  const work = root.childFor(total - reserve);
+  return { root, work };
+}
+
+/** Combine caller cancellation with a per-operation timeout. */
+function signalWithTimeout(parentSignal, timeoutMs) {
+  const timeoutSignal = AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 1));
+  if (!parentSignal) return timeoutSignal;
+  return AbortSignal.any([parentSignal, timeoutSignal]);
 }
 
 /**
@@ -110,4 +135,11 @@ function sleepWithin(ms, signal) {
   });
 }
 
-export { TurnBudget, turnBudgetFrom, callTimeoutWithin, sleepWithin };
+export {
+  TurnBudget,
+  callTimeoutWithin,
+  createTurnBudgets,
+  signalWithTimeout,
+  sleepWithin,
+  turnBudgetFrom
+};
