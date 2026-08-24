@@ -27,8 +27,8 @@ import {
   VALID_VOICES,
   VOICES_MALE,
   VOICES_FEMALE,
-  VALID_EFFORTS,
-  VALID_LANGUAGES
+  VALID_LANGUAGES,
+  activeEffortPolicy
 } from '../utils/settingsStore.js';
 
 // -- Helpers -------------------------------------------------------------
@@ -271,6 +271,7 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     ? 'the current group'
     : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
   const defaults = defaultSettings();
+  const { supportedEfforts } = activeEffortPolicy();
   return makeTool({
     name: 'manage_preferences',
     description: `Change your own settings for ${scope} — the ones listed in CurrentSettings (voice, effort, language, custom memory). `
@@ -286,8 +287,9 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
       },
       effort: {
         type: 'string',
-        enum: VALID_EFFORTS,
-        description: `How much reasoning you spend per reply (default ${defaults.effort}): low = fastest, high = most thorough.`
+        enum: supportedEfforts,
+        description: `How much reasoning you spend per reply. Supported by the current main model: ${supportedEfforts.join(', ')}; `
+          + `default ${defaults.effort}, the highest available. Lower is faster; higher is more thorough.`
       },
       language: {
         type: 'string',
@@ -806,6 +808,8 @@ const TOOL_READ_FILE = makeTool({
     + 'figures attached as images when the text alone would lose them; audio comes back as a transcript '
     + '(empty for music or ambient sound, which is not the same as silent); video comes back as its '
     + 'transcript plus frames sampled across the clip; images come back attached so you can look at them. '
+    + 'Long or complex documents may be truncated or only partly extracted; if that is insufficient, use shell '
+    + 'to extract page or slide images into workspace/ and inspect them with read_file. '
     + 'Files in this chat that were not loaded this turn appear as "[Attachment: attachments/name.ext]" — '
     + 'pass that exact path here to open one.',
   properties: {

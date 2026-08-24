@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
+import { resolveProviderProfile } from '../ai/providers/providerProfile.js';
 import { getRomeISO  } from './time.js';
 import { withKeyedLock  } from './keyedLock.js';
 
@@ -26,9 +27,6 @@ const VOICES_FEMALE = ['eve', 'ara', 'carina', 'luna', 'iris', 'altair', 'celest
 const VOICES_MALE = ['leo', 'rex', 'zagan', 'helix', 'orion', 'perseus', 'helios', 'lux', 'kepler', 'rigel', 'cosmo', 'sirius', 'castor', 'naksh', 'atlas'];
 const VALID_VOICES = [...VOICES_MALE, ...VOICES_FEMALE];
 
-/** Reasoning effort levels accepted for the main brain. */
-const VALID_EFFORTS = ['low', 'medium', 'high'];
-
 /** Supported reply/TTS languages (BCP-47-ish codes accepted by xAI TTS). */
 const VALID_LANGUAGES = [
   'en', 'ar-EG', 'ar-SA', 'ar-AE', 'bn', 'zh', 'fr', 'de', 'hi', 'id', 'it',
@@ -42,14 +40,34 @@ const DEFAULT_MEMORY =
   + 'Use emojis sometimes.';
 
 /**
+ * Effort choices for per-chat preferences on the active main-brain profile.
+ * ProviderProfile owns the ordered scale; the chat default is its highest
+ * supported value. profile.defaultEffort remains the fallback for calls that
+ * have no per-chat setting at all.
+ * @returns {{ supportedEfforts: readonly string[], chatDefaultEffort: string }}
+ */
+function activeEffortPolicy() {
+  const supportedEfforts = resolveProviderProfile().supportedEfforts;
+  if (!Array.isArray(supportedEfforts) || supportedEfforts.length === 0) {
+    throw new Error('The active provider profile declares no reasoning efforts.');
+  }
+  return {
+    supportedEfforts,
+    chatDefaultEffort: supportedEfforts[supportedEfforts.length - 1]
+  };
+}
+
+/**
  * Program defaults. The voice comes from .env (envConfig.XAI_TTS_VOICE) so the
- * deployment decides the starting voice.
+ * deployment decides the starting voice; reasoning starts at the highest
+ * effort the active provider supports.
  * @returns {{ voice: string, effort: string, language: string, memory: string }}
  */
 function defaultSettings() {
+  const { chatDefaultEffort } = activeEffortPolicy();
   return {
     voice: envConfig.XAI_TTS_VOICE,
-    effort: 'high',
+    effort: chatDefaultEffort,
     language: 'it',
     memory: DEFAULT_MEMORY
   };
@@ -99,13 +117,14 @@ function _writeRawUnlocked(fileId, data) {
  */
 function readSettings(fileId) {
   const defaults = defaultSettings();
+  const { supportedEfforts } = activeEffortPolicy();
   const stored = fileId ? _readRawUnlocked(fileId) : null;
   if (!stored || typeof stored !== 'object') {
     return { ...defaults, updatedAt: null, reviewedAt: null };
   }
   return {
     voice: VALID_VOICES.includes(stored.voice) ? stored.voice : defaults.voice,
-    effort: VALID_EFFORTS.includes(stored.effort) ? stored.effort : defaults.effort,
+    effort: supportedEfforts.includes(stored.effort) ? stored.effort : defaults.effort,
     language: VALID_LANGUAGES.includes(stored.language) ? stored.language : defaults.language,
     memory: typeof stored.memory === 'string' && stored.memory.trim() ? stored.memory : defaults.memory,
     updatedAt: stored.updatedAt || null,
@@ -218,8 +237,8 @@ export {
   VOICES_MALE,
   VOICES_FEMALE,
   VALID_VOICES,
-  VALID_EFFORTS,
   VALID_LANGUAGES,
+  activeEffortPolicy,
   defaultSettings,
   readSettings,
   updateSettings,

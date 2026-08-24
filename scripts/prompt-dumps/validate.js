@@ -133,6 +133,13 @@ function _validateStaticShape(staticPart, prompt, caseId) {
   if (!opening.includes(expectedModel)) {
     ISSUES.push({ caseId, msg: `opening missing model display name "${expectedModel}"` });
   }
+  if (!/began as a project to combine Grok\/SuperGrok with Gemini/.test(opening)
+    || !/supports multiple models while keeping its original name/.test(opening)) {
+    ISSUES.push({ caseId, msg: 'opening missing the provider-neutral GemiX origin note' });
+  }
+  if (/a fusion of/i.test(opening)) {
+    ISSUES.push({ caseId, msg: 'opening still describes the active model as a two-model fusion' });
+  }
   if (!opening.includes('<user_query>')) {
     ISSUES.push({ caseId, msg: 'opening must point at the <user_query> tag as the goal' });
   }
@@ -531,6 +538,10 @@ function _validateWorkspaceToolDescriptions(platform) {
   const readFile = byName.get('read_file') || '';
   if (!/only way to open one/i.test(readFile)) {
     ISSUES.push({ caseId: 'workspace', msg: 'read_file description does not state it is the universal gateway' });
+  }
+  if (!/long or complex documents/i.test(readFile) || !/shell/i.test(readFile)
+    || !/page or slide images/i.test(readFile)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'read_file description lacks the shell fallback for incomplete document extraction' });
   }
   const editFile = byName.get('edit_file') || '';
   if (!/exactly once/i.test(editFile)) {

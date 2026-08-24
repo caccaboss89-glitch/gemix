@@ -8,13 +8,20 @@ import {
   buildStaticInstructions,
   buildDynamicRuntimeContext
 } from '../../src/ai/systemPrompt.js';
-import { getToolsForUser } from '../../src/ai/tools.js';
+import { getToolsForUser, syncProfileToolSets } from '../../src/ai/tools.js';
 import { buildGemixResponseFormat } from '../../src/ai/responseSchema.js';
 import constants from '../../src/config/constants.js';
-import { resolveProfile, toolUnavailableMessage, getCapabilities } from '../../src/config/platformCapabilities.js';
+import {
+  CAPS,
+  PROFILE,
+  resolveProfile,
+  toolUnavailableMessage,
+  getCapabilities
+} from '../../src/config/platformCapabilities.js';
 import { ADMIN_NOTIFIED_SUFFIX } from '../../src/utils/adminNotifier.js';
 import envConfig from '../../src/config/env.js';
 import { _resetActiveProfileForTests } from '../../src/ai/providers/providerProfile.js';
+import { activeEffortPolicy, defaultSettings } from '../../src/utils/settingsStore.js';
 
 const {
   PLATFORM_DISCORD,
@@ -31,7 +38,7 @@ import {
 } from '../../src/utils/toolCallExecution.js';
 import { formatMediaQuotaResetLabel } from '../../src/utils/mediaUsageLimits.js';
 import workspaceRuntime from '../../src/sandbox/workspaceRuntime.js';
-import { CASES, DEFAULT_SETTINGS } from './cases.js';
+import { CASES } from './cases.js';
 
 /** Tool names the workspace-runtime dump quotes verbatim. */
 const WORKSPACE_TOOL_NAMES = new Set(['list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell']);
@@ -236,11 +243,11 @@ const TOOL_RUNTIME_ERRORS = {
   bug_report: [
     'Missing required argument "description".'
   ],
-  manage_preferences: [
+  manage_preferences: () => [
     'Unable to identify the settings file for this chat.',
     'Nothing to update: pass at least one of voice, effort, language, memory.',
     'Invalid voice: "<value>". Available voices: <list>.',
-    'Invalid effort: "<value>". Use one of: low, medium, high.',
+    `Invalid effort: "<value>". Use one of: ${activeEffortPolicy().supportedEfforts.join(', ')}.`,
     'Invalid language: "<value>". Use one of: <list>.',
     'Memory exceeds the 1000 character limit (<n> chars).'
   ],
@@ -304,7 +311,10 @@ function renderToolErrors(ctx, tools) {
     out.push('[runtime, per tool]');
     for (const name of runtimeNames) {
       out.push(`    ${name}:`);
-      for (const msg of TOOL_RUNTIME_ERRORS[name]) out.push(`        - ${msg}`);
+      const messages = typeof TOOL_RUNTIME_ERRORS[name] === 'function'
+        ? TOOL_RUNTIME_ERRORS[name]()
+        : TOOL_RUNTIME_ERRORS[name];
+      for (const msg of messages) out.push(`        - ${msg}`);
     }
   }
 
@@ -354,8 +364,7 @@ function renderInputLayout() {
  * callback instead of living inside renderCase.
  */
 function underCaseDeployment(id, fn) {
-  const deployment = CASES[id]?.deployment;
-  if (!deployment) return fn();
+  const deployment = CASES[id]?.deployment || { provider: 'xai' };
   const saved = {
     provider: envConfig.AI_PROVIDER,
     account: envConfig.CLOUDFLARE_AI_ACCOUNT_ID,
@@ -369,6 +378,7 @@ function underCaseDeployment(id, fn) {
     envConfig.CLOUDFLARE_AI_API_TOKEN = envConfig.CLOUDFLARE_AI_API_TOKEN || 'dump-token';
   }
   _resetActiveProfileForTests();
+  syncProfileToolSets(CAPS, PROFILE);
   try { return fn(); }
   finally {
     Object.assign(envConfig, {
@@ -377,6 +387,8 @@ function underCaseDeployment(id, fn) {
       CLOUDFLARE_AI_API_TOKEN: saved.token
     });
     _resetActiveProfileForTests();
+    syncProfileToolSets(CAPS, PROFILE);
+    _resetActiveProfileForTests();
   }
 }
 
@@ -384,8 +396,15 @@ function renderCase(id) {
   const spec = CASES[id];
   const ctx = { ...spec.ctx };
 
-  // Cases without explicit settings render the program defaults, like a fresh chat.
-  if (ctx.settings === undefined) ctx.settings = { ...DEFAULT_SETTINGS };
+  // Resolve defaults inside the case's provider window. Explicit cases carry
+  // only their overrides so a ChatGPT dump gets max while an xAI dump gets high.
+  const suppliedSettings = ctx.settings;
+  ctx.settings = {
+    ...defaultSettings(),
+    ...(suppliedSettings || {}),
+    updatedAt: suppliedSettings?.updatedAt || null,
+    reviewedAt: suppliedSettings?.reviewedAt || null
+  };
 
   const staticPart = buildStaticInstructions(ctx);
   const dynamicPart = buildDynamicRuntimeContext(ctx);

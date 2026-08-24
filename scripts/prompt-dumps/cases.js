@@ -5,9 +5,9 @@
 //
 // Every case is a plain handler-shaped ctx. Cases without explicit `settings`
 // render the program defaults, like a fresh chat. A case may also carry a
-// `deployment`, which renders it as a different provider profile: the tool
-// registry and some media backends vary by profile, so the corpus has to show
-// more than the one this .env happens to select.
+// `deployment`, which renders it as a different provider profile. The corpus
+// baseline is xAI; explicit overrides cover other profiles, independently of
+// whichever provider the developer's .env selects.
 //
 // Discord note: conversation_title sits in text.format on every turn (its rules
 // live there only — Runtime just carries the current Thread title to compare
@@ -15,13 +15,9 @@
 
 import constants from '../../src/config/constants.js';
 import envConfig from '../../src/config/env.js';
-import { defaultSettings } from '../../src/utils/settingsStore.js';
 
 const { PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED, PLATFORM_DISCORD } = constants;
 const ADMIN_FIRST_NAME = (envConfig.ADMIN_NAME || 'Test Admin').split(/\s+/)[0];
-
-/** Baseline settings for the dump cases (all program defaults, never edited). */
-const DEFAULT_SETTINGS = { ...defaultSettings(), updatedAt: null, reviewedAt: null };
 
 const ACTIVE = {
   isActiveMember: true,
@@ -92,7 +88,6 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        ...DEFAULT_SETTINGS,
         language: 'es-ES',
         memory: 'Rispondi sempre in spagnolo per test.',
         updatedAt: '2026-07-20T10:00:00+02:00'
@@ -146,7 +141,6 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        ...DEFAULT_SETTINGS,
         voice: 'carina',
         effort: 'low',
         memory: 'Preferisci risposte brevi.',
@@ -273,7 +267,6 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        ...DEFAULT_SETTINGS,
         voice: 'luna',
         memory: 'Sto pianificando il piano di allenamento del mese.',
         updatedAt: '2026-06-01T09:00:00+02:00',
@@ -317,4 +310,4 @@ const CASES = {
   }
 };
 
-export { CASES, DEFAULT_SETTINGS };
+export { CASES };

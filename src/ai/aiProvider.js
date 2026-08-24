@@ -55,7 +55,7 @@ function getTransport() {
 /**
  * The reasoning effort for this call: the per-chat setting when the profile
  * accepts it, else the profile default. Providers do not agree on the ladder,
- * so `supportedEfforts` is the authority, not the settings enum.
+ * so the profile's `supportedEfforts` remains the wire-level authority.
  */
 function _resolveEffort(profile, requested) {
   return profile.supportedEfforts.includes(requested) ? requested : profile.defaultEffort;

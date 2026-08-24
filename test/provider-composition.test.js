@@ -23,6 +23,8 @@ import {
 import { xaiResponsesExtensions, XAI_X_SEARCH_TOOL } from '../src/ai/extensions/xaiResponsesExtensions.js';
 import { TRANSPORT_ERROR } from '../src/ai/transport/errors.js';
 import { BASE_REPLAYABLE_ITEM_TYPES } from '../src/ai/transport/responsesProtocol.js';
+import envConfig from '../src/config/env.js';
+import { getProviderProfile } from '../src/ai/providers/providerProfile.js';
 
 test('undeclared wire capabilities default to false', () => {
   const caps = defineWireCapabilities({ supportsResponses: true });
@@ -30,6 +32,16 @@ test('undeclared wire capabilities default to false', () => {
   assert.equal(caps.supportsSse, false);
   assert.equal(caps.nativeAudioInput, false);
   assert.throws(() => defineWireCapabilities({ madeUp: true }), /Unknown wire capability/);
+});
+
+test('the ChatGPT display name strips provider implementation suffixes', () => {
+  const saved = envConfig.CHATGPT_MODEL;
+  envConfig.CHATGPT_MODEL = 'gpt-5.6-sol';
+  try {
+    assert.equal(getProviderProfile('chatgpt').displayName, 'ChatGPT 5.6');
+  } finally {
+    envConfig.CHATGPT_MODEL = saved;
+  }
 });
 
 test('the minimum wire contract names every flag the spec requires', () => {

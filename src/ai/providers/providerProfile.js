@@ -33,11 +33,11 @@ const PROVIDER = Object.freeze({
   CUSTOM: 'custom'
 });
 
-/** Reasoning efforts the xAI Responses API accepts. */
+/** Ordered reasoning-effort scale the xAI Responses API accepts. */
 const XAI_EFFORTS = Object.freeze(['low', 'medium', 'high']);
-/** Efforts the Codex model catalog reports. */
+/** Ordered effort scale the Codex model catalog reports. */
 const CODEX_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
-/** Generic Responses providers: the three the API documents. */
+/** Ordered generic Responses scale: the three efforts the API documents. */
 const GENERIC_EFFORTS = Object.freeze(['low', 'medium', 'high']);
 
 /** Display brand for footers, badges and the prompt opening. */
@@ -51,9 +51,7 @@ function _xaiDisplayName(model) {
 
 function _chatgptDisplayName(model) {
   const slug = String(model || '').trim();
-  const sol = slug.match(/^gpt-(\d+(?:\.\d+)?)-sol/i);
-  if (sol) return `ChatGPT ${sol[1]} Sol`;
-  const gpt = slug.match(/^gpt-(\d+(?:\.\d+)?)/i);
+  const gpt = slug.match(/^gpt-(\d+(?:\.\d+)?)(?:-|$)/i);
   if (gpt) return `ChatGPT ${gpt[1]}`;
   return slug ? `ChatGPT (${slug})` : 'ChatGPT';
 }
@@ -76,7 +74,6 @@ function _buildXaiProfile() {
     id: PROVIDER.XAI,
     model: envConfig.GROK_MODEL,
     displayName: _xaiDisplayName(envConfig.GROK_MODEL),
-    identity: 'SuperGrok',
     baseUrl: envConfig.XAI_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: XAI_EFFORTS,
@@ -111,7 +108,6 @@ function _buildChatgptProfile() {
     id: PROVIDER.CHATGPT,
     model: envConfig.CHATGPT_MODEL,
     displayName: _chatgptDisplayName(envConfig.CHATGPT_MODEL),
-    identity: 'ChatGPT',
     baseUrl: envConfig.CHATGPT_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: CODEX_EFFORTS,
@@ -143,7 +139,6 @@ function _buildOpenRouterProfile() {
     id: PROVIDER.OPENROUTER,
     model: envConfig.OPENROUTER_MAIN_MODEL,
     displayName: _genericDisplayName(envConfig.OPENROUTER_MAIN_MODEL),
-    identity: 'GemiX',
     baseUrl: envConfig.OPENROUTER_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: GENERIC_EFFORTS,
@@ -175,7 +170,6 @@ function _buildCustomProfile() {
     id: PROVIDER.CUSTOM,
     model: envConfig.CUSTOM_RESPONSES_MODEL,
     displayName: _genericDisplayName(envConfig.CUSTOM_RESPONSES_MODEL),
-    identity: 'GemiX',
     baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: GENERIC_EFFORTS,

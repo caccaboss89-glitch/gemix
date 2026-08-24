@@ -17,9 +17,9 @@ import {
   resolveMemoryContent,
   MAX_MEMORY_CHARS,
   VALID_VOICES,
-  VALID_EFFORTS,
   VALID_LANGUAGES,
-  DEFAULT_MEMORY
+  DEFAULT_MEMORY,
+  activeEffortPolicy
 } from '../utils/settingsStore.js';
 
 /**
@@ -46,9 +46,10 @@ async function managePreferences(args, settingsFileId) {
   }
 
   if (args.effort !== undefined && args.effort !== null && args.effort !== '') {
+    const { supportedEfforts } = activeEffortPolicy();
     const effort = String(args.effort).trim().toLowerCase();
-    if (!VALID_EFFORTS.includes(effort)) {
-      return { success: false, error: `Invalid effort: "${args.effort}". Use one of: ${VALID_EFFORTS.join(', ')}.` };
+    if (!supportedEfforts.includes(effort)) {
+      return { success: false, error: `Invalid effort: "${args.effort}". Use one of: ${supportedEfforts.join(', ')}.` };
     }
     patch.effort = effort;
     changes.push(`effort=${effort}`);
