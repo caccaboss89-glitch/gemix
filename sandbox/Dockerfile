@@ -1,7 +1,7 @@
 # GemiX sandbox image.
 # Build: docker build -t gemix-sandbox:latest -f sandbox/Dockerfile sandbox
 # Run: managed by src/sandbox/workspaceRuntime.js, which boots the container
-#      with Cmd: ['sleep', 'infinity'] and attaches per-call via `docker exec`.
+#      with the quota monitor as PID 1 and attaches per-call via `docker exec`.
 #      Bind mounts: /workspace (rw, this conversation's own files) and
 #      /attachments (ro, the host projection of the chat's files).
 #      No agent CLI is baked in: the main agent runs the tools itself and only
@@ -57,7 +57,8 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DEFAULT_TIMEOUT=120
 
 WORKDIR /opt/sandbox
-COPY requirements-sandbox.txt preload_models.py /opt/sandbox/
+COPY requirements-sandbox.txt preload_models.py quota_guard.py quota_exec.py /opt/sandbox/
+RUN chmod 0555 /opt/sandbox/quota_guard.py /opt/sandbox/quota_exec.py
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r /opt/sandbox/requirements-sandbox.txt
 
 # -- unoserver for LibreOffice field updates (TOC, indexes) ------------------
@@ -142,6 +143,4 @@ ENV SANDBOX_WORKDIR=/workspace \
     GEMIX_SANDBOX=1 \
     MPLBACKEND=Agg
 
-# No ENTRYPOINT and no CMD: the build manager always provides Cmd:['sleep','infinity']
-# at run time. Leaving the image without a default avoids confusion if someone
-# launches the container manually for debugging.
+# No ENTRYPOINT and no CMD: the runtime supplies the quota monitor as PID 1.

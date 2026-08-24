@@ -155,7 +155,7 @@ function recordSentMessage(entry) {
   const senderKey = entry && entry.senderKey;
   if (!senderKey || !entry.channel) return;
 
-  // Fire-and-forget with per-sender lock; callers historically treat this as sync.
+  // Serialize each sender's updates and return the completion promise.
   return _withLock(senderKey, async () => {
     try {
       const records = _load(senderKey);

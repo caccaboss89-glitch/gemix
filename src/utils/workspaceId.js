@@ -10,6 +10,7 @@
 // The `group:` / `user:` prefix provides filesystem-safe disambiguation.
 
 import path from 'path';
+import crypto from 'node:crypto';
 import constants from '../config/constants.js';
 import { resolveStorageId  } from './userPaths.js';
 
@@ -71,7 +72,9 @@ function workspaceIdToSlug(workspaceId) {
     .replace(/@/g, '_at_')
     .replace(/:/g, '_')
     .replace(/[^a-zA-Z0-9._-]/g, '_');
-  return replaced.slice(0, 63);
+  if (replaced.length <= 63) return replaced;
+  const suffix = crypto.createHash('sha256').update(workspaceId).digest('hex').slice(0, 12);
+  return `${replaced.slice(0, 63 - suffix.length - 1)}-${suffix}`;
 }
 
 /**
@@ -79,11 +82,10 @@ function workspaceIdToSlug(workspaceId) {
  *
  *   data/users/<workspaceSlug>/build_workspace/   ->  /workspace in the container
  *
- * The directory name is historical and kept so an existing deployment does not
- * lose its workspace on upgrade. The parent path (`data/users/<workspaceSlug>/`)
- * is intentionally distinct from the legacy per-user `data/users/<storageId>/`
- * tree (different prefix `group_`/`user_` ensures no collision) so legacy
- * history/projects continue to live where they always have.
+ * `build_workspace` is the stable persisted directory name. Its parent
+ * (`data/users/<workspaceSlug>/`) is distinct from the per-user
+ * `data/users/<storageId>/` tree: the `group_`/`user_` prefix prevents the
+ * workspace from colliding with history and project data.
  */
 function getWorkspacePath(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);

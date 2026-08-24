@@ -240,8 +240,8 @@ function cleanupExpiredFiles() {
   if (fs.existsSync(TEMP_DIR)) {
     try {
       const orphanThresholdMs = constants.TUNNEL_TOKEN_TTL_HISTORY_MS;
-      // Recurse one level deep: temp files now live either in TEMP_DIR root
-      // (legacy callers) or in TEMP_DIR/<owner>/ (per-user isolation). Sweep
+      // Recurse one level deep: temp files live either in TEMP_DIR root
+      // (callers without an owner) or in TEMP_DIR/<owner>/ (per-user isolation). Sweep
       // both, and drop owner subdirs once they go empty.
       const entries = fs.readdirSync(TEMP_DIR, { withFileTypes: true });
       for (const ent of entries) {

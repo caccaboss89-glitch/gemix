@@ -1,6 +1,6 @@
 // test/responses-items.test.js
 //
-// The internal conversation is Responses-native end to end (spec §18.2): one
+// The internal conversation is Responses-native end to end: one
 // representation, built where the content is produced, sanitized once at the
 // wire and never translated in between.
 //
@@ -167,11 +167,11 @@ test('delivery tools run after everything else, in model order', () => {
     { id: 'c', name: 'read_file', arguments: '{}' },
     { id: 'd', name: 'send_whatsapp_message', arguments: '{}' }
   ];
-  const { phase1, phase2 } = partitionHandlerToolCalls(calls);
+  const { standard, delivery } = partitionHandlerToolCalls(calls);
 
-  assert.deepEqual(phase1.map((t) => t.id), ['a', 'c']);
+  assert.deepEqual(standard.map((t) => t.id), ['a', 'c']);
   // Sending happens once the round's research is done, never interleaved.
-  assert.deepEqual(phase2.map((t) => t.id), ['b', 'd']);
+  assert.deepEqual(delivery.map((t) => t.id), ['b', 'd']);
 });
 
 test('a per-round cap blocks the extra calls, not the first ones', () => {

@@ -10,7 +10,7 @@
 // nothing in it reads a token from disk: credentials come from the profile's
 // CredentialProvider and go straight into an outbound header.
 //
-// Retry policy (spec §18.2): cold only. Once a stream has produced a meaningful
+// Retry policy: cold only. Once a stream has produced a meaningful
 // event the model may already have run a tool, so a truncated stream is a
 // partial response to report, never something to replay. `Retry-After` is
 // honoured and clamped to what is left of the turn.
@@ -266,10 +266,17 @@ class OpenAIResponsesTransport {
       });
     }
     if (!assembler.status) {
-      // EOF without a terminal event: usable only if items already arrived.
+      // EOF without a terminal event is usable only when complete items have
+      // arrived. Deltas prove that work started, but are not replayable output.
       if (!assembler.sawMeaningfulEvent) {
         throw this._error(TRANSPORT_ERROR.TRANSIENT, 'Model stream closed before sending anything.', {
           partial: false,
+          requestId: upstreamRequestId
+        });
+      }
+      if (!assembler.hasOutputItems) {
+        throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model stream closed after deltas but before completing an output item.', {
+          partial: true,
           requestId: upstreamRequestId
         });
       }

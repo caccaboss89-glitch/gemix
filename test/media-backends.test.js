@@ -1,9 +1,8 @@
 // test/media-backends.test.js
 //
-// Media routing (§11.1), the per-backend tool schemas (§18.12), the neuron
-// ledger at the real prices (§11.2) and the fallback rules (§18.13).
+// Media routing, per-backend tool schemas, neuron accounting and fallback rules.
 //
-// The rule that matters most here is §18.13.2: a content-policy refusal is
+// The rule that matters most here is that a content-policy refusal is
 // never retried on another backend. Everything else is about not lying to the
 // model — a tool must not advertise a parameter its backend cannot honour.
 
@@ -60,7 +59,7 @@ beforeEach(() => {
   _resetCooldownsForTests();
 });
 
-// -- routing (§11.1) ----------------------------------------------------------
+// -- routing -----------------------------------------------------------------
 
 test('the xAI profile keeps its own media services, the others fall to the baseline', () => {
   const xai = getProviderProfile('xai');
@@ -101,7 +100,7 @@ test('the declared backend follows the binding, and disappears with the credenti
   withDeployment({ provider: 'chatgpt', cloudflare: true }, () => {
     assert.equal(declaredImageBackend(), BACKEND.CLOUDFLARE);
   });
-  // Rule 1 of §18.13: a backend with no credentials is not offered at all.
+  // A backend with no credentials is not offered at all.
   withDeployment({ provider: 'chatgpt', cloudflare: false }, () => {
     assert.equal(declaredImageBackend(), null);
   });
@@ -125,7 +124,7 @@ test('a cooled-down primary hands over to the fallback, and comes back after', (
   });
 });
 
-// -- fallback policy (§18.13) -------------------------------------------------
+// -- fallback policy ---------------------------------------------------------
 
 test('a content-policy refusal is never routed around', () => {
   const plan = failurePlan(CF_ERROR.CONTENT_POLICY);
@@ -180,7 +179,7 @@ test('FLUX takes exactly one reference, which is what the schema must say', () =
   assert.equal(FLUX_MAX_REFERENCES, 1);
 });
 
-// -- neuron ledger (§11.2) ----------------------------------------------------
+// -- neuron ledger -----------------------------------------------------------
 
 test('image cost uses the probed prices, not the archive estimate', () => {
   // A 512x512 image is one output tile: ~26 neurons, not 250.
@@ -259,7 +258,7 @@ test('parallel reservations cannot collectively overspend the remaining allowanc
   assert.equal(ledgerSnapshot().reserved, 0);
 });
 
-// -- what the model is actually offered (§18.12) ------------------------------
+// -- what the model is actually offered -------------------------------------
 //
 // The registry is read at call time, not at import time, so a profile swap here
 // is enough to see the tool list the other deployment would get.
@@ -328,7 +327,7 @@ test('the GemiX-owned tools are on every profile', () => {
     for (const name of ['search_web', 'search_image', 'read_file', 'shell']) {
       assert.ok(names(tools).includes(name), `${name} missing on ${provider}`);
     }
-    assert.equal(names(tools).includes('web_image_search'), false, 'legacy image tool name must stay gone');
+    assert.equal(names(tools).includes('web_image_search'), false, 'unsupported image tool name must stay absent');
     assert.equal(names(tools).includes('search_images'), false, 'xAI hosted tool name must stay reserved');
   }
 });

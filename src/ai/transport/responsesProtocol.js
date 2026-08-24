@@ -357,6 +357,11 @@ class ResponseAssembler {
       incomplete_reason: this.incompleteReason
     };
   }
+
+  /** True only after at least one complete output item has been assembled. */
+  get hasOutputItems() {
+    return this._items.size > 0;
+  }
 }
 
 // -- Reading an assembled response -------------------------------------------

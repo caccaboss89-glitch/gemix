@@ -1,6 +1,6 @@
 // src/parsers/parserCache.js
 //
-// Host-only cache for parse results (spec §9.2).
+// Host-only cache for parse results.
 //
 // Parsing a 200-page PDF or transcribing a video is expensive, and the model
 // re-reads the same attachment across turns constantly. This keeps the result
@@ -11,7 +11,7 @@
 // Two properties make it safe rather than merely fast. The key is the content
 // hash, so an edited file is a miss and never a stale answer; and the directory
 // is never mounted into the container and never named to the model, so it stays
-// an implementation detail outside the logical contract (§7.3) — the model has
+// an implementation detail outside the model-facing contract — the model has
 // no derived-file tree to navigate or keep tidy.
 //
 // Retention matches the rest of the conversation: 4h sliding from last use,
@@ -57,11 +57,18 @@ function cacheKey(content, parser, params = {}) {
   return crypto.createHash('sha256').update(`${contentHash}|${parser}|${shape}`).digest('hex');
 }
 
-/** Hash a file without holding it in memory twice. */
-function hashFile(absPath) {
+/** Hash a file incrementally, honoring cancellation between chunks. */
+async function hashFile(absPath, opts = {}) {
+  const hash = crypto.createHash('sha256');
   try {
-    return crypto.createHash('sha256').update(fs.readFileSync(absPath)).digest('hex');
-  } catch {
+    const input = fs.createReadStream(absPath, { signal: opts.signal });
+    for await (const chunk of input) {
+      if (opts.signal?.aborted) throw opts.signal.reason || new Error('File hashing aborted.');
+      hash.update(chunk);
+    }
+    return hash.digest('hex');
+  } catch (err) {
+    if (opts.signal?.aborted) throw opts.signal.reason || err;
     return null;
   }
 }
@@ -107,7 +114,7 @@ function readCache(workspaceId, key) {
 function writeCache(workspaceId, key, payload) {
   const file = _entryPath(workspaceId, key);
   if (!file) return false;
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(payload));

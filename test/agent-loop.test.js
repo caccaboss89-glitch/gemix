@@ -129,7 +129,7 @@ test('a workspace path in the final reply resolves to a real file', async () => 
   }
 });
 
-// -- history retention (§8.6) -------------------------------------------------
+// -- history retention -------------------------------------------------------
 
 test('the history store keeps what is in use and drops only what aged out', () => {
   const userId = `test_history_sweep_${process.pid}`;
@@ -146,7 +146,7 @@ test('the history store keeps what is in use and drops only what aged out', () =
   try {
     const res = sweepHistoryStore(userId);
     // The turn that referenced them is long out of the 30-message window; that
-    // is not a reason to delete anything (§8.6 abolished the referential prune).
+    // is not a reason to delete anything; retention is based on age and reuse.
     assert.equal(fs.existsSync(fresh), true, 'a recently used file stays');
     assert.equal(fs.existsSync(stale), false, 'only age removes a file');
     assert.equal(res.deletedCount, 1);

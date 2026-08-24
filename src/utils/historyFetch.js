@@ -3,7 +3,7 @@
 const HISTORY_FETCH_TIMEOUT_MS = 15_000;
 
 /**
- * Normalize loadHistory return value (array legacy or { history, incomplete }).
+ * Normalize loadHistory return value (array or { history, incomplete }).
  * @param {Array|{history?:Array,incomplete?:boolean}|null|undefined} payload
  * @returns {{ history: Array, incomplete: boolean }}
  */

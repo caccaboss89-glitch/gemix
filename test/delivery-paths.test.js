@@ -1,8 +1,8 @@
 // test/delivery-paths.test.js
 //
-// Path-centric delivery (§18.16): a file ships because the model named its real
+// Path-centric delivery: a file ships because the model named its real
 // path, not because something with the same basename was found somewhere. The
-// interesting cases are the ones that used to resolve and now must not.
+// boundary cases verify that ambiguous basenames and invalid paths are refused.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -56,26 +56,39 @@ test('the selection ships resolved paths and reports the rest as missing', async
     WORKSPACE_ID
   );
   assert.deepEqual(attachments.map(a => a.name), ['report.pdf', 'photo.jpg']);
-  assert.equal(attachments[0].filePath, path.join(WORKSPACE, 'report.pdf'));
+  assert.equal(attachments[0].buffer.toString(), '%PDF-1.4 x');
   assert.equal(attachments[0].mimetype, 'application/pdf');
   assert.deepEqual(missing, ['workspace/nope.txt']);
 });
 
-test('a tool output lands in the workspace and comes back as its own path', () => {
-  const staged = stageToolOutput(WORKSPACE_ID, 'song.mp3', Buffer.from('id3'));
+test('a tool output lands in the workspace and comes back as its own path', async () => {
+  const staged = await stageToolOutput(WORKSPACE_ID, 'song.mp3', Buffer.from('id3'));
   assert.equal(staged.display, 'workspace/song.mp3');
-  assert.equal(fs.existsSync(staged.abs), true);
+  assert.equal(fs.existsSync(path.join(WORKSPACE, staged.name)), true);
   // And that path is exactly what delivery accepts, with no naming step between.
-  assert.equal(resolveLocalFileEntry(staged.display, WORKSPACE_ID).filePath, staged.abs);
+  assert.equal(resolveLocalFileEntry(staged.display, WORKSPACE_ID).size, 3);
 });
 
-test('a colliding output is renamed, so the returned path is always the real one', () => {
-  const first = stageToolOutput(WORKSPACE_ID, 'dup.txt', Buffer.from('a'));
-  const second = stageToolOutput(WORKSPACE_ID, 'dup.txt', Buffer.from('b'));
+test('a colliding output is renamed, so the returned path is always the real one', async () => {
+  const first = await stageToolOutput(WORKSPACE_ID, 'dup.txt', Buffer.from('a'));
+  const second = await stageToolOutput(WORKSPACE_ID, 'dup.txt', Buffer.from('b'));
   assert.notEqual(first.display, second.display);
-  assert.equal(fs.readFileSync(resolveLocalFileEntry(second.display, WORKSPACE_ID).filePath, 'utf8'), 'b');
+  const selection = await resolveDeliverySelection([second.display], WORKSPACE_ID);
+  assert.equal(selection.attachments[0].buffer.toString(), 'b');
 });
 
-test('staging refuses to run without a workspace instead of writing somewhere else', () => {
-  assert.throws(() => stageToolOutput(null, 'x.txt', Buffer.from('x')), /workspace/i);
+test('staging refuses to run without a workspace instead of writing somewhere else', async () => {
+  await assert.rejects(stageToolOutput(null, 'x.txt', Buffer.from('x')), /workspace/i);
+});
+
+test('delivery enforces the runtime item cap even outside schema validation', async () => {
+  const entries = [];
+  for (let index = 0; index < 11; index++) {
+    const name = `cap-${index}.txt`;
+    fs.writeFileSync(path.join(WORKSPACE, name), String(index));
+    entries.push(`workspace/${name}`);
+  }
+  const selection = await resolveDeliverySelection(entries, WORKSPACE_ID);
+  assert.equal(selection.attachments.length, 10);
+  assert.deepEqual(selection.missing, ['workspace/cap-10.txt']);
 });

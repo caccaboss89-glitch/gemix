@@ -39,8 +39,8 @@ test('wirePart takes native parts only — there is no second content dialect', 
     wirePart({ type: 'input_image', image_url: 'https://x/i.png' }),
     { type: 'input_image', image_url: 'https://x/i.png' }
   );
-  // Chat-style parts are not produced anywhere any more, so accepting them
-  // would only hide a producer that skipped the migration.
+  // Accepting chat-style parts would hide a producer emitting the wrong
+  // protocol shape.
   assert.equal(wirePart({ type: 'text', text: 'hi' }), null);
   assert.equal(wirePart({ type: 'image_url', image_url: { url: 'https://x/i.png' } }), null);
 });
@@ -155,4 +155,3 @@ test('readResponse extracts text, tool calls and replay items', () => {
   assert.equal(read.replayItems.length, 3);
   assert.equal(read.status, 'completed');
 });
-

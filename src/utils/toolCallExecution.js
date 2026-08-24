@@ -9,21 +9,20 @@ const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
 
 /**
  * @param {object[]} toolCalls - `{id, name, arguments}` in model order
- * @returns {{ phase1: object[], phase2: object[] }}
- *   phase1: standard tools (parallel) — generate_*, workspace, search, …
- *   phase2: outbound delivery (parallel) — send_email, send_whatsapp_message
+ * @returns {{ standard: object[], delivery: object[] }}
+ *   standard tools may run in parallel; outbound delivery runs serially after them
  */
 function partitionHandlerToolCalls(toolCalls) {
-  const phase1 = [];
-  const phase2 = [];
+  const standard = [];
+  const delivery = [];
   for (const tc of toolCalls) {
     if (HANDLER_DELIVERY_TOOLS.has(tc.name)) {
-      phase2.push(tc);
+      delivery.push(tc);
     } else {
-      phase1.push(tc);
+      standard.push(tc);
     }
   }
-  return { phase1, phase2 };
+  return { standard, delivery };
 }
 
 /**

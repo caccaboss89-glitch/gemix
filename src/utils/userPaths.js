@@ -9,8 +9,8 @@
 //       <storageId>/                  ← chat history (WA jid/group, Discord thread id)
 //         history/
 //         history_meta.json
-//       user_<sanitized>/             ← build workspaces (workspaceId user:…)
-//       group_<sanitized>/            ← build workspaces (workspaceId group:…)
+//       user_<sanitized>/             ← agent workspaces (workspaceId user:…)
+//       group_<sanitized>/            ← agent workspaces (workspaceId group:…)
 //
 // Workspace trees live under user_* / group_* (see workspaceId.js, workspaceFs.js).
 // This module only manages <storageId>/ history paths.

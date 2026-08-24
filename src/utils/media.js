@@ -1,24 +1,11 @@
 // src/utils/media.js
 //
-// Helpers for attachment tags and supported WhatsApp media types.
+// Helpers for supported WhatsApp media types and attachment-tag parsing.
 
 import constants from '../config/constants.js';
 
 function isSupportedMedia(type) {
   return constants.SUPPORTED_MEDIA.includes(type);
-}
-
-/**
- * Build a standardized attachment tag for AI context (always English).
- * Uses the on-disk history filename when synced; otherwise the resolved display name.
- * "(expired)" is never used — missing sync only means the file was not persisted yet;
- * ingress still uploads via fetchBuffer when possible.
- */
-function buildAttachmentTag(syncedPath, fallbackName) {
-  const name = syncedPath
-    ? (syncedPath.startsWith('history/') ? syncedPath.slice('history/'.length) : syncedPath)
-    : (fallbackName || 'file');
-  return `[Attachment: ${name}]`;
 }
 
 function extractAttachmentTagPaths(text) {
@@ -35,7 +22,6 @@ function extractAttachmentTagPaths(text) {
 
 export {
   isSupportedMedia,
-  buildAttachmentTag,
   extractAttachmentTagPaths
 
 };

@@ -27,7 +27,7 @@ function createMemoizedFetchBuffer(fetchOnce) {
  * @param {object} [options]
  * @param {string} [options.workspaceId] - conversation whose projection to fill
  * @param {boolean} [options.inline] - the message being answered, or the one it
- *   replies to: only those may carry an image natively (spec §8.6).
+ *   replies to: only those may carry an image natively.
  * @param {number} [options.imagesInlined] - running per-turn inline image count
  */
 async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
@@ -38,7 +38,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
 
   if (!isSupportedMedia(mediaType)) {
     const fallbackName = resolveIngressFilename(waFilename, mimetypeHint, msgId);
-    const tag = buildAttachmentTag(fallbackName || waFilename || 'file');
+    const tag = buildAttachmentTag(fallbackName || waFilename || 'file', true);
     return {
       tag,
       textFragment: `${tag} `,
@@ -52,7 +52,7 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
   }
 
   if (!msgId) {
-    const tag = buildAttachmentTag(waFilename || 'file');
+    const tag = buildAttachmentTag(waFilename || 'file', true);
     return {
       tag,
       textFragment: `${tag} `,
@@ -114,7 +114,7 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
   const { metadataDurationSec = 0, inline = false, imagesInlined = 0 } = options;
 
   if (isDiscordAttachmentOversize(att)) {
-    const tag = buildAttachmentTag(att.name);
+    const tag = buildAttachmentTag(att.name, true);
     return {
       tag,
       textFragment: `${tag}${formatDiscordOversizeNote(att)} `,

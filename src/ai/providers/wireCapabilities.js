@@ -3,12 +3,12 @@
 // What a provider must be able to do on the wire before GemiX will talk to it.
 //
 // These are deliberately NOT user features. "The provider offers hosted web
-// search" is not a wire capability — it is something GemiX ignores (spec §2.11).
+// search" is not a wire capability — it is something GemiX ignores.
 // A wire capability is only ever about the protocol itself: can this endpoint
 // carry the conversation, the tools, the schema and the reasoning GemiX needs.
 // Feature bindings answer the other question, and they win.
 //
-// The minimum contract for the v1 (spec §18.15): a POST /responses that streams
+// The minimum contract is a POST /responses that streams
 // SSE, reliable client-side function calling, strict json_schema structured
 // output, stateless reasoning replay, and a main model that can at least see.
 
@@ -20,9 +20,9 @@ const WIRE_CAPABILITY = Object.freeze({
   STRICT_STRUCTURED_OUTPUT: 'supportsStrictStructuredOutput',
   REASONING_REPLAY: 'supportsReasoningReplay',
   IMAGE_INPUT: 'supportsImageInput',
-  /** Reserved hook (spec §18.14): no v1 backend declares it. */
+  /** Reserved hook; no backend currently declares it. */
   NATIVE_AUDIO_INPUT: 'nativeAudioInput',
-  /** Reserved hook: no v1 backend declares it. */
+  /** Reserved hook; no backend currently declares it. */
   NATIVE_VIDEO_INPUT: 'nativeVideoInput'
 });
 
@@ -48,8 +48,8 @@ const DEFAULTS = Object.freeze({
 });
 
 /**
- * A frozen capability set, defaulting every undeclared flag to false so a new
- * capability can never be silently assumed present on an old profile.
+ * A frozen capability set. Every undeclared flag defaults to false, so
+ * capabilities always require an explicit declaration.
  *
  * @param {object} declared
  * @returns {Readonly<object>}

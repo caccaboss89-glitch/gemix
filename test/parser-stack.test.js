@@ -155,8 +155,8 @@ test('a document over the size limit is refused before any parsing', async () =>
   }
 });
 
-test('whether OCR runs is a host fact, answered without throwing', () => {
-  assert.equal(typeof ocrAvailable(), 'boolean');
+test('whether OCR runs is a host fact, answered without throwing', async () => {
+  assert.equal(typeof await ocrAvailable(), 'boolean');
 });
 
 // -- images -------------------------------------------------------------------
@@ -251,9 +251,15 @@ test('the global cap is a real bound, not a comment', () => {
   assert.ok(keptBytes <= GLOBAL_CAP_BYTES);
 });
 
-test('hashing a file that is not there returns nothing rather than throwing', () => {
-  assert.equal(hashFile(path.join(ROOT, 'nope.bin')), null);
-  assert.equal(hashFile(path.join(ROOT, 'notes.md')).length, 64);
+test('hashing a file that is not there returns nothing rather than throwing', async () => {
+  assert.equal(await hashFile(path.join(ROOT, 'nope.bin')), null);
+  assert.equal((await hashFile(path.join(ROOT, 'notes.md'))).length, 64);
+});
+
+test('hashing honors an already-aborted turn', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('turn ended'));
+  await assert.rejects(() => hashFile(path.join(ROOT, 'notes.md'), { signal: controller.signal }), /turn ended/);
 });
 
 // -- through read_file --------------------------------------------------------

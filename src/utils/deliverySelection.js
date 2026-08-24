@@ -6,7 +6,7 @@
 //   - namespace paths   -> the file itself, in `workspace/` or `attachments/`
 //   - public https URLs -> downloaded into memory or disk
 // Only listed files ship. A path is resolved as a path and nothing else: there
-// is no basename lookup and no delivery buffer to search first (spec §18.16).
+// is no basename lookup and no delivery buffer to search first.
 // A URL payload too big even for disk staging is delivered as a source link.
 
 import path from 'path';
@@ -15,7 +15,8 @@ import crypto from 'crypto';
 import { downloadPublicFile, downloadPublicFileToDisk, filenameFromPublicUrl  } from './fetch.js';
 import { sanitizeFilename  } from './text.js';
 import { uniqueAttachmentName  } from './attachments.js';
-import { resolveAgentPath  } from '../sandbox/workspacePaths.js';
+import { parseAgentPath  } from '../sandbox/workspacePaths.js';
+import { readAgentFileBuffer, statAgentFile } from '../sandbox/hostFileGateway.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { TEMP_DIR  } from './tempFileServer.js';
 import { createLogger  } from './logger.js';
@@ -27,6 +28,8 @@ const log = createLogger('DeliverySelection');
 // attach on WhatsApp is still worth downloading, because it ships as a link.
 const DEFAULT_URL_MAX_BYTES = 60 * 1024 * 1024;   // straight into memory
 const DISK_URL_MAX_BYTES = 200 * 1024 * 1024;     // staged on disk instead
+const MAX_DELIVERY_SELECTION_ITEMS = 10;
+const MAX_DELIVERY_SELECTION_BYTES = 200 * 1024 * 1024;
 
 function _isFileTooLargeError(err) {
   return err && typeof err.message === 'string' && /File too large/i.test(err.message);
@@ -41,22 +44,36 @@ function _isFileTooLargeError(err) {
  * @param {Array<object>} existing - attachments already resolved (for name dedup)
  * @returns {Promise<object>}
  */
-async function resolvePublicUrlAttachment(url, existing = []) {
+async function resolvePublicUrlAttachment(url, existing = [], opts = {}) {
   const clean = String(url || '').trim();
+  const maxBytes = Math.min(
+    DISK_URL_MAX_BYTES,
+    Number.isFinite(opts.maxBytes) ? Math.max(0, opts.maxBytes) : DISK_URL_MAX_BYTES
+  );
+  if (maxBytes === 0) throw new Error('File too large (delivery byte budget exhausted)');
+  const memoryMaxBytes = Math.min(DEFAULT_URL_MAX_BYTES, maxBytes);
   let dl;
 
   try {
-    dl = await downloadPublicFile(clean, { maxBytes: DEFAULT_URL_MAX_BYTES });
+    dl = await downloadPublicFile(clean, {
+      maxBytes: memoryMaxBytes,
+      signal: opts.signal
+    });
   } catch (err) {
     if (!_isFileTooLargeError(err)) throw err;
+    if (maxBytes <= memoryMaxBytes) throw err;
     if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
     const safeStem = sanitizeFilename(filenameFromPublicUrl(clean)) || 'file';
     const destPath = path.join(TEMP_DIR, `dl_${crypto.randomBytes(12).toString('hex')}_${safeStem}`);
-    const disk = await downloadPublicFileToDisk(clean, destPath, { maxBytes: DISK_URL_MAX_BYTES });
+    const disk = await downloadPublicFileToDisk(clean, destPath, {
+      maxBytes,
+      signal: opts.signal
+    });
     dl = {
       filePath: disk.filePath,
       mimetype: disk.mimetype,
-      filename: disk.filename
+      filename: disk.filename,
+      size: disk.size
     };
   }
 
@@ -64,11 +81,11 @@ async function resolvePublicUrlAttachment(url, existing = []) {
   const att = { name, mimetype: dl.mimetype };
   if (dl.buffer) att.buffer = dl.buffer;
   if (dl.filePath) att.filePath = dl.filePath;
-  return att;
+  return { att, sizeBytes: dl.buffer?.length || dl.size || 0 };
 }
 
 /**
- * When download is impossible (over WhatsApp cap), keep the source URL so
+ * When the file exceeds the bounded hosting budget, keep its source URL so
  * delivery can still surface a direct link to the user.
  */
 function createExternalUrlAttachment(url, existing = []) {
@@ -91,11 +108,11 @@ function createExternalUrlAttachment(url, existing = []) {
  * @param {Array<object>} existing
  * @returns {Promise<{ att: object|null, missing: boolean }>}
  */
-async function resolveUrlEntry(url, existing = []) {
+async function resolveUrlEntry(url, existing = [], opts = {}) {
   const clean = String(url || '').trim();
   try {
-    const att = await resolvePublicUrlAttachment(clean, existing);
-    return { att, missing: false };
+    const resolved = await resolvePublicUrlAttachment(clean, existing, opts);
+    return { ...resolved, missing: false };
   } catch (err) {
     if (_isFileTooLargeError(err)) {
       return { att: createExternalUrlAttachment(clean, existing), missing: false };
@@ -114,20 +131,19 @@ async function resolveUrlEntry(url, existing = []) {
  *
  * @param {string} entry - `workspace/report.pdf`, `attachments/photo.jpg`, …
  * @param {string} workspaceId
- * @returns {{ root: string, display: string, name: string, filePath: string }|null}
+ * @returns {{ root: string, display: string, name: string, size: number }|null}
  */
 function resolveLocalFileEntry(entry, workspaceId) {
   if (typeof entry !== 'string' || !entry.trim() || !workspaceId) return null;
-  const resolved = resolveAgentPath(workspaceId, entry);
-  if (!resolved || !resolved.relPath) return null;
-  try {
-    if (!fs.statSync(resolved.abs).isFile()) return null;
-  } catch { return null; }
+  const parsed = parseAgentPath(entry);
+  if (!parsed || !parsed.relPath) return null;
+  const resolved = statAgentFile(workspaceId, parsed.display);
+  if (!resolved) return null;
   return {
     root: resolved.root,
     display: resolved.display,
     name: path.basename(resolved.relPath),
-    filePath: resolved.abs
+    size: resolved.stat.size
   };
 }
 
@@ -136,21 +152,31 @@ function resolveLocalFileEntry(entry, workspaceId) {
  * @param {string|null} workspaceId - the conversation whose files may ship.
  * @returns {Promise<{ attachments: Array<object>, missing: string[] }>}
  */
-async function resolveDeliverySelection(entries, workspaceId = null) {
+async function resolveDeliverySelection(entries, workspaceId = null, opts = {}) {
   const attachments = [];
   const missing = [];
   if (!Array.isArray(entries) || entries.length === 0) return { attachments, missing };
 
   const seen = new Set();
+  let selectedBytes = 0;
   for (const raw of entries) {
     const entry = String(raw || '').trim();
     if (!entry || seen.has(entry)) continue;
     seen.add(entry);
+    if (seen.size > MAX_DELIVERY_SELECTION_ITEMS) {
+      missing.push(entry);
+      continue;
+    }
+    const remainingBytes = Math.max(0, MAX_DELIVERY_SELECTION_BYTES - selectedBytes);
 
     if (/^https?:\/\//i.test(entry)) {
-      const resolved = await resolveUrlEntry(entry, attachments);
+      const resolved = await resolveUrlEntry(entry, attachments, {
+        maxBytes: remainingBytes,
+        signal: opts.signal
+      });
       if (resolved.att) {
         attachments.push(resolved.att);
+        selectedBytes += resolved.sizeBytes || 0;
         if (resolved.att.externalUrl) {
           log.warn(`delivery URL too large to host; will send source link (${entry.slice(0, 100)})`);
         }
@@ -166,9 +192,21 @@ async function resolveDeliverySelection(entries, workspaceId = null) {
       missing.push(entry);
       continue;
     }
+    let opened;
+    try { opened = readAgentFileBuffer(workspaceId, local.display, remainingBytes); }
+    catch (err) {
+      if (err?.code !== 'EFILETOOLARGE') throw err;
+      missing.push(entry);
+      continue;
+    }
+    if (!opened) {
+      missing.push(entry);
+      continue;
+    }
+    selectedBytes += opened.buffer.length;
     attachments.push({
       name: uniqueAttachmentName(attachments, local.name),
-      filePath: local.filePath,
+      buffer: opened.buffer,
       mimetype: mimeForExtension(path.extname(local.name))
     });
   }
@@ -179,6 +217,8 @@ async function resolveDeliverySelection(entries, workspaceId = null) {
 export {
   resolveDeliverySelection,
   resolveLocalFileEntry,
-  resolveUrlEntry
+  resolveUrlEntry,
+  MAX_DELIVERY_SELECTION_ITEMS,
+  MAX_DELIVERY_SELECTION_BYTES
 
 };

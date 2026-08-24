@@ -6,8 +6,11 @@
 
 import fs from 'fs';
 import path from 'path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import constants from '../config/constants.js';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from './adminNotifier.js';
+import { openPublicHttp } from './publicHttp.js';
 import { signalWithTimeout } from './turnBudget.js';
 
 function _downloadTimeoutMs(maxBytes, optsTimeout) {
@@ -16,63 +19,49 @@ function _downloadTimeoutMs(maxBytes, optsTimeout) {
   return Math.max(constants.FETCH_TIMEOUT_MS, Math.ceil(maxBytes / minBytesPerSec) * 1000);
 }
 
-/**
- * Read a fetch response body with a running byte cap (safe when Content-Length is absent).
- * @param {Response} res
- * @param {number} maxBytes
- * @param {number} timeoutMs
- * @param {string|null} [destPath] - When set, write to disk instead of buffering.
- * @returns {Promise<Buffer|number>} Buffer or byte count written.
- */
-async function _consumeResponseBodyCapped(res, maxBytes, timeoutMs, destPath = null) {
-  if (!res.body) throw new Error('No response body');
-  const reader = res.body.getReader();
+function _header(response, name) {
+  const value = response.headers[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function _consumePublicBody(response, maxBytes, signal) {
   let received = 0;
-  const chunks = destPath ? null : [];
-  let stream = null;
-  if (destPath) {
-    const dir = path.dirname(destPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    stream = fs.createWriteStream(destPath);
+  const chunks = [];
+  for await (const raw of response) {
+    if (signal?.aborted) throw signal.reason || new Error('Download aborted.');
+    const chunk = Buffer.from(raw);
+    received += chunk.length;
+    if (received > maxBytes) {
+      response.destroy();
+      throw new Error(`File too large (${received} bytes, max ${maxBytes})`);
+    }
+    chunks.push(chunk);
   }
-
-  const deadline = Date.now() + timeoutMs;
-  let failed = false;
-  try {
-    while (true) {
-      if (Date.now() > deadline) {
-        throw new Error(`Body read timeout (${timeoutMs / 1000}s)`);
-      }
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value || value.length === 0) continue;
-      received += value.length;
-      if (received > maxBytes) {
-        throw new Error(`File too large (${received} bytes, max ${maxBytes})`);
-      }
-      const buf = Buffer.from(value);
-      if (stream) stream.write(buf);
-      else chunks.push(buf);
-    }
-  } catch (err) {
-    failed = true;
-    try { await reader.cancel(); } catch { /* ignore */ }
-    if (stream) {
-      stream.destroy();
-      try { if (destPath && fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch { /* ignore */ }
-    }
-    throw err;
-  } finally {
-    // Only end() on success — end() after destroy can mask the original error.
-    if (stream && !failed) {
-      await new Promise((resolve, reject) => {
-        stream.end((endErr) => (endErr ? reject(endErr) : resolve()));
-      });
-    }
-  }
-
   if (received === 0) throw new Error('Download returned an empty body.');
-  return destPath ? received : Buffer.concat(chunks);
+  return Buffer.concat(chunks, received);
+}
+
+async function _consumePublicBodyToDisk(response, maxBytes, destPath, signal) {
+  let received = 0;
+  const limiter = new Transform({
+    transform(chunk, _encoding, callback) {
+      received += chunk.length;
+      if (received > maxBytes) {
+        callback(new Error(`File too large (${received} bytes, max ${maxBytes})`));
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+  const stream = fs.createWriteStream(destPath, { flags: 'wx', mode: 0o600 });
+  try {
+    await pipeline(response, limiter, stream, { signal });
+    if (received === 0) throw new Error('Download returned an empty body.');
+    return received;
+  } catch (err) {
+    try { fs.unlinkSync(destPath); } catch { /* absent or never created */ }
+    throw err;
+  }
 }
 
 async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
@@ -146,10 +135,9 @@ async function fetchExternal(url, options = {}, source = null, timeoutMs = const
 
 /**
  * Download a public HTTP(S) file into memory with a hard size cap.
- * Used when the model references files by URL (web/X search results,
- * delivery attachments, build inputs). SSRF surface accepted: URLs come
- * from model output / search results, mirroring the previous research
- * image download path.
+ * Used when the model references files by URL (web/X search results and
+ * delivery attachments). Every DNS target and redirect is restricted to
+ * globally routable addresses.
  *
  * @param {string} url
  * @param {object} [opts]
@@ -165,23 +153,27 @@ async function downloadPublicFile(url, opts = {}) {
   }
   const clean = url.trim();
   const timeoutMs = _downloadTimeoutMs(maxBytes, opts.timeoutMs);
-  const res = await fetchWithTimeout(clean, {
-    signal: opts.signal,
+  const operationSignal = signalWithTimeout(opts.signal || null, timeoutMs);
+  const { response, url: finalUrl } = await openPublicHttp(clean, {
+    signal: operationSignal,
+    timeoutMs,
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'Accept': '*/*'
     }
-  }, timeoutMs);
-  if (!res.ok) {
-    throw new Error(`Download failed: HTTP ${res.status} (${clean.slice(0, 120)})`);
+  });
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    response.resume();
+    throw new Error(`Download failed: HTTP ${response.statusCode} (${clean.slice(0, 120)})`);
   }
-  const declared = Number(res.headers.get('content-length') || 0);
+  const declared = Number(_header(response, 'content-length') || 0);
   if (declared > maxBytes) {
+    response.resume();
     throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
   }
-  const buffer = await _consumeResponseBodyCapped(res, maxBytes, timeoutMs);
-  const mimetype = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
-  const filename = _filenameFromPublicUrl(clean);
+  const buffer = await _consumePublicBody(response, maxBytes, operationSignal);
+  const mimetype = (_header(response, 'content-type') || 'application/octet-stream').split(';')[0].trim();
+  const filename = _filenameFromPublicUrl(finalUrl.href);
   return { buffer, mimetype, filename };
 }
 
@@ -217,30 +209,34 @@ async function downloadPublicFileToDisk(url, destPath, opts = {}) {
   }
   const clean = url.trim();
   const timeoutMs = _downloadTimeoutMs(maxBytes, opts.timeoutMs);
-  const res = await fetchWithTimeout(clean, {
-    signal: opts.signal,
+  const operationSignal = signalWithTimeout(opts.signal || null, timeoutMs);
+  const { response, url: finalUrl } = await openPublicHttp(clean, {
+    signal: operationSignal,
+    timeoutMs,
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'Accept': '*/*'
     }
-  }, timeoutMs);
-  if (!res.ok) {
-    throw new Error(`Download failed: HTTP ${res.status} (${clean.slice(0, 120)})`);
+  });
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    response.resume();
+    throw new Error(`Download failed: HTTP ${response.statusCode} (${clean.slice(0, 120)})`);
   }
-  const declared = Number(res.headers.get('content-length') || 0);
+  const declared = Number(_header(response, 'content-length') || 0);
   if (declared > maxBytes) {
+    response.resume();
     throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
   }
   const dir = path.dirname(destPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-  const size = await _consumeResponseBodyCapped(res, maxBytes, timeoutMs, destPath);
+  const size = await _consumePublicBodyToDisk(response, maxBytes, destPath, operationSignal);
 
-  const mimetype = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
+  const mimetype = (_header(response, 'content-type') || 'application/octet-stream').split(';')[0].trim();
   return {
     filePath: destPath,
     mimetype,
-    filename: _filenameFromPublicUrl(clean),
+    filename: _filenameFromPublicUrl(finalUrl.href),
     size
   };
 }

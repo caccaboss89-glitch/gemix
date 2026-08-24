@@ -2,7 +2,7 @@
 //
 // What happens to a file the moment it arrives, on every platform.
 //
-// One rule decides everything (spec §8.6): images from the message being
+// One rule decides everything: images from the message being
 // answered — or the one it replies to — go to the model inline, and nothing
 // else ever does. Documents, audio, video and archives become a path the model
 // can open with `read_file` when it decides it needs them, instead of being
@@ -140,7 +140,7 @@ async function _materialize(opts) {
 }
 
 /**
- * Turn one incoming or historical attachment into its tag plus, for an inline
+ * Turn one incoming or stored attachment into its tag plus, for an inline
  * image, the content part the model can look at.
  *
  * @param {object} opts
@@ -170,7 +170,7 @@ async function ingestAttachment(opts) {
 
   // Duration gates only decide what the tag *says*: an over-long clip is still
   // projected, because the invariant is tag ⇔ file and because trimming a long
-  // recording with `shell` is exactly what the raw is kept for (§8.3, §8.6).
+  // recording with `shell` is exactly what the raw is kept for.
   const kind = mediaKindFor(displayName, contentType);
   let overDurationLimit = null;
   let durationNote = '';
@@ -198,8 +198,8 @@ async function ingestAttachment(opts) {
   }
 
   // Raw binaries reach no parser, but they are still files in this chat: the
-  // model can hash, unpack or inspect one with `shell`. A tag without a file
-  // behind it is the one thing §8.6 forbids.
+  // model can hash, unpack or inspect one with `shell`. Keep the tag paired with
+  // its stored file so later tools can access it.
   const unreadable = isNonReadableExt(_extOf(displayName));
   const note = unreadable ? UNREADABLE_NOTE : durationNote;
 

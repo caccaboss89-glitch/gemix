@@ -41,16 +41,24 @@ async function _generateMusic({ args, userCtx }) {
     return musicResult.toolResult;
   }
 
-  const workspaceId = resolveWorkspaceId(userCtx);
-  const paths = musicResult.attachments
-    .map(att => stageToolOutput(workspaceId, att.name, att.buffer).display);
-  return {
-    success: true,
-    path: paths[0],
-    message: 'Song generated successfully and saved as '
-      + `${paths.map(filePath => `"${filePath}"`).join(', ')}. `
-      + 'You cannot listen to it yourself, but you can still use it or send it to the user.'
-  };
+  const reservation = musicResult.quotaReservation;
+  try {
+    const workspaceId = resolveWorkspaceId(userCtx);
+    const staged = await Promise.all(
+      musicResult.attachments.map(att => stageToolOutput(workspaceId, att.name, att.buffer))
+    );
+    reservation?.commit();
+    const paths = staged.map(file => file.display);
+    return {
+      success: true,
+      path: paths[0],
+      message: 'Song generated successfully and saved as '
+        + `${paths.map(filePath => `"${filePath}"`).join(', ')}. `
+        + 'You cannot listen to it yourself, but you can still use it or send it to the user.'
+    };
+  } finally {
+    await reservation?.release();
+  }
 }
 
 const MEDIA_TOOL_EXECUTORS = Object.freeze({

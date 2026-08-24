@@ -1,18 +1,18 @@
 // src/parsers/parserRegistry.js
 //
-// The one place that decides which parser reads a file (spec §9, §18.6).
+// The one place that decides which parser reads a file.
 //
 // `read_file` calls `parse()` and gets back a single shape, whatever the file
 // was. That indirection is the point: the tool contract the model sees does not
-// change when Kreuzberg or OCR is swapped, or when a future profile
-// declares native audio input. The model never learns a parser exists.
+// change with the active parser stack or main-model profile. The model never
+// learns a parser exists.
 //
 // Every result is `{ ok, kind, content, metadata, images, notes }`. `images`
 // are raw buffers — rendered PDF pages, video frames, figures pulled out of a
 // document — which the caller turns into content parts, because only the caller
 // knows the per-turn inline budget.
 //
-// Results are cached by content hash (§9.2), so re-reading the same attachment
+// Results are cached by content hash, so re-reading the same attachment
 // across turns costs one lookup. Images are cached too, base64 in the entry,
 // which is what makes a re-read of a transcribed video free rather than another
 // ffmpeg pass. A file whose bytes changed hashes differently and misses.
@@ -140,7 +140,7 @@ async function _dispatch(family, absPath, ext, stat, opts) {
         + `${Math.round(constants.PARSE_MAX_DOCUMENT_BYTES / (1024 * 1024))} MB parsing limit. Split it with shell first.`
       );
     }
-    const result = await parseDocument(absPath, { ext, ocr: opts.ocr });
+    const result = await parseDocument(absPath, { ext, ocr: opts.ocr, signal: opts.signal });
     if (!result.ok) return _fail(PARSE_ERROR.PARSER_UNAVAILABLE, result.error);
     return result;
   }
@@ -167,6 +167,7 @@ async function _dispatch(family, absPath, ext, stat, opts) {
  * }>}
  */
 async function parse(absPath, opts = {}) {
+  if (opts.signal?.aborted) throw opts.signal.reason || new Error('File parsing aborted.');
   let stat;
   try { stat = fs.statSync(absPath); }
   catch { return _fail(PARSE_ERROR.FILE_UNAVAILABLE, 'This file is not there any more.'); }
@@ -180,7 +181,7 @@ async function parse(absPath, opts = {}) {
   const cacheable = Boolean(opts.workspaceId) && CACHEABLE.has(family);
   let key = null;
   if (cacheable) {
-    const contentHash = hashFile(absPath);
+    const contentHash = await hashFile(absPath, { signal: opts.signal });
     if (contentHash) {
       key = cacheKey(contentHash, family, _cacheParameters(family, ext, opts));
       const hit = readCache(opts.workspaceId, key);

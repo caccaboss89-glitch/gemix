@@ -1,6 +1,6 @@
 ﻿// test/web-stack.test.js
 //
-// The GemiX-owned web tools (spec Â§10, Â§18.9): search_web finds pages,
+// The GemiX-owned web tools: search_web finds pages,
 // read_page opens one, and both run on our own stack on every provider profile.
 //
 // The sidecar is stubbed at the fetch boundary, so what is under test is the
@@ -206,7 +206,7 @@ test('a non-URL is refused before the network', async () => {
   assert.equal(calls.length, 0);
 });
 
-// -- ownership (Â§2.4) ---------------------------------------------------------
+// -- ownership ---------------------------------------------------------------
 
 test('both web tools are function tools on every profile, never provider-hosted', () => {
   const saved = envConfig.AI_PROVIDER;
@@ -224,8 +224,8 @@ test('both web tools are function tools on every profile, never provider-hosted'
         assert.ok(found, `${name} missing on ${provider}`);
         assert.equal(found.type, 'function', `${name} must not be a hosted type on ${provider}`);
       }
-      // The hosted web_search type must stay gone: it is the one the provider
-      // would answer with its own index instead of ours.
+      // `web_search` is provider-owned; GemiX exposes `search_web` as a
+      // function tool and must not collide with that reserved type.
       assert.equal(tools.some((t) => t.type === 'web_search'), false, provider);
     }
   } finally {

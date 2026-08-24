@@ -1,13 +1,13 @@
 // src/web/agentSearch.js
 //
 // Client for the agent-search sidecar, the layer GemiX puts in front of its own
-// SearXNG instance (spec §10, §18.9). It answers two questions: what is on the
+// SearXNG instance. It answers two questions: what is on the
 // web about this, and what does this page actually say.
 //
 // The sidecar is deliberately behind this module rather than exposed to the
 // rest of the program: the tool contracts are GemiX's, so replacing agent-search
 // with something else — or with a Node layer of our own — is a change here and
-// nowhere else (§18.11).
+// nowhere else.
 //
 // Two endpoints are used, both GET:
 //   /search?q=&count=&fetch=false  -> { results: [{title,url,snippet,engines,score,position}], meta }

@@ -1,6 +1,6 @@
 // test/attachment-ingress.test.js
 //
-// What §8.6 actually decides, per file: images of the message being answered go
+// Per-file routing: images of the message being answered go
 // inline and nothing else does, every file gets a namespace path, and a tag is
 // never live unless the file is really there.
 
@@ -74,7 +74,7 @@ test('a raw binary is projected too, with a tag that says what it is', async () 
   assert.equal(r.tag, '[Attachment: attachments/setup.exe]');
   assert.deepEqual(r.contentParts, [], 'nothing about it is worth vision');
   assert.match(r.textFragment, /binary/i, 'the model is told read_file will not open it');
-  // The invariant is tag ⇔ file (§8.6): a live tag with nothing behind it is
+  // The invariant is tag ⇔ file: a live tag with nothing behind it is
   // the one shape that is not allowed, even for a file no parser can read.
   assert.equal(fs.existsSync(path.join(ATTACHMENTS, 'setup.exe')), true);
 });

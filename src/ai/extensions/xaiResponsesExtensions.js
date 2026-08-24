@@ -1,7 +1,7 @@
 // src/ai/extensions/xaiResponsesExtensions.js
 //
 // Everything xAI-specific about a Responses request, kept behind one boundary
-// so the transport itself stays generic (spec §2.3).
+// so the transport itself stays generic.
 //
 // What lives here:
 //   - the sticky-routing header xAI uses alongside prompt_cache_key;
@@ -39,7 +39,7 @@ const XAI_REPLAYABLE_ITEM_TYPES = Object.freeze([
  * tool calls; it only counts them for the research badge.
  *
  * The hosted `web_search` type is deliberately absent and must stay absent:
- * normal web search is GemiX-owned on every profile (spec §2.4, §2.5).
+ * normal web search is GemiX-owned on every profile.
  */
 const XAI_X_SEARCH_TOOL = Object.freeze({
   type: 'x_search',

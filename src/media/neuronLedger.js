@@ -1,14 +1,13 @@
 // src/media/neuronLedger.js
 //
-// The shared budget behind every Cloudflare Workers AI call (spec §11.2).
+// The shared budget behind every Cloudflare Workers AI call.
 //
 // Workers AI bills in "neurons" and the free plan grants 10,000 a day across
 // the whole account. Whisper and FLUX draw on the same pool, so neither can be
 // metered on its own: a day of heavy transcription is a day with fewer images,
 // and the only way to know that before the request is to count both here.
 //
-// Prices come from the live probe recorded in the spec, not from the archive
-// branch, whose 250-neurons-per-tile figure was wrong by an order of magnitude:
+// Prices reflect the current Workers AI billing rates:
 //
 //   FLUX  26.05 neurons per 512x512 output tile + 5.37 per input tile
 //         (a 512² image is ~26; a 1024² image is ~104)

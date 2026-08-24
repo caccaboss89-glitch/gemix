@@ -10,7 +10,7 @@
 // for Google TTS input (speech tags are written by GemiX itself in the voice
 // reply `response` text).
 //
-// TTS is a delivery backend, not a model tool (spec §11.3): the chain comes
+// TTS is a delivery backend, not a model tool: the chain comes
 // from the profile's TTS feature binding, so a provider with a deliberately
 // integrated service is primary and Google Translate is behind it. On a profile
 // with no such service, Google Translate is simply the primary — the xAI

@@ -1,13 +1,13 @@
 // src/parsers/mediaParser.js
 //
-// Images, audio and video for `read_file` (spec §7.3, §8.2, §9).
+// Images, audio and video for `read_file`.
 //
 // Each of the three answers a different question:
 //
 //   image → the model already sees it; what it cannot see is the file itself,
 //           so this returns dimensions, format and colour space
 //   audio → the words, from the STT backend; on music or ambient sound the
-//           transcript is legitimately empty and says so (§8.5)
+//           transcript is legitimately empty and says so
 //   video → the words with timings, plus frames sampled across the clip, so
 //           the model reads what was said and sees what it looked like
 //
@@ -89,7 +89,7 @@ function _runFfmpeg(args, timeoutMs = FFMPEG_TIMEOUT_MS, signal) {
       finish({ ok: false, error: `ffmpeg timed out after ${timeoutMs / 1000}s` });
     }, timeoutMs);
     signal?.addEventListener('abort', onAbort, { once: true });
-    child.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });
+    child.stderr.on('data', (d) => { stderr = (stderr + d.toString()).slice(-2000); });
     child.stdout.on('data', () => { /* drained so ffmpeg does not block */ });
     child.on('error', (err) => finish({ ok: false, error: err.message }));
     child.on('close', (code) => {
@@ -139,7 +139,7 @@ async function parseImage(absPath) {
  * The transcript as the model should read it.
  *
  * `timed` asks for one line per segment prefixed with its timecode, which is
- * what a video transcript needs to be useful (spec §8.6): quoting a line is
+ * what a video transcript needs to be useful: quoting a line is
  * half the answer, saying when it was said is the other half. A backend that
  * returned no segments falls back to plain text rather than inventing timings.
  */

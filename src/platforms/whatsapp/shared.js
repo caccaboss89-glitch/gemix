@@ -143,10 +143,9 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
     isBotAt: (m, mi) => isHistoryBotMessage(m, mi)
   });
 
-  // Build each history entry (including its xAI upload) in parallel with
-  // bounded concurrency, preserving chronological order in the result. Serial
-  // uploads here used to dominate turn latency and could blow the history
-  // fetch timeout when many recent messages carried media.
+  // Build each history entry (including its xAI upload) with bounded parallel
+  // concurrency while preserving chronological order. This keeps a media-heavy
+  // history inside the fetch timeout.
   // Scheduled + registry system messages carry no sender label: they are
   // rendered as <system-notification> turns, which already say who wrote them.
   const _meta = ({ senderName = null, isGemiX = false, isScheduled = false, isSystem = false }) => ({
@@ -232,7 +231,7 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null) 
       }
 
       // History is tags only, on every platform: the model opens what it needs
-      // with read_file instead of the window carrying every past file (§8.6).
+      // with read_file instead of the window carrying every past file.
       const mediaIngress = await ingressWaMessageMedia(msg, userId, {
         workspaceId,
         inline: false
@@ -553,7 +552,7 @@ async function buildIncomingContentPartsFromMessages(
 
   // Every media item in the logical message (album or single). Only these and
   // the quoted message may put an image in front of the model, up to the
-  // per-turn cap (§8.6).
+  // per-turn cap.
   let imagesInlined = contentParts.filter(p => p?.type === 'input_image').length;
   for (const msg of messages) {
     if (specialText !== null && msg === captionMsg) continue;

@@ -11,10 +11,12 @@
 // occurrence it hit and a silent wrong edit is worse than an error it can fix
 // by quoting more surrounding lines. `replaceAll` is the explicit opt-out.
 //
-// The read is host-side (fast, our own code); the write goes back through the
+// The read uses the descriptor-safe host gateway; the write goes through the
 // container, same as write_file, so both mutations follow one path.
 
-import fs from 'fs';
+import constants from '../../config/constants.js';
+import { readAgentFileBuffer } from '../../sandbox/hostFileGateway.js';
+import { assertWorkspaceCapacity } from '../../sandbox/workspaceFs.js';
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { isProbablyText } from './textFiles.js';
 import {
@@ -68,17 +70,26 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     // between the initial permission check and the read-transform-write cycle.
     const lockedResolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
     if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
-    let buffer;
+    let opened;
     try {
-      const stat = fs.statSync(lockedResolved.abs);
-      if (!stat.isFile()) return { success: false, error: `${lockedResolved.display} is not a file.` };
-      buffer = fs.readFileSync(lockedResolved.abs);
-    } catch {
+      opened = readAgentFileBuffer(
+        workspaceId,
+        raw,
+        constants.WORKSPACE_QUOTA_MB * 1024 * 1024
+      );
+    } catch (err) {
+      if (err?.code === 'EFILETOOLARGE') {
+        return { success: false, error: `${lockedResolved.display} is too large to edit as text.` };
+      }
+      throw err;
+    }
+    if (!opened) {
       return {
         success: false,
         error: `${lockedResolved.display} does not exist. Use write_file to create it.`
       };
     }
+    const buffer = opened.buffer;
     if (!isProbablyText(buffer)) {
       return { success: false, error: `${lockedResolved.display} is binary; edit_file only works on text.` };
     }
@@ -102,6 +113,13 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     const after = args.replaceAll
       ? before.split(args.oldText).join(args.newText)
       : before.replace(args.oldText, args.newText);
+
+    try {
+      assertWorkspaceCapacity(workspaceId, Buffer.byteLength(after, 'utf-8'), buffer.length);
+    } catch (err) {
+      if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };
+      throw err;
+    }
 
     const committed = await commitWorkspaceText(workspaceId, lockedResolved, after);
     if (!committed.success) return committed;

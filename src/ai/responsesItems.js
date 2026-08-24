@@ -1,7 +1,7 @@
 // src/ai/responsesItems.js
 //
 // Constructors for GemiX's internal conversation, which is Responses-native end
-// to end (spec §18.2): the same typed items the wire uses, built once by whoever
+// to end: the same typed items the wire uses, built once by whoever
 // produces the content and never translated again.
 //
 // There is deliberately no second, chat-style representation. History entries,

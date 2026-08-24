@@ -12,12 +12,14 @@
 // than text, image parts its vision reads directly — rendered PDF pages, video
 // frames, figures out of a document.
 //
-// Host-side, in-process: reading runs GemiX's own code on GemiX's own disk.
+// Host-side parsing uses a private snapshot opened through a descriptor-safe
+// gateway, so model-created links cannot redirect a read outside either root.
 
 import fs from 'fs';
 import path from 'path';
 import constants from '../../config/constants.js';
-import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
+import { snapshotAgentFile } from '../../sandbox/hostFileGateway.js';
+import { invalidPathError, parseAgentPath } from '../../sandbox/workspacePaths.js';
 import { PARSE_ERROR, parse } from '../../parsers/parserRegistry.js';
 import { inlineImagePartFromBuffer } from './inlineImage.js';
 
@@ -52,43 +54,58 @@ async function readFile(args = {}, workspaceId, opts = {}) {
   const raw = typeof args.path === 'string' ? args.path : '';
   if (!raw.trim()) return { success: false, error: 'Missing required argument "path".' };
 
-  const resolved = resolveAgentPath(workspaceId, raw);
-  if (!resolved) return invalidPathError(raw);
+  const parsed = parseAgentPath(raw);
+  if (!parsed) return invalidPathError(raw);
 
-  let stat;
-  try { stat = fs.statSync(resolved.abs); }
-  catch {
+  let snapshot;
+  try { snapshot = snapshotAgentFile(workspaceId, raw); }
+  catch (err) {
     return {
       success: false,
       error_code: READ_ERROR.FILE_UNAVAILABLE,
-      error: `${resolved.display} does not exist. Use list_files to see what is there.`
+      error: `${parsed.display}: ${err.message}`
     };
   }
-  if (stat.isDirectory()) {
-    return { success: false, error: `${resolved.display} is a directory. Use list_files on it.` };
+  if (!snapshot) {
+    return {
+      success: false,
+      error_code: READ_ERROR.FILE_UNAVAILABLE,
+      error: `${parsed.display} does not exist or is not a safe regular file. Use list_files to see what is there.`
+    };
   }
 
-  const ext = path.extname(resolved.abs).toLowerCase();
+  const stat = snapshot.stat;
+  const ext = path.extname(snapshot.relPath).toLowerCase();
   const fileInfo = {
-    path: resolved.display,
+    path: snapshot.display,
     bytes: stat.size,
     modified: new Date(stat.mtimeMs).toISOString(),
     extension: ext || '(none)'
   };
 
-  const result = await parse(resolved.abs, {
-    workspaceId,
-    offset: args.offset,
-    limit: args.limit,
-    language: opts.language,
-    signal: opts.signal
-  });
+  let result;
+  let sourceImage = null;
+  try {
+    result = await parse(snapshot.filePath, {
+      workspaceId,
+      offset: args.offset,
+      limit: args.limit,
+      language: opts.language,
+      signal: opts.signal
+    });
+    if (result.kind === 'image') {
+      try { sourceImage = fs.readFileSync(snapshot.filePath); }
+      catch { sourceImage = null; }
+    }
+  } finally {
+    snapshot.cleanup();
+  }
 
   if (!result.ok) {
     return {
       success: false,
       error_code: result.error_code || READ_ERROR.PARSER_UNAVAILABLE,
-      error: `${resolved.display}: ${result.error}`,
+      error: `${snapshot.display}: ${result.error}`,
       metadata: fileInfo
     };
   }
@@ -100,7 +117,7 @@ async function readFile(args = {}, workspaceId, opts = {}) {
   // The file itself is the image, so it is attached whole rather than as a
   // derived one; everything else attaches what the parser produced.
   const source = result.kind === 'image'
-    ? [{ buffer: _readOrNull(resolved.abs), mime: null }]
+    ? [{ buffer: sourceImage, mime: null }]
     : (result.images || []);
 
   for (const [i, img] of source.slice(0, MAX_ATTACHED_IMAGES).entries()) {
@@ -124,7 +141,7 @@ async function readFile(args = {}, workspaceId, opts = {}) {
 
   const envelope = {
     success: true,
-    path: resolved.display,
+    path: snapshot.display,
     kind: result.kind,
     metadata,
     message: notes.join(' ') || _defaultMessage(result, parts.length)
@@ -134,11 +151,6 @@ async function readFile(args = {}, workspaceId, opts = {}) {
   return parts.length > 0
     ? [{ type: 'input_text', text: JSON.stringify(envelope) }, ...parts]
     : envelope;
-}
-
-function _readOrNull(absPath) {
-  try { return fs.readFileSync(absPath); }
-  catch { return null; }
 }
 
 function _defaultMessage(result, attached) {

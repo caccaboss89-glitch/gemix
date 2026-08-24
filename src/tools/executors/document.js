@@ -21,7 +21,7 @@ async function _generateFormalRequestPdf({ args, userCtx }) {
       legalSignature: args.legalSignature
     });
     const formalFileName = `Richiesta_${sanitizeFilename(args.title || 'formale')}.pdf`;
-    const staged = stageToolOutput(resolveWorkspaceId(userCtx), formalFileName, formalPdfBuffer);
+    const staged = await stageToolOutput(resolveWorkspaceId(userCtx), formalFileName, formalPdfBuffer);
     return {
       success: true,
       path: staged.display,

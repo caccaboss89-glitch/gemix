@@ -6,7 +6,7 @@
 // separate from WireCapabilities, which only answers "can we talk to this
 // endpoint". A provider advertising hosted web search changes nothing here: the
 // binding is what the program routes on, and for search it is always GemiX
-// (spec §2.4, §2.11).
+// for every profile.
 //
 // Some bindings are not negotiable. Web search, image search, page reading, the
 // workspace, the filesystem, the shell and music generation belong to GemiX in
@@ -45,7 +45,7 @@ const GEMIX_OWNED = Object.freeze({
   [FEATURE.WORKSPACE]: 'gemix',
   [FEATURE.FILESYSTEM]: 'gemix',
   [FEATURE.SHELL]: 'gemix',
-  // Fixed by spec §11.5: the music tool keeps its own OpenRouter/Lyria backend
+  // The music tool keeps its own OpenRouter/Lyria backend
   // whatever the main brain runs on.
   [FEATURE.MUSIC_GENERATION]: 'openrouter-lyria'
 });
@@ -63,7 +63,7 @@ const BASELINE = Object.freeze({
 });
 
 /**
- * Fallback chains (spec §18.13). A provider-primary backend degrades to the
+ * Fallback chains. A provider-primary backend degrades to the
  * GemiX baseline; a baseline backend has nowhere left to fall.
  */
 const FALLBACKS = Object.freeze({

@@ -104,7 +104,8 @@ export default {
 
   // Workspace lifecycle, decoupled from the container's idle TTL:
   //   - WORKSPACE_TTL_MS: time after the user's last interaction before wipe.
-  //   - WORKSPACE_QUOTA_MB: cap on the workspace tree, checked after each write.
+  //   - WORKSPACE_QUOTA_MB: API writes are preflighted; sandbox writes are
+  //     monitored continuously and individual files cannot exceed this size.
   //   - SHELL_TIMEOUT_*_MS: default and ceiling for one `shell` call.
   //   - WORKSPACE_LOCK_WAIT_MS: wait for the per-workspace mutation lock.
   WORKSPACE_TTL_MS,
@@ -152,6 +153,8 @@ export default {
   READ_PAGE_MAX_CHARS: 60_000,
   // Ceiling on a video GemiX downloads or generates, before it ever touches disk.
   MAX_VIDEO_BYTES: 60 * 1024 * 1024,
+  // Decoded audio ceiling for one streamed music generation.
+  MAX_MUSIC_BYTES: 60 * 1024 * 1024,
   VIDEO_GEN_DURATION_S: 6,
   VIDEO_GEN_RESOLUTION: '480p',
   MAX_TTS_CHARS: 1000,

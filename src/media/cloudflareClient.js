@@ -1,6 +1,6 @@
 // src/media/cloudflareClient.js
 //
-// One way in to Cloudflare Workers AI (spec §11.2).
+// One way in to Cloudflare Workers AI.
 //
 // Two features use this account — Whisper for speech and FLUX for images — and
 // they share one free daily allowance, so they also share the client that

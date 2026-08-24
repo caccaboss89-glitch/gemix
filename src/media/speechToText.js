@@ -4,7 +4,7 @@
 // capability.
 //
 // The main model never hears audio: whatever provider is active, a voice note
-// reaches it as text produced here (spec §8.3, §11.4). That keeps a user's
+// reaches it as text produced here. That keeps a user's
 // spoken turn readable on every profile instead of only on the ones whose
 // model happens to accept audio, and it keeps the transcript on the correct
 // history turn rather than appended to the next one.
@@ -126,6 +126,7 @@ function _result(status, provider, extra = {}) {
  */
 function _toWav16k(absPath, signal) {
   return new Promise((resolve) => {
+    if (signal?.aborted) return resolve(null);
     const outPath = path.join(tempDirForOwner(null), `stt_${crypto.randomBytes(8).toString('hex')}.wav`);
     const child = spawn(envConfig.FFMPEG_PATH, [
       '-hide_banner', '-loglevel', 'error', '-y',
@@ -161,7 +162,7 @@ function _extractTranscript(payload) {
 /**
  * Timed segments, when the backend returned them.
  *
- * A video transcript has to carry timings (spec §8.6): without them the model
+ * A video transcript has to carry timings: without them the model
  * can quote what was said but not say when, which is most of what a transcript
  * is for. Whisper returns `segments`; a backend that gives only word timings is
  * grouped into lines rather than losing the clock entirely.
@@ -299,7 +300,7 @@ async function transcribeAudioFile(absPath, opts = {}) {
       } catch (err) {
         // The whole point of the binding's fallback: a refusal from xAI must
         // not cost the user their transcript when Cloudflare can still do it.
-        // Two exceptions (§18.13): an aborted turn is not a backend failure,
+        // Two exceptions: an aborted turn is not a backend failure,
         // and a content-policy refusal is a decision no second backend should
         // be asked to overturn.
         if (err.name === 'AbortError' || err.name === 'TimeoutError') throw err;

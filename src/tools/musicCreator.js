@@ -20,11 +20,66 @@ const log = createLogger('MusicCreator');
 
 const pendingGenerations = new Set();
 
+function createMusicAudioAccumulator(maxBytes = constants.MAX_MUSIC_BYTES) {
+  const maxEncodedChars = Math.ceil(maxBytes / 3) * 4;
+  const chunks = [];
+  let encodedChars = 0;
+
+  return {
+    add(value) {
+      if (typeof value !== 'string' || value.length === 0) return;
+      encodedChars += value.length;
+      if (encodedChars > maxEncodedChars) {
+        throw new Error(`Music audio exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit.`);
+      }
+      chunks.push(value);
+    },
+    joined() { return chunks.join(''); },
+    count() { return chunks.length; },
+    maxEncodedChars
+  };
+}
+
+function decodeMusicAudio(encoded, maxBytes = constants.MAX_MUSIC_BYTES) {
+  let clean = String(encoded || '');
+  if (clean.includes(',')) clean = clean.slice(clean.indexOf(',') + 1);
+  clean = clean.replace(/\s/g, '');
+  const maxEncodedChars = Math.ceil(maxBytes / 3) * 4;
+  if (!clean || clean.length > maxEncodedChars || !/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) {
+    throw new Error('Music generation returned invalid or oversized base64 audio.');
+  }
+  const buffer = Buffer.from(clean, 'base64');
+  if (buffer.length === 0 || buffer.length > maxBytes) {
+    throw new Error(`Music audio exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit.`);
+  }
+  return buffer;
+}
+
 async function callLyriaStreaming(model, apiUrl, body, apiKey, signal) {
   const timeoutMs = 180000;
 
-  const audioChunks = [];
+  const audio = createMusicAudioAccumulator();
   let buffer = '';
+
+  const consumeLine = (line) => {
+    if (!line.startsWith('data: ')) return;
+    const dataStr = line.slice(6).trim();
+    if (!dataStr || dataStr === '[DONE]') return;
+
+    let data;
+    try { data = JSON.parse(dataStr); }
+    catch { log.debug('Failed to parse SSE line'); return; }
+    const delta = data.choices?.[0]?.delta || {};
+    if (delta.audio?.data) audio.add(delta.audio.data);
+
+    if (delta.content) {
+      const content = delta.content.trim();
+      if (content.length > 200 && !content.includes(' ') && /^[A-Za-z0-9+/=]+$/.test(content)) {
+        audio.add(content);
+        log.info(`Found base64 audio chunk (${content.length} chars)`);
+      }
+    }
+  };
 
   try {
     log.info(`Lyria streaming call to ${model}`);
@@ -54,35 +109,18 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey, signal) {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > audio.maxEncodedChars + 64 * 1024) {
+        throw new Error('Music stream contains an oversized SSE event.');
+      }
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const dataStr = line.slice(6).trim();
-        if (dataStr === '[DONE]') continue;
-
-        try {
-          const data = JSON.parse(dataStr);
-          const delta = data.choices?.[0]?.delta || {};
-
-          if (delta.audio?.data) audioChunks.push(delta.audio.data);
-
-          if (delta.content) {
-            const c = delta.content.trim();
-            if (c.length > 200 && !c.includes(' ') && /^[A-Za-z0-9+/=]+$/.test(c)) {
-              audioChunks.push(c);
-              log.info(`Found base64 audio chunk (${c.length} chars)`);
-            }
-          }
-        } catch {
-          log.debug('Failed to parse SSE line');
-        }
-      }
+      for (const line of lines) consumeLine(line.trimEnd());
     }
 
-    const fullAudioBase64 = audioChunks.join('');
-    log.info(`Stream finished - Audio chunks: ${audioChunks.length}`);
+    buffer += decoder.decode();
+    if (buffer.trim()) consumeLine(buffer.trimEnd());
+    const fullAudioBase64 = audio.joined();
+    log.info(`Stream finished - Audio chunks: ${audio.count()}`);
 
     return { audio: { data: fullAudioBase64 } };
 
@@ -140,6 +178,7 @@ async function musicCreator(prompt, userCtx) {
     return { toolResult: { success: false, error: quota.error }, attachments: [] };
   }
   if (!userIsAdmin) pendingGenerations.add(userId);
+  let reservationHandedOff = false;
 
   try {
     log.info(`Generating music for ${userId}`);
@@ -161,10 +200,7 @@ async function musicCreator(prompt, userCtx) {
     const result = await callLyriaStreaming(model, apiUrl, body, apiKey, signal);
 
     if (result.audio.data && result.audio.data.length > 100) {
-      let audioBase64 = result.audio.data;
-      if (audioBase64.includes(',')) audioBase64 = audioBase64.split(',')[1];
-
-      const rawBuffer = Buffer.from(audioBase64, 'base64');
+      const rawBuffer = decodeMusicAudio(result.audio.data);
       let buffer;
       try {
         buffer = await convertMp3ToWhatsAppOpus(rawBuffer, { signal });
@@ -180,11 +216,11 @@ async function musicCreator(prompt, userCtx) {
       }
       const filename = `song_${Date.now()}.ogg`;
 
-      quota.commit();
-
+      reservationHandedOff = true;
       return {
         toolResult: { success: true },
-        attachments: [{ name: filename, buffer, mimetype: 'audio/ogg', sendAudioAsVoice: true }]
+        attachments: [{ name: filename, buffer, mimetype: 'audio/ogg', sendAudioAsVoice: true }],
+        quotaReservation: quota
       };
     }
 
@@ -214,10 +250,13 @@ async function musicCreator(prompt, userCtx) {
       attachments: []
     };
   } finally {
-    await quota.release();
+    if (!reservationHandedOff) await quota.release();
     if (!userIsAdmin) pendingGenerations.delete(userId);
   }
 }
 
-export { musicCreator
+export {
+  musicCreator,
+  createMusicAudioAccumulator,
+  decodeMusicAudio
 };

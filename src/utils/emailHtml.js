@@ -2,10 +2,9 @@
 //
 // Email body preparation for the send_email tool.
 //
-// The tool contract is an HTML body, so the markup is passed through to the
-// mail client (previously it was HTML-escaped, which made recipients see the
-// raw tags as text). Untrusted/executable constructs are stripped instead, and
-// a plain-text body is still escaped + wrapped so it renders correctly.
+// The tool contract is an HTML body, so safe markup is passed through to the
+// mail client while untrusted or executable constructs are stripped. A
+// plain-text body is escaped and wrapped so it renders correctly.
 //
 // It also resolves inline images: an <img src="cid:filename"> in the body is
 // matched against the delivery-buffer files the model selected, and those files

@@ -1,7 +1,6 @@
 // src/media/imageBackends.js
 //
-// The image-generation backends, and the rules for moving between them
-// (spec §11.1, §18.12, §18.13).
+// The image-generation backends and the rules for moving between them.
 //
 // Two backends exist and they are not interchangeable, which is why the tool
 // schema is built per backend rather than shared:
@@ -16,7 +15,7 @@
 // smaller schema honestly.
 //
 // The fallback chain is fixed: xAI first, Cloudflare behind it. What is not
-// fixed is when it fires, and rule 2 of §18.13 is the one that matters — a
+// fixed is when it fires, and the important distinction is that a
 // content-policy refusal is never retried elsewhere. Routing around a
 // provider's safety decision is not a fallback.
 
@@ -88,7 +87,7 @@ function resolveImageBackends() {
   const fallback = fallbackBackendFor(bound);
   const usable = (b) => b === BACKEND.XAI || (b === BACKEND.CLOUDFLARE && isCloudflareConfigured());
 
-  // Rule 1 of §18.13: a backend with no credentials is skipped outright rather
+  // A backend with no credentials is skipped outright rather
   // than attempted and allowed to fail.
   const primary = usable(bound) && !_inCooldown(bound) ? bound : null;
   const behind = fallback && usable(fallback) && !_inCooldown(fallback) ? fallback : null;
@@ -104,7 +103,7 @@ function declaredImageBackend() {
 }
 
 /**
- * What to do about a failed attempt, by §18.13. Three separate questions,
+ * What to do about a failed attempt. Three separate questions,
  * because one failure can answer them differently: a 429 falls back *and*
  * cools the primary down, a 500 retries once *before* falling back, and a
  * content-policy refusal does neither.
@@ -144,8 +143,7 @@ function resolveFluxSize(name) {
 /**
  * Generate one image on Workers AI FLUX.
  *
- * Multipart only: the probe recorded in the spec had a JSON body refused with
- * "required properties 'multipart'", so the form shape is not a preference.
+ * Multipart only: the endpoint requires the multipart form shape.
  *
  * @param {object} req
  * @param {string} req.prompt

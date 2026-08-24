@@ -7,6 +7,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import {
   orderPool,
@@ -20,6 +22,7 @@ import {
 
 /** Unique per run so a parallel test file cannot collide with this one. */
 const POOL = `test-store-${process.pid}`;
+const CHILD_FIXTURE = fileURLToPath(new URL('./fixtures/credential-update-child.mjs', import.meta.url));
 
 after(() => {
   try { fs.unlinkSync(storePath(POOL)); } catch { /* never created */ }
@@ -44,8 +47,11 @@ test('upsertAccount round-trips through the store and replaces by id', async () 
   assert.equal(pool.find(a => a.id === 'one').label, 'renamed');
 });
 
-test('the store file never keeps its temp file around', () => {
-  assert.equal(fs.existsSync(`${storePath(POOL)}.tmp`), false);
+test('the store file never keeps a temp file around', () => {
+  const base = path.basename(storePath(POOL));
+  const leftovers = fs.readdirSync(path.dirname(storePath(POOL)))
+    .filter(name => name.startsWith(`${base}.`) && name.endsWith('.tmp'));
+  assert.deepEqual(leftovers, []);
 });
 
 test('patchAccount touches only the named account', async () => {
@@ -66,6 +72,23 @@ test('concurrent updates serialize instead of losing one another', async () => {
   for (let i = 0; i < 8; i++) assert.ok(ids.includes(`concurrent-${i}`), `lost concurrent-${i}`);
 });
 
+test('separate processes serialize read-modify-write updates', async () => {
+  const childPool = `${POOL}-processes`;
+  const runChild = id => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [CHILD_FIXTURE, childPool, id], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('exit', code => code === 0 ? resolve() : reject(new Error(stderr || `child exit ${code}`)));
+  });
+  try {
+    await Promise.all([runChild('one'), runChild('two'), runChild('three')]);
+    assert.deepEqual(readPool(childPool).map(item => item.id).sort(), ['one', 'three', 'two']);
+  } finally {
+    try { fs.unlinkSync(storePath(childPool)); } catch { /* never created */ }
+  }
+});
+
 test('removeAccount drops exactly one account', async () => {
   const remaining = await removeAccount(POOL, 'concurrent-0');
   assert.equal(remaining.some(a => a.id === 'concurrent-0'), false);
@@ -79,6 +102,22 @@ test('a malformed store reads as empty rather than throwing', () => {
   fs.writeFileSync(file, '{ not json');
   try {
     assert.deepEqual(readPool(brokenPool), []);
+  } finally {
+    fs.unlinkSync(file);
+  }
+});
+
+test('a mutation refuses to overwrite a malformed credential store', async () => {
+  const brokenPool = `${POOL}-broken-mutation`;
+  const file = storePath(brokenPool);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '{ still not json');
+  try {
+    await assert.rejects(
+      () => updatePool(brokenPool, () => [account('replacement')]),
+      /without risking data loss/
+    );
+    assert.equal(fs.readFileSync(file, 'utf-8'), '{ still not json');
   } finally {
     fs.unlinkSync(file);
   }

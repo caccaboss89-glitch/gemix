@@ -44,7 +44,7 @@ test('the ChatGPT display name strips provider implementation suffixes', () => {
   }
 });
 
-test('the minimum wire contract names every flag the spec requires', () => {
+test('the minimum wire contract names every required flag', () => {
   assert.deepEqual([...REQUIRED_WIRE_CAPABILITIES].sort(), [
     'supportsFunctionCalling',
     'supportsImageInput',

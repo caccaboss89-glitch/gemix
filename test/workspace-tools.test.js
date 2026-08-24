@@ -21,9 +21,9 @@ import { ATOMIC_WRITE_SCRIPT } from '../src/tools/workspace/mutation.js';
 import { shell } from '../src/tools/workspace/shell.js';
 import {
   checkWorkspaceQuota,
-  ensureWorkspaceWritable,
-  listFilesUnder
+  ensureWorkspaceWritable
 } from '../src/sandbox/workspaceFs.js';
+import { listAgentDirectory } from '../src/sandbox/hostFileGateway.js';
 import workspaceRuntime from '../src/sandbox/workspaceRuntime.js';
 import { isProbablyText } from '../src/tools/workspace/textFiles.js';
 import { TurnBudget } from '../src/utils/turnBudget.js';
@@ -417,13 +417,16 @@ test('shell caps its own timeout and then the turn budget caps it again', async 
 test('buildExecSpec wraps a shell line in a hard timeout', () => {
   const spec = workspaceRuntime.buildExecSpec({ command: 'echo hi' });
   assert.deepEqual(spec.cmd.slice(0, 3), ['timeout', '--signal=KILL', '60s']);
-  assert.deepEqual(spec.cmd.slice(3), ['/bin/bash', '-lc', 'echo hi']);
+  assert.deepEqual(spec.cmd.slice(3), [
+    'python', '/opt/sandbox/quota_exec.py', String(constants.WORKSPACE_QUOTA_MB * 1024 * 1024),
+    '/bin/bash', '-lc', 'echo hi'
+  ]);
   assert.equal(spec.timeoutMs, constants.SHELL_TIMEOUT_DEFAULT_MS);
 });
 
-test('buildExecSpec passes argv through untouched', () => {
+test('buildExecSpec preserves argv behind the quota wrapper', () => {
   const spec = workspaceRuntime.buildExecSpec({ command: ['cat', '/workspace/a b.txt'] });
-  assert.deepEqual(spec.cmd.slice(3), ['cat', '/workspace/a b.txt']);
+  assert.deepEqual(spec.cmd.slice(-2), ['cat', '/workspace/a b.txt']);
 });
 
 test('buildExecSpec clamps the timeout to the ceiling', () => {
@@ -452,12 +455,12 @@ test('a workspace under quota reports ok', () => {
   assert.ok(quota.usedBytes > 0);
 });
 
-test('listFilesUnder skips symlinks so a planted link cannot widen a listing', () => {
+test('descriptor-safe listing skips symlinks so a planted link cannot widen it', () => {
   const linkPath = path.join(ROOT, 'escape');
   try { fs.symlinkSync(path.resolve('.'), linkPath, 'dir'); }
   catch { return; } // symlinks need privileges on Windows; the guard is still in the code
   try {
-    const listing = listFilesUnder(ROOT, { limit: 1000 });
+    const listing = listAgentDirectory(WORKSPACE_ID, 'workspace/', { limit: 1000 });
     assert.equal(listing.files.some(f => f.relPath.startsWith('escape/')), false);
   } finally {
     fs.unlinkSync(linkPath);

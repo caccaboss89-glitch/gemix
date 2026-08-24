@@ -43,12 +43,16 @@ services:
     networks:
       egress: {}           # path to the host (reaches tailsocks); upstream is SOCKS5
       sandbox_net: {}      # reachable by sandboxes as hostname "gemix-sandbox-proxy"
-    # Do NOT expose the port to the host - the proxy must only be reachable
-    # from sandbox_net.
+    # Do NOT expose the port to the host. Production workspaces reach it from
+    # a separate internal network created for each conversation by Node.
+    mem_limit: 512m
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
 
   sandbox_example:
-    # Example of how the Node manager runs a workspace container: quiet
-    # `sleep infinity` process, attached per call via `docker exec`.
+    # Manual single-workspace example. Production does not use this shared
+    # sandbox_net: Node creates one internal network per conversation.
     build:
       context: .
       dockerfile: Dockerfile
@@ -56,7 +60,7 @@ services:
     container_name: gemix-sandbox-example
     depends_on: [proxy]
     entrypoint: ""
-    command: ["sleep", "infinity"]
+    command: ["python", "/opt/sandbox/quota_guard.py", "524288000"]
     user: "1000:1000"
     environment:
       HTTP_PROXY:  "http://gemix-sandbox-proxy:8080"

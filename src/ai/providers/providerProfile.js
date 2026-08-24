@@ -6,7 +6,8 @@
 // needs one of those answers reads it here instead of re-deriving it from a
 // model slug, a base URL or the contents of an auth file.
 //
-// The separation the spec insists on (§3) is visible in the shape:
+// The separation between transport, credentials, extensions and feature
+// bindings is visible in the shape:
 //
 //   profile.wire        -> WireCapabilities: can we talk to this endpoint at all
 //   profile.credentials -> CredentialProvider: how a request is authenticated
@@ -105,7 +106,7 @@ function _buildXaiProfile() {
  * The ChatGPT subscription reached through the Codex backend. It is treated as
  * exactly what the credential unlocks — a Responses endpoint — and never as the
  * whole OpenAI product line: image, video, STT and TTS fall back to the GemiX
- * baselines (spec §14.2).
+ * baselines.
  */
 function _buildChatgptProfile() {
   return {
@@ -136,7 +137,7 @@ function _buildChatgptProfile() {
 
 /**
  * OpenRouter as the main brain. Accessory services of the provider are NOT
- * discovered or integrated (spec §3.4): only the model is used from here.
+ * discovered or integrated: only the model is used from here.
  */
 function _buildOpenRouterProfile() {
   return {

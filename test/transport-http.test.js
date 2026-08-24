@@ -202,6 +202,26 @@ test('a stream that produced nothing is replayed', async () => {
   assert.equal(response.status, 'completed');
 });
 
+test('delta-only EOF is a partial malformed response and is never replayed', async () => {
+  const credentials = new StubCredentials();
+  let calls = 0;
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: credentials,
+    label: 'test',
+    fetchImpl: async () => {
+      calls++;
+      return sseResponse([
+        'data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"unfinished"}\n\n'
+      ]);
+    }
+  });
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [] } }),
+    err => err.kind === TRANSPORT_ERROR.MALFORMED && err.partial === true
+  );
+  assert.equal(calls, 1);
+});
+
 test('a non-SSE 200 answer is malformed, not silently parsed', async () => {
   const transport = new OpenAIResponsesTransport({
     credentialProvider: new StubCredentials(),

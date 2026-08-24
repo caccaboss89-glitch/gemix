@@ -20,6 +20,8 @@ import constants from '../config/constants.js';
 import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
 import { resolveProviderProfile } from './providers/providerProfile.js';
 
+const MAX_REPLY_ATTACHMENTS = 10;
+
 // Which markup actually renders is stated once, in the "This chat" section of
 // the system prompt — not restated here.
 const RESPONSE_FIELD_DESC =
@@ -97,6 +99,7 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
   properties.attachments = {
     type: ['array', 'null'],
     items: { type: 'string' },
+    maxItems: MAX_REPLY_ATTACHMENTS,
     description: _attachmentsFieldDesc()
   };
   required.push('attachments');
@@ -283,6 +286,7 @@ function parseStructuredReply(raw) {
 }
 
 export {
+  MAX_REPLY_ATTACHMENTS,
   buildGemixResponseFormat,
   parseStructuredReply
 

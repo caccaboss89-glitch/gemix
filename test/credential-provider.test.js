@@ -208,6 +208,19 @@ test('a live token survives a broken refresh instead of rotating away', async ()
   assert.equal(readPool(pool).find(a => a.id === 'a').lastStatus, 'ok');
 });
 
+test('a broken refresh never returns a token shorter than the requested lifetime', async () => {
+  const pool = poolName('minimum-lifetime');
+  await updatePool(pool, () => [
+    { id: 'short', accessToken: 'short-live', refreshToken: 'r0', expiresAtMs: Date.now() + 60_000, priority: 0, lastStatus: 'ok' },
+    { id: 'spare', accessToken: 'spare-live', refreshToken: 'r1', expiresAtMs: null, priority: 1, lastStatus: 'ok' }
+  ]);
+  const provider = new TestProvider({ pool, fetchImpl: tokenEndpoint({ fail: true }) });
+
+  const credential = await provider.get({ minRemainingMs: 120_000 });
+  assert.equal(credential.accountId, 'spare');
+  assert.equal(credential.accessToken, 'spare-live');
+});
+
 test('refresh() forces an exchange even on a token that looks fine', async () => {
   const pool = poolName('forced');
   await updatePool(pool, () => [{

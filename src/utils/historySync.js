@@ -18,7 +18,7 @@ const log = createLogger('HistorySync');
 // (history fetch timeout/incomplete). Files older than this TTL are removed;
 // the next successful history rebuild re-syncs media from the last MAX_HISTORY messages.
 // Retention of the durable history store, shared with the workspace and the
-// attachment projection so one conversation expires as a whole (spec §8.6).
+// attachment projection so one conversation expires as a whole.
 const HISTORY_RETENTION_MS = constants.WORKSPACE_TTL_MS;
 const GEMIX_VOICE_TEXT_CACHE_FILE = path.join(constants.DATA_DIR, 'gemixVoiceTextCache.json');
 const RECENT_VOICE_MAX_ENTRIES = 200;
@@ -401,14 +401,13 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
 /**
  * Age sweep of one conversation's history store, on the shared hourly clock.
  *
- * Retention is 4h sliding from last use (spec §8.6): a file's mtime is
+ * Retention is 4h sliding from last use: a file's mtime is
  * refreshed when it is reused, so an active chat still lets an untouched file
  * go while a file the model keeps opening stays.
  *
- * The old post-turn referential prune is deliberately gone. It deleted anything
- * that had fallen out of the 30-message window the moment it fell out, which
- * made rehydration impossible and, once history tags became full paths, matched
- * nothing at all and deleted the whole store every turn.
+ * Retention depends only on age and reuse, never on whether a file is still
+ * referenced by the current 30-message window. This keeps files available for
+ * later history rehydration until their own TTL expires.
  *
  * @param {string} userId
  * @param {object} [opts]

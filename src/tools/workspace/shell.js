@@ -66,16 +66,19 @@ async function shell(args = {}, workspaceId, opts = {}) {
     if (run.truncated) notes.push('Output was truncated; only the tail is shown.');
     const quota = checkWorkspaceQuota(workspaceId);
     if (!quota.ok) notes.push(quota.message);
+    const commandSucceeded = run.rc === 0 && !run.timedOut;
 
     return {
-      success: run.rc === 0 && !run.timedOut,
+      success: commandSucceeded && quota.ok,
       exit_code: run.rc,
       timed_out: run.timedOut,
       duration_ms: run.durationMs,
       stdout: run.stdout,
       stderr: run.stderr,
       ...quotaResultFields(quota),
-      ...(run.rc === 0 && !run.timedOut ? {} : { error: `Command exited with code ${run.rc}.` }),
+      ...(commandSucceeded && quota.ok
+        ? {}
+        : { error: commandSucceeded ? quota.message : `Command exited with code ${run.rc}.` }),
       message: notes.join(' ') || `Exit ${run.rc} in ${run.durationMs} ms.`
     };
   });

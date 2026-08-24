@@ -1,10 +1,9 @@
 // src/utils/batchContext.js
 //
-// The debounce window is per chat, so anything anyone sends while it is open
-// used to be merged into the same turn. filterBatchToTriggerSpeaker narrows a
-// fired batch back to the participant it was opened for; the helpers below then
-// resolve handler context (who is "the user" for permissions and tools) from
-// that participant's own burst.
+// The debounce window is per chat, but a fired batch belongs to the participant
+// who opened it. filterBatchToTriggerSpeaker keeps only that participant's
+// burst; the helpers below resolve handler context (who is "the user" for
+// permissions and tools) from the same entries.
 
 import constants from '../config/constants.js';
 

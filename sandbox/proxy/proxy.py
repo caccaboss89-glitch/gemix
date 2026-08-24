@@ -2,7 +2,7 @@
 GemiX sandbox egress proxy.
 
 The ONLY bridge between the (internal, no-default-route) sandbox network and
-the outside world. Every outbound HTTP(S) request from a build sandbox is
+the outside world. Every outbound HTTP(S) request from an agent workspace is
 forwarded upstream through a SOCKS5 proxy that exits on a residential IP
 (tailsocks -> Tailscale -> Redmi phone, see SERVER_SETUP.md). This gives the
 in-container `yt-dlp`/`curl`/`wget` the same residential egress that bypasses
@@ -13,10 +13,10 @@ Protocol support:
 - Plain HTTP GET/POST/...           - forwarded verbatim.
 
 Routing:
-- There is NO host allowlist: any host is reachable, because the residential
-  exit is the whole point and downloads target arbitrary CDNs/images.
-- Upstream connections are made via SOCKS5 with remote DNS (socks5h semantics):
-  the destination hostname is resolved on the Redmi side, never locally.
+- Arbitrary public hosts are reachable, while loopback, private, link-local,
+  reserved and otherwise non-global addresses are denied.
+- DNS is resolved and validated locally, then the validated address is pinned
+  in the SOCKS5 CONNECT request so rebinding cannot pivot the tunnel.
 - Fail-closed: if the SOCKS5 upstream (Redmi) is unreachable, the request fails
   with 502 and there is no direct-internet fallback. When the Redmi is off, the
   sandbox simply has no internet (intended security property).
@@ -36,6 +36,7 @@ Operational:
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 import socket
 import socketserver
@@ -52,6 +53,8 @@ from urllib.parse import urlparse
 PROXY_PORT: int = int(os.environ.get("PROXY_PORT", "8080"))
 TUNNEL_TIMEOUT_S: int = int(os.environ.get("TUNNEL_TIMEOUT_S", "120"))
 MAX_UPSTREAM_CONNECT_S: int = int(os.environ.get("UPSTREAM_CONNECT_TIMEOUT_S", "15"))
+CLIENT_REQUEST_TIMEOUT_S = 30
+MAX_HTTP_REQUEST_BODY_BYTES = 8 * 1024 * 1024
 
 # Residential SOCKS5 upstream (tailsocks -> Tailscale -> Redmi). All egress
 # exits here; there is no direct-internet fallback.
@@ -112,12 +115,49 @@ def _recv_exact(sock: socket.socket, n: int) -> bytes:
     return buf
 
 
-def socks5_connect(dst_host: str, dst_port: int, timeout: int) -> socket.socket:
+class PolicyError(ValueError):
+    """The requested destination is outside the public internet boundary."""
+
+
+def resolve_public_target(dst_host: str, dst_port: int) -> tuple[str, int]:
+    """Resolve a host and require every answer to be globally routable."""
+    host = dst_host.strip().strip("[]").rstrip(".")
+    if not host or host.lower() == "localhost" or host.lower().endswith(".localhost"):
+        raise PolicyError("local destination denied")
+    try:
+        literal = ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if not literal.is_global:
+            raise PolicyError("non-public destination denied")
+        return str(literal), socket.AF_INET6 if literal.version == 6 else socket.AF_INET
+
+    try:
+        answers = socket.getaddrinfo(host, dst_port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise PolicyError(f"destination DNS lookup failed: {exc}") from exc
+    addresses: list[tuple[str, int]] = []
+    for family, _socktype, _proto, _canonname, sockaddr in answers:
+        address = sockaddr[0].split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise PolicyError("destination DNS returned an invalid address") from exc
+        if not ip.is_global:
+            raise PolicyError("destination DNS returned a non-public address")
+        pair = (str(ip), family)
+        if pair not in addresses:
+            addresses.append(pair)
+    if not addresses:
+        raise PolicyError("destination DNS returned no addresses")
+    return addresses[0]
+
+
+def socks5_connect(dst_address: str, dst_port: int, family: int, timeout: int) -> socket.socket:
     """
-    Open a tunnel to dst_host:dst_port through the SOCKS5 upstream (Redmi),
-    resolving the destination hostname on the upstream side (socks5h). Returns a
-    connected socket on success; raises OSError if the upstream or the target is
-    unreachable.
+    Open a tunnel to a previously validated public address through the SOCKS5
+    upstream. Returns a connected socket on success.
     """
     sock = socket.create_connection(
         (REDMI_SOCKS_HOST, REDMI_SOCKS_PORT), timeout=timeout
@@ -130,20 +170,15 @@ def socks5_connect(dst_host: str, dst_port: int, timeout: int) -> socket.socket:
         if greeting[0] != 0x05 or greeting[1] != 0x00:
             raise OSError("socks5 upstream rejected no-auth handshake")
 
-        try:
-            host_bytes = dst_host.encode("idna")
-        except Exception:
-            host_bytes = dst_host.encode("ascii", "ignore")
-        if not host_bytes or len(host_bytes) > 255:
-            raise OSError(f"invalid destination host: {dst_host!r}")
-
-        # CONNECT with domain ATYP (0x03) so the upstream resolves DNS.
-        request = (
-            b"\x05\x01\x00\x03"
-            + bytes([len(host_bytes)])
-            + host_bytes
-            + struct.pack(">H", dst_port)
-        )
+        if family == socket.AF_INET:
+            atyp = b"\x01"
+            packed_address = socket.inet_pton(socket.AF_INET, dst_address)
+        elif family == socket.AF_INET6:
+            atyp = b"\x04"
+            packed_address = socket.inet_pton(socket.AF_INET6, dst_address)
+        else:
+            raise OSError(f"unsupported destination address family: {family}")
+        request = b"\x05\x01\x00" + atyp + packed_address + struct.pack(">H", dst_port)
         sock.sendall(request)
 
         reply = _recv_exact(sock, 4)
@@ -191,6 +226,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "GemixSandboxProxy/2.0"
 
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(CLIENT_REQUEST_TIMEOUT_S)
+
     # Silence default noisy per-request log
     def log_message(self, format, *args):  # noqa: N802 (BaseHTTPRequestHandler API)
         return
@@ -198,15 +237,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
     # -- CONNECT (HTTPS tunneling) -----------------------------------------
     def do_CONNECT(self) -> None:  # noqa: N802
         target = self.path  # "host:port"
-        host, _, port_str = target.partition(":")
         try:
-            port = int(port_str) if port_str else 443
+            parsed_target = urlparse(f"//{target}")
+            host = parsed_target.hostname or ""
+            port = parsed_target.port or 443
         except ValueError:
             self._reject(400, "bad target")
             return
 
         try:
-            upstream = socks5_connect(host, port, MAX_UPSTREAM_CONNECT_S)
+            address, family = resolve_public_target(host, port)
+        except PolicyError as e:
+            _log("warn", event="deny_target", host=host, port=port, err=str(e))
+            self._reject(403, "public internet destinations only")
+            return
+        try:
+            upstream = socks5_connect(address, port, family, MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
@@ -229,8 +275,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
     # -- Plain HTTP forwarding ---------------------------------------------
     def _forward_http(self) -> None:
         parsed = urlparse(self.path)
-        host = parsed.hostname or self.headers.get("Host", "")
-        port = parsed.port or 80
+        host_header = urlparse(f"//{self.headers.get('Host', '')}")
+        host = parsed.hostname or host_header.hostname or ""
+        try:
+            port = parsed.port or host_header.port or 80
+        except ValueError:
+            self._reject(400, "bad target")
+            return
         if not host:
             self._reject(400, "missing host")
             return
@@ -240,7 +291,33 @@ class ProxyHandler(BaseHTTPRequestHandler):
             path += "?" + parsed.query
 
         try:
-            upstream = socks5_connect(host, port, MAX_UPSTREAM_CONNECT_S)
+            address, family = resolve_public_target(host, port)
+        except PolicyError as e:
+            _log("warn", event="deny_target", host=host, port=port, err=str(e))
+            self._reject(403, "public internet destinations only")
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            self._reject(400, "bad Content-Length")
+            return
+        if content_length < 0:
+            self._reject(400, "bad Content-Length")
+            return
+        if content_length > MAX_HTTP_REQUEST_BODY_BYTES:
+            self._reject(413, "request body too large")
+            return
+        try:
+            body = self.rfile.read(content_length) if content_length else b""
+        except (OSError, TimeoutError):
+            self._reject(408, "request body timeout")
+            return
+        if len(body) != content_length:
+            self._reject(400, "incomplete request body")
+            return
+
+        try:
+            upstream = socks5_connect(address, port, family, MAX_UPSTREAM_CONNECT_S)
         except Exception as e:
             _log("warn", event="upstream_fail", host=host, port=port, err=str(e))
             _notify_admin(
@@ -250,28 +327,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._reject(502, "residential upstream unavailable")
             return
 
-        try:
-            content_length = int(self.headers.get("Content-Length", "0") or 0)
-        except ValueError:
-            self._reject(400, "bad Content-Length")
-            return
-        if content_length < 0:
-            self._reject(400, "bad Content-Length")
-            return
-        body = self.rfile.read(content_length) if content_length else b""
-
         req_lines = [f"{self.command} {path} HTTP/1.1".encode()]
-        # Overwrite connection headers we control; forward the rest
-        skip = {"proxy-connection", "connection"}
-        sent_host = False
+        # Connection and Host are derived here, never trusted from the client.
+        skip = {"proxy-connection", "connection", "host"}
         for k, v in self.headers.items():
             if k.lower() in skip:
                 continue
-            if k.lower() == "host":
-                sent_host = True
             req_lines.append(f"{k}: {v}".encode())
-        if not sent_host:
-            req_lines.append(f"Host: {host}".encode())
+        host_value = f"[{host}]" if ":" in host else host
+        if port != 80:
+            host_value = f"{host_value}:{port}"
+        req_lines.append(f"Host: {host_value}".encode())
         req_lines.append(b"Connection: close")
         req_data = b"\r\n".join(req_lines) + b"\r\n\r\n" + body
 
@@ -315,6 +381,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     # -- Helpers -----------------------------------------------------------
     def _reject(self, code: int, reason: str) -> None:
         body = f"{reason}\n".encode()
+        self.close_connection = True
         try:
             self.send_response(code, reason)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -365,7 +432,7 @@ def main() -> int:
         "info",
         event="startup",
         port=PROXY_PORT,
-        upstream=f"socks5h://{REDMI_SOCKS_HOST}:{REDMI_SOCKS_PORT}",
+        upstream=f"socks5://{REDMI_SOCKS_HOST}:{REDMI_SOCKS_PORT}",
     )
     server = ThreadingHTTPServer(("0.0.0.0", PROXY_PORT), ProxyHandler)
     try:

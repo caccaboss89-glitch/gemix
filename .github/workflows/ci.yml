@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-tests:
+    runs-on: ubuntu-24.04
+    env:
+      AI_PROVIDER: chatgpt
+      CHATGPT_MODEL: gpt-5.6
+      GROK_MODEL: grok
+      IMAGE_GEN_MODEL: image
+      VIDEO_GEN_MODEL: video
+      OPENROUTER_BASE_URL: https://openrouter.invalid/api/v1
+      OPENROUTER_API_KEY: test
+      MUSIC_MODEL: music
+      OPENROUTER_HTTP_REFERER: https://gemix.invalid
+      ADMIN_NAME: Test Admin
+      LEGAL_NAME: Test Legal Name
+      BOT_TOKEN: test
+      GUILD_ID: test
+      BOT_EMAIL: test@example.invalid
+      BOT_PASS: test
+      MUSIC_WRAP_PASSWORD: test
+      MUSIC_WRAP_URL: https://gemix.invalid/wrap
+      MUSIC_STATS_URL: https://gemix.invalid/stats
+      GITHUB_TOKEN: test
+      GITHUB_REPO: example/gemix
+      GEMIX_NOTIFY_URL: http://127.0.0.1:9999/notify
+      GEMIX_PUBLIC_ATTACHMENT_BASE_URL: https://files.gemix.invalid
+      GEMIX_TEMP_FILE_PORT: "9999"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Lint
+        run: npx eslint . --ext .js
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Sandbox quota tests
+        working-directory: sandbox
+        run: python -m unittest test_quota_guard.py
+      - name: Sandbox proxy policy tests
+        working-directory: sandbox/proxy
+        run: python -m unittest test_proxy.py

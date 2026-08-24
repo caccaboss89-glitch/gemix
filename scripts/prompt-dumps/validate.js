@@ -107,7 +107,7 @@ function _promptSection(staticPart, heading) {
   return next < 0 ? staticPart.slice(from) : staticPart.slice(from, next);
 }
 
-/** Prose shape, section order and the blocks retired by the prose rewrite. */
+/** Prose shape, section order and blocks forbidden by the current contract. */
 function _validateStaticShape(staticPart, prompt, caseId) {
   // Prose sections, in order. XML is reserved for program data.
   const headings = [...staticPart.matchAll(/^## (.+)$/gm)].map(m => m[1]);
@@ -150,19 +150,19 @@ function _validateStaticShape(staticPart, prompt, caseId) {
     ISSUES.push({ caseId, msg: `static instruction rendered as XML: ${line.slice(0, 48)}` });
     break;
   }
-  // Scaffolding retired in the phase-B rewrite.
+  // Instructions are prose sections; XML-like scaffolding is forbidden.
   for (const gone of ['<Context>', '<Directives>', '<PreSendCheck>', '<Platform', '<Limits>', '<Identity>', '<Conduct>', '<Style>', '<Grounding>', '<Tooling>', 'Rules context:']) {
     if (staticPart.includes(gone)) {
-      ISSUES.push({ caseId, msg: `static still contains retired block ${gone}` });
+      ISSUES.push({ caseId, msg: `static contains forbidden block ${gone}` });
     }
   }
   if (/R\d+ \[(always|out|reply|tool)\]/.test(staticPart)) {
     ISSUES.push({ caseId, msg: 'static still numbers directives R<n> [scope]' });
   }
-  // Legacy top-level blocks, all folded into prose sections.
+  // These concepts belong in prose sections, never top-level XML blocks.
   for (const gone of ['<Rules>', '<ToolUsage>', '<Capabilities>', '<Conversation>', '<Memory>', '<Reactions>', '<Visibility>']) {
     if (prompt.includes(gone)) {
-      ISSUES.push({ caseId, msg: `obsolete ${gone} block must be removed` });
+      ISSUES.push({ caseId, msg: `forbidden top-level block ${gone}` });
     }
   }
   if (/\s+\n<\/[A-Za-z]+>/.test(prompt)) {
@@ -170,28 +170,28 @@ function _validateStaticShape(staticPart, prompt, caseId) {
   }
 }
 
-/** Claims the prompt must no longer make, on either side of the split. */
+/** Claims forbidden on either side of the static/dynamic split. */
 function _validateNoStaleClaims(staticPart, prompt, caseId) {
   // xAI injects its own citation directive and the API renders [[N]](url) itself.
   if (/Cite web sources with links/i.test(prompt)) {
     ISSUES.push({ caseId, msg: 'static must not duplicate the xAI citation directive' });
   }
   if (/system prompt Format line/i.test(prompt)) {
-    ISSUES.push({ caseId, msg: 'stale cross-reference to the removed "Format line"' });
+    ISSUES.push({ caseId, msg: 'invalid cross-reference to "Format line"' });
   }
   if (/read_server_rules/.test(prompt)) {
-    ISSUES.push({ caseId, msg: 'read_server_rules no longer exists (removed in A4)' });
+    ISSUES.push({ caseId, msg: 'read_server_rules is not in the tool catalog' });
   }
   if (prompt.includes('native processing via tunnel')) {
     ISSUES.push({ caseId, msg: 'contains native processing via tunnel' });
   }
   if (/all audio\/video|tutti.*audio\/video/i.test(prompt) && /temp link|link temporaneo/i.test(prompt)) {
-    ISSUES.push({ caseId, msg: 'obsolete proactive all A/V temp-link policy in prompt' });
+    ISSUES.push({ caseId, msg: 'unsupported proactive all A/V temp-link policy in prompt' });
   }
   // The buffer is always empty when the Runtime block is built, so it is
   // described in prose and each tool result names its own file instead.
   if (/<DeliveryBuffer>/.test(prompt)) {
-    ISSUES.push({ caseId, msg: 'DeliveryBuffer block was retired: tool results name their own files' });
+    ISSUES.push({ caseId, msg: 'DeliveryBuffer is forbidden: tool results name their own files' });
   }
   // conversation_title rules live in text.format only.
   if (/conversation_title/.test(staticPart)) {
@@ -471,7 +471,7 @@ function _validateSettingsBlocks(dynamicPart, prompt, id, caseId) {
       ISSUES.push({ caseId, msg: 'CurrentSettings missing (default)/(custom) markers' });
     }
     if (prompt.includes('<Memory>')) {
-      ISSUES.push({ caseId, msg: 'obsolete <Memory> block (folded into <CurrentSettings>)' });
+      ISSUES.push({ caseId, msg: '<Memory> is forbidden; settings belong in <CurrentSettings>' });
     }
     // Customized cases must be flagged as custom, all-default ones never.
     const wantsCustom = CUSTOM_SETTINGS_CASES.includes(id);

@@ -3,7 +3,7 @@
 // Turning a local image into a content part the model can actually look at.
 //
 // The part is an inline base64 data URL. It is not an upload: no user file is
-// published to a third-party host on the way to the model (spec §17.23), so
+// published to a third-party host on the way to the model, so
 // there is no public link to leak and nothing to expire mid-turn.
 
 import fs from 'fs';

@@ -7,9 +7,9 @@
 // so a refresh triggered by a media call is the same rotation the next model
 // call will see — and a single-use refresh token can never be spent twice.
 //
-// This module replaced the old auth-file reader. There is no `active_provider`
-// selection and no external CLI: an expired token is refreshed here, in-process,
-// before the request goes out.
+// Service calls use the shared pool directly: there is no separate provider
+// selector or external CLI, and expiring tokens refresh in-process before the
+// request goes out.
 
 import { xaiCredentialProvider } from './credentialRegistry.js';
 

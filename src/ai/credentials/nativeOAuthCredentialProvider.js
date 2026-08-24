@@ -3,13 +3,9 @@
 // The OAuth-backed CredentialProvider: GemiX's own store, its own refresh, its
 // own multi-account pool.
 //
-// The shape of the old mechanism was: a call fails, GemiX shells out to an
-// external CLI, the CLI spends a real subscription request so the file it owns
-// gets rewritten, GemiX re-reads it and retries. That cost up to two minutes and
-// a slice of the plan for what is one HTTPS round trip. Here the expiry is
-// known, so the refresh happens BEFORE the call — the first request of a turn
-// already carries a valid token — and the reactive path exists only for the
-// case where the provider rejects a token we believed was good.
+// Token expiry is known, so refresh happens before the request and the first
+// call of a turn already carries a valid token. The reactive path is reserved
+// for a provider rejecting a token that still appeared valid locally.
 //
 // Pool behaviour: accounts are ordered by health then priority. A refresh that
 // fails marks the account `auth_failed` and the next `get()` moves on to the
@@ -23,7 +19,9 @@ import {
   orderPool,
   patchAccount,
   readPool,
-  storePath
+  storePath,
+  updateAccountExclusive,
+  updatePool
 } from './credentialStore.js';
 import { isDescriptorConfigured, oauthDescriptorFor } from './oauthProviders.js';
 import { refreshAccessToken } from './oauthClient.js';
@@ -90,11 +88,27 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
     return account.expiresAtMs - Date.now() <= headroom;
   }
 
+  _hasRequiredLifetime(account, minRemainingMs = 0) {
+    if (!account.accessToken) return false;
+    if (account.expiresAtMs === null) return true;
+    return account.expiresAtMs - Date.now() > Math.max(0, minRemainingMs);
+  }
+
+  async _markAuthFailedIfCurrent(account) {
+    await updatePool(this.pool, accounts => accounts.map((current) => {
+      if (current.id !== account.id) return current;
+      if (current.accessToken !== account.accessToken || current.refreshToken !== account.refreshToken) {
+        return current;
+      }
+      return { ...current, lastStatus: 'auth_failed', lastStatusAt: Date.now() };
+    }));
+  }
+
   /**
    * Refresh one account, persisting the rotated pair before returning it.
    * Concurrent callers share the single in-flight exchange.
    */
-  async _refreshAccount(account) {
+  async _refreshAccount(account, opts = {}) {
     const inFlight = this._refreshes.get(account.id);
     if (inFlight) return inFlight;
 
@@ -102,19 +116,35 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
     const configured = isDescriptorConfigured(descriptor);
     if (!configured.ok) throw new Error(configured.reason);
 
-    const run = (async () => {
-      const tokens = await refreshAccessToken(descriptor, account.refreshToken, { fetchImpl: this._fetchImpl });
-      // Persist first: the refresh token that produced these is already dead.
-      await patchAccount(this.pool, account.id, {
+    let exchanged = false;
+    const run = updateAccountExclusive(this.pool, account.id, async (current) => {
+      const changedByAnotherProcess = current.accessToken !== account.accessToken
+        || current.refreshToken !== account.refreshToken;
+      if (changedByAnotherProcess && this._hasRequiredLifetime(current, opts.minRemainingMs)) {
+        return current;
+      }
+      if (!opts.force && !this._needsRefresh(current, opts.minRemainingMs)) return current;
+      if (!current.refreshToken) throw new Error(`account "${current.id}" has no refresh token`);
+      let tokens;
+      try {
+        tokens = await refreshAccessToken(descriptor, current.refreshToken, { fetchImpl: this._fetchImpl });
+      } catch (err) {
+        err.credentialSnapshot = current;
+        throw err;
+      }
+      exchanged = true;
+      return {
+        ...current,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresAtMs: tokens.expiresAtMs,
         lastStatus: 'ok',
         lastStatusAt: Date.now()
-      });
-      log.info(`${this.pool}: refreshed account "${account.id}"`);
-      return { ...account, ...tokens, lastStatus: 'ok' };
-    })().finally(() => {
+      };
+    }).then((current) => {
+      if (exchanged) log.info(`${this.pool}: refreshed account "${account.id}"`);
+      return current;
+    }).finally(() => {
       this._refreshes.delete(account.id);
     });
 
@@ -139,20 +169,17 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
       }
 
       try {
-        account = await this._refreshAccount(account);
+        account = await this._refreshAccount(account, { minRemainingMs: opts.minRemainingMs });
         this._currentAccountId = account.id;
         log.warn(`${this.pool}: rotating to refreshed account "${account.id}"`);
         return this._toCredential(account);
       } catch (err) {
         lastError = err;
-        const stillValid = account.accessToken
-          && (account.expiresAtMs === null || account.expiresAtMs > Date.now());
+        const latest = readPool(this.pool).find(candidate => candidate.id === account.id) || account;
+        const stillValid = this._hasRequiredLifetime(latest, opts.minRemainingMs);
         log.warn(`${this.pool}: candidate account "${account.id}" could not refresh (${err.message})`);
-        if (stillValid) return this._toCredential(account);
-        await patchAccount(this.pool, account.id, {
-          lastStatus: 'auth_failed',
-          lastStatusAt: Date.now()
-        });
+        if (stillValid) return this._toCredential(latest);
+        await this._markAuthFailedIfCurrent(err.credentialSnapshot || account);
       }
     }
 
@@ -173,17 +200,18 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
 
     if (this._needsRefresh(account, opts.minRemainingMs)) {
       try {
-        account = await this._refreshAccount(account);
+        account = await this._refreshAccount(account, { minRemainingMs: opts.minRemainingMs });
       } catch (err) {
         // An account with a live token and a broken refresh is still worth one
         // try; one with neither has to step aside for the next in the pool.
-        const stillValid = account.accessToken
-          && (account.expiresAtMs === null || account.expiresAtMs > Date.now());
+        const latest = readPool(this.pool).find(candidate => candidate.id === account.id) || account;
+        const stillValid = this._hasRequiredLifetime(latest, opts.minRemainingMs);
         log.warn(`${this.pool}: proactive refresh of "${account.id}" failed (${err.message})`);
         if (!stillValid) {
-          await patchAccount(this.pool, account.id, { lastStatus: 'auth_failed', lastStatusAt: Date.now() });
+          await this._markAuthFailedIfCurrent(err.credentialSnapshot || account);
           return this._rotateToUsableAccount(account.id, err, opts);
         }
+        account = latest;
       }
     }
 
@@ -199,11 +227,11 @@ class NativeOAuthCredentialProvider extends CredentialProvider {
     const requestedId = opts.accountId || this._currentAccountId;
     const account = (requestedId && accounts.find(a => a.id === requestedId)) || this._pickAccount();
     try {
-      const refreshed = await this._refreshAccount(account);
+      const refreshed = await this._refreshAccount(account, { force: true, minRemainingMs: opts.minRemainingMs });
       this._currentAccountId = refreshed.id;
       return this._toCredential(refreshed);
     } catch (err) {
-      await patchAccount(this.pool, account.id, { lastStatus: 'auth_failed', lastStatusAt: Date.now() });
+      await this._markAuthFailedIfCurrent(err.credentialSnapshot || account);
       return this._rotateToUsableAccount(account.id, err, opts);
     }
   }

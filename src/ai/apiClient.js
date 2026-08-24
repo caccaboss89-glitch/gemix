@@ -4,9 +4,9 @@
 // Grok Imagine image/video and xAI TTS. Retry, timeout, structured
 // request/response logging and log-directory quota live here.
 //
-// The main brain no longer passes through this file — it speaks the generic
-// OpenAIResponsesTransport (ai/transport/) with a CredentialProvider. What is
-// left is the xAI media stack, and phase 6 moves it behind the media backends.
+// This module is limited to the xAI media stack, routed through the media
+// backends. Main-brain requests use OpenAIResponsesTransport with a
+// CredentialProvider.
 
 import fs from 'fs';
 import path from 'path';
@@ -383,8 +383,8 @@ async function callApiWithRetry(
       throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
     }
   }
-  // Unreachable: every path above returns or throws. Guards against a future
-  // `continue` leaking out of the loop and handing callers an undefined Response.
+  // Defensive invariant: every path above returns or throws, so callers never
+  // receive an undefined Response.
   throw new Error(`${modelName} API unreachable: retry loop exhausted`);
 }
 

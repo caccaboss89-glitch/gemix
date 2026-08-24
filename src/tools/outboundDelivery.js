@@ -28,7 +28,9 @@ const log = createLogger('OutboundDelivery');
  * @returns {Promise<{ attachments: object[], missingNote: string }>}
  */
 async function resolveOutboundAttachments(entries, userCtx) {
-  const selection = await resolveDeliverySelection(entries, resolveWorkspaceId(userCtx));
+  const selection = await resolveDeliverySelection(entries, resolveWorkspaceId(userCtx), {
+    signal: userCtx.turnBudget?.signal
+  });
   const missingNote = selection.missing.length > 0
     ? ` Attachment(s) not resolved and NOT sent: ${selection.missing.join(', ')}.`
     : '';

@@ -18,7 +18,7 @@
 //      it already had (<PastVoiceReply>).
 //   4. Loop: one `/v1/responses` call per round, whichever provider profile is
 //      active - tool calls per round in two phases:
-//      (1) standard tools parallel, (2) delivery parallel - repeat until the
+//      (1) standard tools parallel, (2) delivery calls serial - repeat until the
 //      model returns the final response or the round budget is reached. The
 //      final reply is always structured JSON (response / nullable attachments,
 //      plus conversation_title on every Discord turn, plus a `voice` flag on
@@ -32,48 +32,32 @@ import { callAI  } from './ai/aiProvider.js';
 import {
   pruneSeenToolMedia,
   systemItem,
-  toolResultItems,
   userItem
 } from './ai/responsesItems.js';
 import {
   buildStaticInstructions,
-  buildDynamicRuntimeContext,
   promptToolsFingerprint
 } from './ai/systemPrompt.js';
-import { getToolsForUser, getToolAccessError  } from './ai/tools.js';
+import { prepareTurn, reloadSettings } from './ai/turnPreparation.js';
+import { executeToolRound } from './ai/toolRoundController.js';
+import {
+  accumulateSearchStats,
+  applyParsedTitle,
+  buildVoiceReply,
+  resolveFinalAttachments
+} from './ai/turnReply.js';
+import { getToolsForUser  } from './ai/tools.js';
 import { buildGemixResponseFormat, parseStructuredReply  } from './ai/responseSchema.js';
-import { resolveDeliverySelection  } from './utils/deliverySelection.js';
-import { applyPastVoiceRepliesToHistory  } from './utils/voiceTranscripts.js';
-import { projectUserVoiceMessages  } from './attachments/voiceProjection.js';
-import { collectVisibleAttachmentNames, reconcileProjection } from './attachments/projection.js';
-import { generateVoice  } from './tools/voiceMessage.js';
-import { sanitizeVoiceMessageText  } from './utils/text.js';
-import { getCapabilities, resolveProfile, toolUnavailableMessage  } from './config/platformCapabilities.js';
-import { executeTool } from './tools/index.js';
 import constants from './config/constants.js';
 import { createTurnBudgets, turnBudgetFrom } from './utils/turnBudget.js';
 import envConfig from './config/env.js';
 import { createLogger  } from './utils/logger.js';
 import { appendResearchBadge, buildResearchBadgeText  } from './utils/footer.js';
 
-import { resolveWorkspaceId  } from './utils/workspaceId.js';
-import { touchActivity  } from './utils/workspaceState.js';
-import { listWorkspaceFiles  } from './sandbox/workspaceFs.js';
-import { readSettings, isReviewDue, markReviewed  } from './utils/settingsStore.js';
-import { cleanAssistantResponse, stripOutgoingDeliveryArtifacts, renderInlineCitations  } from './utils/text.js';
-import { sanitizeDiscordThreadTitle  } from './utils/discord.js';
-import { loadRegolamento  } from './utils/regolamento.js';
-import { resolveStorageId, resolveSettingsFileId  } from './utils/userPaths.js';
+import { cleanAssistantResponse, renderInlineCitations  } from './utils/text.js';
 import { generatePromptCacheKey  } from './utils/promptCacheKey.js';
 import { enableReleaseNotify  } from './tools/releaseNotify.js';
 import { sendWhatsAppDirect  } from './tools/whatsappSender.js';
-import {
-  partitionHandlerToolCalls,
-  perRoundCappedDuplicateIds,
-  perRoundCapErrorPayload,
-  PER_ROUND_TOOL_LIMITS
-} from './utils/toolCallExecution.js';
-import { sendIntermediateNotification  } from './utils/intermediateNotification.js';
 import {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
@@ -83,8 +67,7 @@ import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { providerFailureReply } from './ai/providers/errorPolicy.js';
 import { notifyAdmin } from './utils/adminNotifier.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
-import { wrapSystemReminder, wrapUserQuery  } from './utils/systemTags.js';
-import { summarizeToolCall, summarizeToolResult } from './utils/toolLogSummary.js';
+import { wrapSystemReminder  } from './utils/systemTags.js';
 
 const log = createLogger('Handler');
 
@@ -92,12 +75,6 @@ function extractPlainTextContent(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.find(p => p.type === 'input_text')?.text || '';
   return '';
-}
-
-/** Re-read the persisted preferences so a manage_preferences call takes effect at once. */
-function reloadSettings(ctx, ui) {
-  if (ctx.platform === constants.PLATFORM_DISCORD) return;
-  ctx.settings = readSettings(resolveSettingsFileId(ctx, ui));
 }
 
 function getReleaseNotifyTarget(ctx, ui) {
@@ -116,12 +93,6 @@ function buildMaintenanceReleaseAlreadyEnabledMessage() {
   return `${RELEASE_NOTIFY_ALREADY_PREFIX}\n\nPotrai disabilitarle chiedendolo direttamente a GemiX quando tornerà disponibile.`;
 }
 
-function _toolNotAvailableMessage(toolName, ctx) {
-  return toolUnavailableMessage(toolName, resolveProfile(ctx), {
-    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember)
-  });
-}
-
 /**
  * Main message handler. Takes a normalized context and returns a response object.
  * @param {object} ctx
@@ -137,8 +108,8 @@ async function handleMessage(ctx) {
   ctx.turnBudget = turnBudgets.work;
   const responseCtx = {
     discordTitle: '',
-    // Accumulated stats from native server-side web/X searches (main brain
-    // server-side search tools) - used for the badge appended to the reply.
+    // Accumulated source counts from GemiX web search and provider-native X
+    // search, used for the badge appended to the reply.
     researchStats: null
   };
 
@@ -203,163 +174,9 @@ async function handleMessage(ctx) {
       };
     }
 
-    const isDiscord = ctx.platform === constants.PLATFORM_DISCORD;
-    // Voice replies are a structured-reply flag (WhatsApp dedicated only),
-    // never a tool. The model sets `voice:true` and writes `response` with TTS tags.
-    const allowVoice = Boolean(getCapabilities(ctx).voiceReply);
-    const settingsFileId = resolveSettingsFileId(ctx, ui);
-
-    // Per-chat preferences drive the prompt's <CurrentSettings>, the reasoning
-    // effort, and the TTS voice/language.
-    ctx.settings = isDiscord ? null : readSettings(settingsFileId);
-    // Monthly renewal notice: injected only when something is customized, and
-    // recorded right away so it cannot repeat even if it goes unanswered.
-    ctx.settingsReviewDue = Boolean(ctx.settings && isReviewDue(ctx.settings));
-    if (ctx.settingsReviewDue) {
-      try { await markReviewed(settingsFileId); }
-      catch (err) { log.warn(`markReviewed failed: ${err.message}`); }
-    }
-
-    if (isDiscord) {
-      ctx.rulesContext = loadRegolamento();
-    }
-
-    const userCtx = {
-      isActiveMember,
-      isAdmin: userIsAdmin,
-      member: ui.member,
-      taskFileId: ui.taskFileId,
-      settingsFileId,
-      userId: ctx.userId,
-      userName: ctx.userName,
-      waJid: ctx.waJid || (ui.member ? ui.member.wa : null),
-      email: ui.member ? ui.member.email : null,
-      isGroup: ctx.isGroup,
-      groupId: ctx.groupId,
-      chatId: ctx.chatId || null,
-      platform: ctx.platform,
-      requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
-      presence: ctx.presence || null,
-      turnBudget: ctx.turnBudget,
-      // Bound helper for tools that want to fire an intermediate notification
-      // (e.g. generate_video - "Sto generando il video...").
-      // Dedup is enforced per (call, kind) inside sendIntermediateNotification.
-      sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message)
-    };
-
-    // ctx.requestId is set here so that sendIntermediateNotification (which
-    // receives ctx, not userCtx) uses the same call-scoped ID as the dedup
-    // keys written by the tools dispatcher (which receives userCtx).
-    ctx.requestId = userCtx.requestId;
-
-    // -- Workspace activity tracking --
-    // Touch last-activity on each main turn and read <Workspace> for the
-    // prompt. Read once, first level only: the Runtime block that carries it is
-    // built once too, and `list_files` gives the model the rest on demand.
-    const workspaceId = resolveWorkspaceId(ctx);
-    ctx.userWorkspace = null;
-    if (workspaceId) {
-      try { touchActivity(workspaceId); }
-      catch (e) { log.warn(`touchActivity failed: ${e.message}`); }
-      try {
-        const listing = listWorkspaceFiles(workspaceId, 30, { depth: 1 });
-        if (listing.total > 0) {
-          ctx.userWorkspace = {
-            total: listing.total,
-            files: listing.files,
-            dirs: listing.dirs,
-            more: !!listing.more
-          };
-        }
-      } catch (e) {
-        log.warn(`listWorkspaceFiles failed: ${e.message}`);
-      }
-    }
-
-    // Static system first (only role:system — keep it that way for prefix
-    // cache). Then history, the current user message, and the Runtime block.
-    // Rebuilt static only if the live tool fingerprint changes mid-turn (rare).
-    let staticInstructions = buildStaticInstructions(ctx);
-    let toolsFp = promptToolsFingerprint(ctx);
-    const input = [systemItem(staticInstructions)];
-    input[0]._staticPrefix = true;
-
-    // GemiX voice in history is [Attachment] on assistant (no native audio parts).
-    // Replace those tags in-place with <PastVoiceReply> on the assistant messages
-    // (not on the current user turn). Voice platforms only (WA dedicated + personal).
-    let historyForApi = Array.isArray(ctx.history) ? ctx.history : [];
-    if (workspaceId) {
-      try {
-        const visibleNames = collectVisibleAttachmentNames(historyForApi, ctx.content);
-        const reconciled = reconcileProjection(workspaceId, visibleNames);
-        if (reconciled.removed > 0) {
-          log.info(`   Attachment projection reconciled: removed=${reconciled.removed}, kept=${reconciled.kept}`);
-        }
-        if (reconciled.missing > 0) {
-          log.warn(`   Attachment projection has ${reconciled.missing} visible file(s) missing after ingress`);
-        }
-      } catch (projectionErr) {
-        log.warn(`Attachment projection reconciliation failed: ${projectionErr.message}`);
-      }
-    }
-    if (allowVoice && historyForApi.length > 0) {
-      try {
-        const { history: patched, replacedCount } = applyPastVoiceRepliesToHistory(
-          historyForApi,
-          resolveStorageId(ctx)
-        );
-        historyForApi = patched;
-        if (replacedCount > 0) {
-          log.info(`   Replaced ${replacedCount} assistant voice [Attachment] tag(s) with <PastVoiceReply>`);
-        }
-      } catch (txErr) {
-        log.warn(`PastVoiceReply history rewrite failed: ${txErr.message}`);
-      }
-    }
-    // The user's own voice notes are conversational content, not files to open:
-    // every one of them becomes <PastVoice> with its transcript, in place, on
-    // every platform. The audio stays in attachments/ for read_file.
-    let contentForApi = ctx.content;
-    try {
-      const projected = await projectUserVoiceMessages(
-        { history: historyForApi, current: contentForApi, storageId: resolveStorageId(ctx) },
-        { language: ctx.settings?.language, signal: ctx.turnBudget?.signal }
-      );
-      historyForApi = projected.history;
-      contentForApi = projected.current;
-      if (projected.projected > 0) {
-        log.info(`   Rendered ${projected.projected} user voice note(s) as <PastVoice>`);
-      }
-    } catch (voiceErr) {
-      log.warn(`PastVoice projection failed: ${voiceErr.message}`);
-    }
-
-    if (historyForApi.length > 0) {
-      input.push(...historyForApi);
-    }
-
-    // The whole burst is a single item (utils/batchContentRefresh), tagged so the
-    // model knows which request it is answering. The tag is the one deliberate
-    // break in the cross-turn prefix: next turn the history replays these same
-    // messages untagged and separate, so the shared prefix now ends where this
-    // turn's burst began instead of at the Runtime block below.
-    input.push(userItem(wrapUserQuery(contentForApi)));
-
-    // Turn-varying program state: built once, placed right after the current
-    // user message, and never moved again. Both constraints matter.
-    //   - after the user message, so that nothing turn-varying lands where the
-    //     history will replay a message next turn.
-    //   - never rebuilt or re-appended, because then each round would drop
-    //     changing bytes where the replayed reasoning and tool items land and
-    //     force a recompute from there on.
-    // Together they keep every round a pure append, which is the cache that
-    // actually holds (87-89% within a turn).
-    // Must not use role:system either: xAI merges extra system messages into the
-    // leading system block, which moves them and busts the prefix for good.
-    // What it states can move during the turn (workspace files, quota counts,
-    // preferences); the tool results that cause those changes report them, so
-    // the frozen snapshot stays truthful about turn start.
-    input.push(userItem(buildDynamicRuntimeContext(ctx)));
+    const prepared = await prepareTurn(ctx, ui);
+    const { isDiscord, allowVoice, userCtx, workspaceId, input } = prepared;
+    let { staticInstructions, toolsFp } = prepared;
 
     /** Keep input[0] in sync if the static prefix is rebuilt mid-turn. */
     const syncStaticPrefix = () => {
@@ -388,97 +205,6 @@ async function handleMessage(ctx) {
     let workBudgetLimitReached = false;
     const promptCacheKey = generatePromptCacheKey(userCtx);
 
-    const accumulateSearchStats = (searchStats) => {
-      if (!searchStats || (searchStats.webSources === 0 && searchStats.xPosts === 0)) return;
-      if (!responseCtx.researchStats) {
-        responseCtx.researchStats = { webSources: 0, xPosts: 0 };
-      }
-      responseCtx.researchStats.webSources += searchStats.webSources;
-      responseCtx.researchStats.xPosts += searchStats.xPosts;
-    };
-
-    // Resolve the attachments the model listed in its structured final reply:
-    // paths in this conversation's namespace, or public https URLs. Only what
-    // it listed ships.
-    const resolveFinalAttachments = async (parsed) => {
-      if (!parsed.structured) return [];
-      const { attachments, missing } = await resolveDeliverySelection(parsed.attachments, workspaceId);
-      if (missing.length > 0) {
-        log.warn(`   Final reply attachments not resolved: ${missing.join(', ')}`);
-      }
-      return attachments;
-    };
-
-    // Non-empty conversation_title → rename; "" / missing → leave thread name as-is.
-    const applyParsedTitle = (parsed) => {
-      if (!parsed.title) return;
-      const title = sanitizeDiscordThreadTitle(stripOutgoingDeliveryArtifacts(parsed.title));
-      if (!title) return;
-      responseCtx.discordTitle = title;
-    };
-
-    // Tool defs for the round in flight (platform/membership-gated; what the
-    // model may reach for is decided here, never re-derived per call).
-    let currentRoundTools = [];
-
-    const runToolCall = async (tc) => {
-      try {
-        log.info('   Executing:', summarizeToolCall(tc));
-        const { toolCallId, result } = await executeTool(
-          { id: tc.id, function: { name: tc.name, arguments: tc.arguments } },
-          userCtx, responseCtx, deliveryCtx, currentRoundTools
-        );
-        log.info('   Result:', summarizeToolResult(result));
-        return toolResultItems(toolCallId, result);
-      } catch (toolErr) {
-        log.error(`   ❌ Tool error "${tc.name}": ${toolErr.message}`);
-        return toolResultItems(tc.id, JSON.stringify({
-          success: false,
-          error: `Execution error: ${toolErr.message}`
-        }));
-      }
-    };
-
-    // Generate a voice reply from the model's final `response` text when it set
-    // `voice:true` (WhatsApp dedicated only). Returns a voice response object,
-    // or null to fall back to a normal text reply (too long, error).
-    const buildVoiceReply = async (rawResponseText, finalAttachments, budget) => {
-      const spoken = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
-      if (!spoken.trim()) return null;
-
-      if (spoken.length > constants.MAX_TTS_CHARS) {
-        log.warn(`   Voice text too long (${spoken.length} > ${constants.MAX_TTS_CHARS}); replying as text`);
-        return null;
-      }
-
-      let voiceBuffer;
-      try {
-        if (ctx.presence && typeof ctx.presence.setRecording === 'function') {
-          try { await ctx.presence.setRecording(); } catch { /* best effort */ }
-        }
-        voiceBuffer = await generateVoice(spoken, ctx.settings || {}, { signal: budget?.signal });
-      } catch (err) {
-        log.error(`   Voice generation failed (${err.message}); replying as text`);
-        return null;
-      }
-
-      const researchFooter = ctx.platform === constants.PLATFORM_WA_DEDICATED
-        ? buildResearchBadgeText(responseCtx.researchStats)
-        : null;
-      log.info(`   Voice reply ready (${voiceBuffer.length} bytes)`);
-      return {
-        text: null,
-        voiceBuffer,
-        isVoiceOnly: true,
-        attachments: finalAttachments,
-        discordTitle: responseCtx.discordTitle || '',
-        modelUsed: lastModelUsed,
-        voiceTranscriptText: spoken,
-        voiceTranscriptChatId: ctx.chatId || ctx.groupId || null,
-        researchFooter
-      };
-    };
-
     while (rounds < constants.MAX_TOOL_ROUNDS) {
       rounds++;
 
@@ -500,11 +226,10 @@ async function handleMessage(ctx) {
         isActiveMember,
         isAdmin: userIsAdmin
       });
-      currentRoundTools = roundTools;
       const nextFp = promptToolsFingerprint(ctx);
       if (nextFp !== toolsFp) {
-        // Unexpected today (getToolsForUser depends on nothing that moves mid-turn);
-        // keep it correct in case gating ever changes.
+        // Keep the cached system prefix aligned with the tool set actually
+        // offered in this round.
         staticInstructions = buildStaticInstructions(ctx);
         toolsFp = nextFp;
         syncStaticPrefix();
@@ -539,7 +264,7 @@ async function handleMessage(ctx) {
       }
       const { reply, provider, model, searchStats } = roundResult;
       lastModelUsed = model;
-      accumulateSearchStats(searchStats);
+      accumulateSearchStats(responseCtx, searchStats);
       log.info(`   Provider: ${provider} (${model})`);
 
       if (reply.toolCalls.length > 0) {
@@ -549,53 +274,13 @@ async function handleMessage(ctx) {
         // encrypted reasoning is what keeps the next round's thinking continuous.
         input.push(...reply.items);
 
-        const orderedCalls = reply.toolCalls;
-        // The set the model was actually offered this round: membership in it is
-        // the whole permission check (see ai/tools.js getToolAccessError).
-        const allowedToolNames = new Set(roundTools.map(t => t.function?.name).filter(Boolean));
-        const phases = partitionHandlerToolCalls(orderedCalls);
-        const resultsById = new Map();
-
-        const recordToolResult = async (tc, blockedOncePerRound) => {
-          if (blockedOncePerRound.has(tc.id)) {
-            const cap = PER_ROUND_TOOL_LIMITS[tc.name];
-            log.warn(`   Tool "${tc.name}" blocked: per-round cap (${cap}) exceeded in same model turn`);
-            return toolResultItems(tc.id, perRoundCapErrorPayload(tc.name, cap));
-          }
-          const toolBlock = getToolAccessError(
-            tc.name,
-            allowedToolNames,
-            (name) => _toolNotAvailableMessage(name, ctx)
-          );
-          if (toolBlock) {
-            log.warn(`   Tool "${tc.name}" blocked: ${toolBlock}`);
-            return toolResultItems(tc.id, JSON.stringify({ success: false, error: toolBlock }));
-          }
-          return runToolCall(tc);
-        };
-
-        const runPhase = async (batch, parallel) => {
-          const blockedOncePerRound = perRoundCappedDuplicateIds(batch, PER_ROUND_TOOL_LIMITS);
-          if (parallel) {
-            await Promise.all(batch.map(async (tc) => {
-              resultsById.set(tc.id, await recordToolResult(tc, blockedOncePerRound));
-            }));
-          } else {
-            for (const tc of batch) {
-              resultsById.set(tc.id, await recordToolResult(tc, blockedOncePerRound));
-            }
-          }
-        };
-
-        await runPhase(phases.phase1, true);
-        await runPhase(phases.phase2, false);
-
-        // Every call answered, in the order the model made them: a
-        // function_call with no output back is a malformed conversation.
-        for (const tc of orderedCalls) {
-          const items = resultsById.get(tc.id);
-          if (items) input.push(...items);
-        }
+        input.push(...await executeToolRound(reply.toolCalls, {
+          userCtx,
+          responseCtx,
+          deliveryCtx,
+          roundTools,
+          platformCtx: ctx
+        }));
 
         // A file or image preview a tool attached is worth its tokens on the
         // round it arrives and not after; the envelope stays either way.
@@ -610,13 +295,20 @@ async function handleMessage(ctx) {
       if (!parsed.structured) {
         log.warn('   Structured reply expected but content was not valid JSON; using raw text');
       }
-      applyParsedTitle(parsed);
-      const finalAttachments = await resolveFinalAttachments(parsed);
+      applyParsedTitle(parsed, responseCtx);
+      const finalAttachments = await resolveFinalAttachments(parsed, workspaceId, turnBudgets.work.signal);
 
       // Voice reply (WhatsApp dedicated only): speak `response` (with TTS tags)
       // instead of sending text. Falls back to text on limit/length/TTS failure.
       if (allowVoice && parsed.voice) {
-        const voiceReply = await buildVoiceReply(parsed.text || '', finalAttachments, turnBudgets.work);
+        const voiceReply = await buildVoiceReply({
+          rawResponseText: parsed.text,
+          finalAttachments,
+          budget: turnBudgets.work,
+          ctx,
+          responseCtx,
+          modelUsed: lastModelUsed
+        });
         if (voiceReply) return voiceReply;
         log.info('   Voice reply not produced; falling back to text');
       }
@@ -661,9 +353,9 @@ async function handleMessage(ctx) {
       }
 
       // ── Research badge ──────────────────────────────────────────────────
-      // Append "🌐: N sources. 𝕏: N posts." when server-side web/X search ran
-      // (real counts from the API payloads). Omit a section when its count is
-      // zero so the badge stays minimal.
+      // Append "🌐: N sources. 𝕏: N posts." from the counts collected by
+      // GemiX web search and provider-native X search. Zero sections stay out
+      // so the badge remains minimal.
       if (text.trim() && responseCtx.researchStats) {
         const badge = buildResearchBadgeText(responseCtx.researchStats);
         if (badge) {
@@ -720,10 +412,10 @@ async function handleMessage(ctx) {
         budget: turnBudgets.root
       });
       if (finalModel) lastModelUsed = finalModel;
-      accumulateSearchStats(searchStats);
+      accumulateSearchStats(responseCtx, searchStats);
       const parsed = parseStructuredReply(finalReply.text || '');
-      applyParsedTitle(parsed);
-      wrapUpAttachments = await resolveFinalAttachments(parsed);
+      applyParsedTitle(parsed, responseCtx);
+      wrapUpAttachments = await resolveFinalAttachments(parsed, workspaceId, turnBudgets.root.signal);
       wrapUpVoice = Boolean(allowVoice && parsed.voice);
       wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanAssistantResponse(parsed.text || '');
     } catch (wrapErr) {
@@ -732,7 +424,14 @@ async function handleMessage(ctx) {
 
     // Voice wrap-up reply (WhatsApp dedicated): speak it; fall back to text.
     if (wrapUpVoice && wrapUpText.trim()) {
-      const voiceReply = await buildVoiceReply(wrapUpText, wrapUpAttachments, turnBudgets.root);
+      const voiceReply = await buildVoiceReply({
+        rawResponseText: wrapUpText,
+        finalAttachments: wrapUpAttachments,
+        budget: turnBudgets.root,
+        ctx,
+        responseCtx,
+        modelUsed: lastModelUsed
+      });
       if (voiceReply) return voiceReply;
       wrapUpText = cleanAssistantResponse(wrapUpText);
     }

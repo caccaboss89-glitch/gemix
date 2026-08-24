@@ -21,8 +21,7 @@
 // host-owned and outside the model-controlled runtime.
 //
 // Notes:
-//   - The base image ENTRYPOINT is overridden with `Cmd:['sleep','infinity']`
-//     + `Entrypoint:[]` so the container is a quiet idle process to attach to.
+//   - PID 1 is a quota monitor; commands still attach through Docker exec.
 //   - All egress (curl/wget/yt-dlp/pip-less downloads) goes through the egress
 //     proxy, which forwards upstream via the residential SOCKS5 and fails
 //     closed when that is unavailable.
@@ -49,9 +48,39 @@ const SANDBOX_NETWORK = envConfig.GEMIX_SANDBOX_NETWORK;
 const PROXY_HOSTNAME = envConfig.GEMIX_SANDBOX_PROXY_HOST;
 const PROXY_PORT = envConfig.GEMIX_SANDBOX_PROXY_PORT;
 const PROXY_URL = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
+const WORKSPACE_QUOTA_BYTES = constants.WORKSPACE_QUOTA_MB * 1024 * 1024;
 
 /** Map<workspaceId, WorkspaceContainerEntry> */
 const _pool = new Map();
+
+function _boundedName(prefix, identity, nonce, maxLength = 63) {
+  const safePrefix = String(prefix || 'gemix').toLowerCase().replace(/[^a-z0-9_.-]/g, '-');
+  const safeNonce = String(nonce || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const hash = crypto.createHash('sha256').update(String(identity)).digest('hex').slice(0, 12);
+  const suffix = `${hash}-${safeNonce}`;
+  return `${safePrefix.slice(0, Math.max(1, maxLength - suffix.length - 1))}-${suffix}`;
+}
+
+function workspaceContainerName(workspaceId, nonce = crypto.randomBytes(3).toString('hex')) {
+  const slug = workspaceIdToSlug(workspaceId);
+  if (!slug) throw new Error('Cannot resolve workspace slug');
+  return _boundedName(`gemix-ws-${slug}`, workspaceId, nonce);
+}
+
+function workspaceNetworkName(workspaceId, nonce = crypto.randomBytes(3).toString('hex')) {
+  return _boundedName(`${SANDBOX_NETWORK}-ws`, workspaceId, nonce);
+}
+
+function workspaceNetworkCreateOptions(workspaceId, networkName) {
+  return {
+    Name: networkName,
+    Internal: true,
+    Labels: {
+      'gemix.kind': 'workspace-network',
+      'gemix.workspaceId': workspaceId
+    }
+  };
+}
 
 let _docker = null;
 async function _getDocker() {
@@ -87,8 +116,8 @@ function containerEnv() {
 }
 
 /**
- * Spawn a fresh container for `workspaceId`. Idle `sleep infinity` PID 1;
- * tools attach via docker exec.
+ * Spawn a fresh container for `workspaceId`. Its quota monitor is PID 1 and
+ * tools attach through docker exec.
  */
 async function _spawnContainer(workspaceId) {
   const slug = workspaceIdToSlug(workspaceId);
@@ -102,8 +131,9 @@ async function _spawnContainer(workspaceId) {
   if (!attachmentsDir) throw new Error('Cannot ensure attachments directory');
   ensureWorkspaceWritable(workspaceId);
 
-  const containerName = `gemix-ws-${slug}-${crypto.randomBytes(3).toString('hex')}`
-    .toLowerCase().replace(/[^a-z0-9_.-]/g, '-').slice(0, 63);
+  const nonce = crypto.randomBytes(3).toString('hex');
+  const containerName = workspaceContainerName(workspaceId, nonce);
+  const networkName = workspaceNetworkName(workspaceId, nonce);
 
   const docker = await _getDocker();
   const memBytes = constants.SANDBOX_MEMORY_MB * 1024 * 1024;
@@ -114,7 +144,7 @@ async function _spawnContainer(workspaceId) {
   ];
 
   const hostConfig = {
-    NetworkMode: SANDBOX_NETWORK,
+    NetworkMode: networkName,
     AutoRemove: true,
     CapDrop: ['ALL'],
     SecurityOpt: ['no-new-privileges:true'],
@@ -132,10 +162,8 @@ async function _spawnContainer(workspaceId) {
     name: containerName,
     Image: SANDBOX_IMAGE,
     Hostname: 'workspace',
-    // Override image defaults so the container is a quiet idle process we
-    // attach to via docker exec.
     Entrypoint: [],
-    Cmd: ['sleep', 'infinity'],
+    Cmd: ['python', '/opt/sandbox/quota_guard.py', String(WORKSPACE_QUOTA_BYTES)],
     User: sandboxUserString(),
     Env: containerEnv(),
     HostConfig: hostConfig,
@@ -145,14 +173,37 @@ async function _spawnContainer(workspaceId) {
     }
   };
 
-  const container = await docker.createContainer(createOpts);
-  await container.start();
+  let network;
+  const proxyContainer = docker.getContainer(PROXY_HOSTNAME);
+  let container;
+  try {
+    await proxyContainer.inspect();
+    network = await docker.createNetwork(workspaceNetworkCreateOptions(workspaceId, networkName));
+    await network.connect({
+      Container: proxyContainer.id,
+      EndpointConfig: { Aliases: [PROXY_HOSTNAME] }
+    });
+    container = await docker.createContainer(createOpts);
+    await container.start();
+  } catch (err) {
+    if (container) {
+      try { await container.remove({ force: true }); } catch { /* not created or already removed */ }
+    }
+    if (network) {
+      try { await network.disconnect({ Container: proxyContainer.id, Force: true }); } catch { /* not connected */ }
+      try { await network.remove(); } catch { /* best effort */ }
+    }
+    throw err;
+  }
 
   return {
     workspaceId,
     container,
     containerId: container.id,
     containerName,
+    network,
+    networkName,
+    proxyContainer,
     lastUsedAt: Date.now()
   };
 }
@@ -267,6 +318,7 @@ function buildExecSpec({ command, timeoutMs } = {}) {
   } else {
     throw new Error('buildExecSpec: missing command');
   }
+  argv = ['python', '/opt/sandbox/quota_exec.py', String(WORKSPACE_QUOTA_BYTES), ...argv];
   const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
   return {
     cmd: ['timeout', '--signal=KILL', `${timeoutSec}s`, ...argv],
@@ -350,8 +402,10 @@ async function execInWorkspace(workspaceId, opts = {}) {
   } catch {
     rc = timedOut ? 124 : 1;
   }
-  // GNU timeout uses 124 on timeout; the SIGKILL path reports 137.
-  if (rc === 124 || rc === 137) timedOut = true;
+  // GNU timeout uses 124, or 137 when its final SIGKILL fired. Other sandbox
+  // enforcement (notably the quota monitor) can also produce 137, so only
+  // classify that code as a timeout when it arrived at the configured edge.
+  if (rc === 124 || (rc === 137 && Date.now() - startedAt >= timeoutMs - 1_000)) timedOut = true;
 
   const stdout = _capBufferChunks(stdoutBuf);
   const stderr = _capBufferChunks(stderrBuf);
@@ -373,9 +427,17 @@ async function _killEntry(entry) {
     try { entry = await entry._bootPromise; }
     catch { return; }
   }
-  if (!entry || !entry.container) return;
-  try { await entry.container.stop({ t: 2 }); } catch { /* */ }
-  try { await entry.container.remove({ force: true }); } catch { /* */ }
+  if (!entry) return;
+  if (entry.container) {
+    try { await entry.container.stop({ t: 2 }); } catch { /* already stopped */ }
+    try { await entry.container.remove({ force: true }); } catch { /* already removed */ }
+  }
+  if (entry.network) {
+    try {
+      await entry.network.disconnect({ Container: entry.proxyContainer?.id || PROXY_HOSTNAME, Force: true });
+    } catch { /* already disconnected */ }
+    try { await entry.network.remove(); } catch { /* already removed */ }
+  }
 }
 
 async function shutdown(workspaceId) {
@@ -393,9 +455,8 @@ async function shutdownAll() {
 }
 
 /**
- * Best-effort cleanup of dangling workspace containers from previous runs.
- * Matches the current `gemix-ws-` prefix and the `gemix-bw-` one older builds
- * used, plus either generation's label. Called on startup.
+ * Best-effort startup cleanup of dangling workspace containers. Matches both
+ * supported runtime-name prefixes (`gemix-ws-`, `gemix-bw-`) and their labels.
  */
 async function cleanupOrphanContainers() {
   let docker;
@@ -408,9 +469,9 @@ async function cleanupOrphanContainers() {
       c.Names.some(n => n.startsWith('/gemix-ws-') || n.startsWith('/gemix-bw-'))
       || (c.Labels && (c.Labels['gemix.kind'] === 'workspace-runtime' || c.Labels['gemix.kind'] === 'build-workspace'))
     );
-    if (orphans.length === 0) return;
-
-    log.info(`Found ${orphans.length} orphan workspace container(s). Cleaning up...`);
+    if (orphans.length > 0) {
+      log.info(`Found ${orphans.length} orphan workspace container(s). Cleaning up...`);
+    }
     for (const cInfo of orphans) {
       try {
         const container = docker.getContainer(cInfo.Id);
@@ -425,6 +486,21 @@ async function cleanupOrphanContainers() {
         } else {
           log.warn(`Failed to cleanup ${cInfo.Id.slice(0, 12)}: ${err.message}`);
         }
+      }
+    }
+
+    const networks = await docker.listNetworks({ filters: { label: ['gemix.kind=workspace-network'] } });
+    for (const networkInfo of networks) {
+      try {
+        const network = docker.getNetwork(networkInfo.Id);
+        const inspected = await network.inspect();
+        for (const containerId of Object.keys(inspected.Containers || {})) {
+          await network.disconnect({ Container: containerId, Force: true }).catch(() => {});
+        }
+        await network.remove();
+        log.info(`Cleaned up orphan workspace network ${networkInfo.Name}`);
+      } catch (err) {
+        log.warn(`Failed to cleanup workspace network ${networkInfo.Name}: ${err.message}`);
       }
     }
   } catch (err) {
@@ -452,6 +528,9 @@ export default {
   execInWorkspace,
   buildExecSpec,
   containerEnv,
+  workspaceContainerName,
+  workspaceNetworkName,
+  workspaceNetworkCreateOptions,
   shutdown,
   shutdownAll
 };

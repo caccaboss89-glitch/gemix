@@ -143,7 +143,7 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   return `Tool "${toolName}" is not available in the current context.`;
 }
 
-/** @param {Set<string>|null} toolNames - live tool names from getToolsForUser; null = legacy cap.tools */
+/** @param {Set<string>|null} toolNames - live tool names from getToolsForUser; null = profile cap.tools */
 function _hasTool(toolNames, cap, name) {
   if (toolNames) return toolNames.has(name);
   return cap.tools.has(name);

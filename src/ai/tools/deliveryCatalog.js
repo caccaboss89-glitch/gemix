@@ -5,10 +5,13 @@
 
 import { makeTool } from './schema.js';
 
+const MAX_DELIVERY_ATTACHMENTS = 10;
+
 const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string' },
-  description: 'OPTIONAL. Same entry types as reply attachments: a path exactly as you saw it, or a direct public https file URL. Omit if none.'
+  maxItems: MAX_DELIVERY_ATTACHMENTS,
+  description: `OPTIONAL, up to ${MAX_DELIVERY_ATTACHMENTS}. Same entry types as reply attachments: a path exactly as you saw it, or a direct public https file URL. Omit if none.`
 };
 
 function buildWhatsAppTool(isAdmin) {
@@ -93,6 +96,7 @@ function buildReadSentMessagesTool(isAdmin) {
 }
 
 export {
+  MAX_DELIVERY_ATTACHMENTS,
   buildEmailTool,
   buildReadSentMessagesTool,
   buildWhatsAppTool

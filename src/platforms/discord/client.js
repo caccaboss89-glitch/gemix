@@ -171,7 +171,7 @@ async function buildDiscordIncomingContentParts(msg, channel, historyStorageId, 
   const attachmentTags = [];
 
   // The message being answered and the one it replies to are the only sources
-  // of inline images, and they share the per-turn cap (spec §8.6).
+  // of inline images, and they share the per-turn cap.
   let imagesInlined = quotedMediaParts.length;
   for (const att of msg.attachments.values()) {
     const ingress = await ingressDiscordAttachment(att, historyStorageId, {
@@ -502,7 +502,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
     for (const att of m.attachments.values()) {
       // History is tags only, on every platform: the model opens what it needs
-      // with read_file instead of the window carrying every past file (§8.6).
+      // with read_file instead of the window carrying every past file.
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         workspaceId,
         inline: false,

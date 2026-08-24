@@ -78,6 +78,14 @@ function validateToolArgs(args, toolDef) {
       const nestedErr = _validateObjectRequired(value, propSchema, key);
       if (nestedErr) return nestedErr;
     }
+    if (propSchema.type === 'array' && Array.isArray(value)) {
+      if (Number.isInteger(propSchema.minItems) && value.length < propSchema.minItems) {
+        return `Argument "${key}" must contain at least ${propSchema.minItems} item(s).`;
+      }
+      if (Number.isInteger(propSchema.maxItems) && value.length > propSchema.maxItems) {
+        return `Argument "${key}" must contain at most ${propSchema.maxItems} item(s).`;
+      }
+    }
     if (propSchema.type === 'array' && Array.isArray(value) && propSchema.items?.type === 'object') {
       const itemSchema = propSchema.items;
       const itemProps = itemSchema.properties || {};

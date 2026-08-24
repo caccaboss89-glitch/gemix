@@ -14,8 +14,7 @@
 //     outlive the shell call and therefore has to coordinate its own writes.
 //
 // Activity lives in `<workspaceMetaDir>/.build_state.json`; the lock directory
-// is its sibling. The state filename is historical and kept so an upgrade does
-// not lose an existing workspace's activity timestamp.
+// is its sibling.
 
 import fs from 'fs';
 import path from 'path';
@@ -75,15 +74,23 @@ function _writeState(workspaceId, state) {
  *
  * Also stores the workspaceId in the state.
  */
-function touchActivity(workspaceId) {
+async function touchActivity(workspaceId) {
   if (!workspaceId) return;
+  return withWorkspaceLock(workspaceId, { ownerId: `activity:${process.pid}` }, async () => {
+    const state = _readState(workspaceId);
+    delete state.lock;
+    state.lastActivityAt = Date.now();
+    state.workspaceId = workspaceId;
+    _writeState(workspaceId, state);
+  });
+}
+
+function readWorkspaceActivity(workspaceId) {
   const state = _readState(workspaceId);
-  // Locks moved out of this legacy state file. Drop an old embedded lock the
-  // first time the workspace is touched after upgrade.
-  delete state.lock;
-  state.lastActivityAt = Date.now();
-  state.workspaceId = workspaceId;
-  _writeState(workspaceId, state);
+  return {
+    workspaceId: typeof state.workspaceId === 'string' ? state.workspaceId : null,
+    lastActivityAt: Number(state.lastActivityAt) || 0
+  };
 }
 
 /**
@@ -252,7 +259,7 @@ async function withWorkspaceLock(workspaceId, opts, fn) {
 /**
  * Iterate over every workspace meta dir under constants.DATA_DIR/users/ that
  * has a state file. Returns [{ workspaceSlug, workspaceId, metaDir,
- * lastActivityAt, lock }], where lock is read from the sibling lock directory.
+ * lastActivityAt }].
  * Used by the cron sweeper to find stale workspaces.
  */
 function listWorkspaceStates() {
@@ -275,8 +282,7 @@ function listWorkspaceStates() {
         workspaceSlug: e.name,
         workspaceId: raw && typeof raw.workspaceId === 'string' ? raw.workspaceId : null,
         metaDir,
-        lastActivityAt: Number(raw && raw.lastActivityAt) || 0,
-        lock: _readLockAt(path.join(metaDir, LOCK_DIRNAME))
+        lastActivityAt: Number(raw && raw.lastActivityAt) || 0
       });
     } catch { /* skip corrupted state file */ }
   }
@@ -286,6 +292,7 @@ function listWorkspaceStates() {
 export {
   LOCK_MAX_TTL_MS,
   touchActivity,
+  readWorkspaceActivity,
   acquireWorkspaceLock,
   releaseWorkspaceLock,
   withWorkspaceLock,

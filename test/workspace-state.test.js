@@ -11,7 +11,9 @@ import test, { after } from 'node:test';
 import { getWorkspaceMetaDir } from '../src/utils/workspaceId.js';
 import {
   acquireWorkspaceLock,
+  readWorkspaceActivity,
   releaseWorkspaceLock,
+  touchActivity,
   withWorkspaceLock
 } from '../src/utils/workspaceState.js';
 
@@ -19,7 +21,8 @@ const IDS = [
   `user:lock-local-${process.pid}@c.us`,
   `user:lock-process-${process.pid}@c.us`,
   `user:lock-finally-${process.pid}@c.us`,
-  `user:lock-expiry-${process.pid}@c.us`
+  `user:lock-expiry-${process.pid}@c.us`,
+  `user:lock-activity-${process.pid}@c.us`
 ];
 
 after(() => {
@@ -97,4 +100,18 @@ test('an expired generation is reaped without letting its old token release the 
     err => err?.code === 'EWORKSPACEBUSY'
   );
   releaseWorkspaceLock(workspaceId, replacement);
+});
+
+test('activity updates serialize with mutations and become visible after the lock', async () => {
+  const workspaceId = IDS[4];
+  const mutation = await acquireWorkspaceLock(workspaceId, { ownerId: 'mutation', waitMs: 0 });
+  let settled = false;
+  const touching = touchActivity(workspaceId).then(() => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(settled, false);
+  releaseWorkspaceLock(workspaceId, mutation);
+  await touching;
+  const state = readWorkspaceActivity(workspaceId);
+  assert.equal(state.workspaceId, workspaceId);
+  assert.ok(Date.now() - state.lastActivityAt < 2_000);
 });

@@ -15,23 +15,23 @@
 // The generated media is downloaded into `workspace/`, and the tool answers
 // with its path — plus, for an image, an inline copy so the model sees it.
 //
-// `generate_image` is the one tool with two backends behind it (spec §11.1):
+// `generate_image` is the one tool with two backends behind it:
 // Grok Imagine where the profile has it, Cloudflare FLUX otherwise and as the
 // fallback. The routing and the fallback rules live in media/imageBackends.js;
 // what stays here is the xAI half and the parts both share — prompt cleaning,
 // the weekly quota, staging the result.
 
-import fs from 'fs';
 import path from 'path';
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
 import { callApiWithRetry, logApiResponse, fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
-import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
+import { downloadPublicFile  } from '../utils/fetch.js';
 import { resolveLocalFileEntry  } from '../utils/deliverySelection.js';
+import { readAgentFileBuffer } from '../sandbox/hostFileGateway.js';
 import { resolveWorkspaceId  } from '../utils/workspaceId.js';
 import { stageToolOutput  } from './workspace/toolOutput.js';
-import { INLINE_IMAGE_EXTS, inlineImagePart  } from './workspace/inlineImage.js';
+import { INLINE_IMAGE_EXTS, inlineImagePartFromBuffer  } from './workspace/inlineImage.js';
 import {
   BACKEND,
   FLUX_SIZES,
@@ -143,19 +143,19 @@ function _resolveReferenceImageUrls(refList, max, workspaceId) {
       };
     }
 
-    let buffer;
+    let opened;
     try {
-      const sz = fs.statSync(found.filePath).size;
-      if (sz === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-      if (sz > constants.MAX_IMAGE_BYTES) {
+      opened = readAgentFileBuffer(workspaceId, found.display, constants.MAX_IMAGE_BYTES);
+    } catch (err) {
+      if (err?.code === 'EFILETOOLARGE') {
         return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
       }
-      buffer = fs.readFileSync(found.filePath);
-    } catch (err) {
       return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
     }
+    if (!opened) return { ok: false, reason: `Cannot safely read reference "${entry}".` };
+    if (opened.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
 
-    urls.push(`data:${mimeForExtension(ext, 'image/png')};base64,${buffer.toString('base64')}`);
+    urls.push(`data:${mimeForExtension(ext, 'image/png')};base64,${opened.buffer.toString('base64')}`);
   }
   return { ok: true, urls };
 }
@@ -175,18 +175,12 @@ function _classifyXaiFailure(message) {
 }
 
 async function _downloadMedia(url, signal) {
-  const res = await fetchWithTimeout(url, { signal }, VIDEO_DOWNLOAD_TIMEOUT_MS);
-  if (!res.ok) {
-    throw new Error(`Download failed: HTTP ${res.status}`);
-  }
-  const arrBuf = await readResponseBodyWithTimeout(res.arrayBuffer(), VIDEO_DOWNLOAD_TIMEOUT_MS);
-  if (!arrBuf || arrBuf.byteLength === 0) {
-    throw new Error('Download returned an empty body.');
-  }
-  if (arrBuf.byteLength > GENERATED_MEDIA_MAX_BYTES) {
-    throw new Error(`Download too large (${arrBuf.byteLength} bytes, max ${GENERATED_MEDIA_MAX_BYTES}).`);
-  }
-  return Buffer.from(arrBuf);
+  const result = await downloadPublicFile(url, {
+    signal,
+    timeoutMs: VIDEO_DOWNLOAD_TIMEOUT_MS,
+    maxBytes: GENERATED_MEDIA_MAX_BYTES
+  });
+  return result.buffer;
 }
 
 /**
@@ -246,17 +240,18 @@ function _readReferenceBuffers(refList, workspaceId) {
       return { ok: false, reason: `Reference "${entry}" is not a supported image type.` };
     }
     try {
-      const stat = fs.statSync(found.filePath);
-      if (stat.size === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
-      if (stat.size > constants.MAX_IMAGE_BYTES) {
-        return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
-      }
+      const opened = readAgentFileBuffer(workspaceId, found.display, constants.MAX_IMAGE_BYTES);
+      if (!opened) return { ok: false, reason: `Cannot safely read reference "${entry}".` };
+      if (opened.buffer.length === 0) return { ok: false, reason: `Reference "${entry}" is empty.` };
       images.push({
-        buffer: fs.readFileSync(found.filePath),
+        buffer: opened.buffer,
         name: found.name,
         mime: mimeForExtension(ext, 'image/png')
       });
     } catch (err) {
+      if (err?.code === 'EFILETOOLARGE') {
+        return { ok: false, reason: `Reference "${entry}" exceeds the ${Math.round(constants.MAX_IMAGE_BYTES / 1024 / 1024)} MB limit.` };
+      }
       return { ok: false, reason: `Cannot read reference "${entry}": ${err.message}` };
     }
   }
@@ -264,7 +259,7 @@ function _readReferenceBuffers(refList, workspaceId) {
 }
 
 /** Land the generated bytes in the workspace under a name taken from the prompt. */
-function _stageGeneratedMedia(workspaceId, prompt, buffer, ext, fallbackBase) {
+async function _stageGeneratedMedia(workspaceId, prompt, buffer, ext, fallbackBase) {
   const baseName = sanitizeFilename(prompt.slice(0, 30), 30) || fallbackBase;
   return stageToolOutput(workspaceId, `${baseName}_${Date.now()}.${ext}`, buffer);
 }
@@ -374,11 +369,11 @@ async function generateImage(args, userCtx) {
 
     let staged;
     try {
-      staged = _stageGeneratedMedia(workspaceId, prompt, attempt.buffer, attempt.ext, 'image');
+      staged = await _stageGeneratedMedia(workspaceId, prompt, attempt.buffer, attempt.ext, 'image');
     } catch (err) {
       return { success: false, error: `Cannot save the generated image: ${err.message}` };
     }
-    const visionPart = inlineImagePart(staged.abs);
+    const visionPart = inlineImagePartFromBuffer(attempt.buffer, mimeForExtension(`.${attempt.ext}`, 'image/png'));
 
     const truncNote = truncated ? ' (prompt was truncated)' : '';
     const refNote = attempt.refCount > 0 ? ` Used ${attempt.refCount} reference image(s).` : '';
@@ -463,7 +458,7 @@ async function _attemptFluxImage({ prompt, refList, size, workspaceId, signal })
 }
 
 /**
- * Try the primary, then the fallback, under the §18.13 rules. Never more than
+ * Try the primary, then the fallback, under the fallback policy. Never more than
  * one retry per backend and never a third backend, so this always terminates.
  */
 async function _runImageChain({ primary, fallback, prompt, refList, aspect, size, workspaceId, signal }) {
@@ -490,7 +485,7 @@ async function _runImageChain({ primary, fallback, prompt, refList, aspect, size
   log.info(`   ${primary} failed (${attempt.code}); falling back to ${fallback}`);
   const second = await run(fallback);
   if (second.ok) return { ...second, backend: fallback };
-  // Rule 6: both are spent, so the model gets one structured error, not a loop.
+  // Both are spent, so the model gets one structured error, not a loop.
   return { ok: false, error: `${attempt.error} Fallback also failed: ${second.error}`, code: second.code };
 }
 
@@ -599,7 +594,7 @@ async function generateVideo(args, userCtx) {
     const ext = _extFromGeneratedMedia(videoUrl, null, 'mp4');
     let staged;
     try {
-      staged = _stageGeneratedMedia(workspaceId, prompt, buffer, ext, 'video');
+      staged = await _stageGeneratedMedia(workspaceId, prompt, buffer, ext, 'video');
     } catch (err) {
       return { success: false, error: `Cannot save the generated video: ${err.message}` };
     }

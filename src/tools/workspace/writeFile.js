@@ -15,6 +15,8 @@
 // a conversation file the model copies it across first.
 
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
+import { statAgentFile } from '../../sandbox/hostFileGateway.js';
+import { assertWorkspaceCapacity } from '../../sandbox/workspaceFs.js';
 import {
   commitWorkspaceText,
   quotaResultFields,
@@ -50,6 +52,17 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
     // for a symlink between validation and serialization.
     const lockedResolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
     if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
+    const current = statAgentFile(workspaceId, raw);
+    try {
+      assertWorkspaceCapacity(
+        workspaceId,
+        Buffer.byteLength(args.content, 'utf-8'),
+        current?.stat?.size || 0
+      );
+    } catch (err) {
+      if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };
+      throw err;
+    }
     const committed = await commitWorkspaceText(workspaceId, lockedResolved, args.content);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;

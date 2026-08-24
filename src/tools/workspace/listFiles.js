@@ -6,16 +6,12 @@
 //
 // `list_files`: what is in `workspace/` or `attachments/` right now.
 //
-// Host-side, in-process: a listing only ever runs GemiX's own code, and a
-// docker exec would cost more than the readdir it wraps.
-
-import fs from 'fs';
 import constants from '../../config/constants.js';
-import { listFilesUnder } from '../../sandbox/workspaceFs.js';
+import { listAgentDirectory, statAgentFile } from '../../sandbox/hostFileGateway.js';
 import {
   ROOT,
   invalidPathError,
-  resolveAgentPath,
+  parseAgentPath,
   toDisplayPath
 } from '../../sandbox/workspacePaths.js';
 
@@ -30,31 +26,28 @@ const MAX_ENTRIES = 300;
  */
 function listFiles(args = {}, workspaceId) {
   const raw = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : `${ROOT.WORKSPACE}/`;
-  const resolved = resolveAgentPath(workspaceId, raw);
+  const resolved = parseAgentPath(raw);
   if (!resolved) return invalidPathError(raw);
 
-  let stat = null;
-  try { stat = fs.statSync(resolved.abs); } catch { /* missing */ }
-  if (!stat) {
+  const listing = listAgentDirectory(workspaceId, resolved.display, {
+    limit: MAX_ENTRIES,
+    depth: args.recursive ? Infinity : 1
+  });
+  if (!listing) {
+    if (statAgentFile(workspaceId, resolved.display)) {
+      return {
+        success: false,
+        error: `${resolved.display} is a file, not a directory. Use read_file to read it.`
+      };
+    }
     return {
       success: true,
       path: resolved.display,
       total: 0,
       entries: [],
-      message: `${resolved.display} does not exist yet.`
+      message: `${resolved.display} does not exist or is not a safe directory.`
     };
   }
-  if (!stat.isDirectory()) {
-    return {
-      success: false,
-      error: `${resolved.display} is a file, not a directory. Use read_file to read it.`
-    };
-  }
-
-  const listing = listFilesUnder(resolved.abs, {
-    limit: MAX_ENTRIES,
-    depth: args.recursive ? Infinity : 1
-  });
 
   const prefix = resolved.relPath ? `${resolved.relPath}/` : '';
   const entries = listing.files.map(f => ({

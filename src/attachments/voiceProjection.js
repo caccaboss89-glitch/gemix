@@ -11,7 +11,7 @@
 // in place, on the same role and in the same position. Nothing about the
 // 30-message window, the ordering or the attachment rules changes, and the raw
 // audio stays in `attachments/` because the user may still want it cut,
-// converted or analysed (spec §8.3).
+// converted or analysed later.
 //
 // GemiX's own voice replies are the mirror case and keep `<PastVoiceReply>`
 // (utils/voiceTranscripts.js): the transcript is already known at generation

@@ -55,8 +55,8 @@ function _replaceVoiceAttachmentsInAssistantContent(content, storageId, seen) {
     if (!text) continue;
 
     const past = _formatPastVoiceReply(name, text);
-    // Tags carry the namespace path; older history entries kept the bare name
-    // or the legacy history/ prefix, so all three forms have to match.
+    // Tags carry the namespace path; stored history may use a bare name or the
+    // history/ prefix, so all three forms have to match.
     const re = new RegExp(
       `\\[Attachment(?:\\s*\\(expired\\))?:\\s*(?:attachments/|history/)?${_escapeRegExp(name)}\\]`,
       'g'

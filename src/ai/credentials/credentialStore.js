@@ -9,8 +9,9 @@
 //      has to be on disk, or a crash between the exchange and the write leaves
 //      the account permanently unusable. Every mutation is a temp-file write
 //      plus a rename, and the rename is what makes it atomic.
-//   2. Two turns can refresh at once. All read-modify-write goes through one
-//      in-process chain, so a concurrent update cannot clobber a rotation.
+//   2. Turns and the auth CLI can update the same pool concurrently. All
+//      read-modify-write operations hold both an in-process chain and an
+//      inter-process lock, so neither process can clobber a rotation.
 //   3. The file holds bearer and refresh tokens, so it is created 0600 and
 //      never leaves the host process — nothing here is ever handed to the
 //      container the model controls.
@@ -19,6 +20,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import constants from '../../config/constants.js';
 import { createLogger } from '../../utils/logger.js';
 import { withKeyedLock } from '../../utils/keyedLock.js';
@@ -28,9 +30,75 @@ const log = createLogger('Credentials');
 const STORE_DIR = path.join(constants.DATA_DIR, 'credentials');
 const FILE_MODE = 0o600;
 const DIR_MODE = 0o700;
+const LOCK_STALE_MS = 5 * 60 * 1000;
+const LOCK_WAIT_MS = 2 * 60 * 1000;
 
-/** Per-provider chain so a concurrent rotation cannot clobber another. */
+/** Per-provider chain so concurrent work in this process stays ordered. */
 const _locks = new Map();
+
+function _sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function _lockDir(provider) {
+  return `${_storeFile(provider)}.lock`;
+}
+
+function _readLockOwner(lockDir) {
+  try { return JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf-8')); }
+  catch { return null; }
+}
+
+function _reclaimStaleLock(lockDir) {
+  let stat;
+  try { stat = fs.statSync(lockDir); }
+  catch { return false; }
+  if (Date.now() - stat.mtimeMs <= LOCK_STALE_MS) return false;
+  const stale = `${lockDir}.stale-${process.pid}-${crypto.randomUUID()}`;
+  try {
+    fs.renameSync(lockDir, stale);
+    fs.rmSync(stale, { recursive: true, force: true });
+    return true;
+  } catch { return false; }
+}
+
+async function _withFileLock(provider, fn) {
+  _ensureDir();
+  const lockDir = _lockDir(provider);
+  const nonce = `${process.pid}-${crypto.randomUUID()}`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  while (true) {
+    let created = false;
+    try {
+      fs.mkdirSync(lockDir, { mode: DIR_MODE });
+      created = true;
+      fs.writeFileSync(
+        path.join(lockDir, 'owner.json'),
+        JSON.stringify({ nonce, pid: process.pid, createdAt: Date.now() }),
+        { encoding: 'utf-8', mode: FILE_MODE, flag: 'wx' }
+      );
+      break;
+    } catch (err) {
+      if (created) {
+        try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch { /* stale recovery handles it */ }
+      }
+      if (err.code !== 'EEXIST') throw err;
+      if (_reclaimStaleLock(lockDir)) continue;
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for the ${provider} credential-store lock.`);
+      }
+      await _sleep(50 + Math.floor(Math.random() * 50));
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    if (_readLockOwner(lockDir)?.nonce === nonce) {
+      try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch { /* next writer reclaims it */ }
+    }
+  }
+}
 
 /**
  * @typedef {object} StoredAccount
@@ -89,13 +157,16 @@ function _normalizeAccount(raw, index) {
  * @param {string} provider
  * @returns {StoredAccount[]}
  */
-function readPool(provider) {
+function _readPool(provider, strict) {
   const file = _storeFile(provider);
   let raw;
   try {
     if (!fs.existsSync(file)) return [];
     raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
   } catch (err) {
+    if (strict) {
+      throw new Error(`Cannot read the ${provider} credential store without risking data loss: ${err.message}`);
+    }
     log.warn(`Cannot read the ${provider} credential store (${err.message}); treating it as empty`);
     return [];
   }
@@ -103,11 +174,15 @@ function readPool(provider) {
   return accounts.map(_normalizeAccount).filter(Boolean);
 }
 
+function readPool(provider) {
+  return _readPool(provider, false);
+}
+
 /** Write the whole pool atomically with 0600 permissions. */
 function _writePool(provider, accounts) {
   _ensureDir();
   const file = _storeFile(provider);
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   const payload = JSON.stringify({ provider: _sanitizeProvider(provider), accounts }, null, 2);
   try {
     fs.writeFileSync(tmp, payload, { encoding: 'utf-8', mode: FILE_MODE });
@@ -128,9 +203,39 @@ function _writePool(provider, accounts) {
  */
 function updatePool(provider, mutate) {
   return withKeyedLock(_locks, _sanitizeProvider(provider), async () => {
-    const next = mutate(readPool(provider)) || [];
-    _writePool(provider, next);
-    return next;
+    return _withFileLock(provider, async () => {
+      const next = await mutate(_readPool(provider, true)) || [];
+      _writePool(provider, next);
+      return next;
+    });
+  });
+}
+
+/**
+ * Mutate one account while holding the cross-process store lock. This is used
+ * for refresh-token exchange so reading the current single-use token, calling
+ * the provider and persisting the rotated pair form one serialized operation.
+ *
+ * @param {string} provider
+ * @param {string} accountId
+ * @param {(account: StoredAccount) => Promise<StoredAccount>|StoredAccount} mutate
+ * @returns {Promise<StoredAccount>}
+ */
+function updateAccountExclusive(provider, accountId, mutate) {
+  return withKeyedLock(_locks, _sanitizeProvider(provider), async () => {
+    return _withFileLock(provider, async () => {
+      const accounts = _readPool(provider, true);
+      const index = accounts.findIndex(account => account.id === accountId);
+      if (index === -1) throw new Error(`Credential account "${accountId}" no longer exists.`);
+      const updated = await mutate({ ...accounts[index] });
+      const normalized = _normalizeAccount({ ...accounts[index], ...updated, id: accountId }, index);
+      if (!normalized) throw new Error(`Credential account "${accountId}" carries no usable token.`);
+      normalized.id = accountId;
+      const next = [...accounts];
+      next[index] = normalized;
+      _writePool(provider, next);
+      return normalized;
+    });
   });
 }
 
@@ -221,6 +326,7 @@ export {
   STORE_DIR,
   readPool,
   updatePool,
+  updateAccountExclusive,
   upsertAccount,
   patchAccount,
   removeAccount,

@@ -18,7 +18,7 @@ import { modifyTaskFile, readTaskFile  } from '../utils/taskStore.js';
 import { createLogger  } from '../utils/logger.js';
 import { stripVoiceTags, normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
-import { listWorkspaceStates  } from '../utils/workspaceState.js';
+import { listWorkspaceStates, readWorkspaceActivity, withWorkspaceLock } from '../utils/workspaceState.js';
 import workspaceRuntime from '../sandbox/workspaceRuntime.js';
 import { wipeWorkspace  } from '../sandbox/workspaceFs.js';
 import { clearProjection, sweepExpiredAttachments } from '../attachments/projection.js';
@@ -51,25 +51,28 @@ async function _sweepStaleWorkspaces() {
   for (const s of states) {
     if (!s.lastActivityAt) continue;
     if (now - s.lastActivityAt < constants.WORKSPACE_TTL_MS) continue;
-    // Never wipe a workspace while a foreground mutation is still holding the
-    // cross-process lock. An expired lock is safe to ignore and will be reaped
-    // by the next mutating tool call.
-    if (s.lock && Number(s.lock.expiresAt) > now) continue;
-
     const workspaceId = s.workspaceId;
     if (!workspaceId) {
       log.warn(`Skipping idle workspace ${s.workspaceSlug}: no workspaceId persisted`);
       continue;
     }
-    log.info(`Wiping idle workspace ${s.workspaceSlug} (idle ${(now - s.lastActivityAt) / 60000 | 0} min)`);
-    try { wipeWorkspace(workspaceId); }
-    catch (err) { log.warn(`wipeWorkspace failed: ${err.message}`); }
-    try { clearProjection(workspaceId); }
-    catch (err) { log.warn(`clearProjection failed: ${err.message}`); }
-    try { clearParserCache(workspaceId); }
-    catch (err) { log.warn(`clearParserCache failed: ${err.message}`); }
-    try { await workspaceRuntime.shutdown(workspaceId); }
-    catch (err) { log.warn(`workspace container shutdown failed: ${err.message}`); }
+    try {
+      await withWorkspaceLock(workspaceId, { ownerId: `sweep:${process.pid}`, waitMs: 0 }, async () => {
+        const current = readWorkspaceActivity(workspaceId);
+        if (!current.lastActivityAt || Date.now() - current.lastActivityAt < constants.WORKSPACE_TTL_MS) return;
+        log.info(`Wiping idle workspace ${s.workspaceSlug} (idle ${(Date.now() - current.lastActivityAt) / 60000 | 0} min)`);
+        try { await workspaceRuntime.shutdown(workspaceId); }
+        catch (err) { log.warn(`workspace container shutdown failed: ${err.message}`); }
+        try { wipeWorkspace(workspaceId); }
+        catch (err) { log.warn(`wipeWorkspace failed: ${err.message}`); }
+        try { clearProjection(workspaceId); }
+        catch (err) { log.warn(`clearProjection failed: ${err.message}`); }
+        try { clearParserCache(workspaceId); }
+        catch (err) { log.warn(`clearParserCache failed: ${err.message}`); }
+      });
+    } catch (err) {
+      if (err.code !== 'EWORKSPACEBUSY') log.warn(`workspace sweep failed: ${err.message}`);
+    }
   }
 
   try { sweepExpiredAttachments(now); }

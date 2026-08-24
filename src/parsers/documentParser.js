@@ -1,7 +1,7 @@
 // src/parsers/documentParser.js
 //
 // Documents, spreadsheets, slides, email and archives — everything Kreuzberg
-// reads (spec §9, §18.6).
+// reads.
 //
 // One dependency does the work: text, tables, embedded images, metadata and
 // OCR all come out of the same call, so there is no per-format branch here to
@@ -15,7 +15,7 @@
 // that has not installed it yet must still be able to read a text file.
 
 import path from 'path';
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { mimeForExtension } from '../config/mimeExtensions.js';
@@ -40,6 +40,23 @@ const THIN_TEXT_CHARS_PER_PAGE = 200;
 let _kreuzberg = null;
 let _kreuzbergError = null;
 let _ocrAvailable = null;
+let _ocrProbe = null;
+
+function _abortReason(signal) {
+  return signal?.reason || new Error('Document parsing aborted.');
+}
+
+function _abortable(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(_abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(_abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(promise).then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', onAbort);
+    });
+  });
+}
 
 /** Load the native binding once, remembering a failure so it is not retried per read. */
 async function _load() {
@@ -63,16 +80,31 @@ async function _load() {
  * keeps a scanned PDF returning its (empty) text layer with an honest note,
  * instead of every document read spilling tesseract errors.
  */
-function ocrAvailable() {
+async function ocrAvailable() {
   if (_ocrAvailable !== null) return _ocrAvailable;
-  try {
-    const probe = spawnSync(envConfig.TESSERACT_PATH, ['--version'], { timeout: 5000 });
-    _ocrAvailable = probe.status === 0;
-  } catch {
-    _ocrAvailable = false;
+  if (!_ocrProbe) {
+    _ocrProbe = new Promise((resolve) => {
+      let settled = false;
+      const finish = (available) => {
+        if (settled) return;
+        settled = true;
+        _ocrAvailable = available;
+        if (!available) log.info('tesseract not found: scanned pages will not be OCR-ed');
+        resolve(available);
+      };
+      let child;
+      try { child = spawn(envConfig.TESSERACT_PATH, ['--version'], { stdio: 'ignore' }); }
+      catch { finish(false); return; }
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* already exited */ }
+        finish(false);
+      }, 5000);
+      timer.unref?.();
+      child.once('error', () => { clearTimeout(timer); finish(false); });
+      child.once('exit', code => { clearTimeout(timer); finish(code === 0); });
+    });
   }
-  if (!_ocrAvailable) log.info('tesseract not found: scanned pages will not be OCR-ed');
-  return _ocrAvailable;
+  return _ocrProbe;
 }
 
 /** True when this module claims the file. */
@@ -101,13 +133,14 @@ function _cleanMetadata(raw) {
 }
 
 /** Render the first pages of a PDF so vision can read what the text layer lost. */
-async function _renderPages(kreuzberg, absPath, pageCount, notes) {
+async function _renderPages(kreuzberg, absPath, pageCount, notes, signal) {
   const pages = Math.min(pageCount || 1, constants.PARSE_MAX_PDF_RENDER_PAGES);
   const images = [];
   // The renderer indexes from 0; everything the model sees counts from 1.
   for (let index = 0; index < pages; index++) {
+    if (signal?.aborted) throw _abortReason(signal);
     try {
-      const png = await kreuzberg.renderPdfPage(absPath, index, { scale: 2 });
+      const png = await _abortable(kreuzberg.renderPdfPage(absPath, index, { scale: 2 }), signal);
       const buffer = Buffer.isBuffer(png) ? png : Buffer.from(png);
       if (buffer.length > 0) images.push({ page: index + 1, buffer, mime: 'image/png' });
     } catch (err) {
@@ -152,28 +185,30 @@ function _tables(result) {
  * @param {object} [opts]
  * @param {string} [opts.ext] - lowercase extension, defaults to the path's
  * @param {boolean} [opts.ocr] - run OCR on pages with no text layer
+ * @param {AbortSignal} [opts.signal]
  * @returns {Promise<{
  *   ok: boolean, error?: string, kind?: string, content?: string,
  *   metadata?: object, images?: Array, notes?: string[]
  * }>}
  */
 async function parseDocument(absPath, opts = {}) {
-  const kreuzberg = await _load();
+  const kreuzberg = await _abortable(_load(), opts.signal);
   if (!kreuzberg) {
     return { ok: false, error: 'The document parser is not installed on this deployment.' };
   }
 
   const ext = opts.ext || path.extname(absPath).toLowerCase();
   const notes = [];
-  const useOcr = opts.ocr !== false && ocrAvailable();
+  const useOcr = opts.ocr !== false && await _abortable(ocrAvailable(), opts.signal);
   let result;
   try {
-    result = await kreuzberg.extractFile(
+    result = await _abortable(kreuzberg.extractFile(
       absPath,
       mimeForExtension(ext) || undefined,
       useOcr ? { ocr: { backend: 'tesseract' } } : {}
-    );
+    ), opts.signal);
   } catch (err) {
+    if (opts.signal?.aborted) throw _abortReason(opts.signal);
     return { ok: false, error: `Could not parse this file: ${err.message}` };
   }
 
@@ -197,7 +232,7 @@ async function parseDocument(absPath, opts = {}) {
     if (thin) {
       notes.push('The text layer is thin for this page count, so the pages are attached as images.');
       if (!useOcr) notes.push('OCR is not available on this host, so scanned text is only in those images.');
-      images.push(...await _renderPages(kreuzberg, absPath, pageCount, notes));
+      images.push(...await _renderPages(kreuzberg, absPath, pageCount, notes, opts.signal));
     }
   }
 

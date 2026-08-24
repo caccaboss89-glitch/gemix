@@ -131,9 +131,8 @@ function stripMarkdownLinks(text) {
  * The Responses API enables inline citations by default: whenever the model
  * cites a server-side web/X search result it writes `[[N]](url)` straight into
  * the reply text (docs.x.ai → Tools → Citations). Discord renders that as a
- * clickable `[N]`, but WhatsApp has no anchor-text markup at all — bare URLs
- * are the only thing it linkifies — so there the markdown used to be deleted
- * outright and every source was lost.
+ * clickable `[N]`, but WhatsApp has no anchor-text markup at all and only
+ * linkifies bare URLs.
  *
  * Here each citation keeps a `[N]` marker in place and the URLs are appended
  * as a numbered list under the reply. Numbering is rebuilt from first-appearance

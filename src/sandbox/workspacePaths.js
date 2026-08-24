@@ -10,7 +10,7 @@
 // One path shape means a file named by `write_file` is the same string the
 // model passes to `read_file`, to `send_email`, and to `attachments[]` in the
 // final reply. Nothing here resolves a bare basename against a directory
-// listing: a path either names a real file or it does not (spec §18.16).
+// listing: a path either names a real file or it does not.
 //
 // A path with no root prefix is read as `workspace/`, because that is the only
 // place the model can create anything. Everything else — `..`, null bytes,
