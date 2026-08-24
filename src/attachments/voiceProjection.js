@@ -165,8 +165,8 @@ async function _transcribe(storageId, name, info, opts) {
 }
 
 /**
- * Resolve every clip: cached ones for free, the rest transcribed newest-first
- * with bounded concurrency and a per-turn cap.
+ * Resolve every clip from cache first. When STT is available, transcribe cache
+ * misses newest-first with bounded concurrency and a per-turn cap.
  */
 async function _resolveAll(names, storageId, opts) {
   const resolved = new Map();
@@ -177,6 +177,17 @@ async function _resolveAll(names, storageId, opts) {
     if (!info) continue;
     if (info.cached) resolved.set(name, info.cached);
     else pending.push({ name, info });
+  }
+
+  if (!isSttConfigured()) {
+    for (const { name } of pending) {
+      resolved.set(name, {
+        status: STT_STATUS.UNCONFIGURED,
+        text: '',
+        message: STT_UNCONFIGURED_MESSAGE
+      });
+    }
+    return resolved;
   }
 
   // `names` arrives in document order, so the newest clips are at the end and
@@ -259,14 +270,13 @@ async function projectUserVoiceMessages({ history, current, storageId }, opts = 
   if (names.size === 0) return { history: safeHistory, current, projected: 0 };
 
   let resolved;
-  if (!isSttConfigured()) {
-    resolved = new Map([...names].map(name => [name, {
+  if (!storageId) {
+    const unavailable = !isSttConfigured();
+    resolved = new Map([...names].map(name => [name, unavailable ? {
       status: STT_STATUS.UNCONFIGURED,
       text: '',
       message: STT_UNCONFIGURED_MESSAGE
-    }]));
-  } else if (!storageId) {
-    resolved = new Map([...names].map(name => [name, { status: STT_STATUS.ERROR, text: '' }]));
+    } : { status: STT_STATUS.ERROR, text: '' }]));
   } else {
     resolved = await _resolveAll([...names], storageId, {
       language: opts.language,
