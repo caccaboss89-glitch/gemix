@@ -39,7 +39,7 @@ import {
 import { formatMediaQuotaResetLabel } from '../../src/utils/mediaUsageLimits.js';
 import workspaceRuntime from '../../src/sandbox/workspaceRuntime.js';
 import { ATOMIC_WRITE_SCRIPT } from '../../src/tools/workspace/mutation.js';
-import { CASES } from './cases.js';
+import { CASES, MOCK_ACTIVE_MEMBERS } from './cases.js';
 
 /** Tool names the workspace-runtime dump quotes verbatim. */
 const WORKSPACE_TOOL_NAMES = new Set(['list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell']);
@@ -407,7 +407,7 @@ function renderCase(id) {
     reviewedAt: suppliedSettings?.reviewedAt || null
   };
 
-  const staticPart = buildStaticInstructions(ctx);
+  const staticPart = buildStaticInstructions(ctx, undefined, { activeMembers: MOCK_ACTIVE_MEMBERS });
   const dynamicPart = buildDynamicRuntimeContext(ctx);
 
   const identity = ctx.userIdentity || {};

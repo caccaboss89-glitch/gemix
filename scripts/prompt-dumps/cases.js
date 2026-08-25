@@ -38,6 +38,23 @@ const NON_ACTIVE = {
   taskFileId: 'wa_3999999999'
 };
 
+/** Stable, non-sensitive roster used by the offline prompt corpus. */
+const MOCK_ACTIVE_MEMBERS = [
+  {
+    name: envConfig.ADMIN_NAME,
+    nicks: ['test-admin'],
+    email: 'admin@example.invalid',
+    wa: '390000000001@c.us',
+    admin: true
+  },
+  {
+    name: 'Member User',
+    nicks: ['test-member'],
+    email: 'member@example.invalid',
+    wa: '390000000002@c.us'
+  }
+];
+
 /** Sample roster for group prompt dumps (mirrors waParticipants.js formatting). */
 const MOCK_GROUP_PARTICIPANTS = [
   { number: '393331234567', name: 'Alice', isGemix: false },
@@ -310,4 +327,4 @@ const CASES = {
   }
 };
 
-export { CASES };
+export { CASES, MOCK_ACTIVE_MEMBERS };

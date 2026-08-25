@@ -101,20 +101,25 @@ function _callerLineInner(ctx, promptOpts) {
  * @param {object} ctx
  * @param {Array} [tools] - the set offered this round; resolved from ctx when
  *   absent, so a rebuild always describes the same tools it was fingerprinted on.
+ * @param {{ activeMembers?: Array<object> }} [opts]
  */
-function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx)) {
+function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}) {
   const isActiveMember = Boolean(ctx.userIdentity?.isActiveMember);
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
   const toolNames = toolNamesToSet(tools);
+  const activeMembers = Array.isArray(opts.activeMembers) ? opts.activeMembers : ACTIVE_MEMBERS;
   // Discord Thread title / conversation_title guidance live only in Runtime.
   const promptOpts = { isActiveMember, toolNames };
 
   const sections = [_buildOpening(cap)];
 
   sections.push(_section('This chat', _buildChatLines(ctx, cap, profile)));
-  sections.push(_section('Who you are talking to', _buildAudienceLines(cap, profile, promptOpts, isAdmin)));
+  sections.push(_section(
+    'Who you are talking to',
+    _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers)
+  ));
   sections.push(_section('Program-owned turns', [PROGRAM_ITEMS_RULE]));
   sections.push(_section('What you can and cannot see', buildVisibilityLines(profile)));
   sections.push(_section('How you answer', buildAnswerLines(profile, promptOpts)));
@@ -224,7 +229,7 @@ function _buildChatLines(ctx, cap, profile) {
  * one, so it is stated outright. The roster stays an XML data block; how to
  * address people around it is prose.
  */
-function _buildAudienceLines(cap, profile, promptOpts, isAdmin) {
+function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   const lines = buildAudienceLines(profile, promptOpts);
   if (!promptOpts.isActiveMember) return lines;
 
@@ -232,7 +237,7 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin) {
     // The admin addresses members directly by phone/email (see send_* and
     // schedule_tasks), so the roster carries the exact identifiers: no name
     // lookup is needed and reminders never default to the caller by mistake.
-    const roster = ACTIVE_MEMBERS.map((m) => {
+    const roster = activeMembers.map((m) => {
       const num = (m.wa || '').split('@')[0].split(':')[0] || '?';
       const email = m.email ? `, ${m.email}` : '';
       return `${escapeXml(m.name)} (${num}${escapeXml(email)})`;
@@ -247,7 +252,7 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin) {
           + 'and takes a recipient when the reminder is for someone else.'
     );
   } else {
-    lines.push(`<ActiveMembers>${ACTIVE_MEMBERS.map(m => escapeXml(m.name)).join(', ')}</ActiveMembers>`);
+    lines.push(`<ActiveMembers>${activeMembers.map(m => escapeXml(m.name)).join(', ')}</ActiveMembers>`);
     lines.push('Address them by their roster name in the delivery tools.');
   }
 
