@@ -185,5 +185,10 @@ export default {
   AGENT_SEARCH_TOKEN: process.env.AGENT_SEARCH_TOKEN || '',
 
   GEMIX_NOTIFY_SECRET: process.env.GEMIX_NOTIFY_SECRET || '',
-  CHROMIUM_PATH: process.env.CHROMIUM_PATH || '/usr/bin/chromium'
+
+  // Browser WhatsApp Web runs in. Empty means "let Puppeteer resolve the
+  // browser it installed for itself", which is the supported setup: Ubuntu's
+  // `chromium` package is a confined snap that Puppeteer cannot drive through
+  // executablePath. Set it only for a deployment with a real system binary.
+  CHROMIUM_PATH: process.env.CHROMIUM_PATH || ''
 };

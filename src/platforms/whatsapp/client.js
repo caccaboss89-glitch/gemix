@@ -12,6 +12,7 @@
 
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
+import puppeteer from 'puppeteer';
 import qrcode from 'qrcode-terminal';
 import constants from '../../config/constants.js';
 import envConfig from '../../config/env.js';
@@ -20,6 +21,24 @@ import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppe
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const PROTOCOL_TIMEOUT_MS = 120_000;
+
+/**
+ * Which browser binary Puppeteer launches, resolved once per process.
+ *
+ * The default is the Chrome that Puppeteer downloads for itself during
+ * `npm install`, because on Ubuntu 24.04 `apt install chromium` is a confined
+ * snap that Puppeteer cannot drive through `executablePath` and fails in ways
+ * that are hard to read. `CHROMIUM_PATH` overrides it where a real system
+ * binary exists. An empty result leaves the option unset, which lets Puppeteer
+ * raise its own, more precise, "browser not found" error at launch.
+ */
+function _resolveChromiumPath() {
+  if (envConfig.CHROMIUM_PATH) return envConfig.CHROMIUM_PATH;
+  try { return puppeteer.executablePath(); }
+  catch { return ''; }
+}
+
+const CHROMIUM_PATH = _resolveChromiumPath();
 
 function _isReady(client) {
   return Boolean(client?.info?.wid?._serialized);
@@ -37,10 +56,11 @@ function _isReady(client) {
  * @returns {object} The whatsapp-web.js Client instance (already initializing)
  */
 function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady }) {
+  log.info(`Chromium: ${CHROMIUM_PATH || 'resolved by Puppeteer at launch'}`);
   const client = new Client({
     authStrategy: new LocalAuth({ clientId }),
     puppeteer: {
-      executablePath: envConfig.CHROMIUM_PATH,
+      executablePath: CHROMIUM_PATH || undefined,
       headless: true,
       args: constants.PUPPETEER_ARGS,
       protocolTimeout: PROTOCOL_TIMEOUT_MS
