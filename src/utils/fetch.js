@@ -163,12 +163,14 @@ async function downloadPublicFile(url, opts = {}) {
     }
   });
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    response.resume();
+    response.destroy();
     throw new Error(`Download failed: HTTP ${response.statusCode} (${clean.slice(0, 120)})`);
   }
   const declared = Number(_header(response, 'content-length') || 0);
   if (declared > maxBytes) {
-    response.resume();
+    // Dropped rather than drained: nothing here is going to be read, and on a
+    // home line downloading a body only to discard it is the expensive option.
+    response.destroy();
     throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
   }
   const buffer = await _consumePublicBody(response, maxBytes, operationSignal);
@@ -219,12 +221,12 @@ async function downloadPublicFileToDisk(url, destPath, opts = {}) {
     }
   });
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    response.resume();
+    response.destroy();
     throw new Error(`Download failed: HTTP ${response.statusCode} (${clean.slice(0, 120)})`);
   }
   const declared = Number(_header(response, 'content-length') || 0);
   if (declared > maxBytes) {
-    response.resume();
+    response.destroy();
     throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
   }
   const dir = path.dirname(destPath);

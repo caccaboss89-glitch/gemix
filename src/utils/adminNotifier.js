@@ -11,6 +11,17 @@ let client = null;
 const cooldowns = new Map();
 const COOLDOWN_MS = 5 * 60 * 1000;
 
+/**
+ * Forget sources whose cooldown has run out. Most sources are fixed strings,
+ * but a few carry a model or tool name and one arrives from the sandbox proxy
+ * over POST /notify, so the map has no natural ceiling without this.
+ */
+function _dropExpiredCooldowns(now) {
+  for (const [source, at] of cooldowns) {
+    if (now - at >= COOLDOWN_MS) cooldowns.delete(source);
+  }
+}
+
 // Standardized message suffix appended to AI tool errors after admin
 // notification. Composed from shared halves so the bug_report variant (which
 // must not tell the model off for calling bug_report) cannot drift from it.
@@ -41,9 +52,11 @@ function setAdminNotifierClient(waClient) {
 async function notifyAdmin(source, errorMessage) {
   if (!client) return false;
 
+  const now = Date.now();
   const lastNotified = cooldowns.get(source) || 0;
-  if (Date.now() - lastNotified < COOLDOWN_MS) return false;
-  cooldowns.set(source, Date.now());
+  if (now - lastNotified < COOLDOWN_MS) return false;
+  _dropExpiredCooldowns(now);
+  cooldowns.set(source, now);
 
   const admin = ACTIVE_MEMBERS.find(m => m.admin);
   if (!admin) return false;

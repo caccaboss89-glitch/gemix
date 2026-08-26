@@ -100,12 +100,18 @@ async function _lookupWithDeadline(hostname, timeoutMs, signal) {
   }
 }
 
-async function resolvePublicAddress(url, opts = {}) {
+/**
+ * Every address this name may be connected to, all of them validated. Returning
+ * the whole set rather than the first answer is what lets a dual-stack host
+ * still be reached when one family has no route out; it widens nothing, because
+ * a single non-public answer already rejects the name outright.
+ */
+async function resolvePublicAddresses(url, opts = {}) {
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   const literalFamily = net.isIP(hostname);
   if (literalFamily) {
     if (!isPublicIp(hostname)) throw new Error('Private or local URL targets are not allowed.');
-    return { address: hostname, family: literalFamily };
+    return [{ address: hostname, family: literalFamily }];
   }
 
   let answers;
@@ -117,7 +123,7 @@ async function resolvePublicAddress(url, opts = {}) {
   if (!answers.length || answers.some(answer => !isPublicIp(answer.address))) {
     throw new Error('Private, local or unresolved URL targets are not allowed.');
   }
-  return answers[0];
+  return answers;
 }
 
 function _requestPinned(url, target, opts) {
@@ -147,12 +153,27 @@ async function openPublicHttp(raw, opts = {}) {
     if (opts.signal?.aborted) throw opts.signal.reason || new Error('Download aborted.');
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error(`Timeout (${timeoutMs / 1000}s) reached for ${url.href}`);
-    const target = await resolvePublicAddress(url, { timeoutMs: remaining, signal: opts.signal });
-    const response = await _requestPinned(url, target, {
-      headers: opts.headers,
-      signal: opts.signal,
-      timeoutMs: remaining
-    });
+    const targets = await resolvePublicAddresses(url, { timeoutMs: remaining, signal: opts.signal });
+    let response = null;
+    let lastErr = null;
+    for (const target of targets) {
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      try {
+        response = await _requestPinned(url, target, {
+          headers: opts.headers,
+          signal: opts.signal,
+          timeoutMs: left
+        });
+        break;
+      } catch (err) {
+        if (opts.signal?.aborted) throw opts.signal.reason || err;
+        lastErr = err;
+      }
+    }
+    if (!response) {
+      throw lastErr || new Error(`Timeout (${timeoutMs / 1000}s) reached for ${url.href}`);
+    }
     const location = response.headers.location;
     if (response.statusCode >= 300 && response.statusCode < 400 && location) {
       response.resume();

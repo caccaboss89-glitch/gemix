@@ -134,12 +134,19 @@ function _toWav16k(absPath, signal) {
   return new Promise((resolve) => {
     if (signal?.aborted) return resolve(null);
     const outPath = path.join(tempDirForOwner(null), `stt_${crypto.randomBytes(8).toString('hex')}.wav`);
-    const child = spawn(envConfig.FFMPEG_PATH, [
-      '-hide_banner', '-loglevel', 'error', '-y',
-      '-i', absPath,
-      '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
-      outPath
-    ]);
+    let child;
+    try {
+      child = spawn(envConfig.FFMPEG_PATH, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', absPath,
+        '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
+        outPath
+      ]);
+    } catch { return resolve(null); }
+    // Both pipes have to be read or ffmpeg blocks once the OS buffer fills and
+    // only the kill timer below would ever end it.
+    child.stdout.on('data', () => {});
+    child.stderr.on('data', () => {});
     const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, FFMPEG_TIMEOUT_MS);
     const onAbort = () => { try { child.kill('SIGKILL'); } catch { /* gone */ } };
     signal?.addEventListener?.('abort', onAbort, { once: true });

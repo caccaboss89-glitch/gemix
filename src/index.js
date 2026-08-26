@@ -59,11 +59,16 @@ function runStartupCleanup() {
         log.debug(`   Docker cleanup skipped: ${err.message}`);
       }
 
-      // 3. User cache directories
+      // 3. User cache directories. ~/.cache/puppeteer holds the browser
+      //    WhatsApp Web runs in (see platforms/whatsapp/client.js), so it is
+      //    the one entry this must not remove.
       try {
         const homeCacheSize = execSync('du -sh ~/.cache 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
         log.info(`   ~/.cache: ${homeCacheSize.split('\t')[0]}`);
-        execSync('rm -rf ~/.cache/* 2>/dev/null || true', { encoding: 'utf-8' });
+        execSync(
+          'find ~/.cache -mindepth 1 -maxdepth 1 ! -name puppeteer -exec rm -rf {} + 2>/dev/null || true',
+          { encoding: 'utf-8' }
+        );
 
         const pipCacheSize = execSync('pip cache info 2>/dev/null | grep "Total" || echo "0"', { encoding: 'utf-8' }).trim();
         log.info(`   pip cache: ${pipCacheSize}`);
