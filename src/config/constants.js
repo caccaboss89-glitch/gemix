@@ -91,10 +91,18 @@ export default {
   // sub-tool turns (the x_search family) per request.
   MAX_TOOL_ROUNDS: 50,
 
-  // Workspace runtime container: memory cap and idle TTL. The container is a
-  // per-conversation process the main agent execs into; it is reaped when idle
-  // and re-created on demand, independently of the workspace's own 4h TTL.
-  SANDBOX_MEMORY_MB: 1536,
+  // Workspace runtime container: memory cap, how many may run at once, and
+  // idle TTL. The container is a per-conversation process the main agent execs
+  // into; it is reaped when idle and re-created on demand, independently of
+  // the workspace's own 4h TTL.
+  //
+  // The two numbers are one decision: 12.6 GB on the host, minus GemiX itself
+  // (restarted at 3 GB), the three other bots it shares the machine with, the
+  // service containers (sandbox proxy, SearXNG, agent-search) and the system,
+  // leaves roughly 3 GB for sandboxes - 4 x 768 MB. Recompute them together if
+  // the machine or its tenants change.
+  SANDBOX_MEMORY_MB: 768,
+  SANDBOX_MAX_CONTAINERS: 4,
   SANDBOX_IDLE_TTL_MS: 15 * 60 * 1000,
 
   // Public temp file URLs (tempFileServer + Caddy) - token TTLs for the
@@ -113,7 +121,14 @@ export default {
   WORKSPACE_TTL_MS,
   // Same TTL as prose, for the prompt and the tool descriptions that quote it.
   WORKSPACE_TTL_LABEL: formatDurationLabel(WORKSPACE_TTL_MS),
-  WORKSPACE_QUOTA_MB: 500,
+  WORKSPACE_QUOTA_MB: 2048,
+  /**
+   * Largest file edit_file pulls into memory. Deliberately not the quota: the
+   * quota bounds a directory on disk, this bounds a Buffer plus the string it
+   * is decoded into, and the two stopped being the same number once the
+   * workspace moved to a host with room to spare on disk and none in RAM.
+   */
+  WORKSPACE_EDIT_MAX_BYTES: 500 * 1024 * 1024,
   SHELL_TIMEOUT_DEFAULT_MS: 60 * 1000,
   SHELL_TIMEOUT_MAX_MS: 5 * 60 * 1000,
   WORKSPACE_LOCK_WAIT_MS: 30 * 1000,

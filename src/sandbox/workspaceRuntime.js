@@ -59,6 +59,30 @@ const WORKSPACE_QUOTA_BYTES = constants.WORKSPACE_QUOTA_MB * 1024 * 1024;
  */
 const _pool = new Map();
 
+/** Error code a caller matches to tell "no slot free" from a real failure. */
+const SANDBOX_BUSY_CODE = 'ESANDBOXBUSY';
+
+/**
+ * Whether one request may proceed to a container.
+ *
+ * The cap only ever refuses a NEW container. `pooled` is what makes that safe:
+ * a chat already holding one keeps it whatever the count says, so a session is
+ * never cut off half way through - and reclaiming a slot whose container died
+ * does not add to the total either. The admin is exempt outright.
+ *
+ * Pure on purpose: this is the rule, and it stays testable without Docker.
+ *
+ * @param {object} req
+ * @param {boolean} req.pooled - this workspace already has an entry in the pool
+ * @param {number} req.activeCount - entries currently pooled
+ * @param {boolean} [req.isAdmin]
+ * @returns {boolean}
+ */
+function admitWorkspaceRequest({ pooled, activeCount, isAdmin }) {
+  if (pooled || isAdmin) return true;
+  return activeCount < constants.SANDBOX_MAX_CONTAINERS;
+}
+
 function _boundedName(prefix, identity, nonce, maxLength = 63) {
   const safePrefix = String(prefix || 'gemix').toLowerCase().replace(/[^a-z0-9_.-]/g, '-');
   const safeNonce = String(nonce || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -228,11 +252,33 @@ async function _isAlive(entry) {
  * Concurrent callers share one boot: whoever finds a pooled promise awaits it
  * and then checks liveness, and a container Docker no longer reports as running
  * is purged and replaced.
+ *
+ * Opening a new container is subject to constants.SANDBOX_MAX_CONTAINERS: the
+ * host shares its RAM with three other bots, so past the ceiling a chat that
+ * has no container yet is refused with SANDBOX_BUSY_CODE rather than served at
+ * everyone else's expense. Nothing is created on that path.
+ *
+ * @param {string} workspaceId
+ * @param {object} [opts]
+ * @param {boolean} [opts.isAdmin] - exempt from the ceiling
  */
-async function getOrCreate(workspaceId) {
+async function getOrCreate(workspaceId, opts = {}) {
   if (!workspaceId) throw new Error('workspaceId is required');
 
   const pending = _pool.get(workspaceId);
+  if (!admitWorkspaceRequest({
+    pooled: Boolean(pending),
+    activeCount: _pool.size,
+    isAdmin: opts.isAdmin
+  })) {
+    log.warn(
+      `sandbox at capacity (${_pool.size}/${constants.SANDBOX_MAX_CONTAINERS}): `
+      + `no new container for ${workspaceId}`
+    );
+    const err = new Error('Every sandbox slot is in use.');
+    err.code = SANDBOX_BUSY_CODE;
+    throw err;
+  }
   if (pending) {
     let entry = null;
     try { entry = await pending; }
@@ -337,12 +383,13 @@ function buildExecSpec({ command, timeoutMs } = {}) {
  * @param {Buffer|string} [opts.input] - written to the command's stdin
  * @param {number} [opts.timeoutMs]
  * @param {string} [opts.workingDir] - defaults to /workspace
+ * @param {boolean} [opts.isAdmin] - exempt from the concurrent-container cap
  * @returns {Promise<{rc:number,stdout:string,stderr:string,truncated:boolean,timedOut:boolean,durationMs:number}>}
  */
 async function execInWorkspace(workspaceId, opts = {}) {
   const { cmd, timeoutMs } = buildExecSpec(opts);
   const hasInput = opts.input !== undefined && opts.input !== null;
-  const entry = await getOrCreate(workspaceId);
+  const entry = await getOrCreate(workspaceId, { isAdmin: opts.isAdmin });
   entry.lastUsedAt = Date.now();
 
   const exec = await entry.container.exec({
@@ -559,7 +606,7 @@ function init() {
   cleanupOrphanContainers().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
 }
 
-export { _ownedResourceIsOrphan };
+export { _ownedResourceIsOrphan, admitWorkspaceRequest, SANDBOX_BUSY_CODE };
 
 export default {
   init,

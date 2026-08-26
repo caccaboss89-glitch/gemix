@@ -72,11 +72,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
     let opened;
     try {
-      opened = readAgentFileBuffer(
-        workspaceId,
-        raw,
-        constants.WORKSPACE_QUOTA_MB * 1024 * 1024
-      );
+      opened = readAgentFileBuffer(workspaceId, raw, constants.WORKSPACE_EDIT_MAX_BYTES);
     } catch (err) {
       if (err?.code === 'EFILETOOLARGE') {
         return { success: false, error: `${lockedResolved.display} is too large to edit as text.` };
@@ -121,7 +117,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
       throw err;
     }
 
-    const committed = await commitWorkspaceText(workspaceId, lockedResolved, after);
+    const committed = await commitWorkspaceText(workspaceId, lockedResolved, after, opts);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;
     const replaced = args.replaceAll ? occurrences : 1;

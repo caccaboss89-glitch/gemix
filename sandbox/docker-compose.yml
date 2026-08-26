@@ -71,8 +71,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 200
-    mem_limit: 1536m
-    memswap_limit: 1536m
+    mem_limit: 768m
+    memswap_limit: 768m
     cpus: 1.0
     # Mount a real pair here in tests, as the manager does per conversation:
     # volumes:

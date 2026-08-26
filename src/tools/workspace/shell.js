@@ -32,6 +32,7 @@ import { quotaResultFields, runWorkspaceMutation } from './mutation.js';
  * @param {string} workspaceId
  * @param {object} [opts]
  * @param {string} [opts.lockOwnerId]
+ * @param {boolean} [opts.isAdmin] - exempt from the concurrent-container cap
  * @param {import('../../utils/turnBudget.js').TurnBudget|null} [opts.budget]
  */
 async function shell(args = {}, workspaceId, opts = {}) {
@@ -59,7 +60,8 @@ async function shell(args = {}, workspaceId, opts = {}) {
     const run = await workspaceRuntime.execInWorkspace(workspaceId, {
       command,
       timeoutMs,
-      workingDir
+      workingDir,
+      isAdmin: opts.isAdmin
     });
 
     const notes = [];

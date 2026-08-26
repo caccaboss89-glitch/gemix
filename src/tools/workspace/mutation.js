@@ -54,10 +54,18 @@ async function runWorkspaceMutation(workspaceId, opts = {}, fn) {
   }
 }
 
-async function commitWorkspaceText(workspaceId, resolved, content) {
+/**
+ * @param {string} workspaceId
+ * @param {object} resolved - a path already resolved under the mutation lock
+ * @param {string} content
+ * @param {object} [opts]
+ * @param {boolean} [opts.isAdmin] - exempt from the concurrent-container cap
+ */
+async function commitWorkspaceText(workspaceId, resolved, content, opts = {}) {
   const run = await workspaceRuntime.execInWorkspace(workspaceId, {
     command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', resolved.containerPath, '/workspace'],
-    input: content
+    input: content,
+    isAdmin: opts.isAdmin
   });
   if (run.rc !== 0) {
     return {

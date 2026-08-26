@@ -76,6 +76,21 @@ const PROVIDER_AUTH_MESSAGE =
   `${ADMIN_ERROR_PREFIX} API*\n\nNon riesco ad autenticarmi con il modello in questo momento. `
   + 'L\'amministratore è stato avvisato.';
 
+// -- Sandbox capacity ------------------------------------------------------
+
+/**
+ * Sent when every sandbox slot is taken and this chat would need a new one.
+ * GemiX runs a fixed number of workspace containers (the ceiling lives in
+ * constants.js, which cannot be named here: it is constants.js that imports
+ * this file). A chat that already holds one is never turned away, and neither
+ * is the admin, so this only ever answers a conversation asking for a slot
+ * that does not exist yet.
+ */
+const SANDBOX_BUSY_PREFIX = '⚙️ GemiX è sotto utilizzo intensivo al momento';
+const SANDBOX_BUSY_MESSAGE =
+  `${SANDBOX_BUSY_PREFIX}: non ho un posto libero per aprire il tuo spazio di lavoro. `
+  + 'Riprova tra qualche minuto.';
+
 // -- Temporary attachment links --------------------------------------------
 
 /**
@@ -190,6 +205,7 @@ const SYSTEM_MESSAGE_PREFIXES = [
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
+  SANDBOX_BUSY_PREFIX,
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   PRIVACY_NOTICE_PREFIX,
@@ -228,6 +244,8 @@ export {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
+  SANDBOX_BUSY_MESSAGE,
+  SANDBOX_BUSY_PREFIX,
   GROK_CREDIT_EXHAUSTED_MESSAGE,
   PROVIDER_LIMIT_MESSAGE,
   PROVIDER_AUTH_MESSAGE,

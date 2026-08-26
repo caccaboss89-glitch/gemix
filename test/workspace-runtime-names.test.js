@@ -4,7 +4,8 @@ import { once } from 'node:events';
 import test from 'node:test';
 
 import workspaceRuntime from '../src/sandbox/workspaceRuntime.js';
-import { _ownedResourceIsOrphan } from '../src/sandbox/workspaceRuntime.js';
+import { _ownedResourceIsOrphan, admitWorkspaceRequest } from '../src/sandbox/workspaceRuntime.js';
+import constants from '../src/config/constants.js';
 import { workspaceIdToSlug } from '../src/utils/workspaceId.js';
 
 test('long workspace ids keep a collision-resistant suffix', () => {
@@ -43,4 +44,25 @@ test('orphan cleanup preserves resources owned by another live process', async (
     child.kill();
     await exited;
   }
+});
+
+
+test('the sandbox ceiling only ever refuses a container that does not exist yet', () => {
+  const cap = constants.SANDBOX_MAX_CONTAINERS;
+  const request = (over) => ({ pooled: false, activeCount: over, isAdmin: false });
+
+  // Below the ceiling every chat is served.
+  assert.equal(admitWorkspaceRequest(request(0)), true);
+  assert.equal(admitWorkspaceRequest(request(cap - 1)), true);
+
+  // At and past it, a chat with no container of its own is turned away.
+  assert.equal(admitWorkspaceRequest(request(cap)), false);
+  assert.equal(admitWorkspaceRequest(request(cap + 1)), false);
+
+  // A chat that already holds one keeps it: sessions are never cut in half,
+  // and reclaiming a slot does not add to the total.
+  assert.equal(admitWorkspaceRequest({ pooled: true, activeCount: cap, isAdmin: false }), true);
+
+  // The admin is exempt outright.
+  assert.equal(admitWorkspaceRequest({ pooled: false, activeCount: cap, isAdmin: true }), true);
 });
