@@ -13,6 +13,10 @@
 // disabled (regex match on /temp/<32hex>/<name> only). Path traversal is
 // blocked (registered files must live under constants.DATA_DIR or TEMP_DIR). Per-token
 // rate limit caps abuse from leaked links.
+//
+// It listens on loopback only: the public path is Caddy, which terminates TLS
+// and forwards just /temp/*. The host shares a home LAN with the family's own
+// devices, so nothing here is offered to the local subnet directly.
 
 import http from 'http';
 import fs from 'fs';
@@ -393,10 +397,10 @@ function startTempFileServer() {
     }
   });
 
-  _server.listen(PORT, '0.0.0.0', () => {
+  _server.listen(PORT, '127.0.0.1', () => {
     const tempH = Math.round(constants.TUNNEL_TOKEN_TTL_TEMP_MS / 60000);
     const histH = Math.round(constants.TUNNEL_TOKEN_TTL_HISTORY_MS / 3600000);
-    log.info(`Temp file server listening on 0.0.0.0:${PORT} (TTL: ${tempH}min temp / ${histH}h history)`);
+    log.info(`Temp file server listening on 127.0.0.1:${PORT} (TTL: ${tempH}min temp / ${histH}h history)`);
   });
 
   _server.on('error', (err) => {

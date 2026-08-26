@@ -37,25 +37,37 @@ function startInternalNotifyServer() {
       return;
     }
 
-    let body = '';
-    req.on('data', chunk => { body += chunk; if (body.length > 4096) req.destroy(); });
+    // Counted in bytes, not code units: the cap has to describe what was read
+    // off the socket, and a multi-byte character split across chunks would
+    // otherwise be decoded wrong on top of being miscounted.
+    const chunks = [];
+    let received = 0;
+    const reply = (code, text) => {
+      if (res.writableEnded || res.destroyed) return;
+      try { res.writeHead(code).end(text); } catch { /* client already gone */ }
+    };
+    req.on('data', chunk => {
+      received += chunk.length;
+      if (received > 4096) { req.destroy(); return; }
+      chunks.push(chunk);
+    });
     req.on('end', async () => {
       try {
         if (NOTIFY_SECRET && req.headers['x-notify-secret'] !== NOTIFY_SECRET) {
-          res.writeHead(403).end('forbidden');
+          reply(403, 'forbidden');
           return;
         }
-        const { source, details } = JSON.parse(body);
+        const { source, details } = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
         if (source && details) {
           log.warn(`Proxy notification: [${source}] ${details}`);
           await notifyAdmin(String(source).slice(0, 100), String(details).slice(0, 500));
         }
-        res.writeHead(200).end('ok');
+        reply(200, 'ok');
       } catch {
-        res.writeHead(400).end();
+        reply(400);
       }
     });
-    req.on('error', () => res.writeHead(400).end());
+    req.on('error', () => reply(400));
   });
 
   _server.listen(PORT, env.GEMIX_NOTIFY_BIND, () => {
