@@ -8,9 +8,10 @@
 //
 // This is where arbitrary model-authored code runs, which is exactly why it
 // runs in the container and nowhere else: capabilities dropped, non-root, pid
-// and memory capped, egress only through the residential proxy, and no
-// credential of any kind in the environment. A command that needs a token does
-// not get one — GemiX makes provider calls itself, through its own tools.
+// and memory capped, egress only through the sandbox proxy (public internet
+// only, never the LAN), and no credential of any kind in the environment. A
+// command that needs a token does not get one — GemiX makes provider calls
+// itself, through its own tools.
 //
 // Timeout: 60s by default, 300s ceiling. Output is captured and capped;
 // a command that will run longer than the ceiling should be backgrounded, and

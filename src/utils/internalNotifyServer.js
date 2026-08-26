@@ -4,7 +4,9 @@
 // to the admin via notifyAdmin().
 //
 // Endpoint: POST /notify  { source: string, details: string }
-// Only binds to 127.0.0.1 - reachable from Docker via host.docker.internal.
+// Binds to GEMIX_NOTIFY_BIND (loopback by default). The proxy container posts
+// from inside Docker, so a deployment that wants those alerts binds this to the
+// bridge gateway the container reaches as host.docker.internal.
 
 import http from 'http';
 import { createLogger  } from './logger.js';
@@ -56,8 +58,8 @@ function startInternalNotifyServer() {
     req.on('error', () => res.writeHead(400).end());
   });
 
-  _server.listen(PORT, '127.0.0.1', () => {
-    log.info(`Internal notify server listening on 127.0.0.1:${PORT}`);
+  _server.listen(PORT, env.GEMIX_NOTIFY_BIND, () => {
+    log.info(`Internal notify server listening on ${env.GEMIX_NOTIFY_BIND}:${PORT}`);
   });
 
   _server.on('error', (err) => {

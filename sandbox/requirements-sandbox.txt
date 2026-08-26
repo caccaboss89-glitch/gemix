@@ -1,10 +1,11 @@
 # GemiX Python Sandbox - pre-installed libraries.
 # Install with: pip install -r requirements-sandbox.txt
 #
-# NOTE: all sandbox egress (curl/wget/yt-dlp/requests) is forwarded by the HTTP
-# egress proxy upstream through the residential SOCKS5 (Redmi). Any host is
-# reachable; there is no allowlist. If the Redmi is offline the sandbox has no
-# internet at all (fail-closed). yt-dlp is installed in the image (see Dockerfile).
+# NOTE: all sandbox egress (curl/wget/yt-dlp/requests) goes through the HTTP
+# egress proxy, which opens the connection itself. Any public host is reachable
+# and there is no allowlist, but private/LAN destinations are refused and there
+# is no route out that skips the proxy. yt-dlp is installed in the image (see
+# Dockerfile).
 
 # -- Kernel runtime (required) --
 jupyter_server==2.14.2

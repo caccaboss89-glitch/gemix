@@ -21,27 +21,22 @@ services:
     image: gemix-sandbox-proxy:latest
     container_name: gemix-sandbox-proxy
     restart: unless-stopped
-    # Forwards ALL sandbox egress upstream to the residential SOCKS5
-    # (tailsocks -> Redmi). No allowlist. Fail-closed when the Redmi is off.
+    # Opens every sandbox connection itself, from this container's own bridge
+    # network. No allowlist, but only globally routable destinations: the home
+    # LAN the host sits on is denied like any other private range.
     #
-    # Production Linux (dedicated gemix_sandbox_egress): export the egress
-    # gateway, then pass it in — do NOT use host.docker.internal / 172.17.0.1:
-    #   EGRESS_GW=$(docker network inspect gemix_sandbox_egress -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}')
-    #   REDMI_SOCKS_HOST=$EGRESS_GW GEMIX_NOTIFY_URL=http://$EGRESS_GW:9999/notify \
-    #     docker compose -f sandbox/docker-compose.yml up --build
-    # Docker Desktop only may still use host.docker.internal via extra_hosts.
+    # host.docker.internal is how the container reaches GemiX's notify endpoint
+    # on the host; GEMIX_NOTIFY_BIND must name an address the host actually
+    # listens on for that (see SERVER_SETUP.md).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       PROXY_PORT: "8080"
-      # Residential SOCKS5 host reachable from this container (egress gateway IP).
-      REDMI_SOCKS_HOST: "${REDMI_SOCKS_HOST:-}"
-      REDMI_SOCKS_PORT: "${REDMI_SOCKS_PORT:-5040}"
-      # Host internal notify URL, e.g. http://$EGRESS_GW:9999/notify
+      # Host notify URL, e.g. http://host.docker.internal:9999/notify
       GEMIX_NOTIFY_URL: "${GEMIX_NOTIFY_URL:-}"
       GEMIX_NOTIFY_SECRET: "${GEMIX_NOTIFY_SECRET:-}"
     networks:
-      egress: {}           # path to the host (reaches tailsocks); upstream is SOCKS5
+      default: {}          # normal bridge: this container's route to the internet
       sandbox_net: {}      # reachable by sandboxes as hostname "gemix-sandbox-proxy"
     # Do NOT expose the port to the host. Production workspaces reach it from
     # a separate internal network created for each conversation by Node.
@@ -79,16 +74,13 @@ services:
     mem_limit: 1536m
     memswap_limit: 1536m
     cpus: 1.0
-    volumes:
-      # Mount a real pair here in tests, as the manager does per conversation:
-      # - /path/to/workspace:/workspace:rw
-      # - /path/to/attachments:/attachments:ro
+    # Mount a real pair here in tests, as the manager does per conversation:
+    # volumes:
+    #   - /path/to/workspace:/workspace:rw
+    #   - /path/to/attachments:/attachments:ro
 
 networks:
   # Internal-only network where sandboxes live; no direct internet.
   sandbox_net:
     driver: bridge
     internal: true
-  # Network with internet access, used only by the proxy.
-  egress:
-    driver: bridge

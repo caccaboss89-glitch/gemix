@@ -142,6 +142,11 @@ export default {
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
   GITHUB_REPO: process.env.GITHUB_REPO,
   GEMIX_NOTIFY_URL: process.env.GEMIX_NOTIFY_URL,
+  // Address the internal notify server binds to. Loopback keeps it host-only,
+  // but the sandbox proxy posts from inside Docker and cannot reach the host's
+  // loopback: a deployment that wants those alerts sets this to the Docker
+  // bridge gateway the proxy sees (typically 172.17.0.1).
+  GEMIX_NOTIFY_BIND: process.env.GEMIX_NOTIFY_BIND || '127.0.0.1',
   GEMIX_PUBLIC_ATTACHMENT_BASE_URL: process.env.GEMIX_PUBLIC_ATTACHMENT_BASE_URL,
   GEMIX_TEMP_FILE_PORT,
 

@@ -395,8 +395,9 @@ function _buildWorkspaceLines() {
     `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `
     + 'without activity in this chat. Delete what you no longer need instead of filling it. '
     + 'Package installs are disabled; the toolchain in `shell` is fixed.',
-    'Network access from `shell` goes through a proxy that fails closed. On a connection error, a CONNECT failure '
-    + 'or a DNS failure the internet is down: stop, do not retry in a loop, and say so in your reply.'
+    'Network access from `shell` goes through a proxy that reaches public hosts only. A 403 from it means the '
+    + 'destination is not public; a connection or DNS failure means that one host is unreachable, so try another '
+    + 'source instead of looping on the same one, and say so if none works.'
   ];
 }
 

@@ -23,8 +23,8 @@
 // Notes:
 //   - PID 1 is a quota monitor; commands still attach through Docker exec.
 //   - All egress (curl/wget/yt-dlp/pip-less downloads) goes through the egress
-//     proxy, which forwards upstream via the residential SOCKS5 and fails
-//     closed when that is unavailable.
+//     proxy, the only container on this network with a route out, and it
+//     refuses every destination that is not globally routable.
 
 import crypto from 'crypto';
 import stream from 'stream';
@@ -112,8 +112,8 @@ async function _getDocker() {
 function containerEnv() {
   return [
     'HOME=/var/lib/gemix-workspace',
-    // All outbound traffic goes through the egress proxy → residential SOCKS5.
-    // Fail-closed when the upstream is down.
+    // All outbound traffic goes through the egress proxy, which is what keeps
+    // the sandbox off the host's LAN.
     `HTTP_PROXY=${PROXY_URL}`,
     `HTTPS_PROXY=${PROXY_URL}`,
     `http_proxy=${PROXY_URL}`,

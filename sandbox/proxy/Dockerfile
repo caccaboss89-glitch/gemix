@@ -1,6 +1,6 @@
 # GemiX sandbox egress proxy.
-# Tiny Python-only HTTP(S) proxy that forwards all sandbox egress upstream
-# through the residential SOCKS5 (Redmi). No third-party deps.
+# Tiny Python-only HTTP(S) proxy: the single exit the sandbox network has, and
+# the place where non-public destinations are refused. No third-party deps.
 # Build: docker build -t gemix-sandbox-proxy:latest -f sandbox/proxy/Dockerfile sandbox/proxy
 
 FROM python:3.12-alpine

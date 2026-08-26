@@ -67,8 +67,9 @@ RUN pip install --no-cache-dir --retries 5 --timeout 120 unoserver
 # -- yt-dlp (media downloads) -----------------------------------------------
 # Installed at build time (pip is disabled at runtime below). Left unpinned on
 # purpose: extractors must stay current with site changes, so a fresh copy is
-# pulled on every image rebuild. All its traffic exits via the egress proxy
-# (residential IP), so anti-datacenter blocks are bypassed like any other host.
+# pulled on every image rebuild. All its traffic exits via the egress proxy,
+# which reaches the internet on the host's own residential line, so
+# anti-datacenter blocks do not apply.
 RUN pip install --no-cache-dir --retries 5 --timeout 120 yt-dlp
 
 # -- Node.js + common JS tooling -------------------------------------------
