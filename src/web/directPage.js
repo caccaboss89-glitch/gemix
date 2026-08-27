@@ -18,7 +18,7 @@ async function _extract(buffer, mimetype) {
 
 /** True when Google Cache returned its own consent/search UI, not the target. */
 function isGoogleInterstice(content, strategy) {
-  if (strategy !== 'google-cache' || typeof content !== 'string') return false;
+  if (typeof strategy !== 'string' || !/cache/i.test(strategy) || typeof content !== 'string') return false;
   return /(?:before you continue to google|prima di continuare su google|consent\.google|google uses cookies)/i.test(content)
     || (/^cache:https?:\/\//i.test(content.trim()) && /(?:cerca con google|search with google)/i.test(content));
 }

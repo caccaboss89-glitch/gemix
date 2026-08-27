@@ -9,6 +9,10 @@ test('Google consent/search content is not mistaken for the requested cached pag
     'cache:https://example.com - Cerca con Google\nPrima di continuare su Google',
     'google-cache'
   ), true);
+  assert.equal(isGoogleInterstice(
+    'cache:https://example.com - Cerca con Google\nPrima di continuare su Google',
+    'cache'
+  ), true);
   assert.equal(isGoogleInterstice('The actual target article', 'google-cache'), false);
   assert.equal(isGoogleInterstice('Prima di continuare su Google', 'direct'), false);
 });
