@@ -32,6 +32,39 @@ let dedicatedWaClient = null;
 let personalWaClient = null;
 let discordClient = null;
 let shutdownStarted = false;
+let personalRecoveryInProgress = false;
+let personalRecoveryTimer = null;
+
+function startPersonalWhatsApp() {
+  personalWaClient = initPersonalWhatsApp({
+    onFatal: (reason, err) => recoverPersonalWhatsApp(reason, err)
+  });
+}
+
+async function recoverPersonalWhatsApp(reason, err) {
+  if (shutdownStarted || personalRecoveryInProgress) return;
+  personalRecoveryInProgress = true;
+  const detail = err ? `: ${err?.message || err}` : '';
+  log.error(`Personal WhatsApp unavailable (${reason})${detail}; restarting only that client.`);
+
+  const failedClient = personalWaClient;
+  personalWaClient = null;
+  try {
+    await shutdownWhatsAppClient(failedClient);
+  } catch (shutdownErr) {
+    log.warn(`Personal WhatsApp cleanup failed: ${shutdownErr?.message || shutdownErr}`);
+  }
+
+  if (shutdownStarted) {
+    personalRecoveryInProgress = false;
+    return;
+  }
+  personalRecoveryTimer = setTimeout(() => {
+    personalRecoveryTimer = null;
+    personalRecoveryInProgress = false;
+    if (!shutdownStarted) startPersonalWhatsApp();
+  }, 15_000);
+}
 
 /**
  * Create the data directories GemiX needs and, if opted in, run the Linux
@@ -113,9 +146,7 @@ runStartupCleanup();
     setAdminNotifierClient(dedicatedWaClient);
   });
 
-  personalWaClient = initPersonalWhatsApp({
-    onFatal: (reason) => shutdownHandler(`WA personal ${reason}`, 1)
-  });
+  startPersonalWhatsApp();
 
   discordClient = initDiscord();
 
@@ -132,6 +163,10 @@ runStartupCleanup();
 async function shutdownHandler(signal, exitCode = 0) {
   if (shutdownStarted) return;
   shutdownStarted = true;
+  if (personalRecoveryTimer) {
+    clearTimeout(personalRecoveryTimer);
+    personalRecoveryTimer = null;
+  }
   log.info(`\nGemiX - Shutting down (${signal})...`);
   const closures = await Promise.allSettled([
     shutdownWhatsAppClient(dedicatedWaClient),

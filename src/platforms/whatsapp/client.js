@@ -6,9 +6,9 @@
 // to, and what they do once ready — everything else about staying connected is
 // identical, so it lives here once.
 //
-// Failure policy is deliberate: an auth failure or a client that never reaches
-// `ready` requests a coordinated process restart, while a disconnect is retried
-// in-process (WhatsApp Web drops sessions routinely).
+// Failure policy is deliberate: a failed initialization requests coordinated
+// recovery, while a disconnect is retried in-process (WhatsApp Web drops
+// sessions routinely). Waiting for a QR scan is not a failure.
 
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
@@ -55,7 +55,7 @@ function _isReady(client) {
  * @param {string} opts.messageEvent - 'message' (incoming only) or 'message_create' (incl. our own)
  * @param {Function} opts.onMessage - async (msg) => void; transient WA/Puppeteer errors are absorbed
  * @param {Function} [opts.onReady] - (client) => void, after the client reports ready
- * @param {Function} [opts.onFatal] - (reason, error) => void, asks the app to restart cleanly
+ * @param {Function} [opts.onFatal] - (reason, error) => void, asks the app to recover cleanly
  * @returns {object} The whatsapp-web.js Client instance (already initializing)
  */
 function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady, onFatal }) {
@@ -78,6 +78,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   let shuttingDown = false;
   let shutdownPromise = null;
   let fatalReported = false;
+  let waitingForQr = false;
 
   const clearReconnectTimer = () => {
     if (reconnectTimer) {
@@ -88,18 +89,22 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
 
   const watchdog = setTimeout(() => {
     if (!shuttingDown && !_isReady(client)) {
-      requestFatalRestart('init timeout after 5 minutes');
+      if (waitingForQr) {
+        log.warn(`${clientId} WhatsApp client is waiting for a QR scan; leaving the other platforms online.`);
+        return;
+      }
+      requestFatalRecovery('init timeout after 5 minutes');
     }
   }, READY_WATCHDOG_MS);
   watchdog.unref();
 
-  function requestFatalRestart(reason, err = null) {
+  function requestFatalRecovery(reason, err = null) {
     if (shuttingDown || fatalReported) return;
     fatalReported = true;
     clearTimeout(watchdog);
     clearReconnectTimer();
     const detail = err ? `: ${formatWaError(err)}` : '';
-    log.error(`${clientId} WhatsApp lifecycle failure (${reason})${detail}. Requesting clean restart.`);
+    log.error(`${clientId} WhatsApp lifecycle failure (${reason})${detail}. Requesting clean recovery.`);
 
     if (typeof onFatal === 'function') {
       Promise.resolve(onFatal(reason, err)).catch((fatalErr) => {
@@ -114,6 +119,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   }
 
   client.on('qr', (qr) => {
+    waitingForQr = true;
     log.info('Scan QR code:');
     qrcode.generate(qr, { small: true });
   });
@@ -123,13 +129,14 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     clearReconnectTimer();
     initializeInProgress = false;
     reconnectAttempts = 0;
+    waitingForQr = false;
     log.info('Client ready:', client.info.wid._serialized);
     if (typeof onReady === 'function') onReady(client);
   });
 
   client.on('auth_failure', (msg) => {
     if (shuttingDown) return;
-    requestFatalRestart('authentication failure', new Error(String(msg || 'unknown auth failure')));
+    requestFatalRecovery('authentication failure', new Error(String(msg || 'unknown auth failure')));
   });
 
   client.on('disconnected', (reason) => {
@@ -181,7 +188,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   initializeInProgress = true;
   Promise.resolve()
     .then(() => client.initialize())
-    .catch((err) => requestFatalRestart('initialization rejected', err))
+    .catch((err) => requestFatalRecovery('initialization rejected', err))
     .finally(() => { initializeInProgress = false; });
   return client;
 }
