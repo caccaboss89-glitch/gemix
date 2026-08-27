@@ -29,6 +29,7 @@ import {
   TRANSPORT_ERROR,
   TransportError,
   classifyHttpFailure,
+  classifyStreamFailure,
   isRetryableKind,
   retryAfterMs,
   summarizeErrorBody
@@ -285,7 +286,7 @@ class OpenAIResponsesTransport {
         });
         // A stream that produced nothing can be replayed: no tool ran and no
         // partial reply exists. Anything else is reported as it is.
-        if (err.kind === TRANSPORT_ERROR.TRANSIENT && !err.partial && attempt < MAX_COLD_ATTEMPTS) {
+        if (isRetryableKind(err.kind) && !err.partial && attempt < MAX_COLD_ATTEMPTS) {
           this._log.warn(`stream attempt ${attempt} produced nothing: ${err.message}`);
           await sleepWithin(Math.min(attempt * 2000, budget.remainingMs), budget.signal);
           continue;
@@ -373,8 +374,9 @@ class OpenAIResponsesTransport {
 
       if (assembler.error) {
         const message = assembler.error.message || JSON.stringify(assembler.error).slice(0, 300);
-        throw this._error(TRANSPORT_ERROR.MALFORMED, `Model reported an error: ${message}`, {
-          requestId: upstreamRequestId
+        throw this._error(classifyStreamFailure(assembler.error), `Model reported an error: ${message}`, {
+          requestId: upstreamRequestId,
+          partial: assembler.sawMeaningfulEvent
         });
       }
       if (assembler.status === 'failed') {

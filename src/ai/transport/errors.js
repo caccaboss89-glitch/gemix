@@ -84,6 +84,43 @@ function classifyHttpFailure(status, bodyText, refine = null) {
   return TRANSPORT_ERROR.MALFORMED;
 }
 
+/**
+ * Classify an error reported inside an otherwise successful Responses stream.
+ * Providers do not use one exact shape here, so inspect the stable semantic
+ * fields and message while keeping unknown protocol failures non-retryable.
+ *
+ * @param {object|string|null} error
+ * @returns {string}
+ */
+function classifyStreamFailure(error) {
+  if (Number.isInteger(error?.status)) {
+    return classifyHttpFailure(error.status, JSON.stringify(error));
+  }
+
+  const details = typeof error === 'string'
+    ? error
+    : [error?.type, error?.code, error?.message]
+      .filter(value => typeof value === 'string')
+      .join(' ');
+
+  if (/insufficient[_ -]?quota|billing|spending[_ -]?limit|credit/i.test(details)) {
+    return TRANSPORT_ERROR.QUOTA;
+  }
+  if (/rate[_ -]?limit|too many requests|throttl/i.test(details)) {
+    return TRANSPORT_ERROR.RATE_LIMIT;
+  }
+  if (/server[_ -]?error|internal[_ -]?(?:server[_ -]?)?error|overload|service[_ -]?unavailable|temporar(?:y|ily) unavailable|try again later/i.test(details)) {
+    return TRANSPORT_ERROR.TRANSIENT;
+  }
+  if (/authentication|authorization|invalid[_ -]?(?:api[_ -]?)?key|unauthorized|forbidden/i.test(details)) {
+    return TRANSPORT_ERROR.AUTH;
+  }
+  if (/invalid[_ -]?request|unsupported|unprocessable|context[_ -]?length/i.test(details)) {
+    return TRANSPORT_ERROR.UNSUPPORTED_INPUT;
+  }
+  return TRANSPORT_ERROR.MALFORMED;
+}
+
 /** Short, credential-free summary of an error body, for logs and admin notices. */
 function summarizeErrorBody(bodyText) {
   if (typeof bodyText !== 'string' || !bodyText) return '';
@@ -131,6 +168,7 @@ export {
   TransportError,
   isTransportError,
   classifyHttpFailure,
+  classifyStreamFailure,
   summarizeErrorBody,
   retryAfterMs,
   isRetryableKind

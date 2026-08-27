@@ -266,6 +266,91 @@ test('a stream that produced nothing is replayed', async () => {
   assert.equal(response.status, 'completed');
 });
 
+test('an overloaded error event is replayed cold and then succeeds', async () => {
+  let calls = 0;
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => {
+      calls++;
+      return calls === 1
+        ? sseResponse([
+          'data: {"type":"error","code":"server_error",'
+          + '"message":"Our servers are currently overloaded. Please try again later."}\n\n'
+        ])
+        : sseResponse(COMPLETED_STREAM);
+    }
+  });
+
+  const { response } = await transport.createResponse({ body: { model: 'm', input: [] } });
+  assert.equal(calls, 2);
+  assert.equal(response.status, 'completed');
+});
+
+test('a rate-limit error event is replayed cold and then succeeds', async () => {
+  let calls = 0;
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => {
+      calls++;
+      return calls === 1
+        ? sseResponse([
+          'data: {"type":"error","error":{"type":"rate_limit_error",'
+          + '"message":"Too many requests"}}\n\n'
+        ])
+        : sseResponse(COMPLETED_STREAM);
+    }
+  });
+
+  const { response } = await transport.createResponse({ body: { model: 'm', input: [] } });
+  assert.equal(calls, 2);
+  assert.equal(response.status, 'completed');
+});
+
+test('a transient stream error after output is never replayed', async () => {
+  let calls = 0;
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => {
+      calls++;
+      return sseResponse([
+        'data: {"type":"response.output_text.delta","output_index":0,'
+        + '"content_index":0,"delta":"started"}\n\n',
+        'data: {"type":"error","code":"server_error","message":"Server overloaded"}\n\n'
+      ]);
+    }
+  });
+
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [] } }),
+    err => err.kind === TRANSPORT_ERROR.TRANSIENT && err.partial === true
+  );
+  assert.equal(calls, 1);
+});
+
+test('an unknown stream error remains malformed and is not replayed', async () => {
+  let calls = 0;
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => {
+      calls++;
+      return sseResponse([
+        'data: {"type":"error","code":"mystery",'
+        + '"message":"Unrecognized protocol failure"}\n\n'
+      ]);
+    }
+  });
+
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [] } }),
+    err => err.kind === TRANSPORT_ERROR.MALFORMED && err.partial === false
+  );
+  assert.equal(calls, 1);
+});
+
 test('delta-only EOF is a partial malformed response and is never replayed', async () => {
   const credentials = new StubCredentials();
   let calls = 0;
