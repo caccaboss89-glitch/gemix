@@ -22,7 +22,7 @@ import {
 } from '../src/features/featureBindings.js';
 import { xaiResponsesExtensions, XAI_X_SEARCH_TOOL } from '../src/ai/extensions/xaiResponsesExtensions.js';
 import { TRANSPORT_ERROR } from '../src/ai/transport/errors.js';
-import { BASE_REPLAYABLE_ITEM_TYPES } from '../src/ai/transport/responsesProtocol.js';
+import { BASE_REPLAYABLE_ITEM_TYPES, buildResponsesBody } from '../src/ai/transport/responsesProtocol.js';
 import envConfig from '../src/config/env.js';
 import { getProviderProfile } from '../src/ai/providers/providerProfile.js';
 
@@ -32,6 +32,26 @@ test('undeclared wire capabilities default to false', () => {
   assert.equal(caps.supportsSse, false);
   assert.equal(caps.nativeAudioInput, false);
   assert.throws(() => defineWireCapabilities({ madeUp: true }), /Unknown wire capability/);
+});
+
+test('max_output_tokens is declared per provider, and the Codex backend does not take it', () => {
+  // A real regression: the Codex backend answers
+  // "HTTP 400 UNSUPPORTED_INPUT: Unsupported parameter: max_output_tokens"
+  // and fails the whole request, not just the parameter. Before this capability
+  // existed the parameter went out on every call.
+  assert.equal(getProviderProfile('chatgpt').wire.supportsMaxOutputTokens, false);
+  assert.equal(getProviderProfile('xai').wire.supportsMaxOutputTokens, true);
+
+  // Not part of the minimum contract: an endpoint that bounds the answer on its
+  // own terms is still perfectly usable.
+  assert.ok(!REQUIRED_WIRE_CAPABILITIES.includes('supportsMaxOutputTokens'));
+
+  // The body must omit the key rather than send it as null: a key present with
+  // a null value would be rejected all the same.
+  const senzaTetto = buildResponsesBody({ model: 'm', input: [], maxOutputTokens: null });
+  assert.ok(!('max_output_tokens' in senzaTetto));
+  const conTetto = buildResponsesBody({ model: 'm', input: [], maxOutputTokens: 64000 });
+  assert.equal(conTetto.max_output_tokens, 64000);
 });
 
 test('the ChatGPT display name strips provider implementation suffixes', () => {

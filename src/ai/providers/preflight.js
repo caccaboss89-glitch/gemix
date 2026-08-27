@@ -38,7 +38,11 @@ async function runProviderPreflight(profile, credentialProvider) {
 
   const baseUrl = profile.baseUrl || '(from credential)';
   log.info(`   Provider: ${profile.id} — ${profile.displayName} (${profile.model}) at ${baseUrl}`);
-  log.info('   Wire: Responses+SSE, function calling, strict json_schema, reasoning replay, vision');
+  // The required capabilities are listed as prose because they are the same for
+  // every provider that got past the check above. The optional ones are named
+  // only when present, so the log says what actually differs between backends.
+  const optional = profile.wire.supportsMaxOutputTokens ? ', max_output_tokens' : '';
+  log.info(`   Wire: Responses+SSE, function calling, strict json_schema, reasoning replay, vision${optional}`);
 
   let credentialOk = false;
   try {

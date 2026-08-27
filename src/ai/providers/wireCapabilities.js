@@ -20,6 +20,14 @@ const WIRE_CAPABILITY = Object.freeze({
   STRICT_STRUCTURED_OUTPUT: 'supportsStrictStructuredOutput',
   REASONING_REPLAY: 'supportsReasoningReplay',
   IMAGE_INPUT: 'supportsImageInput',
+  /**
+   * Whether the endpoint accepts `max_output_tokens` on the request body.
+   * Not required: an endpoint that caps the answer on its own terms is still
+   * perfectly usable. The Codex backend rejects the parameter outright with
+   * HTTP 400 UNSUPPORTED_INPUT, which fails the whole request, so this has to
+   * be declared rather than assumed.
+   */
+  MAX_OUTPUT_TOKENS: 'supportsMaxOutputTokens',
   /** Reserved hook; no backend currently declares it. */
   NATIVE_AUDIO_INPUT: 'nativeAudioInput',
   /** Reserved hook; no backend currently declares it. */
@@ -43,6 +51,7 @@ const DEFAULTS = Object.freeze({
   [WIRE_CAPABILITY.STRICT_STRUCTURED_OUTPUT]: false,
   [WIRE_CAPABILITY.REASONING_REPLAY]: false,
   [WIRE_CAPABILITY.IMAGE_INPUT]: false,
+  [WIRE_CAPABILITY.MAX_OUTPUT_TOKENS]: false,
   [WIRE_CAPABILITY.NATIVE_AUDIO_INPUT]: false,
   [WIRE_CAPABILITY.NATIVE_VIDEO_INPUT]: false
 });

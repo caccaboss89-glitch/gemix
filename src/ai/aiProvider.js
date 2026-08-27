@@ -97,7 +97,10 @@ async function callAI(items, tools = null, opts = {}) {
     tools: toolsToWire(tools),
     toolChoice: opts.toolChoice || 'auto',
     responseFormat: opts.responseFormat || null,
-    maxOutputTokens: constants.MAX_TOKENS,
+    // Only where the endpoint accepts it: the Codex backend rejects the
+    // parameter with HTTP 400 and fails the whole call, so an endpoint that
+    // bounds the answer on its own terms simply gets no cap from us.
+    maxOutputTokens: profile.wire.supportsMaxOutputTokens ? constants.MAX_TOKENS : null,
     promptCacheKey: opts.promptCacheKey || null,
     // Stateless reasoning replay: the encrypted chain has to come back on the
     // response or the next round starts the model's thinking from scratch.

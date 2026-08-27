@@ -88,7 +88,8 @@ function _buildXaiProfile() {
       supportsFunctionCalling: true,
       supportsStrictStructuredOutput: true,
       supportsReasoningReplay: true,
-      supportsImageInput: true
+      supportsImageInput: true,
+      supportsMaxOutputTokens: true
     }),
     createCredentialProvider: xaiCredentialProvider,
     extensions: xaiResponsesExtensions,
@@ -107,6 +108,10 @@ function _buildXaiProfile() {
  * exactly what the credential unlocks — a Responses endpoint — and never as the
  * whole OpenAI product line: image, video, STT and TTS fall back to the GemiX
  * baselines.
+ *
+ * `supportsMaxOutputTokens` is deliberately absent: this backend answers
+ * `HTTP 400 UNSUPPORTED_INPUT: Unsupported parameter: max_output_tokens` and
+ * fails the entire request. The length of the answer is left to the endpoint.
  */
 function _buildChatgptProfile() {
   return {
