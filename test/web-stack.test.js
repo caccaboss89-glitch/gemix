@@ -13,6 +13,7 @@ import test, { afterEach, beforeEach } from 'node:test';
 import constants from '../src/config/constants.js';
 import envConfig from '../src/config/env.js';
 import { getToolsForUser } from '../src/ai/tools.js';
+import { searchImage } from '../src/tools/searchImage.js';
 import { readPage, searchWeb } from '../src/tools/searchWeb.js';
 import { _resetActiveProfileForTests } from '../src/ai/providers/providerProfile.js';
 
@@ -27,7 +28,8 @@ function stubSidecar(status, body) {
     return {
       ok: status >= 200 && status < 300,
       status,
-      text: async () => (typeof body === 'string' ? body : JSON.stringify(body))
+      text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+      json: async () => (typeof body === 'string' ? JSON.parse(body) : body)
     };
   };
 }
@@ -66,6 +68,7 @@ test('results reach the model as title, url and snippet only', async () => {
   const res = await searchWeb({ query: 'x' });
 
   assert.equal(res.success, true);
+  assert.equal(res.status, 'ok');
   assert.deepEqual(Object.keys(res.results[0]), ['title', 'url', 'snippet']);
   assert.match(res.message, /read_page/, 'the model is told how to go deeper');
 });
@@ -90,6 +93,7 @@ test('an empty result set is a real answer, and says what to do next', async () 
   const res = await searchWeb({ query: 'nothing at all' });
 
   assert.equal(res.success, true);
+  assert.equal(res.status, 'ok');
   assert.deepEqual(res.results, []);
   assert.match(res.message, /different wording/);
 });
@@ -102,7 +106,41 @@ test('a partly-dead upstream still answers, and says the engines fell short', as
   const res = await searchWeb({ query: 'x' });
 
   assert.equal(res.success, true, 'degraded is not failed');
+  assert.equal(res.status, 'degraded');
+  assert.deepEqual(res.diagnostics.unresponsive_engines, ['google']);
   assert.match(res.message, /did not answer/);
+});
+
+test('a degraded empty sidecar cache gets one fresh direct SearXNG fallback', async () => {
+  calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), headers: options?.headers || {} });
+    const direct = String(url).startsWith(envConfig.SEARCH_IMAGE_BASE_URL);
+    const body = direct
+      ? { results: [{ ...HIT, content: HIT.snippet, engine: 'brave', engines: ['brave'] }] }
+      : {
+        results: [],
+        meta: {
+          upstream_status: 'degraded',
+          upstream_errors: ['duckduckgo: CAPTCHA'],
+          unresponsive_engines: ['duckduckgo']
+        }
+      };
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(body),
+      json: async () => body
+    };
+  };
+
+  const res = await searchWeb({ query: 'IANA Example Domains', count: 5 });
+  assert.equal(calls.length, 2);
+  assert.equal(res.results.length, 1);
+  assert.equal(res.status, 'degraded');
+  assert.equal(res.diagnostics.direct_fallback_used, true);
+  assert.deepEqual(res.diagnostics.engines_used, ['brave']);
+  assert.deepEqual(res.diagnostics.upstream_errors, ['duckduckgo: CAPTCHA']);
 });
 
 test('the sources found feed the research badge', async () => {
@@ -119,6 +157,7 @@ test('a missing query never reaches the network', async () => {
   const res = await searchWeb({});
 
   assert.equal(res.success, false);
+  assert.equal(res.status, 'failed');
   assert.equal(calls.length, 0);
 });
 
@@ -150,6 +189,16 @@ test('a malformed body is a failure, not a silent empty result', async () => {
   const res = await searchWeb({ query: 'x' });
   assert.equal(res.success, false);
   assert.match(res.error, /malformed/i);
+});
+
+test('image search selects its engines with supported SearXNG bang syntax', async () => {
+  stubSidecar(200, { results: [] });
+  const res = await searchImage({ query: 'Wikimedia waterfall' });
+
+  assert.equal(res.success, true);
+  assert.equal(lastParams().get('q'), '!goi !bii !ddi Wikimedia waterfall');
+  assert.equal(lastParams().get('engines'), null);
+  assert.equal(lastParams().get('categories'), 'images');
 });
 
 // -- read_page ----------------------------------------------------------------

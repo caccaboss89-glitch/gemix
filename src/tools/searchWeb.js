@@ -73,16 +73,28 @@ function _failureMessage(code, error) {
  */
 async function searchWeb(args = {}, responseCtx = null, opts = {}) {
   const query = _cleanQuery(args.query);
-  if (!query) return { success: false, error: 'Missing required argument "query".' };
+  if (!query) return { success: false, status: 'failed', error: 'Missing required argument "query".' };
 
   const res = await queryAgentSearch({ query, count: _clampCount(args.count), signal: opts.signal });
-  if (!res.ok) return { success: false, error: _failureMessage(res.code, res.error) };
+  if (!res.ok) {
+    return { success: false, status: 'failed', error: _failureMessage(res.code, res.error) };
+  }
+
+  const status = res.meta.degraded ? 'degraded' : 'ok';
+  const diagnostics = {
+    engines_used: res.meta.enginesUsed,
+    unresponsive_engines: res.meta.unresponsiveEngines,
+    upstream_errors: res.meta.upstreamErrors,
+    direct_fallback_used: res.meta.directFallbackUsed
+  };
 
   if (res.results.length === 0) {
     return {
       success: true,
+      status,
       query,
       results: [],
+      diagnostics,
       message: res.meta.degraded
         ? 'No results, and some engines did not answer. A differently worded query may do better.'
         : 'No results for this query. Try different wording or a more specific phrase.'
@@ -96,12 +108,14 @@ async function searchWeb(args = {}, responseCtx = null, opts = {}) {
 
   return {
     success: true,
+    status,
     query,
     results: res.results.map((hit) => ({
       title: hit.title,
       url: hit.url,
       snippet: hit.snippet.slice(0, MAX_SNIPPET_LEN)
     })),
+    diagnostics,
     message: 'Snippets only. Call read_page on a URL to read the page itself.'
   };
 }

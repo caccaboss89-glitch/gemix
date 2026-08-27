@@ -124,6 +124,7 @@ async function sendEmailTool(args, userCtx, deliveryCtx) {
     recordOutbound({
       senderKey: userCtx.taskFileId,
       channel: 'email',
+      status: 'accepted',
       recipient: _sentRecipient(target),
       subject,
       body: stripOutgoingDeliveryArtifacts(args.body || ''),
@@ -143,7 +144,9 @@ async function sendEmailTool(args, userCtx, deliveryCtx) {
 
     return {
       success: true,
-      message: `Email sent successfully to ${target.display}${counts}.${inlineNote}${unresolvedNote}${missingNote}`
+      status: 'accepted',
+      message: `Email accepted for outbound delivery to ${target.display}${counts}.${inlineNote}${unresolvedNote}${missingNote} `
+        + 'This does not confirm inbox delivery or reading.'
     };
   } catch (err) {
     await notifyAdmin('Email Tool', `Failed to send email to ${target.email}: ${err.message}`);

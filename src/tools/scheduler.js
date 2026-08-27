@@ -28,16 +28,41 @@ import { formatTaskRecipient  } from '../utils/taskRecipient.js';
  *   whatsapp: { toGroup?, toPrivate?, recipient?: { name?, phone? } }
  * }
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, isActiveMember, isAdmin, isGroup, groupId }
- * @returns {{ success: boolean, tasks: Array, message?: string }} Per-task
- *   confirmations/errors plus a single (pluralized) verification note.
+ * @returns {{ success: boolean, status: string, tasks: Array, batch: object, message?: string }}
+ *   Indexed per-task confirmations/errors, retry indices and one verification note.
  */
 async function scheduleTasks(tasks, ctx) {
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return {
+      success: false,
+      status: 'failed',
+      tasks: [],
+      error: 'Pass at least one reminder in "tasks".'
+    };
+  }
   const now = new Date();
   const nowTime = now.getTime();
   const maxDateMs = nowTime + constants.MAX_TASK_DAYS * 24 * 60 * 60 * 1000;
   const results = [];
+  const pendingWrites = new Map();
 
-  for (const task of tasks) {
+  for (const rawTask of tasks) {
+    if (!rawTask || typeof rawTask !== 'object' || Array.isArray(rawTask)) {
+      results.push({ success: false, error: 'Each reminder must be an object.' });
+      continue;
+    }
+    const task = { ...rawTask };
+    const whatsapp = rawTask.whatsapp && typeof rawTask.whatsapp === 'object'
+      ? { ...rawTask.whatsapp, recipient: { ...(rawTask.whatsapp.recipient || {}) } }
+      : null;
+    if (typeof task.content !== 'string' || !task.content.trim()) {
+      results.push({ success: false, error: 'Reminder content must be a non-empty string.' });
+      continue;
+    }
+    if (typeof task.scheduledAt !== 'string' || !task.scheduledAt.trim()) {
+      results.push({ success: false, error: 'Reminder scheduledAt must be an ISO 8601 date-time string.' });
+      continue;
+    }
     // Convert local datetime (without offset) to ISO with correct timezone offset
     const scheduledAtISO = convertRomeLocalToISO(task.scheduledAt);
     if (!scheduledAtISO) {
@@ -109,47 +134,41 @@ async function scheduleTasks(tasks, ctx) {
       };
     }
 
-    let toGroupIgnoredWarning = null;
-    if (task.whatsapp && task.whatsapp.toGroup && !ctx.isGroup) {
-      toGroupIgnoredWarning = 'Ignored whatsapp.toGroup: you are not in a valid group for this platform.';
-      task.whatsapp.toGroup = false;
+    if (whatsapp?.toGroup && whatsapp?.toPrivate) {
+      results.push({
+        success: false,
+        error: 'Choose one WhatsApp destination: toGroup and toPrivate cannot both be true.'
+      });
+      continue;
+    }
+    if (whatsapp?.toGroup && !ctx.isGroup) {
+      results.push({ success: false, error: 'whatsapp.toGroup is only available from a WhatsApp group.' });
+      continue;
     }
 
-    const isGroupTask = task.whatsapp && task.whatsapp.toGroup && ctx.isGroup && ctx.groupTaskFileId;
-    if (task.whatsapp && task.whatsapp.toGroup && !isGroupTask) {
+    const isGroupTask = Boolean(whatsapp?.toGroup && ctx.isGroup && ctx.groupTaskFileId);
+    if (whatsapp?.toGroup && !isGroupTask) {
       results.push({ success: false, error: 'whatsapp.toGroup requested but no group task file is available.' });
       continue;
     }
 
-    const waRecipient = task.whatsapp?.recipient || {};
+    const waRecipient = whatsapp?.recipient || {};
     const hasExplicitRecipient = Boolean(waRecipient.phone || waRecipient.name);
 
     // Recipient without toPrivate/toGroup → treat as a private reminder to that person.
-    if (task.whatsapp && hasExplicitRecipient && !task.whatsapp.toGroup && !task.whatsapp.toPrivate) {
-      task.whatsapp.toPrivate = true;
+    if (whatsapp && hasExplicitRecipient && !whatsapp.toGroup && !whatsapp.toPrivate) {
+      whatsapp.toPrivate = true;
     }
 
-    if (task.whatsapp && task.whatsapp.toPrivate && hasExplicitRecipient && !ctx.isAdmin && !ctx.isActiveMember) {
+    if (whatsapp?.toPrivate && hasExplicitRecipient && !ctx.isAdmin && !ctx.isActiveMember) {
       results.push({ success: false, error: 'Specific WhatsApp recipient only available for active members or admin.' });
-      continue;
-    }
-
-    // A private reminder for someone other than the current chat requires a
-    // recipient: never silently fall back to the caller when the intent was to
-    // remind a specific person in a group.
-    if (task.whatsapp && task.whatsapp.toPrivate && !hasExplicitRecipient
-        && (ctx.isAdmin || ctx.isActiveMember) && ctx.isGroup && !task.whatsapp.toGroup) {
-      results.push({
-        success: false,
-        error: 'toPrivate without a recipient: set whatsapp.recipient to remind a specific person, or whatsapp.toGroup to remind the current group.'
-      });
       continue;
     }
 
     let fileId = isGroupTask ? ctx.groupTaskFileId : ctx.taskFileId;
 
     const destinations = {};
-    if (task.whatsapp && task.whatsapp.toPrivate) {
+    if (whatsapp?.toPrivate) {
       try {
         if (ctx.isAdmin && waRecipient.phone) {
           destinations.whatsapp = normalizePhoneToJid(waRecipient.phone);
@@ -214,12 +233,6 @@ async function scheduleTasks(tasks, ctx) {
       ...(recurrence && { recurrence })
     };
 
-    await modifyTaskFile(fileId, async (fileData) => {
-      const data = fileData || { tasks: [] };
-      data.tasks.push(newTask);
-      return data;
-    });
-
     const scheduledAtRome = formatTimestamp(scheduledAt);
 
     // Recipient label from the caller's perspective (empty = self-reminder):
@@ -248,20 +261,43 @@ async function scheduleTasks(tasks, ctx) {
       recipientLine +
       recLabel;
 
-    if (toGroupIgnoredWarning) {
-      taskSummary = toGroupIgnoredWarning + '\n' + taskSummary;
-    }
     if (dstWarning) {
       taskSummary = dstWarning + '\n' + taskSummary;
     }
 
+    const resultIndex = results.length;
     results.push({ success: true, message: taskSummary });
+    if (!pendingWrites.has(fileId)) pendingWrites.set(fileId, []);
+    pendingWrites.get(fileId).push({ task: newTask, resultIndex });
   }
+
+  // One atomic read-modify-write per task file. A failure rolls back every new
+  // item for that file, while independent recipient/group files still commit.
+  await Promise.all([...pendingWrites.entries()].map(async ([fileId, queued]) => {
+    try {
+      await modifyTaskFile(fileId, async (fileData) => {
+        if (fileData && !Array.isArray(fileData.tasks)) {
+          throw new Error('Existing task file has an invalid tasks field.');
+        }
+        const data = fileData || { tasks: [] };
+        data.tasks.push(...queued.map(entry => entry.task));
+        return data;
+      });
+    } catch (err) {
+      for (const { resultIndex } of queued) {
+        results[resultIndex] = {
+          success: false,
+          error: `Reminder was not saved: ${err.message}`
+        };
+      }
+    }
+  }));
 
   // Single verification note (pluralized) instead of repeating it per task.
   // Only the time is checked: the message is meant to read as the reminder that
   // arrives then, not as a copy of the words the user used to ask for it.
-  const okCount = results.filter(r => r.success).length;
+  const indexedResults = results.map((result, index) => ({ index, ...result }));
+  const okCount = indexedResults.filter(r => r.success).length;
   let verifyNote = null;
   if (okCount === 1) {
     verifyNote = 'Verify scheduledAt is the moment the user asked for. If it is wrong, remove the task by its ID and recreate it.';
@@ -269,7 +305,19 @@ async function scheduleTasks(tasks, ctx) {
     verifyNote = 'Verify every scheduledAt is the moment the user asked for. If one is wrong, remove that task by its ID and recreate it.';
   }
 
-  return { success: true, tasks: results, ...(verifyNote ? { message: verifyNote } : {}) };
+  const failedIndices = indexedResults.filter(result => !result.success).map(result => result.index);
+  const status = okCount === indexedResults.length ? 'ok' : (okCount > 0 ? 'degraded' : 'failed');
+  return {
+    success: okCount > 0,
+    status,
+    tasks: indexedResults,
+    batch: {
+      atomic_per_task_file: true,
+      rollback_across_task_files: false,
+      retry_failed_indices: failedIndices
+    },
+    ...(verifyNote ? { message: verifyNote } : {})
+  };
 }
 
 export { scheduleTasks };

@@ -148,26 +148,30 @@ function hasCustomSettings(settings) {
 }
 
 /**
- * Apply a partial update and stamp `updatedAt`. Only the provided keys change,
- * so the tool can touch a single preference at a time.
+ * Apply a partial update and stamp `updatedAt` only when an effective value
+ * changes. Only the provided keys change, so the tool can touch one preference.
  * @param {string} fileId
  * @param {{ voice?: string, effort?: string, language?: string, memory?: string }} patch
- * @returns {Promise<{ success: boolean, error?: string, settings?: object }>}
+ * @returns {Promise<{ success: boolean, changed?: boolean, error?: string, settings?: object }>}
  */
 async function updateSettings(fileId, patch) {
   if (!fileId) return { success: false, error: 'Unable to identify the settings file for this chat.' };
   return _withLock(fileId, async () => {
     const stored = _readRawUnlocked(fileId) || {};
-    const next = { ...stored };
-    for (const [key, value] of Object.entries(patch || {})) {
-      if (value !== undefined) next[key] = value;
+    const current = readSettings(fileId);
+    const changedEntries = Object.entries(patch || {})
+      .filter(([key, value]) => value !== undefined && current[key] !== value);
+    if (changedEntries.length === 0) {
+      return { success: true, changed: false, settings: current };
     }
+    const next = { ...stored };
+    for (const [key, value] of changedEntries) next[key] = value;
     next.updatedAt = getRomeISO();
     // A change restarts the renewal cycle.
     next.reviewedAt = next.updatedAt;
     const written = _writeRawUnlocked(fileId, next);
     if (!written.success) return written;
-    return { success: true, settings: readSettings(fileId) };
+    return { success: true, changed: true, settings: readSettings(fileId) };
   });
 }
 

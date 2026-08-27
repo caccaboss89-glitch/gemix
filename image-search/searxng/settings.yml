@@ -5,7 +5,15 @@
 # that catalog already active — the block at the bottom only adds the image
 # engines, which the defaults leave off.
 
-use_default_settings: true
+use_default_settings:
+  engines:
+    # These general engines fail deterministically in the current stack (404
+    # and 403 respectively). CAPTCHA/rate-limited engines remain available:
+    # they are intermittent and SearXNG can still combine the healthy replies.
+    remove:
+      - aol
+      - karmasearch
+      - karmasearch videos
 
 general:
   instance_name: "GemiX Web Stack"

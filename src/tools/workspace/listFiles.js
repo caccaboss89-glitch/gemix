@@ -40,12 +40,19 @@ function listFiles(args = {}, workspaceId) {
         error: `${resolved.display} is a file, not a directory. Use read_file to read it.`
       };
     }
+    if (resolved.relPath) {
+      return {
+        success: false,
+        error: `${resolved.display} does not exist. Use list_files on its parent directory to see what is there.`
+      };
+    }
     return {
       success: true,
       path: resolved.display,
       total: 0,
       entries: [],
-      message: `${resolved.display} does not exist or is not a safe directory.`
+      directories: [],
+      message: `${resolved.display} is empty.`
     };
   }
 

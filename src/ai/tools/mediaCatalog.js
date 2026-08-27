@@ -100,7 +100,7 @@ const TOOL_GENERATE_VIDEO = makeTool({
 
 const TOOL_GENERATE_MUSIC = makeTool({
   name: 'generate_music',
-  description: 'Create a 30-second music clip from a prompt. The clip is saved in your workspace.',
+  description: 'Create a music clip of approximately 30 seconds from a prompt. The clip is saved in your workspace.',
   properties: { prompt: { type: 'string', description: 'Detailed description of style, instruments, and mood.' } },
   required: ['prompt']
 });

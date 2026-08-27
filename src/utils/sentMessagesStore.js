@@ -1,9 +1,9 @@
 // src/utils/sentMessagesStore.js
 //
-// Persistent log of the messages GemiX delivered to OTHER users on a sender's
+// Persistent log of messages GemiX submitted to OTHER users on a sender's
 // behalf (send_whatsapp_message / send_email). Only the last N outgoing
 // messages are kept per sender (shared across WhatsApp + email), so a member
-// can later ask GemiX to confirm what was actually sent — even for old
+// can later ask GemiX to inspect what outbound service accepted — even for old
 // messages, since these records have no time-based expiry (only the least
 // recent are dropped once the cap is exceeded).
 //
@@ -145,6 +145,7 @@ function _pruneOrphanFiles(senderKey, records) {
  * @param {object} entry
  * @param {string} entry.senderKey - stable per-person id (userCtx.taskFileId)
  * @param {'whatsapp'|'email'} entry.channel
+ * @param {'accepted'} [entry.status]
  * @param {{ phone?: string|null, email?: string|null, display?: string }} entry.recipient
  * @param {string} [entry.text] - WhatsApp message text
  * @param {string} [entry.subject] - email subject
@@ -167,6 +168,7 @@ function recordSentMessage(entry) {
         id: crypto.randomBytes(8).toString('hex'),
         ts: Date.now(),
         channel: entry.channel,
+        status: entry.status || 'accepted',
         recipient: {
           phone: (entry.recipient && entry.recipient.phone) || null,
           email: (entry.recipient && entry.recipient.email) || null,

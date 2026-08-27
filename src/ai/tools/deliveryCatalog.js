@@ -25,7 +25,7 @@ function buildWhatsAppTool(isAdmin) {
     : { name: { type: 'string', description: 'Recipient active member name (not yourself).' } };
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — send a message to a specific phone number. Never for intermediate updates in the current chat. Start by saying on whose behalf you\'re writing. Messages can end up in spam, so suggest the user check there if needed.',
+    description: 'Delivery tool — submit a message to a specific phone number. A successful result means WhatsApp accepted the outbound send, not that the device received or read it. Never for intermediate updates in the current chat. Start by saying on whose behalf you\'re writing.',
     properties: {
       message: { type: 'string', description: 'Message text. WhatsApp formatting only — no Markdown links.' },
       recipient: {
@@ -48,7 +48,7 @@ function buildEmailTool(isAdmin) {
     : { name: { type: 'string', description: 'Member name (email resolved from name)' } };
   return makeTool({
     name: 'send_email',
-    description: 'Delivery tool — send an email. Outbound only: you cannot read the user\'s inbox or any email others sent them (replies included). '
+    description: 'Delivery tool — submit an email. A successful result means the mail service accepted the outbound send, not inbox delivery or reading. Outbound only: you cannot read the user\'s inbox or any email others sent them (replies included). '
       + 'To review what GemiX already sent on their behalf, use read_sent_messages. '
       + 'If on behalf of someone else, start by saying on whose behalf you\'re writing.',
     properties: {
@@ -74,7 +74,7 @@ function buildEmailTool(isAdmin) {
 function buildReadSentMessagesTool(isAdmin) {
   return makeTool({
     name: 'read_sent_messages',
-    description: 'Look up messages GemiX previously delivered to OTHER people on the caller\'s behalf (only what the caller sent — never any reply the recipients wrote back), via WhatsApp and/or email. '
+    description: 'Look up messages GemiX previously submitted to OTHER people on the caller\'s behalf (only what the caller sent — never any reply the recipients wrote back), via WhatsApp and/or email. The audit records outbound acceptance, not device/inbox delivery or reading. '
       + 'Use it when a user wants to verify messages sent earlier — not to confirm a message you just sent (the send tool\'s success result already confirms that). '
       + 'Only the last 10 outgoing messages are kept (shared across WhatsApp and email). '
       + 'Any files that were attached are shown to you again when still retrievable, otherwise flagged as expired.',

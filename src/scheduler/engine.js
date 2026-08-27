@@ -175,18 +175,26 @@ function startScheduler() {
 
 function _taskIsDue(task, nowTime) {
   const taskDate = new Date(task.scheduledAt);
-  return !isNaN(taskDate.getTime()) && taskDate.getTime() <= nowTime;
+  return task?.deliveryFailure?.status !== 'failed'
+    && !isNaN(taskDate.getTime())
+    && taskDate.getTime() <= nowTime;
+}
+
+function _taskDestinationEntries(task) {
+  const dest = task.destinations || {};
+  return [
+    ...(dest.whatsapp ? [{ key: 'whatsapp', jid: dest.whatsapp }] : []),
+    ...(dest.whatsappGroup ? [{ key: 'whatsappGroup', jid: dest.whatsappGroup }] : [])
+  ];
 }
 
 /**
  * Deliver a scheduled task to all configured WhatsApp destinations.
  *
- * Throws if any destination fails, so the caller can retry the whole delivery;
- * a destination that already succeeded may receive the message again. Once the
- * retries are spent the occurrence is lost — a one-time task is dropped and a
- * recurring one moves on to its next date (see _finalizeDueTasks).
+ * Throws if any pending destination fails. Successful destinations are removed
+ * from the caller-owned set, so later attempts retry only what is still missing.
  */
-async function _deliverTask(task) {
+async function _deliverTask(task, pendingDestinations) {
   // Deliveries go out through whatsappSender's own client reference; this is
   // the readiness gate for it, checked before any message is built.
   if (!dedicatedClient) {
@@ -199,25 +207,22 @@ async function _deliverTask(task) {
   messageText = normalizeMarkdown(messageText);
   messageText = addScheduledFooter(messageText, task.createdAt || getRomeISO());
 
-  const dest = task.destinations || {};
-  const attempts = [];
-  if (dest.whatsapp) attempts.push(() => sendWhatsAppDirect(dest.whatsapp, messageText));
-  if (dest.whatsappGroup) attempts.push(() => sendWhatsAppDirect(dest.whatsappGroup, messageText));
+  const destinations = _taskDestinationEntries(task);
 
-  if (!attempts.length) {
+  if (!destinations.length) {
     throw new Error('Task has no WhatsApp destinations configured');
   }
 
   const errors = [];
-  for (const send of attempts) {
+  for (const destination of destinations) {
+    if (!pendingDestinations.has(destination.key)) continue;
     try {
-      await send();
+      await sendWhatsAppDirect(destination.jid, messageText);
+      pendingDestinations.delete(destination.key);
     } catch (err) {
-      errors.push(err.message);
+      errors.push(`${destination.key}: ${err.message}`);
     }
   }
-  // Partial multi-destination success still fails the task so the missed
-  // destination can retry on a later cycle (do not finalize/advance).
   if (errors.length) {
     throw new Error(errors.join('; '));
   }
@@ -228,30 +233,41 @@ const TASK_DELIVERY_BACKOFF_MS = [2000, 5000];
 
 /**
  * Run up to TASK_DELIVERY_MAX_ATTEMPTS retries with short backoff between failures.
- * @returns {boolean} true when delivered successfully
+ * @param {object} [opts] test-only timing overrides
+ * @returns {{ delivered: boolean, attempts: number, pendingDestinations: string[], lastError?: string }}
  */
-async function _executeTaskWithRetries(task) {
-  for (let attempt = 1; attempt <= TASK_DELIVERY_MAX_ATTEMPTS; attempt++) {
+async function _executeTaskWithRetries(task, opts = {}) {
+  const maxAttempts = opts.maxAttempts || TASK_DELIVERY_MAX_ATTEMPTS;
+  const wait = opts.sleep || sleepWithin;
+  const pendingDestinations = new Set(_taskDestinationEntries(task).map(destination => destination.key));
+  let lastError = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await _deliverTask(task);
+      await _deliverTask(task, pendingDestinations);
       if (attempt > 1) {
-        log.info(`Task ${task.id} delivered on attempt ${attempt}/${TASK_DELIVERY_MAX_ATTEMPTS}`);
+        log.info(`Task ${task.id} delivered on attempt ${attempt}/${maxAttempts}`);
       }
-      return true;
+      return { delivered: true, attempts: attempt, pendingDestinations: [] };
     } catch (err) {
-      log.error(`Task ${task.id} attempt ${attempt}/${TASK_DELIVERY_MAX_ATTEMPTS} failed: ${err.message}`);
-      if (attempt >= TASK_DELIVERY_MAX_ATTEMPTS) {
-        log.error(`Task ${task.id} removed after ${TASK_DELIVERY_MAX_ATTEMPTS} failed delivery attempts`);
-        return false;
+      lastError = err.message;
+      log.error(`Task ${task.id} attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
+      if (attempt >= maxAttempts) {
+        log.error(`Task ${task.id} stopped after ${maxAttempts} failed delivery attempts`);
+        return {
+          delivered: false,
+          attempts: attempt,
+          pendingDestinations: [...pendingDestinations],
+          lastError
+        };
       }
       const delayMs = TASK_DELIVERY_BACKOFF_MS[attempt - 1] ?? TASK_DELIVERY_BACKOFF_MS[TASK_DELIVERY_BACKOFF_MS.length - 1];
-      await sleepWithin(delayMs);
+      await wait(delayMs);
     }
   }
-  return false;
+  return { delivered: false, attempts: maxAttempts, pendingDestinations: [...pendingDestinations], lastError };
 }
 
-function _finalizeDueTasks(data, dueTasks, handledIds) {
+function _finalizeDueTasks(data, dueTasks, handledIds, failedResults = new Map()) {
   const dueIds = new Set(dueTasks.map(t => t.id));
   const updatedTasks = [];
 
@@ -263,11 +279,19 @@ function _finalizeDueTasks(data, dueTasks, handledIds) {
     const recurrence = normalizePersistedRecurrence(t.recurrence);
     const delivered = handledIds.has(t.id);
 
-    // A one-time task that never went out has nowhere left to go; a recurring
-    // one loses only this occurrence and keeps the series alive, so a few
-    // minutes of WhatsApp being unreachable cannot silently end a reminder.
+    // A terminal one-time failure remains visible until the user removes it.
+    // A recurring task records the missed occurrence and moves to its next one.
     if (!delivered && !recurrence) {
-      log.warn(`Task ${t.id} dropped: delivery failed after all attempts`);
+      const failure = failedResults.get(t.id) || {};
+      t.deliveryFailure = {
+        status: 'failed',
+        attempts: failure.attempts || TASK_DELIVERY_MAX_ATTEMPTS,
+        failedAt: getRomeISO(),
+        lastError: failure.lastError || 'Delivery failed.',
+        pendingDestinations: failure.pendingDestinations || []
+      };
+      updatedTasks.push(t);
+      log.warn(`Task ${t.id} retained with terminal delivery failure`);
       continue;
     }
     if (!recurrence) continue; // one-time, delivered: done, not re-added
@@ -283,6 +307,17 @@ function _finalizeDueTasks(data, dueTasks, handledIds) {
       log.warn(`Recurring task ${t.id}: ${skipped} missed occurrence(s) skipped, next: ${next}`);
     }
     t.scheduledAt = next;
+    delete t.deliveryFailure;
+    if (delivered) delete t.lastDeliveryFailure;
+    else {
+      const failure = failedResults.get(t.id) || {};
+      t.lastDeliveryFailure = {
+        attempts: failure.attempts || TASK_DELIVERY_MAX_ATTEMPTS,
+        failedAt: getRomeISO(),
+        lastError: failure.lastError || 'Delivery failed.',
+        pendingDestinations: failure.pendingDestinations || []
+      };
+    }
     updatedTasks.push(t);
     if (delivered) {
       log.info(`Recurring task ${t.id} rescheduled: ${next}`);
@@ -309,7 +344,13 @@ async function checkAndExecuteTasks() {
     const fileId = file.replace('.json', '');
     // Plain read: taking the write lock here rewrote every task file on every
     // tick, for nothing. The finalize pass below is the only writer.
-    const data = await readTaskFile(fileId);
+    let data;
+    try {
+      data = await readTaskFile(fileId);
+    } catch (err) {
+      log.error(`Task file read error ${fileId}:`, err.message);
+      continue;
+    }
     const dueTasks = Array.isArray(data?.tasks)
       ? data.tasks.filter(t => _taskIsDue(t, nowTime))
       : [];
@@ -317,9 +358,10 @@ async function checkAndExecuteTasks() {
     if (!dueTasks.length) continue;
 
     // "Handled" = delivered OR intentionally skipped (occurrence on an excepted
-    // date). Both advance a recurring task; a failed delivery drops a one-time
-    // task and costs a recurring one only this occurrence.
+    // date). Both advance a recurring task; terminal one-time failures remain
+    // visible, while a recurring failure records and advances one occurrence.
     const handledIds = new Set();
+    const failedResults = new Map();
     for (const task of dueTasks) {
       const norm = normalizePersistedRecurrence(task.recurrence);
       if (norm && isDateSkipped(task.scheduledAt, norm.exdate)) {
@@ -327,16 +369,19 @@ async function checkAndExecuteTasks() {
         log.info(`Task ${task.id} occurrence skipped (recurrence exception)`);
         continue;
       }
-      if (await _executeTaskWithRetries(task)) {
+      const outcome = await _executeTaskWithRetries(task);
+      if (outcome.delivered) {
         handledIds.add(task.id);
         log.info(`Task executed: ${task.id}`);
+      } else {
+        failedResults.set(task.id, outcome);
       }
     }
 
     try {
       await modifyTaskFile(fileId, async (data) => {
         if (!data || !data.tasks || data.tasks.length === 0) return data;
-        return _finalizeDueTasks(data, dueTasks, handledIds);
+        return _finalizeDueTasks(data, dueTasks, handledIds, failedResults);
       });
     } catch (err) {
       log.error(`Task file finalize error ${fileId}:`, err.message);
@@ -344,5 +389,9 @@ async function checkAndExecuteTasks() {
   }
 }
 
-export { startScheduler, setSchedulerWaClient
+export {
+  _executeTaskWithRetries,
+  _finalizeDueTasks,
+  startScheduler,
+  setSchedulerWaClient
 };

@@ -23,15 +23,16 @@ const _withLock = (fileId, fn) => withKeyedLock(_locks, fileId, fn);
 /**
  * Read task data from a task file.
  * @param {string} fileId - The task file ID
- * @returns {Promise<{ tasks: Array }|null>} Parsed task data or null if file doesn't exist / is corrupt
+ * @returns {Promise<{ tasks: Array }|null>} Parsed task data, or null only when the file does not exist
  */
 async function readTaskFile(fileId) {
   const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
   try {
     const raw = await fsPromises.readFile(filePath, 'utf-8');
     return JSON.parse(raw);
-  } catch {
-    return null;
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw new Error(`Cannot read task file ${fileId}: ${err.message}`, { cause: err });
   }
 }
 
@@ -50,8 +51,9 @@ async function modifyTaskFile(fileId, fn) {
     try {
       const raw = await fsPromises.readFile(filePath, 'utf-8');
       data = JSON.parse(raw);
-    } catch {
-      data = null;
+    } catch (err) {
+      if (err.code === 'ENOENT') data = null;
+      else throw new Error(`Cannot read task file ${fileId}: ${err.message}`, { cause: err });
     }
     const result = await fn(data);
     if (result === undefined || result === null) return;
@@ -70,5 +72,4 @@ async function modifyTaskFile(fileId, fn) {
   });
 }
 
-export { readTaskFile, modifyTaskFile
-};
+export { readTaskFile, modifyTaskFile };

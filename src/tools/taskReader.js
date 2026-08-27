@@ -33,6 +33,13 @@ function _formatTask(t, i, ctx, showRecipient) {
     if (recurrence.exdate.length) line += ` (excluded: ${recurrence.exdate.join(', ')})`;
   }
 
+  if (t.deliveryFailure?.status === 'failed') {
+    line += ` | DELIVERY FAILED after ${t.deliveryFailure.attempts || '?'} attempt(s)`;
+    if (t.deliveryFailure.lastError) line += `: ${String(t.deliveryFailure.lastError).slice(0, 160)}`;
+  } else if (t.lastDeliveryFailure) {
+    line += ` | previous occurrence failed after ${t.lastDeliveryFailure.attempts || '?'} attempt(s)`;
+  }
+
   // Recipient is only meaningful for active members/admin, who can set
   // reminders for other people; empty for self-reminders (omitted).
   if (showRecipient && (ctx.isActiveMember || ctx.isAdmin)) {
@@ -60,7 +67,12 @@ function _formatTask(t, i, ctx, showRecipient) {
 async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false, ctx = {}) {
   let result = '';
 
-  const personalData = await readTaskFile(taskFileId);
+  let personalData;
+  try {
+    personalData = await readTaskFile(taskFileId);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
   if (personalData && personalData.tasks && personalData.tasks.length > 0) {
     result += 'Your personal reminders:\n';
     result += personalData.tasks.map((t, i) => _formatTask(t, i, ctx, true)).join('\n');
@@ -69,7 +81,12 @@ async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = fals
   }
 
   if (includeGroup && groupTaskFileId) {
-    const groupData = await readTaskFile(groupTaskFileId);
+    let groupData;
+    try {
+      groupData = await readTaskFile(groupTaskFileId);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
     if (groupData && groupData.tasks && groupData.tasks.length > 0) {
       result += '\n\nGroup reminders:\n';
       result += groupData.tasks.map((t, i) => _formatTask(t, i, ctx, false)).join('\n');

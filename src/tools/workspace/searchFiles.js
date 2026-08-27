@@ -53,11 +53,17 @@ function searchFiles(args = {}, workspaceId) {
   if (!resolved) return invalidPathError(raw);
   const listing = listAgentDirectory(workspaceId, resolved.display, { limit: 10_000 });
   if (!listing) {
+    if (resolved.relPath) {
+      return {
+        success: false,
+        error: `${resolved.display} does not exist. Use list_files on its parent directory to see what is there.`
+      };
+    }
     return {
       success: true,
       path: resolved.display,
       matches: [],
-      message: `${resolved.display} does not exist or is not a safe directory.`
+      message: `${resolved.display} is empty.`
     };
   }
   const { files, total } = listing;

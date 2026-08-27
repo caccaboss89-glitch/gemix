@@ -44,6 +44,11 @@ services:
       SEARXNG_BASE_URL: http://127.0.0.1:8888/
       # Keep limiter off for local loopback API use from GemiX.
       SEARXNG_LIMITER: "false"
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    dns_search:
+      - "."
     networks:
       - gemix-web
     cap_drop:
@@ -69,12 +74,19 @@ services:
       - "127.0.0.1:3939:3939"
     environment:
       SEARXNG_URL: http://searxng:8080
-      CACHE_TTL: "3600"
+      # A degraded empty search must not poison results for an hour. GemiX also
+      # performs one direct SearXNG retry when the sidecar labels it degraded.
+      CACHE_TTL: "300"
       RATE_LIMIT: "60"
       ADAPTERS_DIR: /app/adapters
       # Loopback-only, so a token is optional. If you set one, mirror it in
       # GemiX .env as AGENT_SEARCH_TOKEN.
       AGENT_SEARCH_TOKEN: "${AGENT_SEARCH_TOKEN:-}"
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    dns_search:
+      - "."
     volumes:
       - agent-search-data:/app/data
     depends_on:

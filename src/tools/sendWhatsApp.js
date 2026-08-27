@@ -89,6 +89,7 @@ async function sendWhatsAppTool(args, userCtx, deliveryCtx) {
   const audit = () => recordOutbound({
     senderKey: userCtx.taskFileId,
     channel: 'whatsapp',
+    status: 'accepted',
     recipient: _sentRecipient(target),
     text,
     attachments
@@ -128,7 +129,9 @@ async function sendWhatsAppTool(args, userCtx, deliveryCtx) {
     audit();
     return {
       success: true,
-      message: `WhatsApp message sent successfully to ${target.display}${counts}.${missingNote}`
+      status: 'accepted',
+      message: `WhatsApp message accepted for outbound delivery to ${target.display}${counts}.${missingNote} `
+        + 'This does not confirm delivery to the device or reading.'
     };
   } catch (err) {
     // The text may already be out: log it so read_sent_messages still shows it.

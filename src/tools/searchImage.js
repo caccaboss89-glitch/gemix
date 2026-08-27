@@ -15,6 +15,7 @@ import constants from '../config/constants.js';
 import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
 import { inlineImagePartFromBuffer  } from './workspace/inlineImage.js';
 import { createLogger  } from '../utils/logger.js';
+import { sniffImageType } from '../utils/imageType.js';
 
 const log = createLogger('SearchImage');
 
@@ -83,39 +84,6 @@ function _pickImageUrl(hit) {
 }
 
 /**
- * Detect image type from magic bytes. Rejects HTML/error bodies hotlinked as images.
- * @param {Buffer} buffer
- * @returns {{ ext: string, mime: string }|null}
- */
-function _sniffImageType(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return null;
-  // JPEG
-  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
-    return { ext: '.jpg', mime: 'image/jpeg' };
-  }
-  // PNG
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
-    return { ext: '.png', mime: 'image/png' };
-  }
-  // GIF
-  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
-    return { ext: '.gif', mime: 'image/gif' };
-  }
-  // WEBP (RIFF....WEBP)
-  if (
-    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46
-    && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
-  ) {
-    return { ext: '.webp', mime: 'image/webp' };
-  }
-  // ICO
-  if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01 && buffer[3] === 0x00) {
-    return { ext: '.ico', mime: 'image/x-icon' };
-  }
-  return null;
-}
-
-/**
  * Download one search hit and build an inline input_image part for the model.
  * The bytes never touch disk: a hit the model only looks at is not a file.
  * @returns {Promise<{ part: object|null, error?: string }>}
@@ -127,7 +95,7 @@ async function _buildVisionPart(imgUrl, index, signal) {
       timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS,
       signal
     });
-    const sniffed = _sniffImageType(dl.buffer);
+    const sniffed = sniffImageType(dl.buffer);
     if (!sniffed) {
       return { part: null, error: 'Downloaded body is not a recognized image (JPEG/PNG/WEBP/GIF/ICO).' };
     }
@@ -167,11 +135,12 @@ async function searchImage(args = {}, opts = {}) {
   }
 
   const url = new URL(`${base}/search`);
-  url.searchParams.set('q', query);
+  // SearXNG's documented multi-engine selector is bang syntax. Its `engines`
+  // query parameter is not part of the public Search API and was ignored,
+  // allowing unrelated fallback engines to leak icons into image results.
+  url.searchParams.set('q', `!goi !bii !ddi ${query}`);
   url.searchParams.set('format', 'json');
   url.searchParams.set('categories', 'images');
-  // Prefer Google Images when the local instance has it active; others fill gaps.
-  url.searchParams.set('engines', 'google images,bing images,duckduckgo images');
   url.searchParams.set('pageno', '1');
   url.searchParams.set('safesearch', '0');
 

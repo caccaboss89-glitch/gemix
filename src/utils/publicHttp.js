@@ -132,15 +132,24 @@ function _requestPinned(url, target, opts) {
     const request = client.get(url, {
       headers: opts.headers,
       signal: opts.signal,
-      lookup(_hostname, _lookupOpts, callback) {
-        callback(null, target.address, target.family);
-      }
+      lookup: _pinnedLookup(target)
     }, resolve);
     request.setTimeout(opts.timeoutMs, () => {
       request.destroy(new Error(`Timeout (${opts.timeoutMs / 1000}s) reached for ${url.href}`));
     });
     request.on('error', reject);
   });
+}
+
+/** Node 22 requests an array when autoSelectFamily sets lookup options.all. */
+function _pinnedLookup(target) {
+  return (_hostname, lookupOpts, callback) => {
+    if (lookupOpts?.all) {
+      callback(null, [{ address: target.address, family: target.family }]);
+      return;
+    }
+    callback(null, target.address, target.family);
+  };
 }
 
 /** Open a validated response stream, returning the final URL after redirects. */
@@ -186,6 +195,7 @@ async function openPublicHttp(raw, opts = {}) {
 }
 
 export {
+  _pinnedLookup,
   isPublicIp,
   openPublicHttp,
   parsePublicUrl

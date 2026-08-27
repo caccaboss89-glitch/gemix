@@ -17,23 +17,27 @@ import { modifyTaskFile  } from '../utils/taskStore.js';
 async function removeTasks(taskIds, fileId) {
   let result = { success: false, error: 'No task file found. You have no scheduled reminders.' };
 
-  await modifyTaskFile(fileId, async (data) => {
-    if (!data || !Array.isArray(data.tasks) || data.tasks.length === 0) {
+  try {
+    await modifyTaskFile(fileId, async (data) => {
+      if (!data || !Array.isArray(data.tasks) || data.tasks.length === 0) {
+        return data;
+      }
+
+      const before = data.tasks.length;
+      data.tasks = data.tasks.filter(t => !taskIds.includes(t.id));
+      const removed = before - data.tasks.length;
+
+      if (removed === 0) {
+        result = { success: false, error: 'No tasks found with the specified IDs.' };
+        return data;
+      }
+
+      result = { success: true, message: `${removed} task(s) removed successfully.` };
       return data;
-    }
-
-    const before = data.tasks.length;
-    data.tasks = data.tasks.filter(t => !taskIds.includes(t.id));
-    const removed = before - data.tasks.length;
-
-    if (removed === 0) {
-      result = { success: false, error: 'No tasks found with the specified IDs.' };
-      return data;
-    }
-
-    result = { success: true, message: `${removed} task(s) removed successfully.` };
-    return data;
-  });
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 
   return result;
 }

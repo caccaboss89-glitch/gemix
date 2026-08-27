@@ -6,10 +6,10 @@
 //
 // What send_email and send_whatsapp_message share: one message per destination
 // per turn, the same attachment resolution, and an audit entry so the caller can
-// later ask what GemiX sent on their behalf.
+// later ask what GemiX submitted on their behalf.
 //
-// The one-per-destination reservation is taken only once delivery has actually
-// happened, so a send that failed outright can be retried, while a send that
+// The one-per-destination reservation is taken only once the platform accepts
+// the outbound send, so a send that failed outright can be retried, while one
 // half-succeeded (text out, attachments not) cannot blast the text twice.
 
 import { resolveDeliverySelection  } from '../utils/deliverySelection.js';
@@ -55,7 +55,7 @@ function alreadyContactedError(contacted, key, what) {
 
 /**
  * Write the audit entry read back by read_sent_messages. Never throws: losing
- * the log entry must not turn a delivered message into a reported failure.
+ * the log entry must not turn an accepted message into a reported failure.
  */
 function recordOutbound(entry) {
   try {

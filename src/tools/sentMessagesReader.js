@@ -5,7 +5,8 @@
 // serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
 //
 // read_sent_messages tool: lets an active member (or admin) confirm what GemiX
-// previously delivered to OTHER people on their behalf, on WhatsApp and/or
+// previously accepted for outbound delivery to OTHER people on their behalf,
+// on WhatsApp and/or
 // email. Results are grouped by recipient. Any files that were attached are
 // put back into this conversation projection, so each one comes back as an
 // `attachments/<name>` path the model can open with read_file — images also
@@ -233,6 +234,7 @@ async function readSentMessages(args, userCtx) {
 
     const msgOut = {
       channel: r.channel,
+      deliveryStatus: r.status || 'accepted',
       // Europe/Rome, DST-aware — same formatting as reminders/history (never UTC).
       sentAt: formatTimestamp(r.ts)
     };
@@ -264,7 +266,8 @@ async function readSentMessages(args, userCtx) {
     group.messages.push(msgOut);
   }
 
-  let message = `Found ${matched.length} ${channelLabel} message(s) GemiX sent on your behalf (only your last 10 outgoing messages are kept).`;
+  let message = `Found ${matched.length} ${channelLabel} message(s) GemiX accepted for outbound delivery on your behalf `
+    + '(only your last 10 outgoing messages are kept; this audit does not prove device/inbox delivery or reading).';
   if (anyRecovered) {
     message += ' Their attachments are back under attachments/, so you can open them with read_file;'
       + ' images are attached below.';

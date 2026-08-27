@@ -86,6 +86,28 @@ test('ChatGPT 5.6 accepts none as an explicit no-reasoning preference', async (t
   });
 });
 
+test('reapplying effective preferences is an idempotent verified no-op', async (t) => {
+  const fileId = `test_settings_noop_${process.pid}_${Date.now()}`;
+  const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
+  t.after(() => {
+    try { fs.unlinkSync(filePath); } catch { /* a no-op creates no file */ }
+  });
+
+  await withProvider('chatgpt', async () => {
+    const current = readSettings(fileId);
+    const result = await managePreferences({
+      voice: current.voice,
+      effort: current.effort,
+      language: current.language,
+      memory: current.memory
+    }, fileId);
+    assert.equal(result.success, true);
+    assert.equal(result.changed, false);
+    assert.deepEqual(result.settings, current);
+    assert.equal(fs.existsSync(filePath), false, 'a no-op must not create or timestamp a settings file');
+  });
+});
+
 test('every supported effort persists, while a provider-only value degrades without being erased', async (t) => {
   const fileId = `test_effort_${process.pid}_${Date.now()}`;
   const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);

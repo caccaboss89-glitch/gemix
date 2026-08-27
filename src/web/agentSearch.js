@@ -35,6 +35,7 @@ const WEB_ERROR = Object.freeze({
 // A search is a fan-out across engines; a read can escalate all the way to a
 // browser render, so it gets the longer budget of the two.
 const SEARCH_TIMEOUT_MS = 30_000;
+const SEARX_FALLBACK_TIMEOUT_MS = 20_000;
 const READ_TIMEOUT_MS = 60_000;
 
 /** True when a base URL is set at all. There is no cloud fallback for this. */
@@ -56,6 +57,44 @@ function _classifyStatus(status) {
   if (status === 429) return WEB_ERROR.RATE_LIMIT;
   if (status === 400 || status === 422) return WEB_ERROR.BAD_REQUEST;
   return WEB_ERROR.UPSTREAM;
+}
+
+function _normalizeHits(raw) {
+  return (Array.isArray(raw) ? raw : []).map((hit) => ({
+    title: typeof hit?.title === 'string' ? hit.title.trim() : '',
+    url: typeof hit?.url === 'string' ? hit.url.trim() : '',
+    snippet: typeof hit?.snippet === 'string'
+      ? hit.snippet.trim()
+      : (typeof hit?.content === 'string' ? hit.content.trim() : ''),
+    engines: Array.isArray(hit?.engines)
+      ? hit.engines.filter((engine) => typeof engine === 'string')
+      : (typeof hit?.engine === 'string' ? [hit.engine] : [])
+  })).filter((hit) => hit.url);
+}
+
+/** Bypass only a stale degraded empty sidecar cache, using its same SearXNG. */
+async function _searchSearxFallback(query, count, signal) {
+  const base = String(envConfig.SEARCH_IMAGE_BASE_URL || '').replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(base)) return [];
+  const url = new URL(`${base}/search`);
+  url.searchParams.set('q', query);
+  url.searchParams.set('format', 'json');
+  url.searchParams.set('categories', 'general');
+  url.searchParams.set('pageno', '1');
+  url.searchParams.set('safesearch', '0');
+  try {
+    const response = await fetchWithTimeout(url.toString(), {
+      method: 'GET',
+      headers: { Accept: 'application/json', 'User-Agent': 'GemiX-WebSearch/1.0' },
+      signal
+    }, SEARX_FALLBACK_TIMEOUT_MS);
+    if (!response.ok) return [];
+    const body = await response.text();
+    return _normalizeHits(JSON.parse(body)?.results).slice(0, count);
+  } catch (err) {
+    log.warn(`direct SearXNG fallback failed: ${err.message}`);
+    return [];
+  }
 }
 
 /**
@@ -127,24 +166,38 @@ async function searchWeb({ query, count, signal }) {
   const res = await _get('/search', { q: query, count, fetch: 'false' }, SEARCH_TIMEOUT_MS, signal);
   if (!res.ok) return res;
 
-  const raw = Array.isArray(res.data?.results) ? res.data.results : [];
-  const results = raw.map((hit) => ({
-    title: typeof hit?.title === 'string' ? hit.title.trim() : '',
-    url: typeof hit?.url === 'string' ? hit.url.trim() : '',
-    snippet: typeof hit?.snippet === 'string' ? hit.snippet.trim() : '',
-    engines: Array.isArray(hit?.engines) ? hit.engines.filter((e) => typeof e === 'string') : []
-  })).filter((hit) => hit.url);
+  let results = _normalizeHits(res.data?.results);
 
   const meta = res.data?.meta || {};
+  let enginesUsed = Array.isArray(meta.engines_used) ? meta.engines_used : [];
+  const unresponsiveEngines = Array.isArray(meta.unresponsive_engines) ? meta.unresponsive_engines : [];
+  const upstreamStatus = typeof meta.upstream_status === 'string' ? meta.upstream_status : null;
+  const upstreamErrors = Array.isArray(meta.upstream_errors)
+    ? meta.upstream_errors.filter(error => typeof error === 'string').slice(0, 20).map(error => error.slice(0, 200))
+    : [];
+  let directFallbackUsed = false;
+  if (results.length === 0 && (upstreamStatus === 'degraded' || upstreamStatus === 'failed')) {
+    results = await _searchSearxFallback(query, count, signal);
+    if (results.length > 0) {
+      directFallbackUsed = true;
+      enginesUsed = [...new Set(results.flatMap(hit => hit.engines))];
+    }
+  }
   return {
     ok: true,
     results,
     meta: {
-      enginesUsed: Array.isArray(meta.engines_used) ? meta.engines_used : [],
+      enginesUsed,
       // The sidecar answers with whatever engines did respond, so a degraded
       // upstream is a note on a real result, not a failure of the call.
-      degraded: meta.upstream_status && meta.upstream_status !== 'ok',
-      unresponsiveEngines: Array.isArray(meta.unresponsive_engines) ? meta.unresponsive_engines : []
+      degraded: upstreamStatus === 'degraded'
+        || upstreamStatus === 'failed'
+        || unresponsiveEngines.length > 0
+        || (results.length === 0 && enginesUsed.length === 0 && upstreamStatus !== 'ok'),
+      upstreamStatus,
+      upstreamErrors,
+      directFallbackUsed,
+      unresponsiveEngines
     }
   };
 }

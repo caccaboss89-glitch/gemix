@@ -34,7 +34,7 @@ async function managePreferences(args, settingsFileId) {
   }
 
   const patch = {};
-  const changes = [];
+  const current = readSettings(settingsFileId);
 
   if (args.voice !== undefined && args.voice !== null && args.voice !== '') {
     const voice = String(args.voice).trim().toLowerCase();
@@ -42,7 +42,6 @@ async function managePreferences(args, settingsFileId) {
       return { success: false, error: `Invalid voice: "${args.voice}". Available voices: ${VALID_VOICES.join(', ')}.` };
     }
     patch.voice = voice;
-    changes.push(`voice=${voice}`);
   }
 
   if (args.effort !== undefined && args.effort !== null && args.effort !== '') {
@@ -52,7 +51,6 @@ async function managePreferences(args, settingsFileId) {
       return { success: false, error: `Invalid effort: "${args.effort}". Use one of: ${supportedEfforts.join(', ')}.` };
     }
     patch.effort = effort;
-    changes.push(`effort=${effort}`);
   }
 
   if (args.language !== undefined && args.language !== null && args.language !== '') {
@@ -62,12 +60,10 @@ async function managePreferences(args, settingsFileId) {
       return { success: false, error: `Invalid language: "${args.language}". Use one of: ${VALID_LANGUAGES.join(', ')}.` };
     }
     patch.language = match;
-    changes.push(`language=${match}`);
   }
 
   let memoryNote = '';
   if (args.memory !== undefined && args.memory !== null) {
-    const current = readSettings(settingsFileId);
     const resolved = resolveMemoryContent(current.memory, args.memory, args.replace !== false);
     if (resolved.cleared) {
       // Clearing restores the default guidance rather than leaving it empty.
@@ -84,21 +80,35 @@ async function managePreferences(args, settingsFileId) {
       const mode = args.replace === false ? 'appended to' : 'updated';
       memoryNote = ` Memory ${mode} (${resolved.content.length}/${MAX_MEMORY_CHARS} chars).`;
     }
-    changes.push('memory');
   }
 
   if (Object.keys(patch).length === 0) {
     return { success: false, error: 'Nothing to update: pass at least one of voice, effort, language, memory.' };
   }
 
-  const written = await updateSettings(settingsFileId, patch);
+  const changedKeys = Object.keys(patch).filter(key => patch[key] !== current[key]);
+  if (changedKeys.length === 0) {
+    return {
+      success: true,
+      changed: false,
+      settings: current,
+      message: 'Preferences already matched these values; nothing was written.'
+    };
+  }
+
+  const changedPatch = Object.fromEntries(changedKeys.map(key => [key, patch[key]]));
+  const written = await updateSettings(settingsFileId, changedPatch);
   if (!written.success) {
     return { success: false, error: written.error };
   }
 
+  const changes = changedKeys.map(key => key === 'memory' ? 'memory' : `${key}=${patch[key]}`);
+  const effectiveMemoryNote = changedKeys.includes('memory') ? memoryNote : '';
   return {
     success: true,
-    message: `Preferences updated (${changes.join(', ')}).${memoryNote} `
+    changed: true,
+    settings: written.settings,
+    message: `Preferences updated (${changes.join(', ')}).${effectiveMemoryNote} `
       + 'The new values are active from your next reply.'
   };
 }

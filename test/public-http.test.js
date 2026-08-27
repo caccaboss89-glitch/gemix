@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isPublicIp, openPublicHttp, parsePublicUrl } from '../src/utils/publicHttp.js';
+import { _pinnedLookup, isPublicIp, openPublicHttp, parsePublicUrl } from '../src/utils/publicHttp.js';
 
 test('public-address policy rejects every local and documentation range', () => {
   for (const address of [
@@ -33,4 +33,17 @@ test('IPv6 special-purpose ranges are rejected in every textual form', () => {
 test('literal private targets are refused before any connection is attempted', async () => {
   await assert.rejects(() => openPublicHttp('http://127.0.0.1:9/private'), /Private|local/);
   await assert.rejects(() => openPublicHttp('http://[::1]:9/private'), /Private|local/);
+});
+
+test('pinned DNS lookup follows the scalar and all-address Node contracts', async () => {
+  const lookup = _pinnedLookup({ address: '8.8.8.8', family: 4 });
+  const scalar = await new Promise((resolve, reject) => {
+    lookup('ignored.test', {}, (err, address, family) => err ? reject(err) : resolve({ address, family }));
+  });
+  assert.deepEqual(scalar, { address: '8.8.8.8', family: 4 });
+
+  const all = await new Promise((resolve, reject) => {
+    lookup('ignored.test', { all: true }, (err, addresses) => err ? reject(err) : resolve(addresses));
+  });
+  assert.deepEqual(all, [{ address: '8.8.8.8', family: 4 }]);
 });

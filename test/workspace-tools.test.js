@@ -98,6 +98,16 @@ test('list_files points at read_file when handed a file', () => {
   assert.match(res.error, /read_file/);
 });
 
+test('missing sub-directories are not confused with an empty fresh root', () => {
+  const listed = listFiles({ path: 'workspace/missing' }, WORKSPACE_ID);
+  assert.equal(listed.success, false);
+  assert.match(listed.error, /does not exist/);
+
+  const searched = searchFiles({ path: 'workspace/missing', namePattern: '*' }, WORKSPACE_ID);
+  assert.equal(searched.success, false);
+  assert.match(searched.error, /does not exist/);
+});
+
 // -- search_files -------------------------------------------------------------
 
 test('search_files matches a basename glob', () => {

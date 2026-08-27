@@ -10,7 +10,7 @@ function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, h
     return {
       recipient: {
         type: 'object',
-        description: `Target recipient (phone) — someone other than the current ${here}.`,
+        description: `Private recipient by phone. Omit to use the current ${here}; explicitly naming the caller is equivalent to a self-reminder.`,
         properties: {
           phone: {
             type: 'string',
@@ -32,7 +32,7 @@ function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, h
     };
     properties.recipient = {
       type: 'object',
-      description: 'Active member to remind. REQUIRED with toPrivate when reminding someone other than the current chat.',
+      description: 'Active member to remind. Omit with toPrivate for a private self-reminder; set it when reminding someone else.',
       properties: { name: { type: 'string', description: 'Active member name to remind.' } }
     };
   } else if (isWhatsAppGroup) {
@@ -88,10 +88,10 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Schedule reminders for the current chat, other active members or external contacts. The reminder is DELIVERED at the scheduled time to whoever you set as recipient — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails.'
+      ? 'Schedule reminders for the current chat, other active members or external contacts. The reminder is DELIVERED at the scheduled time to whoever you set as recipient — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails. Batch items are validated independently and saved atomically per task file; inspect each indexed result and retry only failed indices.'
       : isActiveMember
-        ? 'Schedule reminders for the current chat or other active members. The reminder is DELIVERED to the recipient you set — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails.'
-        : 'Schedule personal reminders for the current chat.',
+        ? 'Schedule reminders for the current chat or other active members. The reminder is DELIVERED to the recipient you set — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails. Batch items are validated independently and saved atomically per task file; inspect each indexed result and retry only failed indices.'
+        : 'Schedule personal reminders for the current chat. Batch items are validated independently and saved atomically per task file; inspect each indexed result and retry only failed indices.',
     properties: {
       tasks: {
         type: 'array',

@@ -47,6 +47,7 @@ import { createLogger  } from '../utils/logger.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
 import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
 import { sleepWithin } from '../utils/turnBudget.js';
+import { sniffImageType } from '../utils/imageType.js';
 
 const log = createLogger('ImagineGenerator');
 
@@ -421,10 +422,14 @@ async function _attemptXaiImage({ prompt, refList, aspect, workspaceId, signal }
   } catch (err) {
     return { ok: false, error: `Image load failed: ${err.message}`, code: 'TRANSIENT' };
   }
+  const type = sniffImageType(buffer);
+  if (!type) {
+    return { ok: false, error: 'Image generation returned an unrecognized image format.', code: 'MALFORMED' };
+  }
   return {
     ok: true,
     buffer,
-    ext: _extFromGeneratedMedia(item.url, item.mime_type, 'jpg'),
+    ext: type.ext,
     refCount: submit.refCount
   };
 }

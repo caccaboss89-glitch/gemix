@@ -25,6 +25,7 @@ import envConfig from '../config/env.js';
 import { FEATURE, backendFor, fallbackBackendFor } from '../features/featureBindings.js';
 import { resolveProviderProfile } from '../ai/providers/providerProfile.js';
 import { createLogger } from '../utils/logger.js';
+import { sniffImageType } from '../utils/imageType.js';
 
 const log = createLogger('ImageBackends');
 
@@ -180,7 +181,11 @@ async function generateWithFlux({ prompt, size, references = [], signal }) {
   if (buffer.length === 0) {
     return { ok: false, code: CF_ERROR.MALFORMED, error: 'Workers AI returned an empty image.' };
   }
-  return { ok: true, buffer, ext: 'png' };
+  const type = sniffImageType(buffer);
+  if (!type) {
+    return { ok: false, code: CF_ERROR.MALFORMED, error: 'Workers AI returned an unrecognized image format.' };
+  }
+  return { ok: true, buffer, ext: type.ext, mime: type.mime };
 }
 
 export {
