@@ -13,7 +13,7 @@ import test, { afterEach, beforeEach } from 'node:test';
 import constants from '../src/config/constants.js';
 import envConfig from '../src/config/env.js';
 import { getToolsForUser } from '../src/ai/tools.js';
-import { searchImage } from '../src/tools/searchImage.js';
+import { _imageUrlCandidates, searchImage } from '../src/tools/searchImage.js';
 import { readPage, searchWeb } from '../src/tools/searchWeb.js';
 import { _resetActiveProfileForTests } from '../src/ai/providers/providerProfile.js';
 
@@ -201,6 +201,19 @@ test('image search selects its engines with supported SearXNG bang syntax', asyn
   assert.equal(lastParams().get('categories'), 'images');
 });
 
+test('image search keeps distinct preview fallbacks in preference order', () => {
+  assert.deepEqual(_imageUrlCandidates({
+    img_src: 'https://images.example.org/original.jpg',
+    thumbnail_src: 'https://images.example.org/preview.webp',
+    thumbnail: 'https://images.example.org/preview.webp',
+    url: 'https://images.example.org/fallback.png'
+  }), [
+    'https://images.example.org/original.jpg',
+    'https://images.example.org/preview.webp',
+    'https://images.example.org/fallback.png'
+  ]);
+});
+
 // -- read_page ----------------------------------------------------------------
 
 test('a page comes back as text with the extraction cap applied', async () => {
@@ -209,6 +222,7 @@ test('a page comes back as text with the extraction cap applied', async () => {
   const res = await readPage({ url: 'https://example.org/a' });
 
   assert.equal(res.success, true);
+  assert.equal(res.extraction_strategy, 'unknown');
   assert.equal(res.content.length, constants.READ_PAGE_MAX_CHARS);
   assert.equal(res.truncated, true);
   // Asking for one char over the cap is what makes overflow detectable.

@@ -66,45 +66,52 @@ function _isHttpsImageUrl(u) {
 }
 
 /**
- * Prefer img_src (direct file), then thumbnail_src as last resort.
+ * Return distinct candidate image URLs in download preference order.
  * @param {object} hit
- * @returns {string|null}
+ * @returns {string[]}
  */
-function _pickImageUrl(hit) {
-  if (!hit || typeof hit !== 'object') return null;
+function _imageUrlCandidates(hit) {
+  if (!hit || typeof hit !== 'object') return [];
+  const candidates = [];
   for (const key of ['img_src', 'thumbnail_src', 'thumbnail']) {
     const candidate = hit[key];
-    if (_isHttpsImageUrl(candidate)) return String(candidate).trim();
+    if (_isHttpsImageUrl(candidate)) candidates.push(String(candidate).trim());
   }
   // Some engines put the image file in `url` when category is images.
   if (_isHttpsImageUrl(hit.url) && /\.(jpe?g|png|gif|webp|bmp|avif)(\?|#|$)/i.test(hit.url)) {
-    return String(hit.url).trim();
+    candidates.push(String(hit.url).trim());
   }
-  return null;
+  return [...new Set(candidates)].slice(0, 3);
 }
 
 /**
  * Download one search hit and build an inline input_image part for the model.
  * The bytes never touch disk: a hit the model only looks at is not a file.
- * @returns {Promise<{ part: object|null, error?: string }>}
+ * @returns {Promise<{ part: object|null, url?: string, error?: string }>}
  */
-async function _buildVisionPart(imgUrl, index, signal) {
-  try {
-    const dl = await downloadPublicFile(imgUrl, {
-      maxBytes: constants.MAX_IMAGE_BYTES,
-      timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS,
-      signal
-    });
-    const sniffed = sniffImageType(dl.buffer);
-    if (!sniffed) {
-      return { part: null, error: 'Downloaded body is not a recognized image (JPEG/PNG/WEBP/GIF/ICO).' };
+async function _buildVisionPart(imageUrls, index, signal) {
+  let lastError = 'No usable image URL was returned.';
+  for (const imgUrl of imageUrls) {
+    try {
+      const dl = await downloadPublicFile(imgUrl, {
+        maxBytes: constants.MAX_IMAGE_BYTES,
+        timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS,
+        signal
+      });
+      const sniffed = sniffImageType(dl.buffer);
+      if (!sniffed) {
+        lastError = 'Downloaded body is not a recognized image (JPEG/PNG/WEBP/GIF/ICO).';
+        continue;
+      }
+      const part = inlineImagePartFromBuffer(dl.buffer, sniffed.mime);
+      if (part) return { part, url: imgUrl };
+      lastError = 'Image is too large to attach inline.';
+    } catch (err) {
+      lastError = err.message;
     }
-    const part = inlineImagePartFromBuffer(dl.buffer, sniffed.mime);
-    return part ? { part } : { part: null, error: 'Image is too large to attach inline.' };
-  } catch (err) {
-    log.warn(`Vision preview failed for image ${index}: ${err.message}`);
-    return { part: null, error: err.message };
   }
+  log.warn(`Vision preview failed for image ${index}: ${lastError}`);
+  return { part: null, error: lastError };
 }
 
 /**
@@ -195,11 +202,13 @@ async function searchImage(args = {}, opts = {}) {
   const images = [];
 
   for (const hit of rawResults) {
-    const imgUrl = _pickImageUrl(hit);
+    const candidates = _imageUrlCandidates(hit);
+    const imgUrl = candidates[0];
     if (!imgUrl || seen.has(imgUrl)) continue;
     seen.add(imgUrl);
     images.push({
       url: imgUrl,
+      candidates,
       title: typeof hit.title === 'string' ? hit.title.trim().slice(0, 200) : '',
       source_page: typeof hit.url === 'string' && hit.url !== imgUrl ? hit.url : undefined,
       engine: typeof hit.engine === 'string' ? hit.engine : undefined
@@ -220,7 +229,7 @@ async function searchImage(args = {}, opts = {}) {
 
   // Build provider-neutral inline vision previews in parallel.
   const visionSettled = await Promise.all(
-    images.map((img, i) => _buildVisionPart(img.url, i, opts.signal))
+    images.map((img, i) => _buildVisionPart(img.candidates, i, opts.signal))
   );
 
   const nativeParts = [];
@@ -228,7 +237,7 @@ async function searchImage(args = {}, opts = {}) {
     const v = visionSettled[i];
     const entry = {
       index: i,
-      url: img.url,
+      url: v?.url || img.url,
       title: img.title,
       vision: Boolean(v && v.part)
     };
@@ -269,5 +278,6 @@ async function searchImage(args = {}, opts = {}) {
 }
 
 export {
+  _imageUrlCandidates,
   searchImage
 };

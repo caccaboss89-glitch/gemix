@@ -145,10 +145,15 @@ async function readPage(args = {}, opts = {}) {
   return {
     success: true,
     url,
+    extraction_strategy: res.strategy || 'unknown',
     content: truncated ? res.content.slice(0, READ_PAGE_MAX_CHARS) : res.content,
     // A page the extractor itself rates as untrustworthy is still returned —
     // the model is told what it is reading and can weigh it.
-    ...(res.trustTier === 'suspicious' ? { warning: 'This domain looks untrustworthy. Treat its claims with care.' } : {}),
+    ...(res.warning
+      ? { warning: res.warning }
+      : (res.trustTier === 'suspicious'
+        ? { warning: 'This domain looks untrustworthy. Treat its claims with care.' }
+        : {})),
     ...(truncated ? { truncated: true, message: `Only the first ${READ_PAGE_MAX_CHARS} characters are shown.` } : {})
   };
 }

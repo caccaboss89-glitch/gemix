@@ -19,6 +19,7 @@
 import envConfig from '../config/env.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
 import { createLogger } from '../utils/logger.js';
+import { isGoogleInterstice, readPublicPageDirect } from './directPage.js';
 
 const log = createLogger('AgentSearch');
 
@@ -230,12 +231,20 @@ async function readWebPage({ url, maxChars, signal }) {
     };
   }
 
+  if (isGoogleInterstice(data.content, data.strategy)) {
+    const direct = await readPublicPageDirect(url, maxChars, signal);
+    if (direct.ok) return direct;
+  }
+
   return {
     ok: true,
     content: data.content,
     strategy: typeof data.strategy === 'string' ? data.strategy : '',
     chars: Number.isFinite(data.chars) ? data.chars : data.content.length,
-    trustTier: typeof data.trust?.tier === 'string' ? data.trust.tier : 'unknown'
+    trustTier: typeof data.trust?.tier === 'string' ? data.trust.tier : 'unknown',
+    ...(isGoogleInterstice(data.content, data.strategy)
+      ? { warning: 'The extractor returned a Google consent page instead of the target page.' }
+      : {})
   };
 }
 
