@@ -18,6 +18,8 @@ bin/
 src/logs/
 src/data/**
 .tempfiles/
+/core
+/core.*
 
 # Dev scripts
 scripts/output-regenerate-prompt-dumps/

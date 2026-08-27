@@ -21,6 +21,7 @@ import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppe
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const PROTOCOL_TIMEOUT_MS = 120_000;
+const shutdownByClient = new WeakMap();
 
 /**
  * Which browser binary Puppeteer launches, resolved once per process.
@@ -71,6 +72,8 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   let reconnectAttempts = 0;
   let reconnectTimer = null;
   let initializeInProgress = false;
+  let shuttingDown = false;
+  let shutdownPromise = null;
 
   const clearReconnectTimer = () => {
     if (reconnectTimer) {
@@ -80,7 +83,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   };
 
   const watchdog = setTimeout(() => {
-    if (!_isReady(client)) {
+    if (!shuttingDown && !_isReady(client)) {
       log.error(`${clientId} WhatsApp client init timeout (5 min). Forcing process exit to restart.`);
       process.exit(1);
     }
@@ -102,12 +105,14 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   });
 
   client.on('auth_failure', (msg) => {
+    if (shuttingDown) return;
     log.error('Auth failure:', msg);
     log.error('Exiting so PM2 can restart with a fresh session (re-scan QR if needed).');
     setTimeout(() => process.exit(1), 2000);
   });
 
   client.on('disconnected', (reason) => {
+    if (shuttingDown) return;
     log.warn('Disconnected:', reason);
     initializeInProgress = false;
     clearReconnectTimer();
@@ -143,9 +148,28 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
     }
   });
 
+  shutdownByClient.set(client, () => {
+    if (shutdownPromise) return shutdownPromise;
+    shuttingDown = true;
+    clearTimeout(watchdog);
+    clearReconnectTimer();
+    shutdownPromise = Promise.resolve().then(() => client.destroy());
+    return shutdownPromise;
+  });
+
   client.initialize();
   return client;
 }
 
-export { createWhatsAppClient };
+async function shutdownWhatsAppClient(client) {
+  if (!client) return;
+  const shutdown = shutdownByClient.get(client);
+  if (shutdown) {
+    await shutdown();
+    return;
+  }
+  if (typeof client.destroy === 'function') await client.destroy();
+}
+
+export { createWhatsAppClient, shutdownWhatsAppClient };
 export { _isReady as isWaClientReady };

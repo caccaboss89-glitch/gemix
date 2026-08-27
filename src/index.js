@@ -21,11 +21,16 @@ import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { runProviderPreflight, logFeatureBindings } from './ai/providers/preflight.js';
 import { getCredentialProvider } from './ai/aiProvider.js';
 import { initApiLogRetention } from './ai/apiLogs.js';
+import { shutdownWhatsAppClient } from './platforms/whatsapp/client.js';
 
 const { TASKS_DIR, DATA_DIR } = constants;
 const { STARTUP_SYSTEM_CLEANUP } = envConfig;
 
 const log = createLogger('GemiX');
+let dedicatedWaClient = null;
+let personalWaClient = null;
+let discordClient = null;
+let shutdownStarted = false;
 
 /**
  * Create the data directories GemiX needs and, if opted in, run the Linux
@@ -98,16 +103,16 @@ runStartupCleanup();
   await runProviderPreflight(profile, getCredentialProvider());
   logFeatureBindings(profile);
 
-  const dedicatedWa = initDedicatedWhatsApp();
+  dedicatedWaClient = initDedicatedWhatsApp();
 
-  dedicatedWa.on('ready', () => {
-    setSchedulerWaClient(dedicatedWa);
-    setAdminNotifierClient(dedicatedWa);
+  dedicatedWaClient.on('ready', () => {
+    setSchedulerWaClient(dedicatedWaClient);
+    setAdminNotifierClient(dedicatedWaClient);
   });
 
-  initPersonalWhatsApp();
+  personalWaClient = initPersonalWhatsApp();
 
-  initDiscord();
+  discordClient = initDiscord();
 
   workspaceRuntime.init();
   initApiLogRetention();
@@ -120,7 +125,19 @@ runStartupCleanup();
 });
 
 const shutdownHandler = async (signal) => {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
   log.info(`\nGemiX - Shutting down (${signal})...`);
+  const closures = await Promise.allSettled([
+    shutdownWhatsAppClient(dedicatedWaClient),
+    shutdownWhatsAppClient(personalWaClient),
+    Promise.resolve().then(() => discordClient?.destroy())
+  ]);
+  for (const result of closures) {
+    if (result.status === 'rejected') {
+      log.warn(`Platform shutdown failed during ${signal}: ${result.reason?.message || result.reason}`);
+    }
+  }
   try { await workspaceRuntime.shutdownAll(); } catch (err) { log.warn(`Workspace container shutdown failed during ${signal}: ${err.message}`); }
   process.exit(0);
 };
