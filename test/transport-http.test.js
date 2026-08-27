@@ -67,6 +67,37 @@ const COMPLETED_STREAM = [
   'data: {"type":"response.completed","response":{"id":"r1","status":"completed","output":[]}}\n\n'
 ];
 
+test('a stream with no content-type is read, a stream with the wrong one is refused', async () => {
+  // The Codex backend sends a well-formed event stream with the content-type
+  // header omitted. Refusing it threw away a working response over a missing
+  // label, and every turn died on the first round.
+  const noHeader = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => sseResponse(COMPLETED_STREAM, { headers: { 'content-type': null } })
+  });
+  const { response } = await noHeader.createResponse({ body: { model: 'm', input: [] } });
+  assert.equal(response.status, 'completed');
+
+  // A content-type that is present and says something else is real evidence
+  // that the answer is not a stream, and must still be refused with the body
+  // quoted: that body is usually what explains the refusal.
+  const wrongHeader = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: (k) => (String(k).toLowerCase() === 'content-type' ? 'application/json' : null) },
+      text: async () => '{"error":"nope"}'
+    })
+  });
+  await assert.rejects(
+    () => wrongHeader.createResponse({ body: { model: 'm', input: [] } }),
+    /Expected an event stream, got "application\/json"/
+  );
+});
+
 test('a successful call assembles the stream and marks the credential healthy', async () => {
   const credentials = new StubCredentials();
   let seenUrl = null;

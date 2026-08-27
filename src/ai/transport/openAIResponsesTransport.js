@@ -175,14 +175,29 @@ class OpenAIResponsesTransport {
         });
       }
 
+      //  A *wrong* content-type and a *missing* one are not the same evidence,
+      //  and they are handled differently on purpose.
+      //
+      //  `application/json` on a 200 means the endpoint decided to answer with
+      //  something other than a stream: reading the body is the right move,
+      //  because it usually explains why.
+      //
+      //  No content-type at all proves nothing. The Codex backend sends a
+      //  perfectly well-formed event stream with the header omitted, and
+      //  rejecting it threw away a working response over a missing label.
+      //  Here the body itself is the evidence, so the stream reader decides: if
+      //  it is not SSE it yields no events and fails on its own terms.
       const contentType = res.headers.get('content-type') || '';
-      if (!/text\/event-stream/i.test(contentType)) {
+      if (contentType && !/text\/event-stream/i.test(contentType)) {
         const bodyText = await res.text().catch(() => '');
         throw this._error(
           TRANSPORT_ERROR.MALFORMED,
-          `Expected an event stream, got "${contentType || 'no content-type'}": ${summarizeErrorBody(bodyText)}`,
+          `Expected an event stream, got "${contentType}": ${summarizeErrorBody(bodyText)}`,
           { requestId: upstreamRequestId }
         );
+      }
+      if (!contentType) {
+        this._log.warn('response carried no content-type; reading it as an event stream');
       }
 
       let assembled;
