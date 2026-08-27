@@ -63,6 +63,12 @@ class OpenAIResponsesTransport {
     this.label = opts.label || 'responses';
     this._fetch = opts.fetchImpl || ((...args) => fetch(...args));
     this._log = createLogger(`Transport:${this.label}`);
+    /**
+     * Whether the "no content-type" notice has already been given. It is worth
+     * saying once, because it tells you the endpoint is off-spec; repeating it
+     * on every single call would only teach the reader to skip that line.
+     */
+    this._warnedMissingContentType = false;
   }
 
   /**
@@ -196,8 +202,9 @@ class OpenAIResponsesTransport {
           { requestId: upstreamRequestId }
         );
       }
-      if (!contentType) {
-        this._log.warn('response carried no content-type; reading it as an event stream');
+      if (!contentType && !this._warnedMissingContentType) {
+        this._warnedMissingContentType = true;
+        this._log.warn('response carried no content-type; reading it as an event stream (said once per run)');
       }
 
       let assembled;
