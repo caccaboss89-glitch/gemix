@@ -132,15 +132,15 @@ async function searchWeb(args = {}, responseCtx = null, opts = {}) {
  */
 async function readPage(args = {}, responseCtx = null, opts = {}) {
   const url = typeof args.url === 'string' ? args.url.trim() : '';
-  if (!url) return { success: false, error: 'Missing required argument "url".' };
+  if (!url) return { success: false, status: 'failed', error: 'Missing required argument "url".' };
   if (!/^https?:\/\//i.test(url)) {
-    return { success: false, error: `"${url}" is not an http(s) URL. Pass a full page address.` };
+    return { success: false, status: 'failed', error: `"${url}" is not an http(s) URL. Pass a full page address.` };
   }
 
   // One character over the cap, so a page that fills it exactly is not reported
   // as truncated and one that overflows is caught before it reaches the model.
   const res = await readWebPage({ url, maxChars: READ_PAGE_MAX_CHARS + 1, signal: opts.signal });
-  if (!res.ok) return { success: false, error: _failureMessage(res.code, res.error) };
+  if (!res.ok) return { success: false, status: 'failed', error: _failureMessage(res.code, res.error) };
 
   if (responseCtx) {
     if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xPosts: 0 };
@@ -150,6 +150,7 @@ async function readPage(args = {}, responseCtx = null, opts = {}) {
   const truncated = res.content.length > READ_PAGE_MAX_CHARS;
   return {
     success: true,
+    status: truncated ? 'degraded' : 'ok',
     url,
     extraction_strategy: res.strategy || 'unknown',
     content: truncated ? res.content.slice(0, READ_PAGE_MAX_CHARS) : res.content,

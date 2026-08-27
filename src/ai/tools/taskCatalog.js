@@ -58,13 +58,16 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     content: { type: 'string', description: contentDesc },
     scheduledAt: {
       type: 'string',
-      description: 'Execution time in ISO 8601 (e.g. 2026-06-05T14:30:00). System uses the correct timezone.'
+      description: 'Copy the user\'s intended local calendar date and wall-clock time unchanged as YYYY-MM-DDTHH:MM:SS '
+        + '(e.g. a requested 14:30 stays 14:30). Do not convert the hour and do not add Z or a UTC offset; '
+        + 'the backend alone interprets it in Europe/Rome and applies the correct DST-aware offset.'
     },
     repeat: {
       type: 'string',
       description: 'OPTIONAL recurrence as an RRULE string; omit for a one-time reminder. '
         + 'FREQ=HOURLY|DAILY|WEEKLY|MONTHLY (required), plus optional INTERVAL=N (default 1), '
-        + 'BYDAY=MO,TU,WE,TH,FR,SA,SU (weekly only), UNTIL=YYYY-MM-DDTHH:MM:SS (default: the 1-year limit), '
+        + 'BYDAY=MO,TU,WE,TH,FR,SA,SU (weekly only), UNTIL=YYYY-MM-DDTHH:MM:SS as an unchanged local wall-clock '
+        + 'time without Z/offset (default: the 1-year limit), '
         + 'EXDATE=YYYY-MM-DD,… (dates to skip). '
         + 'Examples: "FREQ=DAILY;INTERVAL=2" every 2 days; "FREQ=WEEKLY;BYDAY=MO,FR" every Monday and Friday; '
         + '"FREQ=MONTHLY;INTERVAL=3;EXDATE=2026-12-25" every 3 months except that date.'

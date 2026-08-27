@@ -65,7 +65,18 @@ function validateNoImplLeaks(text, caseId, scope) {
 function validateToolDumpLeaks(dump, caseId) {
   const toolsStart = dump.indexOf('--- TOOLS');
   if (toolsStart < 0) return;
-  validateNoImplLeaks(dump.slice(toolsStart), caseId, 'tool schema');
+  const toolText = dump.slice(toolsStart);
+  validateNoImplLeaks(toolText, caseId, 'tool schema');
+  if (toolText.includes('[function] schedule_tasks')) {
+    if (!/wall-clock time unchanged/.test(toolText)
+        || !/Do not convert the hour/.test(toolText)
+        || !/do not add Z or a UTC offset/.test(toolText)) {
+      ISSUES.push({
+        caseId,
+        msg: 'schedule_tasks must tell the model to copy wall-clock time unchanged and leave timezone conversion to the backend'
+      });
+    }
+  }
 }
 
 // -- Structured output -----------------------------------------------------

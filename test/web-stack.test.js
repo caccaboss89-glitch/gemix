@@ -196,9 +196,36 @@ test('image search selects its engines with supported SearXNG bang syntax', asyn
   const res = await searchImage({ query: 'Wikimedia waterfall' });
 
   assert.equal(res.success, true);
+  assert.equal(res.status, 'ok');
   assert.equal(lastParams().get('q'), '!goi !bii !ddi Wikimedia waterfall');
   assert.equal(lastParams().get('engines'), null);
   assert.equal(lastParams().get('categories'), 'images');
+});
+
+test('image search reports degraded when an engine or vision preview falls short', async () => {
+  calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), headers: options?.headers || {} });
+    if (String(url).startsWith(envConfig.SEARCH_IMAGE_BASE_URL)) {
+      const body = {
+        results: [{ title: 'Result', img_src: 'https://127.0.0.1/result.jpg' }],
+        unresponsive_engines: [['startpage', 'CAPTCHA']]
+      };
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(body),
+        json: async () => body
+      };
+    }
+    throw new Error('preview blocked');
+  };
+
+  const res = await searchImage({ query: 'result' });
+  assert.equal(res.success, true);
+  assert.equal(res.status, 'degraded');
+  assert.equal(res.vision_count, 0);
+  assert.deepEqual(res.diagnostics.unresponsive_engines, [['startpage', 'CAPTCHA']]);
 });
 
 test('image search keeps distinct preview fallbacks in preference order', () => {
@@ -222,6 +249,7 @@ test('a page comes back as text with the extraction cap applied', async () => {
   const res = await readPage({ url: 'https://example.org/a' });
 
   assert.equal(res.success, true);
+  assert.equal(res.status, 'degraded');
   assert.equal(res.extraction_strategy, 'unknown');
   assert.equal(res.content.length, constants.READ_PAGE_MAX_CHARS);
   assert.equal(res.truncated, true);
@@ -234,6 +262,7 @@ test('a page that fits is not labelled truncated', async () => {
   const res = await readPage({ url: 'https://example.org/a' });
 
   assert.equal(res.success, true);
+  assert.equal(res.status, 'ok');
   assert.equal(res.truncated, undefined);
   assert.equal(res.content, 'short page');
 });
@@ -256,6 +285,7 @@ test('an untrustworthy domain is still read, with the caveat attached', async ()
   const res = await readPage({ url: 'https://exarnple.org' });
 
   assert.equal(res.success, true);
+  assert.equal(res.status, 'ok');
   assert.match(res.warning, /untrustworthy/);
 });
 
@@ -268,6 +298,7 @@ test('a page every strategy failed on names what was tried', async () => {
   const res = await readPage({ url: 'https://example.org/x' }, responseCtx);
 
   assert.equal(res.success, false);
+  assert.equal(res.status, 'failed');
   assert.match(res.error, /direct, readability, browser/);
   assert.equal(responseCtx.researchStats, null);
 });

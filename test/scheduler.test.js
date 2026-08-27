@@ -45,6 +45,23 @@ test('schedule_tasks reports indexed partial success and persists one atomic fil
   assert.equal((await readTaskFile(fileId)).tasks.length, 2);
 });
 
+test('schedule_tasks rejects model-supplied offsets and invalid Rome wall-clock values', async () => {
+  const result = await scheduleTasks([
+    { content: 'UTC is backend-owned', scheduledAt: '2026-12-01T12:00:00Z' },
+    { content: 'Offset is backend-owned', scheduledAt: '2026-12-01T12:00:00+01:00' },
+    { content: 'Impossible date', scheduledAt: '2026-02-31T12:00:00' },
+    { content: 'Spring DST gap', scheduledAt: '2027-03-28T02:30:00' }
+  ], taskContext(`test_schedule_invalid_time_${process.pid}_${Date.now()}`));
+
+  assert.equal(result.success, false);
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(result.batch.retry_failed_indices, [0, 1, 2, 3]);
+  assert.match(result.tasks[0].error, /do not add Z or an offset/);
+  assert.match(result.tasks[1].error, /do not add Z or an offset/);
+  assert.match(result.tasks[2].error, /Invalid local date\/time/);
+  assert.match(result.tasks[3].error, /clock jumps directly to 03:00/);
+});
+
 test('a corrupt task file fails closed and is not overwritten', async (t) => {
   const fileId = `test_schedule_corrupt_${process.pid}_${Date.now()}`;
   const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);

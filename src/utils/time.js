@@ -133,7 +133,7 @@ function getLastSundayOfMonth(year, month) {
  * @returns {string|null} Warning message if hour is ambiguous, null otherwise
  */
 function checkDSTAmbiguousHour(localDatetime) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(localDatetime);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{3})?$/.exec(localDatetime);
   if (!match) return null;
 
   const year = parseInt(match[1], 10);
@@ -180,18 +180,35 @@ function formatTimestamp(date) {
  * convertRomeLocalToISO("2026-01-15T16:30:00") // -> "2026-01-15T16:30:00+01:00" (Standard time)
  */
 function convertRomeLocalToISO(localDatetime) {
-  // Validate format (must be YYYY-MM-DDTHH:MM:SS or YYYY-MM-DDTHH:MM:SS.mmm)
-  const iso8601Regex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?$/;
-  if (!iso8601Regex.test(localDatetime)) {
-    return null;
-  }
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?$/.exec(localDatetime);
+  if (!match) return null;
 
-  const [datePart, timePart] = localDatetime.split('T');
-  const [year, month, day] = datePart.split('-').map(Number);
-  const [hour, minute, second] = timePart.split(':').map(Number);
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw, millisecondRaw] = match;
+  const [year, month, day, hour, minute, second, millisecond] = [
+    yearRaw,
+    monthRaw,
+    dayRaw,
+    hourRaw,
+    minuteRaw,
+    secondRaw,
+    millisecondRaw || '0'
+  ].map(Number);
 
   // Validate ranges
   if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return null;
+  }
+
+  // Date.UTC normalizes impossible dates (31 February -> March). Refuse that
+  // normalization so a reminder can never silently move to another day.
+  const calendarProbe = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
+  if (calendarProbe.getUTCFullYear() !== year
+      || calendarProbe.getUTCMonth() !== month - 1
+      || calendarProbe.getUTCDate() !== day
+      || calendarProbe.getUTCHours() !== hour
+      || calendarProbe.getUTCMinutes() !== minute
+      || calendarProbe.getUTCSeconds() !== second
+      || calendarProbe.getUTCMilliseconds() !== millisecond) {
     return null;
   }
 
@@ -229,7 +246,15 @@ function convertRomeLocalToISO(localDatetime) {
   let bestMatch = null;
 
   for (const offsetMins of [60, 120]) {
-    const testUtcDate = new Date(Date.UTC(year, month - 1, day, hour - Math.floor(offsetMins / 60), minute, second, 0));
+    const testUtcDate = new Date(Date.UTC(
+      year,
+      month - 1,
+      day,
+      hour - Math.floor(offsetMins / 60),
+      minute,
+      second,
+      millisecond
+    ));
     const testRomeTime = getRomeLocalTime(testUtcDate);
 
     if (testRomeTime.year === year && testRomeTime.month === month && testRomeTime.day === day &&
@@ -240,11 +265,9 @@ function convertRomeLocalToISO(localDatetime) {
     }
   }
 
-  if (bestUtcDate === null) {
-    // Fallback: no exact match found (e.g., non-existent spring-forward hour). Use +02:00 (CEST, active after transition).
-    bestUtcDate = new Date(Date.UTC(year, month - 1, day, hour - 2, minute, second, 0));
-    bestMatch = 120;
-  }
+  // No real Rome instant maps to this wall-clock value. This is the
+  // spring-forward gap and must be rejected instead of shifted by one hour.
+  if (bestUtcDate === null) return null;
 
   const offsetMins = bestMatch;
   const sign = offsetMins >= 0 ? '+' : '-';

@@ -16,7 +16,7 @@ import { startScheduler, setSchedulerWaClient } from './scheduler/engine.js';
 import { notifyAdmin, setAdminNotifierClient } from './utils/adminNotifier.js';
 import workspaceRuntime from './sandbox/workspaceRuntime.js';
 import { startInternalNotifyServer } from './utils/internalNotifyServer.js';
-import { startTempFileServer } from './utils/tempFileServer.js';
+import { clearTempStagingOnStartup, startTempFileServer } from './utils/tempFileServer.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { runProviderPreflight, logFeatureBindings } from './ai/providers/preflight.js';
 import { getCredentialProvider } from './ai/aiProvider.js';
@@ -74,6 +74,7 @@ async function recoverPersonalWhatsApp(reason, err) {
 function runStartupCleanup() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+  clearTempStagingOnStartup();
 
   // System cleanup on startup (opt-in via STARTUP_SYSTEM_CLEANUP).
   // See env.js for flag definition and SERVER_SETUP.md for operational notes.
@@ -89,11 +90,15 @@ function runStartupCleanup() {
       execSync('sudo rm -rf /var/lib/apport/* 2>/dev/null || true', { encoding: 'utf-8' });
       execSync('sudo rm -rf /var/crash/* 2>/dev/null || true', { encoding: 'utf-8' });
 
-      // 2. Docker cleanup (safe: only stopped containers and dangling images)
+      // 2. Docker cleanup. Container pruning is label-scoped so a GemiX
+      // restart cannot delete stopped containers belonging to another app.
       try {
-        execSync('sudo docker container prune -f 2>/dev/null || true', { encoding: 'utf-8' });
+        execSync(
+          'sudo docker container prune -f --filter label=gemix.kind=workspace-runtime 2>/dev/null || true',
+          { encoding: 'utf-8' }
+        );
         execSync('sudo docker image prune -f 2>/dev/null || true', { encoding: 'utf-8' });
-        log.info('   Docker cleaned (stopped containers, dangling images)');
+        log.info('   Docker cleaned (stopped GemiX workspace containers, dangling images)');
       } catch (err) {
         log.debug(`   Docker cleanup skipped: ${err.message}`);
       }

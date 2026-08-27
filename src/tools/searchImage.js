@@ -129,7 +129,7 @@ async function _buildVisionPart(imageUrls, index, signal) {
 async function searchImage(args = {}, opts = {}) {
   const query = _cleanQuery(args.query);
   if (!query) {
-    return { success: false, error: 'Missing required argument "query".' };
+    return { success: false, status: 'failed', error: 'Missing required argument "query".' };
   }
 
   const count = _clampCount(args.count);
@@ -137,6 +137,7 @@ async function searchImage(args = {}, opts = {}) {
   if (!base || !/^https?:\/\//i.test(base)) {
     return {
       success: false,
+      status: 'failed',
       error: 'Image search is not configured (SEARCH_IMAGE_BASE_URL is invalid).'
     };
   }
@@ -168,12 +169,14 @@ async function searchImage(args = {}, opts = {}) {
       if (res.status === 403) {
         return {
           success: false,
+          status: 'failed',
           error:
             'Image search service rejected JSON format (enable "json" under search.formats in SearXNG settings.yml).'
         };
       }
       return {
         success: false,
+        status: 'failed',
         error: `Image search service returned HTTP ${res.status}. Is SearXNG running at ${base}?`
       };
     }
@@ -184,6 +187,7 @@ async function searchImage(args = {}, opts = {}) {
       log.warn(`SearXNG invalid JSON: ${parseErr.message}`);
       return {
         success: false,
+        status: 'failed',
         error: 'Image search service returned invalid JSON. Check SearXNG logs and that format=json is enabled.'
       };
     }
@@ -191,6 +195,7 @@ async function searchImage(args = {}, opts = {}) {
     log.warn(`SearXNG request failed: ${err.message}`);
     return {
       success: false,
+      status: 'failed',
       error:
         `Image search service unreachable at ${base}: ${err.message}. `
         + 'Ensure the local SearXNG container (gemix-searxng) is running.'
@@ -217,11 +222,14 @@ async function searchImage(args = {}, opts = {}) {
   }
 
   if (images.length === 0) {
+    const unresponsiveEngines = Array.isArray(data?.unresponsive_engines) ? data.unresponsive_engines : [];
     return {
       success: true,
+      status: unresponsiveEngines.length > 0 ? 'degraded' : 'ok',
       query,
       count: 0,
       images: [],
+      ...(unresponsiveEngines.length > 0 ? { diagnostics: { unresponsive_engines: unresponsiveEngines } } : {}),
       message:
         'No direct image URLs found for this query. Try a different query; do not invent URLs.'
     };
@@ -255,12 +263,15 @@ async function searchImage(args = {}, opts = {}) {
   });
 
   const visionCount = imagesOut.filter(x => x.vision).length;
+  const unresponsiveEngines = Array.isArray(data?.unresponsive_engines) ? data.unresponsive_engines : [];
   const payload = {
     success: true,
+    status: visionCount === imagesOut.length && unresponsiveEngines.length === 0 ? 'ok' : 'degraded',
     query,
     count: imagesOut.length,
     vision_count: visionCount,
     images: imagesOut,
+    ...(unresponsiveEngines.length > 0 ? { diagnostics: { unresponsive_engines: unresponsiveEngines } } : {}),
     message:
       visionCount > 0
         ? `Found ${imagesOut.length} image(s); ${visionCount} attached as vision previews labeled IMAGE_0…IMAGE_n. `

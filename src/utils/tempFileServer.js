@@ -61,6 +61,24 @@ let _server = null;
 let _cleanupInterval = null;
 
 /**
+ * Remove one-shot staging left by an earlier process. Its token registry was
+ * in that process's memory, so none of these files can still be downloaded.
+ * Durable chat history lives under DATA_DIR and is deliberately untouched.
+ */
+function clearTempStagingOnStartup(tempDir = TEMP_DIR) {
+  fileRegistry.clear();
+  if (!fs.existsSync(tempDir)) return false;
+  try {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    log.info('Cleared temporary staging left by the previous process');
+    return true;
+  } catch (err) {
+    log.warn(`Could not clear temporary staging left by the previous process: ${err.message}`);
+    return false;
+  }
+}
+
+/**
  * Generate a secure random token for file access
  */
 function generateToken() {
@@ -417,6 +435,7 @@ function startTempFileServer() {
 
 export {
   startTempFileServer,
+  clearTempStagingOnStartup,
   registerTempFile,
   tempDirForOwner,
   TEMP_DIR,

@@ -60,18 +60,28 @@ async function scheduleTasks(tasks, ctx) {
       continue;
     }
     if (typeof task.scheduledAt !== 'string' || !task.scheduledAt.trim()) {
-      results.push({ success: false, error: 'Reminder scheduledAt must be an ISO 8601 date-time string.' });
-      continue;
-    }
-    // Convert local datetime (without offset) to ISO with correct timezone offset
-    const scheduledAtISO = convertRomeLocalToISO(task.scheduledAt);
-    if (!scheduledAtISO) {
-      results.push({ success: false, error: `Invalid date: "${task.scheduledAt}". Use format: YYYY-MM-DDTHH:MM:SS (e.g.: 2026-04-17T16:30:00)` });
+      results.push({
+        success: false,
+        error: 'Reminder scheduledAt must copy the intended local wall-clock time as YYYY-MM-DDTHH:MM:SS, without Z or an offset.'
+      });
       continue;
     }
 
-    // Check for ambiguous hours during DST transitions
+    // The model copies the user's wall-clock time unchanged. The backend is
+    // solely responsible for choosing the Europe/Rome offset, including DST.
     const dstWarning = checkDSTAmbiguousHour(task.scheduledAt);
+    if (dstWarning?.startsWith('Invalid time:')) {
+      results.push({ success: false, error: dstWarning });
+      continue;
+    }
+    const scheduledAtISO = convertRomeLocalToISO(task.scheduledAt);
+    if (!scheduledAtISO) {
+      results.push({
+        success: false,
+        error: `Invalid local date/time: "${task.scheduledAt}". Copy the requested date and hour unchanged as YYYY-MM-DDTHH:MM:SS; do not add Z or an offset.`
+      });
+      continue;
+    }
 
     const scheduledAt = new Date(scheduledAtISO);
     const scheduledAtTime = scheduledAt.getTime();
