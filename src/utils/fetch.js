@@ -4,10 +4,6 @@
 // optional automatic admin notification on failures. Used for external
 // service calls throughout the bot.
 
-import fs from 'fs';
-import path from 'path';
-import { Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import constants from '../config/constants.js';
 import { buildAdminNotificationNote, notifyAdminDetailed } from './adminNotifier.js';
 import { openPublicHttp } from './publicHttp.js';
@@ -39,29 +35,6 @@ async function _consumePublicBody(response, maxBytes, signal) {
   }
   if (received === 0) throw new Error('Download returned an empty body.');
   return Buffer.concat(chunks, received);
-}
-
-async function _consumePublicBodyToDisk(response, maxBytes, destPath, signal) {
-  let received = 0;
-  const limiter = new Transform({
-    transform(chunk, _encoding, callback) {
-      received += chunk.length;
-      if (received > maxBytes) {
-        callback(new Error(`File too large (${received} bytes, max ${maxBytes})`));
-        return;
-      }
-      callback(null, chunk);
-    }
-  });
-  const stream = fs.createWriteStream(destPath, { flags: 'wx', mode: 0o600 });
-  try {
-    await pipeline(response, limiter, stream, { signal });
-    if (received === 0) throw new Error('Download returned an empty body.');
-    return received;
-  } catch (err) {
-    try { fs.unlinkSync(destPath); } catch { /* absent or never created */ }
-    throw err;
-  }
 }
 
 async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
@@ -135,9 +108,9 @@ async function fetchExternal(url, options = {}, source = null, timeoutMs = const
 
 /**
  * Download a public HTTP(S) file into memory with a hard size cap.
- * Used when the model references files by URL (web/X search results and
- * delivery attachments). Every DNS target and redirect is restricted to
- * globally routable addresses.
+ * Used when the program itself has to fetch a remote file (image search hits,
+ * generated media, Discord attachments). Every DNS target and redirect is
+ * restricted to globally routable addresses.
  *
  * @param {string} url
  * @param {object} [opts]
@@ -188,65 +161,9 @@ function _filenameFromPublicUrl(url) {
   }
 }
 
-/**
- * Download a public HTTP(S) file to disk with a hard size cap (incremental read).
- * Used when the in-memory cap is exceeded but the file should still be delivered
- * via temp download link.
- *
- * @param {string} url
- * @param {string} destPath - Absolute path to write.
- * @param {object} [opts]
- * @param {number} [opts.maxBytes=104857600] - 100 MB default cap.
- * @param {number} [opts.timeoutMs]
- * @param {AbortSignal} [opts.signal]
- * @returns {Promise<{ filePath: string, mimetype: string, filename: string, size: number }>}
- */
-async function downloadPublicFileToDisk(url, destPath, opts = {}) {
-  const maxBytes = Number.isFinite(opts.maxBytes) ? opts.maxBytes : 100 * 1024 * 1024;
-  if (typeof url !== 'string' || !/^https?:\/\//i.test(url.trim())) {
-    throw new Error(`Invalid URL: "${String(url).slice(0, 120)}"`);
-  }
-  if (typeof destPath !== 'string' || !destPath.trim()) {
-    throw new Error('destPath is required');
-  }
-  const clean = url.trim();
-  const timeoutMs = _downloadTimeoutMs(maxBytes, opts.timeoutMs);
-  const operationSignal = signalWithTimeout(opts.signal || null, timeoutMs);
-  const { response, url: finalUrl } = await openPublicHttp(clean, {
-    signal: operationSignal,
-    timeoutMs,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-      'Accept': '*/*'
-    }
-  });
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    response.destroy();
-    throw new Error(`Download failed: HTTP ${response.statusCode} (${clean.slice(0, 120)})`);
-  }
-  const declared = Number(_header(response, 'content-length') || 0);
-  if (declared > maxBytes) {
-    response.destroy();
-    throw new Error(`File too large (${declared} bytes, max ${maxBytes})`);
-  }
-  const dir = path.dirname(destPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-  const size = await _consumePublicBodyToDisk(response, maxBytes, destPath, operationSignal);
-
-  const mimetype = (_header(response, 'content-type') || 'application/octet-stream').split(';')[0].trim();
-  return {
-    filePath: destPath,
-    mimetype,
-    filename: _filenameFromPublicUrl(finalUrl.href),
-    size
-  };
-}
-
 export {
   fetchWithTimeout,
   fetchExternal,
   downloadPublicFile,
-  downloadPublicFileToDisk,
-  readResponseBodyWithTimeout, _filenameFromPublicUrl as filenameFromPublicUrl
+  readResponseBodyWithTimeout
 };

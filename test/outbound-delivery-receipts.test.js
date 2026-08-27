@@ -8,6 +8,7 @@ import { buildFallbackAttachmentMessage } from '../src/utils/attachmentFallback.
 import { deliverWhatsAppAttachments } from '../src/tools/sendWhatsApp.js';
 import { prepareEmailAttachmentsForDelivery } from '../src/tools/sendEmail.js';
 import {
+  EMAIL_DIRECT_MAX_BYTES,
   EMAIL_MIME_ATTACHMENT_BUDGET_BYTES,
   estimateEmailMimeAttachmentBytes
 } from '../src/utils/attachmentDelivery.js';
@@ -91,16 +92,20 @@ test('link fallback reports partial registration instead of counting every candi
   const available = {
     name: 'source.pdf',
     mimetype: 'application/pdf',
-    externalUrl: 'https://files.example/source.pdf'
+    buffer: Buffer.from('source')
   };
   const unavailable = { name: 'missing.pdf', mimetype: 'application/pdf' };
 
-  const result = buildFallbackAttachmentMessage([available, unavailable]);
+  try {
+    const result = buildFallbackAttachmentMessage([available, unavailable]);
 
-  assert.equal(result.fallbackLinks.length, 1);
-  assert.deepEqual(result.fallbackAttachments, [available]);
-  assert.equal(result.failedAttachments.length, 1);
-  assert.equal(result.failedAttachments[0].attachment, unavailable);
+    assert.equal(result.fallbackLinks.length, 1);
+    assert.deepEqual(result.fallbackAttachments, [available]);
+    assert.equal(result.failedAttachments.length, 1);
+    assert.equal(result.failedAttachments[0].attachment, unavailable);
+  } finally {
+    removeMaterializedFile(available);
+  }
 });
 
 test('WhatsApp does not count or audit a link when its fallback message fails', async () => {
@@ -202,29 +207,34 @@ test('email audit distinguishes embedded, attached and linked content', () => {
     mimetype: 'text/plain',
     buffer: Buffer.from('notes')
   };
+  // Only an oversized file is routed to a link now that URLs never become attachments.
   const linked = {
     name: 'archive.zip',
     mimetype: 'application/zip',
-    externalUrl: 'https://files.example/archive.zip'
+    buffer: Buffer.alloc(EMAIL_DIRECT_MAX_BYTES + 1)
   };
 
-  const result = prepareEmailAttachmentsForDelivery(
-    '<p>Body</p><img src="cid:photo.png">',
-    [image, attached, linked]
-  );
+  try {
+    const result = prepareEmailAttachmentsForDelivery(
+      '<p>Body</p><img src="cid:photo.png">',
+      [image, attached, linked]
+    );
 
-  assert.equal(result.inline.length, 1);
-  assert.equal(result.attached.length, 1);
-  assert.equal(result.linked.length, 1);
-  assert.equal(result.failures.length, 0);
-  assert.deepEqual(
-    result.auditAttachments.map(att => [att.name, att.deliveryMethod]),
-    [
-      ['photo.png', 'inline'],
-      ['notes.txt', 'attachment'],
-      ['archive.zip', 'link']
-    ]
-  );
+    assert.equal(result.inline.length, 1);
+    assert.equal(result.attached.length, 1);
+    assert.equal(result.linked.length, 1);
+    assert.equal(result.failures.length, 0);
+    assert.deepEqual(
+      result.auditAttachments.map(att => [att.name, att.deliveryMethod]),
+      [
+        ['photo.png', 'inline'],
+        ['notes.txt', 'attachment'],
+        ['archive.zip', 'link']
+      ]
+    );
+  } finally {
+    removeMaterializedFile(linked);
+  }
 });
 
 test('email MIME budget is aggregate across inline and direct files', () => {

@@ -2,124 +2,26 @@
 //
 // Resolve the attachment entries the model selected for delivery (in the
 // structured final reply or in a delivery tool's `attachments` parameter)
-// into concrete attachment objects:
-//   - namespace paths   -> the file itself, in `workspace/` or `attachments/`
-//   - public https URLs -> downloaded into memory or disk
-// Only listed files ship. A path is resolved as a path and nothing else: there
+// into concrete attachment objects.
+//
+// Only files that exist in the conversation's container ship: namespace paths
+// under `workspace/` or `attachments/`, exactly the ones the model reads with
+// the file tools. Remote media is not delivered from its URL — it is downloaded
+// into `workspace/` first and then sent by path, so every send names a file the
+// model has actually seen. A path is resolved as a path and nothing else: there
 // is no basename lookup and no delivery buffer to search first.
-// A URL payload too big even for disk staging is delivered as a source link.
 
 import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
-import { downloadPublicFile, downloadPublicFileToDisk, filenameFromPublicUrl  } from './fetch.js';
-import { sanitizeFilename  } from './text.js';
 import { uniqueAttachmentName  } from './attachments.js';
 import { parseAgentPath  } from '../sandbox/workspacePaths.js';
 import { readAgentFileBuffer, statAgentFile } from '../sandbox/hostFileGateway.js';
 import { mimeForExtension  } from '../config/mimeExtensions.js';
-import { TEMP_DIR  } from './tempFileServer.js';
 import { createLogger  } from './logger.js';
 
 const log = createLogger('DeliverySelection');
 
-// Download caps. These bound what we are willing to pull off the network, and
-// are deliberately unrelated to any platform's *send* cap: a file too large to
-// attach on WhatsApp is still worth downloading, because it ships as a link.
-const DEFAULT_URL_MAX_BYTES = 60 * 1024 * 1024;   // straight into memory
-const DISK_URL_MAX_BYTES = 200 * 1024 * 1024;     // staged on disk instead
 const MAX_DELIVERY_SELECTION_ITEMS = 10;
 const MAX_DELIVERY_SELECTION_BYTES = 200 * 1024 * 1024;
-
-function _isFileTooLargeError(err) {
-  return err && typeof err.message === 'string' && /File too large/i.test(err.message);
-}
-
-/**
- * Download a public URL into an attachment object. Over the in-memory limit it
- * retries onto disk with the larger DISK_URL_MAX_BYTES cap; only past that does
- * it give up and let the caller fall back to a source link.
- *
- * @param {string} url
- * @param {Array<object>} existing - attachments already resolved (for name dedup)
- * @returns {Promise<object>}
- */
-async function resolvePublicUrlAttachment(url, existing = [], opts = {}) {
-  const clean = String(url || '').trim();
-  const maxBytes = Math.min(
-    DISK_URL_MAX_BYTES,
-    Number.isFinite(opts.maxBytes) ? Math.max(0, opts.maxBytes) : DISK_URL_MAX_BYTES
-  );
-  if (maxBytes === 0) throw new Error('File too large (delivery byte budget exhausted)');
-  const memoryMaxBytes = Math.min(DEFAULT_URL_MAX_BYTES, maxBytes);
-  let dl;
-
-  try {
-    dl = await downloadPublicFile(clean, {
-      maxBytes: memoryMaxBytes,
-      signal: opts.signal
-    });
-  } catch (err) {
-    if (!_isFileTooLargeError(err)) throw err;
-    if (maxBytes <= memoryMaxBytes) throw err;
-    if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
-    const safeStem = sanitizeFilename(filenameFromPublicUrl(clean)) || 'file';
-    const destPath = path.join(TEMP_DIR, `dl_${crypto.randomBytes(12).toString('hex')}_${safeStem}`);
-    const disk = await downloadPublicFileToDisk(clean, destPath, {
-      maxBytes,
-      signal: opts.signal
-    });
-    dl = {
-      filePath: disk.filePath,
-      mimetype: disk.mimetype,
-      filename: disk.filename,
-      size: disk.size
-    };
-  }
-
-  const name = uniqueAttachmentName(existing, sanitizeFilename(dl.filename) || 'file');
-  const att = { name, mimetype: dl.mimetype };
-  if (dl.buffer) att.buffer = dl.buffer;
-  if (dl.filePath) att.filePath = dl.filePath;
-  return { att, sizeBytes: dl.buffer?.length || dl.size || 0 };
-}
-
-/**
- * When the file exceeds the bounded hosting budget, keep its source URL so
- * delivery can still surface a direct link to the user.
- */
-function createExternalUrlAttachment(url, existing = []) {
-  const clean = String(url || '').trim();
-  const rawName = filenameFromPublicUrl(clean);
-  const name = uniqueAttachmentName(existing, sanitizeFilename(rawName) || 'file');
-  const ext = path.extname(name).toLowerCase();
-  return {
-    name,
-    mimetype: mimeForExtension(ext),
-    externalUrl: clean
-  };
-}
-
-/**
- * Resolve one public URL to an attachment, with a source-link fallback when
- * hosting it ourselves fails.
- *
- * @param {string} url
- * @param {Array<object>} existing
- * @returns {Promise<{ att: object|null, missing: boolean }>}
- */
-async function resolveUrlEntry(url, existing = [], opts = {}) {
-  const clean = String(url || '').trim();
-  try {
-    const resolved = await resolvePublicUrlAttachment(clean, existing, opts);
-    return { ...resolved, missing: false };
-  } catch (err) {
-    if (_isFileTooLargeError(err)) {
-      return { att: createExternalUrlAttachment(clean, existing), missing: false };
-    }
-    return { att: null, missing: true, error: err };
-  }
-}
 
 /**
  * Locate a file the model named by its namespace path, under either root.
@@ -148,11 +50,11 @@ function resolveLocalFileEntry(entry, workspaceId) {
 }
 
 /**
- * @param {string[]} entries - Namespace paths and/or public https URLs.
+ * @param {string[]} entries - Namespace paths.
  * @param {string|null} workspaceId - the conversation whose files may ship.
- * @returns {Promise<{ attachments: Array<object>, missing: string[] }>}
+ * @returns {{ attachments: Array<object>, missing: string[] }}
  */
-async function resolveDeliverySelection(entries, workspaceId = null, opts = {}) {
+function resolveDeliverySelection(entries, workspaceId = null) {
   const attachments = [];
   const missing = [];
   if (!Array.isArray(entries) || entries.length === 0) return { attachments, missing };
@@ -169,21 +71,11 @@ async function resolveDeliverySelection(entries, workspaceId = null, opts = {}) 
     }
     const remainingBytes = Math.max(0, MAX_DELIVERY_SELECTION_BYTES - selectedBytes);
 
-    if (/^https?:\/\//i.test(entry)) {
-      const resolved = await resolveUrlEntry(entry, attachments, {
-        maxBytes: remainingBytes,
-        signal: opts.signal
-      });
-      if (resolved.att) {
-        attachments.push(resolved.att);
-        selectedBytes += resolved.sizeBytes || 0;
-        if (resolved.att.externalUrl) {
-          log.warn(`delivery URL too large to host; will send source link (${entry.slice(0, 100)})`);
-        }
-      } else {
-        log.warn(`delivery URL download failed (${entry.slice(0, 100)}): ${resolved.error?.message || 'unknown'}`);
-        missing.push(entry);
-      }
+    // A URL is not a file the container holds: it has to be downloaded into
+    // workspace/ first and then selected by its path.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(entry)) {
+      log.warn(`delivery entry is a URL, not a container path (${entry.slice(0, 100)})`);
+      missing.push(entry);
       continue;
     }
 

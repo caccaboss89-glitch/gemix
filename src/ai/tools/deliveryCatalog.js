@@ -14,7 +14,7 @@ const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string', minLength: 1 },
   maxItems: MAX_DELIVERY_ATTACHMENTS,
-  description: `OPTIONAL, up to ${MAX_DELIVERY_ATTACHMENTS}. Same entry types as reply attachments: a path exactly as you saw it, or a direct public https file URL already present in the conversation or returned by a tool. Oversized files are sent as a link instead of failing. Omit if none.`
+  description: `OPTIONAL, up to ${MAX_DELIVERY_ATTACHMENTS}. Same entries as reply attachments: paths exactly as you saw them, never URLs. Oversized files are sent as a link instead of failing. Omit if none.`
 };
 
 function buildWhatsAppTool(isAdmin) {

@@ -24,7 +24,7 @@ test('reads and delivery refuse a symlink leaf that points outside the workspace
     try { fs.symlinkSync(outside, link, 'file'); }
     catch (err) { t.skip(`symlinks unavailable: ${err.message}`); return; }
     assert.equal(readAgentFileBuffer(WORKSPACE_ID, 'workspace/linked.txt'), null);
-    const selection = await resolveDeliverySelection(['workspace/linked.txt'], WORKSPACE_ID);
+    const selection = resolveDeliverySelection(['workspace/linked.txt'], WORKSPACE_ID);
     assert.deepEqual(selection.attachments, []);
     assert.deepEqual(selection.missing, ['workspace/linked.txt']);
   } finally {

@@ -60,9 +60,9 @@ function _voiceResponseFieldDesc() {
 
 function _attachmentsFieldDesc() {
   return 'The ONLY way to send files in this chat. Use null when you are sending nothing. '
-    + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
-    + '(image/video/audio/PDF/etc. — never a page/article/post link; for remote media use only a direct URL already '
-    + 'present in the conversation or returned by a tool). Never use any other file syntax.';
+    + 'Each entry is a path exactly as you saw it (workspace/... or attachments/...) — never a URL: '
+    + 'a remote file has to be downloaded into workspace/ first and then sent by its path. '
+    + 'Never use any other file syntax.';
 }
 
 // Discord, every turn. Non-empty renames the thread, "" leaves it alone.

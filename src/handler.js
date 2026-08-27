@@ -302,7 +302,7 @@ async function _handleMessage(ctx) {
         log.warn('   Structured reply expected but content was not valid JSON; using raw text');
       }
       applyParsedTitle(parsed, responseCtx);
-      const finalAttachments = await resolveFinalAttachments(parsed, workspaceId, turnBudgets.work.signal);
+      const finalAttachments = resolveFinalAttachments(parsed, workspaceId);
 
       // Voice reply (WhatsApp dedicated only): speak `response` (with TTS tags)
       // instead of sending text. Falls back to text on limit/length/TTS failure.
@@ -404,7 +404,7 @@ async function _handleMessage(ctx) {
       accumulateSearchStats(responseCtx, searchStats);
       const parsed = parseStructuredReply(finalReply.text || '');
       applyParsedTitle(parsed, responseCtx);
-      wrapUpAttachments = await resolveFinalAttachments(parsed, workspaceId, turnBudgets.root.signal);
+      wrapUpAttachments = resolveFinalAttachments(parsed, workspaceId);
       wrapUpVoice = Boolean(allowVoice && parsed.voice);
       wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanTextResponse(parsed.text || '');
     } catch (wrapErr) {

@@ -97,13 +97,13 @@ function _save(senderKey, records) {
 }
 
 /**
- * Copy one attachment's bytes into the sender's files folder. Falls back to a
- * URL reference (re-downloaded on recovery) or metadata only (surfaces as
- * expired) when bytes are unavailable or too large to retain.
+ * Copy one attachment's bytes into the sender's files folder. Falls back to
+ * metadata only (surfaces as expired) when the bytes are unavailable or too
+ * large to retain.
  *
  * @param {string} senderKey
- * @param {object} att - resolved attachment { name, mimetype, buffer?|filePath?|externalUrl? }
- * @returns {{ originalName: string, mimetype: string, storedFile?: string, externalUrl?: string }}
+ * @param {object} att - resolved attachment { name, mimetype, buffer?|filePath? }
+ * @returns {{ originalName: string, mimetype: string, storedFile?: string }}
  */
 function _retainAttachment(senderKey, att) {
   const originalName = (att && att.name) || 'file';
@@ -130,9 +130,6 @@ function _retainAttachment(senderKey, att) {
     log.warn(`Failed to retain attachment "${originalName}": ${err.message}`);
   }
 
-  if (att && typeof att.externalUrl === 'string' && att.externalUrl.trim()) {
-    return { ...base, externalUrl: att.externalUrl.trim() };
-  }
   return base;
 }
 

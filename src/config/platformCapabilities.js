@@ -285,18 +285,18 @@ function buildAnswerLines(profile, opts = {}) {
 
 /**
  * Body of "Sending files". States the two mechanisms the tool descriptions
- * cannot: the program does the fetching, so a URL in `attachments` is the whole
- * job; and a file a tool produced is sent by its path, exactly as returned.
- * Without the first, media already sitting on a CDN gets re-created from
- * scratch, or the model claims it cannot download anything at all.
- * Without the second, files that were generated this turn are never sent, or
- * are regenerated to be sent.
+ * cannot: only a file that exists in this container travels, so remote media is
+ * downloaded first and sent by its path; and a file a tool produced is sent by
+ * the path it returned. Without the first, a URL is dropped into `attachments`
+ * and nothing reaches the user, or media already online gets re-created from
+ * scratch. Without the second, files that were generated this turn are never
+ * sent, or are regenerated to be sent.
  */
 function buildSendingFilesLines() {
   return [
-    'Whatever you list in `attachments` is fetched and delivered by the program: a path in this chat, or a direct https '
-    + 'link to the file itself — already present in the conversation or returned by a tool, never invented, and never a '
-    + 'page/article link. You never download anything yourself and you never need a tool to do it for you — the link is enough.',
+    'Only files that exist here travel: every entry in `attachments` is a path under `workspace/` or `attachments/`, '
+    + 'never a URL. To send something that lives on the web — a video, an image, any file behind a link — download it '
+    + 'into `workspace/` with shell first (yt-dlp for a video page, curl for a direct file), then list the path it wrote.',
     'A tool that produces a file tells you the exact path it wrote. Send it by listing that path, unchanged; the '
     + 'file stays there afterwards, so nothing has to be regenerated to be sent again.'
   ];

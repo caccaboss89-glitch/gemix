@@ -1,5 +1,5 @@
 // Platform delivery policy and attachment partitioning for outbound files.
-// Normal delivery: link only when too heavy for the platform (or externalUrl).
+// Normal delivery: link only when the file is too heavy for the platform.
 
 import {
   attachmentSize,
@@ -7,8 +7,7 @@ import {
   toDiscordAttachmentArgs,
   toEmailAttachment,
   toWhatsAppMediaArgs,
-  WA_DIRECT_MAX_BYTES,
-  hasExternalUrl
+  WA_DIRECT_MAX_BYTES
 } from './attachments.js';
 import { DISCORD_ATTACHMENT_MAX_BYTES } from './discordAttachmentFetch.js';
 import pkg from 'whatsapp-web.js';
@@ -55,12 +54,10 @@ function isOversizedForPlatform(att, platform) {
 
 /**
  * Whether this attachment should skip direct platform delivery and use link fallback.
- * externalUrl is always link-only (checked first).
  * @param {object} att
  * @param {'whatsapp'|'discord'|'email'} platform
  */
 function shouldDeliverAsLink(att, platform) {
-  if (hasExternalUrl(att)) return true;
   if (platform === PLATFORM.WHATSAPP) return shouldWhatsAppUseTempLink(att);
   if (platform === PLATFORM.DISCORD) {
     return isOversizedForPlatform(att, platform) || !toDiscordAttachmentArgs(att);
@@ -110,9 +107,9 @@ async function sendWhatsAppAttachment(att, postMedia, sendOptions = {}) {
 
 export {
   PLATFORM,
+  EMAIL_DIRECT_MAX_BYTES,
   EMAIL_MIME_ATTACHMENT_BUDGET_BYTES,
   estimateEmailMimeAttachmentBytes,
-  hasExternalUrl,
   partitionAttachments,
   sendWhatsAppAttachment
 };

@@ -23,14 +23,12 @@ const log = createLogger('OutboundDelivery');
  * Resolve the files the model listed, and the note to append when some of them
  * could not be found.
  *
- * @param {string[]|undefined} entries - namespace paths and/or public URLs
+ * @param {string[]|undefined} entries - namespace paths
  * @param {object} userCtx
- * @returns {Promise<{ attachments: object[], missing: string[], missingNote: string }>}
+ * @returns {{ attachments: object[], missing: string[], missingNote: string }}
  */
-async function resolveOutboundAttachments(entries, userCtx) {
-  const selection = await resolveDeliverySelection(entries, resolveWorkspaceId(userCtx), {
-    signal: userCtx.turnBudget?.signal
-  });
+function resolveOutboundAttachments(entries, userCtx) {
+  const selection = resolveDeliverySelection(entries, resolveWorkspaceId(userCtx));
   const missingNote = selection.missing.length > 0
     ? ` Attachment(s) not resolved and NOT sent: ${selection.missing.join(', ')}.`
     : '';

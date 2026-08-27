@@ -269,9 +269,7 @@ async function sendEmailTool(args, userCtx, deliveryCtx) {
   const contacted = alreadyContactedError(deliveryCtx.contactedEmail, target.email, 'email');
   if (contacted) return contacted;
 
-  const { attachments, missing, missingNote } = await resolveOutboundAttachments(
-    args.attachments, userCtx
-  );
+  const { attachments, missing, missingNote } = resolveOutboundAttachments(args.attachments, userCtx);
   const subject = stripOutgoingDeliveryArtifacts(args.subject || '');
 
   try {

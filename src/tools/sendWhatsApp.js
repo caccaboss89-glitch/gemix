@@ -160,9 +160,7 @@ async function sendWhatsAppTool(args, userCtx, deliveryCtx) {
   const contacted = alreadyContactedError(deliveryCtx.contactedWA, target.jid, 'WhatsApp message');
   if (contacted) return contacted;
 
-  const { attachments, missing, missingNote } = await resolveOutboundAttachments(
-    args.attachments, userCtx
-  );
+  const { attachments, missing, missingNote } = resolveOutboundAttachments(args.attachments, userCtx);
   const text = stripOutgoingDeliveryArtifacts(args.message);
   try {
     await sendWhatsAppDirect(target.jid, text);

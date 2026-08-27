@@ -51,8 +51,8 @@ const TOOL_READ_PAGE = makeTool({
 const TOOL_SEARCH_IMAGE = makeTool({
   name: 'search_image',
   description:
-    'Search the web for existing images (provides direct image URLs). Vision previews (IMAGE_0, IMAGE_1, …) let you pick visually; '
-    + 'put chosen `url` values in final `attachments` to send them. '
+    'Search the web for existing images. Each hit is saved in workspace/ and previewed inline (IMAGE_0, IMAGE_1, …) so you '
+    + 'pick visually, then send the one you chose by its `path`. '
     + 'Prefer this over generate_image when a real web image is enough.',
   properties: {
     query: {

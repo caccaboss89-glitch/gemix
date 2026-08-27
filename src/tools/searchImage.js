@@ -5,15 +5,17 @@
 // serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
 //
 // Local web image search via a self-hosted SearXNG instance (JSON API).
-// Returns direct https image file URLs for delivery through final `attachments`,
-// and attaches each found image inline as vision content (input_image) so the
-// model can see them — same multimodal tool-result pattern as read_sent_messages.
+// Each hit is downloaded once: the bytes are attached inline as vision content
+// (input_image) so the model can see them — same multimodal tool-result pattern
+// as read_sent_messages — and staged in `workspace/`, so the image the model
+// picks is sent by its path like every other file.
 // Config: envConfig.SEARCH_IMAGE_BASE_URL (default http://127.0.0.1:8888).
 
 import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 import { fetchWithTimeout, downloadPublicFile  } from '../utils/fetch.js';
 import { inlineImagePartFromBuffer  } from './workspace/inlineImage.js';
+import { stageToolOutput  } from './workspace/toolOutput.js';
 import { createLogger  } from '../utils/logger.js';
 import { sniffImageType } from '../utils/imageType.js';
 
@@ -89,9 +91,9 @@ function _imageUrlCandidates(hit) {
 }
 
 /**
- * Download one search hit and build an inline input_image part for the model.
- * The bytes never touch disk: a hit the model only looks at is not a file.
- * @returns {Promise<{ part: object|null, url?: string, error?: string }>}
+ * Download one search hit and build an inline input_image part for the model,
+ * keeping the bytes so the caller can stage them in the workspace.
+ * @returns {Promise<{ part: object|null, url?: string, buffer?: Buffer, ext?: string, error?: string }>}
  */
 async function _buildVisionPart(imageUrls, index, signal) {
   let lastError = 'No usable image URL was returned.';
@@ -108,7 +110,7 @@ async function _buildVisionPart(imageUrls, index, signal) {
         continue;
       }
       const part = inlineImagePartFromBuffer(dl.buffer, sniffed.mime);
-      if (part) return { part, url: imgUrl };
+      if (part) return { part, url: imgUrl, buffer: dl.buffer, ext: sniffed.ext };
       lastError = 'Image is too large to attach inline.';
     } catch (err) {
       lastError = err.message;
@@ -116,6 +118,23 @@ async function _buildVisionPart(imageUrls, index, signal) {
   }
   log.warn(`Vision preview failed for image ${index}: ${lastError}`);
   return { part: null, error: lastError };
+}
+
+/**
+ * Put one downloaded hit in the workspace so it can be sent by path.
+ * A staging failure only costs that image its path: the vision preview and the
+ * rest of the result stand.
+ * @returns {Promise<string|null>} the namespace path, or null when not staged
+ */
+async function _stageImage(workspaceId, index, vision) {
+  if (!workspaceId || !vision?.buffer) return null;
+  try {
+    const staged = await stageToolOutput(workspaceId, `search_image_${index}.${vision.ext}`, vision.buffer);
+    return staged.display;
+  } catch (err) {
+    log.warn(`Cannot stage image ${index} in the workspace: ${err.message}`);
+    return null;
+  }
 }
 
 /**
@@ -128,6 +147,7 @@ async function _buildVisionPart(imageUrls, index, signal) {
  * @param {number} [args.count]
  * @param {object} [opts]
  * @param {AbortSignal} [opts.signal]
+ * @param {string|null} [opts.workspaceId] - where the found images are staged
  * @returns {Promise<object|Array>}
  */
 async function searchImage(args = {}, opts = {}) {
@@ -234,8 +254,7 @@ async function searchImage(args = {}, opts = {}) {
       count: 0,
       images: [],
       ...(unresponsiveEngines.length > 0 ? { diagnostics: { unresponsive_engines: unresponsiveEngines } } : {}),
-      message:
-        'No direct image URLs found for this query. Try a different query; do not invent URLs.'
+      message: 'No images found for this query. Try a different query.'
     };
   }
 
@@ -244,15 +263,22 @@ async function searchImage(args = {}, opts = {}) {
     images.map((img, i) => _buildVisionPart(img.candidates, i, opts.signal))
   );
 
+  // Sequential staging: the workspace lock serializes these writes anyway.
+  const stagedPaths = [];
+  for (let i = 0; i < images.length; i++) {
+    stagedPaths.push(await _stageImage(opts.workspaceId, i, visionSettled[i]));
+  }
+
   const nativeParts = [];
   const imagesOut = images.map((img, i) => {
     const v = visionSettled[i];
     const entry = {
       index: i,
-      url: v?.url || img.url,
+      source_url: v?.url || img.url,
       title: img.title,
       vision: Boolean(v && v.part)
     };
+    if (stagedPaths[i]) entry.path = stagedPaths[i];
     if (img.source_page) entry.source_page = img.source_page;
     if (img.engine) entry.engine = img.engine;
     if (v && v.part) {
@@ -267,23 +293,26 @@ async function searchImage(args = {}, opts = {}) {
   });
 
   const visionCount = imagesOut.filter(x => x.vision).length;
+  const sendableCount = imagesOut.filter(x => x.path).length;
   const unresponsiveEngines = Array.isArray(data?.unresponsive_engines) ? data.unresponsive_engines : [];
   const payload = {
     success: true,
-    status: visionCount === imagesOut.length && unresponsiveEngines.length === 0 ? 'ok' : 'degraded',
+    status: visionCount === imagesOut.length && sendableCount === imagesOut.length && unresponsiveEngines.length === 0
+      ? 'ok'
+      : 'degraded',
     query,
     count: imagesOut.length,
     vision_count: visionCount,
     images: imagesOut,
     ...(unresponsiveEngines.length > 0 ? { diagnostics: { unresponsive_engines: unresponsiveEngines } } : {}),
     message:
-      visionCount > 0
-        ? `Found ${imagesOut.length} image(s); ${visionCount} attached as vision previews labeled IMAGE_0…IMAGE_n. `
-          + 'Inspect them visually, then put the chosen image `url` value(s) in final `attachments`. '
-          + 'Only use these URLs — never invent one or substitute unsupported component syntax.'
-        : `Found ${imagesOut.length} image URL(s) but none could be loaded for vision. `
-          + 'You may still put a `url` from the list in final `attachments` if appropriate, or retry with another query. '
-          + 'Never invent URLs or substitute unsupported component syntax.'
+      sendableCount > 0
+        ? `Found ${imagesOut.length} image(s); ${visionCount} attached as vision previews labeled IMAGE_0…IMAGE_n, `
+          + `${sendableCount} saved in the workspace. Inspect them visually, then send the one you picked by putting `
+          + 'its `path` in final `attachments`. An entry without a `path` was not saved and cannot be sent; '
+          + '`source_url` is where it came from, not something you can attach.'
+        : `Found ${imagesOut.length} image(s) but none could be downloaded, so none can be sent. `
+          + 'Retry with another query.'
   };
 
   if (nativeParts.length === 0) {

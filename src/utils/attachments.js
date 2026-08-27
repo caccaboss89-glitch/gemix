@@ -1,11 +1,10 @@
 // src/utils/attachments.js
 // Unified attachment shape used across responseCtx.
-// An attachment is: { name, mimetype, buffer?, filePath?, externalUrl? }
+// An attachment is: { name, mimetype, buffer?, filePath? }
 //   - buffer:   Buffer already in memory (small/in-flight files: voice, formal PDF, generated media)
 //   - filePath: absolute path on disk (workspace harvest, history, large files)
-//   - externalUrl: source link when the file is too large even to stage on disk
 //
-// At least one of buffer, filePath, or externalUrl must be set. Helper functions handle
+// At least one of buffer or filePath must be set. Helper functions handle
 // read-on-demand from disk.
 
 import fs from 'fs';
@@ -23,7 +22,7 @@ import path from 'path';
 const WA_DIRECT_MAX_BYTES = 16 * 1024 * 1024;
 
 /**
- * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string, externalUrl?: string, sendAudioAsVoice?: boolean }} Attachment
+ * @typedef {{ name: string, mimetype: string, buffer?: Buffer, filePath?: string, sendAudioAsVoice?: boolean }} Attachment
  */
 
 /**
@@ -60,8 +59,7 @@ function isValidAttachment(att) {
   if (!att.name || !att.mimetype) return false;
   const hasBuffer = Buffer.isBuffer(att.buffer);
   const hasPath = typeof att.filePath === 'string' && att.filePath.length > 0;
-  const hasExternal = typeof att.externalUrl === 'string' && att.externalUrl.trim().length > 0;
-  return hasBuffer || hasPath || hasExternal;
+  return hasBuffer || hasPath;
 }
 
 /**
@@ -72,7 +70,6 @@ function isValidAttachment(att) {
  */
 function readAttachmentBuffer(att) {
   if (!isValidAttachment(att)) return null;
-  if (hasExternalUrl(att)) return null;
   if (Buffer.isBuffer(att.buffer)) return att.buffer;
   try {
     return fs.readFileSync(att.filePath);
@@ -86,7 +83,6 @@ function readAttachmentBuffer(att) {
  */
 function attachmentSize(att) {
   if (!att || typeof att !== 'object') return 0;
-  if (typeof att.externalUrl === 'string' && att.externalUrl.trim()) return 0;
   if (Buffer.isBuffer(att.buffer)) return att.buffer.length;
   if (typeof att.filePath === 'string' && att.filePath.length > 0) {
     try { return fs.statSync(att.filePath).size; } catch { return 0; }
@@ -137,14 +133,9 @@ function toWhatsAppMediaArgs(att) {
  * @returns {{ data: Buffer|string, name: string } | null}
  */
 function toDiscordAttachmentArgs(att) {
-  if (hasExternalUrl(att)) return null;
   if (!isValidAttachment(att)) return null;
   if (typeof att.filePath === 'string') return { data: att.filePath, name: att.name };
   return { data: att.buffer, name: att.name };
-}
-
-function hasExternalUrl(att) {
-  return typeof att?.externalUrl === 'string' && att.externalUrl.trim().length > 0;
 }
 
 export {
@@ -154,7 +145,6 @@ export {
   shouldWhatsAppUseTempLink,
   WA_DIRECT_MAX_BYTES,
   toEmailAttachment,
-  hasExternalUrl,
   toWhatsAppMediaArgs,
   toDiscordAttachmentArgs
 };

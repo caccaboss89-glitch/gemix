@@ -4,6 +4,7 @@
 
 import { searchImage } from '../searchImage.js';
 import { readPage, searchWeb } from '../searchWeb.js';
+import { resolveWorkspaceId } from '../../utils/workspaceId.js';
 
 const WEB_TOOL_EXECUTORS = Object.freeze({
   search_web: ({ args, responseCtx, userCtx }) => (
@@ -12,7 +13,10 @@ const WEB_TOOL_EXECUTORS = Object.freeze({
   read_page: ({ args, responseCtx, userCtx }) => (
     readPage(args, responseCtx, { signal: userCtx.turnBudget?.signal })
   ),
-  search_image: ({ args, userCtx }) => searchImage(args, { signal: userCtx.turnBudget?.signal })
+  search_image: ({ args, userCtx }) => searchImage(args, {
+    signal: userCtx.turnBudget?.signal,
+    workspaceId: resolveWorkspaceId(userCtx)
+  })
 });
 
 export { WEB_TOOL_EXECUTORS };

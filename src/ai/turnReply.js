@@ -23,13 +23,9 @@ function accumulateSearchStats(responseCtx, searchStats) {
   responseCtx.researchStats.xSearches += searchStats.xSearches;
 }
 
-async function resolveFinalAttachments(parsed, workspaceId, signal) {
+function resolveFinalAttachments(parsed, workspaceId) {
   if (!parsed.structured) return [];
-  const { attachments, missing } = await resolveDeliverySelection(
-    parsed.attachments,
-    workspaceId,
-    { signal }
-  );
+  const { attachments, missing } = resolveDeliverySelection(parsed.attachments, workspaceId);
   if (missing.length > 0) log.warn(`Final reply attachments not resolved: ${missing.join(', ')}`);
   return attachments;
 }

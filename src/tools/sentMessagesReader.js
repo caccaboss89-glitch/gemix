@@ -15,15 +15,9 @@
 // Scope guard: an active non-admin caller can only look up other active
 // members (mirrors the send tools). Admin may look up any number.
 
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
 import { resolveActiveMemberByName, findMemberByWa, findMemberByEmail  } from '../config/members.js';
 import { normalizePhoneToJid  } from './whatsappSender.js';
 import constants from '../config/constants.js';
-import { downloadPublicFileToDisk  } from '../utils/fetch.js';
-import { TEMP_DIR  } from '../utils/tempFileServer.js';
-import { sanitizeFilename  } from '../utils/text.js';
 import { formatTimestamp  } from '../utils/time.js';
 import { readSentRecords, resolveStoredAttachmentPath  } from '../utils/sentMessagesStore.js';
 import { resolveWorkspaceId  } from '../utils/workspaceId.js';
@@ -103,29 +97,18 @@ function _resolveRecipientFilter(entry, userCtx) {
   return _memberFilter(resolved.member);
 }
 
-async function _downloadExternalToTemp(url, name) {
-  if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
-  const safe = sanitizeFilename(name || 'file').replace(/^\.+/, '') || 'file';
-  const dest = path.join(TEMP_DIR, `sent_${crypto.randomBytes(8).toString('hex')}_${safe}`);
-  const dl = await downloadPublicFileToDisk(url, dest, { maxBytes: 60 * 1024 * 1024 });
-  return dl.filePath;
-}
-
 /**
  * Put a stored attachment back where the model can reach it: a path under
  * `attachments/`, plus an inline copy when it is an image and there is still
  * room in this lookup budget.
  *
- * @returns {Promise<{ path: string|null, part?: object }>}
+ * @returns {{ path: string|null, part?: object }}
  */
-async function _recoverAttachment(workspaceId, senderKey, stored, imagesReadCount) {
+function _recoverAttachment(workspaceId, senderKey, stored, imagesReadCount) {
   try {
-    let absPath = stored.storedFile
+    const absPath = stored.storedFile
       ? resolveStoredAttachmentPath(senderKey, stored.storedFile)
       : null;
-    if (!absPath && typeof stored.externalUrl === 'string' && stored.externalUrl.trim()) {
-      absPath = await _downloadExternalToTemp(stored.externalUrl, stored.originalName);
-    }
     if (!absPath || !workspaceId) return { path: null };
 
     const projected = projectFile(workspaceId, absPath, stored.originalName || undefined);
@@ -255,7 +238,7 @@ async function readSentMessages(args, userCtx) {
     if (Array.isArray(r.attachments) && r.attachments.length > 0) {
       msgOut.attachments = [];
       for (const a of r.attachments) {
-        const recovered = await _recoverAttachment(workspaceId, senderKey, a, imagesReadCount);
+        const recovered = _recoverAttachment(workspaceId, senderKey, a, imagesReadCount);
         if (recovered.path) {
           if (recovered.part) {
             nativeParts.push(recovered.part);

@@ -1,7 +1,7 @@
 // src/utils/attachmentFallback.js
 // Link-fallback delivery for attachments that cannot be sent directly on a platform,
-// or are routed to link delivery by platform policy (oversized, build audio/video,
-// externalUrl). Hosts files on the temp server and builds Italian download messages.
+// or are routed to link delivery by platform policy (oversized, build audio/video).
+// Hosts files on the temp server and builds Italian download messages.
 
 import fs from 'fs';
 import path from 'path';
@@ -15,7 +15,7 @@ import {
   ATTACHMENT_FALLBACK_FAILED_MESSAGE
 } from '../config/systemMessages.js';
 import { shouldWhatsAppUseTempLink, readAttachmentBuffer, uniqueAttachmentName } from './attachments.js';
-import { partitionAttachments, PLATFORM, hasExternalUrl } from './attachmentDelivery.js';
+import { partitionAttachments, PLATFORM } from './attachmentDelivery.js';
 
 const log = createLogger('AttachmentFallback');
 const execFileAsync = promisify(execFile);
@@ -46,13 +46,13 @@ function formatUrlForWhatsApp(url) {
 }
 
 /**
- * Build an Italian system message with temp hosted links and/or passthrough source URLs.
+ * Build an Italian system message with the temp hosted links.
  *
  * @param {Array<object>} linkFallbackAttachments - Policy-routed or send-failed attachments
  * @param {object} [opts]
  * @param {'whatsapp'|'discord'|'email'} [opts.platform] - Destination; only
  *   'whatsapp' gets the anti-wrap URL treatment.
- * @returns {{ message: string, fallbackLinks: Array<{name: string, url: string, size: number, expiresInMinutes: number|null, external?: boolean}>, fallbackAttachments: object[], failedAttachments: Array<{attachment: object, error: string}>, totalSize: number }}
+ * @returns {{ message: string, fallbackLinks: Array<{name: string, url: string, size: number, expiresInMinutes: number}>, fallbackAttachments: object[], failedAttachments: Array<{attachment: object, error: string}>, totalSize: number }}
  */
 function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
   const formatUrl = opts.platform === PLATFORM.WHATSAPP ? formatUrlForWhatsApp : (u) => u;
@@ -69,18 +69,6 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
 
   for (const att of linkFallbackAttachments) {
     try {
-      if (hasExternalUrl(att)) {
-        fallbackLinks.push({
-          name: att.name || 'file',
-          url: att.externalUrl.trim(),
-          size: 0,
-          expiresInMinutes: null,
-          external: true
-        });
-        fallbackAttachments.push(att);
-        continue;
-      }
-
       const filePath = _materializeAttachmentPath(att);
 
       if (!filePath || !fs.existsSync(filePath)) {
@@ -127,23 +115,10 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
   const disponibiliText = isPlural ? 'disponibili' : 'disponibile';
   const scaricaloText = isPlural ? 'Scaricali' : 'Scaricalo';
 
-  const hasExternal = fallbackLinks.some(l => l.external);
-  const hasHosted = fallbackLinks.some(l => !l.external);
-  const expiryMin = hasHosted
-    ? (fallbackLinks.find(l => !l.external)?.expiresInMinutes ?? 60)
-    : null;
-  const expiryLabel = expiryMin !== null && expiryMin !== undefined
-    ? formatExpiryItalian(expiryMin)
-    : null;
+  const expiryLabel = formatExpiryItalian(fallbackLinks[0].expiresInMinutes ?? 60);
 
   let messageText = `${TEMP_ATTACHMENT_PREFIX}${allegatiSuffix} non ${disponibiliText} sulla piattaforma.\n\n`;
-  if (hasHosted && !hasExternal) {
-    messageText += `${scaricaloText} da questo link temporaneo (scade tra ${expiryLabel}):\n\n`;
-  } else if (hasExternal && !hasHosted) {
-    messageText += `${scaricaloText} da questo link:\n\n`;
-  } else {
-    messageText += `${scaricaloText} dai link qui sotto:\n\n`;
-  }
+  messageText += `${scaricaloText} da questo link temporaneo (scade tra ${expiryLabel}):\n\n`;
 
   if (fallbackLinks.length === 1) {
     const link = fallbackLinks[0];
@@ -158,9 +133,7 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
     }).join('\n\n');
   }
 
-  if (hasHosted && expiryLabel) {
-    messageText += `\n\nLink disponibile per ${expiryLabel}.`;
-  }
+  messageText += `\n\nLink disponibile per ${expiryLabel}.`;
 
   return {
     message: messageText,
@@ -214,8 +187,8 @@ async function _createZipArchive(zipPath, entries) {
 
 /**
  * Collapse multiple hostable WA temp-link files into one zip when possible.
- * Entries that only carry a source URL cannot be zipped and are passed through
- * alongside the bundle, never dropped.
+ * An attachment whose bytes cannot be materialized is passed through alongside
+ * the bundle, never dropped.
  */
 async function bundleWhatsAppTempLinkAttachments(attachments) {
   if (!Array.isArray(attachments) || attachments.length <= 1) return attachments;
@@ -224,7 +197,6 @@ async function bundleWhatsAppTempLinkAttachments(attachments) {
   const entries = [];
   const usedNames = [];
   for (const att of attachments) {
-    if (hasExternalUrl(att)) { passthrough.push(att); continue; }
     const p = _materializeAttachmentPath(att);
     if (!p) { passthrough.push(att); continue; }
     const name = uniqueAttachmentName(
@@ -307,11 +279,8 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
       // send that fails. Zipping twice nested one bundle inside the next.
       linkRouted = linkOnly;
       for (const att of linkOnly) {
-        const label = att.name || 'unknown';
-        if (hasExternalUrl(att)) {
-          log.info(`WhatsApp source link: ${label}`);
-        } else if (shouldWhatsAppUseTempLink(att)) {
-          log.info(`WhatsApp temp link (oversized): ${label}`);
+        if (shouldWhatsAppUseTempLink(att)) {
+          log.info(`WhatsApp temp link (oversized): ${att.name || 'unknown'}`);
         }
       }
     }

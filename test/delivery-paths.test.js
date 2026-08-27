@@ -50,8 +50,8 @@ test('without a workspace nothing local resolves at all', () => {
   assert.equal(resolveLocalFileEntry('workspace/report.pdf', null), null);
 });
 
-test('the selection ships resolved paths and reports the rest as missing', async () => {
-  const { attachments, missing } = await resolveDeliverySelection(
+test('the selection ships resolved paths and reports the rest as missing', () => {
+  const { attachments, missing } = resolveDeliverySelection(
     ['workspace/report.pdf', 'attachments/photo.jpg', 'workspace/nope.txt'],
     WORKSPACE_ID
   );
@@ -59,6 +59,13 @@ test('the selection ships resolved paths and reports the rest as missing', async
   assert.equal(attachments[0].buffer.toString(), '%PDF-1.4 x');
   assert.equal(attachments[0].mimetype, 'application/pdf');
   assert.deepEqual(missing, ['workspace/nope.txt']);
+});
+
+test('a URL is never delivered: only files present in the container ship', () => {
+  const entries = ['https://files.example/clip.mp4', 'workspace/report.pdf'];
+  const { attachments, missing } = resolveDeliverySelection(entries, WORKSPACE_ID);
+  assert.deepEqual(attachments.map(a => a.name), ['report.pdf']);
+  assert.deepEqual(missing, ['https://files.example/clip.mp4']);
 });
 
 test('a tool output lands in the workspace and comes back as its own path', async () => {
@@ -73,7 +80,7 @@ test('a colliding output is renamed, so the returned path is always the real one
   const first = await stageToolOutput(WORKSPACE_ID, 'dup.txt', Buffer.from('a'));
   const second = await stageToolOutput(WORKSPACE_ID, 'dup.txt', Buffer.from('b'));
   assert.notEqual(first.display, second.display);
-  const selection = await resolveDeliverySelection([second.display], WORKSPACE_ID);
+  const selection = resolveDeliverySelection([second.display], WORKSPACE_ID);
   assert.equal(selection.attachments[0].buffer.toString(), 'b');
 });
 
@@ -81,14 +88,14 @@ test('staging refuses to run without a workspace instead of writing somewhere el
   await assert.rejects(stageToolOutput(null, 'x.txt', Buffer.from('x')), /workspace/i);
 });
 
-test('delivery enforces the runtime item cap even outside schema validation', async () => {
+test('delivery enforces the runtime item cap even outside schema validation', () => {
   const entries = [];
   for (let index = 0; index < 11; index++) {
     const name = `cap-${index}.txt`;
     fs.writeFileSync(path.join(WORKSPACE, name), String(index));
     entries.push(`workspace/${name}`);
   }
-  const selection = await resolveDeliverySelection(entries, WORKSPACE_ID);
+  const selection = resolveDeliverySelection(entries, WORKSPACE_ID);
   assert.equal(selection.attachments.length, 10);
   assert.deepEqual(selection.missing, ['workspace/cap-10.txt']);
 });

@@ -117,12 +117,12 @@ test('a workspace path in the final reply resolves to a real file', async () => 
     // The handler passes its own workspaceId here. Passing anything else — a
     // context object, say — makes every local path resolve to "missing" and the
     // model can never deliver a file it just made.
-    const { attachments, missing } = await resolveDeliverySelection(['workspace/report.txt'], workspaceId);
+    const { attachments, missing } = resolveDeliverySelection(['workspace/report.txt'], workspaceId);
     assert.deepEqual(missing, []);
     assert.equal(attachments.length, 1);
     assert.equal(attachments[0].name, 'report.txt');
 
-    const wrong = await resolveDeliverySelection(['workspace/report.txt'], { researchStats: null });
+    const wrong = resolveDeliverySelection(['workspace/report.txt'], { researchStats: null });
     assert.equal(wrong.attachments.length, 0, 'a non-workspaceId must not silently resolve');
   } finally {
     fs.rmSync(path.dirname(root), { recursive: true, force: true });
