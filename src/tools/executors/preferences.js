@@ -14,7 +14,11 @@ async function _toggleReleaseNotify({ args, userCtx }) {
 }
 
 const PREFERENCE_TOOL_EXECUTORS = Object.freeze({
-  manage_preferences: ({ args, userCtx }) => managePreferences(args, userCtx.settingsFileId),
+  manage_preferences: ({ args, userCtx }) => managePreferences(
+    args,
+    userCtx.settingsFileId,
+    { allowVoice: userCtx.allowVoice !== false }
+  ),
   toggle_release_notify: _toggleReleaseNotify
 });
 

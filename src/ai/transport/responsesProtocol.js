@@ -19,6 +19,8 @@
 //   3. Only item shapes on the profile's replay allowlist go back out; anything
 //      else is dropped rather than echoed at a backend that never sent it.
 
+import { projectStrictToolParameters } from '../tools/schema.js';
+
 /** Item types every Responses provider accepts back in `input[]`. */
 const BASE_REPLAYABLE_ITEM_TYPES = Object.freeze([
   'reasoning',
@@ -126,9 +128,9 @@ function wireItem(item, replayable) {
     };
   }
   default: {
-    // Provider server-side items (web_search_call, custom_tool_call, …) are
-    // replayed by reference: the backend still holds the result, and echoing a
-    // multi-megabyte payload back would be pure waste.
+    // Provider server-side items are replayed by reference: the backend still
+    // holds the result, and echoing a multi-megabyte payload back would be pure
+    // waste.
     const out = { type: item.type };
     if (typeof item.id === 'string') out.id = item.id;
     if (typeof item.status === 'string') out.status = item.status;
@@ -168,21 +170,34 @@ function buildResponsesInput(items, opts = {}) {
  * Responses shape; a provider-native tool object (already `{type: '…'}`) is
  * passed through by its extension, never invented here.
  *
+ * Strict function arguments and typed function outputs are optional Responses
+ * features. A provider profile has to opt in explicitly; the canonical tool
+ * definitions remain portable and are projected only at this wire boundary.
+ *
  * @param {Array|null} tools
+ * @param {object} [capabilities]
  * @returns {Array|null}
  */
-function toolsToWire(tools) {
+function toolsToWire(tools, capabilities = {}) {
   if (!Array.isArray(tools) || tools.length === 0) return null;
   const out = [];
   for (const tool of tools) {
     if (!tool || typeof tool !== 'object') continue;
     if (tool.type === 'function' && tool.function) {
-      out.push({
+      const parameters = tool.function.parameters || { type: 'object', properties: {} };
+      const wireTool = {
         type: 'function',
         name: tool.function.name,
         description: tool.function.description,
-        parameters: tool.function.parameters || { type: 'object', properties: {} }
-      });
+        parameters: capabilities.supportsStrictFunctionArguments
+          ? projectStrictToolParameters(parameters)
+          : parameters
+      };
+      if (capabilities.supportsStrictFunctionArguments) wireTool.strict = true;
+      if (capabilities.supportsFunctionOutputSchema && tool.function.outputSchema) {
+        wireTool.output_schema = tool.function.outputSchema;
+      }
+      out.push(wireTool);
       continue;
     }
     if (typeof tool.type === 'string' && tool.type !== 'function') out.push({ ...tool });
@@ -381,7 +396,7 @@ function pickAssistantText(texts) {
     try {
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        && (typeof parsed.response === 'string' || typeof parsed.message === 'string')) {
+        && typeof parsed.response === 'string') {
         return texts[i];
       }
     } catch { /* try an earlier message */ }

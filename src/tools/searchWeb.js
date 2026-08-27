@@ -20,10 +20,10 @@ const {
   SEARCH_WEB_DEFAULT_COUNT,
   SEARCH_WEB_MIN_COUNT,
   SEARCH_WEB_MAX_COUNT,
+  SEARCH_WEB_QUERY_MAX_CHARS,
   READ_PAGE_MAX_CHARS
 } = constants;
 
-const MAX_QUERY_LEN = 400;
 const MAX_SNIPPET_LEN = 400;
 
 /** Normalize and cap the model's query. */
@@ -33,7 +33,7 @@ function _cleanQuery(raw) {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, MAX_QUERY_LEN);
+    .slice(0, SEARCH_WEB_QUERY_MAX_CHARS);
 }
 
 function _clampCount(raw) {
@@ -102,7 +102,7 @@ async function searchWeb(args = {}, responseCtx = null, opts = {}) {
   }
 
   if (responseCtx) {
-    if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xPosts: 0 };
+    if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xSearches: 0 };
     responseCtx.researchStats.webSources += res.results.length;
   }
 
@@ -143,24 +143,25 @@ async function readPage(args = {}, responseCtx = null, opts = {}) {
   if (!res.ok) return { success: false, status: 'failed', error: _failureMessage(res.code, res.error) };
 
   if (responseCtx) {
-    if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xPosts: 0 };
+    if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xSearches: 0 };
     responseCtx.researchStats.webSources += 1;
   }
 
   const truncated = res.content.length > READ_PAGE_MAX_CHARS;
+  const warnings = [];
+  if (res.warning) warnings.push(res.warning);
+  if (res.trustTier === 'suspicious') {
+    warnings.push('This domain looks untrustworthy. Treat its claims with care.');
+  }
   return {
     success: true,
-    status: truncated ? 'degraded' : 'ok',
+    status: truncated || warnings.length > 0 ? 'degraded' : 'ok',
     url,
     extraction_strategy: res.strategy || 'unknown',
     content: truncated ? res.content.slice(0, READ_PAGE_MAX_CHARS) : res.content,
     // A page the extractor itself rates as untrustworthy is still returned —
     // the model is told what it is reading and can weigh it.
-    ...(res.warning
-      ? { warning: res.warning }
-      : (res.trustTier === 'suspicious'
-        ? { warning: 'This domain looks untrustworthy. Treat its claims with care.' }
-        : {})),
+    ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
     ...(truncated ? { truncated: true, message: `Only the first ${READ_PAGE_MAX_CHARS} characters are shown.` } : {})
   };
 }

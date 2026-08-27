@@ -4,9 +4,10 @@
 // the person who asked for it: chat history and its attachments (the voice
 // transcriptions in history_meta.json go with them), the workspace tree — which
 // holds both the agent area and the read-only attachment projection — saved
-// preferences, scheduled reminders, the log of messages sent on their behalf,
-// the weekly generation counters, the release-notification subscription and the
-// privacy-notice record.
+// preferences, scheduled reminders, API request/response diagnostics, local
+// bug reports attributable to the chat/caller, the log of messages sent on
+// their behalf, the weekly generation counters, the
+// release-notification subscription and the privacy-notice record.
 //
 // Not touched: the active-member registry (src/data/members.json). Name, phone
 // and email stay there and only the admin can remove them, which is exactly
@@ -28,8 +29,18 @@ import { deleteSentMessages  } from './sentMessagesStore.js';
 import { clearMediaUsage  } from './mediaUsageLimits.js';
 import { forgetUser  } from './privacyConsent.js';
 import { toggleReleaseNotify  } from '../tools/releaseNotify.js';
+import { deleteApiLogsForConversation } from '../ai/apiLogs.js';
+import { generatePromptCacheKey } from './promptCacheKey.js';
+import { deleteBugReportsForContext } from './bugReportStore.js';
 
 const log = createLogger('PrivacyWipe');
+
+/** Delete the exact hashed API-log scope used by the handler for this chat. */
+function deleteConversationApiLogs(ctx, deleteLogs = deleteApiLogsForConversation) {
+  const conversationKey = generatePromptCacheKey(ctx);
+  if (!conversationKey) return { ok: false, deleted: 0 };
+  return deleteLogs(conversationKey);
+}
 
 /** Guard against a malformed chat id turning a recursive delete loose. */
 function _isInsideDataDir(target) {
@@ -85,6 +96,17 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   step('history', _removeTree(getUserRoot(ctx), 'chat history'));
   step('workspace', _removeTree(getWorkspaceMetaDir(resolveWorkspaceId(ctx)), 'workspace'));
 
+  try {
+    const apiLogs = deleteConversationApiLogs(ctx);
+    step('api_logs', apiLogs.ok);
+  } catch (err) {
+    log.warn(`API log deletion failed for ${ctx.chatId}: ${err.message}`);
+    failed.push('api_logs');
+  }
+
+  const bugReports = deleteBugReportsForContext({ ...ctx, taskFileId });
+  step('bug_reports', bugReports.ok);
+
   const settingsFileId = resolveSettingsFileId(ctx, { taskFileId });
   if (settingsFileId) {
     step('settings', _removeTree(path.join(constants.DATA_DIR, 'memories', `${settingsFileId}.json`), 'saved preferences'));
@@ -135,9 +157,9 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   if (failed.length > 0) {
     log.error(`Wipe incomplete for ${ctx.chatId}: ${failed.join(', ')}`);
   } else {
-    log.info(`Wiped every stored trace of ${ctx.chatId}`);
+    log.info(`Wiped GemiX conversation data for ${ctx.chatId}`);
   }
   return { ok: failed.length === 0, failed };
 }
 
-export { wipeWhatsAppUserData };
+export { deleteConversationApiLogs, wipeWhatsAppUserData };

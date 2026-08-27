@@ -13,10 +13,15 @@ import { resolveActiveMemberByName, findMemberByWa  } from '../config/members.js
 import { stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { sendAttachmentsWithFallback  } from '../utils/attachmentFallback.js';
 import { sendWhatsAppAttachment, PLATFORM  } from '../utils/attachmentDelivery.js';
-import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
 import { createLogger  } from '../utils/logger.js';
 import {
   resolveOutboundAttachments,
+  auditAttachment,
+  buildAttachmentDeliverySummary,
+  outboundStatusFor,
+  outboundStatusWithAudit,
+  unresolvedAttachmentFailures,
   alreadyContactedError,
   recordOutbound
 } from './outboundDelivery.js';
@@ -61,6 +66,80 @@ function _sentRecipient(target) {
   };
 }
 
+function _directFailureReason(result, attachment) {
+  return result.directFailures.find(entry => entry.attachment === attachment)?.error || null;
+}
+
+/** Original requested files represented by one fallback artifact (possibly a zip). */
+function _fallbackSources(attachment) {
+  return Array.isArray(attachment?.sourceAttachments) && attachment.sourceAttachments.length > 0
+    ? attachment.sourceAttachments
+    : [attachment];
+}
+
+function _fallbackFailure(result, entry, stage, fallbackError = null) {
+  const directError = _directFailureReason(result, entry.attachment);
+  const reasons = [];
+  if (directError) reasons.push(`Direct delivery failed: ${directError}`);
+  if (entry.error) reasons.push(`Link fallback failed: ${entry.error}`);
+  if (fallbackError) reasons.push(`The fallback message was not sent: ${fallbackError}`);
+  return {
+    name: entry.attachment?.name || 'unknown',
+    stage,
+    error: reasons.join(' ') || 'Attachment delivery failed.'
+  };
+}
+
+/**
+ * Deliver resolved WhatsApp attachments and report only confirmed direct sends
+ * and links whose fallback message was itself accepted by WhatsApp.
+ */
+async function deliverWhatsAppAttachments(attachments, sendDirectAttachment, sendFallbackMessage) {
+  const result = await sendAttachmentsWithFallback(
+    attachments,
+    sendDirectAttachment,
+    { platform: PLATFORM.WHATSAPP }
+  );
+  const failures = result.fallbackFailures.flatMap(entry =>
+    _fallbackSources(entry.attachment).map(attachment =>
+      _fallbackFailure(result, { attachment, error: entry.error }, 'link_generation')
+    )
+  );
+  let linked = [];
+
+  if (result.fallbackMessage) {
+    try {
+      await sendFallbackMessage(result.fallbackMessage);
+      linked = result.fallbackAttachments.flatMap(_fallbackSources);
+      if (linked.length > 0) {
+        log.info(`Sent link-fallback message for ${linked.length} attachment(s)`);
+      }
+    } catch (err) {
+      log.error(`Failed to send fallback message: ${err.message}`);
+      for (const fallbackAttachment of result.fallbackAttachments) {
+        for (const attachment of _fallbackSources(fallbackAttachment)) {
+          failures.push(_fallbackFailure(
+            result,
+            { attachment, error: null },
+            'link_delivery',
+            err.message
+          ));
+        }
+      }
+    }
+  }
+
+  return {
+    direct: result.sent,
+    linked,
+    failures,
+    auditAttachments: [
+      ...result.sent.map(att => auditAttachment(att, 'direct')),
+      ...linked.map(att => auditAttachment(att, 'link'))
+    ]
+  };
+}
+
 /**
  * @param {object} args - { recipient, message, attachments? }
  * @param {object} userCtx
@@ -81,64 +160,87 @@ async function sendWhatsAppTool(args, userCtx, deliveryCtx) {
   const contacted = alreadyContactedError(deliveryCtx.contactedWA, target.jid, 'WhatsApp message');
   if (contacted) return contacted;
 
-  const { attachments, missingNote } = await resolveOutboundAttachments(
+  const { attachments, missing, missingNote } = await resolveOutboundAttachments(
     args.attachments, userCtx
   );
   const text = stripOutgoingDeliveryArtifacts(args.message);
-
-  const audit = () => recordOutbound({
-    senderKey: userCtx.taskFileId,
-    channel: 'whatsapp',
-    status: 'accepted',
-    recipient: _sentRecipient(target),
-    text,
-    attachments
-  });
-
-  let textSent = false;
   try {
     await sendWhatsAppDirect(target.jid, text);
-    textSent = true;
     // Reserved as soon as the text is out: a later attachment failure must not
     // let a retry blast the same text again.
     deliveryCtx.contactedWA.add(target.jid);
+  } catch (err) {
+    const notification = await notifyAdminDetailed(
+      'WhatsApp Delivery',
+      `Failed to send WhatsApp message to ${target.display}: ${err.message}`
+    );
+    return {
+      success: false,
+      error: `Error sending WhatsApp message: ${err.message}${buildAdminNotificationNote(notification)}`
+    };
+  }
 
-    let counts = '';
-    if (attachments.length > 0) {
-      const result = await sendAttachmentsWithFallback(
+  let attachmentResult = { direct: [], linked: [], failures: [], auditAttachments: [] };
+  if (attachments.length > 0) {
+    try {
+      attachmentResult = await deliverWhatsAppAttachments(
         attachments,
         (att) => sendWhatsAppAttachment(att, (media, options) => sendWhatsAppDirect(target.jid, media, options)),
-        { platform: PLATFORM.WHATSAPP }
+        (fallbackMessage) => sendWhatsAppDirect(target.jid, fallbackMessage)
       );
-      log.info(`WhatsApp delivery: ${result.sent.length} direct, ${result.linkFallback.length} via link`);
-
-      if (result.fallbackMessage) {
-        try {
-          await sendWhatsAppDirect(target.jid, result.fallbackMessage);
-          log.info(`Sent link-fallback message for ${result.linkFallback.length} attachment(s)`);
-        } catch (err) {
-          log.error(`Failed to send fallback message: ${err.message}`);
-        }
-      }
-      counts = [
-        result.sent.length > 0 ? ` with ${result.sent.length} attachment(s)` : '',
-        result.linkFallback.length > 0 ? ` (${result.linkFallback.length} via links)` : ''
-      ].join('');
+    } catch (err) {
+      log.error(`Unexpected WhatsApp attachment delivery failure: ${err.message}`);
+      attachmentResult.failures = attachments.map(att => ({
+        name: att.name || 'unknown',
+        stage: 'delivery',
+        error: err.message
+      }));
     }
-
-    audit();
-    return {
-      success: true,
-      status: 'accepted',
-      message: `WhatsApp message accepted for outbound delivery to ${target.display}${counts}.${missingNote} `
-        + 'This does not confirm delivery to the device or reading.'
-    };
-  } catch (err) {
-    // The text may already be out: log it so read_sent_messages still shows it.
-    if (textSent) audit();
-    await notifyAdmin('WhatsApp Delivery', `Failed to send WhatsApp message to ${target.display}: ${err.message}`);
-    return { success: false, error: `Error sending WhatsApp message: ${err.message}${ADMIN_NOTIFIED_SUFFIX}` };
   }
+
+  const failures = [
+    ...unresolvedAttachmentFailures(missing),
+    ...attachmentResult.failures
+  ];
+  const attachmentDelivery = buildAttachmentDeliverySummary({
+    selected: attachments.length + missing.length,
+    direct: attachmentResult.direct.length,
+    linked: attachmentResult.linked.length,
+    failures
+  });
+  const deliveryStatus = outboundStatusFor(attachmentDelivery);
+  log.info(`WhatsApp delivery: ${attachmentDelivery.direct} direct, `
+    + `${attachmentDelivery.viaLinks} via link, ${attachmentDelivery.failed} failed`);
+
+  const auditRecorded = await recordOutbound({
+    senderKey: userCtx.taskFileId,
+    channel: 'whatsapp',
+    acceptanceStatus: 'accepted',
+    toolStatus: deliveryStatus,
+    recipient: _sentRecipient(target),
+    text,
+    attachments: attachmentResult.auditAttachments
+  });
+  const status = outboundStatusWithAudit(deliveryStatus, auditRecorded);
+
+  const counts = attachmentDelivery.selected > 0
+    ? ` Attachments: ${attachmentDelivery.direct} direct, ${attachmentDelivery.viaLinks} via links, `
+      + `${attachmentDelivery.failed} failed.`
+    : '';
+  const auditNote = auditRecorded
+    ? ''
+    : ' The accepted send could not be saved to the read_sent_messages audit.';
+  return {
+    success: true,
+    status,
+    delivery_status: 'accepted',
+    acceptanceStatus: 'accepted',
+    toolStatus: status,
+    audit_recorded: auditRecorded,
+    message: `WhatsApp message accepted for outbound delivery to ${target.display}.${counts}${missingNote}${auditNote} `
+      + 'This does not confirm delivery to the device or reading.',
+    attachmentDelivery
+  };
 }
 
-export { sendWhatsAppTool };
+export { deliverWhatsAppAttachments, sendWhatsAppTool };

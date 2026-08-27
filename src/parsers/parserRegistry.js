@@ -111,16 +111,54 @@ function _parseText(absPath, stat, opts) {
 
   let content = slice.join('\n');
   const notes = [];
+  let outputTruncated = false;
+  let fittedLines = null;
   if (Buffer.byteLength(content, 'utf-8') > maxBytes) {
-    content = Buffer.from(content, 'utf-8').subarray(0, maxBytes).toString('utf-8');
+    outputTruncated = true;
+    let usedBytes = 0;
+    fittedLines = 0;
+    for (const line of slice) {
+      const separatorBytes = fittedLines > 0 ? 1 : 0;
+      const lineBytes = Buffer.byteLength(line, 'utf-8');
+      if (usedBytes + separatorBytes + lineBytes > maxBytes) break;
+      usedBytes += separatorBytes + lineBytes;
+      fittedLines++;
+    }
+    if (fittedLines === 0) {
+      return _fail(
+        PARSE_ERROR.TOO_LARGE,
+        `Line ${offset} alone exceeds the ${Math.round(maxBytes / 1024)} KB read_file output limit. `
+        + 'Line paging cannot resume inside one line; use shell with byte-oriented commands such as '
+        + '`dd`, `head -c` or `tail -c` to inspect it without skipping content.'
+      );
+    }
+    content = slice.slice(0, fittedLines).join('\n');
     notes.push(`Output clipped at ${Math.round(maxBytes / 1024)} KB.`);
   }
-  const lastShown = Math.min(offset - 1 + slice.length, allLines.length);
-  if (lastShown < allLines.length) {
+  const returnedLines = fittedLines ?? (content.length > 0 ? content.split('\n').length : 0);
+  const lastShown = returnedLines > 0 ? offset - 1 + returnedLines : offset - 1;
+  const hasMore = outputTruncated || lastShown < allLines.length;
+  if (offset > allLines.length) {
+    notes.push(`Offset ${offset} is beyond the end of this ${allLines.length}-line file.`);
+  } else if (hasMore) {
     notes.push(`Lines ${offset}-${lastShown} of ${allLines.length}; pass offset/limit for the rest.`);
   }
 
-  return { ok: true, kind: 'text', content, metadata: { lines: allLines.length }, images: [], notes };
+  return {
+    ok: true,
+    kind: 'text',
+    content,
+    metadata: {
+      lines: allLines.length,
+      offset,
+      returned_lines: returnedLines,
+      has_more: hasMore,
+      ...(hasMore ? { next_offset: Math.max(offset, lastShown + 1) } : {}),
+      output_truncated: outputTruncated
+    },
+    images: [],
+    notes
+  };
 }
 
 /** Run the parser for a family, with no caching concerns of its own. */

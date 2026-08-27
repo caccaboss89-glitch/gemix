@@ -138,6 +138,7 @@ async function readFile(args = {}, workspaceId, opts = {}) {
 
   const envelope = {
     success: true,
+    status: metadata.has_more || metadata.output_truncated ? 'degraded' : 'ok',
     path: snapshot.display,
     kind: result.kind,
     metadata,

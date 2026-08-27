@@ -4,7 +4,7 @@
 // so a burst of files counts as the single message it was meant to be:
 //
 //   1. the wipe command, whenever it is the whole message — it empties the chat
-//      and erases the user's data, and never reaches the model;
+//      and deletes the conversation data GemiX stores, and never reaches the model;
 //   2. the privacy notice, on a person's first ever request — sent instead of
 //      the turn, which is why nothing they attached to it is ever downloaded:
 //      the gate returns before history and media ingress run.

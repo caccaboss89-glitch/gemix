@@ -1,21 +1,26 @@
 // Final-reply helpers shared by the normal agent-loop exit and forced wrap-up.
 
 import constants from '../config/constants.js';
+import { getActiveTtsCapabilities } from '../media/ttsCapabilities.js';
 import { generateVoice } from '../tools/voiceMessage.js';
 import { resolveDeliverySelection } from '../utils/deliverySelection.js';
 import { buildResearchBadgeText } from '../utils/footer.js';
 import { createLogger } from '../utils/logger.js';
 import { sanitizeDiscordThreadTitle } from '../utils/discord.js';
 import { voiceReply } from '../utils/replyEnvelope.js';
-import { sanitizeVoiceMessageText, stripOutgoingDeliveryArtifacts } from '../utils/text.js';
+import {
+  sanitizeVoiceMessageText,
+  stripOutgoingDeliveryArtifacts,
+  stripVoiceTags
+} from '../utils/text.js';
 
 const log = createLogger('TurnReply');
 
 function accumulateSearchStats(responseCtx, searchStats) {
-  if (!searchStats || (searchStats.webSources === 0 && searchStats.xPosts === 0)) return;
-  if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xPosts: 0 };
+  if (!searchStats || (searchStats.webSources === 0 && searchStats.xSearches === 0)) return;
+  if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xSearches: 0 };
   responseCtx.researchStats.webSources += searchStats.webSources;
-  responseCtx.researchStats.xPosts += searchStats.xPosts;
+  responseCtx.researchStats.xSearches += searchStats.xSearches;
 }
 
 async function resolveFinalAttachments(parsed, workspaceId, signal) {
@@ -36,7 +41,10 @@ function applyParsedTitle(parsed, responseCtx) {
 }
 
 async function buildVoiceReply({ rawResponseText, finalAttachments, budget, ctx, responseCtx, modelUsed }) {
-  const spoken = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
+  let spoken = sanitizeVoiceMessageText(stripOutgoingDeliveryArtifacts(rawResponseText || ''));
+  // Google has no expressive-tag syntax. Strip xAI-looking tags before both
+  // synthesis and transcript storage so history records exactly what was said.
+  if (!getActiveTtsCapabilities().supportsVoiceTags) spoken = stripVoiceTags(spoken);
   if (!spoken.trim()) return null;
   if (spoken.length > constants.MAX_TTS_CHARS) {
     log.warn(`Voice text too long (${spoken.length} > ${constants.MAX_TTS_CHARS}); replying as text`);

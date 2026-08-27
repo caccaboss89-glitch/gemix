@@ -6,7 +6,6 @@
 
 import constants from '../config/constants.js';
 import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
-import { XAI_X_SEARCH_TOOL } from './extensions/xaiResponsesExtensions.js';
 import { resolveProviderProfile } from './providers/providerProfile.js';
 import {
   buildEmailTool,
@@ -21,7 +20,7 @@ import {
   buildGenerateImageTool
 } from './tools/mediaCatalog.js';
 import { TOOL_TOGGLE_RELEASE_NOTIFY, buildManagePreferencesTool } from './tools/preferenceCatalog.js';
-import { validateToolArgs } from './tools/schema.js';
+import { normalizeOptionalNullArgs, validateToolArgs } from './tools/schema.js';
 import { TOOL_BUG_REPORT } from './tools/systemCatalog.js';
 import {
   buildReadMyTasksTool,
@@ -58,9 +57,9 @@ function getToolsForUser(toolCtx) {
   const profile = resolveProviderProfile();
   const tools = [TOOL_SEARCH_WEB, TOOL_READ_PAGE, TOOL_SEARCH_IMAGE];
 
-  // x_search is a provider-native extension; web and image search above are
-  // always GemiX-owned function tools.
-  if (isFeatureAvailable(profile, FEATURE.X_SEARCH)) tools.push(XAI_X_SEARCH_TOOL);
+  // Provider-native tools cross the generic boundary only through the active
+  // profile. Web and image search above are always GemiX-owned function tools.
+  tools.push(...(Array.isArray(profile.nativeTools) ? profile.nativeTools : []));
 
   // Generation is currently a WhatsApp surface. The image schema is selected
   // from the bound backend and video is present only where a backend exists.
@@ -95,7 +94,9 @@ function getToolsForUser(toolCtx) {
     tools.push(buildReadSentMessagesTool(isAdmin));
   }
 
-  tools.push(TOOL_BUG_REPORT);
+  // The administrator already sees this conversation and its tool failures;
+  // reporting the same problem back to them would be a self-notification.
+  if (!isAdmin) tools.push(TOOL_BUG_REPORT);
   return tools;
 }
 
@@ -109,20 +110,6 @@ function toolNamesToSet(tools) {
   return names;
 }
 
-/** Derive each static platform capability set from the registry itself. */
-function syncProfileToolSets(caps, profileEnum) {
-  for (const profile of Object.values(profileEnum)) {
-    const cap = caps[profile];
-    if (!cap) continue;
-    cap.tools = toolNamesToSet(getToolsForUser({
-      isActiveMember: true,
-      isAdmin: false,
-      platform: cap.platform,
-      isGroup: Boolean(cap.isGroup)
-    }));
-  }
-}
-
 /** The offered set is the complete permission boundary for one round. */
 function getToolAccessError(toolName, allowedRoundNames, unavailableMessage) {
   if (allowedRoundNames.has(toolName)) return null;
@@ -133,7 +120,7 @@ function getToolAccessError(toolName, allowedRoundNames, unavailableMessage) {
 export {
   getToolAccessError,
   getToolsForUser,
-  syncProfileToolSets,
   toolNamesToSet,
+  normalizeOptionalNullArgs,
   validateToolArgs
 };

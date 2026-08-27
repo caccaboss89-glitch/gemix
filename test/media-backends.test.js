@@ -15,9 +15,12 @@ import {
   FLUX_DEFAULT_SIZE,
   FLUX_MAX_REFERENCES,
   FLUX_SIZES,
+  XAI_ASPECT_TO_FLUX_SIZE,
   _resetCooldownsForTests,
+  canUseImageFallback,
   declaredImageBackend,
   failurePlan,
+  fluxSizeForAspectRatio,
   resolveFluxSize,
   resolveImageBackends,
   startCooldown
@@ -36,6 +39,7 @@ import {
   resetLedger,
   tilesFor
 } from '../src/media/neuronLedger.js';
+import { _runImageChain } from '../src/tools/imagineGenerator.js';
 import { FEATURE, backendFor, isFeatureAvailable } from '../src/features/featureBindings.js';
 import { _resetActiveProfileForTests, getProviderProfile } from '../src/ai/providers/providerProfile.js';
 import envConfig from '../src/config/env.js';
@@ -67,7 +71,6 @@ test('the xAI profile keeps its own media services, the others fall to the basel
   assert.equal(backendFor(xai, FEATURE.GENERATE_VIDEO), 'xai-imagine-video');
   assert.equal(backendFor(xai, FEATURE.STT), 'xai-stt');
   assert.equal(backendFor(xai, FEATURE.TTS), 'xai-tts');
-  assert.equal(backendFor(xai, FEATURE.X_SEARCH), 'xai-native');
 });
 
 test('a subscription backend is not treated as the whole product line', () => {
@@ -78,7 +81,6 @@ test('a subscription backend is not treated as the whole product line', () => {
   assert.equal(backendFor(chatgpt, FEATURE.STT), 'cloudflare-whisper');
   assert.equal(backendFor(chatgpt, FEATURE.TTS), 'google-translate');
   assert.equal(isFeatureAvailable(chatgpt, FEATURE.GENERATE_VIDEO), false);
-  assert.equal(isFeatureAvailable(chatgpt, FEATURE.X_SEARCH), false);
 });
 
 test('the search and workspace features stay GemiX-owned on every profile', () => {
@@ -175,8 +177,94 @@ test('a FLUX size resolves to real pixels, and an unknown one to the default', (
   assert.deepEqual(resolveFluxSize(undefined), FLUX_SIZES[FLUX_DEFAULT_SIZE]);
 });
 
+test('xAI text-to-image ratios map onto the closest FLUX presets', () => {
+  for (const [ratio, size] of Object.entries(XAI_ASPECT_TO_FLUX_SIZE)) {
+    assert.equal(fluxSizeForAspectRatio(ratio), size, ratio);
+  }
+  assert.equal(fluxSizeForAspectRatio(undefined), FLUX_DEFAULT_SIZE);
+});
+
+test('only text-to-image is a semantically valid xAI to FLUX fallback', () => {
+  assert.equal(canUseImageFallback(BACKEND.XAI, BACKEND.CLOUDFLARE, 0), true);
+  assert.equal(canUseImageFallback(BACKEND.XAI, BACKEND.CLOUDFLARE, 1), false);
+  assert.equal(canUseImageFallback(BACKEND.XAI, BACKEND.CLOUDFLARE, 3), false);
+});
+
+test('an xAI reference edit never calls FLUX when xAI is cooling down', async () => {
+  const calls = [];
+  const result = await _runImageChain({
+    primary: BACKEND.CLOUDFLARE,
+    fallback: null,
+    contractBackend: BACKEND.XAI,
+    prompt: 'edit this image',
+    refList: ['https://example.test/reference.png'],
+    aspect: null,
+    size: '',
+    attemptBackend: async (backend) => {
+      calls.push(backend);
+      return { ok: true };
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(calls, [], 'FLUX must not consume a request for an xAI edit');
+  assert.match(result.error, /FLUX was not attempted.*cannot preserve/i);
+});
+
+test('an xAI reference edit never falls back to FLUX after an xAI failure', async () => {
+  const calls = [];
+  const result = await _runImageChain({
+    primary: BACKEND.XAI,
+    fallback: BACKEND.CLOUDFLARE,
+    contractBackend: BACKEND.XAI,
+    prompt: 'compose these images',
+    refList: ['workspace/one.png', 'workspace/two.png'],
+    aspect: null,
+    size: '',
+    attemptBackend: async (backend) => {
+      calls.push(backend);
+      return { ok: false, code: CF_ERROR.RATE_LIMIT, error: 'xAI rate limited' };
+    }
+  });
+
+  assert.deepEqual(calls, [BACKEND.XAI]);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /FLUX was not attempted.*cannot preserve/i);
+});
+
+test('xAI text-to-image may fall back to FLUX with its aspect translated', async () => {
+  const calls = [];
+  const result = await _runImageChain({
+    primary: BACKEND.XAI,
+    fallback: BACKEND.CLOUDFLARE,
+    contractBackend: BACKEND.XAI,
+    prompt: 'a wide mountain panorama',
+    refList: [],
+    aspect: '16:9',
+    size: '',
+    attemptBackend: async (backend, request) => {
+      calls.push({ backend, size: request.size });
+      if (backend === BACKEND.XAI) {
+        return { ok: false, code: CF_ERROR.RATE_LIMIT, error: 'xAI rate limited' };
+      }
+      return { ok: true, buffer: Buffer.from('image'), ext: 'jpg', refCount: 0 };
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.backend, BACKEND.CLOUDFLARE);
+  assert.deepEqual(calls, [
+    { backend: BACKEND.XAI, size: 'landscape' },
+    { backend: BACKEND.CLOUDFLARE, size: 'landscape' }
+  ]);
+});
+
 test('FLUX takes exactly one reference, which is what the schema must say', () => {
   assert.equal(FLUX_MAX_REFERENCES, 1);
+  const tools = withDeployment({ provider: 'chatgpt', cloudflare: true },
+    () => getToolsForUser({ ...whatsappCtx, isActiveMember: true, isAdmin: false }));
+  const schema = tools.find(tool => nameOf(tool) === 'generate_image').function.parameters;
+  assert.equal(schema.properties.reference_images.maxItems, FLUX_MAX_REFERENCES);
 });
 
 // -- neuron ledger -----------------------------------------------------------
@@ -299,6 +387,10 @@ test('on xAI the model sees the provider-native tools and the ratio schema', () 
   assert.ok(names(tools).includes('x_search'));
   assert.ok(names(tools).includes('generate_video'));
   assert.deepEqual(paramsOf(tools, 'generate_image'), ['prompt', 'reference_images', 'aspect_ratio']);
+  const imageSchema = tools.find(tool => nameOf(tool) === 'generate_image').function.parameters;
+  const videoSchema = tools.find(tool => nameOf(tool) === 'generate_video').function.parameters;
+  assert.equal(imageSchema.properties.reference_images.maxItems, constants.MAX_REF_IMAGES_FOR_IMAGE);
+  assert.equal(videoSchema.properties.reference_images.maxItems, constants.MAX_REF_IMAGES_FOR_VIDEO);
 });
 
 test('on a profile without them, the native tools are absent rather than broken', () => {

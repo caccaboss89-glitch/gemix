@@ -61,6 +61,7 @@ function searchFiles(args = {}, workspaceId) {
     }
     return {
       success: true,
+      status: 'ok',
       path: resolved.display,
       matches: [],
       message: `${resolved.display} is empty.`
@@ -84,8 +85,11 @@ function searchFiles(args = {}, workspaceId) {
     }));
     return {
       success: true,
+      status: candidates.length > MAX_MATCHES ? 'degraded' : 'ok',
       path: resolved.display,
       matches,
+      returned_matches: matches.length,
+      truncated: candidates.length > MAX_MATCHES,
       message: candidates.length > MAX_MATCHES
         ? `${candidates.length} files match; the first ${MAX_MATCHES} are listed.`
         : `${candidates.length} file(s) match out of ${total}.`
@@ -116,12 +120,30 @@ function searchFiles(args = {}, workspaceId) {
     }
   }
 
+  const truncationReasons = [];
+  if (matches.length >= MAX_MATCHES) truncationReasons.push('match_limit');
+  if (scanned >= MAX_SCANNED_FILES && scanned < candidates.length) truncationReasons.push('scan_limit');
+  if (skippedLarge > 0) truncationReasons.push('large_files_skipped');
+  if (skippedBinary > 0) truncationReasons.push('binary_files_skipped');
   const notes = [`Searched ${scanned} text file(s) under ${resolved.display}.`];
   if (skippedBinary > 0) notes.push(`${skippedBinary} binary file(s) skipped — use read_file on those.`);
   if (skippedLarge > 0) notes.push(`${skippedLarge} file(s) skipped as too large to scan.`);
   if (matches.length >= MAX_MATCHES) notes.push(`Stopped at ${MAX_MATCHES} matches; narrow the query.`);
 
-  return { success: true, path: resolved.display, matches, message: notes.join(' ') };
+  return {
+    success: true,
+    status: truncationReasons.length > 0 ? 'degraded' : 'ok',
+    path: resolved.display,
+    matches,
+    candidate_files: candidates.length,
+    scanned_text_files: scanned,
+    skipped_binary_files: skippedBinary,
+    skipped_large_files: skippedLarge,
+    returned_matches: matches.length,
+    truncated: truncationReasons.includes('match_limit') || truncationReasons.includes('scan_limit'),
+    truncation_reasons: truncationReasons,
+    message: notes.join(' ')
+  };
 }
 
 export { searchFiles };

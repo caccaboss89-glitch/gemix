@@ -167,7 +167,9 @@ async function searchWeb({ query, count, signal }) {
   const res = await _get('/search', { q: query, count, fetch: 'false' }, SEARCH_TIMEOUT_MS, signal);
   if (!res.ok) return res;
 
-  let results = _normalizeHits(res.data?.results);
+  // The sidecar normally honours count, but GemiX owns the public tool
+  // contract and therefore enforces the bound again at its boundary.
+  let results = _normalizeHits(res.data?.results).slice(0, count);
 
   const meta = res.data?.meta || {};
   let enginesUsed = Array.isArray(meta.engines_used) ? meta.engines_used : [];
@@ -210,7 +212,8 @@ async function searchWeb({ query, count, signal }) {
  * @param {string} req.url
  * @param {number} [req.maxChars]
  * @param {AbortSignal} [req.signal]
- * @returns {Promise<{ok: true, content: string, strategy: string, chars: number, trustTier: string}
+ * @returns {Promise<{ok: true, content: string, strategy: string, chars: number,
+ *   trustTier: string, warning?: string}
  *   |{ok: false, code: string, error: string}>}
  */
 async function readWebPage({ url, maxChars, signal }) {
@@ -246,7 +249,10 @@ async function readWebPage({ url, maxChars, signal }) {
     content: data.content,
     strategy: typeof data.strategy === 'string' ? data.strategy : '',
     chars: Number.isFinite(data.chars) ? data.chars : data.content.length,
-    trustTier: typeof data.trust?.tier === 'string' ? data.trust.tier : 'unknown'
+    trustTier: typeof data.trust?.tier === 'string' ? data.trust.tier : 'unknown',
+    ...(typeof data.warning === 'string' && data.warning.trim()
+      ? { warning: data.warning.trim().slice(0, 500) }
+      : {})
   };
 }
 

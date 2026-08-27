@@ -24,10 +24,10 @@ const RELEASE_NOTIFICATION_PREFIX = '🚀 *Nuova release GemiX:';
 /** Music wrap monthly notification sent to all active members (the month varies). */
 const MUSIC_WRAP_PREFIX = '🎵 *Wrap di';
 
-// -- Admin error notifications ---------------------------------------------
+// -- Admin operational alerts ----------------------------------------------
 
-/** Admin API error alert from adminNotifier.js: `⚠️ *ERRORE API — ${source}*\n\n...`. */
-const ADMIN_ERROR_PREFIX = '⚠️ *ERRORE API —';
+/** Operational alert from adminNotifier.js: `⚠️ *ERRORE GEMIX — ${source}*\n\n...`. */
+const ADMIN_ERROR_PREFIX = '⚠️ *ERRORE GEMIX —';
 
 // -- Maintenance -----------------------------------------------------------
 
@@ -62,10 +62,12 @@ const VIDEO_GENERATION_PROGRESS_PREFIX = '🎬 Sto generando il video';
  * its weekly renewal, so it may only ever answer a QUOTA failure that really
  * came from the xAI profile — ai/providers/errorPolicy.js decides that on the
  * error's kind and the active profile, never on the wording of a message.
- * It opens with ADMIN_ERROR_PREFIX, which is what makes it a system message.
+ * Its dedicated prefix makes it a system message without classifying a quota
+ * refusal as an administrator alert.
  */
+const GROK_CREDIT_EXHAUSTED_PREFIX = '⚠️ *LIMITE MODELLO — Grok*';
 const GROK_CREDIT_EXHAUSTED_MESSAGE =
-  `${ADMIN_ERROR_PREFIX} API (Grok)*\n\nScusa ma i crediti sono finiti al momento, `
+  `${GROK_CREDIT_EXHAUSTED_PREFIX}\n\nScusa ma i crediti sono finiti al momento, `
   + 'tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶';
 
 /**
@@ -73,14 +75,16 @@ const GROK_CREDIT_EXHAUSTED_MESSAGE =
  * the user cannot act on which backend GemiX runs, and a message that said
  * "SuperGrok" elsewhere would simply be wrong.
  */
+const PROVIDER_LIMIT_PREFIX = '⚠️ *LIMITE MODELLO*';
 const PROVIDER_LIMIT_MESSAGE =
-  `${ADMIN_ERROR_PREFIX} API*\n\nHo esaurito la disponibilità del modello per il momento. `
+  `${PROVIDER_LIMIT_PREFIX}\n\nHo esaurito la disponibilità del modello per il momento. `
   + 'Riprova più tardi.';
 
-/** Credentials the deployment has to fix: the user can only be told to wait. */
+/** Credentials the deployment has to fix: no delivery claim is made here. */
+const PROVIDER_AUTH_PREFIX = '⚠️ *ERRORE MODELLO — autenticazione*';
 const PROVIDER_AUTH_MESSAGE =
-  `${ADMIN_ERROR_PREFIX} API*\n\nNon riesco ad autenticarmi con il modello in questo momento. `
-  + 'L\'amministratore è stato avvisato.';
+  `${PROVIDER_AUTH_PREFIX}\n\nNon riesco ad autenticarmi con il modello in questo momento. `
+  + 'Il problema richiede un intervento dell\'amministratore.';
 
 // -- Sandbox capacity ------------------------------------------------------
 
@@ -88,9 +92,8 @@ const PROVIDER_AUTH_MESSAGE =
  * Sent when every sandbox slot is taken and this chat would need a new one.
  * GemiX runs a fixed number of workspace containers (the ceiling lives in
  * constants.js, which cannot be named here: it is constants.js that imports
- * this file). A chat that already holds one is never turned away, and neither
- * is the admin, so this only ever answers a conversation asking for a slot
- * that does not exist yet.
+ * this file). A chat that already holds one is never turned away; every new
+ * workspace, including an administrator's, shares the same global ceiling.
  */
 const SANDBOX_BUSY_PREFIX = '⚙️ GemiX è sotto utilizzo intensivo al momento';
 const SANDBOX_BUSY_MESSAGE =
@@ -116,9 +119,9 @@ const ATTACHMENT_FALLBACK_FAILED_MESSAGE =
 // -- Privacy: first-contact notice and data wipe ---------------------------
 
 /**
- * Command that empties the chat and erases every trace of the user from the
- * server. WhatsApp only, recognised only when it is the whole message, and it
- * never starts an AI call (see platforms/whatsapp/privacyGate.js).
+ * Command that empties the chat and deletes the conversation data GemiX stores
+ * on its server. WhatsApp only, recognised only when it is the whole message,
+ * and it never starts an AI call (see platforms/whatsapp/privacyGate.js).
  */
 const PRIVACY_WIPE_COMMAND = '/clear';
 
@@ -162,6 +165,8 @@ function buildPrivacyNoticeMessage(opts = {}) {
     + 'potenzialmente accedere alle conversazioni complete.',
     '- Gli allegati restano sul server finché compaiono nella finestra di messaggi recenti che uso per '
     + 'rispondere: quando ne escono vengono eliminati, così come i file che genero, dopo qualche ora di inattività.',
+    '- Le richieste e risposte complete scambiate con il provider AI possono restare nei log diagnostici per un '
+    + 'massimo di 30 giorni; il comando di eliminazione qui sotto rimuove anche quelle associate a questa chat.',
     '- Non scrivermi mai dati sensibili, credenziali o informazioni private.'
   ];
   if (opts.hasAttachments) {
@@ -171,8 +176,9 @@ function buildPrivacyNoticeMessage(opts = {}) {
     '',
     `Se continui a scrivere accetti queste condizioni. Se non le accetti, scrivi \`${PRIVACY_WIPE_COMMAND}\` da `
     + 'solo, senza altro testo: svuoto questa chat, cancello anche il messaggio che hai appena inviato ed elimino '
-    + 'dal server tutti i tuoi dati — messaggi, allegati, trascrizioni dei miei vocali, preferenze, promemoria '
-    + 'programmati e file generati. Puoi usarlo in qualunque momento.'
+    + 'dal server i dati che GemiX conserva per questa chat — messaggi, allegati, trascrizioni dei miei vocali, '
+    + 'preferenze, promemoria, file generati e log API diagnostici. Non può ritirare messaggi o segnalazioni già '
+    + 'consegnati fuori dalla chat. Puoi usarlo in qualunque momento.'
   );
   if (opts.isActiveMember) {
     lines.push('', PRIVACY_MEMBER_CONTACT_NOTE);
@@ -189,8 +195,8 @@ function buildPrivacyWipeDoneMessage(opts = {}) {
   const lines = [
     PRIVACY_WIPE_DONE_PREFIX,
     '',
-    'Ho svuotato questa chat ed eliminato dal server tutti i tuoi dati: cronologia, allegati, trascrizioni dei '
-    + 'miei messaggi vocali, preferenze salvate, promemoria programmati e file generati.'
+    'Ho svuotato questa chat ed eliminato dal server i dati che GemiX conservava per questa chat: cronologia, '
+    + 'allegati, trascrizioni dei miei messaggi vocali, preferenze salvate, promemoria, file generati e log API diagnostici.'
   ];
   if (opts.isActiveMember) {
     lines.push('', PRIVACY_MEMBER_CONTACT_NOTE);
@@ -204,9 +210,10 @@ function buildPrivacyWipeDoneMessage(opts = {}) {
 const SYSTEM_MESSAGE_PREFIXES = [
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
-  // Also covers GROK_CREDIT_EXHAUSTED_MESSAGE, PROVIDER_LIMIT_MESSAGE and
-  // PROVIDER_AUTH_MESSAGE, which all open with it.
   ADMIN_ERROR_PREFIX,
+  GROK_CREDIT_EXHAUSTED_PREFIX,
+  PROVIDER_LIMIT_PREFIX,
+  PROVIDER_AUTH_PREFIX,
   MAINTENANCE_PREFIX,
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
@@ -227,6 +234,7 @@ const SYSTEM_MESSAGE_PREFIXES = [
  * replies; safe to drop once no live chat reaches back that far.
  */
 const LEGACY_SYSTEM_MESSAGE_PREFIXES = [
+  '⚠️ *ERRORE API —',
   '❌ *ERRORE',
   '⚠️ *AVVISO',
   '🔔 *Promemoria'
@@ -256,8 +264,11 @@ export {
   VIDEO_GENERATION_PROGRESS_PREFIX,
   SANDBOX_BUSY_MESSAGE,
   SANDBOX_BUSY_PREFIX,
+  GROK_CREDIT_EXHAUSTED_PREFIX,
   GROK_CREDIT_EXHAUSTED_MESSAGE,
+  PROVIDER_LIMIT_PREFIX,
   PROVIDER_LIMIT_MESSAGE,
+  PROVIDER_AUTH_PREFIX,
   PROVIDER_AUTH_MESSAGE,
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,

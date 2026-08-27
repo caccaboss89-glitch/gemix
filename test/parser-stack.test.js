@@ -107,7 +107,42 @@ test('text comes back with its line count and honours the window', async () => {
 
   const windowed = await parse(path.join(ROOT, 'notes.md'), { offset: 2, limit: 1 });
   assert.equal(windowed.content, 'alpha beta');
+  assert.deepEqual(
+    {
+      offset: windowed.metadata.offset,
+      returnedLines: windowed.metadata.returned_lines,
+      hasMore: windowed.metadata.has_more,
+      nextOffset: windowed.metadata.next_offset
+    },
+    { offset: 2, returnedLines: 1, hasMore: true, nextOffset: 3 }
+  );
   assert.match(windowed.notes.join(' '), /Lines 2-2 of 4/);
+});
+
+test('a single oversized text line fails explicitly instead of advancing past hidden bytes', async () => {
+  const maxBytes = constants.WORKSPACE_OUTPUT_MAX_BYTES;
+  const abs = write('one-huge-line.txt', `${'x'.repeat(maxBytes + 32)}\nsecond line`);
+  const res = await parse(abs, { offset: 1, limit: 1 });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.error_code, PARSE_ERROR.TOO_LARGE);
+  assert.match(res.error, /Line 1 alone exceeds/);
+  assert.match(res.error, /Line paging cannot resume inside one line/);
+  assert.match(res.error, /shell/);
+});
+
+test('complete empty lines before an oversized line remain pageable', async () => {
+  const maxBytes = constants.WORKSPACE_OUTPUT_MAX_BYTES;
+  const abs = write('empty-then-huge.txt', `\n${'x'.repeat(maxBytes + 32)}\nlast line`);
+  const first = await parse(abs, { offset: 1, limit: 2 });
+  const second = await parse(abs, { offset: 2, limit: 1 });
+
+  assert.equal(first.ok, true);
+  assert.equal(first.content, '');
+  assert.equal(first.metadata.returned_lines, 1);
+  assert.equal(first.metadata.next_offset, 2);
+  assert.equal(second.ok, false);
+  assert.match(second.error, /Line 2 alone exceeds/);
 });
 
 test('a binary with no parser is refused rather than dumped as bytes', async () => {

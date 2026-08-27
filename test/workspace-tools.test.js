@@ -128,9 +128,16 @@ test('search_files finds a line and reports its number', () => {
   assert.equal(hit.text, 'alpha beta');
 });
 
+test('search_files combines name and content filters with AND', () => {
+  const res = searchFiles({ namePattern: '*.py', contains: 'alpha' }, WORKSPACE_ID);
+  assert.deepEqual(res.matches.map(match => match.path), ['workspace/src/app.py']);
+});
+
 test('search_files skips binaries instead of dumping bytes', () => {
   const res = searchFiles({ contains: 'anything' }, WORKSPACE_ID);
   assert.equal(res.matches.some(m => m.path.endsWith('blob.dat')), false);
+  assert.equal(res.status, 'degraded');
+  assert.ok(res.truncation_reasons.includes('binary_files_skipped'));
   assert.match(res.message, /binary file\(s\) skipped/);
 });
 
@@ -151,7 +158,19 @@ test('read_file returns text content with a line count', async () => {
 test('read_file pages a text file with offset and limit', async () => {
   const res = await readFile({ path: 'workspace/notes.md', offset: 2, limit: 1 }, WORKSPACE_ID);
   assert.equal(res.content, 'alpha beta');
+  assert.equal(res.status, 'degraded');
+  assert.equal(res.metadata.has_more, true);
+  assert.equal(res.metadata.next_offset, 3);
   assert.match(res.message, /Lines 2-2 of 4/);
+});
+
+test('read_file reports an offset beyond EOF without pretending content exists', async () => {
+  const res = await readFile({ path: 'workspace/notes.md', offset: 99, limit: 1 }, WORKSPACE_ID);
+  assert.equal(res.success, true);
+  assert.equal(res.content, undefined);
+  assert.equal(res.metadata.returned_lines, 0);
+  assert.equal(res.metadata.has_more, false);
+  assert.match(res.message, /beyond the end/);
 });
 
 test('read_file attaches an image as a content part', async () => {
@@ -397,6 +416,22 @@ test('shell refuses a workingDir outside the namespace', async () => {
   const res = await shell({ command: 'ls', workingDir: '/etc' }, WORKSPACE_ID);
   assert.equal(res.success, false);
   assert.match(res.error, /Invalid path/);
+});
+
+test('shell starts at the namespace root so displayed paths work unchanged', async () => {
+  const realExec = workspaceRuntime.execInWorkspace;
+  let seenWorkingDir = null;
+  workspaceRuntime.execInWorkspace = async (_id, spec) => {
+    seenWorkingDir = spec.workingDir;
+    return { rc: 0, stdout: '', stderr: '', durationMs: 1, timedOut: false, truncated: false };
+  };
+  try {
+    const result = await shell({ command: 'ls workspace/' }, WORKSPACE_ID);
+    assert.equal(seenWorkingDir, '/');
+    assert.equal(result.output_truncated, false);
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
 });
 
 test('shell caps its own timeout and then the turn budget caps it again', async () => {

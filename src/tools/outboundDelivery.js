@@ -25,7 +25,7 @@ const log = createLogger('OutboundDelivery');
  *
  * @param {string[]|undefined} entries - namespace paths and/or public URLs
  * @param {object} userCtx
- * @returns {Promise<{ attachments: object[], missingNote: string }>}
+ * @returns {Promise<{ attachments: object[], missing: string[], missingNote: string }>}
  */
 async function resolveOutboundAttachments(entries, userCtx) {
   const selection = await resolveDeliverySelection(entries, resolveWorkspaceId(userCtx), {
@@ -34,7 +34,49 @@ async function resolveOutboundAttachments(entries, userCtx) {
   const missingNote = selection.missing.length > 0
     ? ` Attachment(s) not resolved and NOT sent: ${selection.missing.join(', ')}.`
     : '';
-  return { attachments: selection.attachments, missingNote };
+  return { attachments: selection.attachments, missing: selection.missing, missingNote };
+}
+
+/** Add delivery metadata without mutating the resolved attachment object. */
+function auditAttachment(att, deliveryMethod) {
+  return { ...att, deliveryMethod };
+}
+
+/** Consistent receipt fields shared by both outbound delivery tools. */
+function buildAttachmentDeliverySummary({ selected = 0, direct = 0, embedded = 0, linked = 0, failures = [] } = {}) {
+  const safeFailures = (Array.isArray(failures) ? failures : []).map(failure => ({
+    name: String(failure?.name || 'unknown'),
+    stage: String(failure?.stage || 'delivery'),
+    error: String(failure?.error || 'Attachment delivery failed.')
+  }));
+  return {
+    selected,
+    delivered: direct + embedded + linked,
+    direct,
+    embedded,
+    viaLinks: linked,
+    failed: safeFailures.length,
+    failures: safeFailures
+  };
+}
+
+/** Message-level tool result is degraded whenever any requested file was lost. */
+function outboundStatusFor(summary) {
+  return summary && summary.failed > 0 ? 'degraded' : 'ok';
+}
+
+/** A missing audit record degrades an otherwise complete accepted send. */
+function outboundStatusWithAudit(status, auditRecorded) {
+  return status === 'ok' && !auditRecorded ? 'degraded' : status;
+}
+
+/** Turn unresolved model selections into explicit receipt failures. */
+function unresolvedAttachmentFailures(missing) {
+  return (Array.isArray(missing) ? missing : []).map(name => ({
+    name,
+    stage: 'resolve',
+    error: 'The requested attachment could not be resolved and was not sent.'
+  }));
 }
 
 /**
@@ -55,18 +97,28 @@ function alreadyContactedError(contacted, key, what) {
 
 /**
  * Write the audit entry read back by read_sent_messages. Never throws: losing
- * the log entry must not turn an accepted message into a reported failure.
+ * the log entry must not negate service acceptance, but callers await and
+ * expose the false result so the tool receipt does not claim full success.
+ * @returns {Promise<boolean>} true only after the audit file was saved
  */
-function recordOutbound(entry) {
+async function recordOutbound(entry) {
   try {
-    recordSentMessage(entry);
+    const saved = await recordSentMessage(entry);
+    if (!saved) log.error(`Failed to record sent message (${entry?.channel || 'unknown'}).`);
+    return saved === true;
   } catch (err) {
-    log.error(`Failed to record sent message (${entry.channel}): ${err.message}`);
+    log.error(`Failed to record sent message (${entry?.channel || 'unknown'}): ${err.message}`);
+    return false;
   }
 }
 
 export {
   resolveOutboundAttachments,
+  auditAttachment,
+  buildAttachmentDeliverySummary,
+  outboundStatusFor,
+  outboundStatusWithAudit,
+  unresolvedAttachmentFailures,
   alreadyContactedError,
   recordOutbound
 };

@@ -14,13 +14,13 @@
 // itself, through its own tools.
 //
 // Timeout: 60s by default, 300s ceiling. Output is captured and capped;
-// a command that will run longer than the ceiling should be backgrounded, and
-// the container survives between calls so it will still be running next time.
+// a command that will run longer than the ceiling should be backgrounded. It
+// survives nearby calls only until the container reaches its idle TTL.
 
 import constants from '../../config/constants.js';
 import workspaceRuntime from '../../sandbox/workspaceRuntime.js';
 import { checkWorkspaceQuota } from '../../sandbox/workspaceFs.js';
-import { ROOT, invalidPathError, resolveAgentPath, toContainerPath } from '../../sandbox/workspacePaths.js';
+import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { callTimeoutWithin } from '../../utils/turnBudget.js';
 import { quotaResultFields, runWorkspaceMutation } from './mutation.js';
 
@@ -32,14 +32,15 @@ import { quotaResultFields, runWorkspaceMutation } from './mutation.js';
  * @param {string} workspaceId
  * @param {object} [opts]
  * @param {string} [opts.lockOwnerId]
- * @param {boolean} [opts.isAdmin] - exempt from the concurrent-container cap
  * @param {import('../../utils/turnBudget.js').TurnBudget|null} [opts.budget]
  */
 async function shell(args = {}, workspaceId, opts = {}) {
   const command = typeof args.command === 'string' ? args.command.trim() : '';
   if (!command) return { success: false, error: 'Missing required argument "command".' };
 
-  let workingDir = toContainerPath(ROOT.WORKSPACE, '');
+  // The namespace root makes `workspace/a.txt` and `attachments/b.txt` mean
+  // exactly the same paths here as in every filesystem tool and final reply.
+  let workingDir = '/';
   if (typeof args.workingDir === 'string' && args.workingDir.trim()) {
     const resolved = resolveAgentPath(workspaceId, args.workingDir);
     if (!resolved) return invalidPathError(args.workingDir);
@@ -60,8 +61,7 @@ async function shell(args = {}, workspaceId, opts = {}) {
     const run = await workspaceRuntime.execInWorkspace(workspaceId, {
       command,
       timeoutMs,
-      workingDir,
-      isAdmin: opts.isAdmin
+      workingDir
     });
 
     const notes = [];
@@ -75,6 +75,7 @@ async function shell(args = {}, workspaceId, opts = {}) {
       success: commandSucceeded && quota.ok,
       exit_code: run.rc,
       timed_out: run.timedOut,
+      output_truncated: run.truncated,
       duration_ms: run.durationMs,
       stdout: run.stdout,
       stderr: run.stderr,

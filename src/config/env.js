@@ -17,9 +17,6 @@ const GEMIX_TEMP_FILE_PORT = toIntInRange(process.env.GEMIX_TEMP_FILE_PORT, 1, 6
 
 // Every value below must be set in .env (no || null in exports).
 const REQUIRED = [
-  'GROK_MODEL',
-  'IMAGE_GEN_MODEL',
-  'VIDEO_GEN_MODEL',
   'OPENROUTER_BASE_URL',
   'OPENROUTER_API_KEY',
   'MUSIC_MODEL',
@@ -48,7 +45,12 @@ if (String(process.env.GEMIX_TEMP_FILE_PORT || '').trim() && !GEMIX_TEMP_FILE_PO
 // mandatory, so a deployment never has to fill in credentials it does not use.
 const AI_PROVIDER = (process.env.AI_PROVIDER || 'xai').trim().toLowerCase();
 const PROFILE_REQUIRED = {
-  xai: XAI_USE_API_KEY ? ['XAI_API_KEY'] : [],
+  xai: [
+    'GROK_MODEL',
+    'IMAGE_GEN_MODEL',
+    'VIDEO_GEN_MODEL',
+    ...(XAI_USE_API_KEY ? ['XAI_API_KEY'] : [])
+  ],
   chatgpt: ['CHATGPT_MODEL'],
   openrouter: ['OPENROUTER_MAIN_MODEL'],
   custom: ['CUSTOM_RESPONSES_BASE_URL', 'CUSTOM_RESPONSES_API_KEY', 'CUSTOM_RESPONSES_MODEL']
@@ -74,7 +76,7 @@ export default {
   // decides what GemiX itself can do.
   AI_PROVIDER,
 
-  GROK_MODEL: process.env.GROK_MODEL,
+  GROK_MODEL: process.env.GROK_MODEL || '',
 
   // xAI authentication: false (default) uses GemiX's own OAuth store
   // (src/data/credentials/xai.json, filled by `npm run auth -- login xai`);
@@ -118,8 +120,8 @@ export default {
   CUSTOM_RESPONSES_API_KEY: process.env.CUSTOM_RESPONSES_API_KEY || '',
   CUSTOM_RESPONSES_MODEL: process.env.CUSTOM_RESPONSES_MODEL || '',
 
-  IMAGE_GEN_MODEL: process.env.IMAGE_GEN_MODEL,
-  VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL,
+  IMAGE_GEN_MODEL: process.env.IMAGE_GEN_MODEL || '',
+  VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL || '',
 
   // Cloudflare Workers AI: the free-tier backend behind STT on every profile
   // and behind image generation where xAI Imagine is absent. Without the two

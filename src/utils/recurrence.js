@@ -19,9 +19,11 @@
 //   - scheduler/engine.js (advance a due recurring task to its next run)
 //   - tools/taskReader.js (render a human-readable recurrence label)
 
-import { convertRomeLocalToISO, getRomeParts  } from './time.js';
+import constants from '../config/constants.js';
+import { convertRomeLocalToISO, formatRomeInstantISO, getRomeParts  } from './time.js';
 
 const VALID_FREQS = ['HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY'];
+const MAX_RECURRENCE_STEPS = constants.RECURRENCE_MAX_INTERVAL;
 
 /** RRULE weekday codes, indexed like Date#getUTCDay (0 = Sunday). */
 const WEEKDAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
@@ -93,10 +95,16 @@ function parseRecurrenceRule(rule) {
   let interval = 1;
   if (seen.has('INTERVAL')) {
     const raw = seen.get('INTERVAL');
-    if (!/^\d+$/.test(raw) || parseInt(raw, 10) < 1) {
-      return { ok: false, error: `Invalid INTERVAL: "${raw}". Use a whole number >= 1.` };
+    const parsedInterval = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(parsedInterval)
+        || parsedInterval < 1
+        || parsedInterval > constants.RECURRENCE_MAX_INTERVAL) {
+      return {
+        ok: false,
+        error: `Invalid INTERVAL: "${raw}". Use a whole number from 1 to ${constants.RECURRENCE_MAX_INTERVAL}.`
+      };
     }
-    interval = parseInt(raw, 10);
+    interval = parsedInterval;
   }
 
   let byday = [];
@@ -119,8 +127,13 @@ function parseRecurrenceRule(rule) {
   let exdate = [];
   if (seen.has('EXDATE')) {
     const dates = seen.get('EXDATE').split(',').map(d => d.trim()).filter(Boolean);
+    if (dates.length === 0) {
+      return { ok: false, error: 'EXDATE is empty. Use one or more YYYY-MM-DD values.' };
+    }
     for (const d of dates) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      // Noon always exists in Europe/Rome, so the same strict converter used
+      // by reminders also rejects normalized dates such as 31 February here.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !convertRomeLocalToISO(`${d}T12:00:00`)) {
         return { ok: false, error: `Invalid EXDATE value: "${d}". Use YYYY-MM-DD.` };
       }
     }
@@ -156,10 +169,9 @@ function isDateSkipped(iso, exdate) {
   return ds ? exdate.includes(ds) : false;
 }
 
-/** Re-anchor a UTC instant to its Europe/Rome wall clock, as ISO with offset. */
+/** Format an instant with its actual Europe/Rome wall clock and offset. */
 function _toRomeISO(date) {
-  const p = getRomeParts(date);
-  return _romeFieldsToISO(p.year, p.month, p.day, p.hour, p.minute, p.second);
+  return formatRomeInstantISO(date);
 }
 
 /** Build an ISO string with the right DST offset from Rome calendar fields. */
@@ -170,6 +182,20 @@ function _romeFieldsToISO(year, month, day, hour, minute, second) {
   const localISO = `${normalized.getUTCFullYear()}-${pad(normalized.getUTCMonth() + 1)}-${pad(normalized.getUTCDate())}`
     + `T${pad(hour)}:${pad(minute)}:${pad(second)}`;
   return convertRomeLocalToISO(localISO);
+}
+
+/** Normalize calendar arithmetic without assigning a timezone offset yet. */
+function _normalizeCalendarFields(year, month, day, hour, minute, second) {
+  const normalized = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return {
+    year: normalized.getUTCFullYear(),
+    month: normalized.getUTCMonth() + 1,
+    day: normalized.getUTCDate(),
+    hour: normalized.getUTCHours(),
+    minute: normalized.getUTCMinutes(),
+    second: normalized.getUTCSeconds(),
+    weekday: normalized.getUTCDay()
+  };
 }
 
 /**
@@ -190,6 +216,44 @@ function _bydayOffset(weekday, interval, byday) {
 
   // Wrap to the first selected weekday of the target week.
   return 7 * interval - currentIdx + Math.min(...targets);
+}
+
+/** Advance one calendar recurrence while retaining its local wall-clock fields. */
+function _nextCalendarFields(current, rec, interval) {
+  if (rec.freq === 'MONTHLY') {
+    const targetMonthIndex = (current.month - 1) + interval;
+    const targetYear = current.year + Math.floor(targetMonthIndex / 12);
+    const targetMonth = (targetMonthIndex % 12) + 1;
+    const daysInTargetMonth = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
+    const anchorDay = Number.isInteger(rec.anchorDay) && rec.anchorDay >= 1 && rec.anchorDay <= 31
+      ? rec.anchorDay
+      : current.day;
+    return _normalizeCalendarFields(
+      targetYear,
+      targetMonth,
+      Math.min(anchorDay, daysInTargetMonth),
+      current.hour,
+      current.minute,
+      current.second
+    );
+  }
+
+  let dayOffset;
+  if (rec.freq === 'WEEKLY' && Array.isArray(rec.byday) && rec.byday.length > 0) {
+    dayOffset = _bydayOffset(current.weekday, interval, rec.byday);
+  } else if (rec.freq === 'WEEKLY') {
+    dayOffset = interval * 7;
+  } else {
+    dayOffset = interval;
+  }
+  return _normalizeCalendarFields(
+    current.year,
+    current.month,
+    current.day + dayOffset,
+    current.hour,
+    current.minute,
+    current.second
+  );
 }
 
 /**
@@ -216,27 +280,23 @@ function computeNextOccurrence(scheduledAtISO, rec) {
     return _toRomeISO(baseDate);
   }
 
-  const { year, month, day, hour, minute, second, weekday } = getRomeParts(baseDate);
-
-  if (rec.freq === 'MONTHLY') {
-    const targetMonthIndex = (month - 1) + interval;
-    const targetYear = year + Math.floor(targetMonthIndex / 12);
-    const targetMonth = (targetMonthIndex % 12) + 1;
-    // Clamp to the last day when the target month is shorter (e.g. 31 -> 28).
-    const daysInTargetMonth = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
-    return _romeFieldsToISO(targetYear, targetMonth, Math.min(day, daysInTargetMonth), hour, minute, second);
+  let fields = getRomeParts(baseDate);
+  // RFC-style local recurrence semantics: a wall-clock value in the spring
+  // DST gap is omitted, not shifted and never treated as the end of the series.
+  // The bound covers every daily candidate in the scheduler's one-year window.
+  for (let i = 0; i < 370; i++) {
+    fields = _nextCalendarFields(fields, rec, interval);
+    const iso = _romeFieldsToISO(
+      fields.year,
+      fields.month,
+      fields.day,
+      fields.hour,
+      fields.minute,
+      fields.second
+    );
+    if (iso) return iso;
   }
-
-  let dayOffset;
-  if (rec.freq === 'WEEKLY' && Array.isArray(rec.byday) && rec.byday.length > 0) {
-    dayOffset = _bydayOffset(weekday, interval, rec.byday);
-  } else if (rec.freq === 'WEEKLY') {
-    dayOffset = interval * 7;
-  } else {
-    dayOffset = interval; // DAILY
-  }
-
-  return _romeFieldsToISO(year, month, day + dayOffset, hour, minute, second);
+  return null;
 }
 
 /**
@@ -251,8 +311,9 @@ function advanceOccurrence(scheduledAtISO, rec) {
   if (!rec) return null;
   const untilTime = rec.until ? new Date(rec.until).getTime() : null;
   let current = scheduledAtISO;
-  // Safety bound: far beyond any realistic 1-year recurrence.
-  for (let i = 0; i < 1000; i++) {
+  // Covers every hourly candidate in the scheduler's one-year horizon,
+  // including leap years, while bounding corrupt hand-edited task data.
+  for (let i = 0; i < MAX_RECURRENCE_STEPS; i++) {
     const next = computeNextOccurrence(current, rec);
     if (!next) return null;
     const nextTime = new Date(next).getTime();
@@ -280,10 +341,8 @@ function advanceOccurrenceBeyond(scheduledAtISO, rec, nowMs = Date.now()) {
 
   let current = scheduledAtISO;
   let skipped = 0;
-  // The scheduler only accepts dates within one year. Ten thousand iterations
-  // still cover every hourly occurrence in that window while bounding corrupt
-  // or hand-edited task data.
-  for (let i = 0; i < 10_000; i++) {
+  // The same bound covers every hourly occurrence in the one-year horizon.
+  for (let i = 0; i < MAX_RECURRENCE_STEPS; i++) {
     const next = advanceOccurrence(current, rec);
     if (!next) return { next: null, skipped };
     if (new Date(next).getTime() > boundary) return { next, skipped };
@@ -296,19 +355,32 @@ function advanceOccurrenceBeyond(scheduledAtISO, rec, nowMs = Date.now()) {
 /**
  * Coerce a recurrence read back from a task file into the canonical shape.
  * @param {object|null} rec
- * @returns {{ freq: string, interval: number, byday: string[], exdate: string[], until: string|null }|null}
+ * @param {string|null} [scheduledAtISO] - derives a missing monthly anchor for
+ *   tasks persisted before anchorDay was introduced
+ * @returns {{ freq: string, interval: number, byday: string[], exdate: string[], until: string|null, anchorDay?: number }|null}
  */
-function normalizePersistedRecurrence(rec) {
+function normalizePersistedRecurrence(rec, scheduledAtISO = null) {
   if (!rec || typeof rec !== 'object') return null;
   const freq = String(rec.freq || '').toUpperCase();
   if (!VALID_FREQS.includes(freq)) return null;
-  return {
+  const normalized = {
     freq,
     interval: Number.isInteger(rec.interval) && rec.interval >= 1 ? rec.interval : 1,
     byday: Array.isArray(rec.byday) ? rec.byday : [],
     exdate: Array.isArray(rec.exdate) ? rec.exdate : [],
     until: rec.until || null
   };
+  if (freq === 'MONTHLY') {
+    let anchorDay = Number.isInteger(rec.anchorDay) && rec.anchorDay >= 1 && rec.anchorDay <= 31
+      ? rec.anchorDay
+      : null;
+    if (!anchorDay && scheduledAtISO) {
+      const start = new Date(scheduledAtISO);
+      if (!isNaN(start.getTime())) anchorDay = getRomeParts(start).day;
+    }
+    if (anchorDay) normalized.anchorDay = anchorDay;
+  }
+  return normalized;
 }
 
 /**

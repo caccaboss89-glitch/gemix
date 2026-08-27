@@ -132,6 +132,52 @@ test('toolsToWire flattens function tools and passes native tool objects through
   assert.equal(toolsToWire([]), null);
 });
 
+test('toolsToWire projects strict arguments and output schemas only when declared', () => {
+  const tool = {
+    type: 'function',
+    function: {
+      name: 'lookup',
+      description: 'd',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' },
+          count: { type: 'integer' },
+          options: {
+            type: 'object',
+            properties: { locale: { type: 'string' } },
+            additionalProperties: false
+          }
+        },
+        required: ['query'],
+        additionalProperties: false
+      },
+      outputSchema: {
+        type: 'object',
+        properties: { status: { type: 'string' } },
+        required: ['status'],
+        additionalProperties: false
+      }
+    }
+  };
+
+  const portable = toolsToWire([tool]);
+  assert.equal('strict' in portable[0], false);
+  assert.equal('output_schema' in portable[0], false);
+  assert.deepEqual(portable[0].parameters.required, ['query']);
+
+  const strict = toolsToWire([tool], {
+    supportsStrictFunctionArguments: true,
+    supportsFunctionOutputSchema: true
+  });
+  assert.equal(strict[0].strict, true);
+  assert.deepEqual(strict[0].parameters.required, ['query', 'count', 'options']);
+  assert.deepEqual(strict[0].parameters.properties.count.type, ['integer', 'null']);
+  assert.deepEqual(strict[0].parameters.properties.options.required, ['locale']);
+  assert.deepEqual(strict[0].parameters.properties.options.type, ['object', 'null']);
+  assert.deepEqual(strict[0].output_schema, tool.function.outputSchema);
+});
+
 test('pickAssistantText prefers the last message that parses as a structured reply', () => {
   assert.equal(
     pickAssistantText(['Sto cercando…', '{"response":"eccolo"}', 'coda']),

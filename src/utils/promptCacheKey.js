@@ -1,8 +1,8 @@
-// Stable per-conversation IDs for xAI sticky routing / prompt cache.
-// Sent as body.prompt_cache_key and, on xAI, header x-grok-conv-id (its backend uses
-// the header on main turns). Pairs with a single byte-stable leading system in
-// input[], append-only history, and a per-turn Runtime role:user block (not a
-// second system). Exact prefix match is still required; this key only sticky-routes.
+// Stable per-conversation IDs for diagnostic-log scoping on every provider.
+// Profiles that explicitly accept prompt_cache_key also put it in the request;
+// xAI additionally sends x-grok-conv-id for sticky routing. It pairs with one
+// byte-stable leading system item, append-only history, and a per-turn Runtime
+// role:user block. Exact prefix match is still required; the key only routes.
 
 import constants from '../config/constants.js';
 import { resolveStorageId  } from './userPaths.js';

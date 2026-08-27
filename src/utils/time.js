@@ -99,6 +99,37 @@ function getRomeParts(date = new Date()) {
 }
 
 /**
+ * Format an existing instant with its actual Europe/Rome wall clock and offset.
+ * Unlike local-time conversion, this preserves which occurrence of an
+ * ambiguous autumn hour the instant represents.
+ * @param {Date|string|number} value - An unambiguous instant.
+ * @returns {string|null} ISO datetime with the Europe/Rome offset.
+ */
+function formatRomeInstantISO(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (isNaN(date.getTime())) return null;
+
+  const parts = getRomeParts(date);
+  const localAsUTC = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+  const instantAtSecondPrecision = Math.floor(date.getTime() / 1000) * 1000;
+  const offsetMinutes = Math.round((localAsUTC - instantAtSecondPrecision) / 60000);
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const pad = number => String(number).padStart(2, '0');
+
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`
+    + `T${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)}`
+    + `${sign}${pad(Math.floor(absoluteOffset / 60))}:${pad(absoluteOffset % 60)}`;
+}
+
+/**
  * Get the last Sunday of a given month and year.
  * Used for calculating DST transition dates (last Sunday of March and October).
  * @param {number} year - Year (e.g., 2026)
@@ -278,5 +309,12 @@ function convertRomeLocalToISO(localDatetime) {
   return `${localDatetime}${sign}${hh}:${mm}`;
 }
 
-export { getRomeTime, getRomeISO, getRomeParts, formatTimestamp, convertRomeLocalToISO, checkDSTAmbiguousHour
+export {
+  getRomeTime,
+  getRomeISO,
+  getRomeParts,
+  formatRomeInstantISO,
+  formatTimestamp,
+  convertRomeLocalToISO,
+  checkDSTAmbiguousHour
 };

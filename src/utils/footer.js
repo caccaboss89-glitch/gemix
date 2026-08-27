@@ -4,6 +4,10 @@
 // formatting model names. Also handles scheduled message footers.
 
 import constants from '../config/constants.js';
+import {
+  formatProviderModelDisplayName,
+  resolveProviderProfile
+} from '../ai/providers/providerProfile.js';
 
 /**
  * Append a suffix that starts with a blank line (e.g. constants.GEMIX_FOOTER_PREFIX).
@@ -20,12 +24,7 @@ function appendBlock(body, suffix) {
  * @returns {string} The human-readable model name or the original ID if not found
  */
 function getModelDisplayName(modelId) {
-  if (!modelId) return 'AI Model';
-  const slug = modelId.split('/').pop().split(':')[0];
-  const grokVersion = slug.match(/^grok-(\d+(?:\.\d+)?)(?:-|$)/);
-  if (grokVersion) return `Grok ${grokVersion[1]}`;
-  const name = slug.replace(/[-_]/g, ' ');
-  return name.replace(/\b\w/g, c => c.toUpperCase());
+  return formatProviderModelDisplayName(resolveProviderProfile().id, modelId);
 }
 
 /**
@@ -110,24 +109,24 @@ function addScheduledFooter(text, createdAt) {
 
 /**
  * Build the server-side research badge line (web/X counts).
- * @param {{ webSources?: number, xPosts?: number }|null} stats
- * @returns {string|null} e.g. "🌐: 3 sources. 𝕏: 1 post." or null when no badge applies
+ * @param {{ webSources?: number, xSearches?: number }|null} stats
+ * @returns {string|null} e.g. "🌐: 3 sources. 𝕏: 1 search." or null when no badge applies
  */
 function buildResearchBadgeText(stats) {
   if (!stats) return null;
   const webSources = stats.webSources || 0;
-  const xPosts = stats.xPosts || 0;
-  if (webSources <= 0 && xPosts <= 0) return null;
+  const xSearches = stats.xSearches || 0;
+  if (webSources <= 0 && xSearches <= 0) return null;
   const parts = [];
   if (webSources > 0) parts.push(`🌐: ${webSources} source${webSources === 1 ? '' : 's'}`);
-  if (xPosts > 0) parts.push(`𝕏: ${xPosts} post${xPosts === 1 ? '' : 's'}`);
+  if (xSearches > 0) parts.push(`𝕏: ${xSearches} search${xSearches === 1 ? '' : 'es'}`);
   return `${parts.join('. ')}.`;
 }
 
 /**
  * Append the research badge block to a text reply (text replies only).
  * @param {string} text
- * @param {{ webSources?: number, xPosts?: number }|null} stats
+ * @param {{ webSources?: number, xSearches?: number }|null} stats
  * @returns {string}
  */
 function appendResearchBadge(text, stats) {

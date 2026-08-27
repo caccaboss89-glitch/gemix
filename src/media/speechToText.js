@@ -272,7 +272,8 @@ async function _transcribeXai(absPath, buffer, opts) {
   const res = await fetchXaiWithOAuthRetry(url, { method: 'POST', body: form }, {
     timeoutMs: REQUEST_TIMEOUT_MS,
     maxAttempts: 2,
-    signal: opts.signal
+    signal: opts.signal,
+    logLabel: 'xAI-STT'
   });
   const text = await res.text();
   let payload = null;

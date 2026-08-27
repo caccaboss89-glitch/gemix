@@ -3,6 +3,7 @@
 // history normalization; the handler receives a ready input array and can
 // concentrate on the agent loop.
 
+import fs from 'fs';
 import constants from '../config/constants.js';
 import { getCapabilities } from '../config/platformCapabilities.js';
 import { projectUserVoiceMessages } from '../attachments/voiceProjection.js';
@@ -16,7 +17,7 @@ import {
 } from './systemPrompt.js';
 import { applyPastVoiceRepliesToHistory } from '../utils/voiceTranscripts.js';
 import { createLogger } from '../utils/logger.js';
-import { resolveWorkspaceId } from '../utils/workspaceId.js';
+import { getWorkspacePath, resolveWorkspaceId } from '../utils/workspaceId.js';
 import { touchActivity } from '../utils/workspaceState.js';
 import { listAgentDirectory } from '../sandbox/hostFileGateway.js';
 import { readSettings, isReviewDue, markReviewed } from '../utils/settingsStore.js';
@@ -30,28 +31,45 @@ const log = createLogger('TurnPreparation');
 /** Re-read persisted preferences so manage_preferences takes effect next round. */
 function reloadSettings(ctx, ui) {
   if (ctx.platform === constants.PLATFORM_DISCORD) return;
-  ctx.settings = readSettings(resolveSettingsFileId(ctx, ui));
+  const allowVoice = Boolean(getCapabilities(ctx).voiceReply);
+  ctx.settings = readSettings(resolveSettingsFileId(ctx, ui), { allowVoice });
 }
 
 async function _prepareWorkspace(ctx) {
   const workspaceId = resolveWorkspaceId(ctx);
-  ctx.userWorkspace = null;
+  ctx.userWorkspace = { state: 'unknown' };
   if (!workspaceId) return null;
   try { await touchActivity(workspaceId); }
   catch (err) { log.warn(`touchActivity failed: ${err.message}`); }
   try {
     const listing = listAgentDirectory(workspaceId, 'workspace/', { limit: 30, depth: 1 });
-    if (!listing) return workspaceId;
-    if (listing.total > 0) {
+    if (listing) {
       ctx.userWorkspace = {
+        state: 'ready',
         total: listing.total,
         files: listing.files,
         dirs: listing.dirs,
         more: Boolean(listing.more)
       };
+      return workspaceId;
+    }
+
+    // A canonical root that has never been materialized is a known empty
+    // workspace. Any existing object the descriptor-safe gateway could not
+    // open is instead an error; it must not be presented as empty.
+    const workspacePath = getWorkspacePath(workspaceId);
+    if (!workspacePath) return workspaceId;
+    try {
+      fs.lstatSync(workspacePath);
+      ctx.userWorkspace = { state: 'error' };
+    } catch (err) {
+      ctx.userWorkspace = err.code === 'ENOENT'
+        ? { state: 'ready', total: 0, files: [], dirs: [], more: false }
+        : { state: 'error' };
     }
   } catch (err) {
     log.warn(`workspace listing failed: ${err.message}`);
+    ctx.userWorkspace = { state: 'error' };
   }
   return workspaceId;
 }
@@ -109,8 +127,11 @@ async function prepareTurn(ctx, ui) {
   const isDiscord = ctx.platform === constants.PLATFORM_DISCORD;
   const allowVoice = Boolean(getCapabilities(ctx).voiceReply);
   const settingsFileId = resolveSettingsFileId(ctx, ui);
-  ctx.settings = isDiscord ? null : readSettings(settingsFileId);
-  ctx.settingsReviewDue = Boolean(ctx.settings && isReviewDue(ctx.settings));
+  const preferenceOptions = { allowVoice };
+  ctx.settings = isDiscord ? null : readSettings(settingsFileId, preferenceOptions);
+  ctx.settingsReviewDue = Boolean(
+    ctx.settings && isReviewDue(ctx.settings, Date.now(), preferenceOptions)
+  );
   if (ctx.settingsReviewDue) {
     try { await markReviewed(settingsFileId); }
     catch (err) { log.warn(`markReviewed failed: ${err.message}`); }
@@ -131,6 +152,7 @@ async function prepareTurn(ctx, ui) {
     groupId: ctx.groupId,
     chatId: ctx.chatId || null,
     platform: ctx.platform,
+    allowVoice,
     requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
     presence: ctx.presence || null,
     turnBudget: ctx.turnBudget,

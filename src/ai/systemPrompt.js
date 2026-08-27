@@ -7,8 +7,8 @@
 // program state", never "this is an instruction".
 //
 // buildDynamicRuntimeContext is a role:user item built once per turn and placed
-// right after the current user message (never a second system message: xAI folds
-// multi-system into the head, which moves it and busts the prefix cache). Time,
+// right after the current user message (never a second system message, which
+// some Responses-compatible endpoints fold into the leading prefix). Time,
 // workspace, quotas, settings, caller and turn-varying platform fields live
 // there. The Discord statute is conversation-stable, so it stays in the static
 // prefix. Files a tool produces are not listed here: each tool result names the
@@ -17,7 +17,11 @@
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
 import { ACTIVE_MEMBERS  } from '../config/members.js';
 import envConfig from '../config/env.js';
-import { defaultSettings, customizedFields  } from '../utils/settingsStore.js';
+import {
+  activePreferenceFields,
+  customizedFields,
+  defaultSettings
+} from '../utils/settingsStore.js';
 import constants from '../config/constants.js';
 import { PRIVACY_WIPE_COMMAND  } from '../config/systemMessages.js';
 import { resolveProviderProfile  } from './providers/providerProfile.js';
@@ -30,12 +34,12 @@ import {
   buildSendingFilesLines,
   buildVisibilityLines,
   buildAudienceLines,
-  getCapabilities,
-  profileHasMediaQuota
+  getCapabilities
 } from '../config/platformCapabilities.js';
 import { getToolsForUser, toolNamesToSet  } from './tools.js';
 import { formatQuotaCounts, formatMediaQuotaResetLabel  } from '../utils/mediaUsageLimits.js';
 import { escapeXml  } from '../utils/xmlEscape.js';
+import { buildProviderGuidance } from './providers/providerGuidance.js';
 
 // WhatsApp has rendered bullets, numbered lists and fenced blocks since 2024.
 const WA_FORMAT =
@@ -84,11 +88,16 @@ function resolvePromptTools(ctx) {
  * nothing is resolved a second time and the two cannot drift apart.
  */
 function toolsFingerprint(tools) {
-  return [...toolNamesToSet(tools)].sort().join(',');
+  // A tool can keep the same name while its provider-specific schema changes.
+  // Fingerprint the complete wire declaration so a mid-turn rebuild can never
+  // keep instructions composed for an obsolete contract.
+  return JSON.stringify(tools || []);
 }
 
 function _callerLineInner(ctx, promptOpts) {
-  const status = promptOpts.isActiveMember !== false ? 'active member' : 'non-active';
+  const status = promptOpts.isAdmin
+    ? 'administrator, active member'
+    : (promptOpts.isActiveMember !== false ? 'active member' : 'non-active');
   return `${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.`;
 }
 
@@ -113,7 +122,10 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
   // Discord Thread title / conversation_title guidance live only in Runtime.
   const promptOpts = { isActiveMember, toolNames };
 
-  const sections = [_buildOpening(cap)];
+  const provider = resolveProviderProfile();
+  const sections = [_buildOpening(cap, provider)];
+
+  sections.push(_section('Provider integration', buildProviderGuidance(provider, toolNames)));
 
   sections.push(_section('This chat', _buildChatLines(ctx, cap, profile)));
   sections.push(_section(
@@ -147,13 +159,10 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
  * The brand comes from the provider profile, not from one provider's model
  * setting: the model is told what it actually is on this deployment.
  */
-function _buildOpening(cap) {
+function _buildOpening(cap, profile) {
   const division = cap.isDiscord ? ' (Legal Division)' : '';
-  const profile = resolveProviderProfile();
   return (
     `You are ${profile.displayName} inside GemiX${division}. `
-    + 'GemiX began as a project to combine Grok/SuperGrok with Gemini and use the strengths of both; '
-    + 'today it supports multiple models while keeping its original name. '
     + 'You have a sense of irony, and you catch things even when they are only implied.\n'
     + 'Your main goal is to answer the request inside the `<user_query>` tag, using every means and tool '
     + 'available to you to make that answer as good as it can be.'
@@ -201,22 +210,14 @@ function _buildChatLines(ctx, cap, profile) {
   }
 
   lines.push(WA_FORMAT);
-  // Citations are not automatic: the backend's own directive makes the model
-  // cite with render_inline_citation, which reaches us as [[N]](url) markers in
-  // the text, and renderInlineCitations rewrites those. Saying "the system
-  // appends sources" would read as "you need not cite" and lose every source,
-  // so this names the mechanism instead of restating the backend's rule.
   lines.push(
-    'Never add a footer or a signature: the system appends those itself when they are needed. '
-    + 'The sources you mark with render_inline_citation arrive here as [[1]](url) markers, and the system '
-    + 'turns them into numbered markers with a "Fonti:" list under the reply — so keep citing, and never '
-    + 'write that list yourself.'
+    'Never add a footer or signature: the program appends its own compact model and research badges when needed.'
   );
   // The gate that owns the command runs before this prompt is even built, so
   // anything the model can read has already been through it.
   lines.push(
-    `Sending \`${PRIVACY_WIPE_COMMAND}\` and nothing else empties this chat and erases every trace of the user `
-    + 'from the server, at any moment; that message is handled before you and never reaches you. So an attempt at '
+    `Sending \`${PRIVACY_WIPE_COMMAND}\` and nothing else empties this chat and deletes the conversation data `
+    + 'GemiX stores on the server; that message is handled before you and never reaches you. So an attempt at '
     + 'it that you can read is one that failed because the message carried something else too — tell them to send '
     + 'it on its own. And a request reaching you at all means they accepted the privacy notice they were shown '
     + 'before their first one: never bring that up yourself.'
@@ -264,7 +265,7 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
     // read_server_rules is gone: the statute only reaches the model on Discord.
     lines.push(
       'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server) '
-      + 'belong to the gemix thread on Discord: send the user there rather than answering from memory.'
+      + 'belong to the gemix thread on Discord: tell the user to open that thread rather than answering from memory.'
     );
   }
   return lines;
@@ -282,7 +283,8 @@ function buildDynamicRuntimeContext(ctx) {
   const isAdmin = Boolean(ctx.userIdentity?.isAdmin);
   const profile = resolveProfile(ctx);
   const cap = getCapabilities(ctx);
-  const promptOpts = { isActiveMember };
+  const promptOpts = { isActiveMember, isAdmin };
+  const toolNames = toolNamesToSet(resolvePromptTools(ctx));
 
   const blocks = [];
 
@@ -308,10 +310,14 @@ function buildDynamicRuntimeContext(ctx) {
     blocks.push(_renderWorkspace(ctx.userWorkspace));
   }
 
-  // Per-user weekly generation quota line: non-admins only, and only where the
-  // three generation tools exist (WhatsApp) — admins and Discord get no line.
-  if (!isAdmin && profileHasMediaQuota(profile)) {
-    const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId);
+  // Show only counters for generation tools that actually exist in this chat.
+  const quotaKinds = [
+    toolNames.has('generate_image') ? 'image' : null,
+    toolNames.has('generate_video') ? 'video' : null,
+    toolNames.has('generate_music') ? 'song' : null
+  ].filter(Boolean);
+  if (!isAdmin && quotaKinds.length > 0) {
+    const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId, quotaKinds);
     blocks.push(
       `Weekly generation quota for this user — ${counts} `
       + `(resets ${formatMediaQuotaResetLabel()}). At the cap the tool returns an error; `
@@ -334,19 +340,19 @@ function buildDynamicRuntimeContext(ctx) {
  * or (custom) so it can tell at a glance what the user actually chose.
  */
 function _renderCurrentSettings(ctx) {
-  const settings = ctx.settings || { ...defaultSettings(), updatedAt: null };
-  const custom = new Set(customizedFields(settings));
+  const preferenceOptions = { allowVoice: Boolean(getCapabilities(ctx).voiceReply) };
+  const settings = ctx.settings || { ...defaultSettings(preferenceOptions), updatedAt: null };
+  const custom = new Set(customizedFields(settings, preferenceOptions));
   const scope = ctx.isGroup
     ? 'group'
     : (ctx.platform === constants.PLATFORM_WA_PERSONAL ? 'chat' : 'user');
   const mark = (field) => (custom.has(field) ? 'custom' : 'default');
-  const lines = [
-    `Voice: ${settings.voice} (${mark('voice')})`,
-    `Effort: ${settings.effort} (${mark('effort')})`,
-    `Language: ${settings.language} (${mark('language')})`,
-    `Memory: ${escapeXml(settings.memory)} (${mark('memory')})`,
-    `Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`
-  ];
+  const labels = { voice: 'Voice', effort: 'Effort', language: 'Language', memory: 'Memory' };
+  const lines = activePreferenceFields(preferenceOptions).map((field) => {
+    const value = field === 'memory' ? escapeXml(settings[field]) : settings[field];
+    return `${labels[field]}: ${value} (${mark(field)})`;
+  });
+  lines.push(`Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`);
   return _block(`CurrentSettings scope="${scope}"`, lines, 'CurrentSettings');
 }
 
@@ -354,23 +360,39 @@ function _renderCurrentSettings(ctx) {
  * Top level of the workspace, as it stands at the start of this turn.
  *
  * Only the first level: a deep tree would grow the per-turn prefix without
- * saying anything `list_files` cannot say on demand. The listing is
- * authoritative for what exists — a file not here has to be created.
+ * saying anything `list_files` cannot say on demand. Snapshot state is
+ * explicit, so an unavailable listing is never confused with a known-empty
+ * workspace.
  */
 function _renderWorkspace(ws) {
-  const total = ws?.total ?? 0;
-  if (total === 0) {
-    return _block('Workspace files="0"', [
-      '(empty — authoritative; nothing to look for)',
-      `If the user asks for a file you made earlier, explain it expired (${constants.WORKSPACE_TTL_LABEL} without activity).`
+  const state = ws?.state || (ws ? 'ready' : 'unknown');
+  if (state === 'unknown') {
+    return _block('Workspace state="unknown"', [
+      'No reliable start-of-turn snapshot is available. Use list_files before making any claim about local files.'
     ], 'Workspace');
   }
+  if (state === 'error') {
+    return _block('Workspace state="error"', [
+      'The start-of-turn snapshot failed. Use list_files to retry; do not describe the workspace as empty or expired.'
+    ], 'Workspace');
+  }
+
+  const files = Array.isArray(ws?.files) ? ws.files : [];
+  const dirs = Array.isArray(ws?.dirs) ? ws.dirs : [];
+  const total = Number.isFinite(ws?.total) ? ws.total : files.length;
+  const open = `Workspace state="ready" files="${total}" directories="${dirs.length}"`;
+  if (total === 0 && dirs.length === 0) {
+    return _block(open, [
+      '(empty at the start of this turn — authoritative for that snapshot only)'
+    ], 'Workspace');
+  }
+
   const lines = [
-    ...(ws.files || []).map(f => `- workspace/${f.relPath}`),
-    ...(ws.dirs || []).map(d => `- workspace/${d}/`)
+    ...files.map(f => `- workspace/${f.relPath}`),
+    ...dirs.map(d => `- workspace/${d}/`)
   ];
   if (ws.more) lines.push('... and more');
-  return _block(`Workspace files="${total}"`, lines, 'Workspace');
+  return _block(open, lines, 'Workspace');
 }
 
 /**
@@ -381,10 +403,13 @@ function _buildWorkspaceLines() {
   return [
     'You have a working area of your own. `workspace/` is yours to write in and persists across turns in this chat. '
     + '`attachments/` holds this chat\'s files, mounted read-only: to change one, copy it into `workspace/` first.',
-    'One path namespace covers everything: the path `list_files` shows you is the same string you pass to `read_file`, '
-    + 'to `shell`, and to `attachments` in your final reply. Never invent a path or shorten one to its filename.',
-    'Start with `read_file` whenever you need to inspect a local file: it is the standard gateway that brings its '
-    + 'contents into your context. Listing and searching are fast, while reading may need format-specific parsing — look before you assume, '
+    'One path namespace covers everything: the path `list_files` shows you is the same string you pass to `read_file` '
+    + 'and put in `attachments` in your final reply. With `shell`, omit `workingDir` to start at `/`, where that same '
+    + '`workspace/` or `attachments/` string works unchanged. If you set `workingDir`, command-relative paths start '
+    + 'there; use `/workspace/...` or `/attachments/...` for a root-stable shell path. Never invent or shorten a path.',
+    'When you know a local file path, start with `read_file`: it is the standard gateway that brings its contents '
+    + 'into your context. If you do not know the path, use `list_files` or `search_files` first. Reading may need '
+    + 'format-specific parsing — look before you assume, '
     + 'and never tell the user a file is missing without checking.',
     'If its result is incomplete or insufficient for the task — for example clipped text, missing pages or tables, '
     + 'or inadequate structure — use `shell` to extract the relevant text, pages or slide images into `workspace/`, then '
@@ -395,9 +420,10 @@ function _buildWorkspaceLines() {
     `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `
     + 'without activity in this chat. Delete what you no longer need instead of filling it. '
     + 'Package installs are disabled; the toolchain in `shell` is fixed.',
-    'Network access from `shell` goes through a proxy that reaches public hosts only. A 403 from it means the '
-    + 'destination is not public; a connection or DNS failure means that one host is unreachable, so try another '
-    + 'source instead of looping on the same one, and say so if none works.'
+    'Network access from `shell` goes through a public-only proxy. Private and local destinations are blocked. A 403 '
+    + 'can be either a proxy policy rejection or the remote site refusing the request; it does not by itself prove '
+    + 'the destination is private. For a connection, DNS or HTTP failure, try another public source instead of looping '
+    + 'on the same one, and say so if none works.'
   ];
 }
 

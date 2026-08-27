@@ -23,6 +23,28 @@ const PLATFORM = {
 /** Direct email attach cap (nodemailer / provider comfort). */
 const EMAIL_DIRECT_MAX_BYTES = 15 * 1024 * 1024;
 
+/**
+ * Conservative ceiling for the aggregate encoded attachment portion of one
+ * email. Gmail's message limit applies after MIME/base64 expansion, not to the
+ * sum of the source files. Keeping the estimated attachment payload at 20 MiB
+ * leaves room inside the provider's 25 MiB message ceiling for the HTML body,
+ * transport headers and boundary variation.
+ */
+const EMAIL_MIME_ATTACHMENT_BUDGET_BYTES = 20 * 1024 * 1024;
+const EMAIL_MIME_PART_OVERHEAD_BYTES = 2048;
+
+/**
+ * Conservative wire-size estimate for one MIME attachment part: base64 data,
+ * RFC-style line wrapping, part headers and a little filename/header growth.
+ */
+function estimateEmailMimeAttachmentBytes(att) {
+  const rawBytes = Math.max(0, attachmentSize(att));
+  const base64Bytes = 4 * Math.ceil(rawBytes / 3);
+  const lineBreakBytes = 2 * Math.ceil(base64Bytes / 76);
+  const filenameBytes = Buffer.byteLength(String(att?.name || 'file'), 'utf8');
+  return base64Bytes + lineBreakBytes + EMAIL_MIME_PART_OVERHEAD_BYTES + (filenameBytes * 4);
+}
+
 function isOversizedForPlatform(att, platform) {
   const size = attachmentSize(att);
   if (platform === PLATFORM.WHATSAPP) return size > WA_DIRECT_MAX_BYTES;
@@ -88,6 +110,8 @@ async function sendWhatsAppAttachment(att, postMedia, sendOptions = {}) {
 
 export {
   PLATFORM,
+  EMAIL_MIME_ATTACHMENT_BUDGET_BYTES,
+  estimateEmailMimeAttachmentBytes,
   hasExternalUrl,
   partitionAttachments,
   sendWhatsAppAttachment

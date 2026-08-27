@@ -18,9 +18,12 @@ import {
   MAX_MEMORY_CHARS,
   VALID_VOICES,
   VALID_LANGUAGES,
-  DEFAULT_MEMORY,
-  activeEffortPolicy
+  activeEffortPolicy,
+  activePreferenceFields,
+  defaultSettings,
+  settingsForModel
 } from '../utils/settingsStore.js';
+import { getActiveTtsCapabilities } from '../media/ttsCapabilities.js';
 
 /**
  * Apply a preferences update for the current chat.
@@ -28,15 +31,18 @@ import {
  * @param {string} settingsFileId - Settings file ID for this chat.
  * @returns {Promise<{ success: boolean, message?: string, error?: string }>}
  */
-async function managePreferences(args, settingsFileId) {
+async function managePreferences(args, settingsFileId, options = {}) {
   if (!settingsFileId) {
     return { success: false, error: 'Unable to identify the settings file for this chat.' };
   }
 
   const patch = {};
-  const current = readSettings(settingsFileId);
+  const current = readSettings(settingsFileId, options);
 
   if (args.voice !== undefined && args.voice !== null && args.voice !== '') {
+    if (options.allowVoice === false || !getActiveTtsCapabilities().selectableVoices) {
+      return { success: false, error: 'The active TTS backend does not support selecting a voice.' };
+    }
     const voice = String(args.voice).trim().toLowerCase();
     if (!VALID_VOICES.includes(voice)) {
       return { success: false, error: `Invalid voice: "${args.voice}". Available voices: ${VALID_VOICES.join(', ')}.` };
@@ -67,7 +73,7 @@ async function managePreferences(args, settingsFileId) {
     const resolved = resolveMemoryContent(current.memory, args.memory, args.replace !== false);
     if (resolved.cleared) {
       // Clearing restores the default guidance rather than leaving it empty.
-      patch.memory = DEFAULT_MEMORY;
+      patch.memory = defaultSettings(options).memory;
       memoryNote = ' Memory reset to the default guidance.';
     } else {
       if (resolved.content.length > MAX_MEMORY_CHARS) {
@@ -83,7 +89,10 @@ async function managePreferences(args, settingsFileId) {
   }
 
   if (Object.keys(patch).length === 0) {
-    return { success: false, error: 'Nothing to update: pass at least one of voice, effort, language, memory.' };
+    return {
+      success: false,
+      error: `Nothing to update: pass at least one of ${activePreferenceFields(options).join(', ')}.`
+    };
   }
 
   const changedKeys = Object.keys(patch).filter(key => patch[key] !== current[key]);
@@ -91,13 +100,13 @@ async function managePreferences(args, settingsFileId) {
     return {
       success: true,
       changed: false,
-      settings: current,
+      settings: settingsForModel(current, options),
       message: 'Preferences already matched these values; nothing was written.'
     };
   }
 
   const changedPatch = Object.fromEntries(changedKeys.map(key => [key, patch[key]]));
-  const written = await updateSettings(settingsFileId, changedPatch);
+  const written = await updateSettings(settingsFileId, changedPatch, options);
   if (!written.success) {
     return { success: false, error: written.error };
   }
@@ -107,7 +116,7 @@ async function managePreferences(args, settingsFileId) {
   return {
     success: true,
     changed: true,
-    settings: written.settings,
+    settings: settingsForModel(written.settings, options),
     message: `Preferences updated (${changes.join(', ')}).${effectiveMemoryNote} `
       + 'The new values are active from your next reply.'
   };

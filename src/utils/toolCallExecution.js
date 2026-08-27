@@ -5,24 +5,43 @@
 // A tool call here is the Responses shape the transport reads off a
 // `function_call` item: `{ id, name, arguments }`.
 
-const HANDLER_DELIVERY_TOOLS = new Set(['send_email', 'send_whatsapp_message']);
+// Only calls that observe state without changing it may share a phase. Unknown
+// and future tools default to serial execution: adding a new executor must not
+// silently make its effects race with the calls around it.
+const PARALLEL_READ_ONLY_TOOLS = new Set([
+  'search_web',
+  'read_page',
+  'search_image',
+  'list_files',
+  'search_files',
+  'read_file',
+  'read_my_tasks',
+  'read_music_stats'
+]);
+// read_sent_messages is deliberately serial: recovering an audited attachment
+// downloads and projects a new file into this conversation's attachments/.
+
+/** Maximum simultaneous read-only calls within one consecutive phase. */
+const TOOL_READ_CONCURRENCY = 4;
 
 /**
  * @param {object[]} toolCalls - `{id, name, arguments}` in model order
- * @returns {{ standard: object[], delivery: object[] }}
- *   standard tools may run in parallel; outbound delivery runs serially after them
+ * Split calls into consecutive execution phases without changing model order.
+ * Adjacent read-only calls form one bounded-parallel phase; every other call
+ * forms part of a serial phase. A read after an effect therefore cannot start
+ * before that effect has completed.
+ *
+ * @returns {{ mode: 'parallel-read'|'serial', calls: object[] }[]}
  */
-function partitionHandlerToolCalls(toolCalls) {
-  const standard = [];
-  const delivery = [];
-  for (const tc of toolCalls) {
-    if (HANDLER_DELIVERY_TOOLS.has(tc.name)) {
-      delivery.push(tc);
-    } else {
-      standard.push(tc);
-    }
+function planHandlerToolCalls(toolCalls) {
+  const phases = [];
+  for (const tc of Array.isArray(toolCalls) ? toolCalls : []) {
+    const mode = PARALLEL_READ_ONLY_TOOLS.has(tc.name) ? 'parallel-read' : 'serial';
+    const previous = phases.at(-1);
+    if (previous?.mode === mode) previous.calls.push(tc);
+    else phases.push({ mode, calls: [tc] });
   }
-  return { standard, delivery };
+  return phases;
 }
 
 /**
@@ -79,6 +98,7 @@ function perRoundCappedDuplicateIds(toolCalls, limits = PER_ROUND_TOOL_LIMITS) {
 function oncePerRoundErrorPayload(toolName) {
   return JSON.stringify({
     success: false,
+    status: 'failed',
     error: `"${toolName}" ${ONCE_PER_ROUND_ERROR}`
   });
 }
@@ -87,12 +107,15 @@ function perRoundCapErrorPayload(toolName, limit) {
   if (limit === 1) return oncePerRoundErrorPayload(toolName);
   return JSON.stringify({
     success: false,
+    status: 'failed',
     error: `"${toolName}" can only be called ${limit} time(s) per round. Use results from earlier calls in this round.`
   });
 }
 
 export {
-  partitionHandlerToolCalls,
+  PARALLEL_READ_ONLY_TOOLS,
+  TOOL_READ_CONCURRENCY,
+  planHandlerToolCalls,
   PER_ROUND_TOOL_LIMITS,
   perRoundCappedDuplicateIds,
   perRoundCapErrorPayload

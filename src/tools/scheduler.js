@@ -18,6 +18,36 @@ import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/tex
 import { modifyTaskFile  } from '../utils/taskStore.js';
 import { parseRecurrenceRule, describeRecurrence, toRomeISO  } from '../utils/recurrence.js';
 import { formatTaskRecipient  } from '../utils/taskRecipient.js';
+import {
+  projectTaskForTool,
+  taskErrorsFromResults,
+  taskOperationResult
+} from '../utils/taskToolResult.js';
+
+function _batchMetadata(failedIndices) {
+  return {
+    atomic_per_task_file: true,
+    rollback_across_task_files: false,
+    retry_failed_indices: failedIndices
+  };
+}
+
+function _batchFailure(error, requestedCount = 0) {
+  const failedIndices = Array.from({ length: requestedCount }, (_, index) => index);
+  return {
+    success: false,
+    status: 'failed',
+    count: 0,
+    requested_count: requestedCount,
+    failed_count: requestedCount,
+    tasks: [],
+    results: [],
+    ids: [],
+    errors: [{ index: null, id: null, error }],
+    batch: _batchMetadata(failedIndices),
+    error
+  };
+}
 
 /**
  * Schedule one or more tasks for a user or group.
@@ -28,17 +58,18 @@ import { formatTaskRecipient  } from '../utils/taskRecipient.js';
  *   whatsapp: { toGroup?, toPrivate?, recipient?: { name?, phone? } }
  * }
  * @param {object} ctx - Context { taskFileId, groupTaskFileId, userId, userName, waJid, isActiveMember, isAdmin, isGroup, groupId }
- * @returns {{ success: boolean, status: string, tasks: Array, batch: object, message?: string }}
- *   Indexed per-task confirmations/errors, retry indices and one verification note.
+ * @returns {object} Stable count/tasks/results/ids/errors fields, retry indices
+ *   and one human-readable verification note.
  */
 async function scheduleTasks(tasks, ctx) {
   if (!Array.isArray(tasks) || tasks.length === 0) {
-    return {
-      success: false,
-      status: 'failed',
-      tasks: [],
-      error: 'Pass at least one reminder in "tasks".'
-    };
+    return _batchFailure('Pass at least one reminder in "tasks".');
+  }
+  if (tasks.length > constants.SCHEDULE_TASKS_MAX_BATCH) {
+    return _batchFailure(
+      `A batch can contain at most ${constants.SCHEDULE_TASKS_MAX_BATCH} reminders.`,
+      tasks.length
+    );
   }
   const now = new Date();
   const nowTime = now.getTime();
@@ -139,6 +170,7 @@ async function scheduleTasks(tasks, ctx) {
         freq,
         interval,
         until: untilISO,
+        ...(freq === 'MONTHLY' ? { anchorDay: parseInt(task.scheduledAt.slice(8, 10), 10) } : {}),
         ...(byday.length ? { byday } : {}),
         ...(exdate.length ? { exdate } : {})
       };
@@ -276,7 +308,13 @@ async function scheduleTasks(tasks, ctx) {
     }
 
     const resultIndex = results.length;
-    results.push({ success: true, message: taskSummary });
+    const scope = destinations.whatsappGroup && fileId === ctx.groupTaskFileId ? 'group' : 'personal';
+    results.push({
+      success: true,
+      id: newTask.id,
+      task: projectTaskForTool(newTask, { scope, recipient: recipientLabel || null }),
+      message: taskSummary
+    });
     if (!pendingWrites.has(fileId)) pendingWrites.set(fileId, []);
     pendingWrites.get(fileId).push({ task: newTask, resultIndex });
   }
@@ -306,7 +344,20 @@ async function scheduleTasks(tasks, ctx) {
   // Single verification note (pluralized) instead of repeating it per task.
   // Only the time is checked: the message is meant to read as the reminder that
   // arrives then, not as a copy of the words the user used to ask for it.
-  const indexedResults = results.map((result, index) => ({ index, ...result }));
+  const scheduledTasks = [];
+  const indexedResults = results.map((result, index) => {
+    if (result.success && result.task) scheduledTasks.push(result.task);
+    return {
+      ...taskOperationResult({
+        index,
+        id: result.id || null,
+        success: result.success,
+        error: result.error || null
+      }),
+      scheduledAt: result.task?.scheduledAt || null,
+      ...(result.message ? { message: result.message } : {})
+    };
+  });
   const okCount = indexedResults.filter(r => r.success).length;
   let verifyNote = null;
   if (okCount === 1) {
@@ -320,12 +371,15 @@ async function scheduleTasks(tasks, ctx) {
   return {
     success: okCount > 0,
     status,
-    tasks: indexedResults,
-    batch: {
-      atomic_per_task_file: true,
-      rollback_across_task_files: false,
-      retry_failed_indices: failedIndices
-    },
+    count: scheduledTasks.length,
+    requested_count: indexedResults.length,
+    failed_count: failedIndices.length,
+    tasks: scheduledTasks,
+    results: indexedResults,
+    ids: scheduledTasks.map(task => task.id),
+    errors: taskErrorsFromResults(indexedResults),
+    batch: _batchMetadata(failedIndices),
+    ...(status === 'failed' ? { error: 'No reminders were scheduled. Inspect results and errors.' } : {}),
     ...(verifyNote ? { message: verifyNote } : {})
   };
 }

@@ -29,7 +29,7 @@ import { runTurnPipeline } from '../../utils/turnPipeline.js';
 import { WhatsAppPresence } from '../../utils/presence.js';
 import { buildGroupParticipants } from '../../utils/waParticipants.js';
 import { isPrivacyWipeCommand, buildWhatsAppPrivacyIntercept } from './privacyGate.js';
-import { notifyAdmin } from '../../utils/adminNotifier.js';
+import { notifyAdminDetailed, withAdminNotificationPolicy } from '../../utils/adminNotifier.js';
 
 const { PLATFORM_WA_DEDICATED, META_AI_NUMBER } = constants;
 
@@ -123,7 +123,7 @@ async function onDedicatedMessage(msg) {
 
   log.info('\nIncoming message');
   log.info(`   User: ${userName}${isGroup ? ` (Group: ${chat.name})` : ''}`);
-  log.info(`   Content: ${msg.body?.substring(0, 80) || '(media)'}${msg.body && msg.body.length > 80 ? '...' : ''}`);
+  log.info(`   Payload: textChars=${String(msg.body || '').length}, media=${Boolean(msg.hasMedia)}`);
   log.info(`   Active member: ${userIdentity.isActiveMember}`);
 
   const messageKey = _waMessageKey(msg);
@@ -236,8 +236,15 @@ async function _handleDedicatedBatch(entries) {
     deliver: async (_ctx, response) => {
       await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_DEDICATED });
     },
-    onDeliverError: async () => {
-      await notifyAdmin('WA Dedicated Chat Delivery', `Failed to send response to chat ${chat.id._serialized}`);
+    onDeliverError: async (ctx, err) => {
+      const adminIsCaller = Boolean(ctx?.userIdentity?.isAdmin);
+      await withAdminNotificationPolicy({
+        suppress: adminIsCaller,
+        reason: adminIsCaller ? 'The administrator is the current caller.' : ''
+      }, () => notifyAdminDetailed(
+        'WA Dedicated Chat Delivery',
+        `Failed to send response to chat ${chat.id._serialized}: ${err.message}`
+      ));
     }
   });
 }

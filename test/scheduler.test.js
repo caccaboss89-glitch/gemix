@@ -27,6 +27,20 @@ function taskContext(fileId) {
   };
 }
 
+test('schedule_tasks returns stable empty arrays for an empty batch', async () => {
+  const result = await scheduleTasks([], taskContext(`test_schedule_empty_${process.pid}`));
+
+  assert.equal(result.success, false);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.count, 0);
+  assert.equal(result.requested_count, 0);
+  assert.deepEqual(result.tasks, []);
+  assert.deepEqual(result.results, []);
+  assert.deepEqual(result.ids, []);
+  assert.equal(result.errors.length, 1);
+  assert.deepEqual(result.batch.retry_failed_indices, []);
+});
+
 test('schedule_tasks reports indexed partial success and persists one atomic file batch', async (t) => {
   const fileId = `test_schedule_batch_${process.pid}_${Date.now()}`;
   const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
@@ -40,7 +54,18 @@ test('schedule_tasks reports indexed partial success and persists one atomic fil
 
   assert.equal(result.success, true);
   assert.equal(result.status, 'degraded');
-  assert.deepEqual(result.tasks.map(item => item.index), [0, 1, 2]);
+  assert.equal(result.count, 2);
+  assert.equal(result.requested_count, 3);
+  assert.equal(result.failed_count, 1);
+  assert.deepEqual(result.results.map(item => item.index), [0, 1, 2]);
+  assert.deepEqual(result.results.map(item => item.status), ['ok', 'failed', 'ok']);
+  assert.equal(result.tasks.length, 2);
+  assert.deepEqual(result.ids, result.tasks.map(task => task.id));
+  assert.deepEqual(result.errors, [{
+    index: 1,
+    id: null,
+    error: result.results[1].error
+  }]);
   assert.deepEqual(result.batch.retry_failed_indices, [1]);
   assert.equal((await readTaskFile(fileId)).tasks.length, 2);
 });
@@ -55,11 +80,15 @@ test('schedule_tasks rejects model-supplied offsets and invalid Rome wall-clock 
 
   assert.equal(result.success, false);
   assert.equal(result.status, 'failed');
+  assert.equal(result.count, 0);
+  assert.deepEqual(result.tasks, []);
+  assert.deepEqual(result.ids, []);
   assert.deepEqual(result.batch.retry_failed_indices, [0, 1, 2, 3]);
-  assert.match(result.tasks[0].error, /do not add Z or an offset/);
-  assert.match(result.tasks[1].error, /do not add Z or an offset/);
-  assert.match(result.tasks[2].error, /Invalid local date\/time/);
-  assert.match(result.tasks[3].error, /clock jumps directly to 03:00/);
+  assert.match(result.results[0].error, /do not add Z or an offset/);
+  assert.match(result.results[1].error, /do not add Z or an offset/);
+  assert.match(result.results[2].error, /Invalid local date\/time/);
+  assert.match(result.results[3].error, /clock jumps directly to 03:00/);
+  assert.equal(result.errors.length, 4);
 });
 
 test('a corrupt task file fails closed and is not overwritten', async (t) => {
@@ -74,6 +103,9 @@ test('a corrupt task file fails closed and is not overwritten', async (t) => {
 
   assert.equal(result.success, false);
   assert.equal(result.status, 'failed');
+  assert.equal(result.count, 0);
+  assert.deepEqual(result.tasks, []);
+  assert.equal(result.results[0].status, 'failed');
   assert.deepEqual(result.batch.retry_failed_indices, [0]);
   assert.equal(fs.readFileSync(filePath, 'utf8'), '{broken');
 });

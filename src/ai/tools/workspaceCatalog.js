@@ -20,8 +20,10 @@ const TOOL_LIST_FILES = makeTool({
 
 const TOOL_SEARCH_FILES = makeTool({
   name: 'search_files',
-  description: 'Find files by name pattern, or lines by exact text, without reading whole files. '
-    + 'Use it on a workspace you did not just create, and to locate the part of a long file you need.',
+  description: 'Find files by name pattern, lines by exact text, or both, without reading whole files. '
+    + 'Each filter works on its own; when both are set, only files satisfying both are returned. '
+    + 'Use it on a workspace you did not just create, and to locate the part of a long file you need. '
+    + 'The result reports returned match counts, skipped files and truncation reasons.',
   properties: {
     namePattern: {
       type: 'string',
@@ -40,11 +42,12 @@ const TOOL_READ_FILE = makeTool({
     + '(empty for music or ambient sound, which is not the same as silent); video comes back as its '
     + 'transcript plus frames sampled across the clip; images come back attached so you can look at them. '
     + 'Files in this chat that were not loaded this turn appear as "[Attachment: attachments/name.ext]" — '
-    + 'pass that exact path here to open one.',
+    + 'pass that exact path here to open one. Text metadata reports the returned line window, has_more and next_offset; '
+    + 'a single line over the output cap returns an explicit error directing you to byte-slice it with shell.',
   properties: {
-    path: { type: 'string', description: WORKSPACE_PATH_HINT },
-    offset: { type: 'integer', description: 'Text files: first line to return, 1-based. Use with limit to page through a long file.' },
-    limit: { type: 'integer', description: 'Text files: how many lines to return from offset.' }
+    path: { type: 'string', minLength: 1, description: WORKSPACE_PATH_HINT },
+    offset: { type: 'integer', minimum: 1, description: 'Text files: first line to return, 1-based. Use with limit to page through a long file.' },
+    limit: { type: 'integer', minimum: 1, description: 'Text files: how many lines to return from offset.' }
   },
   required: ['path']
 });
@@ -55,7 +58,7 @@ const TOOL_WRITE_FILE = makeTool({
     + 'To change part of an existing file use edit_file instead — this replaces the whole content. '
     + 'To change a file from attachments/, copy it into workspace/ with shell first.',
   properties: {
-    path: { type: 'string', description: 'Destination under workspace/. Parent directories are created for you.' },
+    path: { type: 'string', minLength: 1, description: 'Destination under workspace/. Parent directories are created for you.' },
     content: { type: 'string', description: 'Full new content of the file.' }
   },
   required: ['path', 'content']
@@ -67,8 +70,8 @@ const TOOL_EDIT_FILE = makeTool({
     + 'oldText must appear exactly once: copy it verbatim from read_file, whitespace included, and add '
     + 'surrounding lines until it is unique. Set replaceAll to change every occurrence instead.',
   properties: {
-    path: { type: 'string', description: 'File under workspace/.' },
-    oldText: { type: 'string', description: 'Exact text to replace, copied verbatim from the file.' },
+    path: { type: 'string', minLength: 1, description: 'File under workspace/.' },
+    oldText: { type: 'string', minLength: 1, description: 'Exact text to replace, copied verbatim from the file.' },
     newText: { type: 'string', description: 'Replacement text. Empty string deletes the matched text.' },
     replaceAll: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match.' }
   },
@@ -78,19 +81,35 @@ const TOOL_EDIT_FILE = makeTool({
 function buildShellTool() {
   const defaultSec = Math.round(constants.SHELL_TIMEOUT_DEFAULT_MS / 1000);
   const maxSec = Math.round(constants.SHELL_TIMEOUT_MAX_MS / 1000);
+  const idleMinutes = Math.round(constants.SANDBOX_IDLE_TTL_MS / 60_000);
   return makeTool({
     name: 'shell',
     description: 'Run a bash command in the workspace container: Python 3 (numpy, pandas, matplotlib, Pillow, rembg, '
       + 'python-docx/pptx/openpyxl, reportlab, pypdf, pdfplumber), Node, ffmpeg, yt-dlp, poppler, LibreOffice, '
       + 'TeX, zip/unzip, curl/wget. Use it to convert, compress, download, inspect and assemble files. '
       + 'Package installs (pip/npm/apt) are disabled — the toolchain is fixed. '
-      + `Timeout ${defaultSec}s by default, ${maxSec}s maximum; start anything longer in the background and check on it in a later call. `
-      + 'The container keeps running between calls in the same chat. Background jobs outlive the foreground '
-      + 'workspace lock, so do not let them edit files that another tool call may change before they finish.',
+      + 'When an exact version matters, query the installed command or library with shell instead of assuming one. '
+      + `Timeout ${defaultSec}s by default, ${maxSec}s maximum; for longer work, start it in the background, redirect its output into workspace/, print its PID, and inspect or stop it with a later shell call. `
+      + `At most ${constants.SANDBOX_MAX_CONTAINERS} chat containers run at once. A background job outlives the foreground call, `
+      + `but the idle reaper stops the whole container after ${idleMinutes} minutes without a container command; workspace files remain. `
+      + 'Do not let background jobs edit files that another tool call may change before they finish. '
+      + 'The result reports exit_code, timed_out, output_truncated, duration_ms, stdout and stderr.',
     properties: {
-      command: { type: 'string', description: 'Bash command line. Runs in workspace/ unless workingDir says otherwise.' },
-      timeoutSeconds: { type: 'integer', description: `Seconds before the command is killed (default ${defaultSec}, max ${maxSec}).` },
-      workingDir: { type: 'string', description: `Directory to run in, default "workspace/". ${WORKSPACE_PATH_HINT}` }
+      command: {
+        type: 'string',
+        minLength: 1,
+        description: 'Bash command line. Without workingDir it runs at `/`, so workspace/<path> and attachments/<path> work exactly as shown by the file tools. If workingDir is set, relative operands start there; `/workspace/<path>` and `/attachments/<path>` remain root-stable.'
+      },
+      timeoutSeconds: {
+        type: 'integer',
+        minimum: 1,
+        maximum: maxSec,
+        description: `Seconds before the command is killed (default ${defaultSec}, max ${maxSec}).`
+      },
+      workingDir: {
+        type: 'string',
+        description: `Optional command working directory. Omit it to use displayed namespace paths unchanged. When set, command-relative paths start in this directory; use absolute /workspace/... or /attachments/... when you still need a namespace-root path. ${WORKSPACE_PATH_HINT}`
+      }
     },
     required: ['command']
   });

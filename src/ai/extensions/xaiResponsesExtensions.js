@@ -7,22 +7,23 @@
 //   - the sticky-routing header xAI uses alongside prompt_cache_key;
 //   - the one xAI-only body field, max_turns;
 //   - the extra output item types xAI emits and accepts back on replay;
-//   - the native `x_search` tool object, and the rule that its family replaces
-//     GemiX's own definitions when declared;
-//   - the two HTTP 403 bodies that mean "credits exhausted", not "bad token".
+//   - the native `x_search` tool object, which adds xAI's X-only family beside
+//     GemiX's ordinary web tools;
+//   - the xAI HTTP bodies whose meaning depends on the configured auth mode.
 //
 // What does NOT live here: anything about files, the workspace, the web stack
 // or media backends. Those are feature bindings, and they are GemiX's.
 
 import { BASE_REPLAYABLE_ITEM_TYPES } from '../transport/responsesProtocol.js';
 import { TRANSPORT_ERROR } from '../transport/errors.js';
+import envConfig from '../../config/env.js';
 
 /**
  * Output item types xAI adds on top of the base Responses set. They are the
  * server-side call records for its own tool family; replaying them by reference
  * is what keeps a multi-round X search coherent.
  */
-const XAI_SERVER_SIDE_ITEM_TYPES = Object.freeze(['web_search_call', 'custom_tool_call']);
+const XAI_SERVER_SIDE_ITEM_TYPES = Object.freeze(['custom_tool_call', 'x_search_call']);
 
 const XAI_REPLAYABLE_ITEM_TYPES = Object.freeze([
   ...BASE_REPLAYABLE_ITEM_TYPES,
@@ -43,38 +44,18 @@ const XAI_REPLAYABLE_ITEM_TYPES = Object.freeze([
  */
 const XAI_X_SEARCH_TOOL = Object.freeze({
   type: 'x_search',
-  limit: 5,
   enable_image_understanding: true,
   enable_video_understanding: true
 });
 
-/**
- * How many posts each X sub-tool is worth for the research badge. The keyword
- * and semantic searches carry a `limit` in their call input; the rest are one
- * item each.
- */
-const X_CUSTOM_TOOL_ESTIMATE = Object.freeze({
-  x_keyword_search: (input) => _limitFromCustomToolInput(input),
-  x_semantic_search: (input) => _limitFromCustomToolInput(input),
-  x_user_search: () => 1,
-  x_thread_fetch: () => 1,
-  view_x_video: () => 1
-});
-
-function _limitFromCustomToolInput(raw) {
-  let obj = raw;
-  if (typeof raw === 'string') {
-    try { obj = JSON.parse(raw); } catch { return 0; }
-  }
-  if (!obj || typeof obj !== 'object') return 0;
-  const limit = obj.limit;
-  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) return Math.floor(limit);
-  if (typeof limit === 'string') {
-    const n = parseInt(limit, 10);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return 0;
-}
+// `view_x_video` belongs to the native family but is media inspection, not a
+// search. The research badge counts searches only, so it is absent here.
+const X_SEARCH_TOOL_NAMES = new Set([
+  'x_keyword_search',
+  'x_semantic_search',
+  'x_user_search',
+  'x_thread_fetch'
+]);
 
 /**
  * True when an HTTP 403/429 body is the xAI spending-limit refusal
@@ -88,10 +69,9 @@ function _isSpendingLimitBody(bodyText) {
 /**
  * True when an HTTP 403 body is the OAuth "bad-credentials" refusal.
  *
- * Once the SuperGrok team credits run out, xAI's spending-limit body morphs
- * into this one, so on this deployment it means the same thing: the allowance is
- * spent, not that the token went bad. Classifying it as QUOTA is what keeps the
- * user-facing credit notice correct and the admin unalerted.
+ * With SuperGrok OAuth, an exhausted team allowance can surface in this form
+ * after a refresh. A static API key can receive the same body when the key is
+ * bad or revoked, so auth mode decides whether it is quota or authentication.
  */
 function _isOAuthUnauthenticatedBody(bodyText) {
   if (typeof bodyText !== 'string' || !bodyText) return false;
@@ -121,33 +101,40 @@ const xaiResponsesExtensions = Object.freeze({
     return body;
   },
 
-  /**
-   * The two 403 bodies above are an exhausted allowance, not an auth problem:
-   * refreshing the credential cannot help and the user gets the credit notice.
-   */
+  /** Classify xAI's explicit limit and OAuth-only exhausted-allowance bodies. */
   refineHttpFailure(status, bodyText) {
     if ((status === 403 || status === 429) && _isSpendingLimitBody(bodyText)) return TRANSPORT_ERROR.QUOTA;
-    if (status === 403 && _isOAuthUnauthenticatedBody(bodyText)) return TRANSPORT_ERROR.QUOTA;
+    if (!envConfig.XAI_USE_API_KEY
+        && status === 403
+        && _isOAuthUnauthenticatedBody(bodyText)) {
+      return TRANSPORT_ERROR.QUOTA;
+    }
     return null;
   },
 
   /**
    * Server-side search statistics for the research badge appended to replies.
-   * X posts are estimated from the `custom_tool_call` records; the web count
-   * stays zero because GemiX owns web search on every profile and reports its
-   * own sources.
+   * xAI does not expose the number of returned posts in its response. Count
+   * observable completed X-family calls instead; never reinterpret the input
+   * `limit` as a result count. The web count stays zero because GemiX owns web
+   * search on every profile and reports its own sources.
    *
    * @param {object} response - assembled Responses payload
-   * @returns {{ webSources: number, xPosts: number }}
+   * @returns {{ webSources: number, xSearches: number }}
    */
   extractSearchStats(response) {
-    let xPosts = 0;
+    let xSearches = 0;
     for (const item of Array.isArray(response?.output) ? response.output : []) {
+      if (item?.type === 'x_search_call') {
+        if (!item.status || item.status === 'completed') xSearches += 1;
+        continue;
+      }
       if (item?.type !== 'custom_tool_call' || typeof item.name !== 'string') continue;
-      const estimate = X_CUSTOM_TOOL_ESTIMATE[item.name];
-      if (estimate) xPosts += estimate(item.input);
+      if (!X_SEARCH_TOOL_NAMES.has(item.name)) continue;
+      if (item.status && item.status !== 'completed') continue;
+      xSearches += 1;
     }
-    return { webSources: 0, xPosts };
+    return { webSources: 0, xSearches };
   }
 });
 

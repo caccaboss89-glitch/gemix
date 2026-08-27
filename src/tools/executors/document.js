@@ -5,8 +5,8 @@
 import { generateFormalRequestPdf } from '../formalRequestPdf.js';
 import { stageToolOutput } from '../workspace/toolOutput.js';
 import {
-  notifyAdmin,
-  ADMIN_NOTIFIED_SUFFIX
+  buildAdminNotificationNote,
+  notifyAdminDetailed
 } from '../../utils/adminNotifier.js';
 import { sanitizeFilename } from '../../utils/text.js';
 import { resolveWorkspaceId } from '../../utils/workspaceId.js';
@@ -29,10 +29,10 @@ async function _generateFormalRequestPdf({ args, userCtx }) {
         + 'Open it with read_file to check its content, or pass that path to send it.'
     };
   } catch (err) {
-    await notifyAdmin('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
+    const notification = await notifyAdminDetailed('Formal PDF Tool', `Failed to generate PDF: ${err.message}`);
     return {
       success: false,
-      error: `Error generating formal request PDF: ${err.message}${ADMIN_NOTIFIED_SUFFIX}`
+      error: `Error generating formal request PDF: ${err.message}${buildAdminNotificationNote(notification)}`
     };
   }
 }

@@ -3,7 +3,11 @@
 // Scheduled-reminder schemas. These builders vary by membership, admin status
 // and WhatsApp group context; execution lives in the matching task domain.
 
+import constants from '../../config/constants.js';
 import { makeTool } from './schema.js';
+
+const LOCAL_WALL_CLOCK_PATTERN = '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$';
+const E164_PHONE_PATTERN = '^\\+[1-9][0-9]{7,14}$';
 
 function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, here) {
   if (isAdmin) {
@@ -14,9 +18,11 @@ function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, h
         properties: {
           phone: {
             type: 'string',
+            pattern: E164_PHONE_PATTERN,
             description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user.'
           }
-        }
+        },
+        required: ['phone']
       }
     };
   }
@@ -33,7 +39,8 @@ function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, h
     properties.recipient = {
       type: 'object',
       description: 'Active member to remind. Omit with toPrivate for a private self-reminder; set it when reminding someone else.',
-      properties: { name: { type: 'string', description: 'Active member name to remind.' } }
+      properties: { name: { type: 'string', minLength: 1, description: 'Active member name to remind.' } },
+      required: ['name']
     };
   } else if (isWhatsAppGroup) {
     properties.toPrivate = { type: 'boolean', description: 'Deliver as a private DM to you instead of in the group.' };
@@ -55,20 +62,25 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       : 'Reminder text delivered to you at the scheduled time.')) + contentSuffix;
 
   const taskItemProps = {
-    content: { type: 'string', description: contentDesc },
+    content: { type: 'string', minLength: 1, description: contentDesc },
     scheduledAt: {
       type: 'string',
+      pattern: LOCAL_WALL_CLOCK_PATTERN,
       description: 'Copy the user\'s intended local calendar date and wall-clock time unchanged as YYYY-MM-DDTHH:MM:SS '
         + '(e.g. a requested 14:30 stays 14:30). Do not convert the hour and do not add Z or a UTC offset; '
-        + 'the backend alone interprets it in Europe/Rome and applies the correct DST-aware offset.'
+        + 'the backend alone interprets it in Europe/Rome and applies the correct DST-aware offset. This same '
+        + 'interpretation applies to every recipient; never adjust for where the recipient might be.'
     },
     repeat: {
       type: 'string',
       description: 'OPTIONAL recurrence as an RRULE string; omit for a one-time reminder. '
         + 'FREQ=HOURLY|DAILY|WEEKLY|MONTHLY (required), plus optional INTERVAL=N (default 1), '
-        + 'BYDAY=MO,TU,WE,TH,FR,SA,SU (weekly only), UNTIL=YYYY-MM-DDTHH:MM:SS as an unchanged local wall-clock '
-        + 'time without Z/offset (default: the 1-year limit), '
+        + 'BYDAY=MO,TU,WE,TH,FR,SA,SU (weekly only), inclusive UNTIL=YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS '
+        + 'as an unchanged local wall-clock value without Z/offset (default: the 1-year limit), '
         + 'EXDATE=YYYY-MM-DD,… (dates to skip). '
+        + 'scheduledAt is always the first occurrence; weekly BYDAY selects later occurrences. Calendar recurrences '
+        + 'keep the requested wall-clock: a nonexistent spring-DST occurrence is skipped, an autumn duplicate uses '
+        + 'the second standard-time occurrence, and a monthly day clamps in short months then returns to its original day. '
         + 'Examples: "FREQ=DAILY;INTERVAL=2" every 2 days; "FREQ=WEEKLY;BYDAY=MO,FR" every Monday and Friday; '
         + '"FREQ=MONTHLY;INTERVAL=3;EXDATE=2026-12-25" every 3 months except that date.'
     }
@@ -91,13 +103,15 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Schedule reminders for the current chat, other active members or external contacts. The reminder is DELIVERED at the scheduled time to whoever you set as recipient — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails. Batch items are validated independently and saved atomically per task file; inspect each indexed result and retry only failed indices.'
+      ? 'Schedule WhatsApp reminders for the current chat, active members or external contacts; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
       : isActiveMember
-        ? 'Schedule reminders for the current chat or other active members. The reminder is DELIVERED to the recipient you set — set it whenever the target is not the current chat. One task per person. Reminders are delivered on WhatsApp only — you cannot schedule emails. Batch items are validated independently and saved atomically per task file; inspect each indexed result and retry only failed indices.'
-        : 'Schedule personal reminders for the current chat. Batch items are validated independently and saved atomically per task file; inspect each indexed result and retry only failed indices.',
+        ? 'Schedule WhatsApp reminders for the current chat or other active members; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
+        : 'Schedule personal WhatsApp reminders for the current chat. Items are independent and writes are atomic per task file. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.',
     properties: {
       tasks: {
         type: 'array',
+        minItems: 1,
+        maxItems: constants.SCHEDULE_TASKS_MAX_BATCH,
         items: { type: 'object', properties: taskItemProps, required: ['content', 'scheduledAt'] }
       }
     },
@@ -110,19 +124,29 @@ function buildReadMyTasksTool(isWhatsAppGroup) {
   if (isWhatsAppGroup) {
     properties.includeGroupTasks = { type: 'boolean', description: 'Include group tasks' };
   }
-  return makeTool({ name: 'read_my_tasks', description: 'Show scheduled reminders.', properties });
+  return makeTool({
+    name: 'read_my_tasks',
+    description: 'Read scheduled reminders with time, recurrence, recipient, delivery state and removal ID. Returns count, tasks, ids, results and errors; no reminders is success with empty arrays.',
+    properties
+  });
 }
 
 function buildRemoveMyTasksTool(isWhatsAppGroup) {
   const properties = {
-    taskIds: { type: 'array', items: { type: 'string' }, description: 'Task IDs to remove' }
+    taskIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: constants.REMOVE_TASKS_MAX_IDS,
+      items: { type: 'string', minLength: 1 },
+      description: 'Task IDs to remove'
+    }
   };
   if (isWhatsAppGroup) {
     properties.fromGroup = { type: 'boolean', description: 'Remove from group instead of personal' };
   }
   return makeTool({
     name: 'remove_my_tasks',
-    description: 'Remove scheduled reminders.',
+    description: 'Atomically remove reminder IDs from the selected personal or group task file. Returns count, tasks, ids, per-ID results, errors, removed and not_found; mixed matches are degraded and no match changes nothing.',
     properties,
     required: ['taskIds']
   });

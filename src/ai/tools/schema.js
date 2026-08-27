@@ -3,17 +3,86 @@
 // Function-tool schema construction and the lightweight runtime hallucination
 // guard shared by every tool catalog.
 
-function makeTool({ name, description, properties = {}, required = [] }) {
+function _closeSchemaObjects(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  const closed = { ...schema };
+  if (schema.type === 'object') {
+    closed.properties = Object.fromEntries(
+      Object.entries(schema.properties || {}).map(([key, value]) => [key, _closeSchemaObjects(value)])
+    );
+    closed.additionalProperties = false;
+  } else if (schema.type === 'array' && schema.items) {
+    closed.items = _closeSchemaObjects(schema.items);
+  }
+  return closed;
+}
+
+function makeTool({ name, description, properties = {}, required = [], outputSchema = null }) {
+  const parameters = _closeSchemaObjects({ type: 'object', properties });
   const tool = {
     type: 'function',
     function: {
       name,
       description,
-      parameters: { type: 'object', properties }
+      parameters
     }
   };
   if (required.length > 0) tool.function.parameters.required = required;
+  if (outputSchema) tool.function.outputSchema = _closeSchemaObjects(outputSchema);
   return tool;
+}
+
+/**
+ * Project the canonical optional-argument schema into OpenAI strict form.
+ * Every object property becomes required on the wire; originally optional
+ * properties accept null, which the dispatcher removes before execution.
+ */
+function projectStrictToolParameters(schema, optional = false) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  const projected = { ...schema };
+
+  if (optional) {
+    const types = Array.isArray(projected.type) ? projected.type : [projected.type];
+    projected.type = [...new Set(types.filter(Boolean).concat('null'))];
+    if (Array.isArray(projected.enum) && !projected.enum.includes(null)) {
+      projected.enum = [...projected.enum, null];
+    }
+  }
+
+  if (schema.type === 'object') {
+    const originalRequired = new Set(Array.isArray(schema.required) ? schema.required : []);
+    projected.properties = Object.fromEntries(
+      Object.entries(schema.properties || {}).map(([key, child]) => [
+        key,
+        projectStrictToolParameters(child, !originalRequired.has(key))
+      ])
+    );
+    projected.required = Object.keys(schema.properties || {});
+    projected.additionalProperties = false;
+  } else if (schema.type === 'array' && schema.items) {
+    projected.items = projectStrictToolParameters(schema.items, false);
+  }
+  return projected;
+}
+
+/** Remove strict-wire null placeholders only where the canonical field is optional. */
+function normalizeOptionalNullArgs(value, schema) {
+  if (!schema || value === null || value === undefined) return value;
+  if (schema.type === 'array' && Array.isArray(value) && schema.items) {
+    return value.map(item => normalizeOptionalNullArgs(item, schema.items));
+  }
+  if (schema.type !== 'object' || typeof value !== 'object' || Array.isArray(value)) return value;
+
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  const properties = schema.properties || {};
+  const normalized = {};
+  for (const [key, childValue] of Object.entries(value)) {
+    if (childValue === null && Object.hasOwn(properties, key) && !required.has(key)) continue;
+    normalized[key] = Object.hasOwn(properties, key)
+      ? normalizeOptionalNullArgs(childValue, properties[key])
+      : childValue;
+  }
+  return normalized;
 }
 
 function _matchesType(value, schemaType) {
@@ -29,16 +98,75 @@ function _matchesType(value, schemaType) {
   }
 }
 
-function _validateObjectRequired(value, propSchema, pathPrefix) {
-  if (propSchema.type !== 'object' || typeof value !== 'object' || Array.isArray(value)) return null;
-  const nestedRequired = Array.isArray(propSchema.required) ? propSchema.required : [];
-  const nestedProps = propSchema.properties || {};
-  for (const nestedKey of nestedRequired) {
-    const nestedSchema = nestedProps[nestedKey];
-    const allowEmpty = Boolean(nestedSchema && nestedSchema.allowEmpty);
-    const nestedVal = value[nestedKey];
-    if (nestedVal === undefined || nestedVal === null || (nestedVal === '' && !allowEmpty)) {
-      return `Missing required argument "${pathPrefix}.${nestedKey}".`;
+function _argumentLabel(path) {
+  return path ? `Argument "${path}"` : 'Tool arguments';
+}
+
+function _validateValue(value, schema, path) {
+  if (!_matchesType(value, schema.type)) {
+    return `${_argumentLabel(path)} has wrong type (expected ${schema.type}).`;
+  }
+
+  if (Array.isArray(schema.enum) && schema.enum.length > 0 && !schema.enum.includes(value)) {
+    return `${_argumentLabel(path)} must be one of: ${schema.enum.join(', ')}.`;
+  }
+
+  if (typeof value === 'number') {
+    if (typeof schema.minimum === 'number' && value < schema.minimum) {
+      return `${_argumentLabel(path)} must be at least ${schema.minimum}.`;
+    }
+    if (typeof schema.maximum === 'number' && value > schema.maximum) {
+      return `${_argumentLabel(path)} must be at most ${schema.maximum}.`;
+    }
+  }
+
+  if (typeof value === 'string') {
+    if (Number.isInteger(schema.minLength) && value.length < schema.minLength) {
+      return `${_argumentLabel(path)} must contain at least ${schema.minLength} character(s).`;
+    }
+    if (Number.isInteger(schema.maxLength) && value.length > schema.maxLength) {
+      return `${_argumentLabel(path)} must contain at most ${schema.maxLength} character(s).`;
+    }
+    if (typeof schema.pattern === 'string' && !new RegExp(schema.pattern).test(value)) {
+      return `${_argumentLabel(path)} does not match the required format.`;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    if (Number.isInteger(schema.minItems) && value.length < schema.minItems) {
+      return `${_argumentLabel(path)} must contain at least ${schema.minItems} item(s).`;
+    }
+    if (Number.isInteger(schema.maxItems) && value.length > schema.maxItems) {
+      return `${_argumentLabel(path)} must contain at most ${schema.maxItems} item(s).`;
+    }
+    if (schema.items) {
+      for (let index = 0; index < value.length; index++) {
+        const itemErr = _validateValue(value[index], schema.items, `${path}[${index}]`);
+        if (itemErr) return itemErr;
+      }
+    }
+  }
+
+  if (schema.type === 'object') {
+    const props = schema.properties || {};
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const key of required) {
+      const childValue = value[key];
+      if (childValue === undefined || childValue === null || childValue === '') {
+        const childPath = path ? `${path}.${key}` : key;
+        return `Missing required argument "${childPath}".`;
+      }
+    }
+    for (const [key, childValue] of Object.entries(value)) {
+      const childPath = path ? `${path}.${key}` : key;
+      const childSchema = props[key];
+      if (!childSchema) {
+        if (schema.additionalProperties === false) return `Unknown argument "${childPath}".`;
+        continue;
+      }
+      if (childValue === undefined) continue;
+      const childErr = _validateValue(childValue, childSchema, childPath);
+      if (childErr) return childErr;
     }
   }
   return null;
@@ -55,64 +183,12 @@ function validateToolArgs(args, toolDef) {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) {
     return 'Tool arguments must be a JSON object.';
   }
-  const required = Array.isArray(params.required) ? params.required : [];
-  const props = params.properties || {};
-  for (const key of required) {
-    const propSchema = props[key];
-    const allowEmpty = Boolean(propSchema && propSchema.allowEmpty);
-    const val = args[key];
-    if (val === undefined || val === null || (val === '' && !allowEmpty)) {
-      return `Missing required argument "${key}".`;
-    }
-  }
-  for (const [key, value] of Object.entries(args)) {
-    const propSchema = props[key];
-    if (!propSchema || value === undefined || value === null) continue;
-    if (propSchema.type === 'array' && required.includes(key) && Array.isArray(value) && value.length === 0) {
-      return `Argument "${key}" must be a non-empty array.`;
-    }
-    if (!_matchesType(value, propSchema.type)) {
-      return `Argument "${key}" has wrong type (expected ${propSchema.type}).`;
-    }
-    if (propSchema.type === 'object' && typeof value === 'object' && !Array.isArray(value)) {
-      const nestedErr = _validateObjectRequired(value, propSchema, key);
-      if (nestedErr) return nestedErr;
-    }
-    if (propSchema.type === 'array' && Array.isArray(value)) {
-      if (Number.isInteger(propSchema.minItems) && value.length < propSchema.minItems) {
-        return `Argument "${key}" must contain at least ${propSchema.minItems} item(s).`;
-      }
-      if (Number.isInteger(propSchema.maxItems) && value.length > propSchema.maxItems) {
-        return `Argument "${key}" must contain at most ${propSchema.maxItems} item(s).`;
-      }
-    }
-    if (propSchema.type === 'array' && Array.isArray(value) && propSchema.items?.type === 'object') {
-      const itemSchema = propSchema.items;
-      const itemProps = itemSchema.properties || {};
-      for (let i = 0; i < value.length; i++) {
-        const item = value[i];
-        if (item === null || typeof item !== 'object' || Array.isArray(item)) {
-          return `Argument "${key}[${i}]" must be an object.`;
-        }
-        const itemErr = _validateObjectRequired(item, itemSchema, `${key}[${i}]`);
-        if (itemErr) return itemErr;
-        for (const [itemKey, itemVal] of Object.entries(item)) {
-          const fieldSchema = itemProps[itemKey];
-          if (!fieldSchema || itemVal === undefined || itemVal === null) continue;
-          if (fieldSchema.type === 'object' && typeof itemVal === 'object' && !Array.isArray(itemVal)) {
-            const nestedErr = _validateObjectRequired(itemVal, fieldSchema, `${key}[${i}].${itemKey}`);
-            if (nestedErr) return nestedErr;
-          }
-        }
-      }
-    }
-    if (Array.isArray(propSchema.enum) && propSchema.enum.length > 0 && typeof value === 'string') {
-      if (!propSchema.enum.includes(value)) {
-        return `Argument "${key}" must be one of: ${propSchema.enum.join(', ')}.`;
-      }
-    }
-  }
-  return null;
+  return _validateValue(args, params, '');
 }
 
-export { makeTool, validateToolArgs };
+export {
+  makeTool,
+  normalizeOptionalNullArgs,
+  projectStrictToolParameters,
+  validateToolArgs
+};

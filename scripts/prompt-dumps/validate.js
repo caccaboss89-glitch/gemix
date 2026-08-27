@@ -11,14 +11,50 @@ import constants from '../../src/config/constants.js';
 import { PRIVACY_WIPE_COMMAND } from '../../src/config/systemMessages.js';
 import { getCapabilities } from '../../src/config/platformCapabilities.js';
 import { getToolsForUser } from '../../src/ai/tools.js';
-import { resolveProviderProfile } from '../../src/ai/providers/providerProfile.js';
+import {
+  PROMPT_VARIANT,
+  resolveProviderProfile
+} from '../../src/ai/providers/providerProfile.js';
 import envConfig from '../../src/config/env.js';
 import { FEATURE, backendFor } from '../../src/features/featureBindings.js';
+import { getActiveTtsCapabilities, XAI_VOICES } from '../../src/media/ttsCapabilities.js';
+import {
+  XAI_INLINE_VOICE_TAG_NAMES,
+  XAI_WRAPPING_VOICE_TAG_NAMES
+} from '../../src/media/xaiVoiceTags.js';
+import {
+  customizedFields,
+  defaultSettings
+} from '../../src/utils/settingsStore.js';
 import { CASES } from './cases.js';
 
 const { PLATFORM_DISCORD } = constants;
 
 const ISSUES = [];
+
+function _escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const XAI_VOICE_OR_TAG_RE = new RegExp(
+  `(?:\\b(?:${XAI_VOICES.map(_escapeRegex).join('|')})\\b`
+    + `|\\[(?:${XAI_INLINE_VOICE_TAG_NAMES.map(_escapeRegex).join('|')})\\]`
+    + `|<\\/?(?:${XAI_WRAPPING_VOICE_TAG_NAMES.map(_escapeRegex).join('|')})>)`,
+  'i'
+);
+
+const XAI_GUIDANCE_RE = /\bxAI\b|\bGrok\b|\bx_search\b|X posts|X\/Twitter|CDN URL|SuperGrok|xai-tts/i;
+
+function _containsXaiOnlyMaterial(text) {
+  return XAI_GUIDANCE_RE.test(text) || XAI_VOICE_OR_TAG_RE.test(text);
+}
+
+/** Remove program data whose literal contents are not model instructions. */
+function _withoutStaticProgramData(text) {
+  return String(text || '')
+    .replace(/<ActiveMembers>[\s\S]*?<\/ActiveMembers>/g, '')
+    .replace(/<Statute>[\s\S]*?<\/Statute>/g, '');
+}
 
 // -- Case groupings, all derived from CASES --------------------------------
 
@@ -31,11 +67,8 @@ const WHATSAPP_CASES = _is(c => c.platform !== PLATFORM_DISCORD);
 const NON_ACTIVE_CASES = _is(c => c.userIdentity?.isActiveMember === false);
 const NON_ADMIN_ACTIVE_CASES = _is(c => c.userIdentity?.isActiveMember !== false && !c.userIdentity?.isAdmin);
 const VOICE_CASES = caseIds.filter(i => getCapabilities(_ctx(i)).voiceReply);
-// Weekly quota: non-admin callers on a platform exposing all three generation tools.
-const QUOTA_CASES = WHATSAPP_CASES.filter(i => !_ctx(i).userIdentity?.isAdmin);
 const CUSTOM_SETTINGS_CASES = _is(c => c.settings !== undefined);
 const REVIEW_DUE_CASES = _is(c => c.settingsReviewDue === true);
-const WORKSPACE_CASES = _is(c => Boolean(c.userWorkspace));
 
 // -- Implementation-leak sweep ---------------------------------------------
 
@@ -51,7 +84,9 @@ const IMPL_LEAK_PATTERNS = [
   { re: /attached server-side/i, label: 'attached server-side' },
   { re: /returns inline in the tool result/i, label: 'returns inline in the tool result' },
   { re: /injected into the current turn/i, label: 'injected into the current turn' },
-  { re: /Added to the current turn/i, label: 'Added to the current turn' }
+  { re: /Added to the current turn/i, label: 'Added to the current turn' },
+  { re: /render_inline_citation/i, label: 'legacy render_inline_citation' },
+  { re: /\[\[[^\]]*\]\]\(https?:/i, label: 'legacy inline source marker' }
 ];
 
 function validateNoImplLeaks(text, caseId, scope) {
@@ -77,6 +112,28 @@ function validateToolDumpLeaks(dump, caseId) {
       });
     }
   }
+  const ctx = _ctx(Number(caseId));
+  if (ctx) {
+    const hasBugReport = toolText.includes('[function] bug_report');
+    if (Boolean(ctx.userIdentity?.isAdmin) === hasBugReport) {
+      ISSUES.push({ caseId, msg: 'bug_report availability does not match administrator status' });
+    }
+    const generic = resolveProviderProfile().promptVariant === PROMPT_VARIANT.GENERIC;
+    if (generic && _containsXaiOnlyMaterial(toolText)) {
+      ISSUES.push({ caseId, msg: 'generic provider tool schema leaks xAI-only material' });
+    }
+    const nativeX = toolText.match(/\[native\] (\{[^\n]+"type":"x_search"[^\n]+\})/);
+    if (nativeX) {
+      let schema;
+      try { schema = JSON.parse(nativeX[1]); } catch { schema = null; }
+      if (!schema
+          || Object.hasOwn(schema, 'limit')
+          || schema?.enable_image_understanding !== true
+          || schema?.enable_video_understanding !== true) {
+        ISSUES.push({ caseId, msg: 'native x_search dump must omit the obsolete limit and keep both media-understanding flags' });
+      }
+    }
+  }
 }
 
 // -- Structured output -----------------------------------------------------
@@ -84,7 +141,7 @@ function validateToolDumpLeaks(dump, caseId) {
 function validateResponseFormat(dump, caseId) {
   const fmtStart = dump.indexOf('--- STRUCTURED OUTPUT');
   if (fmtStart < 0) return;
-  const fmtEnd = dump.indexOf('\n--- TOOL ERRORS', fmtStart);
+  const fmtEnd = dump.indexOf('\n--- AUDIT APPENDIX', fmtStart);
   const fmt = fmtEnd >= 0 ? dump.slice(fmtStart, fmtEnd) : dump.slice(fmtStart);
   const hasVoice = /voice \(boolean, required\)/.test(fmt);
   const hasVoiceTagDesc = /voice tags below|\[pause\]/.test(fmt);
@@ -115,6 +172,9 @@ function validateResponseFormat(dump, caseId) {
   } else if (hasTitle) {
     ISSUES.push({ caseId, msg: 'non-Discord case must not expose conversation_title schema field' });
   }
+  if (!/schema: object additionalProperties=false required=\[[^\]]*response[^\]]*attachments/.test(fmt)) {
+    ISSUES.push({ caseId, msg: 'structured reply dump must expose its closed object and required fields' });
+  }
 }
 
 // -- Prompt ----------------------------------------------------------------
@@ -136,6 +196,7 @@ function _validateStaticShape(staticPart, prompt, caseId) {
   // Prose sections, in order. XML is reserved for program data.
   const headings = [...staticPart.matchAll(/^## (.+)$/gm)].map(m => m[1]);
   const required = [
+    'Provider integration',
     'This chat',
     'Who you are talking to',
     'Program-owned turns',
@@ -157,12 +218,8 @@ function _validateStaticShape(staticPart, prompt, caseId) {
   if (!opening.includes(expectedModel)) {
     ISSUES.push({ caseId, msg: `opening missing model display name "${expectedModel}"` });
   }
-  if (!/began as a project to combine Grok\/SuperGrok with Gemini/.test(opening)
-    || !/supports multiple models while keeping its original name/.test(opening)) {
-    ISSUES.push({ caseId, msg: 'opening missing the provider-neutral GemiX origin note' });
-  }
-  if (/a fusion of/i.test(opening)) {
-    ISSUES.push({ caseId, msg: 'opening still describes the active model as a two-model fusion' });
+  if (/Grok\/SuperGrok|Gemini|a fusion of/i.test(opening)) {
+    ISSUES.push({ caseId, msg: 'opening contains obsolete provider history' });
   }
   if (!opening.includes('<user_query>')) {
     ISSUES.push({ caseId, msg: 'opening must point at the <user_query> tag as the goal' });
@@ -196,9 +253,8 @@ function _validateStaticShape(staticPart, prompt, caseId) {
 
 /** Claims forbidden on either side of the static/dynamic split. */
 function _validateNoStaleClaims(staticPart, prompt, caseId) {
-  // xAI injects its own citation directive and the API renders [[N]](url) itself.
-  if (/Cite web sources with links/i.test(prompt)) {
-    ISSUES.push({ caseId, msg: 'static must not duplicate the xAI citation directive' });
+  if (/render_inline_citation|"Fonti:" list|inline citations|url_citation/i.test(prompt)) {
+    ISSUES.push({ caseId, msg: 'prompt contains the removed provider citation mechanism' });
   }
   if (/system prompt Format line/i.test(prompt)) {
     ISSUES.push({ caseId, msg: 'invalid cross-reference to "Format line"' });
@@ -229,8 +285,35 @@ function _validateNoStaleClaims(staticPart, prompt, caseId) {
   }
 }
 
+/** Exactly one provider block: generic baseline or its complete xAI replacement. */
+function _validateProviderGuidance(staticPart, caseId) {
+  const guidance = _promptSection(staticPart, 'Provider integration');
+  if (!guidance) return;
+  const variant = resolveProviderProfile().promptVariant;
+  if (variant === PROMPT_VARIANT.XAI) {
+    if (!/Regular web search[\s\S]*GemiX-owned/.test(guidance) || !/native X search/.test(guidance)) {
+      ISSUES.push({ caseId, msg: 'xAI provider block missing its GemiX-web / native-X boundary' });
+    }
+    const withoutOpeningAndProvider = _withoutStaticProgramData(
+      staticPart.slice(staticPart.indexOf('\n## This chat\n'))
+    );
+    if (_containsXaiOnlyMaterial(withoutOpeningAndProvider)) {
+      ISSUES.push({ caseId, msg: 'xAI-only operating guidance escaped the provider integration block' });
+    }
+    return;
+  }
+  if (!/model provider supplies reasoning, vision, structured replies/i.test(guidance)
+      || !/GemiX itself supplies every user-facing feature/i.test(guidance)) {
+    ISSUES.push({ caseId, msg: 'generic provider block missing the baseline provider contract' });
+  }
+  if (_containsXaiOnlyMaterial(_withoutStaticProgramData(staticPart))) {
+    ISSUES.push({ caseId, msg: 'generic provider prompt contains an xAI-only instruction or identifier' });
+  }
+}
+
 /** Turn-varying material must sit in Runtime, never in the cached static prefix. */
 function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
+  const ctx = _ctx(Number(caseId));
   if (/Time \(Europe\/Rome\)/.test(staticPart)) {
     ISSUES.push({ caseId, msg: 'static must not include Time (belongs in the Runtime block)' });
   }
@@ -251,6 +334,10 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
   if (!dynamicPart.includes('<Caller>')) {
     ISSUES.push({ caseId, msg: 'Runtime missing <Caller>' });
   }
+  const callerSaysAdmin = /<Caller>[^<]*\(administrator, active member\)/.test(dynamicPart);
+  if (Boolean(ctx?.userIdentity?.isAdmin) !== callerSaysAdmin) {
+    ISSUES.push({ caseId, msg: 'Runtime caller administrator label does not match identity' });
+  }
   if (/^(Caller|Participants):/m.test(staticPart)) {
     ISSUES.push({ caseId, msg: 'static must not name the caller or the roster (belongs in Runtime)' });
   }
@@ -258,21 +345,30 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
 
 function _validateWorkspaceBlock(dynamicPart, id, caseId) {
   if (!WHATSAPP_CASES.includes(id)) return;
-  if (!/<Workspace files="/.test(dynamicPart)) {
+  const snapshot = _ctx(id).userWorkspace;
+  const state = snapshot?.state || (snapshot ? 'ready' : 'unknown');
+  if (!dynamicPart.includes(`<Workspace state="${state}"`)) {
     ISSUES.push({ caseId, msg: 'WhatsApp case missing Workspace block in Runtime' });
     return;
   }
-  if (!WORKSPACE_CASES.includes(id)) {
-    if (!/<Workspace files="0"/.test(dynamicPart)) {
-      ISSUES.push({ caseId, msg: 'case without a workspace should show Workspace files="0"' });
-    }
-    return;
+  if (state !== 'ready') return;
+
+  const files = Array.isArray(snapshot?.files) ? snapshot.files : [];
+  const dirs = Array.isArray(snapshot?.dirs) ? snapshot.dirs : [];
+  const total = Number.isFinite(snapshot?.total) ? snapshot.total : files.length;
+  if (!dynamicPart.includes(`files="${total}" directories="${dirs.length}"`)) {
+    ISSUES.push({ caseId, msg: 'Workspace snapshot counts do not match its files and directories' });
   }
   // Every listed file carries its full namespace path, because that same
   // string is what the model passes back to read_file and to attachments[].
-  for (const { relPath } of _ctx(id).userWorkspace.files) {
+  for (const { relPath } of files) {
     if (!dynamicPart.includes(`workspace/${relPath}`)) {
       ISSUES.push({ caseId, msg: `Workspace block missing listed path workspace/${relPath}` });
+    }
+  }
+  for (const relPath of dirs) {
+    if (!dynamicPart.includes(`workspace/${relPath}/`)) {
+      ISSUES.push({ caseId, msg: `Workspace block missing listed directory workspace/${relPath}/` });
     }
   }
 }
@@ -387,8 +483,8 @@ function _validateVisibility(staticPart, caseId) {
   if (!visibility.includes('[Reactions: emoji xN]')) {
     ISSUES.push({ caseId, msg: 'visibility section missing [Reactions: emoji xN] notation' });
   }
-  if (!/videos inside X posts/.test(visibility)) {
-    ISSUES.push({ caseId, msg: 'visibility section missing the web-image / X-video capability line' });
+  if (!/A remote URL by itself is not content you have inspected/.test(visibility)) {
+    ISSUES.push({ caseId, msg: 'visibility section missing the remote-content inspection boundary' });
   }
 }
 
@@ -416,12 +512,8 @@ function _validateThisChat(staticPart, id, caseId) {
       ISSUES.push({ caseId, msg: `WhatsApp format line missing ${token}` });
     }
   }
-  if (!/the system appends those itself/.test(chat)) {
-    ISSUES.push({ caseId, msg: 'WhatsApp case missing the "system appends the footer" line' });
-  }
-  // Citations must read as required, and must name the component that makes them.
-  if (!/sources you mark with render_inline_citation/.test(chat) || !/"Fonti:" list/.test(chat)) {
-    ISSUES.push({ caseId, msg: 'WhatsApp case must say to cite with render_inline_citation and let the system build the list' });
+  if (!/program appends its own compact model and research badges/.test(chat)) {
+    ISSUES.push({ caseId, msg: 'WhatsApp case missing the program-owned badge line' });
   }
   // Groups mention by phone digits; one-to-one chats have no mentions at all.
   const wantsMentions = _ctx(id).isGroup === true;
@@ -458,12 +550,24 @@ function _validateWorkspaceGuidance(staticPart, caseId) {
 }
 
 /**
- * Weekly media generation quota line: shown to non-admin callers on platforms
- * exposing all three generation tools (WhatsApp); hidden for admins and Discord.
+ * Weekly media generation quota line: shown to non-admin callers for exactly
+ * the generation tools available in this case.
  */
 function _validateQuotaLine(dynamicPart, id, caseId) {
   const hasQuotaLine = /Weekly generation quota for this user/.test(dynamicPart);
-  if (!QUOTA_CASES.includes(id)) {
+  const ctx = _ctx(id);
+  const liveNames = new Set(getToolsForUser({
+    platform: ctx.platform,
+    isGroup: Boolean(ctx.isGroup),
+    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
+    isAdmin: Boolean(ctx.userIdentity?.isAdmin)
+  }).map(tool => tool.function?.name || tool.type));
+  const labels = [];
+  if (liveNames.has('generate_image')) labels.push('Immagini');
+  if (liveNames.has('generate_video')) labels.push('Video');
+  if (liveNames.has('generate_music')) labels.push('Canzoni');
+  const expected = !ctx.userIdentity?.isAdmin && labels.length > 0;
+  if (!expected) {
     if (hasQuotaLine) {
       ISSUES.push({ caseId, msg: 'weekly media quota line must not appear (admin or non-media platform)' });
     }
@@ -471,8 +575,18 @@ function _validateQuotaLine(dynamicPart, id, caseId) {
   }
   if (!hasQuotaLine) {
     ISSUES.push({ caseId, msg: 'missing weekly media quota line in Runtime (non-admin on a media platform)' });
-  } else if (!/Video: \d+\/2 · Immagini: \d+\/5 · Canzoni: \d+\/2/.test(dynamicPart)) {
-    ISSUES.push({ caseId, msg: 'weekly media quota line malformed (expected "Video: n/2 · Immagini: n/5 · Canzoni: n/2")' });
+  } else {
+    const quotaLine = dynamicPart.match(/Weekly generation quota for this user — ([^\n]+)/)?.[1] || '';
+    for (const label of labels) {
+      if (!new RegExp(`${label}: \\d+\\/\\d+`).test(quotaLine)) {
+        ISSUES.push({ caseId, msg: `weekly media quota line missing ${label}` });
+      }
+    }
+    for (const absent of ['Immagini', 'Video', 'Canzoni'].filter(label => !labels.includes(label))) {
+      if (quotaLine.includes(`${absent}:`)) {
+        ISSUES.push({ caseId, msg: `weekly media quota line exposes unavailable ${absent}` });
+      }
+    }
   }
 }
 
@@ -486,10 +600,19 @@ function _validateSettingsBlocks(dynamicPart, prompt, id, caseId) {
   } else if (!settingsBlock) {
     ISSUES.push({ caseId, msg: 'WhatsApp case missing CurrentSettings block in Runtime' });
   } else {
-    for (const field of ['Voice:', 'Effort:', 'Language:', 'Memory:', 'Last update:']) {
+    const allowVoice = VOICE_CASES.includes(id);
+    const fields = ['Effort:', 'Language:', 'Memory:', 'Last update:'];
+    if (allowVoice && getActiveTtsCapabilities().selectableVoices) fields.unshift('Voice:');
+    for (const field of fields) {
       if (!settingsBlock[0].includes(field)) {
         ISSUES.push({ caseId, msg: `CurrentSettings missing "${field}" line` });
       }
+    }
+    if ((!allowVoice || !getActiveTtsCapabilities().selectableVoices) && settingsBlock[0].includes('Voice:')) {
+      ISSUES.push({ caseId, msg: 'CurrentSettings exposes an inactive TTS voice selector' });
+    }
+    if (!allowVoice && /voice:true|spoken replies|voice replies/i.test(settingsBlock[0])) {
+      ISSUES.push({ caseId, msg: 'text-only platform exposes voice-reply guidance in CurrentSettings' });
     }
     if (!/\((default|custom)\)/.test(settingsBlock[0])) {
       ISSUES.push({ caseId, msg: 'CurrentSettings missing (default)/(custom) markers' });
@@ -498,7 +621,10 @@ function _validateSettingsBlocks(dynamicPart, prompt, id, caseId) {
       ISSUES.push({ caseId, msg: '<Memory> is forbidden; settings belong in <CurrentSettings>' });
     }
     // Customized cases must be flagged as custom, all-default ones never.
-    const wantsCustom = CUSTOM_SETTINGS_CASES.includes(id);
+    const supplied = _ctx(id).settings;
+    const preferenceOptions = { allowVoice };
+    const wantsCustom = CUSTOM_SETTINGS_CASES.includes(id)
+      && customizedFields({ ...defaultSettings(preferenceOptions), ...(supplied || {}) }, preferenceOptions).length > 0;
     if (wantsCustom !== /\(custom\)/.test(settingsBlock[0])) {
       ISSUES.push({ caseId, msg: `(custom) marker does not match the case settings (custom: ${wantsCustom})` });
     }
@@ -535,6 +661,7 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
 
   _validateStaticShape(staticPart, prompt, caseId);
   _validateNoStaleClaims(staticPart, prompt, caseId);
+  _validateProviderGuidance(staticPart, caseId);
   _validateStaticDynamicSplit(staticPart, dynamicPart, caseId);
   _validateWorkspaceBlock(dynamicPart, id, caseId);
   _validateDiscordSplit(staticPart, dynamicPart, id, caseId);

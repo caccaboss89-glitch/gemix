@@ -13,6 +13,29 @@ import { readTaskFile  } from '../utils/taskStore.js';
 import { formatTimestamp  } from '../utils/time.js';
 import { normalizePersistedRecurrence, describeRecurrence  } from '../utils/recurrence.js';
 import { formatTaskRecipient  } from '../utils/taskRecipient.js';
+import { projectTaskForTool, taskOperationResult, taskToolFailure } from '../utils/taskToolResult.js';
+
+function _readFailure(error) {
+  return taskToolFailure(error);
+}
+
+function _taskList(data, label) {
+  if (!data) return { ok: true, tasks: [] };
+  if (!Array.isArray(data.tasks)) {
+    return { ok: false, error: `${label} task file has an invalid tasks field.` };
+  }
+  const invalidIndex = data.tasks.findIndex(task => (
+    !task
+    || typeof task !== 'object'
+    || typeof task.id !== 'string'
+    || typeof task.content !== 'string'
+    || typeof task.scheduledAt !== 'string'
+  ));
+  if (invalidIndex >= 0) {
+    return { ok: false, error: `${label} task file contains an invalid reminder at index ${invalidIndex}.` };
+  }
+  return { ok: true, tasks: data.tasks };
+}
 
 /**
  * Format a single task line.
@@ -26,7 +49,7 @@ import { formatTaskRecipient  } from '../utils/taskRecipient.js';
 function _formatTask(t, i, ctx, showRecipient) {
   let line = `${i + 1}. "${t.content.substring(0, 80)}${t.content.length > 80 ? '...' : ''}" – ${formatTimestamp(t.scheduledAt)}`;
 
-  const recurrence = normalizePersistedRecurrence(t.recurrence);
+  const recurrence = normalizePersistedRecurrence(t.recurrence, t.scheduledAt);
   if (recurrence) {
     line += ` | ${describeRecurrence(recurrence, 'en')}`;
     if (recurrence.until) line += ` until ${formatTimestamp(recurrence.until)}`;
@@ -62,38 +85,71 @@ function _formatTask(t, i, ctx, showRecipient) {
  * @param {string|null} groupTaskFileId - The group's task file ID for group-specific tasks, or null
  * @param {boolean} includeGroup - Whether to include group tasks in the result
  * @param {object} [ctx] - Caller context { isAdmin, isActiveMember, waJid } for recipient display
- * @returns {object} { success, message } with the formatted task list
+ * @returns {object} Human-readable text plus stable count/tasks/results/ids/errors fields.
  */
 async function readTasks(taskFileId, groupTaskFileId = null, includeGroup = false, ctx = {}) {
-  let result = '';
-
   let personalData;
   try {
     personalData = await readTaskFile(taskFileId);
   } catch (err) {
-    return { success: false, error: err.message };
+    return _readFailure(err.message);
   }
-  if (personalData && personalData.tasks && personalData.tasks.length > 0) {
-    result += 'Your personal reminders:\n';
-    result += personalData.tasks.map((t, i) => _formatTask(t, i, ctx, true)).join('\n');
-  } else {
-    result += 'No personal reminders scheduled.';
-  }
+  const personal = _taskList(personalData, 'Personal');
+  if (!personal.ok) return _readFailure(personal.error);
 
+  let groupTasks = [];
   if (includeGroup && groupTaskFileId) {
     let groupData;
     try {
       groupData = await readTaskFile(groupTaskFileId);
     } catch (err) {
-      return { success: false, error: err.message };
+      return _readFailure(err.message);
     }
-    if (groupData && groupData.tasks && groupData.tasks.length > 0) {
-      result += '\n\nGroup reminders:\n';
-      result += groupData.tasks.map((t, i) => _formatTask(t, i, ctx, false)).join('\n');
-    }
+    const group = _taskList(groupData, 'Group');
+    if (!group.ok) return _readFailure(group.error);
+    groupTasks = group.tasks;
   }
 
-  return { success: true, message: result || 'No reminders scheduled.' };
+  let message = '';
+  if (personal.tasks.length > 0) {
+    message += 'Your personal reminders:\n';
+    message += personal.tasks.map((t, i) => _formatTask(t, i, ctx, true)).join('\n');
+  } else {
+    message += 'No personal reminders scheduled.';
+  }
+
+  if (groupTasks.length > 0) {
+    message += '\n\nGroup reminders:\n';
+    message += groupTasks.map((t, i) => _formatTask(t, i, ctx, false)).join('\n');
+  }
+
+  const tasks = [
+    ...personal.tasks.map(task => projectTaskForTool(task, {
+      scope: 'personal',
+      recipient: formatTaskRecipient(task.destinations, {
+        isAdmin: ctx.isAdmin,
+        waJid: ctx.waJid,
+        groupWord: 'group'
+      }) || null
+    })),
+    ...groupTasks.map(task => projectTaskForTool(task, { scope: 'group', recipient: 'group' }))
+  ];
+  const results = tasks.map((task, index) => taskOperationResult({
+    index,
+    id: task.id,
+    success: true
+  }));
+
+  return {
+    success: true,
+    status: 'ok',
+    count: tasks.length,
+    tasks,
+    results,
+    ids: tasks.map(task => task.id),
+    errors: [],
+    message: message || 'No reminders scheduled.'
+  };
 }
 
 export { readTasks };

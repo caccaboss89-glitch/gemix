@@ -82,6 +82,21 @@ test('the count is clamped instead of passed through', async () => {
   assert.equal(Number(lastParams().get('count')), constants.SEARCH_WEB_DEFAULT_COUNT);
 });
 
+test('an over-returning sidecar is sliced to the requested result count', async () => {
+  stubSidecar(200, {
+    results: Array.from({ length: 5 }, (_, index) => ({
+      ...HIT,
+      url: `https://example.org/result-${index}`
+    })),
+    meta: {}
+  });
+  const responseCtx = { researchStats: null };
+  const res = await searchWeb({ query: 'x', count: 2 }, responseCtx);
+
+  assert.equal(res.results.length, 2);
+  assert.equal(responseCtx.researchStats.webSources, 2);
+});
+
 test('a result with no usable URL is dropped rather than shown', async () => {
   stubSidecar(200, { results: [HIT, { title: 'ghost', snippet: 'no url' }], meta: {} });
   const res = await searchWeb({ query: 'x' });
@@ -149,7 +164,7 @@ test('the sources found feed the research badge', async () => {
   await searchWeb({ query: 'x' }, responseCtx);
 
   assert.equal(responseCtx.researchStats.webSources, 2);
-  assert.equal(responseCtx.researchStats.xPosts, 0);
+  assert.equal(responseCtx.researchStats.xSearches, 0);
 });
 
 test('a missing query never reaches the network', async () => {
@@ -274,7 +289,7 @@ test('each successfully read page adds one source to this turn only', async () =
   await readPage({ url: 'https://example.org/a' }, responseCtx);
   await readPage({ url: 'https://example.org/b' }, responseCtx);
 
-  assert.deepEqual(responseCtx.researchStats, { webSources: 2, xPosts: 0 });
+  assert.deepEqual(responseCtx.researchStats, { webSources: 2, xSearches: 0 });
 });
 
 test('an untrustworthy domain is still read, with the caveat attached', async () => {
@@ -285,8 +300,23 @@ test('an untrustworthy domain is still read, with the caveat attached', async ()
   const res = await readPage({ url: 'https://exarnple.org' });
 
   assert.equal(res.success, true);
-  assert.equal(res.status, 'ok');
+  assert.equal(res.status, 'degraded');
   assert.match(res.warning, /untrustworthy/);
+});
+
+test('read_page preserves a sidecar warning and marks the extraction degraded', async () => {
+  stubSidecar(200, {
+    url: 'https://example.org/warned',
+    content: 'Readable but incomplete page.',
+    chars: 29,
+    success: true,
+    warning: 'The extractor detected a possible paywall.'
+  });
+  const res = await readPage({ url: 'https://example.org/warned' });
+
+  assert.equal(res.success, true);
+  assert.equal(res.status, 'degraded');
+  assert.equal(res.warning, 'The extractor detected a possible paywall.');
 });
 
 test('a page every strategy failed on names what was tried', async () => {

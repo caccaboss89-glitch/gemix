@@ -3,13 +3,16 @@
 // Outbound delivery and sent-message audit schemas. These builders vary by
 // membership and admin status.
 
+import constants from '../../config/constants.js';
 import { makeTool } from './schema.js';
 
 const MAX_DELIVERY_ATTACHMENTS = 10;
+const E164_PHONE_PATTERN = '^\\+[1-9][0-9]{7,14}$';
+const EMAIL_PATTERN = '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$';
 
 const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
-  items: { type: 'string' },
+  items: { type: 'string', minLength: 1 },
   maxItems: MAX_DELIVERY_ATTACHMENTS,
   description: `OPTIONAL, up to ${MAX_DELIVERY_ATTACHMENTS}. Same entry types as reply attachments: a path exactly as you saw it, or a direct public https file URL. Omit if none.`
 };
@@ -19,6 +22,7 @@ function buildWhatsAppTool(isAdmin) {
     ? {
       phone: {
         type: 'string',
+        pattern: E164_PHONE_PATTERN,
         description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user. Required — external number only.'
       }
     }
@@ -27,7 +31,7 @@ function buildWhatsAppTool(isAdmin) {
     name: 'send_whatsapp_message',
     description: 'Delivery tool — submit a message to a specific phone number. A successful result means WhatsApp accepted the outbound send, not that the device received or read it. Never for intermediate updates in the current chat. Start by saying on whose behalf you\'re writing.',
     properties: {
-      message: { type: 'string', description: 'Message text. WhatsApp formatting only — no Markdown links.' },
+      message: { type: 'string', minLength: 1, description: 'Message text. WhatsApp formatting only — no Markdown links.' },
       recipient: {
         type: 'object',
         description: isAdmin
@@ -44,7 +48,13 @@ function buildWhatsAppTool(isAdmin) {
 
 function buildEmailTool(isAdmin) {
   const recipientProps = isAdmin
-    ? { email: { type: 'string', description: 'Recipient email address, from the ActiveMembers roster or given by the user.' } }
+    ? {
+      email: {
+        type: 'string',
+        pattern: EMAIL_PATTERN,
+        description: 'Recipient email address, from the ActiveMembers roster or given by the user.'
+      }
+    }
     : { name: { type: 'string', description: 'Member name (email resolved from name)' } };
   return makeTool({
     name: 'send_email',
@@ -52,9 +62,10 @@ function buildEmailTool(isAdmin) {
       + 'To review what GemiX already sent on their behalf, use read_sent_messages. '
       + 'If on behalf of someone else, start by saying on whose behalf you\'re writing.',
     properties: {
-      subject: { type: 'string', description: 'Email subject' },
+      subject: { type: 'string', minLength: 1, description: 'Email subject' },
       body: {
         type: 'string',
+        minLength: 1,
         description: 'HTML body (no markdown), rendered as real HTML by the mail client — inline CSS styling, tables and colors are supported. '
           + 'To show an image INSIDE the body, list it in attachments[] and reference it as &lt;img src="cid:FILENAME"&gt; with its exact filename; '
           + 'files not referenced this way are sent as normal attachments.'
@@ -86,7 +97,8 @@ function buildReadSentMessagesTool(isAdmin) {
       },
       recipients: {
         type: 'array',
-        items: { type: 'string' },
+        maxItems: constants.SENT_MESSAGES_MAX_RECIPIENT_FILTERS,
+        items: { type: 'string', minLength: 1 },
         description: isAdmin
           ? 'OPTIONAL filter, any mix of phone numbers (with country code, e.g. +393XXXXXXXXX) and/or email addresses, from the ActiveMembers roster or given by the user. A phone matches WhatsApp messages, an email matches email messages. Omit to list every recipient.'
           : 'OPTIONAL filter by active member name(s) — mapped to their WhatsApp number and email. Omit to list every recipient.'

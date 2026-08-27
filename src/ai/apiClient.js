@@ -1,15 +1,17 @@
 // src/ai/apiClient.js
 //
 // HTTP plumbing for the xAI endpoints that are NOT the Responses main brain:
-// Grok Imagine image/video and xAI TTS. Retry, timeout, structured
-// request/response logging is shared with the main-brain transport.
+// Grok Imagine image/video, xAI TTS and xAI STT. Retry, timeout and
+// request/response logging are shared with the main-brain transport.
 //
 // This module is limited to the xAI media stack, routed through the media
 // backends. Main-brain requests use OpenAIResponsesTransport with a
 // CredentialProvider.
 
-import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import crypto from 'node:crypto';
+import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
 import constants from '../config/constants.js';
+import envConfig from '../config/env.js';
 import { getXaiServiceAuth, markXaiServiceStatus  } from './credentials/xaiServiceCredentials.js';
 import { createLogger  } from '../utils/logger.js';
 import { signalWithTimeout, sleepWithin } from '../utils/turnBudget.js';
@@ -21,6 +23,78 @@ import {
 } from './apiLogs.js';
 
 const log = createLogger('API');
+
+function _headersForLog(headers) {
+  if (!headers) return {};
+  if (typeof headers.entries === 'function') return Object.fromEntries(headers.entries());
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return { ...headers };
+}
+
+function _requestBodyForLog(body) {
+  if (body === null || body === undefined) return null;
+  if (typeof body === 'string') {
+    try { return JSON.parse(body); }
+    catch { return body; }
+  }
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    const fields = {};
+    for (const [key, value] of body.entries()) {
+      const logged = typeof value === 'string'
+        ? value
+        : {
+          filename: typeof value?.name === 'string' ? value.name : null,
+          type: typeof value?.type === 'string' ? value.type : null,
+          size: Number.isFinite(value?.size) ? value.size : null
+        };
+      if (Object.hasOwn(fields, key)) {
+        fields[key] = Array.isArray(fields[key]) ? [...fields[key], logged] : [fields[key], logged];
+      } else {
+        fields[key] = logged;
+      }
+    }
+    return { type: 'multipart/form-data', fields };
+  }
+  return body;
+}
+
+function _parseLoggedText(text) {
+  if (!text) return '';
+  try { return JSON.parse(text); }
+  catch { return text; }
+}
+
+/** Read a clone so logging never consumes the Response returned to its caller. */
+async function _responseForLog(response) {
+  const headers = _headersForLog(response?.headers);
+  const contentType = String(response?.headers?.get?.('content-type') || '');
+  const http = { status: response?.status ?? null, headers };
+  if (!response?.clone) return { http, body: '<response body unavailable>' };
+  const clone = response.clone();
+  if (/^(?:audio|image|video)\//i.test(contentType) || /^application\/octet-stream/i.test(contentType)) {
+    return { http, body: Buffer.from(await clone.arrayBuffer()) };
+  }
+  return { http, body: _parseLoggedText(await clone.text()) };
+}
+
+function _writeServiceLog(kind, label, url, body, extra) {
+  if (kind === 'request') return logApiRequest(label, url, body, extra);
+  return logApiResponse(label, url, body, extra);
+}
+
+async function _writeResponseSnapshot(label, url, response, extra) {
+  try {
+    _writeServiceLog('response', label, url, await _responseForLog(response), extra);
+  } catch (err) {
+    _writeServiceLog('response', label, url, {
+      http: {
+        status: response?.status ?? null,
+        headers: _headersForLog(response?.headers)
+      },
+      error: { name: err.name, message: `Could not capture response body: ${err.message}` }
+    }, extra);
+  }
+}
 
 function _formatRateLimitLog(status, errBody, headers) {
   const parts = [`HTTP ${status} (rate limit / quota)`];
@@ -46,14 +120,19 @@ function _formatRateLimitLog(status, errBody, headers) {
   return parts.join(' — ');
 }
 
-function _isOAuthCredentialError(errMsg) {
+function _isCredentialRejection(errMsg) {
   if (!errMsg || typeof errMsg !== 'string') return false;
   if (/^HTTP 401\b/.test(errMsg)) return true;
   if (/^HTTP 403\b/.test(errMsg)
-    && /bad-credentials|unauthenticated|could not be validated/i.test(errMsg)) {
+    && /bad-credentials|unauthenticated|could not be validated|(?:api[ _-]?key|token).*(?:invalid|revoked|rejected)|(?:invalid|revoked|rejected).*(?:api[ _-]?key|token)/i.test(errMsg)) {
     return true;
   }
   return false;
+}
+
+/** Only OAuth credentials can be refreshed after an upstream rejection. */
+function _isOAuthCredentialError(errMsg) {
+  return !envConfig.XAI_USE_API_KEY && _isCredentialRejection(errMsg);
 }
 
 /**
@@ -90,11 +169,11 @@ const GROK_CREDIT_EXHAUSTED_CODE = 'GROK_CREDIT_EXHAUSTED';
  * an expected state, and the tool result already tells the model what happened.
  * The main brain has its own typed equivalent (transport QUOTA + errorPolicy).
  *
- * Covers the bare spending-limit body (`personal-team-blocked:spending-limit`)
- * and its later form: once the SuperGrok team credits run out, xAI's
- * spending-limit body morphs into an OAuth "bad-credentials" body
- * (`unauthenticated:bad-credentials` / "OAuth2 access token could not be
- * validated"), which in this deployment means the same thing.
+ * The explicit spending-limit code is quota under either auth mode. Once a
+ * SuperGrok OAuth allowance runs out it can instead surface as
+ * `unauthenticated:bad-credentials` / "OAuth2 access token could not be
+ * validated". A static API key can produce that same text when it is bad or
+ * revoked, so only OAuth may reinterpret it as quota.
  * @param {string|null|undefined} errMsg
  * @returns {boolean}
  */
@@ -102,16 +181,25 @@ function _isGrokCreditExhaustedError(errMsg) {
   if (typeof errMsg !== 'string' || !errMsg) return false;
   const code = _http403Code(errMsg);
   if (code === 'personal-team-blocked:spending-limit') return true;
+  if (envConfig.XAI_USE_API_KEY) return false;
   if (code && code.startsWith('unauthenticated')) return true;
   return errMsg.includes('HTTP 403:') && /could not be validated/i.test(errMsg);
+}
+
+/** The auth/quota distinction shared by media retry and status handling. */
+function _classifyXaiServiceAuthOrQuota(errMsg) {
+  if (_isGrokCreditExhaustedError(errMsg)) return 'QUOTA';
+  if (_isCredentialRejection(errMsg)) return 'AUTH';
+  return null;
 }
 
 /**
  * POST to an xAI media endpoint with retry and timeout logic.
  *
  * The bearer is resolved per attempt from the shared xAI CredentialProvider,
- * which refreshes proactively; a rejected credential forces one in-process
- * refresh before the retry.
+ * which refreshes proactively. An OAuth credential rejected by xAI forces one
+ * in-process refresh; a static API key is reported as AUTH without a fake
+ * refresh attempt.
  *
  * @param {string} modelName - Model name for logging (e.g., 'Grok-Imagine')
  * @param {string} apiUrl - Full API endpoint URL
@@ -130,14 +218,24 @@ async function callApiWithRetry(
   timeoutMs = constants.API_TIMEOUT_MS,
   opts = {}
 ) {
-  logApiRequest(modelName, apiUrl, body, logExtra);
   const callerSignal = opts.signal || null;
+  const apiLogId = crypto.randomUUID();
+  let networkAttempt = 0;
   let forceCredentialRefresh = false;
   let rejectedAccountId = null;
   let credentialRefreshAttempted = false;
   for (let attempt = 1; attempt <= constants.MAX_API_RETRIES; attempt++) {
     const attemptStarted = Date.now();
+    const thisNetworkAttempt = ++networkAttempt;
+    const logMeta = {
+      ...logExtra,
+      apiLogId,
+      transport: 'xai-service',
+      attempt: thisNetworkAttempt,
+      method: 'POST'
+    };
     let requestAccountId = null;
+    let responseLogged = false;
     try {
       if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
       const { token, accountId } = await getXaiServiceAuth({
@@ -148,6 +246,8 @@ async function callApiWithRetry(
       forceCredentialRefresh = false;
       rejectedAccountId = null;
       const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
+
+      _writeServiceLog('request', modelName, apiUrl, _requestBodyForLog(body), logMeta);
 
       const res = await fetch(apiUrl, {
         method: 'POST',
@@ -162,6 +262,11 @@ async function callApiWithRetry(
 
       if (!res.ok) {
         const errBody = await res.text();
+        _writeServiceLog('response', modelName, apiUrl, {
+          http: { status: res.status, headers: _headersForLog(res.headers) },
+          body: _parseLoggedText(errBody)
+        }, { ...logMeta, durationMs: duration });
+        responseLogged = true;
         const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
         if (res.status === 429) {
           log.warn(`   ${_formatRateLimitLog(res.status, errBody, res.headers)}`);
@@ -169,12 +274,23 @@ async function callApiWithRetry(
         throw new Error(`HTTP ${res.status}: ${shortErr}`);
       }
 
+      await _writeResponseSnapshot(modelName, apiUrl, res, {
+        ...logMeta,
+        durationMs: duration
+      });
+      responseLogged = true;
       log.debug(`   Model: ${modelName} - ${duration}ms${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
       await markXaiServiceStatus('ok', requestAccountId);
       return res;
     } catch (err) {
-      if (callerSignal?.aborted) throw callerSignal.reason || err;
       const attemptMs = Date.now() - attemptStarted;
+      if (!responseLogged) {
+        _writeServiceLog('response', modelName, apiUrl, {
+          http: null,
+          error: { name: err.name, message: err.message }
+        }, { ...logMeta, durationMs: attemptMs });
+      }
+      if (callerSignal?.aborted) throw callerSignal.reason || err;
       const isTimeout = err.name === 'AbortError'
         || err.name === 'TimeoutError'
         || (err.message && err.message.includes('524'));
@@ -212,14 +328,24 @@ async function callApiWithRetry(
       }
 
       log.error(`   API error after ${attempt} attempt(s), last try ${Math.round(attemptMs / 1000)}s: ${errMsg}`);
-      if (_isGrokCreditExhaustedError(errMsg)) {
+      const authOrQuota = _classifyXaiServiceAuthOrQuota(errMsg);
+      if (authOrQuota === 'QUOTA') {
         await markXaiServiceStatus('quota', requestAccountId);
         const creditErr = new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
         creditErr.code = GROK_CREDIT_EXHAUSTED_CODE;
         throw creditErr;
       }
-      await notifyAdmin(`API (${modelName})`, `Error after ${attempt} attempt(s): ${errMsg}`);
-      throw new Error(`${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
+      if (authOrQuota === 'AUTH') {
+        await markXaiServiceStatus('auth_failed', requestAccountId);
+      }
+      const notification = await notifyAdminDetailed(
+        `API (${modelName})`,
+        `Error after ${attempt} attempt(s): ${errMsg}`
+      );
+      throw new Error(
+        `${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}`
+        + buildAdminNotificationNote(notification)
+      );
     }
   }
   // Defensive invariant: every path above returns or throws, so callers never
@@ -239,13 +365,28 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : constants.API_TIMEOUT_MS;
   const maxAttempts = Number.isFinite(opts.maxAttempts) ? opts.maxAttempts : constants.MAX_API_RETRIES;
   const callerSignal = opts.signal || null;
+  const label = typeof opts.logLabel === 'string' && opts.logLabel.trim()
+    ? opts.logLabel.trim()
+    : 'xAI-Service';
+  const apiLogId = crypto.randomUUID();
+  let networkAttempt = 0;
   let forceCredentialRefresh = false;
   let rejectedAccountId = null;
   let credentialRefreshAttempted = false;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const attemptStarted = Date.now();
+    const thisNetworkAttempt = ++networkAttempt;
+    const method = String(options.method || 'GET').toUpperCase();
+    const logMeta = {
+      apiLogId,
+      transport: 'xai-service',
+      attempt: thisNetworkAttempt,
+      method
+    };
     let requestAccountId = null;
+    let responseLogged = false;
     try {
       if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
       const { token, accountId } = await getXaiServiceAuth({
@@ -256,6 +397,12 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
       forceCredentialRefresh = false;
       rejectedAccountId = null;
       const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
+
+      _writeServiceLog('request', label, url, {
+        method,
+        headers: _headersForLog(options.headers),
+        body: _requestBodyForLog(options.body)
+      }, logMeta);
 
       const res = await fetch(url, {
         ...options,
@@ -269,6 +416,11 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
+        _writeServiceLog('response', label, url, {
+          http: { status: res.status, headers: _headersForLog(res.headers) },
+          body: _parseLoggedText(errBody)
+        }, { ...logMeta, durationMs: Date.now() - attemptStarted });
+        responseLogged = true;
         const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
         const errMsg = `HTTP ${res.status}: ${shortErr}`;
 
@@ -287,9 +439,20 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
         throw new Error(errMsg);
       }
 
+      await _writeResponseSnapshot(label, url, res, {
+        ...logMeta,
+        durationMs: Date.now() - attemptStarted
+      });
+      responseLogged = true;
       await markXaiServiceStatus('ok', requestAccountId);
       return res;
     } catch (err) {
+      if (!responseLogged) {
+        _writeServiceLog('response', label, url, {
+          http: null,
+          error: { name: err.name, message: err.message }
+        }, { ...logMeta, durationMs: Date.now() - attemptStarted });
+      }
       if (callerSignal?.aborted) throw callerSignal.reason || err;
       lastError = err;
       const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError';
@@ -308,6 +471,11 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
 }
 
 export {
+  _classifyXaiServiceAuthOrQuota,
+  _isGrokCreditExhaustedError,
+  _isOAuthCredentialError,
+  _requestBodyForLog,
+  _responseForLog,
   callApiWithRetry,
   logApiResponse,
   fetchXaiWithOAuthRetry,

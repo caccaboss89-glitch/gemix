@@ -34,7 +34,7 @@ import {
   cleanIncomingText,
   formatLabeledUserContent
 } from '../../utils/text.js';
-import { notifyAdmin } from '../../utils/adminNotifier.js';
+import { notifyAdminDetailed, withAdminNotificationPolicy } from '../../utils/adminNotifier.js';
 import { sanitizeDiscordThreadTitle  } from '../../utils/discord.js';
 import { fetchHistoryWithTimeout  } from '../../utils/historyFetch.js';
 import { runTurnPipeline  } from '../../utils/turnPipeline.js';
@@ -455,9 +455,16 @@ async function _handleDiscordBatch(entries) {
     deliver: async (_ctx, response) => {
       await deliverDiscordResponse(channel, response);
     },
-    onDeliverError: async (_ctx, err) => {
+    onDeliverError: async (ctx, err) => {
       try {
-        await notifyAdmin('Discord Chat Delivery', `Failed to send response in channel ${channel.id}: ${err.message}`);
+        const adminIsCaller = Boolean(ctx?.userIdentity?.isAdmin);
+        await withAdminNotificationPolicy({
+          suppress: adminIsCaller,
+          reason: adminIsCaller ? 'The administrator is the current caller.' : ''
+        }, () => notifyAdminDetailed(
+          'Discord Chat Delivery',
+          `Failed to send response in channel ${channel.id}: ${err.message}`
+        ));
       } catch { /* ignore */ }
       try {
         await channel.send({ content: '❌ Si è verificato un errore nell\'invio della risposta.' });

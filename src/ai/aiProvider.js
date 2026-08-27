@@ -89,7 +89,6 @@ async function callAI(items, tools = null, opts = {}) {
   const context = {
     promptCacheKey: opts.promptCacheKey || null,
     maxTurns: Number.isFinite(opts.maxTurns) ? opts.maxTurns : undefined,
-    requestId: opts.requestId || null,
     round: Number.isFinite(opts.round) ? opts.round : null,
     phase: opts.phase || null
   };
@@ -98,14 +97,16 @@ async function callAI(items, tools = null, opts = {}) {
     model: profile.model,
     input: buildResponsesInput(items, { replayableItemTypes }),
     reasoningEffort: _resolveEffort(profile, opts.reasoningEffort),
-    tools: toolsToWire(tools),
+    tools: toolsToWire(tools, profile.wire),
     toolChoice: opts.toolChoice || 'auto',
     responseFormat: opts.responseFormat || null,
     // Only where the endpoint accepts it: the Codex backend rejects the
     // parameter with HTTP 400 and fails the whole call, so an endpoint that
     // bounds the answer on its own terms simply gets no cap from us.
     maxOutputTokens: profile.wire.supportsMaxOutputTokens ? constants.MAX_TOKENS : null,
-    promptCacheKey: opts.promptCacheKey || null,
+    // Optional Responses fields are opt-in per profile: merely satisfying the
+    // required wire contract does not promise that an endpoint accepts them.
+    promptCacheKey: profile.wire.supportsPromptCacheKey ? (opts.promptCacheKey || null) : null,
     // Stateless reasoning replay: the encrypted chain has to come back on the
     // response or the next round starts the model's thinking from scratch.
     include: profile.wire.supportsReasoningReplay ? ['reasoning.encrypted_content'] : null
@@ -124,7 +125,7 @@ async function callAI(items, tools = null, opts = {}) {
   const read = readResponse(response, { replayableItemTypes });
   const searchStats = profile.extensions?.extractSearchStats
     ? profile.extensions.extractSearchStats(response)
-    : { webSources: 0, xPosts: 0 };
+    : { webSources: 0, xSearches: 0 };
 
   if (read.incompleteReason) {
     log.warn(`   response incomplete (${read.incompleteReason})`);

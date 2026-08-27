@@ -87,13 +87,16 @@ function getMediaUsage(userKey) {
 /**
  * Format the usage counts for the Runtime trailer weekly quota line.
  * @param {string} userKey
+ * @param {Array<'image'|'video'|'song'>} [kinds]
  * @returns {string} e.g. "Video: 1/2 · Immagini: 3/5 · Canzoni: 0/2"
  */
-function formatQuotaCounts(userKey) {
+function formatQuotaCounts(userKey, kinds = ['video', 'image', 'song']) {
   const u = getMediaUsage(userKey);
-  return `Video: ${u.video}/${MEDIA_WEEKLY_LIMITS.video} · `
-    + `Immagini: ${u.image}/${MEDIA_WEEKLY_LIMITS.image} · `
-    + `Canzoni: ${u.song}/${MEDIA_WEEKLY_LIMITS.song}`;
+  const labels = { video: 'Video', image: 'Immagini', song: 'Canzoni' };
+  return kinds
+    .filter(kind => Object.hasOwn(MEDIA_WEEKLY_LIMITS, kind))
+    .map(kind => `${labels[kind]}: ${u[kind]}/${MEDIA_WEEKLY_LIMITS[kind]}`)
+    .join(' · ');
 }
 
 /**

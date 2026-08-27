@@ -9,7 +9,7 @@ import path from 'path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import constants from '../config/constants.js';
-import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from './adminNotifier.js';
+import { buildAdminNotificationNote, notifyAdminDetailed } from './adminNotifier.js';
 import { openPublicHttp } from './publicHttp.js';
 import { signalWithTimeout } from './turnBudget.js';
 
@@ -115,22 +115,22 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = constants.FETCH_T
  * @returns {Promise<Response>} The fetch Response object
  */
 async function fetchExternal(url, options = {}, source = null, timeoutMs = constants.FETCH_TIMEOUT_MS) {
+  let res;
   try {
-    const res = await fetchWithTimeout(url, options, timeoutMs);
-    if (!res.ok && source) {
-      const errMsg = `HTTP Error ${res.status}`;
-      await notifyAdmin(source, errMsg);
-      throw new Error(`${errMsg}${ADMIN_NOTIFIED_SUFFIX}`);
-    }
-    return res;
+    res = await fetchWithTimeout(url, options, timeoutMs);
   } catch (err) {
     if (source) {
-      await notifyAdmin(source, err.message);
-      const notifiedErr = new Error(`${err.message}${ADMIN_NOTIFIED_SUFFIX}`);
-      throw notifiedErr;
+      const notification = await notifyAdminDetailed(source, err.message);
+      throw new Error(`${err.message}${buildAdminNotificationNote(notification)}`, { cause: err });
     }
     throw err;
   }
+  if (!res.ok && source) {
+    const errMsg = `HTTP Error ${res.status}`;
+    const notification = await notifyAdminDetailed(source, errMsg);
+    throw new Error(`${errMsg}${buildAdminNotificationNote(notification)}`);
+  }
+  return res;
 }
 
 /**

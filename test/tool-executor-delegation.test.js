@@ -63,6 +63,12 @@ test('task executor receives platform and group arguments', async () => {
     userCtx: { ...DISCORD_CTX, isGroup: true, groupId: 'discord-group' }
   });
   assert.match(result.error, /only in WhatsApp groups/);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.count, 0);
+  assert.deepEqual(result.tasks, []);
+  assert.deepEqual(result.results, []);
+  assert.deepEqual(result.ids, []);
+  assert.equal(result.errors.length, 1);
 });
 
 test('delivery executor receives membership context', async () => {

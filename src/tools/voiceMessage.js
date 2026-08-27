@@ -19,13 +19,13 @@ import googleTTS from 'google-tts-api';
 import { spawn  } from 'child_process';
 import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
 import { fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
-import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
 import { createLogger  } from '../utils/logger.js';
 import { defaultSettings  } from '../utils/settingsStore.js';
+import { stripVoiceTags } from '../utils/text.js';
 import envConfig from '../config/env.js';
 import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
-import { FEATURE, backendFor  } from '../features/featureBindings.js';
-import { resolveProviderProfile  } from '../ai/providers/providerProfile.js';
+import { TTS_BACKEND, getActiveTtsCapabilities } from '../media/ttsCapabilities.js';
 import { signalWithTimeout } from '../utils/turnBudget.js';
 
 const log = createLogger('TTS');
@@ -44,22 +44,6 @@ const TTS_OUTPUT_FORMAT = { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 }
 /** Language passed to the Google Translate fallback (which takes a bare code). */
 function _baseLanguage(language) {
   return String(language || 'it').split('-')[0].toLowerCase();
-}
-
-/**
- * Strip vocal effect tags from text.
- * Removes both inline tags [xxx] and wrapping tags <xxx>...</xxx>.
- * Used when falling back to Google Translate which doesn't support vocal
- * effects. Also useful when the model's text accidentally contains tags.
- * @param {string} text - Text potentially containing vocal effect markup
- * @returns {string} Cleaned text with all effect tags removed and spaces normalized
- */
-function stripVocalTags(text) {
-  return text
-    .replace(/\[[\w:-]+\]/g, '')       // [pause], [laugh], etc.
-    .replace(/<\/?[\w-]+>/g, '')       // <soft>, </soft>, etc.
-    .replace(/\s{2,}/g, ' ')
-    .trim();
 }
 
 /**
@@ -165,21 +149,11 @@ async function generateVoice(text, settings = {}, opts = {}) {
   }
 }
 
-/**
- * True when xAI TTS is both bound on this profile and switched on. Both have to
- * hold: the binding says the service belongs to this provider at all, the flag
- * is the operator's own kill switch for it.
- */
-function xaiTtsIsPrimary() {
-  return backendFor(resolveProviderProfile(), FEATURE.TTS) === 'xai-tts'
-    && Boolean(envConfig.XAI_TTS_ENABLED);
-}
-
 async function _generateVoice(text, settings, signal) {
   const defaults = defaultSettings();
   const voiceId = settings?.voice || defaults.voice || envConfig.XAI_TTS_VOICE;
   const language = settings?.language || defaults.language;
-  const xaiPrimary = xaiTtsIsPrimary();
+  const xaiPrimary = getActiveTtsCapabilities().backend === TTS_BACKEND.XAI;
 
   if (xaiPrimary) {
     try {
@@ -189,7 +163,7 @@ async function _generateVoice(text, settings, signal) {
     } catch (err) {
       if (signal?.aborted) throw err;
       log.warn('xAI TTS failed, falling back to Google Translate:', err.message);
-      await notifyAdmin('xAI TTS (Fallback)', err.message);
+      await notifyAdminDetailed('xAI TTS (Fallback)', err.message);
     }
   }
 
@@ -198,7 +172,7 @@ async function _generateVoice(text, settings, signal) {
   // Google Translate TTS fallback. Strip vocal tags defensively before use,
   // as the text may contain vocal tags. It has no voice selection: only the
   // language is honoured here, so the chosen voice id does not apply.
-  const cleanText = stripVocalTags(text);
+  const cleanText = stripVoiceTags(text).replace(/\s{2,}/g, ' ').trim();
 
   try {
     return await googleTranslateTTS(cleanText, language, signal);
@@ -206,8 +180,11 @@ async function _generateVoice(text, settings, signal) {
     if (signal?.aborted) throw err;
     if (!xaiPrimary) {
       // Google Translate was the primary here, so its failure is the failure.
-      await notifyAdmin('Google TTS (Primary)', err.message);
-      throw new Error(`TTS failed: Google Translate service error and no provider TTS is available.${ADMIN_NOTIFIED_SUFFIX}`);
+      const notification = await notifyAdminDetailed('Google TTS (Primary)', err.message);
+      throw new Error(
+        'TTS failed: Google Translate service error and no provider TTS is available.'
+        + buildAdminNotificationNote(notification)
+      );
     }
     throw err;
   }
@@ -230,7 +207,12 @@ async function xaiTTS(text, voiceId, language, signal) {
       language,
       output_format: TTS_OUTPUT_FORMAT
     })
-  }, { timeoutMs: TTS_REQUEST_TIMEOUT_MS, maxAttempts: 2, signal });
+  }, {
+    timeoutMs: TTS_REQUEST_TIMEOUT_MS,
+    maxAttempts: 2,
+    signal,
+    logLabel: 'xAI-TTS'
+  });
 
   const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), TTS_REQUEST_TIMEOUT_MS));
   if (buffer.length === 0) {

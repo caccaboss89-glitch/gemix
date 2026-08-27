@@ -48,6 +48,7 @@ function listFiles(args = {}, workspaceId) {
     }
     return {
       success: true,
+      status: 'ok',
       path: resolved.display,
       total: 0,
       entries: [],
@@ -78,8 +79,10 @@ function listFiles(args = {}, workspaceId) {
 
   return {
     success: true,
+    status: listing.more ? 'degraded' : 'ok',
     path: resolved.display,
     total: listing.total,
+    truncated: Boolean(listing.more),
     entries,
     directories,
     message: notes.join(' ')

@@ -7,13 +7,18 @@
 
 use_default_settings:
   engines:
-    # These general engines fail deterministically in the current stack (404
-    # and 403 respectively). CAPTCHA/rate-limited engines remain available:
-    # they are intermittent and SearXNG can still combine the healthy replies.
+    # Engines that fail deterministically on this deployment, stop at a CAPTCHA
+    # instead of returning results, or add icon-library noise to image queries.
+    # Transiently rate-limited engines stay available so SearXNG can still use
+    # them again after their own suspension window expires.
     remove:
       - aol
       - karmasearch
       - karmasearch videos
+      - startpage
+      - startpage images
+      - devicons
+      - lucide
 
 general:
   instance_name: "GemiX Web Stack"

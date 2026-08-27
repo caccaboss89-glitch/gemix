@@ -7,21 +7,22 @@
 // Schema and a stable cached prefix), plus `conversation_title` on every Discord turn
 // (required key, empty string = keep the current title), and a leading `voice`
 // boolean on WA dedicated only. The schema rides on the same HTTP call as tools
-// (no extra round). Per xAI docs, json_schema applies only to the final
-// output_text.
+// (no extra round). The same portable strict schema is used by every provider.
 //
 // conversation_title is deliberately in the schema on EVERY Discord turn, not
-// just the first: xAI renders text.format back into the model's context, so a
-// schema that changed shape after turn 1 sent a different prefix on turn 2 and
-// cost the whole cached prompt. `required` only means the key must be present —
+// just the first: a schema that changes shape between turns invalidates the
+// stable request prefix. `required` only means the key must be present —
 // "" is a valid value and parseStructuredReply reads it as "no rename".
 //
 import constants from '../config/constants.js';
-import envConfig from '../config/env.js';
-import { FEATURE, backendFor, isFeatureAvailable } from '../features/featureBindings.js';
-import { resolveProviderProfile } from './providers/providerProfile.js';
+import { getActiveTtsCapabilities } from '../media/ttsCapabilities.js';
+import {
+  XAI_INLINE_VOICE_TAG_NAMES,
+  XAI_WRAPPING_VOICE_TAG_NAMES
+} from '../media/xaiVoiceTags.js';
 
 const MAX_REPLY_ATTACHMENTS = 10;
+const MAX_CONVERSATION_TITLE_CHARS = 80;
 
 // Which markup actually renders is stated once, in the "This chat" section of
 // the system prompt — not restated here.
@@ -47,28 +48,20 @@ const TAGGED_VOICE_RESPONSE_FIELD_DESC =
   + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags `
   + 'for a human result, even if your recent text replies had none. When `voice` is '
   + 'false write plain text and DO NOT use any voice tag. '
-  + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
-  + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
+  + `Inline tags: ${XAI_INLINE_VOICE_TAG_NAMES.map(name => `[${name}]`).join(' ')}. `
+  + `Wrapping tags: ${XAI_WRAPPING_VOICE_TAG_NAMES.map(name => `<${name}>`).join(' ')}.`;
 
 function _voiceResponseFieldDesc() {
-  const profile = resolveProviderProfile();
-  return backendFor(profile, FEATURE.TTS) === 'xai-tts' && envConfig.XAI_TTS_ENABLED
+  return getActiveTtsCapabilities().supportsVoiceTags
     ? TAGGED_VOICE_RESPONSE_FIELD_DESC
     : PLAIN_VOICE_RESPONSE_FIELD_DESC;
 }
 
-// The X clause only appears where x_search does: naming a tool the profile does
-// not have would send the model looking for it. The profile is fixed for the
-// life of the process, so this stays byte-stable within a conversation.
 function _attachmentsFieldDesc() {
-  const xMedia = isFeatureAvailable(resolveProviderProfile(), FEATURE.X_SEARCH)
-    ? 'for X media use x_search CDN URLs; '
-    : '';
   return 'The ONLY way to send files in this chat. Use null when you are sending nothing. '
     + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
     + '(image/video/audio/PDF/etc. — never a page/article/post link; '
-    + `${xMedia}for web images use the \`url\` fields from search_image). `
-    + 'Never other file syntax (e.g. render_components).';
+    + 'for remote media use only a direct URL returned by a tool). Never use any other file syntax.';
 }
 
 // Discord, every turn. Non-empty renames the thread, "" leaves it alone.
@@ -108,8 +101,8 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
 
   // Strict json_schema has no optional keys: every property has to be in
   // `required`, and "I am not sending anything" is expressed by the null branch
-  // of the type. xAI tolerates a missing key; a stricter backend rejects the
-  // whole schema, so the portable shape is the one built here.
+  // of the type. Some endpoints tolerate a missing key while stricter ones
+  // reject the schema, so the portable shape is the one built here.
   properties.attachments = {
     type: ['array', 'null'],
     items: { type: 'string' },
@@ -119,7 +112,11 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
   required.push('attachments');
 
   if (includeTitle) {
-    properties.conversation_title = { type: 'string', description: TITLE_FIELD_DESC };
+    properties.conversation_title = {
+      type: 'string',
+      maxLength: MAX_CONVERSATION_TITLE_CHARS,
+      description: TITLE_FIELD_DESC
+    };
     required.push('conversation_title');
   }
 
@@ -192,18 +189,15 @@ function _extractTopLevelJsonObjects(str) {
 /**
  * Salvage the `response` field of a `gemix_reply` object that was cut off mid-string.
  *
- * Verified by live probe: xAI sometimes returns `status: "completed"` on an
- * answer whose text simply stops — seen on a citation-heavy reply after ten
- * server-side searches, at 1193 output tokens against a 64000 cap, with every
- * url_citation annotation collapsed to index 0. A control run with the same
- * schema and a heavier question came back whole, so the fault is intermittent
- * and backend-side. Without this salvage the raw JSON reaches the user.
+ * Some Responses-compatible endpoints can report a completed response whose
+ * structured JSON stops mid-string. Without this provider-neutral safeguard,
+ * the raw JSON would reach the user.
  *
  * @param {string} candidate
  * @returns {string} the decoded reply text, or '' when there is nothing to save
  */
 function _salvageTruncatedResponse(candidate) {
-  const key = candidate.search(/"(response|message)"\s*:\s*"/);
+  const key = candidate.search(/"response"\s*:\s*"/);
   if (key < 0) return '';
   const open = candidate.indexOf('"', candidate.indexOf(':', key)) + 1;
   if (open <= 0) return '';
@@ -218,11 +212,25 @@ function _salvageTruncatedResponse(candidate) {
       const simple = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', '"': '"', '\\': '\\', '/': '/' };
       if (esc === 'u') {
         const hex = candidate.slice(i + 2, i + 6);
-        if (hex.length < 4) break;
-        out += String.fromCharCode(parseInt(hex, 16));
+        if (!/^[0-9a-f]{4}$/i.test(hex)) break;
+        const codeUnit = parseInt(hex, 16);
+        if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+          const lowEscape = candidate.slice(i + 6, i + 12);
+          const match = lowEscape.match(/^\\u([0-9a-f]{4})$/i);
+          const lowUnit = match ? parseInt(match[1], 16) : NaN;
+          if (!Number.isFinite(lowUnit) || lowUnit < 0xDC00 || lowUnit > 0xDFFF) break;
+          out += String.fromCodePoint(
+            0x10000 + ((codeUnit - 0xD800) << 10) + (lowUnit - 0xDC00)
+          );
+          i += 11;
+          continue;
+        }
+        if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) break;
+        out += String.fromCharCode(codeUnit);
         i += 5;
       } else {
-        out += simple[esc] ?? esc;
+        if (!(esc in simple)) break;
+        out += simple[esc];
         i += 1;
       }
       continue;
@@ -231,6 +239,13 @@ function _salvageTruncatedResponse(candidate) {
     out += c;
   }
   return out;
+}
+
+/** Read `voice:true` only from the object prefix before the response string. */
+function _salvageTruncatedVoice(candidate) {
+  const responseKey = candidate.search(/"response"\s*:\s*"/);
+  if (responseKey < 0) return false;
+  return /"voice"\s*:\s*true(?:\s*[,}])/.test(candidate.slice(0, responseKey));
 }
 
 /**
@@ -265,7 +280,7 @@ function parseStructuredReply(raw) {
         const objects = _extractTopLevelJsonObjects(candidate);
         for (let i = objects.length - 1; i >= 0; i--) {
           const o = objects[i];
-          if (typeof o.response === 'string' || typeof o.message === 'string') {
+          if (typeof o.response === 'string') {
             parsed = o;
             break;
           }
@@ -279,19 +294,31 @@ function parseStructuredReply(raw) {
     const salvaged = _salvageTruncatedResponse(candidate);
     if (salvaged.trim()) {
       // attachments/title are dropped: a cut-off object cannot be trusted for them.
-      return { structured: true, text: salvaged, title: null, attachments: [], voice: /"voice"\s*:\s*true/.test(candidate) };
+      return {
+        structured: true,
+        text: salvaged,
+        title: null,
+        attachments: [],
+        voice: _salvageTruncatedVoice(candidate)
+      };
     }
     return fallback;
   }
 
-  const text = typeof parsed.response === 'string'
-    ? parsed.response
-    : (typeof parsed.message === 'string' ? parsed.message : '');
+  // A parsed object without the schema's required response is not a structured
+  // reply. Treating `{}` or an obsolete field alias as valid would silently
+  // send an empty message and hide a provider contract violation.
+  if (typeof parsed.response !== 'string') return fallback;
+
+  const text = parsed.response;
   const title = typeof parsed.conversation_title === 'string' && parsed.conversation_title.trim()
-    ? parsed.conversation_title.trim()
+    ? parsed.conversation_title.trim().slice(0, MAX_CONVERSATION_TITLE_CHARS)
     : null;
   const attachments = Array.isArray(parsed.attachments)
-    ? parsed.attachments.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim())
+    ? parsed.attachments
+      .filter(a => typeof a === 'string' && a.trim())
+      .map(a => a.trim())
+      .slice(0, MAX_REPLY_ATTACHMENTS)
     : [];
   // attachments: null or [] both mean there is nothing to send.
   const voice = parsed.voice === true;

@@ -143,3 +143,20 @@ test('media and web executor domains do not contain misplaced tools', () => {
     'read_music_stats'
   ]);
 });
+
+test('workspace tools document line-cap recovery and shell working-directory path semantics', () => {
+  const tools = getToolsForUser({
+    isActiveMember: true,
+    isAdmin: true,
+    platform: constants.PLATFORM_WA_DEDICATED,
+    isGroup: false
+  });
+  const readFile = tools.find(tool => tool.function?.name === 'read_file').function;
+  const shell = tools.find(tool => tool.function?.name === 'shell').function;
+
+  assert.match(readFile.description, /single line over the output cap/);
+  assert.match(readFile.description, /byte-slice it with shell/);
+  assert.match(shell.parameters.properties.command.description, /Without workingDir it runs at `\/`/);
+  assert.match(shell.parameters.properties.command.description, /relative operands start there/);
+  assert.match(shell.parameters.properties.workingDir.description, /use absolute \/workspace/);
+});

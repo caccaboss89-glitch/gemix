@@ -49,7 +49,7 @@ test('orphan cleanup preserves resources owned by another live process', async (
 
 test('the sandbox ceiling only ever refuses a container that does not exist yet', () => {
   const cap = constants.SANDBOX_MAX_CONTAINERS;
-  const request = (over) => ({ pooled: false, activeCount: over, isAdmin: false });
+  const request = (over) => ({ pooled: false, activeCount: over });
 
   // Below the ceiling every chat is served.
   assert.equal(admitWorkspaceRequest(request(0)), true);
@@ -61,8 +61,8 @@ test('the sandbox ceiling only ever refuses a container that does not exist yet'
 
   // A chat that already holds one keeps it: sessions are never cut in half,
   // and reclaiming a slot does not add to the total.
-  assert.equal(admitWorkspaceRequest({ pooled: true, activeCount: cap, isAdmin: false }), true);
+  assert.equal(admitWorkspaceRequest({ pooled: true, activeCount: cap }), true);
 
-  // The admin is exempt outright.
-  assert.equal(admitWorkspaceRequest({ pooled: false, activeCount: cap, isAdmin: true }), true);
+  // Identity cannot bypass the total host ceiling.
+  assert.equal(admitWorkspaceRequest({ pooled: false, activeCount: cap, isAdmin: true }), false);
 });

@@ -7,6 +7,7 @@ import { getGroupTaskFileId } from '../../utils/userIdentifier.js';
 import { scheduleTasks } from '../scheduler.js';
 import { readTasks } from '../taskReader.js';
 import { removeTasks } from '../taskRemover.js';
+import { taskToolFailure } from '../../utils/taskToolResult.js';
 
 const { isWhatsAppPlatform } = constants;
 
@@ -31,7 +32,7 @@ async function _readTasks({ args, userCtx }) {
     && Boolean(userCtx.isGroup)
     && isWhatsAppPlatform(userCtx.platform);
   if (args.includeGroupTasks && !includeGroup) {
-    return { success: false, error: 'includeGroupTasks not available: only in WhatsApp groups.' };
+    return taskToolFailure('includeGroupTasks not available: only in WhatsApp groups.');
   }
   return readTasks(userCtx.taskFileId, groupFileId, includeGroup, {
     isAdmin: userCtx.isAdmin,
@@ -43,15 +44,20 @@ async function _readTasks({ args, userCtx }) {
 async function _removeTasks({ args, userCtx }) {
   const allowGroup = Boolean(userCtx.isGroup) && isWhatsAppPlatform(userCtx.platform);
   if (args.fromGroup && !allowGroup) {
-    return {
-      success: false,
-      error: 'fromGroup is only available in WhatsApp group chats. Remove tasks from your personal task file instead.'
-    };
+    return taskToolFailure(
+      'fromGroup is only available in WhatsApp group chats. Remove tasks from your personal task file instead.'
+    );
   }
   const fileId = args.fromGroup && allowGroup
     ? getGroupTaskFileId(userCtx.groupId)
     : userCtx.taskFileId;
-  return removeTasks(args.taskIds, fileId);
+  return removeTasks(args.taskIds, fileId, {
+    scope: args.fromGroup && allowGroup ? 'group' : 'personal',
+    ctx: {
+      isAdmin: userCtx.isAdmin,
+      waJid: userCtx.waJid
+    }
+  });
 }
 
 const TASK_TOOL_EXECUTORS = Object.freeze({

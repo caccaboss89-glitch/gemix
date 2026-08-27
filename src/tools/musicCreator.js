@@ -13,7 +13,7 @@ import envConfig from '../config/env.js';
 import constants from '../config/constants.js';
 import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
 import { fetchWithTimeout  } from '../utils/fetch.js';
-import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
+import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
 import { convertMp3ToWhatsAppOpus  } from './voiceMessage.js';
 
 const log = createLogger('MusicCreator');
@@ -157,6 +157,15 @@ async function musicCreator(prompt, userCtx) {
   if (!prompt || prompt.trim().length < 5) {
     return { toolResult: { success: false, error: 'Prompt missing or too short.' }, attachments: [] };
   }
+  if (prompt.trim().length > constants.MEDIA_GENERATION_PROMPT_MAX_CHARS) {
+    return {
+      toolResult: {
+        success: false,
+        error: `Prompt exceeds ${constants.MEDIA_GENERATION_PROMPT_MAX_CHARS} characters.`
+      },
+      attachments: []
+    };
+  }
 
   const apiKey = envConfig.OPENROUTER_API_KEY;
   const model = envConfig.MUSIC_MODEL;
@@ -241,11 +250,14 @@ async function musicCreator(prompt, userCtx) {
       };
     }
     log.error(`Music generation failed: ${err.message}`);
-    await notifyAdmin('MusicCreator', `Generation failed for ${userId}: ${err.message}`);
+    const notification = await notifyAdminDetailed(
+      'MusicCreator',
+      `Generation failed for ${userId}: ${err.message}`
+    );
     return {
       toolResult: {
         success: false,
-        error: `Music generation failed: ${err.message}${ADMIN_NOTIFIED_SUFFIX}`
+        error: `Music generation failed: ${err.message}${buildAdminNotificationNote(notification)}`
       },
       attachments: []
     };

@@ -19,7 +19,6 @@ const FEATURE = Object.freeze({
   SEARCH_WEB: 'search_web',
   READ_PAGE: 'read_page',
   SEARCH_IMAGE: 'search_image',
-  X_SEARCH: 'x_search',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
   STT: 'stt',
@@ -55,7 +54,6 @@ const GEMIX_OWNED = Object.freeze({
  * a provider with no deliberately integrated media service of its own.
  */
 const BASELINE = Object.freeze({
-  [FEATURE.X_SEARCH]: UNAVAILABLE,
   [FEATURE.GENERATE_IMAGE]: 'cloudflare-flux',
   [FEATURE.GENERATE_VIDEO]: UNAVAILABLE,
   [FEATURE.STT]: 'cloudflare-whisper',

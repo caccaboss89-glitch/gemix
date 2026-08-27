@@ -2,13 +2,12 @@
 //
 // The per-conversation container the main agent works in.
 //
-// One container per `workspaceId`, started lazily on first use and reused for
-// as long as the user keeps interacting (containers idle past
-// constants.SANDBOX_IDLE_TTL_MS are reaped). It stays alive between tool calls
-// on purpose: a background process the agent starts in one `shell` call has to
-// still be there in the next one, and re-creating a container per call would
-// cost more than most calls do. The workspace's own 4h TTL is separate — the
-// container is disposable, the files are not.
+// One container per `workspaceId`, started lazily on first use and reused while
+// container commands keep it active. It stays alive between nearby tool calls
+// so a background process started by `shell` can be inspected later. Once no
+// container command has run for constants.SANDBOX_IDLE_TTL_MS, the whole
+// container and every process in it are reaped. The workspace's own 4h TTL is
+// separate — the container is disposable, the files are not.
 //
 // Bind mounts, and the whole of what the model can see:
 //
@@ -68,18 +67,17 @@ const SANDBOX_BUSY_CODE = 'ESANDBOXBUSY';
  * The cap only ever refuses a NEW container. `pooled` is what makes that safe:
  * a chat already holding one keeps it whatever the count says, so a session is
  * never cut off half way through - and reclaiming a slot whose container died
- * does not add to the total either. The admin is exempt outright.
+ * does not add to the total either. The ceiling applies equally to every chat.
  *
  * Pure on purpose: this is the rule, and it stays testable without Docker.
  *
  * @param {object} req
  * @param {boolean} req.pooled - this workspace already has an entry in the pool
  * @param {number} req.activeCount - entries currently pooled
- * @param {boolean} [req.isAdmin]
  * @returns {boolean}
  */
-function admitWorkspaceRequest({ pooled, activeCount, isAdmin }) {
-  if (pooled || isAdmin) return true;
+function admitWorkspaceRequest({ pooled, activeCount }) {
+  if (pooled) return true;
   return activeCount < constants.SANDBOX_MAX_CONTAINERS;
 }
 
@@ -259,17 +257,14 @@ async function _isAlive(entry) {
  * everyone else's expense. Nothing is created on that path.
  *
  * @param {string} workspaceId
- * @param {object} [opts]
- * @param {boolean} [opts.isAdmin] - exempt from the ceiling
  */
-async function getOrCreate(workspaceId, opts = {}) {
+async function getOrCreate(workspaceId) {
   if (!workspaceId) throw new Error('workspaceId is required');
 
   const pending = _pool.get(workspaceId);
   if (!admitWorkspaceRequest({
     pooled: Boolean(pending),
-    activeCount: _pool.size,
-    isAdmin: opts.isAdmin
+    activeCount: _pool.size
   })) {
     log.warn(
       `sandbox at capacity (${_pool.size}/${constants.SANDBOX_MAX_CONTAINERS}): `
@@ -383,13 +378,12 @@ function buildExecSpec({ command, timeoutMs } = {}) {
  * @param {Buffer|string} [opts.input] - written to the command's stdin
  * @param {number} [opts.timeoutMs]
  * @param {string} [opts.workingDir] - defaults to /workspace
- * @param {boolean} [opts.isAdmin] - exempt from the concurrent-container cap
  * @returns {Promise<{rc:number,stdout:string,stderr:string,truncated:boolean,timedOut:boolean,durationMs:number}>}
  */
 async function execInWorkspace(workspaceId, opts = {}) {
   const { cmd, timeoutMs } = buildExecSpec(opts);
   const hasInput = opts.input !== undefined && opts.input !== null;
-  const entry = await getOrCreate(workspaceId, { isAdmin: opts.isAdmin });
+  const entry = await getOrCreate(workspaceId);
   entry.lastUsedAt = Date.now();
 
   const exec = await entry.container.exec({

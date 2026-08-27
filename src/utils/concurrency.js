@@ -1,9 +1,8 @@
 // src/utils/concurrency.js
 //
 // Small helper to run async work over a list with bounded parallelism while
-// preserving input order in the results. Used to upload history attachments
-// to xAI in parallel (instead of one-by-one) so building the turn context
-// stays fast and does not blow the history-fetch timeout.
+// preserving input order in the results. History builders use it to prepare
+// media concurrently without tying that generic ingress path to a provider.
 
 /**
  * Map `items` through async `fn` with at most `limit` concurrent calls.

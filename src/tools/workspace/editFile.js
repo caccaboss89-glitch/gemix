@@ -117,7 +117,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
       throw err;
     }
 
-    const committed = await commitWorkspaceText(workspaceId, lockedResolved, after, opts);
+    const committed = await commitWorkspaceText(workspaceId, lockedResolved, after);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;
     const replaced = args.replaceAll ? occurrences : 1;

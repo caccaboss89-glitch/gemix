@@ -276,7 +276,7 @@ function _finalizeDueTasks(data, dueTasks, handledIds, failedResults = new Map()
       updatedTasks.push(t);
       continue;
     }
-    const recurrence = normalizePersistedRecurrence(t.recurrence);
+    const recurrence = normalizePersistedRecurrence(t.recurrence, t.scheduledAt);
     const delivered = handledIds.has(t.id);
 
     // A terminal one-time failure remains visible until the user removes it.
@@ -295,6 +295,9 @@ function _finalizeDueTasks(data, dueTasks, handledIds, failedResults = new Map()
       continue;
     }
     if (!recurrence) continue; // one-time, delivered: done, not re-added
+    // Persist a derived monthly anchor for tasks created before the field was
+    // introduced, so a short month cannot permanently move the series.
+    t.recurrence = recurrence;
 
     // Skip every additional occurrence missed during downtime and resume from
     // the first future date, while still respecting EXDATE and UNTIL.
@@ -363,7 +366,7 @@ async function checkAndExecuteTasks() {
     const handledIds = new Set();
     const failedResults = new Map();
     for (const task of dueTasks) {
-      const norm = normalizePersistedRecurrence(task.recurrence);
+      const norm = normalizePersistedRecurrence(task.recurrence, task.scheduledAt);
       if (norm && isDateSkipped(task.scheduledAt, norm.exdate)) {
         handledIds.add(task.id);
         log.info(`Task ${task.id} occurrence skipped (recurrence exception)`);

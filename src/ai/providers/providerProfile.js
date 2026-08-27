@@ -25,7 +25,10 @@ import { ApiKeyCredentialProvider } from '../credentials/credentialProvider.js';
 import { sharedCredentialProvider, xaiCredentialProvider } from '../credentials/credentialRegistry.js';
 import { createCodexCredentialProvider } from '../credentials/nativeCodexCredentialProvider.js';
 import { CREDENTIAL_POOL } from '../credentials/oauthProviders.js';
-import { xaiResponsesExtensions } from '../extensions/xaiResponsesExtensions.js';
+import {
+  XAI_X_SEARCH_TOOL,
+  xaiResponsesExtensions
+} from '../extensions/xaiResponsesExtensions.js';
 
 const PROVIDER = Object.freeze({
   XAI: 'xai',
@@ -33,6 +36,13 @@ const PROVIDER = Object.freeze({
   OPENROUTER: 'openrouter',
   CUSTOM: 'custom'
 });
+
+const PROMPT_VARIANT = Object.freeze({
+  GENERIC: 'generic',
+  XAI: 'xai'
+});
+
+const NO_NATIVE_TOOLS = Object.freeze([]);
 
 /** Ordered reasoning-effort scale the xAI Responses API accepts. */
 const XAI_EFFORTS = Object.freeze(['low', 'medium', 'high']);
@@ -67,6 +77,13 @@ function _genericDisplayName(model) {
   return slug.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/** Format a model name according to the selected provider's public brand. */
+function formatProviderModelDisplayName(providerId, model) {
+  if (providerId === PROVIDER.XAI) return _xaiDisplayName(model);
+  if (providerId === PROVIDER.CHATGPT) return _chatgptDisplayName(model);
+  return _genericDisplayName(model);
+}
+
 // -- Profile builders --------------------------------------------------------
 
 /**
@@ -78,10 +95,11 @@ function _buildXaiProfile() {
   return {
     id: PROVIDER.XAI,
     model: envConfig.GROK_MODEL,
-    displayName: _xaiDisplayName(envConfig.GROK_MODEL),
+    displayName: formatProviderModelDisplayName(PROVIDER.XAI, envConfig.GROK_MODEL),
     baseUrl: envConfig.XAI_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: XAI_EFFORTS,
+    promptVariant: PROMPT_VARIANT.XAI,
     wire: defineWireCapabilities({
       supportsResponses: true,
       supportsSse: true,
@@ -89,12 +107,13 @@ function _buildXaiProfile() {
       supportsStrictStructuredOutput: true,
       supportsReasoningReplay: true,
       supportsImageInput: true,
-      supportsMaxOutputTokens: true
+      supportsMaxOutputTokens: true,
+      supportsPromptCacheKey: true
     }),
     createCredentialProvider: xaiCredentialProvider,
     extensions: xaiResponsesExtensions,
+    nativeTools: Object.freeze([XAI_X_SEARCH_TOOL]),
     features: defineFeatureBindings({
-      [FEATURE.X_SEARCH]: 'xai-native',
       [FEATURE.GENERATE_IMAGE]: 'xai-imagine-image',
       [FEATURE.GENERATE_VIDEO]: 'xai-imagine-video',
       [FEATURE.STT]: 'xai-stt',
@@ -117,17 +136,21 @@ function _buildChatgptProfile() {
   return {
     id: PROVIDER.CHATGPT,
     model: envConfig.CHATGPT_MODEL,
-    displayName: _chatgptDisplayName(envConfig.CHATGPT_MODEL),
+    displayName: formatProviderModelDisplayName(PROVIDER.CHATGPT, envConfig.CHATGPT_MODEL),
     baseUrl: envConfig.CHATGPT_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: _chatgptEfforts(envConfig.CHATGPT_MODEL),
+    promptVariant: PROMPT_VARIANT.GENERIC,
     wire: defineWireCapabilities({
       supportsResponses: true,
       supportsSse: true,
       supportsFunctionCalling: true,
       supportsStrictStructuredOutput: true,
       supportsReasoningReplay: true,
-      supportsImageInput: true
+      supportsImageInput: true,
+      // Verified by the live Codex backend. Other generic endpoints do not
+      // inherit this optional field merely for being Responses-compatible.
+      supportsPromptCacheKey: true
     }),
     createCredentialProvider: () => sharedCredentialProvider(
       CREDENTIAL_POOL.CHATGPT,
@@ -136,6 +159,7 @@ function _buildChatgptProfile() {
     // Nothing about this backend needs a Responses extension: no extra header
     // beyond the account id the credential already carries, no extra body field.
     extensions: null,
+    nativeTools: NO_NATIVE_TOOLS,
     features: defineFeatureBindings({})
   };
 }
@@ -148,10 +172,11 @@ function _buildOpenRouterProfile() {
   return {
     id: PROVIDER.OPENROUTER,
     model: envConfig.OPENROUTER_MAIN_MODEL,
-    displayName: _genericDisplayName(envConfig.OPENROUTER_MAIN_MODEL),
+    displayName: formatProviderModelDisplayName(PROVIDER.OPENROUTER, envConfig.OPENROUTER_MAIN_MODEL),
     baseUrl: envConfig.OPENROUTER_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: GENERIC_EFFORTS,
+    promptVariant: PROMPT_VARIANT.GENERIC,
     wire: defineWireCapabilities({
       supportsResponses: true,
       supportsSse: true,
@@ -170,6 +195,7 @@ function _buildOpenRouterProfile() {
       })
     ),
     extensions: null,
+    nativeTools: NO_NATIVE_TOOLS,
     features: defineFeatureBindings({})
   };
 }
@@ -179,10 +205,11 @@ function _buildCustomProfile() {
   return {
     id: PROVIDER.CUSTOM,
     model: envConfig.CUSTOM_RESPONSES_MODEL,
-    displayName: _genericDisplayName(envConfig.CUSTOM_RESPONSES_MODEL),
+    displayName: formatProviderModelDisplayName(PROVIDER.CUSTOM, envConfig.CUSTOM_RESPONSES_MODEL),
     baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL,
     defaultEffort: 'high',
     supportedEfforts: GENERIC_EFFORTS,
+    promptVariant: PROMPT_VARIANT.GENERIC,
     wire: defineWireCapabilities({
       supportsResponses: true,
       supportsSse: true,
@@ -200,6 +227,7 @@ function _buildCustomProfile() {
       })
     ),
     extensions: null,
+    nativeTools: NO_NATIVE_TOOLS,
     features: defineFeatureBindings({})
   };
 }
@@ -253,6 +281,8 @@ function _resetActiveProfileForTests() {
 
 export {
   PROVIDER,
+  PROMPT_VARIANT,
+  formatProviderModelDisplayName,
   getProviderProfile,
   resolveProviderProfile,
   _resetActiveProfileForTests

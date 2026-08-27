@@ -88,7 +88,7 @@ test('a tool call survives the seam with the shape the loop reads', async () => 
   const { reply } = await callAI([userItem('open it')]);
 
   assert.equal(reply.toolCalls.length, 1);
-  // {id, name, arguments} is what partitionHandlerToolCalls and the round loop
+  // {id, name, arguments} is what the tool-round planner and loop
   // destructure; a nested `function` object here would silently break both.
   assert.deepEqual(reply.toolCalls[0], {
     id: 'call_1',

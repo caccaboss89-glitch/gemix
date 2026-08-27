@@ -5,7 +5,7 @@
 // serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
 //
 // read_sent_messages tool: lets an active member (or admin) confirm what GemiX
-// previously accepted for outbound delivery to OTHER people on their behalf,
+// previously submitted to outbound services for OTHER people on their behalf,
 // on WhatsApp and/or
 // email. Results are grouped by recipient. Any files that were attached are
 // put back into this conversation projection, so each one comes back as an
@@ -168,6 +168,12 @@ async function readSentMessages(args, userCtx) {
   const rawRecipients = Array.isArray(args.recipients)
     ? args.recipients.filter(x => typeof x === 'string' && x.trim())
     : [];
+  if (rawRecipients.length > constants.SENT_MESSAGES_MAX_RECIPIENT_FILTERS) {
+    return {
+      success: false,
+      error: `Filter at most ${constants.SENT_MESSAGES_MAX_RECIPIENT_FILTERS} recipients in one call.`
+    };
+  }
   if (rawRecipients.length > 0) {
     phoneFilter = new Set();
     emailFilter = new Set();
@@ -234,7 +240,8 @@ async function readSentMessages(args, userCtx) {
 
     const msgOut = {
       channel: r.channel,
-      deliveryStatus: r.status || 'accepted',
+      acceptanceStatus: r.acceptanceStatus ?? 'accepted',
+      toolStatus: r.toolStatus ?? (r.status === 'degraded' ? 'degraded' : 'ok'),
       // Europe/Rome, DST-aware — same formatting as reminders/history (never UTC).
       sentAt: formatTimestamp(r.ts)
     };
@@ -255,10 +262,18 @@ async function readSentMessages(args, userCtx) {
             imagesReadCount += 1;
           }
           anyRecovered = true;
-          msgOut.attachments.push({ name: a.originalName || 'file', path: recovered.path });
+          msgOut.attachments.push({
+            name: a.originalName || 'file',
+            path: recovered.path,
+            deliveryMethod: a.deliveryMethod || 'unknown'
+          });
         } else {
           anyExpired = true;
-          msgOut.attachments.push({ name: a.originalName || 'file', status: 'expired' });
+          msgOut.attachments.push({
+            name: a.originalName || 'file',
+            status: 'expired',
+            deliveryMethod: a.deliveryMethod || 'unknown'
+          });
         }
       }
     }
@@ -266,8 +281,10 @@ async function readSentMessages(args, userCtx) {
     group.messages.push(msgOut);
   }
 
-  let message = `Found ${matched.length} ${channelLabel} message(s) GemiX accepted for outbound delivery on your behalf `
-    + '(only your last 10 outgoing messages are kept; this audit does not prove device/inbox delivery or reading).';
+  let message = `Found ${matched.length} ${channelLabel} outbound message(s) GemiX submitted on your behalf `
+    + '(only your last 10 outgoing messages are kept; acceptanceStatus records service acceptance, while '
+    + 'toolStatus distinguishes complete from degraded attachment submission; neither proves device/inbox '
+    + 'delivery or reading).';
   if (anyRecovered) {
     message += ' Their attachments are back under attachments/, so you can open them with read_file;'
       + ' images are attached below.';

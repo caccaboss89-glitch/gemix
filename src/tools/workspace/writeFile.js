@@ -63,7 +63,7 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
       if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };
       throw err;
     }
-    const committed = await commitWorkspaceText(workspaceId, lockedResolved, args.content, opts);
+    const committed = await commitWorkspaceText(workspaceId, lockedResolved, args.content);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;
     return {

@@ -62,6 +62,9 @@ export default {
   // brings it back on demand.
   MAX_INLINE_IMAGES_PER_TURN: 8,
   MAX_TASK_DAYS: 365,
+  SCHEDULE_TASKS_MAX_BATCH: 50,
+  REMOVE_TASKS_MAX_IDS: 100,
+  RECURRENCE_MAX_INTERVAL: 10_000,
   SCHEDULER_INTERVAL_MS: 60_000,
   // responseLock TTL while a debounced batch waits or a turn pipeline runs
   BATCH_LOCK_TTL_MS: 5 * 60 * 1000,
@@ -163,9 +166,11 @@ export default {
   SEARCH_IMAGE_DEFAULT_COUNT: 2,
   SEARCH_IMAGE_MIN_COUNT: 1,
   SEARCH_IMAGE_MAX_COUNT: 10,
+  SEARCH_IMAGE_QUERY_MAX_CHARS: 300,
   SEARCH_WEB_DEFAULT_COUNT: 8,
   SEARCH_WEB_MIN_COUNT: 1,
   SEARCH_WEB_MAX_COUNT: 20,
+  SEARCH_WEB_QUERY_MAX_CHARS: 400,
   /** Ceiling on one read_page result, so a long article cannot eat the round. */
   READ_PAGE_MAX_CHARS: 60_000,
   // Ceiling on a video GemiX downloads or generates, before it ever touches disk.
@@ -174,6 +179,9 @@ export default {
   MAX_MUSIC_BYTES: 60 * 1024 * 1024,
   VIDEO_GEN_DURATION_S: 6,
   VIDEO_GEN_RESOLUTION: '480p',
+  MEDIA_GENERATION_PROMPT_MAX_CHARS: 2000,
+  BUG_REPORT_MAX_CHARS: 600,
+  SENT_MESSAGES_MAX_RECIPIENT_FILTERS: 20,
   MAX_TTS_CHARS: 1000,
   MAX_AUDIO_DURATION_S: 600,
   MAX_VIDEO_DURATION_S: 120,

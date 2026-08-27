@@ -6,29 +6,29 @@
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
 //   2. Touch the per-conversation workspace activity timestamp.
 //   3. Build the Responses input: static system first (byte-stable for the turn —
-//      xAI prefix-cache matches from the start of input[]), then history, the
+//      Responses endpoints can cache it from the start of input[]), then history, the
 //      current user message, then the program-owned <Runtime>…</Runtime>
 //      role:user item. Runtime is built once per turn and never moves, so every
-//      later round only appends to input[] — never a second role:system (xAI
-//      folds extra system into the head and busts progressive cache). Files
+//      later round only appends to input[] — never a second role:system. Files
 //      arrive through attachments/ingress.js: images of the current or quoted
 //      message inline as base64, everything else an [Attachment: attachments/…]
 //      path the model opens with read_file. Voice notes are rendered as text in
 //      place — the user's with STT (<PastVoice>), GemiX's from the transcript
 //      it already had (<PastVoiceReply>).
 //   4. Loop: one `/v1/responses` call per round, whichever provider profile is
-//      active - tool calls per round in two phases:
-//      (1) standard tools parallel, (2) delivery calls serial - repeat until the
-//      model returns the final response or the round budget is reached. The
+//      active. Consecutive read-only tool calls run with bounded concurrency;
+//      mutations, shell, generators and deliveries remain serial barriers in
+//      the model's original order. Repeat until the model returns the final
+//      response or the round budget is reached. The
 //      final reply is always structured JSON (response / nullable attachments,
 //      plus conversation_title on every Discord turn, plus a `voice` flag on
 //      WA dedicated) enforced via text.format.
 //      When `voice:true` (WA dedicated only), `response` is spoken via TTS.
-//   5. Off Discord, turn inline citation markup into a plain source list
-//      (WhatsApp renders no anchor text), apply the research badge (real web/X
-//      source counts), and ship the reply back to the platform.
+//   5. Apply the research badge from per-turn GemiX web / native X counters,
+//      then ship the reply back to the platform.
 
 import { callAI  } from './ai/aiProvider.js';
+import { withApiLogConversation } from './ai/apiLogs.js';
 import {
   pruneSeenToolMedia,
   systemItem,
@@ -54,7 +54,7 @@ import envConfig from './config/env.js';
 import { createLogger  } from './utils/logger.js';
 import { appendResearchBadge, buildResearchBadgeText  } from './utils/footer.js';
 
-import { cleanAssistantResponse, renderInlineCitations  } from './utils/text.js';
+import { cleanAssistantResponse } from './utils/text.js';
 import { generatePromptCacheKey  } from './utils/promptCacheKey.js';
 import { enableReleaseNotify  } from './tools/releaseNotify.js';
 import { sendWhatsAppDirect  } from './tools/whatsappSender.js';
@@ -64,8 +64,9 @@ import {
   FALLBACK_ERROR_PREFIX
 } from './config/systemMessages.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
+import { getActiveTtsCapabilities } from './media/ttsCapabilities.js';
 import { providerFailureReply } from './ai/providers/errorPolicy.js';
-import { notifyAdmin } from './utils/adminNotifier.js';
+import { notifyAdminDetailed, withAdminNotificationPolicy } from './utils/adminNotifier.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
 import { wrapSystemReminder  } from './utils/systemTags.js';
 import { systemReply, textReply  } from './utils/replyEnvelope.js';
@@ -118,7 +119,7 @@ function buildMaintenanceReleaseAlreadyEnabledMessage() {
  * @param {object} ctx
  * @returns {Promise<object>} Response { text, voiceBuffer, isVoiceOnly, attachments, modelUsed, discordTitle?, researchFooter?, voiceTranscriptText?, voiceTranscriptChatId?, systemMessage? }
  */
-async function handleMessage(ctx) {
+async function _handleMessage(ctx) {
   // One root deadline for the whole turn. The work phase ends early enough to
   // leave a bounded tool-free wrap-up slice under that same deadline.
   const turnBudgets = createTurnBudgets(
@@ -166,6 +167,10 @@ async function handleMessage(ctx) {
     const prepared = await prepareTurn(ctx, ui);
     const { isDiscord, allowVoice, userCtx, workspaceId, input } = prepared;
     let { staticInstructions, toolsFp } = prepared;
+    const cleanTextResponse = text => cleanAssistantResponse(text);
+    const cleanVoiceFallback = text => cleanAssistantResponse(text, {
+      stripProviderVoiceTags: getActiveTtsCapabilities().supportsVoiceTags
+    });
 
     /** Keep input[0] in sync if the static prefix is rebuilt mid-turn. */
     const syncStaticPrefix = () => {
@@ -220,8 +225,8 @@ async function handleMessage(ctx) {
     };
 
     let rounds = 0;
-    // xAI sometimes returns completed+reasoning with no message/tool_calls.
-    // One extra attempt only — do not burn the full tool-round budget.
+    // A completed response can occasionally contain reasoning but no message
+    // or tool call. One extra attempt only, never the whole round budget.
     let emptyOutputRetries = 0;
     const MAX_EMPTY_OUTPUT_RETRIES = 1;
     let lastModelUsed = null;
@@ -301,6 +306,7 @@ async function handleMessage(ctx) {
 
       // Voice reply (WhatsApp dedicated only): speak `response` (with TTS tags)
       // instead of sending text. Falls back to text on limit/length/TTS failure.
+      let voiceFallback = false;
       if (allowVoice && parsed.voice) {
         const voiceReply = await buildVoiceReply({
           rawResponseText: parsed.text,
@@ -312,14 +318,16 @@ async function handleMessage(ctx) {
         });
         if (voiceReply) return voiceReply;
         log.info('   Voice reply not produced; falling back to text');
+        voiceFallback = true;
       }
 
-      let text = cleanAssistantResponse(parsed.text || '');
-      if (!isDiscord) text = renderInlineCitations(text);
+      let text = voiceFallback
+        ? cleanVoiceFallback(parsed.text || '')
+        : cleanTextResponse(parsed.text || '');
       log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
-      // xAI occasionally returns status=completed with only a reasoning item
-      // (no function_call, no message/output_text). At most one retry; if it
+      // A Responses endpoint can return status=completed with only a reasoning
+      // item (no function_call, no message/output_text). At most one retry; if it
       // still returns empty (or the API is 503-flaky), fall back immediately —
       // do not spin through all constants.MAX_TOOL_ROUNDS.
       if (!text.trim() && finalAttachments.length === 0) {
@@ -349,7 +357,7 @@ async function handleMessage(ctx) {
       }
 
       // ── Research badge ──────────────────────────────────────────────────
-      // Append "🌐: N sources. 𝕏: N posts." from the counts collected by
+      // Append "🌐: N sources. 𝕏: N searches." from the counts collected by
       // GemiX web search and provider-native X search. Zero sections stay out
       // so the badge remains minimal.
       if (text.trim() && responseCtx.researchStats) {
@@ -398,7 +406,7 @@ async function handleMessage(ctx) {
       applyParsedTitle(parsed, responseCtx);
       wrapUpAttachments = await resolveFinalAttachments(parsed, workspaceId, turnBudgets.root.signal);
       wrapUpVoice = Boolean(allowVoice && parsed.voice);
-      wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanAssistantResponse(parsed.text || '');
+      wrapUpText = wrapUpVoice ? (parsed.text || '') : cleanTextResponse(parsed.text || '');
     } catch (wrapErr) {
       log.error(`   Forced wrap-up call failed: ${wrapErr.message}`);
     }
@@ -414,10 +422,8 @@ async function handleMessage(ctx) {
         modelUsed: lastModelUsed
       });
       if (voiceReply) return voiceReply;
-      wrapUpText = cleanAssistantResponse(wrapUpText);
+      wrapUpText = cleanVoiceFallback(wrapUpText);
     }
-    if (!isDiscord) wrapUpText = renderInlineCitations(wrapUpText);
-
     if (wrapUpText.trim() && responseCtx.researchStats) {
       wrapUpText = appendResearchBadge(wrapUpText, responseCtx.researchStats);
     }
@@ -443,7 +449,7 @@ async function handleMessage(ctx) {
     if (providerReply) {
       log.warn(`   [${platformLabel.trim()}] ${providerReply.logLine}`);
       if (providerReply.notifyAdmin) {
-        await notifyAdmin('AI Provider', `${err.kind}: ${err.message}`).catch(() => {});
+        await notifyAdminDetailed('AI Provider', `${err.kind}: ${err.message}`).catch(() => {});
       }
       return systemReply(providerReply.text, {
         discordTitle: responseCtx.discordTitle || ''
@@ -453,6 +459,10 @@ async function handleMessage(ctx) {
     log.error(`\n❌ [${platformLabel}] HANDLER ERROR:`);
     log.error(`   ${err.message}`);
     log.error(`   Stack: ${err.stack?.split('\n')[1]?.trim() || 'N/A'}`);
+    await notifyAdminDetailed(
+      'Message Handler',
+      `${err.message}\n${err.stack || ''}`
+    ).catch(() => {});
 
     return systemReply(FALLBACK_ERROR_PREFIX, {
       discordTitle: responseCtx.discordTitle || ''
@@ -465,6 +475,15 @@ async function handleMessage(ctx) {
     turnBudgets.work.dispose();
     turnBudgets.root.dispose();
   }
+}
+
+function handleMessage(ctx) {
+  const adminIsCaller = Boolean(ctx?.userIdentity?.isAdmin);
+  const conversationKey = generatePromptCacheKey(ctx);
+  return withApiLogConversation(conversationKey, () => withAdminNotificationPolicy({
+    suppress: adminIsCaller,
+    reason: adminIsCaller ? 'The administrator is the current caller.' : ''
+  }, () => _handleMessage(ctx)));
 }
 
 export { handleMessage };

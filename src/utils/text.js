@@ -3,7 +3,7 @@
 // Collection of text utilities used throughout GemiX:
 // - Filename sanitization for safe storage
 // - Stripping TTS voice effect tags ([pause], <soft>, etc.)
-// - Normalizing Markdown for WhatsApp compatibility (xAI inline citations included)
+// - Normalizing Markdown for WhatsApp compatibility
 // - Cleaning history prefixes, system messages, research badges, footers, etc.
 // - High-level clean functions for incoming and outgoing messages
 
@@ -11,6 +11,10 @@ import { stripPhoneMentionTags } from './waMentions.js';
 import { isSystemMessage } from '../config/systemMessages.js';
 import { removeFooter, removeScheduledFooter } from './footer.js';
 import { formatTimestamp } from './time.js';
+import {
+  XAI_INLINE_VOICE_TAG_NAMES,
+  XAI_WRAPPING_VOICE_TAG_NAMES
+} from '../media/xaiVoiceTags.js';
 
 /**
  * Sanitize a string for use as a filename.
@@ -28,14 +32,12 @@ function sanitizeFilename(text, maxLen = 80) {
     .slice(0, maxLen) || 'file';
 }
 
-// Canonical tag names, as declared to the model in ai/responseSchema.js
-// (VOICE_RESPONSE_FIELD_DESC). Kept as plain name lists (not the bracket
-// syntax) so the stripping regexes below can tolerate the model writing a
-// wrapping-only tag with inline [brackets] or vice versa - both still get
-// removed instead of leaking into the reply.
-const VOICE_TAGS_INLINE_NAMES = ['pause', 'long-pause', 'hum-tune', 'laugh', 'chuckle', 'giggle', 'cry', 'tsk', 'tongue-click', 'lip-smack', 'breath', 'inhale', 'exhale', 'sigh'];
-const VOICE_TAGS_WRAP_NAMES = ['soft', 'whisper', 'loud', 'build-intensity', 'decrease-intensity', 'higher-pitch', 'lower-pitch', 'slow', 'fast', 'sing-song', 'singing', 'laugh-speak', 'emphasis'];
-const VOICE_TAG_NAMES = [...VOICE_TAGS_INLINE_NAMES, ...VOICE_TAGS_WRAP_NAMES];
+// Kept as plain names in the shared xAI catalog so stripping tolerates a model
+// writing a wrapping-only tag with inline brackets or vice versa.
+const VOICE_TAG_NAMES = [
+  ...XAI_INLINE_VOICE_TAG_NAMES,
+  ...XAI_WRAPPING_VOICE_TAG_NAMES
+];
 const VOICE_TAG_NAMES_ALT = VOICE_TAG_NAMES.join('|');
 
 // Every declared tag name, matched in EITHER syntax: inline [name] or
@@ -78,8 +80,8 @@ const VOICE_ALLOWED_RE = /[^\p{L}\p{N}\s.,!?'’-]/gu;
 function sanitizeVoiceMessageText(text) {
   if (!text || typeof text !== 'string') return '';
   text = stripPhoneMentionTags(text);
-  // Markdown links (xAI inline citations included) would otherwise survive the
-  // symbol cleanup as their bare words and get read aloud ("1 https x.ai news").
+  // Markdown links would otherwise survive the symbol cleanup as their bare
+  // words and get read aloud.
   text = stripMarkdownLinks(text);
   // Protect voice tags so their brackets/dashes survive the symbol cleanup.
   // The placeholder uses only letters/digits (kept by VOICE_ALLOWED_RE).
@@ -101,14 +103,8 @@ function sanitizeVoiceMessageText(text) {
     .trim();
 }
 
-// Matches markdown inline links (not images): [text](url) and footnote-style [[n]](url).
-const MD_FOOTNOTE_LINK_RE = /\[\[[^\]]*\]\]\([^)]*\)/g;
+// Matches Markdown inline links (not images): [text](url).
 const MD_INLINE_LINK_RE = /(?<!!)\[[^\]]+\]\([^)]*\)/g;
-
-// Same footnote shape, with the URL captured: xAI's inline citations.
-const INLINE_CITATION_RE = /\[\[[^\]]*\]\]\(([^)\s]+)\)/g;
-/** Heading of the source list appended on platforms without clickable anchor text. */
-const SOURCES_LIST_HEADING = 'Fonti:';
 
 /**
  * Strip markdown link syntax from outgoing text. Bare https:// URLs are kept.
@@ -119,39 +115,9 @@ const SOURCES_LIST_HEADING = 'Fonti:';
 function stripMarkdownLinks(text) {
   if (!text || typeof text !== 'string') return text;
   return text
-    .replace(MD_FOOTNOTE_LINK_RE, '')
     .replace(MD_INLINE_LINK_RE, '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/ +\n/g, '\n');
-}
-
-/**
- * Turn xAI's inline citations into a plain-text source list.
- *
- * The Responses API enables inline citations by default: whenever the model
- * cites a server-side web/X search result it writes `[[N]](url)` straight into
- * the reply text (docs.x.ai → Tools → Citations). Discord renders that as a
- * clickable `[N]`, but WhatsApp has no anchor-text markup at all and only
- * linkifies bare URLs.
- *
- * Here each citation keeps a `[N]` marker in place and the URLs are appended
- * as a numbered list under the reply. Numbering is rebuilt from first-appearance
- * order of the distinct URLs, so the list is always 1..N with no gaps even when
- * the model reuses or skips numbers. No citation → text returned unchanged.
- *
- * @param {string} text
- * @returns {string}
- */
-function renderInlineCitations(text) {
-  if (!text || typeof text !== 'string') return text;
-  const numberByUrl = new Map();
-  const marked = text.replace(INLINE_CITATION_RE, (_, url) => {
-    if (!numberByUrl.has(url)) numberByUrl.set(url, numberByUrl.size + 1);
-    return `[${numberByUrl.get(url)}]`;
-  });
-  if (numberByUrl.size === 0) return text;
-  const list = [...numberByUrl].map(([url, n]) => `[${n}] ${url}`).join('\n');
-  return `${marked.replace(/\s+$/u, '')}\n\n${SOURCES_LIST_HEADING}\n${list}`;
 }
 
 /**
@@ -161,16 +127,12 @@ function renderInlineCitations(text) {
  * - **text** - *text* (bold)
  * - __text__ - _text_ (italic)
  * - ~~text~~ - ~text~ (strikethrough)
- * - [[n]](url) - xAI inline citations - converted to [n] + appended source list
  * - [text](url) - removed (bare URLs kept)
  * @param {string} text
  * @returns {string}
  */
 function normalizeMarkdown(text) {
   if (!text || typeof text !== 'string') return text;
-  // Citations first: stripMarkdownLinks would otherwise delete them, URL included.
-  // Idempotent, so text the handler already converted passes through untouched.
-  text = renderInlineCitations(text);
   text = stripMarkdownLinks(text);
   // Remove heading markers (###) completely - WhatsApp doesn't support them
   text = text.replace(/^#{1,6}\s+/gm, '');
@@ -196,10 +158,10 @@ const HISTORY_TIMESTAMP_PREFIX_RE = /^\[\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d
 const LEADING_SPEAKER_LABEL_RE = /^(?:GemiX|Account Owner|Bot)\s*:\s*/i;
 
 // Matches self-generated research badges like:
-//   "🌐: 3 sources. 𝕏: 2 posts."
+//   "🌐: 3 sources. 𝕏: 2 searches."
 //   "🌐: 1 source."
-//   "𝕏: 5 posts"
-const RESEARCH_BADGE_RE = /\n*\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*posts?)(?:\.\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*posts?))?\.?/gi;
+//   "𝕏: 5 posts" (legacy history)
+const RESEARCH_BADGE_RE = /\n*\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*(?:posts?|search(?:es)?))(?:\.\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*(?:posts?|search(?:es)?)))?\.?/gi;
 
 // Matches accidental echoed reply prefix patterns like:
 //   "[In reply to: ...]"
@@ -288,20 +250,21 @@ function stripHistoryPrefixes(text) {
  * Clean up the final assistant response text before any platform processing.
  * Applies outgoing filters, in this order:
  * 1. Strips [Attachment: ...], <PastVoiceReply> and <system-notification>/<system-reminder> echoes
- * 2. Strips voice effect tags (e.g. [pause], <soft>)
+ * 2. Optionally strips provider-specific voice tags from a text fallback
  * 3. Strips any duplicated history conversation prefixes (e.g. "[timestamp] GemiX:")
  * 4. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
- * 5. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N posts.")
+ * 5. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N searches.")
  * 6. Strips any GemiX system-message lines accidentally echoed by the AI
  *    (release banners, maintenance, temp-attachment notice, fallback error...)
  * 7. Strips any accidental footers (e.g. "--GemiX • ...")
  * @param {string} text
+ * @param {{ stripProviderVoiceTags?: boolean }} [opts]
  * @returns {string} Cleaned response text
  */
-function cleanAssistantResponse(text) {
+function cleanAssistantResponse(text, opts = {}) {
   if (!text || typeof text !== 'string') return '';
   let cleaned = stripOutgoingDeliveryArtifacts(text);
-  cleaned = stripVoiceTags(cleaned);
+  if (opts.stripProviderVoiceTags) cleaned = stripVoiceTags(cleaned);
   cleaned = stripHistoryPrefixes(cleaned);
   cleaned = cleaned.replace(IN_REPLY_TO_PREFIX_RE, '');
   cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
@@ -329,8 +292,9 @@ function formatLabeledUserContent(timestampMs, senderName, textBody) {
 
 /**
  * Clean up any incoming message text from chat history/replies before feeding it
- * to the LLM context. Strips the GemiX and scheduled-message footers, voice
- * effect tags, past-voice transcript blocks, research badges and reply headers.
+ * to the LLM context. Strips GemiX and scheduled-message footers, past-voice
+ * transcript blocks, research badges and reply headers. Literal text resembling
+ * a provider's TTS markup is user content here and must remain untouched.
  * @param {string} text
  * @returns {string} Cleaned text
  */
@@ -339,8 +303,7 @@ function cleanIncomingText(text) {
   let cleaned = removeFooter(text);
   cleaned = removeScheduledFooter(cleaned);
 
-  // Clean voice tags, past-voice transcript blocks, research badges, and reply headers
-  cleaned = stripVoiceTags(cleaned);
+  // Clean past-voice transcript blocks, research badges, and reply headers.
   cleaned = stripPastVoiceReplyTags(cleaned);
   cleaned = cleaned.replace(IN_REPLY_TO_PREFIX_RE, '');
   cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
@@ -359,7 +322,6 @@ export {
   stripVoiceTags,
   sanitizeVoiceMessageText,
   normalizeMarkdown,
-  renderInlineCitations,
   stripOutgoingDeliveryArtifacts,
   cleanAssistantResponse,
   cleanIncomingText,

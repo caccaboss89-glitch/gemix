@@ -28,10 +28,12 @@ const WIRE_CAPABILITY = Object.freeze({
    * be declared rather than assumed.
    */
   MAX_OUTPUT_TOKENS: 'supportsMaxOutputTokens',
-  /** Reserved hook; no backend currently declares it. */
-  NATIVE_AUDIO_INPUT: 'nativeAudioInput',
-  /** Reserved hook; no backend currently declares it. */
-  NATIVE_VIDEO_INPUT: 'nativeVideoInput'
+  /** Whether the optional standard `prompt_cache_key` request field is accepted. */
+  PROMPT_CACHE_KEY: 'supportsPromptCacheKey',
+  /** Whether function argument schemas may use strict mode on this endpoint. */
+  STRICT_FUNCTION_ARGUMENTS: 'supportsStrictFunctionArguments',
+  /** Whether function tools accept the optional Responses `output_schema` field. */
+  FUNCTION_OUTPUT_SCHEMA: 'supportsFunctionOutputSchema'
 });
 
 /** Flags that must all be true for a provider to be usable as the main brain. */
@@ -52,8 +54,9 @@ const DEFAULTS = Object.freeze({
   [WIRE_CAPABILITY.REASONING_REPLAY]: false,
   [WIRE_CAPABILITY.IMAGE_INPUT]: false,
   [WIRE_CAPABILITY.MAX_OUTPUT_TOKENS]: false,
-  [WIRE_CAPABILITY.NATIVE_AUDIO_INPUT]: false,
-  [WIRE_CAPABILITY.NATIVE_VIDEO_INPUT]: false
+  [WIRE_CAPABILITY.PROMPT_CACHE_KEY]: false,
+  [WIRE_CAPABILITY.STRICT_FUNCTION_ARGUMENTS]: false,
+  [WIRE_CAPABILITY.FUNCTION_OUTPUT_SCHEMA]: false
 });
 
 /**

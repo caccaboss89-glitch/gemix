@@ -19,10 +19,14 @@ import { sniffImageType } from '../utils/imageType.js';
 
 const log = createLogger('SearchImage');
 
-const { SEARCH_IMAGE_DEFAULT_COUNT, SEARCH_IMAGE_MIN_COUNT, SEARCH_IMAGE_MAX_COUNT } = constants;
+const {
+  SEARCH_IMAGE_DEFAULT_COUNT,
+  SEARCH_IMAGE_MIN_COUNT,
+  SEARCH_IMAGE_MAX_COUNT,
+  SEARCH_IMAGE_QUERY_MAX_CHARS
+} = constants;
 const SEARCH_TIMEOUT_MS = 25_000;
 const VISION_DOWNLOAD_TIMEOUT_MS = 20_000;
-const MAX_QUERY_LEN = 300;
 
 /**
  * Normalize and cap the user/model query.
@@ -36,7 +40,7 @@ function _cleanQuery(raw) {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, MAX_QUERY_LEN);
+    .slice(0, SEARCH_IMAGE_QUERY_MAX_CHARS);
 }
 
 /**
@@ -276,10 +280,10 @@ async function searchImage(args = {}, opts = {}) {
       visionCount > 0
         ? `Found ${imagesOut.length} image(s); ${visionCount} attached as vision previews labeled IMAGE_0…IMAGE_n. `
           + 'Inspect them visually, then put the chosen image `url` value(s) in final `attachments`. '
-          + 'Only use these URLs — never invent ones or use render/citation component syntax.'
+          + 'Only use these URLs — never invent one or substitute unsupported component syntax.'
         : `Found ${imagesOut.length} image URL(s) but none could be loaded for vision. `
           + 'You may still put a `url` from the list in final `attachments` if appropriate, or retry with another query. '
-          + 'Never invent URLs or use render/citation component syntax.'
+          + 'Never invent URLs or substitute unsupported component syntax.'
   };
 
   if (nativeParts.length === 0) {

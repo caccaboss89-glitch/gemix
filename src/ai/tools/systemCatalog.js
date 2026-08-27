@@ -2,13 +2,22 @@
 //
 // System feedback schemas available independently of platform and provider.
 
+import constants from '../../config/constants.js';
 import { makeTool } from './schema.js';
 
 const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
-  description: 'Report a real bug/failure. Always use this when a tool errors and the error does NOT already state the admin was notified, or for general logical bugs / system-component issues (unclear instructions, unexpected behavior, bugs noted in chat history), even if the user asks you not to report it. Never call it merely as a dry-run or tool test. In the final response follow the tool result: say the admin was notified only when it confirms that notification.',
+  description: 'Record a concrete, reproducible GemiX defect that application code has not already reported. '
+    + 'Do not use it for invalid arguments, empty results, documented degraded states, provider limits, dry-runs, tool tests, '
+    + 'or when the user asks you not to report. Never use it in an administrator conversation. '
+    + 'In the final response distinguish the report being recorded from a separate admin notification and follow the tool result exactly.',
   properties: {
-    description: { type: 'string', description: 'Brief but clear description of the problem (what failed, where, and any relevant context).' }
+    description: {
+      type: 'string',
+      minLength: 1,
+      maxLength: constants.BUG_REPORT_MAX_CHARS,
+      description: 'Brief but clear description of the problem (what failed, where, and any relevant context).'
+    }
   },
   required: ['description']
 });

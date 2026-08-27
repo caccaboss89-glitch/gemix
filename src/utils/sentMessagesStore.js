@@ -64,6 +64,20 @@ function _load(senderKey) {
   }
 }
 
+/** Refuse to overwrite an existing audit file that could not be decoded. */
+function _loadForWrite(senderKey) {
+  const file = _logFile(senderKey);
+  if (!fs.existsSync(file)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (!Array.isArray(parsed)) throw new Error('audit root is not an array');
+    return parsed;
+  } catch (err) {
+    log.warn(`Cannot safely update sent-messages log for ${senderKey}: ${err.message}`);
+    return null;
+  }
+}
+
 function _save(senderKey, records) {
   const dir = _senderDir(senderKey);
   const file = _logFile(senderKey);
@@ -94,7 +108,11 @@ function _save(senderKey, records) {
 function _retainAttachment(senderKey, att) {
   const originalName = (att && att.name) || 'file';
   const mimetype = (att && att.mimetype) || 'application/octet-stream';
-  const base = { originalName, mimetype };
+  const base = {
+    originalName,
+    mimetype,
+    ...(att && att.deliveryMethod ? { deliveryMethod: att.deliveryMethod } : {})
+  };
 
   try {
     if (attachmentSize(att) <= MAX_RETAINED_ATTACHMENT_BYTES) {
@@ -139,28 +157,47 @@ function _pruneOrphanFiles(senderKey, records) {
   }
 }
 
+/** Remove new retained copies when the record that references them was not saved. */
+function _discardRetainedFiles(senderKey, retained) {
+  const dir = _filesDir(senderKey);
+  for (const attachment of (Array.isArray(retained) ? retained : [])) {
+    if (!attachment?.storedFile) continue;
+    try { fs.unlinkSync(path.join(dir, attachment.storedFile)); } catch { /* missing */ }
+  }
+}
+
 /**
- * Record one outgoing message (best-effort; never throws into the send flow).
+ * Record one outgoing message. The returned boolean says whether messages.json
+ * was durably replaced; callers expose a failed audit separately from the
+ * already-accepted outbound delivery.
  *
  * @param {object} entry
  * @param {string} entry.senderKey - stable per-person id (userCtx.taskFileId)
  * @param {'whatsapp'|'email'} entry.channel
- * @param {'accepted'} [entry.status]
+ * @param {'accepted'} [entry.acceptanceStatus] - outbound service acceptance
+ * @param {'ok'|'degraded'} [entry.toolStatus] - completeness of attachment submission
  * @param {{ phone?: string|null, email?: string|null, display?: string }} entry.recipient
  * @param {string} [entry.text] - WhatsApp message text
  * @param {string} [entry.subject] - email subject
  * @param {string} [entry.body] - email body
- * @param {Array<object>} [entry.attachments] - resolved attachment objects
+ * @param {Array<object>} [entry.attachments] - only objects actually sent,
+ *   embedded, or included as links; deliveryMethod records which path was used
+ * @returns {Promise<boolean>} true only when the record was saved
  */
-function recordSentMessage(entry) {
+async function recordSentMessage(entry) {
   const senderKey = entry && entry.senderKey;
-  if (!senderKey || !entry.channel) return;
+  const acceptanceStatus = entry?.acceptanceStatus ?? 'accepted';
+  const toolStatus = entry?.toolStatus ?? 'ok';
+  if (!senderKey || !['whatsapp', 'email'].includes(entry?.channel)) return false;
+  if (acceptanceStatus !== 'accepted' || !['ok', 'degraded'].includes(toolStatus)) return false;
 
-  // Serialize each sender's updates and return the completion promise.
+  // Serialize each sender's updates and wait for the durable save result.
   return _withLock(senderKey, async () => {
+    let retained = [];
     try {
-      const records = _load(senderKey);
-      const retained = Array.isArray(entry.attachments)
+      const records = _loadForWrite(senderKey);
+      if (!records) return false;
+      retained = Array.isArray(entry.attachments)
         ? entry.attachments.map(a => _retainAttachment(senderKey, a))
         : [];
 
@@ -168,7 +205,8 @@ function recordSentMessage(entry) {
         id: crypto.randomBytes(8).toString('hex'),
         ts: Date.now(),
         channel: entry.channel,
-        status: entry.status || 'accepted',
+        acceptanceStatus,
+        toolStatus,
         recipient: {
           phone: (entry.recipient && entry.recipient.phone) || null,
           email: (entry.recipient && entry.recipient.email) || null,
@@ -185,11 +223,16 @@ function recordSentMessage(entry) {
       // failed rewrite cannot leave the log pointing at already-deleted files.
       if (_save(senderKey, kept)) {
         _pruneOrphanFiles(senderKey, kept);
+        return true;
       } else {
+        _discardRetainedFiles(senderKey, retained);
         log.warn(`recordSentMessage: save failed for ${senderKey}; skipped orphan prune`);
+        return false;
       }
     } catch (err) {
+      _discardRetainedFiles(senderKey, retained);
       log.warn(`recordSentMessage failed: ${err.message}`);
+      return false;
     }
   });
 }

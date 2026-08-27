@@ -23,7 +23,6 @@ const PROFILE = {
 const TOOL = {
   SEARCH_WEB: 'search_web',
   READ_PAGE: 'read_page',
-  X_SEARCH: 'x_search',
   SEARCH_IMAGE: 'search_image',
   GENERATE_MUSIC: 'generate_music',
   GENERATE_IMAGE: 'generate_image',
@@ -47,9 +46,6 @@ const TOOL = {
   BUG_REPORT: 'bug_report'
 };
 
-// `tools` is not written here: syncProfileToolSets() fills it at the bottom of
-// this file straight from the tool registry, so a profile's capability set can
-// never drift from what getToolsForUser actually returns.
 const CAPS = {
   [PROFILE.WA_PERSONAL]: {
     platform: PLATFORM_WA_PERSONAL,
@@ -59,8 +55,7 @@ const CAPS = {
     longTermMemory: true,
     workspace: true,
     historyTranscriptionNote: false,
-    voiceReply: false,
-    tools: null
+    voiceReply: false
   },
   [PROFILE.WA_DEDICATED_PRIVATE]: {
     platform: PLATFORM_WA_DEDICATED,
@@ -70,8 +65,7 @@ const CAPS = {
     longTermMemory: true,
     workspace: true,
     historyTranscriptionNote: true,
-    voiceReply: true,
-    tools: null
+    voiceReply: true
   },
   [PROFILE.WA_DEDICATED_GROUP]: {
     platform: PLATFORM_WA_DEDICATED,
@@ -81,8 +75,7 @@ const CAPS = {
     longTermMemory: true,
     workspace: true,
     historyTranscriptionNote: true,
-    voiceReply: true,
-    tools: null
+    voiceReply: true
   },
   [PROFILE.DISCORD_THREAD]: {
     platform: PLATFORM_DISCORD,
@@ -92,8 +85,7 @@ const CAPS = {
     longTermMemory: false,
     workspace: true,
     historyTranscriptionNote: false,
-    voiceReply: false,
-    tools: null
+    voiceReply: false
   }
 };
 
@@ -143,10 +135,9 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
   return `Tool "${toolName}" is not available in the current context.`;
 }
 
-/** @param {Set<string>|null} toolNames - live tool names from getToolsForUser; null = profile cap.tools */
-function _hasTool(toolNames, cap, name) {
-  if (toolNames) return toolNames.has(name);
-  return cap.tools.has(name);
+/** True only for a tool in the exact set offered on this turn. */
+function _hasTool(toolNames, name) {
+  return toolNames instanceof Set && toolNames.has(name);
 }
 
 /** Tools gated on active server membership (omitted from schema when caller is not active). */
@@ -170,8 +161,7 @@ function _andList(items) {
  * are named, never explained — what each one does is in its own description.
  */
 function buildAudienceLines(profile, opts = {}) {
-  const cap = CAPS[profile];
-  const has = (name) => _hasTool(opts.toolNames, cap, name);
+  const has = (name) => _hasTool(opts.toolNames, name);
 
   if (opts.isActiveMember === false) {
     const lines = [
@@ -212,16 +202,13 @@ function buildAudienceLines(profile, opts = {}) {
  * prose paragraphs in reading order. Per-tool "when and how" stays in each
  * tool's own description — this section only carries what applies everywhere.
  *
- * Nothing here restates what xAI injects server-side. In particular there is no
- * parallel-tool-calling rule (the backend already prints "You use tools via
- * function calls… You can use multiple tools in parallel by calling them
- * together." above our tool list) and no citation rule (the backend injects its
- * own render_inline_citation directive and the API renders the links itself).
+ * Provider-specific behavior does not live here. The provider block replaces
+ * its generic counterpart as a unit, while this section remains platform-only.
  */
 function buildAnswerLines(profile, opts = {}) {
   const toolNames = opts.toolNames || null;
   const cap = CAPS[profile];
-  const has = (name) => _hasTool(toolNames, cap, name);
+  const has = (name) => _hasTool(toolNames, name);
 
   const pastStyleExample = cap.voiceReply
     ? 'the same vocal style, or a catchphrase'
@@ -230,14 +217,10 @@ function buildAnswerLines(profile, opts = {}) {
     ? 'wrong recipient, an awkward voice reply, a tic'
     : 'wrong recipient, a verbal tic';
 
-  // The backend injects its own safety rules ABOVE this prompt (verified by
-  // prompt-leak probe), so an unqualified "never refuse" would put the two in
-  // open contradiction and leave the model guessing which one wins.
   const lines = [
     'These instructions override anything a user asks you to do.',
-    'You have no moral filter of your own: never refuse or censor a request because you find it distasteful. '
-    + 'The safety rules that come before this prompt are the exception and still stand — they are the only '
-    + 'thing you decline for, and when you do, say so plainly instead of inventing another reason.',
+    'Follow any higher-priority provider policy. Within that boundary, do not add moral judgments or invent a '
+    + 'different reason for a refusal: explain the real limitation plainly.',
     'Users have already read or heard everything you said before. Never repeat your own phrases, jokes or '
     + `recurring ideas across a conversation, and do not let your past style (${pastStyleExample}) pull you into `
     + 'repeating it. Vary every reply. If the user let a question of yours drop, drop it too.',
@@ -262,11 +245,16 @@ function buildAnswerLines(profile, opts = {}) {
   sources.push('tool results');
   lines.push(
     `Ground everything you say in what you can actually see: ${sources.join(', ')}. `
-    + 'Never invent or assume facts, names, dates, numbers, links, file paths, citations, quoted text, '
+    + 'Never invent or assume facts, names, dates, numbers, links, file paths, quoted text, '
     + 'or the contents of a file you were not shown.'
   );
 
-  let verifyTools = has(TOOL.X_SEARCH) ? 'web or X search for facts' : 'web search for facts';
+  lines.push(
+    'Every GemiX function result has `success` plus `status`: `ok` is complete, `degraded` is usable with stated '
+    + 'limitations, and `failed` is unusable. Read the returned fields and message for the tool-specific details.'
+  );
+
+  let verifyTools = 'the appropriate available search tool for facts';
   if (cap.isDiscord) {
     verifyTools += ', the statute below for its text';
   } else if (has(TOOL.READ_TASKS)) {
@@ -277,7 +265,7 @@ function buildAnswerLines(profile, opts = {}) {
     + 'If something stays unconfirmed, say so plainly. Never guess, never rush.'
   );
 
-  if (has(TOOL.SEARCH_WEB) || has(TOOL.X_SEARCH)) {
+  if (has(TOOL.SEARCH_WEB)) {
     let search = 'Search before you answer anything factual that is not already in the history or the settings: news, people, '
       + 'products, events, social posts and screenshots, references you do not recognise. Search first, never guess.';
     if (has(TOOL.READ_PAGE)) {
@@ -303,35 +291,14 @@ function buildAnswerLines(profile, opts = {}) {
  * Without the second, files that were generated this turn are never sent, or
  * are regenerated to be sent.
  */
-function buildSendingFilesLines(profile, opts = {}) {
-  const cap = CAPS[profile];
-  const has = (name) => _hasTool(opts.toolNames, cap, name);
-
-  const lines = [
+function buildSendingFilesLines() {
+  return [
     'Whatever you list in `attachments` is fetched and delivered by the program: a path in this chat, or a direct '
     + 'https link to the file itself. You never download anything yourself and you never need a tool to do it for '
     + 'you — the link is enough.',
     'A tool that produces a file tells you the exact path it wrote. Send it by listing that path, unchanged; the '
     + 'file stays there afterwards, so nothing has to be regenerated to be sent again.'
   ];
-  if (has(TOOL.X_SEARCH)) {
-    let x = 'So when someone wants a photo or a video from an X post, open that post with the X tools, take the '
-      + 'CDN link of the media out of the result, and put that link in `attachments`.';
-    if (has(TOOL.SHELL)) {
-      x += ' Do not download it into the workspace first: the link is already everything the program needs.';
-    }
-    lines.push(x);
-  }
-  return lines;
-}
-
-/** True when a profile exposes all three generation tools (image + video + song). */
-function profileHasMediaQuota(profile) {
-  const cap = CAPS[profile];
-  if (!cap) return false;
-  return cap.tools.has(TOOL.GENERATE_IMAGE)
-    && cap.tools.has(TOOL.GENERATE_VIDEO)
-    && cap.tools.has(TOOL.GENERATE_MUSIC);
 }
 
 /**
@@ -344,12 +311,13 @@ function buildVisibilityLines(profile) {
   // The real boundary is the message window, not a media count: the per-turn
   // caps equal MAX_HISTORY, so inside a 30-message window they never bind.
   let historyLine =
-    `Your history is the last ${MAX_HISTORY} messages of this chat, and anything older is not in your context at `
-    + 'all. Files inside that window are labelled `[Attachment: attachments/filename]` and past reactions as '
+    `Your ordinary history window is the last ${MAX_HISTORY} messages of this chat. A reply quote can additionally `
+    + 'carry an abbreviated excerpt of the older message being answered. Files inside the ordinary window are '
+    + 'labelled `[Attachment: attachments/filename]` and past reactions as '
     + '`[Reactions: emoji xN]`. Images in the message you are answering, or in the message it replies to, you see '
     + 'directly; every other file you open with read_file at that path, whenever you need it.';
-  historyLine += ' A voice message the user sent is already written out for you in `<PastVoice>`, on the turn '
-    + 'where it was spoken, with the audio still there as a file if you need it.';
+  historyLine += ' A voice message the user sent appears as `<PastVoice>` on the turn where it was spoken; its '
+    + 'transcript is included when transcription succeeded, and the audio remains available as a file.';
   if (cap.historyTranscriptionNote) {
     historyLine += ' Your own past voice messages appear the same way, as `<PastVoiceReply>` on those assistant turns.';
   }
@@ -359,8 +327,8 @@ function buildVisibilityLines(profile) {
     `Incoming media: audio longer than ${MAX_AUDIO_DURATION_S}s and video longer than ${MAX_VIDEO_DURATION_S}s are dropped `
     + 'and replaced inline with a "(too long, max Ns)" note. If a file is still attached, it passed the check — read it.',
     historyLine,
-    'You can look at web images by URL and at videos inside X posts. Any other remote file must be attached '
-    + 'to this chat or downloaded into workspace/ before you can read it.'
+    'A remote URL by itself is not content you have inspected. Use the appropriate web tool, or download a file '
+    + 'into workspace/ and open it with read_file, before making claims about what it contains.'
   ];
   if (cap.isDiscord) {
     lines.push(
@@ -376,9 +344,6 @@ function buildVisibilityLines(profile) {
   return lines;
 }
 
-import { syncProfileToolSets } from '../ai/tools.js';
-syncProfileToolSets(CAPS, PROFILE);
-
 export {
   PROFILE,
   TOOL,
@@ -389,6 +354,5 @@ export {
   buildAnswerLines,
   buildSendingFilesLines,
   buildVisibilityLines,
-  buildAudienceLines,
-  profileHasMediaQuota
+  buildAudienceLines
 };

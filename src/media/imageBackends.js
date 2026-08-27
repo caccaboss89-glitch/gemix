@@ -14,10 +14,10 @@
 // that will come back as a different picture, is worse than exposing the
 // smaller schema honestly.
 //
-// The fallback chain is fixed: xAI first, Cloudflare behind it. What is not
-// fixed is when it fires, and the important distinction is that a
-// content-policy refusal is never retried elsewhere. Routing around a
-// provider's safety decision is not a fallback.
+// The generic baseline is Cloudflare. The xAI profile alone replaces it with
+// xAI as primary and may fall back to Cloudflare for compatible text-only
+// requests. A content-policy refusal is never retried elsewhere: routing
+// around a provider's safety decision is not a fallback.
 
 import { CF_ERROR, callWorkersAi, isCloudflareConfigured } from './cloudflareClient.js';
 import { estimateImageNeurons } from './neuronLedger.js';
@@ -50,6 +50,15 @@ const FLUX_DEFAULT_SIZE = 'square';
 
 /** FLUX takes exactly one reference; more are not composed, they are ignored. */
 const FLUX_MAX_REFERENCES = 1;
+
+/** Closest FLUX output shape for each aspect ratio exposed by xAI. */
+const XAI_ASPECT_TO_FLUX_SIZE = Object.freeze({
+  '1:1': 'square',
+  '16:9': 'landscape',
+  '9:16': 'portrait',
+  '4:3': 'landscape',
+  '3:4': 'portrait'
+});
 
 /**
  * How long a primary backend stays skipped after it rate-limited us.
@@ -141,6 +150,25 @@ function resolveFluxSize(name) {
   return FLUX_SIZES[key] || FLUX_SIZES[FLUX_DEFAULT_SIZE];
 }
 
+/** Translate the xAI text-to-image shape into the closest FLUX size preset. */
+function fluxSizeForAspectRatio(aspectRatio) {
+  const key = typeof aspectRatio === 'string' ? aspectRatio.trim() : '';
+  return XAI_ASPECT_TO_FLUX_SIZE[key] || FLUX_DEFAULT_SIZE;
+}
+
+/**
+ * Whether an image request may move between two backends without changing the
+ * operation the model requested. xAI reference calls are edits/compositions;
+ * FLUX reference input only guides a new generation, so only text-to-image is
+ * a valid xAI -> FLUX fallback.
+ */
+function canUseImageFallback(sourceBackend, targetBackend, referenceCount) {
+  if (sourceBackend === targetBackend) return true;
+  return sourceBackend === BACKEND.XAI
+    && targetBackend === BACKEND.CLOUDFLARE
+    && referenceCount === 0;
+}
+
 /**
  * Generate one image on Workers AI FLUX.
  *
@@ -194,9 +222,12 @@ export {
   FLUX_DEFAULT_SIZE,
   FLUX_MAX_REFERENCES,
   FLUX_SIZES,
+  XAI_ASPECT_TO_FLUX_SIZE,
   _resetCooldownsForTests,
+  canUseImageFallback,
   declaredImageBackend,
   failurePlan,
+  fluxSizeForAspectRatio,
   generateWithFlux,
   resolveFluxSize,
   resolveImageBackends,

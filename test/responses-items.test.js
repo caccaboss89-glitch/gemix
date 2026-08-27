@@ -21,7 +21,7 @@ import {
 import { buildResponsesInput } from '../src/ai/transport/responsesProtocol.js';
 import {
   PER_ROUND_TOOL_LIMITS,
-  partitionHandlerToolCalls,
+  planHandlerToolCalls,
   perRoundCappedDuplicateIds
 } from '../src/utils/toolCallExecution.js';
 
@@ -160,18 +160,27 @@ test('internal bookkeeping never reaches the wire', () => {
 // The loop reads calls straight off `function_call` items, so these helpers see
 // `{id, name, arguments}` — not a nested `function` object.
 
-test('delivery tools run after everything else, in model order', () => {
+test('tool phases preserve effect barriers in model order', () => {
   const calls = [
     { id: 'a', name: 'search_web', arguments: '{}' },
-    { id: 'b', name: 'send_email', arguments: '{}' },
-    { id: 'c', name: 'read_file', arguments: '{}' },
-    { id: 'd', name: 'send_whatsapp_message', arguments: '{}' }
+    { id: 'b', name: 'read_page', arguments: '{}' },
+    { id: 'c', name: 'send_email', arguments: '{}' },
+    { id: 'd', name: 'read_file', arguments: '{}' },
+    { id: 'e', name: 'read_sent_messages', arguments: '{}' },
+    { id: 'f', name: 'write_file', arguments: '{}' },
+    { id: 'g', name: 'send_whatsapp_message', arguments: '{}' }
   ];
-  const { standard, delivery } = partitionHandlerToolCalls(calls);
+  const phases = planHandlerToolCalls(calls);
 
-  assert.deepEqual(standard.map((t) => t.id), ['a', 'c']);
-  // Sending happens once the round's research is done, never interleaved.
-  assert.deepEqual(delivery.map((t) => t.id), ['b', 'd']);
+  assert.deepEqual(phases.map(phase => ({
+    mode: phase.mode,
+    ids: phase.calls.map(call => call.id)
+  })), [
+    { mode: 'parallel-read', ids: ['a', 'b'] },
+    { mode: 'serial', ids: ['c'] },
+    { mode: 'parallel-read', ids: ['d'] },
+    { mode: 'serial', ids: ['e', 'f', 'g'] }
+  ]);
 });
 
 test('a per-round cap blocks the extra calls, not the first ones', () => {

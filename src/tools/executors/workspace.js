@@ -31,8 +31,7 @@ async function _executeWorkspaceTool(name, { args, userCtx }) {
   if (!workspaceId) return { success: false, error: 'Cannot resolve a workspace for this chat.' };
 
   const lockOpts = {
-    lockOwnerId: userCtx.requestId ? `${userCtx.requestId}:workspace` : undefined,
-    isAdmin: Boolean(userCtx.isAdmin)
+    lockOwnerId: userCtx.requestId ? `${userCtx.requestId}:workspace` : undefined
   };
   try {
     if (name === 'list_files') return await listFiles(args, workspaceId);

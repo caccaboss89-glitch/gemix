@@ -52,7 +52,7 @@ function formatUrlForWhatsApp(url) {
  * @param {object} [opts]
  * @param {'whatsapp'|'discord'|'email'} [opts.platform] - Destination; only
  *   'whatsapp' gets the anti-wrap URL treatment.
- * @returns {{ message: string, fallbackLinks: Array<{name: string, url: string, size: number, expiresInMinutes: number|null, external?: boolean}>, totalSize: number }}
+ * @returns {{ message: string, fallbackLinks: Array<{name: string, url: string, size: number, expiresInMinutes: number|null, external?: boolean}>, fallbackAttachments: object[], failedAttachments: Array<{attachment: object, error: string}>, totalSize: number }}
  */
 function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
   const formatUrl = opts.platform === PLATFORM.WHATSAPP ? formatUrlForWhatsApp : (u) => u;
@@ -61,6 +61,8 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
   }
 
   const fallbackLinks = [];
+  const fallbackAttachments = [];
+  const failedAttachments = [];
   let totalSize = 0;
 
   log.info(`Processing ${linkFallbackAttachments.length} link-fallback attachment(s)...`);
@@ -75,6 +77,7 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
           expiresInMinutes: null,
           external: true
         });
+        fallbackAttachments.push(att);
         continue;
       }
 
@@ -82,6 +85,10 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
 
       if (!filePath || !fs.existsSync(filePath)) {
         log.warn(`Attachment file not found: ${att.name || 'unknown'}`);
+        failedAttachments.push({
+          attachment: att,
+          error: 'Attachment bytes were unavailable for link fallback.'
+        });
         continue;
       }
 
@@ -95,15 +102,24 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
         size: stat.size,
         expiresInMinutes
       });
+      fallbackAttachments.push(att);
 
       totalSize += stat.size;
     } catch (err) {
       log.error(`Failed to register attachment "${att.name || 'unknown'}" as temp file: ${err.message}`);
+      failedAttachments.push({ attachment: att, error: err.message });
     }
   }
 
   if (fallbackLinks.length === 0) {
-    throw new Error('No attachments were successfully registered for link fallback');
+    const error = new Error('No attachments were successfully registered for link fallback');
+    error.failedAttachments = failedAttachments.length > 0
+      ? failedAttachments
+      : linkFallbackAttachments.map(attachment => ({
+        attachment,
+        error: 'The attachment could not be registered for link fallback.'
+      }));
+    throw error;
   }
 
   const isPlural = fallbackLinks.length > 1;
@@ -149,6 +165,8 @@ function buildFallbackAttachmentMessage(linkFallbackAttachments, opts = {}) {
   return {
     message: messageText,
     fallbackLinks,
+    fallbackAttachments,
+    failedAttachments,
     totalSize
   };
 }
@@ -214,7 +232,7 @@ async function bundleWhatsAppTempLinkAttachments(attachments) {
       att.name || path.basename(p)
     );
     usedNames.push(name);
-    entries.push({ path: p, name });
+    entries.push({ path: p, name, attachment: att });
   }
   if (entries.length <= 1) return attachments;
 
@@ -226,7 +244,12 @@ async function bundleWhatsAppTempLinkAttachments(attachments) {
       log.info(`Bundled ${entries.length} WhatsApp temp-link attachment(s) into ${WA_BUNDLE_ZIP_NAME}`);
       return [
         ...passthrough,
-        { name: WA_BUNDLE_ZIP_NAME, mimetype: 'application/zip', filePath: zipPath }
+        {
+          name: WA_BUNDLE_ZIP_NAME,
+          mimetype: 'application/zip',
+          filePath: zipPath,
+          sourceAttachments: entries.map(entry => entry.attachment)
+        }
       ];
     }
   } catch (err) {
@@ -248,18 +271,29 @@ async function _trySendAttachment(attachment, sendFunction) {
  * Send attachments: direct bucket first, then link fallback for policy-routed
  * items (WA) and send failures.
  *
- * @returns {Promise<{ sent: object[], linkFallback: object[], fallbackMessage: string|null, fallbackLinks: object[] }>}
+ * @returns {Promise<{ sent: object[], directFailures: Array<{attachment: object, error: string}>, linkFallback: object[], fallbackMessage: string|null, fallbackLinks: object[], fallbackAttachments: object[], fallbackFailures: Array<{attachment: object, error: string}> }>}
  */
 async function sendAttachmentsWithFallback(attachments, sendFunction, options = {}) {
   if (!Array.isArray(attachments) || attachments.length === 0) {
-    return { sent: [], linkFallback: [], fallbackMessage: null, fallbackLinks: [] };
+    return {
+      sent: [],
+      directFailures: [],
+      linkFallback: [],
+      fallbackMessage: null,
+      fallbackLinks: [],
+      fallbackAttachments: [],
+      fallbackFailures: []
+    };
   }
 
   const results = {
     sent: [],
+    directFailures: [],
     linkFallback: [],
     fallbackMessage: null,
-    fallbackLinks: []
+    fallbackLinks: [],
+    fallbackAttachments: [],
+    fallbackFailures: []
   };
 
   let toTry = attachments;
@@ -291,6 +325,7 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
       log.info(`Attachment sent: ${result.attachment.name || 'unknown'}`);
     } else {
       sendFailed.push(result.attachment);
+      results.directFailures.push({ attachment: result.attachment, error: result.error });
       log.info(`Direct send failed (${result.attachment.name || 'unknown'}), using link fallback.`);
     }
   }
@@ -309,10 +344,15 @@ async function sendAttachmentsWithFallback(attachments, sendFunction, options = 
       const fallbackData = buildFallbackAttachmentMessage(linkFallback, options);
       results.fallbackMessage = fallbackData.message;
       results.fallbackLinks = fallbackData.fallbackLinks;
+      results.fallbackAttachments = fallbackData.fallbackAttachments;
+      results.fallbackFailures = fallbackData.failedAttachments;
       log.info(`Generated link-fallback message for ${linkFallback.length} attachment(s)`);
     } catch (err) {
       log.error(`Failed to generate link-fallback message: ${err.message}`);
       results.fallbackMessage = ATTACHMENT_FALLBACK_FAILED_MESSAGE;
+      results.fallbackFailures = Array.isArray(err.failedAttachments)
+        ? err.failedAttachments
+        : linkFallback.map(attachment => ({ attachment, error: err.message }));
     }
   }
 

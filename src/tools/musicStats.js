@@ -114,8 +114,8 @@ function formatStats(data) {
   let output = 'MUSIC BOT STATISTICS\n\n';
 
   output += 'GLOBAL:\n';
-  output += `  Songs started: ${global.songsStarted || 'N/A'}\n`;
-  output += `  Songs completed: ${global.songsCompleted || 'N/A'}\n`;
+  output += `  Songs started: ${global.songsStarted ?? 'N/A'}\n`;
+  output += `  Songs completed: ${global.songsCompleted ?? 'N/A'}\n`;
   output += `  Active users: ${userEntries.length}\n`;
   output += `  Total music hours: ${totalHours}h ${totalMinutes}m\n`;
   output += `  Server playlist adds: ${totalServerAdds}\n`;
@@ -135,4 +135,4 @@ function formatStats(data) {
   return { success: true, message: output };
 }
 
-export { readMusicStats };
+export { formatStats, readMusicStats };

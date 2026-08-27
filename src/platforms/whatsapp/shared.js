@@ -153,9 +153,9 @@ async function buildWhatsAppHistory(chat, platform, userId, excludeKeys = null, 
     isBotAt: (m, mi) => isHistoryBotMessage(m, mi)
   });
 
-  // Build each history entry (including its xAI upload) with bounded parallel
-  // concurrency while preserving chronological order. This keeps a media-heavy
-  // history inside the fetch timeout.
+  // Build each history entry and its media parts with bounded concurrency while
+  // preserving chronological order. This keeps a media-heavy history inside
+  // the fetch timeout.
   // Scheduled + registry system messages carry no sender label: they are
   // rendered as <system-notification> turns, which already say who wrote them.
   const _meta = ({ senderName = null, isGemiX = false, isScheduled = false, isSystem = false }) => ({

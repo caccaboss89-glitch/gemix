@@ -2,10 +2,9 @@
 //
 // The startup check for the profile this process runs on.
 //
-// Two things are verified, in this order:
-//   1. the wire contract — a profile that cannot carry Responses/SSE/function
-//      calling/strict schema/reasoning replay/vision is refused outright, since
-//      no amount of retrying at runtime would make it work;
+// Two things are checked, in this order:
+//   1. the profile declaration — a profile that does not declare every required
+//      Responses/SSE/function/schema/replay/vision capability is refused;
 //   2. the credential — resolved once so a misconfiguration surfaces at boot
 //      instead of on the first user message.
 //
@@ -38,11 +37,15 @@ async function runProviderPreflight(profile, credentialProvider) {
 
   const baseUrl = profile.baseUrl || '(from credential)';
   log.info(`   Provider: ${profile.id} — ${profile.displayName} (${profile.model}) at ${baseUrl}`);
-  // The required capabilities are listed as prose because they are the same for
-  // every provider that got past the check above. The optional ones are named
-  // only when present, so the log says what actually differs between backends.
-  const optional = profile.wire.supportsMaxOutputTokens ? ', max_output_tokens' : '';
-  log.info(`   Wire: Responses+SSE, function calling, strict json_schema, reasoning replay, vision${optional}`);
+  // This is the profile's explicit contract, not a synthetic model request.
+  // Actual endpoint conformance is then exercised by normal Responses calls.
+  const optional = [];
+  if (profile.wire.supportsMaxOutputTokens) optional.push('max_output_tokens');
+  if (profile.wire.supportsPromptCacheKey) optional.push('prompt_cache_key');
+  if (profile.wire.supportsStrictFunctionArguments) optional.push('strict function arguments');
+  if (profile.wire.supportsFunctionOutputSchema) optional.push('function output_schema');
+  const optionalText = optional.length > 0 ? `, optional: ${optional.join(', ')}` : '';
+  log.info(`   Declared wire: Responses+SSE, function calling, strict json_schema, reasoning replay, vision${optionalText}`);
 
   let credentialOk = false;
   try {

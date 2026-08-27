@@ -6,7 +6,8 @@
 // Every case is a plain handler-shaped ctx. Cases without explicit `settings`
 // render the program defaults, like a fresh chat. A case may also carry a
 // `deployment`, which renders it as a different provider profile. The corpus
-// baseline is xAI; explicit overrides cover other profiles, independently of
+// baseline is a generic provider; explicit xAI cases cover its isolated
+// replacement block and native tools, independently of
 // whichever provider the developer's .env selects.
 //
 // Discord note: conversation_title sits in text.format on every turn (its rules
@@ -62,6 +63,15 @@ const MOCK_GROUP_PARTICIPANTS = [
   { number: '393330000001', name: 'GemiX', isGemix: true }
 ];
 
+/** A successful, known-empty start-of-turn workspace snapshot. */
+const EMPTY_WORKSPACE = Object.freeze({
+  state: 'ready',
+  total: 0,
+  files: Object.freeze([]),
+  dirs: Object.freeze([]),
+  more: false
+});
+
 const CASES = {
   1: {
     label: 'WA personal — admin/active, baseline',
@@ -71,7 +81,7 @@ const CASES = {
       chatId: 'personal_chat@test',
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   2: {
@@ -82,7 +92,7 @@ const CASES = {
       chatId: 'personal_chat@test',
       userName: 'Guest User',
       userIdentity: NON_ACTIVE,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   3: {
@@ -93,7 +103,7 @@ const CASES = {
       chatId: 'personal_chat@test',
       userName: 'Member User',
       userIdentity: ACTIVE_NON_ADMIN,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   4: {
@@ -109,7 +119,7 @@ const CASES = {
         memory: 'Rispondi sempre in spagnolo per test.',
         updatedAt: '2026-07-20T10:00:00+02:00'
       },
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   5: {
@@ -121,21 +131,24 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       userWorkspace: {
+        state: 'ready',
         total: 2,
         files: [{ relPath: 'out/report.pdf' }, { relPath: 'chart.png' }],
+        dirs: [],
         more: false
       }
     }
   },
   6: {
-    label: 'WA dedicated private — active',
+    label: 'WA dedicated private — xAI active',
+    deployment: { provider: 'xai', cloudflare: true },
     ctx: {
       platform: PLATFORM_WA_DEDICATED,
       isGroup: false,
       chatId: 'wa_priv@test',
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   7: {
@@ -146,11 +159,12 @@ const CASES = {
       chatId: 'wa_priv@test',
       userName: 'Guest',
       userIdentity: NON_ACTIVE,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   8: {
-    label: 'WA dedicated private — custom user settings (voice + effort + memory)',
+    label: 'WA dedicated private — xAI custom user settings (voice + effort + memory)',
+    deployment: { provider: 'xai', cloudflare: true },
     ctx: {
       platform: PLATFORM_WA_DEDICATED,
       isGroup: false,
@@ -163,11 +177,12 @@ const CASES = {
         memory: 'Preferisci risposte brevi.',
         updatedAt: '2026-07-24T18:30:00+02:00'
       },
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   9: {
-    label: 'WA dedicated group — active',
+    label: 'WA dedicated group — xAI active',
+    deployment: { provider: 'xai', cloudflare: true },
     ctx: {
       platform: PLATFORM_WA_DEDICATED,
       isGroup: true,
@@ -176,7 +191,7 @@ const CASES = {
       chatId: 'grp@test.g.us',
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
-      userWorkspace: null,
+      userWorkspace: EMPTY_WORKSPACE,
       groupParticipants: MOCK_GROUP_PARTICIPANTS
     }
   },
@@ -190,7 +205,7 @@ const CASES = {
       chatId: 'grp@test.g.us',
       userName: 'Guest',
       userIdentity: NON_ACTIVE,
-      userWorkspace: null,
+      userWorkspace: EMPTY_WORKSPACE,
       groupParticipants: MOCK_GROUP_PARTICIPANTS
     }
   },
@@ -204,12 +219,13 @@ const CASES = {
       chatId: 'grp@test.g.us',
       userName: 'Member User',
       userIdentity: ACTIVE_NON_ADMIN,
-      userWorkspace: null,
+      userWorkspace: EMPTY_WORKSPACE,
       groupParticipants: MOCK_GROUP_PARTICIPANTS
     }
   },
   12: {
-    label: 'Discord — new thread (placeholder title ".")',
+    label: 'Discord — xAI new thread (placeholder title ".")',
+    deployment: { provider: 'xai', cloudflare: true },
     ctx: {
       platform: PLATFORM_DISCORD,
       isGroup: false,
@@ -272,7 +288,7 @@ const CASES = {
       chatId: 'wa_priv@test',
       userName: 'Member User',
       userIdentity: ACTIVE_NON_ADMIN,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   17: {
@@ -290,7 +306,7 @@ const CASES = {
         reviewedAt: '2026-06-01T09:00:00+02:00'
       },
       settingsReviewDue: true,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   },
   // Everyone on Discord is an active member (userIdentifier.js: the server is
@@ -311,8 +327,8 @@ const CASES = {
     }
   },
   19: {
-    label: 'WA dedicated private — non-xAI profile (baseline media backends)',
-    // Same chat as case 6, on a provider with no X search and no video service:
+    label: 'WA dedicated private — generic provider (baseline media backends)',
+    // Same chat as xAI case 6, on a provider with no X search and no video service:
     // those tools are absent rather than present-and-failing, and generate_image
     // shows the Cloudflare schema instead of the Grok Imagine one.
     deployment: { provider: 'chatgpt', cloudflare: true },
@@ -322,7 +338,7 @@ const CASES = {
       chatId: 'wa_priv@test',
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
-      userWorkspace: null
+      userWorkspace: EMPTY_WORKSPACE
     }
   }
 };
