@@ -224,10 +224,10 @@ function buildAnswerLines(profile, opts = {}) {
   const has = (name) => _hasTool(toolNames, cap, name);
 
   const pastStyleExample = cap.voiceReply
-    ? 'plain text without voice tags, or a catchphrase'
+    ? 'the same vocal style, or a catchphrase'
     : 'a catchphrase or recurring opener';
   const pastMistakeExample = cap.voiceReply
-    ? 'wrong recipient, missing voice tags, a tic'
+    ? 'wrong recipient, an awkward voice reply, a tic'
     : 'wrong recipient, a verbal tic';
 
   // The backend injects its own safety rules ABOVE this prompt (verified by

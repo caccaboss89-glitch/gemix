@@ -40,15 +40,17 @@ let client;
 /**
  * Initialize dedicated WhatsApp account client. Listens to `message` only:
  * this account's own sends are GemiX replies and must not re-enter the loop.
+ * @param {{ onFatal?: Function }} [opts]
  * @returns {object} The whatsapp-web.js Client instance
  */
-function initDedicatedWhatsApp() {
+function initDedicatedWhatsApp(opts = {}) {
   client = createWhatsAppClient({
     clientId: 'dedicated',
     log,
     messageEvent: 'message',
     onMessage: onDedicatedMessage,
-    onReady: (c) => setDedicatedClient(c)
+    onReady: (c) => setDedicatedClient(c),
+    onFatal: opts.onFatal
   });
   return client;
 }

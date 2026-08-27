@@ -12,6 +12,8 @@ import { PRIVACY_WIPE_COMMAND } from '../../src/config/systemMessages.js';
 import { getCapabilities } from '../../src/config/platformCapabilities.js';
 import { getToolsForUser } from '../../src/ai/tools.js';
 import { resolveProviderProfile } from '../../src/ai/providers/providerProfile.js';
+import envConfig from '../../src/config/env.js';
+import { FEATURE, backendFor } from '../../src/features/featureBindings.js';
 import { CASES } from './cases.js';
 
 const { PLATFORM_DISCORD } = constants;
@@ -75,12 +77,23 @@ function validateResponseFormat(dump, caseId) {
   const fmt = fmtEnd >= 0 ? dump.slice(fmtStart, fmtEnd) : dump.slice(fmtStart);
   const hasVoice = /voice \(boolean, required\)/.test(fmt);
   const hasVoiceTagDesc = /voice tags below|\[pause\]/.test(fmt);
+  const hasPlainVoiceDesc = /natural spoken words/.test(fmt);
   const hasTitle = /conversation_title \(string, required\)/.test(fmt);
   const id = Number(caseId);
+  const expectsVoiceTags = backendFor(resolveProviderProfile(), FEATURE.TTS) === 'xai-tts'
+    && envConfig.XAI_TTS_ENABLED;
 
   if (VOICE_CASES.includes(id)) {
     if (!hasVoice) ISSUES.push({ caseId, msg: 'WA dedicated case missing voice schema field' });
-    if (!hasVoiceTagDesc) ISSUES.push({ caseId, msg: 'WA dedicated case missing voice tag instructions in response schema' });
+    if (expectsVoiceTags && !hasVoiceTagDesc) {
+      ISSUES.push({ caseId, msg: 'xAI TTS case missing voice tag instructions in response schema' });
+    }
+    if (!expectsVoiceTags && hasVoiceTagDesc) {
+      ISSUES.push({ caseId, msg: 'non-xAI TTS case must not expose xAI voice tags' });
+    }
+    if (!expectsVoiceTags && !hasPlainVoiceDesc) {
+      ISSUES.push({ caseId, msg: 'plain TTS case missing natural spoken-word instructions' });
+    }
   } else {
     if (hasVoice) ISSUES.push({ caseId, msg: 'non-voice case must not expose voice schema field' });
     if (hasVoiceTagDesc) ISSUES.push({ caseId, msg: 'non-voice case must not expose voice tag instructions in response schema' });

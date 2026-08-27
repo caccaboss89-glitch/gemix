@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { processWhatsAppQuotedReply } from '../src/utils/quoteIngress.js';
+import {
+  MAX_QUOTED_TEXT_CHARS,
+  processWhatsAppQuotedReply
+} from '../src/utils/quoteIngress.js';
 
 function quotedMessage(id, body, parent = null) {
   return {
@@ -40,4 +43,21 @@ test('a quoted WhatsApp chain shares the caller LID roster and cache at every de
   assert.equal((result.prefix.match(/@393331234567/g) || []).length, 2);
   assert.match(result.prefix, /@22222222 immediate/);
   assert.doesNotMatch(result.prefix, /should-not-replace/);
+});
+
+test('a long quoted message is capped without truncating the new message', async () => {
+  const quoted = quotedMessage('quoted', 'x'.repeat(MAX_QUOTED_TEXT_CHARS + 1200));
+  const current = quotedMessage('current', 'the new message remains outside the quote', quoted);
+
+  const result = await processWhatsAppQuotedReply(
+    current,
+    'chat@c.us',
+    'chat@c.us',
+    new Set(['quoted'])
+  );
+
+  const quotedText = result.prefix.slice('[In reply to: '.length, -2);
+  assert.equal(Array.from(quotedText).length, MAX_QUOTED_TEXT_CHARS);
+  assert.ok(quotedText.endsWith('…'));
+  assert.doesNotMatch(result.prefix, /the new message remains/);
 });

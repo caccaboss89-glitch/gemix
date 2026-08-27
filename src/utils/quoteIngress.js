@@ -23,6 +23,21 @@ const log = createLogger('QuoteIngress');
 /** Max hops to walk when expanding a reply chain (immediate quote = depth 0). */
 const MAX_REPLY_CHAIN_DEPTH = 5;
 
+/** Maximum quoted text retained for each reply-chain hop. */
+const MAX_QUOTED_TEXT_CHARS = 800;
+
+function truncateQuotedText(value) {
+  const text = String(value || '').trim();
+  const chars = Array.from(text);
+  if (chars.length <= MAX_QUOTED_TEXT_CHARS) return text;
+  return `${chars.slice(0, MAX_QUOTED_TEXT_CHARS - 1).join('').trimEnd()}…`;
+}
+
+function quotedPrefix(value) {
+  const text = truncateQuotedText(value);
+  return text ? `[In reply to: ${text}]\n` : '[In reply to a message]\n';
+}
+
 function waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
 }
@@ -55,11 +70,11 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
 
   const quotedSpecial = formatSpecialMessageText(quoted);
   if (quotedSpecial !== null) {
-    return { prefix: `[In reply to: ${quotedSpecial}]\n`, mediaParts: [] };
+    return { prefix: quotedPrefix(quotedSpecial), mediaParts: [] };
   }
   if (quoted.type === 'vcard' || quoted.type === 'multi_vcard') {
     return {
-      prefix: `[In reply to: ${formatWhatsAppContactText(quoted.body || '')}]\n`,
+      prefix: quotedPrefix(formatWhatsAppContactText(quoted.body || '')),
       mediaParts: []
     };
   }
@@ -71,7 +86,7 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
       if (isGroup) questionBase = await resolveLidTagsInBody(questionBase, lidCtx.phones, lidCtx.cache);
     }
     const pollText = formatWhatsAppPollText(quoted, `[Poll] ${questionBase}`);
-    return { prefix: `[In reply to: ${pollText}]\n`, mediaParts: [] };
+    return { prefix: quotedPrefix(pollText), mediaParts: [] };
   }
 
   let quotedText = '';
@@ -93,18 +108,18 @@ async function formatWhatsAppQuotedLevel(quoted, opts = {}) {
     // Same shape as Discord: one or more "[In reply to: …]" lines (no "text" variant).
     if (quotedText) {
       return {
-        prefix: `[In reply to: ${inner}]\n[In reply to: ${quotedText}]\n`,
+        prefix: `${quotedPrefix(inner)}${quotedPrefix(quotedText)}`,
         mediaParts
       };
     }
     return {
-      prefix: `[In reply to: ${inner}]\n`,
+      prefix: quotedPrefix(inner),
       mediaParts
     };
   }
 
   if (quotedText) {
-    return { prefix: `[In reply to: ${quotedText}]\n`, mediaParts: [] };
+    return { prefix: quotedPrefix(quotedText), mediaParts: [] };
   }
 
   return { prefix: '[In reply to a message]\n', mediaParts: [] };
@@ -229,17 +244,17 @@ async function formatDiscordQuotedLevel(quotedMsg, historyStorageId, includeMedi
         mediaParts.push(...ingress.contentParts);
         inlined += ingress.contentParts.length;
       }
-      prefix += `[In reply to: ${ingress.textFragment.trim()}]\n`;
+      prefix += quotedPrefix(ingress.textFragment);
     }
     if (quotedMsg.content) {
-      prefix += `[In reply to: ${cleanIncomingText(quotedMsg.content)}]\n`;
+      prefix += quotedPrefix(cleanIncomingText(quotedMsg.content));
     }
     return { prefix, mediaParts };
   }
 
   if (quotedMsg.content) {
     return {
-      prefix: `[In reply to: ${cleanIncomingText(quotedMsg.content)}]\n`,
+      prefix: quotedPrefix(cleanIncomingText(quotedMsg.content)),
       mediaParts: []
     };
   }
@@ -334,5 +349,7 @@ async function processDiscordQuotedReply(msg, channel, historyStorageId, recentM
 export {
   processWhatsAppQuotedReply,
   processDiscordQuotedReply,
-  MAX_REPLY_CHAIN_DEPTH
+  MAX_REPLY_CHAIN_DEPTH,
+  MAX_QUOTED_TEXT_CHARS,
+  truncateQuotedText
 };

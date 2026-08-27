@@ -22,6 +22,7 @@ import { runProviderPreflight, logFeatureBindings } from './ai/providers/preflig
 import { getCredentialProvider } from './ai/aiProvider.js';
 import { initApiLogRetention } from './ai/apiLogs.js';
 import { shutdownWhatsAppClient } from './platforms/whatsapp/client.js';
+import { isWaLifecycleRestartError } from './utils/waPuppeteer.js';
 
 const { TASKS_DIR, DATA_DIR } = constants;
 const { STARTUP_SYSTEM_CLEANUP } = envConfig;
@@ -103,14 +104,18 @@ runStartupCleanup();
   await runProviderPreflight(profile, getCredentialProvider());
   logFeatureBindings(profile);
 
-  dedicatedWaClient = initDedicatedWhatsApp();
+  dedicatedWaClient = initDedicatedWhatsApp({
+    onFatal: (reason) => shutdownHandler(`WA dedicated ${reason}`, 1)
+  });
 
   dedicatedWaClient.on('ready', () => {
     setSchedulerWaClient(dedicatedWaClient);
     setAdminNotifierClient(dedicatedWaClient);
   });
 
-  personalWaClient = initPersonalWhatsApp();
+  personalWaClient = initPersonalWhatsApp({
+    onFatal: (reason) => shutdownHandler(`WA personal ${reason}`, 1)
+  });
 
   discordClient = initDiscord();
 
@@ -121,10 +126,10 @@ runStartupCleanup();
   startTempFileServer();
 })().catch((err) => {
   log.error('Startup failed:', err);
-  process.exit(1);
+  shutdownHandler('startup failure', 1);
 });
 
-const shutdownHandler = async (signal) => {
+async function shutdownHandler(signal, exitCode = 0) {
   if (shutdownStarted) return;
   shutdownStarted = true;
   log.info(`\nGemiX - Shutting down (${signal})...`);
@@ -139,8 +144,8 @@ const shutdownHandler = async (signal) => {
     }
   }
   try { await workspaceRuntime.shutdownAll(); } catch (err) { log.warn(`Workspace container shutdown failed during ${signal}: ${err.message}`); }
-  process.exit(0);
-};
+  process.exit(exitCode);
+}
 
 process.on('SIGINT', () => shutdownHandler('SIGINT'));
 process.on('SIGTERM', () => shutdownHandler('SIGTERM'));
@@ -166,6 +171,10 @@ function formatProcessErrorForAdmin(err) {
 
 process.on('unhandledRejection', (err) => {
   log.error('❌ Unhandled rejection:', err);
+  if (isWaLifecycleRestartError(err)) {
+    log.warn('Expected WhatsApp lifecycle rejection: restart is already being handled; admin alert suppressed.');
+    return;
+  }
   notifyAdmin('Unhandled Rejection', formatProcessErrorForAdmin(err)).catch(() => {});
 });
 

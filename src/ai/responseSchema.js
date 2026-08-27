@@ -17,7 +17,8 @@
 // "" is a valid value and parseStructuredReply reads it as "no rename".
 //
 import constants from '../config/constants.js';
-import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
+import envConfig from '../config/env.js';
+import { FEATURE, backendFor, isFeatureAvailable } from '../features/featureBindings.js';
 import { resolveProviderProfile } from './providers/providerProfile.js';
 
 const MAX_REPLY_ATTACHMENTS = 10;
@@ -34,7 +35,13 @@ const VOICE_FLAG_DESC =
   + 'Keep long or technical answers as text. '
   + 'Voice is only for the current chat — you cannot send a voice message to anyone else.';
 
-const VOICE_RESPONSE_FIELD_DESC =
+const PLAIN_VOICE_RESPONSE_FIELD_DESC =
+  'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY natural spoken words '
+  + 'with readable punctuation . , ! ? \' — no emoji, markup, or other symbols. '
+  + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. `
+  + 'When `voice` is false write plain text.';
+
+const TAGGED_VOICE_RESPONSE_FIELD_DESC =
   'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY spoken words plus '
   + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
   + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags `
@@ -42,6 +49,13 @@ const VOICE_RESPONSE_FIELD_DESC =
   + 'false write plain text and DO NOT use any voice tag. '
   + 'Inline tags: [pause] [long-pause] [hum-tune] [laugh] [chuckle] [giggle] [cry] [tsk] [tongue-click] [lip-smack] [breath] [inhale] [exhale] [sigh]. '
   + 'Wrapping tags: <soft> <whisper> <loud> <build-intensity> <decrease-intensity> <higher-pitch> <lower-pitch> <slow> <fast> <sing-song> <singing> <laugh-speak> <emphasis>.';
+
+function _voiceResponseFieldDesc() {
+  const profile = resolveProviderProfile();
+  return backendFor(profile, FEATURE.TTS) === 'xai-tts' && envConfig.XAI_TTS_ENABLED
+    ? TAGGED_VOICE_RESPONSE_FIELD_DESC
+    : PLAIN_VOICE_RESPONSE_FIELD_DESC;
+}
 
 // The X clause only appears where x_search does: naming a tool the profile does
 // not have would send the model looking for it. The profile is fixed for the
@@ -88,7 +102,7 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
 
   properties.response = {
     type: 'string',
-    description: allowVoice ? VOICE_RESPONSE_FIELD_DESC : RESPONSE_FIELD_DESC
+    description: allowVoice ? _voiceResponseFieldDesc() : RESPONSE_FIELD_DESC
   };
   required.push('response');
 

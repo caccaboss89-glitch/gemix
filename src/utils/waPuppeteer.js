@@ -37,6 +37,18 @@ function isWaPuppeteerTransientError(err) {
 }
 
 /**
+ * Expected startup failures that already trigger a coordinated restart. They
+ * stay in PM2 logs but should not also become an admin-facing API bug report.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isWaLifecycleRestartError(err) {
+  const msg = String(err?.message || err || '').trim();
+  return /^auth timeout$/i.test(msg)
+    || /The browser is already running for .*\.wwebjs_auth[\\/]session-/i.test(msg);
+}
+
+/**
  * Retry an async puppeteer-backed call a few times on transient failures.
  * @template T
  * @param {() => Promise<T>} fn
@@ -78,6 +90,7 @@ function formatWaError(err) {
 
 export {
   isWaPuppeteerTransientError,
+  isWaLifecycleRestartError,
   withWaPuppeteerRetry,
   formatWaError
 };

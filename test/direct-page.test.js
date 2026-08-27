@@ -13,6 +13,14 @@ test('Google consent/search content is not mistaken for the requested cached pag
     'cache:https://example.com - Cerca con Google\nPrima di continuare su Google',
     'cache'
   ), true);
+  assert.equal(isGoogleInterstice(
+    'La ricerca di -\ncache:https://example.com/\n- non ha prodotto risultati in nessun documento.\nSuggerimenti:',
+    'google-cache'
+  ), true);
+  assert.equal(isGoogleInterstice(
+    'Your search - cache:https://example.com/ - did not match any documents.',
+    'google-cache'
+  ), true);
   assert.equal(isGoogleInterstice('The actual target article', 'google-cache'), false);
   assert.equal(isGoogleInterstice('Prima di continuare su Google', 'direct'), false);
 });

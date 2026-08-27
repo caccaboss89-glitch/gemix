@@ -41,14 +41,16 @@ let client;
  * Initialize personal WhatsApp account client. Listens to `message_create`:
  * on this account the owner's own messages are user turns, so outgoing ones
  * must be seen too (GemiX's own replies are filtered by their footer).
+ * @param {{ onFatal?: Function }} [opts]
  * @returns {object} The whatsapp-web.js Client instance
  */
-function initPersonalWhatsApp() {
+function initPersonalWhatsApp(opts = {}) {
   client = createWhatsAppClient({
     clientId: 'personal',
     log,
     messageEvent: 'message_create',
-    onMessage: onPersonalMessage
+    onMessage: onPersonalMessage,
+    onFatal: opts.onFatal
   });
   return client;
 }

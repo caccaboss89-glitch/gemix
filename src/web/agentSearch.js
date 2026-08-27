@@ -234,6 +234,11 @@ async function readWebPage({ url, maxChars, signal }) {
   if (isGoogleInterstice(data.content, data.strategy)) {
     const direct = await readPublicPageDirect(url, maxChars, signal);
     if (direct.ok) return direct;
+    return {
+      ok: false,
+      code: WEB_ERROR.UPSTREAM,
+      error: 'The extractor returned a Google search/consent page instead of the requested page, and direct extraction failed.'
+    };
   }
 
   return {
@@ -241,10 +246,7 @@ async function readWebPage({ url, maxChars, signal }) {
     content: data.content,
     strategy: typeof data.strategy === 'string' ? data.strategy : '',
     chars: Number.isFinite(data.chars) ? data.chars : data.content.length,
-    trustTier: typeof data.trust?.tier === 'string' ? data.trust.tier : 'unknown',
-    ...(isGoogleInterstice(data.content, data.strategy)
-      ? { warning: 'The extractor returned a Google consent page instead of the target page.' }
-      : {})
+    trustTier: typeof data.trust?.tier === 'string' ? data.trust.tier : 'unknown'
   };
 }
 

@@ -20,7 +20,9 @@ async function _extract(buffer, mimetype) {
 function isGoogleInterstice(content, strategy) {
   if (typeof strategy !== 'string' || !/cache/i.test(strategy) || typeof content !== 'string') return false;
   return /(?:before you continue to google|prima di continuare su google|consent\.google|google uses cookies)/i.test(content)
-    || (/^cache:https?:\/\//i.test(content.trim()) && /(?:cerca con google|search with google)/i.test(content));
+    || (/cache:https?:\/\//i.test(content) && /(?:cerca con google|search with google)/i.test(content))
+    || (/cache:https?:\/\//i.test(content)
+      && /(?:non ha prodotto risultati in nessun documento|did not match any documents|no results found)/i.test(content));
 }
 
 async function readPublicPageDirect(url, maxChars, signal) {

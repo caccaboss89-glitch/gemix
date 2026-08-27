@@ -6,9 +6,8 @@
 // (This file returns binary audio Buffers, so it produces no tool-facing text.)
 //
 // Voice generation pipeline. Produces OGG/Opus audio buffers for WhatsApp
-// voice messages. Always applies MP3-to-Opus transcode, and strips vocal tags
-// for Google TTS input (speech tags are written by GemiX itself in the voice
-// reply `response` text).
+// voice messages. Always applies MP3-to-Opus transcode, and strips any vocal
+// tags defensively before Google TTS because that backend does not support them.
 //
 // TTS is a delivery backend, not a model tool: the chain comes
 // from the profile's TTS feature binding, so a provider with a deliberately

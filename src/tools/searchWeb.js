@@ -125,11 +125,12 @@ async function searchWeb(args = {}, responseCtx = null, opts = {}) {
  *
  * @param {object} args
  * @param {string} args.url
+ * @param {object} [responseCtx] - per-turn research badge accumulator
  * @param {object} [opts]
  * @param {AbortSignal} [opts.signal]
  * @returns {Promise<object>}
  */
-async function readPage(args = {}, opts = {}) {
+async function readPage(args = {}, responseCtx = null, opts = {}) {
   const url = typeof args.url === 'string' ? args.url.trim() : '';
   if (!url) return { success: false, error: 'Missing required argument "url".' };
   if (!/^https?:\/\//i.test(url)) {
@@ -140,6 +141,11 @@ async function readPage(args = {}, opts = {}) {
   // as truncated and one that overflows is caught before it reaches the model.
   const res = await readWebPage({ url, maxChars: READ_PAGE_MAX_CHARS + 1, signal: opts.signal });
   if (!res.ok) return { success: false, error: _failureMessage(res.code, res.error) };
+
+  if (responseCtx) {
+    if (!responseCtx.researchStats) responseCtx.researchStats = { webSources: 0, xPosts: 0 };
+    responseCtx.researchStats.webSources += 1;
+  }
 
   const truncated = res.content.length > READ_PAGE_MAX_CHARS;
   return {

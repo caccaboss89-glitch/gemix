@@ -7,8 +7,8 @@
 // identical, so it lives here once.
 //
 // Failure policy is deliberate: an auth failure or a client that never reaches
-// `ready` exits the process so PM2 restarts it clean, while a disconnect is
-// retried in-process (WhatsApp Web drops sessions routinely).
+// `ready` requests a coordinated process restart, while a disconnect is retried
+// in-process (WhatsApp Web drops sessions routinely).
 
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
@@ -19,6 +19,7 @@ import envConfig from '../../config/env.js';
 import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppeteer.js';
 
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
+const AUTH_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const PROTOCOL_TIMEOUT_MS = 120_000;
 const shutdownByClient = new WeakMap();
@@ -54,9 +55,10 @@ function _isReady(client) {
  * @param {string} opts.messageEvent - 'message' (incoming only) or 'message_create' (incl. our own)
  * @param {Function} opts.onMessage - async (msg) => void; transient WA/Puppeteer errors are absorbed
  * @param {Function} [opts.onReady] - (client) => void, after the client reports ready
+ * @param {Function} [opts.onFatal] - (reason, error) => void, asks the app to restart cleanly
  * @returns {object} The whatsapp-web.js Client instance (already initializing)
  */
-function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady }) {
+function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady, onFatal }) {
   log.info(`Chromium: ${CHROMIUM_PATH || 'resolved by Puppeteer at launch'}`);
   const client = new Client({
     authStrategy: new LocalAuth({ clientId }),
@@ -66,6 +68,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
       args: constants.PUPPETEER_ARGS,
       protocolTimeout: PROTOCOL_TIMEOUT_MS
     },
+    authTimeoutMs: AUTH_TIMEOUT_MS,
     qr_timeout: constants.WA_QR_TIMEOUT
   });
 
@@ -74,6 +77,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
   let initializeInProgress = false;
   let shuttingDown = false;
   let shutdownPromise = null;
+  let fatalReported = false;
 
   const clearReconnectTimer = () => {
     if (reconnectTimer) {
@@ -84,11 +88,30 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
 
   const watchdog = setTimeout(() => {
     if (!shuttingDown && !_isReady(client)) {
-      log.error(`${clientId} WhatsApp client init timeout (5 min). Forcing process exit to restart.`);
-      process.exit(1);
+      requestFatalRestart('init timeout after 5 minutes');
     }
   }, READY_WATCHDOG_MS);
   watchdog.unref();
+
+  function requestFatalRestart(reason, err = null) {
+    if (shuttingDown || fatalReported) return;
+    fatalReported = true;
+    clearTimeout(watchdog);
+    clearReconnectTimer();
+    const detail = err ? `: ${formatWaError(err)}` : '';
+    log.error(`${clientId} WhatsApp lifecycle failure (${reason})${detail}. Requesting clean restart.`);
+
+    if (typeof onFatal === 'function') {
+      Promise.resolve(onFatal(reason, err)).catch((fatalErr) => {
+        log.error(`Fatal restart callback failed: ${formatWaError(fatalErr)}`);
+      });
+      return;
+    }
+
+    Promise.resolve(shutdownWhatsAppClient(client))
+      .catch((shutdownErr) => log.warn(`WhatsApp cleanup before restart failed: ${formatWaError(shutdownErr)}`))
+      .finally(() => process.exit(1));
+  }
 
   client.on('qr', (qr) => {
     log.info('Scan QR code:');
@@ -106,9 +129,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
 
   client.on('auth_failure', (msg) => {
     if (shuttingDown) return;
-    log.error('Auth failure:', msg);
-    log.error('Exiting so PM2 can restart with a fresh session (re-scan QR if needed).');
-    setTimeout(() => process.exit(1), 2000);
+    requestFatalRestart('authentication failure', new Error(String(msg || 'unknown auth failure')));
   });
 
   client.on('disconnected', (reason) => {
@@ -157,7 +178,11 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady 
     return shutdownPromise;
   });
 
-  client.initialize();
+  initializeInProgress = true;
+  Promise.resolve()
+    .then(() => client.initialize())
+    .catch((err) => requestFatalRestart('initialization rejected', err))
+    .finally(() => { initializeInProgress = false; });
   return client;
 }
 

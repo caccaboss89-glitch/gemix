@@ -49,6 +49,12 @@ const RELEASE_NOTIFY_ALREADY_PREFIX = 'ℹ️ Le notifiche degli aggiornamenti d
 
 const FALLBACK_ERROR_PREFIX = '⚠️ GemiX: Generazione della risposta fallita. Riprova tra poco.';
 
+// -- Slow media-tool progress ----------------------------------------------
+
+/** Program-owned progress banners sent before long image/video generation. */
+const IMAGE_GENERATION_PROGRESS_PREFIX = '🎨 Sto generando l\'immagine';
+const VIDEO_GENERATION_PROGRESS_PREFIX = '🎬 Sto generando il video';
+
 // -- Provider refusals (user-facing) ----------------------------------------
 
 /**
@@ -205,6 +211,8 @@ const SYSTEM_MESSAGE_PREFIXES = [
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
+  IMAGE_GENERATION_PROGRESS_PREFIX,
+  VIDEO_GENERATION_PROGRESS_PREFIX,
   SANDBOX_BUSY_PREFIX,
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
@@ -244,6 +252,8 @@ export {
   RELEASE_NOTIFY_ENABLED_PREFIX,
   RELEASE_NOTIFY_ALREADY_PREFIX,
   FALLBACK_ERROR_PREFIX,
+  IMAGE_GENERATION_PROGRESS_PREFIX,
+  VIDEO_GENERATION_PROGRESS_PREFIX,
   SANDBOX_BUSY_MESSAGE,
   SANDBOX_BUSY_PREFIX,
   GROK_CREDIT_EXHAUSTED_MESSAGE,

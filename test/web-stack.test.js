@@ -238,6 +238,16 @@ test('a page that fits is not labelled truncated', async () => {
   assert.equal(res.content, 'short page');
 });
 
+test('each successfully read page adds one source to this turn only', async () => {
+  stubSidecar(200, { url: 'https://example.org/a', content: 'short page', chars: 10, success: true });
+  const responseCtx = { researchStats: null };
+
+  await readPage({ url: 'https://example.org/a' }, responseCtx);
+  await readPage({ url: 'https://example.org/b' }, responseCtx);
+
+  assert.deepEqual(responseCtx.researchStats, { webSources: 2, xPosts: 0 });
+});
+
 test('an untrustworthy domain is still read, with the caveat attached', async () => {
   stubSidecar(200, {
     url: 'https://exarnple.org', content: 'claims', chars: 6, success: true,
@@ -254,10 +264,12 @@ test('a page every strategy failed on names what was tried', async () => {
     url: 'https://example.org/x', content: null, chars: 0, success: false,
     strategies_tried: ['direct', 'readability', 'browser']
   });
-  const res = await readPage({ url: 'https://example.org/x' });
+  const responseCtx = { researchStats: null };
+  const res = await readPage({ url: 'https://example.org/x' }, responseCtx);
 
   assert.equal(res.success, false);
   assert.match(res.error, /direct, readability, browser/);
+  assert.equal(responseCtx.researchStats, null);
 });
 
 test('a non-URL is refused before the network', async () => {

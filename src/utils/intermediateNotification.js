@@ -17,18 +17,12 @@ import { markNotifiedInCall, unmarkNotifiedInCall  } from './notificationDedup.j
 import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
 import { removeDiscordEmoji  } from './discord.js';
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from './text.js';
-import { addFooter  } from './footer.js';
 import { createLogger  } from './logger.js';
 
 const log = createLogger('IntermediateNotification');
 
-function formatWhatsAppIntermediateText(message, platform) {
-  let text = normalizeMarkdown(stripOutgoingDeliveryArtifacts(message));
-  // Personal WA history treats footer-bearing fromMe text as start of a GemiX block.
-  if (platform === constants.PLATFORM_WA_PERSONAL) {
-    text = addFooter(text, 'GemiX');
-  }
-  return text;
+function formatWhatsAppIntermediateText(message) {
+  return normalizeMarkdown(stripOutgoingDeliveryArtifacts(message));
 }
 
 /**
@@ -109,7 +103,7 @@ async function sendIntermediateNotification(ctx, kind, message) {
       return true;
     }
 
-    const text = formatWhatsAppIntermediateText(message, ctx.platform);
+    const text = formatWhatsAppIntermediateText(message);
     if (target.channel === 'wa_chat') {
       await target.chat.sendMessage(text);
       log.info(`   ${kind} notification - WhatsApp (${target.platform}): ${message}`);
