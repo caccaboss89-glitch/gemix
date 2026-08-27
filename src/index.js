@@ -20,7 +20,7 @@ import { startTempFileServer } from './utils/tempFileServer.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { runProviderPreflight, logFeatureBindings } from './ai/providers/preflight.js';
 import { getCredentialProvider } from './ai/aiProvider.js';
-import { initApiLogRetention } from './ai/apiClient.js';
+import { initApiLogRetention } from './ai/apiLogs.js';
 
 const { TASKS_DIR, DATA_DIR } = constants;
 const { STARTUP_SYSTEM_CLEANUP } = envConfig;

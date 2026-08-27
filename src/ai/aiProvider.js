@@ -75,6 +75,8 @@ function _resolveEffort(profile, requested) {
  * @param {string|null} [opts.promptCacheKey]
  * @param {number} [opts.maxTurns]
  * @param {string|null} [opts.requestId]
+ * @param {number} [opts.round]
+ * @param {string} [opts.phase]
  * @param {import('../utils/turnBudget.js').TurnBudget|null} [opts.budget]
  * @returns {Promise<{ reply: {text: string, toolCalls: Array, items: Array},
  *   provider: string, model: string, searchStats: object }>}
@@ -87,7 +89,9 @@ async function callAI(items, tools = null, opts = {}) {
   const context = {
     promptCacheKey: opts.promptCacheKey || null,
     maxTurns: Number.isFinite(opts.maxTurns) ? opts.maxTurns : undefined,
-    requestId: opts.requestId || null
+    requestId: opts.requestId || null,
+    round: Number.isFinite(opts.round) ? opts.round : null,
+    phase: opts.phase || null
   };
 
   const body = buildResponsesBody({

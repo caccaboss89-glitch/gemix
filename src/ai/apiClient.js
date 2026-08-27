@@ -2,168 +2,25 @@
 //
 // HTTP plumbing for the xAI endpoints that are NOT the Responses main brain:
 // Grok Imagine image/video and xAI TTS. Retry, timeout, structured
-// request/response logging and log-directory quota live here.
+// request/response logging is shared with the main-brain transport.
 //
 // This module is limited to the xAI media stack, routed through the media
 // backends. Main-brain requests use OpenAIResponsesTransport with a
 // CredentialProvider.
 
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import { notifyAdmin, ADMIN_NOTIFIED_SUFFIX  } from '../utils/adminNotifier.js';
 import constants from '../config/constants.js';
 import { getXaiServiceAuth, markXaiServiceStatus  } from './credentials/xaiServiceCredentials.js';
 import { createLogger  } from '../utils/logger.js';
 import { signalWithTimeout, sleepWithin } from '../utils/turnBudget.js';
+import {
+  initApiLogRetention,
+  logApiRequest,
+  logApiResponse,
+  redactApiLogData
+} from './apiLogs.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const log = createLogger('API');
-const apiLogDir = path.resolve(__dirname, '..', 'logs');
-const LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days (monthly retention)
-const LOG_CLEANUP_INTERVAL_MS = 1 * 60 * 60 * 1000; // 1 hour (scan interval; age gate is monthly)
-const LOG_DIR_QUOTA_BYTES = 200 * 1024 * 1024;     // 200 MB hard cap on total log dir size
-
-// Throttle window for _enforceLogDirQuota: the scan itself is O(n) (readdir +
-// one statSync per file), so running it on every single log write — up to
-// twice per round, MAX_TOOL_ROUNDS rounds per turn — would scan a directory
-// that can hold thousands of files 100 times over. The 200 MB cap is a soft
-// backstop (cleanupOldLogs() also runs hourly on an age basis), so skipping a
-// scan for a few seconds under load is harmless.
-const LOG_QUOTA_CHECK_INTERVAL_MS = 30_000;
-let _lastQuotaCheckAt = 0;
-
-/**
- * Enforce a total size quota on the log directory by deleting the oldest
- * files until the total size drops below LOG_DIR_QUOTA_BYTES. Throttled to
- * at most once per LOG_QUOTA_CHECK_INTERVAL_MS — see comment above.
- */
-function _enforceLogDirQuota() {
-  const now = Date.now();
-  if (now - _lastQuotaCheckAt < LOG_QUOTA_CHECK_INTERVAL_MS) return;
-  _lastQuotaCheckAt = now;
-  try {
-    if (!fs.existsSync(apiLogDir)) return;
-    const files = fs.readdirSync(apiLogDir).filter(f => f.endsWith('.json'));
-    let total = 0;
-    const stats = [];
-    for (const f of files) {
-      try {
-        const fp = path.join(apiLogDir, f);
-        const st = fs.statSync(fp);
-        total += st.size;
-        stats.push({ fp, mtime: st.mtimeMs, size: st.size });
-      } catch { /* ignore */ }
-    }
-    if (total <= LOG_DIR_QUOTA_BYTES) return;
-    stats.sort((a, b) => a.mtime - b.mtime);
-    let deleted = 0;
-    for (const s of stats) {
-      if (total <= LOG_DIR_QUOTA_BYTES) break;
-      try {
-        fs.unlinkSync(s.fp);
-        total -= s.size;
-        deleted++;
-      } catch { /* ignore */ }
-    }
-    if (deleted > 0) log.info(`Log quota: deleted ${deleted} oldest file(s) to enforce ${Math.round(LOG_DIR_QUOTA_BYTES / 1024 / 1024)} MB cap.`);
-  } catch (err) {
-    log.warn(`Log quota enforcement failed: ${err.message}`);
-  }
-}
-
-function ensureLogDir() {
-  if (!fs.existsSync(apiLogDir)) {
-    fs.mkdirSync(apiLogDir, { recursive: true });
-  }
-}
-
-function cleanupOldLogs() {
-  try {
-    if (!fs.existsSync(apiLogDir)) return;
-    const now = Date.now();
-    const files = fs.readdirSync(apiLogDir);
-    let deleted = 0;
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = path.join(apiLogDir, file);
-      try {
-        const stat = fs.statSync(filePath);
-        if (now - stat.mtimeMs > LOG_MAX_AGE_MS) {
-          fs.unlinkSync(filePath);
-          deleted++;
-        }
-      } catch { }
-    }
-    if (deleted > 0) log.info(`Log cleanup: deleted ${deleted} old file(s)`);
-  } catch (err) {
-    log.warn(`Log cleanup failed: ${err.message}`);
-  }
-}
-
-let _logCleanupInterval = null;
-
-/** Start API-log retention after application startup. Idempotent. */
-function initApiLogRetention() {
-  if (_logCleanupInterval) return;
-  cleanupOldLogs();
-  _logCleanupInterval = setInterval(cleanupOldLogs, LOG_CLEANUP_INTERVAL_MS);
-  _logCleanupInterval.unref();
-}
-
-function _getLogFilePath(prefix, timestamp) {
-  const sanitized = timestamp.replace(/[:.]/g, '-');
-  const rand = crypto.randomBytes(3).toString('hex');
-  return path.join(apiLogDir, `${prefix}-${sanitized}-${rand}.json`);
-}
-
-/**
- * Write a request/response log entry under `${prefix}-<timestamp>-<rand>.json`.
- * Shared by logApiRequest and logApiResponse, which differ only in the log
- * kind/prefix and the field name the body is stored under.
- */
-function _writeApiLog(kind, bodyField, modelName, apiUrl, body, extra = {}) {
-  try {
-    ensureLogDir();
-    _enforceLogDirQuota();
-    const now = new Date().toISOString();
-    const entry = {
-      timestamp: now,
-      model: modelName,
-      apiUrl,
-      [bodyField]: body,
-      ...extra
-    };
-    const filePath = _getLogFilePath(`api-${kind}`, now);
-    fs.writeFileSync(filePath, JSON.stringify(entry, null, 2));
-    return filePath;
-  } catch (err) {
-    log.warn(`Failed to write API ${kind} log: ${err.message}`);
-    return null;
-  }
-}
-
-const logApiRequest = (modelName, apiUrl, body, extra = {}) =>
-  _writeApiLog('request', 'requestBody', modelName, apiUrl, _redactInlineData(body), extra);
-const logApiResponse = (modelName, apiUrl, responseBody, extra = {}) =>
-  _writeApiLog('response', 'responseBody', modelName, apiUrl, responseBody, extra);
-
-/** Replace inline base64 payloads with a size marker before logging them. */
-function _redactInlineData(value) {
-  if (typeof value === 'string') {
-    const comma = value.indexOf(',');
-    return /^data:[^;]+;base64,/i.test(value)
-      ? `${value.slice(0, comma + 1)}<${value.length - comma - 1} chars omitted>`
-      : value;
-  }
-  if (Array.isArray(value)) return value.map(_redactInlineData);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, _redactInlineData(child)]));
-  }
-  return value;
-}
 
 function _formatRateLimitLog(status, errBody, headers) {
   const parts = [`HTTP ${status} (rate limit / quota)`];
@@ -455,5 +312,5 @@ export {
   logApiResponse,
   fetchXaiWithOAuthRetry,
   initApiLogRetention,
-  _redactInlineData
+  redactApiLogData as _redactInlineData
 };

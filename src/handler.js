@@ -247,7 +247,9 @@ async function handleMessage(ctx) {
         responseFormat,
         promptCacheKey,
         reasoningEffort: ctx.settings?.effort,
-        budget: turnBudgetFrom(ctx)
+        budget: turnBudgetFrom(ctx),
+        round: rounds,
+        phase: 'work'
       };
 
       let roundResult;
@@ -386,7 +388,9 @@ async function handleMessage(ctx) {
         responseFormat,
         promptCacheKey,
         reasoningEffort: ctx.settings?.effort,
-        budget: turnBudgets.root
+        budget: turnBudgets.root,
+        round: rounds + 1,
+        phase: 'wrap_up'
       });
       if (finalModel) lastModelUsed = finalModel;
       accumulateSearchStats(responseCtx, searchStats);

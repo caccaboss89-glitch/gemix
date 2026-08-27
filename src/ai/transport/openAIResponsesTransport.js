@@ -15,11 +15,14 @@
 // partial response to report, never something to replay. `Retry-After` is
 // honoured and clamped to what is left of the turn.
 //
-// Logging is metadata only: model, status, item count, duration, request id.
-// No bearer, account id, base64, encrypted_content, file content or user text.
+// Every actual wire attempt writes the provider-neutral request, SSE events and
+// assembled response. Credentials and opaque binary/encrypted payloads are
+// redacted by the shared API logger before they reach disk.
 
+import crypto from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
 import { TurnBudget, sleepWithin } from '../../utils/turnBudget.js';
+import { logApiRequest, logApiResponse } from '../apiLogs.js';
 import { SseDecoder } from './sse.js';
 import { ResponseAssembler } from './responsesProtocol.js';
 import {
@@ -44,6 +47,11 @@ function _joinUrl(baseUrl, path) {
   return tail ? `${base}/${tail}` : base;
 }
 
+function _responseHeaders(headers) {
+  if (!headers?.entries) return {};
+  return Object.fromEntries(headers.entries());
+}
+
 class OpenAIResponsesTransport {
   /**
    * @param {object} opts
@@ -52,6 +60,7 @@ class OpenAIResponsesTransport {
    * @param {object} [opts.extensions] - provider extension (see ai/extensions/)
    * @param {string} [opts.label] - short name for log lines
    * @param {Function} [opts.fetchImpl] - injected for tests
+   * @param {object|null} [opts.apiLogWriter] - injected log sink; null disables test logging
    */
   constructor(opts = {}) {
     if (!opts.credentialProvider) {
@@ -62,6 +71,9 @@ class OpenAIResponsesTransport {
     this.extensions = opts.extensions || null;
     this.label = opts.label || 'responses';
     this._fetch = opts.fetchImpl || ((...args) => fetch(...args));
+    this._apiLogWriter = Object.hasOwn(opts, 'apiLogWriter')
+      ? opts.apiLogWriter
+      : (opts.fetchImpl ? null : { request: logApiRequest, response: logApiResponse });
     this._log = createLogger(`Transport:${this.label}`);
     /**
      * Whether the "no content-type" notice has already been given. Worth saying
@@ -114,6 +126,20 @@ class OpenAIResponsesTransport {
       const headers = this._buildHeaders(credential, context);
 
       const startedAt = Date.now();
+      const apiLogId = crypto.randomUUID();
+      const logMeta = {
+        apiLogId,
+        transport: 'responses',
+        provider: this.extensions?.providerId || this.label,
+        gemixRequestId: requestId,
+        round: context.round ?? null,
+        phase: context.phase ?? null,
+        attempt
+      };
+      this._writeApiLog('request', wireBody.model, url, wireBody, {
+        ...logMeta,
+        startedAt: new Date(startedAt).toISOString()
+      });
       let res;
       try {
         res = await this._fetch(url, {
@@ -123,6 +149,13 @@ class OpenAIResponsesTransport {
           signal: budget.signal
         });
       } catch (err) {
+        this._writeApiLog('response', wireBody.model, url, {
+          http: null,
+          error: { name: err.name, message: err.message }
+        }, {
+          ...logMeta,
+          durationMs: Date.now() - startedAt
+        });
         if (budget.signal.aborted) {
           throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Turn budget expired while contacting the model.');
         }
@@ -139,6 +172,17 @@ class OpenAIResponsesTransport {
 
       if (!res.ok) {
         const bodyText = await res.text().catch(() => '');
+        this._writeApiLog('response', wireBody.model, url, {
+          http: {
+            status: res.status,
+            headers: _responseHeaders(res.headers)
+          },
+          body: bodyText
+        }, {
+          ...logMeta,
+          upstreamRequestId,
+          durationMs: Date.now() - startedAt
+        });
         const kind = classifyHttpFailure(res.status, bodyText, this.extensions?.refineHttpFailure);
         const detail = summarizeErrorBody(bodyText);
         this._log.warn(
@@ -198,6 +242,18 @@ class OpenAIResponsesTransport {
       const contentType = res.headers.get('content-type') || '';
       if (contentType && !/text\/event-stream/i.test(contentType)) {
         const bodyText = await res.text().catch(() => '');
+        this._writeApiLog('response', wireBody.model, url, {
+          http: {
+            status: res.status,
+            contentType,
+            headers: _responseHeaders(res.headers)
+          },
+          body: bodyText
+        }, {
+          ...logMeta,
+          upstreamRequestId,
+          durationMs: Date.now() - startedAt
+        });
         throw this._error(
           TRANSPORT_ERROR.MALFORMED,
           `Expected an event stream, got "${contentType}": ${summarizeErrorBody(bodyText)}`,
@@ -210,9 +266,23 @@ class OpenAIResponsesTransport {
       }
 
       let assembled;
+      const streamCapture = { receivedBytes: 0, events: [], assembledResponse: null };
       try {
-        assembled = await this._consumeStream(res, budget, upstreamRequestId);
+        assembled = await this._consumeStream(res, budget, upstreamRequestId, streamCapture);
       } catch (err) {
+        this._writeApiLog('response', wireBody.model, url, {
+          http: {
+            status: res.status,
+            contentType: contentType || null,
+            headers: _responseHeaders(res.headers)
+          },
+          stream: streamCapture,
+          error: { kind: err.kind || null, name: err.name, message: err.message, partial: Boolean(err.partial) }
+        }, {
+          ...logMeta,
+          upstreamRequestId,
+          durationMs: Date.now() - startedAt
+        });
         // A stream that produced nothing can be replayed: no tool ran and no
         // partial reply exists. Anything else is reported as it is.
         if (err.kind === TRANSPORT_ERROR.TRANSIENT && !err.partial && attempt < MAX_COLD_ATTEMPTS) {
@@ -223,6 +293,19 @@ class OpenAIResponsesTransport {
         throw err;
       }
 
+      this._writeApiLog('response', wireBody.model, url, {
+        http: {
+          status: res.status,
+          contentType: contentType || null,
+          headers: _responseHeaders(res.headers)
+        },
+        stream: streamCapture,
+        assembledResponse: assembled.response
+      }, {
+        ...logMeta,
+        upstreamRequestId,
+        durationMs: Date.now() - startedAt
+      });
       await this.credentials.markStatus('ok', credential.accountId);
       this._log.info(
         `model=${wireBody.model} effort=${wireBody.reasoning?.effort ?? 'n/a'} `
@@ -254,64 +337,85 @@ class OpenAIResponsesTransport {
    * Read the SSE body into a normalized response. A stream that dies after
    * producing content is a partial response and is never retried automatically.
    */
-  async _consumeStream(res, budget, upstreamRequestId) {
+  async _consumeStream(res, budget, upstreamRequestId, capture = null) {
     const decoder = new SseDecoder();
     const assembler = new ResponseAssembler();
 
     try {
-      for await (const chunk of res.body) {
-        for (const event of decoder.push(chunk)) assembler.apply(event);
-        if (budget.expired) {
-          throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Turn budget expired while reading the model stream.', {
-            partial: assembler.sawMeaningfulEvent,
+      try {
+        for await (const chunk of res.body) {
+          if (capture) {
+            capture.receivedBytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
+          }
+          for (const event of decoder.push(chunk)) {
+            if (capture) capture.events.push(event);
+            assembler.apply(event);
+          }
+          if (budget.expired) {
+            throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Turn budget expired while reading the model stream.', {
+              partial: assembler.sawMeaningfulEvent,
+              requestId: upstreamRequestId
+            });
+          }
+        }
+        for (const event of decoder.end()) {
+          if (capture) capture.events.push(event);
+          assembler.apply(event);
+        }
+      } catch (err) {
+        if (err instanceof TransportError) throw err;
+        throw this._error(
+          assembler.sawMeaningfulEvent ? TRANSPORT_ERROR.MALFORMED : TRANSPORT_ERROR.TRANSIENT,
+          `Model stream ended early: ${err.message}`,
+          { partial: assembler.sawMeaningfulEvent, requestId: upstreamRequestId }
+        );
+      }
+
+      if (assembler.error) {
+        const message = assembler.error.message || JSON.stringify(assembler.error).slice(0, 300);
+        throw this._error(TRANSPORT_ERROR.MALFORMED, `Model reported an error: ${message}`, {
+          requestId: upstreamRequestId
+        });
+      }
+      if (assembler.status === 'failed') {
+        throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model reported a failed response.', {
+          requestId: upstreamRequestId
+        });
+      }
+      if (!assembler.status) {
+        // EOF without a terminal event is usable only when complete items have
+        // arrived. Deltas prove that work started, but are not replayable output.
+        if (!assembler.sawMeaningfulEvent) {
+          throw this._error(TRANSPORT_ERROR.TRANSIENT, 'Model stream closed before sending anything.', {
+            partial: false,
             requestId: upstreamRequestId
           });
         }
+        if (!assembler.hasOutputItems) {
+          throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model stream closed after deltas but before opening an output item.', {
+            partial: true,
+            requestId: upstreamRequestId
+          });
+        }
+        this._log.warn('stream closed without a terminal event; using the items already received');
       }
-      for (const event of decoder.end()) assembler.apply(event);
+
+      return {
+        response: assembler.toResponse(),
+        requestId: upstreamRequestId,
+        usage: assembler.usage
+      };
+    } finally {
+      if (capture) capture.assembledResponse = assembler.toResponse();
+    }
+  }
+
+  _writeApiLog(kind, model, url, body, extra) {
+    try {
+      this._apiLogWriter?.[kind]?.(model, url, body, extra);
     } catch (err) {
-      if (err instanceof TransportError) throw err;
-      throw this._error(
-        assembler.sawMeaningfulEvent ? TRANSPORT_ERROR.MALFORMED : TRANSPORT_ERROR.TRANSIENT,
-        `Model stream ended early: ${err.message}`,
-        { partial: assembler.sawMeaningfulEvent, requestId: upstreamRequestId }
-      );
+      this._log.warn(`API ${kind} log sink failed: ${err.message}`);
     }
-
-    if (assembler.error) {
-      const message = assembler.error.message || JSON.stringify(assembler.error).slice(0, 300);
-      throw this._error(TRANSPORT_ERROR.MALFORMED, `Model reported an error: ${message}`, {
-        requestId: upstreamRequestId
-      });
-    }
-    if (assembler.status === 'failed') {
-      throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model reported a failed response.', {
-        requestId: upstreamRequestId
-      });
-    }
-    if (!assembler.status) {
-      // EOF without a terminal event is usable only when complete items have
-      // arrived. Deltas prove that work started, but are not replayable output.
-      if (!assembler.sawMeaningfulEvent) {
-        throw this._error(TRANSPORT_ERROR.TRANSIENT, 'Model stream closed before sending anything.', {
-          partial: false,
-          requestId: upstreamRequestId
-        });
-      }
-      if (!assembler.hasOutputItems) {
-        throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model stream closed after deltas but before opening an output item.', {
-          partial: true,
-          requestId: upstreamRequestId
-        });
-      }
-      this._log.warn('stream closed without a terminal event; using the items already received');
-    }
-
-    return {
-      response: assembler.toResponse(),
-      requestId: upstreamRequestId,
-      usage: assembler.usage
-    };
   }
 
   _error(kind, message, extra = {}) {

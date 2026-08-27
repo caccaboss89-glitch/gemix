@@ -121,6 +121,39 @@ test('a successful call assembles the stream and marks the credential healthy', 
   assert.deepEqual(credentials.statuses, ['ok']);
 });
 
+test('provider-neutral logs contain the decorated wire request and full response stream', async () => {
+  const logs = { request: [], response: [] };
+  const apiLogWriter = {
+    request: (...args) => logs.request.push(args),
+    response: (...args) => logs.response.push(args)
+  };
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'chatgpt-oauth',
+    extensions: {
+      providerId: 'chatgpt-oauth',
+      decorateBody: body => ({ ...body, provider_field: 'kept' })
+    },
+    apiLogWriter,
+    fetchImpl: async () => sseResponse(COMPLETED_STREAM)
+  });
+
+  await transport.createResponse({
+    body: { model: 'm', input: [{ role: 'user', content: 'hello' }] },
+    requestId: 'gemix-1',
+    context: { round: 2, phase: 'work' }
+  });
+
+  assert.equal(logs.request.length, 1);
+  assert.equal(logs.response.length, 1);
+  assert.equal(logs.request[0][2].provider_field, 'kept');
+  assert.equal(logs.request[0][3].provider, 'chatgpt-oauth');
+  assert.equal(logs.request[0][3].round, 2);
+  assert.equal(logs.response[0][2].stream.events.length, 2);
+  assert.equal(logs.response[0][2].assembledResponse.output[0].content[0].text, 'ok');
+  assert.equal(logs.response[0][3].apiLogId, logs.request[0][3].apiLogId);
+});
+
 test('a 503 is replayed cold and then succeeds', async () => {
   const credentials = new StubCredentials();
   let calls = 0;
