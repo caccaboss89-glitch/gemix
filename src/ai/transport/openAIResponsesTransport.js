@@ -64,11 +64,13 @@ class OpenAIResponsesTransport {
     this._fetch = opts.fetchImpl || ((...args) => fetch(...args));
     this._log = createLogger(`Transport:${this.label}`);
     /**
-     * Whether the "no content-type" notice has already been given. It is worth
-     * saying once, because it tells you the endpoint is off-spec; repeating it
-     * on every single call would only teach the reader to skip that line.
+     * Whether the "no content-type" notice has already been given. Worth saying
+     * once, because it tells you the endpoint omits a header the protocol asks
+     * for; not worth repeating on every call, which would only teach the reader
+     * to skip that line. It is info and not warn on purpose: nothing went
+     * wrong, and warn goes to stderr, where a process manager paints it red.
      */
-    this._warnedMissingContentType = false;
+    this._notedMissingContentType = false;
   }
 
   /**
@@ -202,9 +204,9 @@ class OpenAIResponsesTransport {
           { requestId: upstreamRequestId }
         );
       }
-      if (!contentType && !this._warnedMissingContentType) {
-        this._warnedMissingContentType = true;
-        this._log.warn('response carried no content-type; reading it as an event stream (said once per run)');
+      if (!contentType && !this._notedMissingContentType) {
+        this._notedMissingContentType = true;
+        this._log.info('response carried no content-type; reading it as an event stream (said once per run)');
       }
 
       let assembled;
