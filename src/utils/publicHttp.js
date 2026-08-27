@@ -1,9 +1,9 @@
 // src/utils/publicHttp.js
 //
-// Public-only HTTP(S) boundary for model-selected downloads. DNS is resolved
-// locally, every result must be globally routable, and the request is pinned to
-// one validated address. Redirects are followed manually through the same
-// validation so they cannot pivot into loopback, private or link-local space.
+// Public-only HTTP(S) boundary for model-selected downloads. DNS uses the host
+// resolver first and public resolvers when the host has rewritten a public name
+// to a local address. Every result must be globally routable and the request is
+// pinned to one validated address. Redirects repeat the same validation.
 
 import dns from 'node:dns/promises';
 import http from 'node:http';
@@ -11,6 +11,7 @@ import https from 'node:https';
 import net from 'node:net';
 
 const MAX_REDIRECTS = 5;
+const PUBLIC_DNS_SERVERS = Object.freeze(['1.1.1.1', '1.0.0.1']);
 
 function _publicIpv4(address) {
   const p = address.split('.').map(Number);
@@ -78,13 +79,13 @@ function parsePublicUrl(raw) {
   return url;
 }
 
-async function _lookupWithDeadline(hostname, timeoutMs, signal) {
+async function _lookupWithDeadline(hostname, timeoutMs, signal, lookup) {
   if (signal?.aborted) throw signal.reason || new Error('Download aborted.');
   let timer;
   let onAbort;
   try {
     return await Promise.race([
-      dns.lookup(hostname, { all: true, verbatim: true }),
+      lookup(hostname, { all: true, verbatim: true }),
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error(`DNS lookup timed out for ${hostname}.`)), timeoutMs);
         timer.unref?.();
@@ -100,11 +101,27 @@ async function _lookupWithDeadline(hostname, timeoutMs, signal) {
   }
 }
 
+async function _lookupPublicDns(hostname) {
+  const resolver = new dns.Resolver();
+  resolver.setServers(PUBLIC_DNS_SERVERS);
+  const settled = await Promise.allSettled([
+    resolver.resolve4(hostname),
+    resolver.resolve6(hostname)
+  ]);
+  const answers = settled.flatMap((result, index) => result.status === 'fulfilled'
+    ? result.value.map(address => ({ address, family: index === 0 ? 4 : 6 }))
+    : []);
+  if (answers.length === 0) {
+    const firstError = settled.find(result => result.status === 'rejected')?.reason;
+    throw firstError || new Error(`No DNS answer for ${hostname}.`);
+  }
+  return answers;
+}
+
 /**
- * Every address this name may be connected to, all of them validated. Returning
- * the whole set rather than the first answer is what lets a dual-stack host
- * still be reached when one family has no route out; it widens nothing, because
- * a single non-public answer already rejects the name outright.
+ * Every address this name may be connected to, all of them validated. A broken
+ * ISP search suffix may rewrite a public name to loopback; when the host answer
+ * is unusable, resolve the same name through public DNS and validate it fully.
  */
 async function resolvePublicAddresses(url, opts = {}) {
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
@@ -114,11 +131,28 @@ async function resolvePublicAddresses(url, opts = {}) {
     return [{ address: hostname, family: literalFamily }];
   }
 
-  let answers;
-  try { answers = await _lookupWithDeadline(hostname, opts.timeoutMs || 60_000, opts.signal); }
-  catch (err) {
+  const timeoutMs = opts.timeoutMs || 60_000;
+  const deadline = Date.now() + timeoutMs;
+  const systemLookup = opts.lookup || dns.lookup;
+  const publicLookup = opts.publicLookup || _lookupPublicDns;
+  let systemError = null;
+  let answers = [];
+  try {
+    answers = await _lookupWithDeadline(hostname, timeoutMs, opts.signal, systemLookup);
+  } catch (err) {
     if (opts.signal?.aborted) throw opts.signal.reason || err;
-    throw new Error(`DNS lookup failed for ${url.hostname}: ${err.message}`);
+    systemError = err;
+  }
+  if (answers.length > 0 && answers.every(answer => isPublicIp(answer.address))) return answers;
+
+  try {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(`DNS lookup timed out for ${hostname}.`);
+    answers = await _lookupWithDeadline(hostname, remaining, opts.signal, publicLookup);
+  } catch (err) {
+    if (opts.signal?.aborted) throw opts.signal.reason || err;
+    if (systemError) throw new Error(`DNS lookup failed for ${url.hostname}: ${systemError.message}`);
+    throw new Error('Private, local or unresolved URL targets are not allowed.');
   }
   if (!answers.length || answers.some(answer => !isPublicIp(answer.address))) {
     throw new Error('Private, local or unresolved URL targets are not allowed.');
@@ -198,5 +232,6 @@ export {
   _pinnedLookup,
   isPublicIp,
   openPublicHttp,
-  parsePublicUrl
+  parsePublicUrl,
+  resolvePublicAddresses
 };

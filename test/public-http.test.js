@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { _pinnedLookup, isPublicIp, openPublicHttp, parsePublicUrl } from '../src/utils/publicHttp.js';
+import {
+  _pinnedLookup,
+  isPublicIp,
+  openPublicHttp,
+  parsePublicUrl,
+  resolvePublicAddresses
+} from '../src/utils/publicHttp.js';
 
 test('public-address policy rejects every local and documentation range', () => {
   for (const address of [
@@ -46,4 +52,22 @@ test('pinned DNS lookup follows the scalar and all-address Node contracts', asyn
     lookup('ignored.test', { all: true }, (err, addresses) => err ? reject(err) : resolve(addresses));
   });
   assert.deepEqual(all, [{ address: '8.8.8.8', family: 4 }]);
+});
+
+test('public DNS repairs an ISP loopback rewrite without weakening address validation', async () => {
+  const url = parsePublicUrl('https://example.com/page');
+  const systemAnswer = async () => [{ address: '127.0.0.1', family: 4 }];
+  const publicAnswer = async () => [
+    { address: '104.20.23.154', family: 4 },
+    { address: '2606:4700:10::6814:179a', family: 6 }
+  ];
+  assert.deepEqual(await resolvePublicAddresses(url, {
+    lookup: systemAnswer,
+    publicLookup: publicAnswer
+  }), await publicAnswer());
+
+  await assert.rejects(() => resolvePublicAddresses(url, {
+    lookup: systemAnswer,
+    publicLookup: async () => [{ address: '192.168.1.5', family: 4 }]
+  }), /Private|local/);
 });
