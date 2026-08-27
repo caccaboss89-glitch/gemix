@@ -16,7 +16,7 @@ import { resolveActiveMemberByName  } from '../config/members.js';
 import { normalizePhoneToJid  } from './whatsappSender.js';
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { modifyTaskFile  } from '../utils/taskStore.js';
-import { parseRecurrenceRule, describeRecurrence, toRomeISO  } from '../utils/recurrence.js';
+import { parseRecurrenceRule, describeRecurrence, toRomeISO, isDateSkipped  } from '../utils/recurrence.js';
 import { formatTaskRecipient  } from '../utils/taskRecipient.js';
 import {
   projectTaskForTool,
@@ -140,6 +140,18 @@ async function scheduleTasks(tasks, ctx) {
         continue;
       }
       const { freq, interval, byday, exdate, until } = parsed.value;
+
+      // scheduledAt is always delivered as the first occurrence (see repeat's
+      // description); an EXDATE landing on that same Rome calendar date would
+      // otherwise silently skip it instead.
+      if (exdate.length && isDateSkipped(scheduledAtISO, exdate)) {
+        results.push({
+          success: false,
+          error: 'EXDATE cannot exclude the reminder\'s own start date. scheduledAt falls on '
+            + `${scheduledAtISO.slice(0, 10)}, which is also excluded.`
+        });
+        continue;
+      }
 
       // UNTIL is optional: default to the 1-year limit so a recurrence always ends.
       let untilISO = toRomeISO(new Date(maxDateMs));

@@ -69,18 +69,23 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       description: 'Copy the user\'s intended local calendar date and wall-clock time unchanged as YYYY-MM-DDTHH:MM:SS '
         + '(e.g. a requested 14:30 stays 14:30). Do not convert the hour and do not add Z or a UTC offset; '
         + 'the backend alone interprets it in Europe/Rome and applies the correct DST-aware offset. This same '
-        + 'interpretation applies to every recipient; never adjust for where the recipient might be.'
+        + 'interpretation applies to every recipient; never adjust for where the recipient might be. An impossible '
+        + 'calendar date (e.g. February 31) is rejected, not normalized to a nearby real date.'
     },
     repeat: {
       type: 'string',
       description: 'OPTIONAL recurrence as an RRULE string; omit for a one-time reminder. '
         + 'FREQ=HOURLY|DAILY|WEEKLY|MONTHLY (required), plus optional INTERVAL=N (default 1), '
         + 'BYDAY=MO,TU,WE,TH,FR,SA,SU (weekly only), inclusive UNTIL=YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS '
-        + 'as an unchanged local wall-clock value without Z/offset (default: the 1-year limit), '
-        + 'EXDATE=YYYY-MM-DD,… (dates to skip). '
+        + 'as an unchanged local wall-clock value without Z/offset (default: the 1-year limit, and it must fall '
+        + 'after scheduledAt), EXDATE=YYYY-MM-DD,… (dates to skip; each must be a real calendar date and none may '
+        + 'equal scheduledAt\'s own date — that first occurrence always fires). EXDATE always matches by Rome '
+        + 'calendar date regardless of FREQ, so on an HOURLY recurrence it drops every occurrence that falls on '
+        + 'that date, not just one. '
         + 'scheduledAt is always the first occurrence; weekly BYDAY selects later occurrences. Calendar recurrences '
         + 'keep the requested wall-clock: a nonexistent spring-DST occurrence is skipped, an autumn duplicate uses '
         + 'the second standard-time occurrence, and a monthly day clamps in short months then returns to its original day. '
+        + 'Each task in the batch is validated and created independently: one invalid item does not block the others. '
         + 'Examples: "FREQ=DAILY;INTERVAL=2" every 2 days; "FREQ=WEEKLY;BYDAY=MO,FR" every Monday and Friday; '
         + '"FREQ=MONTHLY;INTERVAL=3;EXDATE=2026-12-25" every 3 months except that date.'
     }
@@ -103,9 +108,9 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Schedule WhatsApp reminders for the current chat, active members or external contacts; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
+      ? 'Schedule WhatsApp reminders for the current chat, active members or external contacts; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
       : isActiveMember
-        ? 'Schedule WhatsApp reminders for the current chat or other active members; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
+        ? 'Schedule WhatsApp reminders for the current chat or other active members; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
         : 'Schedule personal WhatsApp reminders for the current chat. Items are independent and writes are atomic per task file. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.',
     properties: {
       tasks: {
@@ -126,7 +131,7 @@ function buildReadMyTasksTool(isWhatsAppGroup) {
   }
   return makeTool({
     name: 'read_my_tasks',
-    description: 'Read scheduled reminders with time, recurrence, recipient, delivery state and removal ID. Returns count, tasks, ids, results and errors; no reminders is success with empty arrays.',
+    description: 'Read scheduled reminders with time, recurrence, recipient, delivery state and removal ID — including ones you created for someone else, which live in your own task file, never theirs. Returns count, tasks, ids, results and errors; no reminders is success with empty arrays.',
     properties
   });
 }

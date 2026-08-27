@@ -68,7 +68,7 @@ function underProvider(provider, fn) {
 test('an injected prompt roster preserves admin-only identifiers without using deployment data', () => {
   assert.match(
     promptFor(true),
-    /<ActiveMembers>Fixture Member \(390000000099, fixture@example\.invalid\)<\/ActiveMembers>/
+    /<ActiveMembers>Fixture Member \(\+390000000099, fixture@example\.invalid\)<\/ActiveMembers>/
   );
   assert.match(promptFor(false), /<ActiveMembers>Fixture Member<\/ActiveMembers>/);
   assert.doesNotMatch(

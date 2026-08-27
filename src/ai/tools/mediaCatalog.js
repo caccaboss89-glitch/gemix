@@ -130,7 +130,8 @@ const TOOL_READ_MUSIC_STATS = makeTool({
   name: 'read_music_stats',
   description: 'Read the deployment MusicBot\'s current cumulative listening summary: global songs started/completed, '
     + 'total listening time and playlist additions, global top five songs, and the same listening/addition/top-five '
-    + 'breakdown for every tracked user. The result includes the source\'s last-updated timestamp when available.',
+    + 'breakdown for every tracked user. Top five in every case ranks by play count, most played first. '
+    + 'The result includes the source\'s last-updated timestamp when available.',
   properties: {}
 });
 

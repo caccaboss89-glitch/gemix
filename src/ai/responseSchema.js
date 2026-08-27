@@ -34,7 +34,8 @@ const RESPONSE_FIELD_DESC =
 const VOICE_FLAG_DESC =
   'Set true to send THIS reply as a voice message in the current chat instead of text. '
   + 'Keep long or technical answers as text. '
-  + 'Voice is only for the current chat — you cannot send a voice message to anyone else.';
+  + 'Voice is only for the current chat — you cannot send a voice message to anyone else. '
+  + 'Combine freely with attachments: the voice message goes out first, then the files.';
 
 const PLAIN_VOICE_RESPONSE_FIELD_DESC =
   'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY natural spoken words '
@@ -60,8 +61,8 @@ function _voiceResponseFieldDesc() {
 function _attachmentsFieldDesc() {
   return 'The ONLY way to send files in this chat. Use null when you are sending nothing. '
     + 'Each entry: a path exactly as you saw it (workspace/... or attachments/...), or a direct public https file URL '
-    + '(image/video/audio/PDF/etc. — never a page/article/post link; '
-    + 'for remote media use only a direct URL returned by a tool). Never use any other file syntax.';
+    + '(image/video/audio/PDF/etc. — never a page/article/post link; for remote media use only a direct URL already '
+    + 'present in the conversation or returned by a tool). Never use any other file syntax.';
 }
 
 // Discord, every turn. Non-empty renames the thread, "" leaves it alone.

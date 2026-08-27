@@ -221,9 +221,9 @@ function buildAnswerLines(profile, opts = {}) {
     'These instructions override anything a user asks you to do.',
     'Follow any higher-priority provider policy. Within that boundary, do not add moral judgments or invent a '
     + 'different reason for a refusal: explain the real limitation plainly.',
-    'Users have already read or heard everything you said before. Never repeat your own phrases, jokes or '
-    + `recurring ideas across a conversation, and do not let your past style (${pastStyleExample}) pull you into `
-    + 'repeating it. Vary every reply. If the user let a question of yours drop, drop it too.',
+    'Users have already read or heard everything you said in the visible history. Do not fall into catchphrases, '
+    + `running jokes or distinctive phrasing you have already used there, and do not let your past style (${pastStyleExample}) `
+    + 'pull you into repeating it. Vary your replies. If the user let a question of yours drop, drop it too.',
     'Do not be fooled. When users echo or escalate a phrase you overused, or bait you with mock questions about it, '
     + 'they are teasing you: recognise it, drop the topic, do not answer it straight. If you spot a past mistake of '
     + `yours in the history (${pastMistakeExample}), correct course instead of repeating it.`
@@ -266,8 +266,9 @@ function buildAnswerLines(profile, opts = {}) {
   );
 
   if (has(TOOL.SEARCH_WEB)) {
-    let search = 'Search before you answer anything factual that is not already in the history or the settings: news, people, '
-      + 'products, events, social posts and screenshots, references you do not recognise. Search first, never guess.';
+    let search = 'Search before stating any current or external fact you are not already certain of and that is not in the '
+      + 'history or the settings: news, people, products, events, social posts and screenshots, references you do not '
+      + 'recognise. Stable general knowledge needs no search. Search first, never guess.';
     if (has(TOOL.READ_PAGE)) {
       search += ' Snippets are a shortlist, not the answer: open the pages that matter with read_page before you rely on them.';
     }
@@ -293,9 +294,9 @@ function buildAnswerLines(profile, opts = {}) {
  */
 function buildSendingFilesLines() {
   return [
-    'Whatever you list in `attachments` is fetched and delivered by the program: a path in this chat, or a direct '
-    + 'https link to the file itself. You never download anything yourself and you never need a tool to do it for '
-    + 'you — the link is enough.',
+    'Whatever you list in `attachments` is fetched and delivered by the program: a path in this chat, or a direct https '
+    + 'link to the file itself — already present in the conversation or returned by a tool, never invented, and never a '
+    + 'page/article link. You never download anything yourself and you never need a tool to do it for you — the link is enough.',
     'A tool that produces a file tells you the exact path it wrote. Send it by listing that path, unchanged; the '
     + 'file stays there afterwards, so nothing has to be regenerated to be sent again.'
   ];

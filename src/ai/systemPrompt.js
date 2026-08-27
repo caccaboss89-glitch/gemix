@@ -14,6 +14,7 @@
 // prefix. Files a tool produces are not listed here: each tool result names the
 // path it wrote, which is what the model reads for the rest of the turn.
 
+import pkg from '../../package.json' with { type: 'json' };
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
 import { ACTIVE_MEMBERS  } from '../config/members.js';
 import envConfig from '../config/env.js';
@@ -37,6 +38,7 @@ import {
   getCapabilities
 } from '../config/platformCapabilities.js';
 import { getToolsForUser, toolNamesToSet  } from './tools.js';
+import { isReleaseNotifySubscribed  } from '../tools/releaseNotify.js';
 import { formatQuotaCounts, formatMediaQuotaResetLabel  } from '../utils/mediaUsageLimits.js';
 import { escapeXml  } from '../utils/xmlEscape.js';
 import { buildProviderGuidance } from './providers/providerGuidance.js';
@@ -162,7 +164,7 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
 function _buildOpening(cap, profile) {
   const division = cap.isDiscord ? ' (Legal Division)' : '';
   return (
-    `You are ${profile.displayName} inside GemiX${division}. `
+    `You are ${profile.displayName} inside GemiX ${pkg.version}${division}. `
     + 'You have a sense of irony, and you catch things even when they are only implied.\n'
     + 'Your main goal is to answer the request inside the `<user_query>` tag, using every means and tool '
     + 'available to you to make that answer as good as it can be.'
@@ -239,7 +241,8 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
     // schedule_tasks), so the roster carries the exact identifiers: no name
     // lookup is needed and reminders never default to the caller by mistake.
     const roster = activeMembers.map((m) => {
-      const num = (m.wa || '').split('@')[0].split(':')[0] || '?';
+      const digits = (m.wa || '').split('@')[0].split(':')[0];
+      const num = digits ? `+${digits}` : '?';
       const email = m.email ? `, ${m.email}` : '';
       return `${escapeXml(m.name)} (${num}${escapeXml(email)})`;
     }).join('; ');
@@ -330,6 +333,12 @@ function buildDynamicRuntimeContext(ctx) {
     if (ctx.settingsReviewDue) {
       blocks.push(_block('SettingsReview', [SETTINGS_REVIEW_NOTICE]));
     }
+  }
+
+  if (toolNames.has('toggle_release_notify')) {
+    const chatId = ctx.chatId || ctx.groupId || ctx.waJid;
+    const on = isReleaseNotifySubscribed(chatId);
+    blocks.push(`Release notifications for this chat: ${on ? 'on' : 'off'} (toggle_release_notify to change).`);
   }
 
   return _macro('Runtime', blocks);

@@ -87,5 +87,10 @@ function getSubscribedChats() {
   return new Map(subscribedChats);
 }
 
-export { toggleReleaseNotify, getSubscribedChats, enableReleaseNotify
+/** Whether this chat currently has release notifications enabled. */
+function isReleaseNotifySubscribed(chatId) {
+  return Boolean(chatId) && subscribedChats.has(chatId);
+}
+
+export { toggleReleaseNotify, getSubscribedChats, enableReleaseNotify, isReleaseNotifySubscribed
 };

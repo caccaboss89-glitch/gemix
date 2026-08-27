@@ -43,11 +43,13 @@ const TOOL_READ_FILE = makeTool({
     + 'transcript plus frames sampled across the clip; images come back attached so you can look at them. '
     + 'Files in this chat that were not loaded this turn appear as "[Attachment: attachments/name.ext]" — '
     + 'pass that exact path here to open one. Text metadata reports the returned line window, has_more and next_offset; '
-    + 'a single line over the output cap returns an explicit error directing you to byte-slice it with shell.',
+    + `up to ${(constants.PARSE_MAX_TEXT_CHARS / 1000).toFixed(0)}K characters come back in one call before you must page with offset/limit, `
+    + 'and a single line over the output cap returns an explicit error directing you to byte-slice it with shell. '
+    + `Documents up to ${Math.round(constants.PARSE_MAX_DOCUMENT_BYTES / (1024 * 1024))} MB are accepted; larger ones need shell to extract the relevant part first.`,
   properties: {
     path: { type: 'string', minLength: 1, description: WORKSPACE_PATH_HINT },
-    offset: { type: 'integer', minimum: 1, description: 'Text files: first line to return, 1-based. Use with limit to page through a long file.' },
-    limit: { type: 'integer', minimum: 1, description: 'Text files: how many lines to return from offset.' }
+    offset: { type: 'integer', minimum: 1, description: 'Text files only: first line to return, 1-based; ignored for images, audio, video and other non-text formats. Use with limit to page through a long file.' },
+    limit: { type: 'integer', minimum: 1, description: 'Text files only: how many lines to return from offset; ignored for images, audio, video and other non-text formats.' }
   },
   required: ['path']
 });
@@ -90,9 +92,10 @@ function buildShellTool() {
       + 'Package installs (pip/npm/apt) are disabled — the toolchain is fixed. '
       + 'When an exact version matters, query the installed command or library with shell instead of assuming one. '
       + `Timeout ${defaultSec}s by default, ${maxSec}s maximum; for longer work, start it in the background, redirect its output into workspace/, print its PID, and inspect or stop it with a later shell call. `
-      + `At most ${constants.SANDBOX_MAX_CONTAINERS} chat containers run at once. A background job outlives the foreground call, `
+      + `Each container has ${constants.SANDBOX_MEMORY_MB} MB RAM; at most ${constants.SANDBOX_MAX_CONTAINERS} chat containers run at once. A background job outlives the foreground call, `
       + `but the idle reaper stops the whole container after ${idleMinutes} minutes without a container command; workspace files remain. `
       + 'Do not let background jobs edit files that another tool call may change before they finish. '
+      + `Captured stdout/stderr are capped at ${Math.round(constants.WORKSPACE_OUTPUT_MAX_BYTES / 1024)} KB (tail kept); read a larger result from its redirected file with read_file instead. `
       + 'The result reports exit_code, timed_out, output_truncated, duration_ms, stdout and stderr.',
     properties: {
       command: {

@@ -14,7 +14,7 @@ const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
   items: { type: 'string', minLength: 1 },
   maxItems: MAX_DELIVERY_ATTACHMENTS,
-  description: `OPTIONAL, up to ${MAX_DELIVERY_ATTACHMENTS}. Same entry types as reply attachments: a path exactly as you saw it, or a direct public https file URL. Omit if none.`
+  description: `OPTIONAL, up to ${MAX_DELIVERY_ATTACHMENTS}. Same entry types as reply attachments: a path exactly as you saw it, or a direct public https file URL already present in the conversation or returned by a tool. Oversized files are sent as a link instead of failing. Omit if none.`
 };
 
 function buildWhatsAppTool(isAdmin) {
@@ -29,7 +29,7 @@ function buildWhatsAppTool(isAdmin) {
     : { name: { type: 'string', description: 'Recipient active member name (not yourself).' } };
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — submit a message to a specific phone number. A successful result means WhatsApp accepted the outbound send, not that the device received or read it. Never for intermediate updates in the current chat. Start by saying on whose behalf you\'re writing.',
+    description: 'Delivery tool — submit a message to a specific phone number. A successful result means WhatsApp accepted the outbound send, not that the device received or read it. Text and attachments go out as separate WhatsApp sends, so a `degraded` result can mean the text landed while a file did not — check the attachment failures in the result. Never for intermediate updates in the current chat. Start by saying on whose behalf you\'re writing.',
     properties: {
       message: { type: 'string', minLength: 1, description: 'Message text. WhatsApp formatting only — no Markdown links.' },
       recipient: {
@@ -58,7 +58,7 @@ function buildEmailTool(isAdmin) {
     : { name: { type: 'string', description: 'Member name (email resolved from name)' } };
   return makeTool({
     name: 'send_email',
-    description: 'Delivery tool — submit an email. A successful result means the mail service accepted the outbound send, not inbox delivery or reading. Outbound only: you cannot read the user\'s inbox or any email others sent them (replies included). '
+    description: 'Delivery tool — submit an email. A successful result means the mail service accepted the outbound send, not inbox delivery or reading. Body and attachments travel in one SMTP send, so success covers both together; a `degraded` result means the message went through but not every attachment could be resolved. Outbound only: you cannot read the user\'s inbox or any email others sent them (replies included). '
       + 'To review what GemiX already sent on their behalf, use read_sent_messages. '
       + 'If on behalf of someone else, start by saying on whose behalf you\'re writing.',
     properties: {
