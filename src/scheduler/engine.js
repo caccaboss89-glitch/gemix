@@ -16,7 +16,7 @@ import { modifyTaskFile, readTaskFile  } from '../utils/taskStore.js';
 import { createLogger  } from '../utils/logger.js';
 import { stripVoiceTags, normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
-import { listWorkspaceStates, readWorkspaceActivity, withWorkspaceLock } from '../utils/workspaceState.js';
+import { clearActivity, listWorkspaceStates, readWorkspaceActivity, withWorkspaceLock } from '../utils/workspaceState.js';
 import workspaceRuntime from '../sandbox/workspaceRuntime.js';
 import { wipeWorkspace  } from '../sandbox/workspaceFs.js';
 import { clearProjection, sweepExpiredAttachments } from '../attachments/projection.js';
@@ -41,7 +41,9 @@ let _cycleInFlight = false;
  * Periodic sweeper for the agent's per-conversation workspace tree.
  * Wipes any workspace whose user has not interacted with GemiX for
  * constants.WORKSPACE_TTL_MS, along with its attachment projection, and shuts
- * down the matching container. The metadata file is left in place.
+ * down the matching container. The metadata file is left in place with its
+ * activity timestamp cleared, so a workspace is wiped once and not again on
+ * every later pass.
  *
  * Projected attachments, the durable history store and cached parses are also
  * swept on their own clock: an entry keeps its 4h from the last time it was
@@ -72,6 +74,8 @@ async function _sweepStaleWorkspaces() {
         catch (err) { log.warn(`clearProjection failed: ${err.message}`); }
         try { clearParserCache(workspaceId); }
         catch (err) { log.warn(`clearParserCache failed: ${err.message}`); }
+        try { clearActivity(workspaceId); }
+        catch (err) { log.warn(`clearActivity failed: ${err.message}`); }
       });
     } catch (err) {
       if (err.code !== 'EWORKSPACEBUSY') log.warn(`workspace sweep failed: ${err.message}`);

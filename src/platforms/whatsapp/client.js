@@ -8,7 +8,9 @@
 //
 // Failure policy is deliberate: a failed initialization requests coordinated
 // recovery, while a disconnect is retried in-process (WhatsApp Web drops
-// sessions routinely). Waiting for a QR scan is not a failure.
+// sessions routinely). Waiting for a QR scan is not a failure. A browser that
+// dies under a ready client is neither: it is reported as a lifecycle failure,
+// because nothing else in the stack would ever notice it.
 
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
@@ -19,6 +21,7 @@ import envConfig from '../../config/env.js';
 import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppeteer.js';
 
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
+const LIVENESS_CHECK_INTERVAL_MS = 60 * 1000;
 const AUTH_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const PROTOCOL_TIMEOUT_MS = 120_000;
@@ -42,8 +45,21 @@ function _resolveChromiumPath() {
 
 const CHROMIUM_PATH = _resolveChromiumPath();
 
+/**
+ * Whether the Chromium behind the client is still there. `client.info` is a
+ * plain object cached at ready time and outlives the browser, so it alone says
+ * nothing about the client's ability to see or send anything.
+ */
+function _isBrowserAlive(client) {
+  return Boolean(
+    client?.pupBrowser?.isConnected?.()
+    && client.pupPage
+    && !client.pupPage.isClosed()
+  );
+}
+
 function _isReady(client) {
-  return Boolean(client?.info?.wid?._serialized);
+  return Boolean(client?.info?.wid?._serialized) && _isBrowserAlive(client);
 }
 
 /**
@@ -79,12 +95,59 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   let shutdownPromise = null;
   let fatalReported = false;
   let waitingForQr = false;
+  let livenessTimer = null;
+  let livenessCheckInFlight = false;
 
   const clearReconnectTimer = () => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+  };
+
+  const clearLivenessTimer = () => {
+    if (livenessTimer) {
+      clearInterval(livenessTimer);
+      livenessTimer = null;
+    }
+  };
+
+  /**
+   * Watch the browser for as long as the client is ready.
+   *
+   * whatsapp-web.js emits `disconnected` only when WhatsApp itself drops the
+   * session (logout, state change). A Chromium that crashes, or a page that
+   * detaches, produces no event at all: the client keeps its cached `info`,
+   * reports ready, and silently stops receiving messages until the process is
+   * restarted by hand. This is the only thing that notices.
+   */
+  const startLivenessMonitor = () => {
+    clearLivenessTimer();
+
+    // Bound to this browser instance: a reconnect replaces it, and the handler
+    // left behind by the previous one must not report a failure for it.
+    const browser = client.pupBrowser;
+    browser?.once('disconnected', () => {
+      if (shuttingDown || client.pupBrowser !== browser) return;
+      requestFatalRecovery('Chromium disconnected');
+    });
+
+    livenessTimer = setInterval(async () => {
+      if (shuttingDown || fatalReported || livenessCheckInFlight) return;
+      if (!_isBrowserAlive(client)) {
+        requestFatalRecovery('Chromium gone');
+        return;
+      }
+      livenessCheckInFlight = true;
+      try {
+        await client.pupPage.evaluate(() => true);
+      } catch (err) {
+        if (!shuttingDown) requestFatalRecovery('WhatsApp Web page unresponsive', err);
+      } finally {
+        livenessCheckInFlight = false;
+      }
+    }, LIVENESS_CHECK_INTERVAL_MS);
+    livenessTimer.unref();
   };
 
   const watchdog = setTimeout(() => {
@@ -103,6 +166,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     fatalReported = true;
     clearTimeout(watchdog);
     clearReconnectTimer();
+    clearLivenessTimer();
     const detail = err ? `: ${formatWaError(err)}` : '';
     log.error(`${clientId} WhatsApp lifecycle failure (${reason})${detail}. Requesting clean recovery.`);
 
@@ -127,6 +191,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   client.on('ready', () => {
     clearTimeout(watchdog);
     clearReconnectTimer();
+    startLivenessMonitor();
     initializeInProgress = false;
     reconnectAttempts = 0;
     waitingForQr = false;
@@ -144,6 +209,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     log.warn('Disconnected:', reason);
     initializeInProgress = false;
     clearReconnectTimer();
+    clearLivenessTimer();
     reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
     log.info(`Reconnect attempt ${reconnectAttempts} in ${delay / 1000}s...`);
@@ -181,6 +247,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     shuttingDown = true;
     clearTimeout(watchdog);
     clearReconnectTimer();
+    clearLivenessTimer();
     shutdownPromise = Promise.resolve().then(() => client.destroy());
     return shutdownPromise;
   });

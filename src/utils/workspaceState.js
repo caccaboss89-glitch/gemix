@@ -83,6 +83,20 @@ function touchActivity(workspaceId) {
   _writeState(workspaceId, state);
 }
 
+/**
+ * Drop the activity timestamp after the workspace has been wiped, keeping the
+ * workspaceId so the entry stays resolvable. Without this the sweeper reads the
+ * same stale timestamp on every pass and wipes an already-empty workspace
+ * forever; the next turn re-stamps it through touchActivity.
+ */
+function clearActivity(workspaceId) {
+  if (!workspaceId) return;
+  const state = _readState(workspaceId);
+  delete state.lastActivityAt;
+  state.workspaceId = workspaceId;
+  _writeState(workspaceId, state);
+}
+
 function readWorkspaceActivity(workspaceId) {
   const state = _readState(workspaceId);
   return {
@@ -295,6 +309,7 @@ function listWorkspaceStates() {
 
 export {
   touchActivity,
+  clearActivity,
   readWorkspaceActivity,
   acquireWorkspaceLock,
   releaseWorkspaceLock,
