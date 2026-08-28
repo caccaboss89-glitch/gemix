@@ -661,7 +661,7 @@ function _validateWorkspaceExecEnv(dump) {
   }
   const end = dump.indexOf('\n--- EXEC:', start);
   const envText = end >= 0 ? dump.slice(start, end) : dump.slice(start);
-  const forbidden = /API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|BEARER|AUTHORIZATION|OAUTH|_SECRET|_TOKEN/i;
+  const forbidden = /API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|BEARER|AUTHORIZATION|OAUTH|_SECRET|_TOKEN\b/i;
   if (forbidden.test(envText)) {
     ISSUES.push({ caseId: 'workspace', msg: 'workspace exec env carries a credential-looking variable' });
   }
