@@ -36,7 +36,7 @@ test('Runtime tells the model when the current caller is the administrator', () 
     userIdentity: { isActiveMember: true, isAdmin: true },
     userWorkspace: null
   });
-  assert.match(runtime, /<Caller>Test Admin \(administrator, active member\)/);
+  assert.match(runtime, /<Caller>Test Admin \(Discord server administrator, active member\)/);
 });
 
 function underProvider(provider, fn) {
