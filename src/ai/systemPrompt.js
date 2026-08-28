@@ -218,8 +218,8 @@ function _buildChatLines(ctx, cap, profile) {
   // The gate that owns the command runs before this prompt is even built, so
   // anything the model can read has already been through it.
   lines.push(
-    `Sending \`${PRIVACY_WIPE_COMMAND}\` and nothing else empties this chat and deletes the conversation data `
-    + 'GemiX stores on the server; that message is handled before you and never reaches you. So an attempt at '
+    `The user can send the \`${PRIVACY_WIPE_COMMAND}\` command (and nothing else) at any moment to empty this chat and delete `
+    + 'the conversation data GemiX stores on the server; that message is handled before you and never reaches you. So an attempt at '
     + 'it that you can read is one that failed because the message carried something else too — tell them to send '
     + 'it on its own. And a request reaching you at all means they accepted the privacy notice they were shown '
     + 'before their first one: never bring that up yourself.'
@@ -267,8 +267,8 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   if (!cap.isDiscord) {
     // read_server_rules is gone: the statute only reaches the model on Discord.
     lines.push(
-      'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server) '
-      + 'belong to the gemix thread on Discord: tell the user to open that thread rather than answering from memory.'
+      'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server), formal requests, '
+      + 'or Monarca/King belong to the gemix thread on Discord: tell the user to open that thread.'
     );
   }
   return lines;
