@@ -9,10 +9,10 @@
 // for every profile.
 //
 // Some bindings are not negotiable. Web search, image search, page reading, the
-// workspace, the filesystem, the shell and music generation belong to GemiX in
-// every profile, so a profile cannot override them — the definition throws
-// rather than letting a provider quietly take one over. Everything else has a
-// GemiX-baseline default and a per-profile override.
+// workspace, the filesystem, the shell, music generation and speech synthesis
+// belong to GemiX in every profile, so a profile cannot override them — the
+// definition throws rather than letting a provider quietly take one over.
+// Everything else has a GemiX-baseline default and a per-profile override.
 
 /** Every feature a profile can bind. */
 const FEATURE = Object.freeze({
@@ -46,7 +46,10 @@ const GEMIX_OWNED = Object.freeze({
   [FEATURE.SHELL]: 'gemix',
   // The music tool keeps its own OpenRouter/Lyria backend
   // whatever the main brain runs on.
-  [FEATURE.MUSIC_GENERATION]: 'openrouter-lyria'
+  [FEATURE.MUSIC_GENERATION]: 'openrouter-lyria',
+  // Speech synthesis is the same two voices everywhere: Cartesia Sonic with a
+  // Microsoft Edge fallback behind it (tools/voiceMessage.js).
+  [FEATURE.TTS]: 'gemix-tts'
 });
 
 /**
@@ -56,8 +59,7 @@ const GEMIX_OWNED = Object.freeze({
 const BASELINE = Object.freeze({
   [FEATURE.GENERATE_IMAGE]: 'cloudflare-flux',
   [FEATURE.GENERATE_VIDEO]: UNAVAILABLE,
-  [FEATURE.STT]: 'cloudflare-whisper',
-  [FEATURE.TTS]: 'google-translate'
+  [FEATURE.STT]: 'cloudflare-whisper'
 });
 
 /**
@@ -66,8 +68,7 @@ const BASELINE = Object.freeze({
  */
 const FALLBACKS = Object.freeze({
   'xai-imagine-image': 'cloudflare-flux',
-  'xai-stt': 'cloudflare-whisper',
-  'xai-tts': 'google-translate'
+  'xai-stt': 'cloudflare-whisper'
 });
 
 /**

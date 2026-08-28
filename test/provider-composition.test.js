@@ -114,7 +114,7 @@ test('a profile with no overrides gets the GemiX baselines', () => {
   assert.equal(backendFor(profile, FEATURE.MUSIC_GENERATION), 'openrouter-lyria');
   assert.equal(backendFor(profile, FEATURE.GENERATE_IMAGE), 'cloudflare-flux');
   assert.equal(backendFor(profile, FEATURE.STT), 'cloudflare-whisper');
-  assert.equal(backendFor(profile, FEATURE.TTS), 'google-translate');
+  assert.equal(backendFor(profile, FEATURE.TTS), 'gemix-tts');
   assert.equal(backendFor(profile, FEATURE.GENERATE_VIDEO), UNAVAILABLE);
   assert.equal(isFeatureAvailable(profile, FEATURE.GENERATE_VIDEO), false);
 });
@@ -122,7 +122,6 @@ test('a profile with no overrides gets the GemiX baselines', () => {
 test('provider-primary media backends fall back to the GemiX baseline', () => {
   assert.equal(fallbackBackendFor('xai-imagine-image'), 'cloudflare-flux');
   assert.equal(fallbackBackendFor('xai-stt'), 'cloudflare-whisper');
-  assert.equal(fallbackBackendFor('xai-tts'), 'google-translate');
   assert.equal(fallbackBackendFor('cloudflare-flux'), null);
   assert.equal(fallbackBackendFor('xai-imagine-video'), null);
 });

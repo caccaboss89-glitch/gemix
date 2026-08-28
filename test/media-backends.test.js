@@ -70,7 +70,6 @@ test('the xAI profile keeps its own media services, the others fall to the basel
   assert.equal(backendFor(xai, FEATURE.GENERATE_IMAGE), 'xai-imagine-image');
   assert.equal(backendFor(xai, FEATURE.GENERATE_VIDEO), 'xai-imagine-video');
   assert.equal(backendFor(xai, FEATURE.STT), 'xai-stt');
-  assert.equal(backendFor(xai, FEATURE.TTS), 'xai-tts');
 });
 
 test('a subscription backend is not treated as the whole product line', () => {
@@ -79,7 +78,6 @@ test('a subscription backend is not treated as the whole product line', () => {
   const chatgpt = getProviderProfile('chatgpt');
   assert.equal(backendFor(chatgpt, FEATURE.GENERATE_IMAGE), 'cloudflare-flux');
   assert.equal(backendFor(chatgpt, FEATURE.STT), 'cloudflare-whisper');
-  assert.equal(backendFor(chatgpt, FEATURE.TTS), 'google-translate');
   assert.equal(isFeatureAvailable(chatgpt, FEATURE.GENERATE_VIDEO), false);
 });
 
@@ -90,6 +88,7 @@ test('the search and workspace features stay GemiX-owned on every profile', () =
     assert.equal(backendFor(profile, FEATURE.SEARCH_IMAGE), 'gemix-image-search');
     assert.equal(backendFor(profile, FEATURE.SHELL), 'gemix');
     assert.equal(backendFor(profile, FEATURE.MUSIC_GENERATION), 'openrouter-lyria');
+    assert.equal(backendFor(profile, FEATURE.TTS), 'gemix-tts');
   }
 });
 

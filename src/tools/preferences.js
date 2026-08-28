@@ -23,7 +23,6 @@ import {
   defaultSettings,
   settingsForModel
 } from '../utils/settingsStore.js';
-import { getActiveTtsCapabilities } from '../media/ttsCapabilities.js';
 
 /**
  * Apply a preferences update for the current chat.
@@ -40,8 +39,8 @@ async function managePreferences(args, settingsFileId, options = {}) {
   const current = readSettings(settingsFileId, options);
 
   if (args.voice !== undefined && args.voice !== null && args.voice !== '') {
-    if (options.allowVoice === false || !getActiveTtsCapabilities().selectableVoices) {
-      return { success: false, error: 'The active TTS backend does not support selecting a voice.' };
+    if (options.allowVoice === false) {
+      return { success: false, error: 'This chat cannot send spoken replies, so it has no voice to select.' };
     }
     const voice = String(args.voice).trim().toLowerCase();
     if (!VALID_VOICES.includes(voice)) {

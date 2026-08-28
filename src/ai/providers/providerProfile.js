@@ -116,8 +116,7 @@ function _buildXaiProfile() {
     features: defineFeatureBindings({
       [FEATURE.GENERATE_IMAGE]: 'xai-imagine-image',
       [FEATURE.GENERATE_VIDEO]: 'xai-imagine-video',
-      [FEATURE.STT]: 'xai-stt',
-      [FEATURE.TTS]: 'xai-tts'
+      [FEATURE.STT]: 'xai-stt'
     })
   };
 }
@@ -125,7 +124,7 @@ function _buildXaiProfile() {
 /**
  * The ChatGPT subscription reached through the Codex backend. It is treated as
  * exactly what the credential unlocks — a Responses endpoint — and never as the
- * whole OpenAI product line: image, video, STT and TTS fall back to the GemiX
+ * whole OpenAI product line: image, video and STT fall back to the GemiX
  * baselines.
  *
  * `supportsMaxOutputTokens` is deliberately absent: this backend answers

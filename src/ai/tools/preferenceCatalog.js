@@ -6,10 +6,8 @@ import {
   activeEffortPolicy,
   defaultSettings,
   VALID_LANGUAGES,
-  VOICES_FEMALE,
-  VOICES_MALE
+  VALID_VOICES
 } from '../../utils/settingsStore.js';
-import { getActiveTtsCapabilities } from '../../media/ttsCapabilities.js';
 import { makeTool } from './schema.js';
 
 function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
@@ -20,16 +18,14 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
   const defaults = defaultSettings(preferenceOptions);
   const { supportedEfforts } = activeEffortPolicy();
-  const tts = getActiveTtsCapabilities();
   const properties = {};
 
-  if (allowVoice && tts.selectableVoices) {
+  if (allowVoice) {
     properties.voice = {
       type: 'string',
-      enum: tts.selectableVoices,
+      enum: VALID_VOICES,
       description: `Voice used for spoken replies (default ${defaults.voice}). `
-        + `Male: ${VOICES_MALE.join(', ')}. Female: ${VOICES_FEMALE.join(', ')}. `
-        + 'Pick the one matching the gender and character the user asks for.'
+        + 'Pick the one matching the gender the user asks for.'
     };
   }
 
@@ -58,7 +54,7 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     replace: { type: 'boolean', description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.' }
   });
 
-  const fieldNames = allowVoice && tts.selectableVoices
+  const fieldNames = allowVoice
     ? 'voice, effort, language and custom memory'
     : 'effort, language and custom memory';
   return makeTool({

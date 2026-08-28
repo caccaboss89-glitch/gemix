@@ -14,7 +14,7 @@ import { checkAndSendMusicWrap  } from './musicWrapMonitor.js';
 import { checkNewRelease  } from './releaseMonitor.js';
 import { modifyTaskFile, readTaskFile  } from '../utils/taskStore.js';
 import { createLogger  } from '../utils/logger.js';
-import { stripVoiceTags, normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { sendWhatsAppDirect  } from '../tools/whatsappSender.js';
 import { clearActivity, listWorkspaceStates, readWorkspaceActivity, withWorkspaceLock } from '../utils/workspaceState.js';
 import workspaceRuntime from '../sandbox/workspaceRuntime.js';
@@ -206,7 +206,7 @@ async function _deliverTask(task, pendingDestinations) {
   }
 
   let messageText = stripOutgoingDeliveryArtifacts(
-    stripVoiceTags((task.content || '').replace(/^\[GemiX\]\s*/i, ''))
+    (task.content || '').replace(/^\[GemiX\]\s*/i, '')
   );
   messageText = normalizeMarkdown(messageText);
   messageText = addScheduledFooter(messageText, task.createdAt || getRomeISO());

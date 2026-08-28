@@ -64,7 +64,6 @@ import {
   FALLBACK_ERROR_PREFIX
 } from './config/systemMessages.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
-import { getActiveTtsCapabilities } from './media/ttsCapabilities.js';
 import { providerFailureReply } from './ai/providers/errorPolicy.js';
 import { notifyAdminDetailed, withAdminNotificationPolicy } from './utils/adminNotifier.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
@@ -168,9 +167,6 @@ async function _handleMessage(ctx) {
     const { isDiscord, allowVoice, userCtx, workspaceId, input } = prepared;
     let { staticInstructions, toolsFp } = prepared;
     const cleanTextResponse = text => cleanAssistantResponse(text);
-    const cleanVoiceFallback = text => cleanAssistantResponse(text, {
-      stripProviderVoiceTags: getActiveTtsCapabilities().supportsVoiceTags
-    });
 
     /** Keep input[0] in sync if the static prefix is rebuilt mid-turn. */
     const syncStaticPrefix = () => {
@@ -304,9 +300,8 @@ async function _handleMessage(ctx) {
       applyParsedTitle(parsed, responseCtx);
       const finalAttachments = resolveFinalAttachments(parsed, workspaceId);
 
-      // Voice reply (WhatsApp dedicated only): speak `response` (with TTS tags)
-      // instead of sending text. Falls back to text on limit/length/TTS failure.
-      let voiceFallback = false;
+      // Voice reply (WhatsApp dedicated only): speak `response` instead of
+      // sending text. Falls back to text on limit/length/TTS failure.
       if (allowVoice && parsed.voice) {
         const voiceReply = await buildVoiceReply({
           rawResponseText: parsed.text,
@@ -318,12 +313,9 @@ async function _handleMessage(ctx) {
         });
         if (voiceReply) return voiceReply;
         log.info('   Voice reply not produced; falling back to text');
-        voiceFallback = true;
       }
 
-      let text = voiceFallback
-        ? cleanVoiceFallback(parsed.text || '')
-        : cleanTextResponse(parsed.text || '');
+      let text = cleanTextResponse(parsed.text || '');
       log.info(`   [${pLabel}] Response generated (${text.length} chars, ${finalAttachments.length} attachment(s))`);
 
       // A Responses endpoint can return status=completed with only a reasoning
@@ -422,7 +414,7 @@ async function _handleMessage(ctx) {
         modelUsed: lastModelUsed
       });
       if (voiceReply) return voiceReply;
-      wrapUpText = cleanVoiceFallback(wrapUpText);
+      wrapUpText = cleanTextResponse(wrapUpText);
     }
     if (wrapUpText.trim() && responseCtx.researchStats) {
       wrapUpText = appendResearchBadge(wrapUpText, responseCtx.researchStats);

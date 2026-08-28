@@ -7,6 +7,8 @@
 import 'dotenv/config';
 
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
+// Comma-separated list, e.g. a pool of interchangeable API keys.
+const toList = (val) => String(val || '').split(',').map(item => item.trim()).filter(Boolean);
 const toIntInRange = (val, min, max, defaultVal) => {
   const n = Number(val);
   return Number.isInteger(n) && n >= min && n <= max ? n : defaultVal;
@@ -136,6 +138,20 @@ export default {
   // resolves to its Cloudflare fallback rather than posting to a guessed URL.
   XAI_STT_PATH: process.env.XAI_STT_PATH || '',
 
+  // Cartesia Sonic: the primary TTS backend on every provider profile. Each
+  // account carries its own monthly free credit allowance, so the pool is a
+  // list and GemiX works through it one key at a time (media/cartesiaKeyRing.js).
+  // With the list empty, TTS is simply the Microsoft Edge fallback, which needs
+  // no credential.
+  CARTESIA_API_KEYS: toList(process.env.CARTESIA_API_KEYS),
+  CARTESIA_BASE_URL: (process.env.CARTESIA_BASE_URL || 'https://api.cartesia.ai').replace(/\/+$/, ''),
+  CARTESIA_MODEL: process.env.CARTESIA_MODEL || 'sonic-3.6',
+  CARTESIA_VERSION: process.env.CARTESIA_VERSION || '2026-08-14',
+
+  // Starting voice for a chat that never set one. Only 'male' and 'female'
+  // exist: both TTS backends map them to their own voices (media/ttsVoices.js).
+  TTS_VOICE: /^female$/i.test(process.env.TTS_VOICE || '') ? 'female' : 'male',
+
   BOT_TOKEN: process.env.BOT_TOKEN,
   GUILD_ID: process.env.GUILD_ID,
   BOT_EMAIL: process.env.BOT_EMAIL,
@@ -156,8 +172,6 @@ export default {
   LEGAL_NAME: process.env.LEGAL_NAME,
 
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),
-  XAI_TTS_ENABLED: toBool(process.env.XAI_TTS_ENABLED, false),
-  XAI_TTS_VOICE: process.env.XAI_TTS_VOICE || 'leo',
   STARTUP_SYSTEM_CLEANUP: toBool(process.env.STARTUP_SYSTEM_CLEANUP, false),
 
   // Weekly media quota reset (Europe/Rome). Used for period keys + prompt/tool wording.

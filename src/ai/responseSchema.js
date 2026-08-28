@@ -15,11 +15,6 @@
 // "" is a valid value and parseStructuredReply reads it as "no rename".
 //
 import constants from '../config/constants.js';
-import { getActiveTtsCapabilities } from '../media/ttsCapabilities.js';
-import {
-  XAI_INLINE_VOICE_TAG_NAMES,
-  XAI_WRAPPING_VOICE_TAG_NAMES
-} from '../media/xaiVoiceTags.js';
 
 const MAX_REPLY_ATTACHMENTS = 10;
 const MAX_CONVERSATION_TITLE_CHARS = 80;
@@ -37,26 +32,11 @@ const VOICE_FLAG_DESC =
   + 'Voice is only for the current chat — you cannot send a voice message to anyone else. '
   + 'Combine freely with attachments: the voice message goes out first, then the files.';
 
-const PLAIN_VOICE_RESPONSE_FIELD_DESC =
+const VOICE_RESPONSE_FIELD_DESC =
   'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY natural spoken words '
   + 'with readable punctuation . , ! ? \' — no emoji, markup, or other symbols. '
   + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. `
   + 'When `voice` is false write plain text.';
-
-const TAGGED_VOICE_RESPONSE_FIELD_DESC =
-  'The reply shown to the user. When `voice` is true this text is spoken by TTS: write ONLY spoken words plus '
-  + 'the voice tags below — no emoji, no symbols (_ " \\ * ~ ` # …); readable punctuation . , ! ? \' only. '
-  + `Keep it under ${constants.MAX_TTS_CHARS} characters; longer voice replies are sent as text instead. ALWAYS weave in voice tags `
-  + 'for a human result, even if your recent text replies had none. When `voice` is '
-  + 'false write plain text and DO NOT use any voice tag. '
-  + `Inline tags: ${XAI_INLINE_VOICE_TAG_NAMES.map(name => `[${name}]`).join(' ')}. `
-  + `Wrapping tags: ${XAI_WRAPPING_VOICE_TAG_NAMES.map(name => `<${name}>`).join(' ')}.`;
-
-function _voiceResponseFieldDesc() {
-  return getActiveTtsCapabilities().supportsVoiceTags
-    ? TAGGED_VOICE_RESPONSE_FIELD_DESC
-    : PLAIN_VOICE_RESPONSE_FIELD_DESC;
-}
 
 function _attachmentsFieldDesc() {
   return 'The ONLY way to send files in this chat. Use null when you are sending nothing. '
@@ -96,7 +76,7 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
 
   properties.response = {
     type: 'string',
-    description: allowVoice ? _voiceResponseFieldDesc() : RESPONSE_FIELD_DESC
+    description: allowVoice ? VOICE_RESPONSE_FIELD_DESC : RESPONSE_FIELD_DESC
   };
   required.push('response');
 

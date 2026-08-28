@@ -7,11 +7,6 @@ import {
 } from '../src/ai/providers/providerProfile.js';
 import constants from '../src/config/constants.js';
 import envConfig from '../src/config/env.js';
-import { XAI_VOICES } from '../src/media/ttsCapabilities.js';
-import {
-  XAI_INLINE_VOICE_TAG_NAMES,
-  XAI_WRAPPING_VOICE_TAG_NAMES
-} from '../src/media/xaiVoiceTags.js';
 
 const FIXTURE_MEMBERS = [{
   name: 'Fixture Member',
@@ -19,17 +14,8 @@ const FIXTURE_MEMBERS = [{
   email: 'fixture@example.invalid'
 }];
 
-function regexAlternation(values) {
-  return values.map(value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-}
-
-const XAI_ONLY_PROMPT_MATERIAL = new RegExp(
-  'render_inline_citation|Grok\\/SuperGrok|\\bxAI\\b|\\bx_search\\b|X posts|xai-tts'
-    + `|\\b(?:${regexAlternation(XAI_VOICES)})\\b`
-    + `|\\[(?:${regexAlternation(XAI_INLINE_VOICE_TAG_NAMES)})\\]`
-    + `|<\\/?(?:${regexAlternation(XAI_WRAPPING_VOICE_TAG_NAMES)})>`,
-  'i'
-);
+const XAI_ONLY_PROMPT_MATERIAL =
+  /render_inline_citation|Grok\/SuperGrok|\bxAI\b|\bx_search\b|X posts/i;
 
 function promptFor(isAdmin) {
   return buildStaticInstructions({
@@ -96,22 +82,16 @@ test('generic and xAI provider guidance replace one another without legacy leaks
 });
 
 test('personal WhatsApp runtime never exposes spoken-reply defaults', () => {
-  const savedTts = envConfig.XAI_TTS_ENABLED;
-  envConfig.XAI_TTS_ENABLED = true;
-  try {
-    const runtime = underProvider('xai', () => buildDynamicRuntimeContext({
-      platform: constants.PLATFORM_WA_PERSONAL,
-      isGroup: false,
-      chatId: 'personal-fixture@c.us',
-      userName: 'Fixture Member',
-      userIdentity: { isActiveMember: true, isAdmin: false },
-      userWorkspace: null
-    }));
-    assert.match(runtime, /<CurrentSettings scope="chat">/);
-    assert.doesNotMatch(runtime, /Voice:|voice:true|voice replies|spoken replies/i);
-  } finally {
-    envConfig.XAI_TTS_ENABLED = savedTts;
-  }
+  const runtime = underProvider('xai', () => buildDynamicRuntimeContext({
+    platform: constants.PLATFORM_WA_PERSONAL,
+    isGroup: false,
+    chatId: 'personal-fixture@c.us',
+    userName: 'Fixture Member',
+    userIdentity: { isActiveMember: true, isAdmin: false },
+    userWorkspace: null
+  }));
+  assert.match(runtime, /<CurrentSettings scope="chat">/);
+  assert.doesNotMatch(runtime, /Voice:|voice:true|voice replies|spoken replies/i);
 });
 
 test('workspace runtime distinguishes an empty snapshot from unknown and failed snapshots', () => {

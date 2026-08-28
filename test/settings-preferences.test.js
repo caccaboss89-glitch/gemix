@@ -108,62 +108,58 @@ test('reapplying effective preferences is an idempotent verified no-op', async (
   });
 });
 
-test('generic TTS hides and rejects the dormant xAI voice preference', async () => {
-  await withProvider('chatgpt', async () => {
-    const tools = getToolsForUser({
-      isActiveMember: true,
-      isAdmin: false,
-      platform: constants.PLATFORM_WA_DEDICATED,
-      isGroup: false
-    });
-    const properties = tools.find(t => t.function?.name === 'manage_preferences')
-      .function.parameters.properties;
-    assert.equal('voice' in properties, false);
-    const result = await managePreferences({ voice: 'sirius' }, `unused_voice_${process.pid}`);
-    assert.equal(result.success, false);
-    assert.match(result.error, /does not support selecting a voice/);
-  });
-});
-
-test('text-only chats hide voice preferences and use text-only default memory', async () => {
-  const savedTts = envConfig.XAI_TTS_ENABLED;
-  envConfig.XAI_TTS_ENABLED = true;
-  try {
-    await withProvider('xai', async () => {
-      const personalTools = getToolsForUser({
-        isActiveMember: true,
-        isAdmin: false,
-        platform: constants.PLATFORM_WA_PERSONAL,
-        isGroup: false
-      });
-      const dedicatedTools = getToolsForUser({
+test('the voice preference is the same two genders on every provider', async () => {
+  for (const provider of ['chatgpt', 'xai']) {
+    await withProvider(provider, async () => {
+      const tools = getToolsForUser({
         isActiveMember: true,
         isAdmin: false,
         platform: constants.PLATFORM_WA_DEDICATED,
         isGroup: false
       });
-      const personalProperties = personalTools.find(t => t.function?.name === 'manage_preferences')
+      const properties = tools.find(t => t.function?.name === 'manage_preferences')
         .function.parameters.properties;
-      const dedicatedProperties = dedicatedTools.find(t => t.function?.name === 'manage_preferences')
-        .function.parameters.properties;
-
-      assert.equal('voice' in personalProperties, false);
-      assert.equal('voice' in dedicatedProperties, true);
-      const textDefaults = defaultSettings({ allowVoice: false });
-      assert.doesNotMatch(textDefaults.memory, /voice:true|voice replies|spoken replies/i);
-      assert.equal('voice' in settingsForModel(textDefaults, { allowVoice: false }), false);
-
-      const rejected = await managePreferences(
-        { voice: 'sirius' },
-        `unused_personal_voice_${process.pid}`,
-        { allowVoice: false }
-      );
-      assert.equal(rejected.success, false);
-      assert.match(rejected.error, /does not support selecting a voice/);
+      assert.deepEqual(properties.voice.enum, ['male', 'female']);
+      const result = await managePreferences({ voice: 'sirius' }, `unused_voice_${process.pid}`);
+      assert.equal(result.success, false);
+      assert.match(result.error, /Invalid voice/);
     });
-  } finally {
-    envConfig.XAI_TTS_ENABLED = savedTts;
   }
+});
+
+test('text-only chats hide voice preferences and use text-only default memory', async () => {
+  await withProvider('xai', async () => {
+    const personalTools = getToolsForUser({
+      isActiveMember: true,
+      isAdmin: false,
+      platform: constants.PLATFORM_WA_PERSONAL,
+      isGroup: false
+    });
+    const dedicatedTools = getToolsForUser({
+      isActiveMember: true,
+      isAdmin: false,
+      platform: constants.PLATFORM_WA_DEDICATED,
+      isGroup: false
+    });
+    const personalProperties = personalTools.find(t => t.function?.name === 'manage_preferences')
+      .function.parameters.properties;
+    const dedicatedProperties = dedicatedTools.find(t => t.function?.name === 'manage_preferences')
+      .function.parameters.properties;
+
+    assert.equal('voice' in personalProperties, false);
+    assert.equal('voice' in dedicatedProperties, true);
+    const textDefaults = defaultSettings({ allowVoice: false });
+    assert.doesNotMatch(textDefaults.memory, /voice:true|voice replies|spoken replies/i);
+    assert.equal('voice' in settingsForModel(textDefaults, { allowVoice: false }), false);
+
+    const rejected = await managePreferences(
+      { voice: 'female' },
+      `unused_personal_voice_${process.pid}`,
+      { allowVoice: false }
+    );
+    assert.equal(rejected.success, false);
+    assert.match(rejected.error, /cannot send spoken replies/);
+  });
 });
 
 test('every supported effort persists, while a provider-only value degrades without being erased', async (t) => {

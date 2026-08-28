@@ -15,13 +15,6 @@ import {
   PROMPT_VARIANT,
   resolveProviderProfile
 } from '../../src/ai/providers/providerProfile.js';
-import envConfig from '../../src/config/env.js';
-import { FEATURE, backendFor } from '../../src/features/featureBindings.js';
-import { getActiveTtsCapabilities, XAI_VOICES } from '../../src/media/ttsCapabilities.js';
-import {
-  XAI_INLINE_VOICE_TAG_NAMES,
-  XAI_WRAPPING_VOICE_TAG_NAMES
-} from '../../src/media/xaiVoiceTags.js';
 import {
   customizedFields,
   defaultSettings
@@ -32,21 +25,10 @@ const { PLATFORM_DISCORD } = constants;
 
 const ISSUES = [];
 
-function _escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-const XAI_VOICE_OR_TAG_RE = new RegExp(
-  `(?:\\b(?:${XAI_VOICES.map(_escapeRegex).join('|')})\\b`
-    + `|\\[(?:${XAI_INLINE_VOICE_TAG_NAMES.map(_escapeRegex).join('|')})\\]`
-    + `|<\\/?(?:${XAI_WRAPPING_VOICE_TAG_NAMES.map(_escapeRegex).join('|')})>)`,
-  'i'
-);
-
-const XAI_GUIDANCE_RE = /\bxAI\b|\bGrok\b|\bx_search\b|X posts|X\/Twitter|CDN URL|SuperGrok|xai-tts/i;
+const XAI_GUIDANCE_RE = /\bxAI\b|\bGrok\b|\bx_search\b|X posts|X\/Twitter|CDN URL|SuperGrok/i;
 
 function _containsXaiOnlyMaterial(text) {
-  return XAI_GUIDANCE_RE.test(text) || XAI_VOICE_OR_TAG_RE.test(text);
+  return XAI_GUIDANCE_RE.test(text);
 }
 
 /** Remove program data whose literal contents are not model instructions. */
@@ -144,27 +126,16 @@ function validateResponseFormat(dump, caseId) {
   const fmtEnd = dump.indexOf('\n--- AUDIT APPENDIX', fmtStart);
   const fmt = fmtEnd >= 0 ? dump.slice(fmtStart, fmtEnd) : dump.slice(fmtStart);
   const hasVoice = /voice \(boolean, required\)/.test(fmt);
-  const hasVoiceTagDesc = /voice tags below|\[pause\]/.test(fmt);
-  const hasPlainVoiceDesc = /natural spoken words/.test(fmt);
+  const hasSpokenDesc = /natural spoken words/.test(fmt);
   const hasTitle = /conversation_title \(string, required\)/.test(fmt);
   const id = Number(caseId);
-  const expectsVoiceTags = backendFor(resolveProviderProfile(), FEATURE.TTS) === 'xai-tts'
-    && envConfig.XAI_TTS_ENABLED;
 
   if (VOICE_CASES.includes(id)) {
     if (!hasVoice) ISSUES.push({ caseId, msg: 'WA dedicated case missing voice schema field' });
-    if (expectsVoiceTags && !hasVoiceTagDesc) {
-      ISSUES.push({ caseId, msg: 'xAI TTS case missing voice tag instructions in response schema' });
-    }
-    if (!expectsVoiceTags && hasVoiceTagDesc) {
-      ISSUES.push({ caseId, msg: 'non-xAI TTS case must not expose xAI voice tags' });
-    }
-    if (!expectsVoiceTags && !hasPlainVoiceDesc) {
-      ISSUES.push({ caseId, msg: 'plain TTS case missing natural spoken-word instructions' });
-    }
+    if (!hasSpokenDesc) ISSUES.push({ caseId, msg: 'voice case missing natural spoken-word instructions' });
   } else {
     if (hasVoice) ISSUES.push({ caseId, msg: 'non-voice case must not expose voice schema field' });
-    if (hasVoiceTagDesc) ISSUES.push({ caseId, msg: 'non-voice case must not expose voice tag instructions in response schema' });
+    if (hasSpokenDesc) ISSUES.push({ caseId, msg: 'non-voice case must not expose spoken-word instructions in response schema' });
   }
   // conversation_title is required in text.format on every Discord turn.
   if (DISCORD_CASES.includes(id)) {
@@ -602,14 +573,14 @@ function _validateSettingsBlocks(dynamicPart, prompt, id, caseId) {
   } else {
     const allowVoice = VOICE_CASES.includes(id);
     const fields = ['Effort:', 'Language:', 'Memory:', 'Last update:'];
-    if (allowVoice && getActiveTtsCapabilities().selectableVoices) fields.unshift('Voice:');
+    if (allowVoice) fields.unshift('Voice:');
     for (const field of fields) {
       if (!settingsBlock[0].includes(field)) {
         ISSUES.push({ caseId, msg: `CurrentSettings missing "${field}" line` });
       }
     }
-    if ((!allowVoice || !getActiveTtsCapabilities().selectableVoices) && settingsBlock[0].includes('Voice:')) {
-      ISSUES.push({ caseId, msg: 'CurrentSettings exposes an inactive TTS voice selector' });
+    if (!allowVoice && settingsBlock[0].includes('Voice:')) {
+      ISSUES.push({ caseId, msg: 'CurrentSettings exposes a voice selector on a text-only platform' });
     }
     if (!allowVoice && /voice:true|spoken replies|voice replies/i.test(settingsBlock[0])) {
       ISSUES.push({ caseId, msg: 'text-only platform exposes voice-reply guidance in CurrentSettings' });

@@ -2,7 +2,6 @@
 //
 // Collection of text utilities used throughout GemiX:
 // - Filename sanitization for safe storage
-// - Stripping TTS voice effect tags ([pause], <soft>, etc.)
 // - Normalizing Markdown for WhatsApp compatibility
 // - Cleaning history prefixes, system messages, research badges, footers, etc.
 // - High-level clean functions for incoming and outgoing messages
@@ -11,10 +10,6 @@ import { stripPhoneMentionTags } from './waMentions.js';
 import { isSystemMessage } from '../config/systemMessages.js';
 import { removeFooter, removeScheduledFooter } from './footer.js';
 import { formatTimestamp } from './time.js';
-import {
-  XAI_INLINE_VOICE_TAG_NAMES,
-  XAI_WRAPPING_VOICE_TAG_NAMES
-} from '../media/xaiVoiceTags.js';
 
 /**
  * Sanitize a string for use as a filename.
@@ -32,48 +27,18 @@ function sanitizeFilename(text, maxLen = 80) {
     .slice(0, maxLen) || 'file';
 }
 
-// Kept as plain names in the shared xAI catalog so stripping tolerates a model
-// writing a wrapping-only tag with inline brackets or vice versa.
-const VOICE_TAG_NAMES = [
-  ...XAI_INLINE_VOICE_TAG_NAMES,
-  ...XAI_WRAPPING_VOICE_TAG_NAMES
-];
-const VOICE_TAG_NAMES_ALT = VOICE_TAG_NAMES.join('|');
-
-// Every declared tag name, matched in EITHER syntax: inline [name] or
-// wrapping <name>/</name>. Voice replies only ever use `response` text (never
-// rendered as real HTML/brackets), so this is unambiguous and covers a model
-// mixing up which tags are "inline" vs "wrapping".
-const VOICE_TAGS_INLINE_RE = new RegExp(`\\[(?:${VOICE_TAG_NAMES_ALT})\\]`, 'gi');
-const VOICE_TAGS_WRAP_RE = new RegExp(`<\\/?(?:${VOICE_TAG_NAMES_ALT})>`, 'gi');
-
-/**
- * Strip voice effect tags from a string.
- * Removes inline tags like [pause] and wrapping tags like <soft>...</soft>
- * that are only valid in a voice reply (response with `voice:true`). Tolerates
- * either bracket syntax for any declared tag name (e.g. a stray [laugh-speak]
- * written with inline brackets), so no tag can leak into the visible text.
- * @param {string} text
- * @returns {string}
- */
-function stripVoiceTags(text) {
-  if (!text) return text;
-  return text.replace(VOICE_TAGS_INLINE_RE, '').replace(VOICE_TAGS_WRAP_RE, '');
-}
-
 // Characters that are not read aloud cleanly by TTS and must be removed from
 // voice text (emoji, underscores, straight quotes, backslashes, markdown symbols, …).
 // Allowed: letters (incl. accented), digits, whitespace, the readable
 // punctuation . , ! ? ' (straight) and ’ (typographic apostrophe), and a
-// hyphen — everything else is dropped. Voice effect tags ([pause], <soft>, …)
-// are protected and restored around the cleanup.
+// hyphen — everything else is dropped.
 const VOICE_ALLOWED_RE = /[^\p{L}\p{N}\s.,!?'’-]/gu;
 
 /**
  * Sanitize the text of a voice message before TTS (and before it is stored in
- * history_meta for <PastVoiceReply>, so both stay in sync). Keeps spoken words, the
- * supported voice effect tags, and basic readable punctuation; strips emoji,
- * @phone mention tags, markdown links, and non-readable symbols (_, ", \, *, ~, `, #, …).
+ * history_meta for <PastVoiceReply>, so both stay in sync). Keeps spoken words
+ * and basic readable punctuation; strips emoji, @phone mention tags, markdown
+ * links, and non-readable symbols (_, ", \, *, ~, `, #, …).
  * @param {string} text
  * @returns {string}
  */
@@ -83,20 +48,8 @@ function sanitizeVoiceMessageText(text) {
   // Markdown links would otherwise survive the symbol cleanup as their bare
   // words and get read aloud.
   text = stripMarkdownLinks(text);
-  // Protect voice tags so their brackets/dashes survive the symbol cleanup.
-  // The placeholder uses only letters/digits (kept by VOICE_ALLOWED_RE).
-  const tags = [];
-  const mark = (i) => `zZvoicetagZz${i}zZ`;
-  const protectedText = text
-    .replace(VOICE_TAGS_INLINE_RE, (m) => { tags.push(m); return mark(tags.length - 1); })
-    .replace(VOICE_TAGS_WRAP_RE, (m) => { tags.push(m); return mark(tags.length - 1); });
 
-  let cleaned = protectedText.replace(VOICE_ALLOWED_RE, ' ');
-
-  // Restore the protected tags.
-  cleaned = cleaned.replace(/zZvoicetagZz(\d+)zZ/g, (_, i) => tags[Number(i)] || '');
-
-  return cleaned
+  return text.replace(VOICE_ALLOWED_RE, ' ')
     .replace(/[^\S\r\n]{2,}/g, ' ')
     .replace(/[^\S\r\n]+([.,!?])/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
@@ -250,21 +203,18 @@ function stripHistoryPrefixes(text) {
  * Clean up the final assistant response text before any platform processing.
  * Applies outgoing filters, in this order:
  * 1. Strips [Attachment: ...], <PastVoiceReply> and <system-notification>/<system-reminder> echoes
- * 2. Optionally strips provider-specific voice tags from a text fallback
- * 3. Strips any duplicated history conversation prefixes (e.g. "[timestamp] GemiX:")
- * 4. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
- * 5. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N searches.")
- * 6. Strips any GemiX system-message lines accidentally echoed by the AI
+ * 2. Strips any duplicated history conversation prefixes (e.g. "[timestamp] GemiX:")
+ * 3. Strips any accidental echoed reply headers (e.g. "[In reply to: ...]")
+ * 4. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N searches.")
+ * 5. Strips any GemiX system-message lines accidentally echoed by the AI
  *    (release banners, maintenance, temp-attachment notice, fallback error...)
- * 7. Strips any accidental footers (e.g. "--GemiX • ...")
+ * 6. Strips any accidental footers (e.g. "--GemiX • ...")
  * @param {string} text
- * @param {{ stripProviderVoiceTags?: boolean }} [opts]
  * @returns {string} Cleaned response text
  */
-function cleanAssistantResponse(text, opts = {}) {
+function cleanAssistantResponse(text) {
   if (!text || typeof text !== 'string') return '';
   let cleaned = stripOutgoingDeliveryArtifacts(text);
-  if (opts.stripProviderVoiceTags) cleaned = stripVoiceTags(cleaned);
   cleaned = stripHistoryPrefixes(cleaned);
   cleaned = cleaned.replace(IN_REPLY_TO_PREFIX_RE, '');
   cleaned = cleaned.replace(RESEARCH_BADGE_RE, '');
@@ -293,8 +243,7 @@ function formatLabeledUserContent(timestampMs, senderName, textBody) {
 /**
  * Clean up any incoming message text from chat history/replies before feeding it
  * to the LLM context. Strips GemiX and scheduled-message footers, past-voice
- * transcript blocks, research badges and reply headers. Literal text resembling
- * a provider's TTS markup is user content here and must remain untouched.
+ * transcript blocks, research badges and reply headers.
  * @param {string} text
  * @returns {string} Cleaned text
  */
@@ -319,7 +268,6 @@ const REPLY_CHAIN_TRUNCATED_PREFIX = '[In reply to: (reply chain truncated)]\n';
 
 export {
   sanitizeFilename,
-  stripVoiceTags,
   sanitizeVoiceMessageText,
   normalizeMarkdown,
   stripOutgoingDeliveryArtifacts,

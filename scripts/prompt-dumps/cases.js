@@ -172,7 +172,7 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        voice: 'carina',
+        voice: 'female',
         effort: 'low',
         memory: 'Preferisci risposte brevi.',
         updatedAt: '2026-07-24T18:30:00+02:00'
@@ -300,7 +300,7 @@ const CASES = {
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
-        voice: 'luna',
+        voice: 'female',
         memory: 'Sto pianificando il piano di allenamento del mese.',
         updatedAt: '2026-06-01T09:00:00+02:00',
         reviewedAt: '2026-06-01T09:00:00+02:00'

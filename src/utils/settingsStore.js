@@ -13,12 +13,7 @@ import path from 'path';
 import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { resolveProviderProfile } from '../ai/providers/providerProfile.js';
-import {
-  XAI_VOICES as VALID_VOICES,
-  XAI_VOICES_FEMALE as VOICES_FEMALE,
-  XAI_VOICES_MALE as VOICES_MALE,
-  getActiveTtsCapabilities
-} from '../media/ttsCapabilities.js';
+import { TTS_VOICES as VALID_VOICES } from '../media/ttsVoices.js';
 import { getRomeISO  } from './time.js';
 import { withKeyedLock  } from './keyedLock.js';
 
@@ -68,7 +63,7 @@ function activeEffortPolicy() {
 }
 
 /**
- * Program defaults. The voice comes from .env (envConfig.XAI_TTS_VOICE) so the
+ * Program defaults. The voice comes from .env (envConfig.TTS_VOICE) so the
  * deployment decides the starting voice; reasoning starts at the highest
  * effort the active provider supports.
  * @returns {{ voice: string, effort: string, language: string, memory: string }}
@@ -77,7 +72,7 @@ function defaultSettings(options = {}) {
   const { allowVoice } = _preferenceOptions(options);
   const { chatDefaultEffort } = activeEffortPolicy();
   return {
-    voice: envConfig.XAI_TTS_VOICE,
+    voice: envConfig.TTS_VOICE,
     effort: chatDefaultEffort,
     language: 'it',
     memory: allowVoice ? DEFAULT_MEMORY : DEFAULT_TEXT_MEMORY
@@ -88,7 +83,7 @@ function defaultSettings(options = {}) {
 function activePreferenceFields(options = {}) {
   const { allowVoice } = _preferenceOptions(options);
   const fields = ['effort', 'language', 'memory'];
-  if (allowVoice && getActiveTtsCapabilities().selectableVoices) fields.unshift('voice');
+  if (allowVoice) fields.unshift('voice');
   return fields;
 }
 
@@ -274,8 +269,6 @@ export {
   MAX_MEMORY_CHARS,
   DEFAULT_MEMORY,
   DEFAULT_TEXT_MEMORY,
-  VOICES_MALE,
-  VOICES_FEMALE,
   VALID_VOICES,
   VALID_LANGUAGES,
   activePreferenceFields,

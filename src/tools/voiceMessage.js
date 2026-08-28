@@ -6,45 +6,42 @@
 // (This file returns binary audio Buffers, so it produces no tool-facing text.)
 //
 // Voice generation pipeline. Produces OGG/Opus audio buffers for WhatsApp
-// voice messages. Always applies MP3-to-Opus transcode, and strips any vocal
-// tags defensively before Google TTS because that backend does not support them.
+// voice messages, always through an MP3-to-Opus transcode.
 //
-// TTS is a delivery backend, not a model tool: the chain comes
-// from the profile's TTS feature binding, so a provider with a deliberately
-// integrated service is primary and Google Translate is behind it. On a profile
-// with no such service, Google Translate is simply the primary — the xAI
-// endpoint is not called with a credential that does not belong to it.
+// TTS is a GemiX-owned feature and identical on every provider profile:
+// Cartesia Sonic is the primary backend and Microsoft Edge Neural the fallback
+// behind it. Both speak the same two voices (male / female), so rotating a
+// spent Cartesia key or dropping to the fallback never changes the voice the
+// chat asked for.
 
-import googleTTS from 'google-tts-api';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import pkg from 'node-edge-tts';
 import { spawn  } from 'child_process';
 import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
-import { fetchXaiWithOAuthRetry  } from '../ai/apiClient.js';
 import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
 import { createLogger  } from '../utils/logger.js';
 import { defaultSettings  } from '../utils/settingsStore.js';
-import { stripVoiceTags } from '../utils/text.js';
 import envConfig from '../config/env.js';
-import { getXaiServiceAuth  } from '../ai/credentials/xaiServiceCredentials.js';
-import { TTS_BACKEND, getActiveTtsCapabilities } from '../media/ttsCapabilities.js';
+import { cartesiaLanguage, cartesiaVoiceId, edgeVoice } from '../media/ttsVoices.js';
+import { markExhausted, markWorking, nextUsableKey } from '../media/cartesiaKeyRing.js';
 import { signalWithTimeout } from '../utils/turnBudget.js';
+
+const { EdgeTTS } = pkg;
 
 const log = createLogger('TTS');
 
-// xAI TTS request timeout (usually completes in a few seconds).
+// Single TTS request timeout (both backends usually answer in a few seconds).
 const TTS_REQUEST_TIMEOUT_MS = 90 * 1000;
 
 // Overall voice generation timeout covering TTS and transcode. On expiry, the call fails rather than hanging.
 const VOICE_GENERATION_TIMEOUT_MS = 120 * 1000;
 
-// Fixed xAI TTS output format (transcoded to OGG/Opus for WhatsApp below).
-// Voice id and language come from the per-chat settings, falling back to the
-// deployment defaults (envConfig.XAI_TTS_VOICE in .env, Italian).
-const TTS_OUTPUT_FORMAT = { codec: 'mp3', sample_rate: 24000, bit_rate: 128000 };
-
-/** Language passed to the Google Translate fallback (which takes a bare code). */
-function _baseLanguage(language) {
-  return String(language || 'it').split('-')[0].toLowerCase();
-}
+// Fixed MP3 output both backends produce (transcoded to OGG/Opus for WhatsApp below).
+const CARTESIA_SAMPLE_RATE = 44100;
+const CARTESIA_BIT_RATE = 128000;
+const EDGE_OUTPUT_FORMAT = 'audio-24khz-96kbitrate-mono-mp3';
 
 /**
  * Convert MP3 buffer to WhatsApp-compatible OGG/Opus format.
@@ -126,12 +123,10 @@ function convertMp3ToWhatsAppOpus(mp3Buffer, opts = {}) {
 }
 
 /**
- * Generate voice audio using the direct xAI TTS endpoint (primary) with
- * Google Translate TTS fallback.
- * Enforces a global timeout and the caller's absolute turn deadline.
- * @param {string} text - Text to convert to speech (max 1000 characters).
- *   May contain xAI speech tags ([pause], <soft>...</soft>, ...) - GemiX
- *   writes them directly; they are stripped for the Google fallback.
+ * Generate voice audio through Cartesia (primary) with the Microsoft Edge
+ * fallback behind it. Enforces a global timeout and the caller's absolute turn
+ * deadline.
+ * @param {string} text - Text to convert to speech (max constants.MAX_TTS_CHARS characters).
  * @param {object} [settings] - Per-chat settings { voice, language }; defaults when omitted.
  * @param {object} [opts]
  * @param {AbortSignal} [opts.signal] - caller cancellation / absolute turn deadline
@@ -149,101 +144,135 @@ async function generateVoice(text, settings = {}, opts = {}) {
   }
 }
 
+/** Guard every stage against the caller's absolute turn deadline. */
+function _assertDeadline(signal) {
+  if (signal?.aborted) throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
+}
+
 async function _generateVoice(text, settings, signal) {
   const defaults = defaultSettings();
-  const voiceId = settings?.voice || defaults.voice || envConfig.XAI_TTS_VOICE;
+  const voice = settings?.voice || defaults.voice;
   const language = settings?.language || defaults.language;
-  const xaiPrimary = getActiveTtsCapabilities().backend === TTS_BACKEND.XAI;
-
-  if (xaiPrimary) {
-    try {
-      if (signal?.aborted) throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
-      const mp3Buffer = await xaiTTS(text, voiceId, language, signal);
-      return await convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
-    } catch (err) {
-      if (signal?.aborted) throw err;
-      log.warn('xAI TTS failed, falling back to Google Translate:', err.message);
-      await notifyAdminDetailed('xAI TTS (Fallback)', err.message);
-    }
-  }
-
-  if (signal?.aborted) throw new Error(`Voice generation timeout (${VOICE_GENERATION_TIMEOUT_MS / 1000}s)`);
-
-  // Google Translate TTS fallback. Strip vocal tags defensively before use,
-  // as the text may contain vocal tags. It has no voice selection: only the
-  // language is honoured here, so the chosen voice id does not apply.
-  const cleanText = stripVoiceTags(text).replace(/\s{2,}/g, ' ').trim();
 
   try {
-    return await googleTranslateTTS(cleanText, language, signal);
+    const mp3Buffer = await cartesiaTTS(text, voice, language, signal);
+    // A null buffer means the ring has nothing left to try: expected once a
+    // month, and not something to alert the administrator about.
+    if (mp3Buffer) return await convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
+    log.info(envConfig.CARTESIA_API_KEYS.length === 0
+      ? 'No Cartesia key is configured; using Microsoft Edge.'
+      : 'Every Cartesia key is out of monthly credits; using Microsoft Edge.');
   } catch (err) {
     if (signal?.aborted) throw err;
-    if (!xaiPrimary) {
-      // Google Translate was the primary here, so its failure is the failure.
-      const notification = await notifyAdminDetailed('Google TTS (Primary)', err.message);
-      throw new Error(
-        'TTS failed: Google Translate service error and no provider TTS is available.'
-        + buildAdminNotificationNote(notification)
-      );
+    log.warn('Cartesia TTS failed, falling back to Microsoft Edge:', err.message);
+    await notifyAdminDetailed('Cartesia TTS (Fallback)', err.message);
+  }
+
+  _assertDeadline(signal);
+
+  try {
+    const mp3Buffer = await edgeTTS(text, voice, language, signal);
+    return await convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    const notification = await notifyAdminDetailed('Microsoft Edge TTS (Fallback)', err.message);
+    throw new Error(
+      `TTS failed: Cartesia is unusable and Microsoft Edge errored (${err.message}).`
+      + buildAdminNotificationNote(notification)
+    );
+  }
+}
+
+// -- Cartesia Sonic (primary) ------------------------------------------------
+
+/**
+ * Whether a rejected request means this key has spent its monthly free credits,
+ * as opposed to a transient failure that says nothing about the allowance.
+ * `quota_exceeded` is Cartesia's own code for a spent allowance; 401/402/403
+ * mean the key itself is no longer usable, which the ring treats the same way
+ * because retrying it before the next reset can only fail again.
+ */
+function _keyIsSpent(status, errorCode) {
+  return errorCode === 'quota_exceeded' || status === 401 || status === 402 || status === 403;
+}
+
+/**
+ * Call `POST /tts/bytes` with each usable key in turn and return the MP3
+ * buffer, or null when every key has spent its monthly credits.
+ * A spent key is written down before the next one is tried; any other failure
+ * ends the rotation, because a transient error is no reason to burn the ring.
+ */
+async function cartesiaTTS(text, voice, language, signal) {
+  const body = JSON.stringify({
+    model_id: envConfig.CARTESIA_MODEL,
+    transcript: text,
+    voice: cartesiaVoiceId(voice),
+    language: cartesiaLanguage(language),
+    output_format: { container: 'mp3', sample_rate: CARTESIA_SAMPLE_RATE, bit_rate: CARTESIA_BIT_RATE }
+  });
+
+  let entry = nextUsableKey();
+  while (entry) {
+    _assertDeadline(signal);
+    const res = await fetchWithTimeout(`${envConfig.CARTESIA_BASE_URL}/tts/bytes`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${entry.key}`,
+        'Cartesia-Version': envConfig.CARTESIA_VERSION,
+        'Content-Type': 'application/json'
+      },
+      body,
+      signal
+    }, TTS_REQUEST_TIMEOUT_MS);
+
+    if (res.ok) {
+      const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), TTS_REQUEST_TIMEOUT_MS));
+      if (buffer.length === 0) throw new Error('Cartesia returned an empty audio body.');
+      await markWorking(entry.fingerprint);
+      return buffer;
     }
-    throw err;
+
+    const detail = await res.text().catch(() => '');
+    let errorCode = null;
+    try { errorCode = JSON.parse(detail)?.error_code || null; } catch { /* not the documented JSON error shape */ }
+    if (!_keyIsSpent(res.status, errorCode)) {
+      throw new Error(`Cartesia TTS failed (HTTP ${res.status}): ${detail || 'no error body'}`);
+    }
+    entry = await markExhausted(entry.fingerprint);
   }
+
+  return null;
 }
 
-// -- xAI TTS (direct endpoint) ----------------------------------------------
+// -- Microsoft Edge Neural (fallback) ----------------------------------------
 
 /**
- * Call `POST /v1/tts` and return the MP3 buffer. Authenticates through the
- * shared xAI CredentialProvider, same as every other xAI endpoint.
+ * Synthesize through Microsoft Edge's read-aloud service, which needs no
+ * credential. The library only writes to a file, so the audio is staged in a
+ * private temp directory and read back from there.
  */
-async function xaiTTS(text, voiceId, language, signal) {
-  const { baseUrl } = await getXaiServiceAuth();
-  const res = await fetchXaiWithOAuthRetry(`${baseUrl}/tts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text,
-      voice_id: voiceId,
-      language,
-      output_format: TTS_OUTPUT_FORMAT
-    })
-  }, {
-    timeoutMs: TTS_REQUEST_TIMEOUT_MS,
-    maxAttempts: 2,
-    signal,
-    logLabel: 'xAI-TTS'
-  });
-
-  const buffer = Buffer.from(await readResponseBodyWithTimeout(res.arrayBuffer(), TTS_REQUEST_TIMEOUT_MS));
-  if (buffer.length === 0) {
-    throw new Error('xAI TTS returned an empty audio body.');
+async function edgeTTS(text, voice, language, signal) {
+  const selected = edgeVoice(voice, language);
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gemix-tts-'));
+  const file = path.join(dir, 'voice.mp3');
+  try {
+    const tts = new EdgeTTS({
+      voice: selected.voice,
+      lang: selected.lang,
+      outputFormat: EDGE_OUTPUT_FORMAT,
+      pitch: 'default',
+      rate: 'default',
+      volume: 'default',
+      timeout: TTS_REQUEST_TIMEOUT_MS
+    });
+    await tts.ttsPromise(text, file);
+    _assertDeadline(signal);
+    const buffer = await fs.promises.readFile(file);
+    if (buffer.length === 0) throw new Error('Microsoft Edge TTS returned an empty audio file.');
+    return buffer;
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => { /* best effort */ });
   }
-  return buffer;
-}
-
-// -- Google Translate TTS (fallback) --------------------------------------
-
-/**
- * Google Translate TTS fallback (no voice selection, fixed speed: normal).
- */
-async function googleTranslateTTS(text, language, signal) {
-  const urls = googleTTS.getAllAudioUrls(text, {
-    lang: _baseLanguage(language),
-    slow: false,
-    host: 'https://translate.google.com'
-  });
-
-  const buffers = await Promise.all(
-    urls.map(async ({ url }) => {
-      if (signal?.aborted) throw new Error('TTS aborted');
-      const res = await fetchWithTimeout(url, { signal });
-      if (!res.ok) throw new Error(`TTS download failed: ${res.status}`);
-      return Buffer.from(await res.arrayBuffer());
-    })
-  );
-
-  const mp3Buffer = Buffer.concat(buffers);
-  return convertMp3ToWhatsAppOpus(mp3Buffer, { signal });
 }
 
 export { generateVoice, convertMp3ToWhatsAppOpus
