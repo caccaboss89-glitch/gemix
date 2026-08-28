@@ -98,7 +98,7 @@ function toolsFingerprint(tools) {
 
 function _callerLineInner(ctx, promptOpts) {
   const status = promptOpts.isAdmin
-    ? 'administrator, active member'
+    ? 'Discord server administrator, active member'
     : (promptOpts.isActiveMember !== false ? 'active member' : 'non-active');
   return `${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.`;
 }
