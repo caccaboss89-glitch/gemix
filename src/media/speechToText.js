@@ -29,7 +29,6 @@ import { fetchXaiWithOAuthRetry } from '../ai/apiClient.js';
 import { getXaiServiceAuth } from '../ai/credentials/xaiServiceCredentials.js';
 import { tempDirForOwner } from '../utils/tempFileServer.js';
 import { CF_ERROR, callWorkersAi, isCloudflareConfigured } from './cloudflareClient.js';
-import { estimateSttNeurons } from './neuronLedger.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('STT');
@@ -225,7 +224,6 @@ async function _cloudflarePost(buffer, opts) {
       beam_size: 5,
       condition_on_previous_text: false
     },
-    estimatedNeurons: estimateSttNeurons(opts.durationSec),
     signal: opts.signal,
     timeoutMs: REQUEST_TIMEOUT_MS
   });

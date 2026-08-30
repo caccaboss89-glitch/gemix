@@ -20,7 +20,6 @@
 // around a provider's safety decision is not a fallback.
 
 import { CF_ERROR, callWorkersAi, isCloudflareConfigured } from './cloudflareClient.js';
-import { estimateImageNeurons } from './neuronLedger.js';
 import envConfig from '../config/env.js';
 import { FEATURE, backendFor, fallbackBackendFor } from '../features/featureBindings.js';
 import { resolveProviderProfile } from '../ai/providers/providerProfile.js';
@@ -201,7 +200,6 @@ async function generateWithFlux({ prompt, size, references = [], signal }) {
   const res = await callWorkersAi({
     model: envConfig.CLOUDFLARE_IMAGE_MODEL,
     body: form,
-    estimatedNeurons: estimateImageNeurons({ width, height, inputImages: refs.length }),
     signal
   });
   if (!res.ok) return { ok: false, error: res.error, code: res.code };

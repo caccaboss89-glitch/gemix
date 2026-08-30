@@ -1,6 +1,6 @@
 // test/media-backends.test.js
 //
-// Media routing, per-backend tool schemas, neuron accounting and fallback rules.
+// Media routing, per-backend tool schemas, account rotation and fallback rules.
 //
 // The rule that matters most here is that a content-policy refusal is
 // never retried on another backend. Everything else is about not lying to the
@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test, { after, before, beforeEach } from 'node:test';
-import { CF_ERROR, classifyFailure } from '../src/media/cloudflareClient.js';
+import { CF_ERROR, EXHAUSTED_POOL_ERROR, classifyFailure } from '../src/media/cloudflareClient.js';
 import {
   BACKEND,
   FLUX_DEFAULT_SIZE,
@@ -25,20 +25,6 @@ import {
   resolveImageBackends,
   startCooldown
 } from '../src/media/imageBackends.js';
-import {
-  DAILY_NEURONS,
-  LEDGER_FILE,
-  NEURONS_PER_INPUT_TILE,
-  NEURONS_PER_OUTPUT_TILE,
-  RESERVE_NEURONS,
-  estimateImageNeurons,
-  estimateSttNeurons,
-  ledgerSnapshot,
-  reserveNeurons,
-  remainingNeurons,
-  resetLedger,
-  tilesFor
-} from '../src/media/neuronLedger.js';
 import {
   CLOUDFLARE_STATE_FILE,
   isCloudflareConfigured,
@@ -59,13 +45,10 @@ const ACCOUNT_POOL = [
   { accountId: 'cf-account-2', apiToken: 'cf-token-2' }
 ];
 
-let ledgerBackup = null;
 let ringBackup = null;
 let accountsBackup = null;
 
 before(() => {
-  try { ledgerBackup = fs.readFileSync(LEDGER_FILE, 'utf-8'); }
-  catch { ledgerBackup = null; }
   try { ringBackup = fs.readFileSync(CLOUDFLARE_STATE_FILE, 'utf-8'); }
   catch { ringBackup = null; }
   accountsBackup = envConfig.CLOUDFLARE_AI_ACCOUNTS;
@@ -73,14 +56,11 @@ before(() => {
 
 after(() => {
   envConfig.CLOUDFLARE_AI_ACCOUNTS = accountsBackup;
-  if (ledgerBackup === null) { try { fs.unlinkSync(LEDGER_FILE); } catch { /* never existed */ } }
-  else fs.writeFileSync(LEDGER_FILE, ledgerBackup);
   if (ringBackup === null) { try { fs.unlinkSync(CLOUDFLARE_STATE_FILE); } catch { /* never existed */ } }
   else fs.writeFileSync(CLOUDFLARE_STATE_FILE, ringBackup);
 });
 
 beforeEach(() => {
-  resetLedger();
   _resetCooldownsForTests();
   envConfig.CLOUDFLARE_AI_ACCOUNTS = ACCOUNT_POOL.map(account => ({ ...account }));
   try { fs.unlinkSync(CLOUDFLARE_STATE_FILE); } catch { /* already absent */ }
@@ -190,6 +170,25 @@ test('HTTP statuses map onto the codes the policy reads', () => {
   assert.equal(classifyFailure(400, 'bad field'), CF_ERROR.MALFORMED);
 });
 
+test('the two kinds of 429 are told apart by what Cloudflare says', () => {
+  // Retiring an account for the day on a burst limit would throw away a full
+  // allowance, so only the wording about the allowance itself counts.
+  assert.equal(
+    classifyFailure(429, 'You have used up your daily free allocation of 10,000 neurons, '
+      + 'please upgrade to the Workers Paid plan'),
+    CF_ERROR.BUDGET
+  );
+  assert.equal(classifyFailure(429, 'Capacity temporarily exceeded'), CF_ERROR.RATE_LIMIT);
+  assert.equal(classifyFailure(429, '3040: rate limited'), CF_ERROR.RATE_LIMIT);
+});
+
+test('an exhausted pool and a burst limit are not the same outage', () => {
+  // Both send the request elsewhere and cool the backend down, but only the
+  // first is written into the ring, so the wording has to stay distinguishable.
+  assert.deepEqual(failurePlan(CF_ERROR.BUDGET), failurePlan(CF_ERROR.RATE_LIMIT));
+  assert.match(EXHAUSTED_POOL_ERROR, /00:00 UTC/);
+});
+
 // -- FLUX sizes ---------------------------------------------------------------
 
 test('a FLUX size resolves to real pixels, and an unknown one to the default', () => {
@@ -287,99 +286,6 @@ test('FLUX takes exactly one reference, which is what the schema must say', () =
     () => getToolsForUser({ ...whatsappCtx, isActiveMember: true, isAdmin: false }));
   const schema = tools.find(tool => nameOf(tool) === 'generate_image').function.parameters;
   assert.equal(schema.properties.reference_images.maxItems, FLUX_MAX_REFERENCES);
-});
-
-// -- neuron ledger -----------------------------------------------------------
-
-test('image cost uses the probed prices, not the archive estimate', () => {
-  // A 512x512 image is one output tile: ~26 neurons, not 250.
-  assert.equal(tilesFor(512, 512), 1);
-  assert.equal(estimateImageNeurons({ width: 512, height: 512 }), NEURONS_PER_OUTPUT_TILE);
-  // 1024x1024 is four tiles: ~104.
-  assert.equal(tilesFor(1024, 1024), 4);
-  assert.equal(estimateImageNeurons({ width: 1024, height: 1024 }), 4 * NEURONS_PER_OUTPUT_TILE);
-  // A reference is charged at the lower input rate on top.
-  assert.equal(
-    estimateImageNeurons({ width: 512, height: 512, inputImages: 2 }),
-    NEURONS_PER_OUTPUT_TILE + 2 * NEURONS_PER_INPUT_TILE
-  );
-});
-
-test('transcription is charged by audio length', () => {
-  assert.ok(estimateSttNeurons(600) > estimateSttNeurons(60));
-  assert.ok(estimateSttNeurons(0) > 0, 'a clip always costs something');
-});
-
-/** Two accounts' worth of counters, addressed the way the ring addresses them. */
-const ACCOUNT_A = 'account-a';
-const ACCOUNT_B = 'account-b';
-
-async function commitSpend(cost, now = Date.now(), account = ACCOUNT_A) {
-  const reservation = await reserveNeurons(account, cost, now);
-  assert.equal(reservation.ok, true, reservation.reason);
-  assert.equal(await reservation.commit(), true);
-}
-
-test('images and speech draw on one shared allowance', async () => {
-  const start = remainingNeurons(ACCOUNT_A);
-  await commitSpend(estimateImageNeurons({ width: 1024, height: 1024 }));
-  const afterImage = remainingNeurons(ACCOUNT_A);
-  assert.ok(afterImage < start);
-
-  await commitSpend(estimateSttNeurons(300));
-  assert.ok(remainingNeurons(ACCOUNT_A) < afterImage, 'the transcription came out of the same pool');
-});
-
-test('each account carries its own daily allowance', async () => {
-  await commitSpend(DAILY_NEURONS - RESERVE_NEURONS);
-  assert.equal(remainingNeurons(ACCOUNT_A), 0);
-  assert.equal(
-    remainingNeurons(ACCOUNT_B),
-    DAILY_NEURONS - RESERVE_NEURONS,
-    'a spent account must not eat into the next one'
-  );
-});
-
-test('the allowance is refused before the call, with the numbers in the message', async () => {
-  await commitSpend(DAILY_NEURONS - RESERVE_NEURONS);
-  const verdict = await reserveNeurons(ACCOUNT_A, 50);
-  assert.equal(verdict.ok, false);
-  assert.match(verdict.reason, /allowance for today is spent/);
-  assert.match(verdict.reason, /00:00 UTC/);
-});
-
-test('a reserve is kept back rather than spending down to the last neuron', async () => {
-  assert.equal(remainingNeurons(ACCOUNT_A), DAILY_NEURONS - RESERVE_NEURONS);
-  const exact = await reserveNeurons(ACCOUNT_A, DAILY_NEURONS - RESERVE_NEURONS);
-  assert.equal(exact.ok, true);
-  await exact.release();
-  const over = await reserveNeurons(ACCOUNT_A, DAILY_NEURONS - RESERVE_NEURONS + 1);
-  assert.equal(over.ok, false);
-});
-
-test('the count rolls over on the UTC day Cloudflare resets on', async () => {
-  await commitSpend(500);
-  assert.ok(ledgerSnapshot(ACCOUNT_A).spent >= 500);
-  const tomorrow = Date.now() + 25 * 60 * 60 * 1000;
-  assert.equal(ledgerSnapshot(ACCOUNT_A, tomorrow).spent, 0);
-  assert.equal(remainingNeurons(ACCOUNT_A, tomorrow), DAILY_NEURONS - RESERVE_NEURONS);
-});
-
-test('parallel reservations cannot collectively overspend the remaining allowance', async () => {
-  const available = DAILY_NEURONS - RESERVE_NEURONS;
-  await commitSpend(available - 100);
-
-  const [first, second] = await Promise.all([
-    reserveNeurons(ACCOUNT_A, 75),
-    reserveNeurons(ACCOUNT_A, 75)
-  ]);
-  assert.equal([first.ok, second.ok].filter(Boolean).length, 1);
-  const accepted = first.ok ? first : second;
-  const refused = first.ok ? second : first;
-  assert.match(refused.reason, /allowance for today is spent/);
-  assert.equal(ledgerSnapshot(ACCOUNT_A).reserved, 75);
-  await accepted.release();
-  assert.equal(ledgerSnapshot(ACCOUNT_A).reserved, 0);
 });
 
 // -- account rotation --------------------------------------------------------

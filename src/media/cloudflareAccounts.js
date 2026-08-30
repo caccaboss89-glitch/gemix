@@ -8,15 +8,14 @@
 // in the request URL and the API token in the Authorization header — so the two
 // .env lists are zipped positionally: the first id belongs to the first token.
 //
-// An account is written down as spent only when Cloudflare itself refuses the
-// call — 401/403 (the credential is unusable) or 429 (the allowance is really
-// gone, our own estimate having been optimistic). The neuron ledger refusing a
-// call is not that: it means this particular call does not fit in what is left,
-// and a cheaper one later today still might, so the client simply moves on to
-// the next account without touching the ring.
+// An account is written down as spent only on what Cloudflare itself answers:
+// 401/403 (the credential is unusable) or the 429 that names the daily free
+// allocation. Nothing is estimated ahead of the call, because Cloudflare is the
+// only authority on what an account has left — and the 429 that means "too many
+// at once" is deliberately not one of these, since it clears on its own.
 //
-// Cloudflare resets the free allowance at 00:00 UTC, which is also the day
-// boundary the neuron ledger counts on, so the ring's period is the UTC day.
+// Cloudflare resets the free allowance at 00:00 UTC, so that is the ring's
+// period: on the first call of a new UTC day every account is eligible again.
 
 import path from 'path';
 import constants from '../config/constants.js';

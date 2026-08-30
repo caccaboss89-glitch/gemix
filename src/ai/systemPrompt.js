@@ -322,8 +322,8 @@ function buildDynamicRuntimeContext(ctx) {
   if (!isAdmin && quotaKinds.length > 0) {
     const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId, quotaKinds);
     blocks.push(
-      `Generation quota for this user — ${counts}. At the cap the tool returns an error; `
-      + 'if the user asks, tell them what is left.'
+      `Generation quota for this user — ${counts}. At the cap the tool refuses, so say so `
+      + 'instead of calling it; if the user asks, tell them what is left.'
     );
   }
 
