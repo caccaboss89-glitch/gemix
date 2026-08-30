@@ -39,7 +39,7 @@ import {
 } from '../config/platformCapabilities.js';
 import { getToolsForUser, toolNamesToSet  } from './tools.js';
 import { isReleaseNotifySubscribed  } from '../tools/releaseNotify.js';
-import { formatQuotaCounts, formatMediaQuotaResetLabel  } from '../utils/mediaUsageLimits.js';
+import { formatQuotaCounts  } from '../utils/mediaUsageLimits.js';
 import { escapeXml  } from '../utils/xmlEscape.js';
 import { buildProviderGuidance } from './providers/providerGuidance.js';
 
@@ -322,8 +322,7 @@ function buildDynamicRuntimeContext(ctx) {
   if (!isAdmin && quotaKinds.length > 0) {
     const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId, quotaKinds);
     blocks.push(
-      `Weekly generation quota for this user — ${counts} `
-      + `(resets ${formatMediaQuotaResetLabel()}). At the cap the tool returns an error; `
+      `Generation quota for this user — ${counts}. At the cap the tool returns an error; `
       + 'if the user asks, tell them what is left.'
     );
   }

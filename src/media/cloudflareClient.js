@@ -2,18 +2,31 @@
 //
 // One way in to Cloudflare Workers AI.
 //
-// Two features use this account — Whisper for speech and FLUX for images — and
-// they share one free daily allowance, so they also share the client that
-// counts it. Keeping the transport here means the credential is read in exactly
-// one place and the ledger cannot be bypassed by a second caller rolling its
-// own fetch.
+// Two features use these accounts — Whisper for speech and FLUX for images —
+// and they share one free daily allowance per account, so they also share the
+// client that counts it. Keeping the transport here means the credentials are
+// read in exactly one place and the ledger cannot be bypassed by a second
+// caller rolling its own fetch.
+//
+// This is also where the account rotation happens, because it is the only layer
+// that sees both halves of a refusal: the neuron ledger saying this call no
+// longer fits in what the account has left, and Cloudflare saying the account
+// is finished for the day. Either sends the call on to the next account, so a
+// deployment that needs more than 10,000 neurons a day only has to add accounts
+// to .env — but only the second is written down, because a call too big for
+// what is left says nothing about a smaller one later today.
 //
 // The two models want different bodies: Whisper takes JSON with base64 audio,
 // FLUX is multipart-only (a JSON body is refused outright with "required
 // properties 'multipart'"). Both shapes live here rather than in the callers.
 
-import envConfig from '../config/env.js';
 import { reserveNeurons } from './neuronLedger.js';
+import {
+  isCloudflareConfigured,
+  markExhausted,
+  markWorking,
+  usableAccounts
+} from './cloudflareAccounts.js';
 import { createLogger } from '../utils/logger.js';
 import { signalWithTimeout } from '../utils/turnBudget.js';
 
@@ -33,13 +46,8 @@ const CF_ERROR = Object.freeze({
   MALFORMED: 'MALFORMED'
 });
 
-/** True when this deployment has Workers AI credentials at all. */
-function isCloudflareConfigured() {
-  return Boolean(envConfig.CLOUDFLARE_AI_ACCOUNT_ID && envConfig.CLOUDFLARE_AI_API_TOKEN);
-}
-
-function _url(model) {
-  return `${API_BASE}/${envConfig.CLOUDFLARE_AI_ACCOUNT_ID}/ai/run/${model}`;
+function _url(accountId, model) {
+  return `${API_BASE}/${accountId}/ai/run/${model}`;
 }
 
 /** Cloudflare puts the useful part of a failure in `errors[]`. */
@@ -60,12 +68,25 @@ function classifyFailure(status, message) {
 }
 
 /**
- * POST to one Workers AI model, with the ledger checked before and updated
- * after.
+ * Whether a refusal means this account is done for the day, as opposed to a
+ * failure that says nothing about its allowance. AUTH is a credential that is
+ * no longer usable; RATE_LIMIT on the free tier means the allowance is really
+ * gone, our own estimate having been the optimistic one. Neither can improve
+ * before the reset, so both are written down.
+ */
+function _accountIsSpent(code) {
+  return code === CF_ERROR.AUTH || code === CF_ERROR.RATE_LIMIT;
+}
+
+/**
+ * POST to one Workers AI model, rotating through the account pool until one
+ * has both the allowance and the willingness to serve the call.
  *
  * @param {object} req
  * @param {string} req.model
- * @param {object|FormData} req.body - a plain object is sent as JSON
+ * @param {object|FormData|(() => object|FormData)} req.body - a plain object is
+ *   sent as JSON; pass a factory when the body is a FormData, which cannot be
+ *   replayed across accounts
  * @param {number} req.estimatedNeurons
  * @param {AbortSignal} [req.signal]
  * @param {number} [req.timeoutMs]
@@ -76,21 +97,54 @@ async function callWorkersAi({ model, body, estimatedNeurons, signal, timeoutMs 
     return { ok: false, code: CF_ERROR.UNCONFIGURED, error: 'Cloudflare Workers AI is not configured.' };
   }
 
-  const reservation = await reserveNeurons(estimatedNeurons);
-  if (!reservation.ok) {
-    return { ok: false, code: CF_ERROR.BUDGET, error: reservation.reason };
+  const accounts = usableAccounts();
+  let budgetReason = null;
+  let lastFailure = null;
+
+  for (const account of accounts) {
+    const reservation = await reserveNeurons(account.fingerprint, estimatedNeurons);
+    if (!reservation.ok) {
+      // Not enough left on this account for a call this size. A cheaper one may
+      // still fit today, so the account keeps its place in the ring.
+      budgetReason = reservation.reason;
+      continue;
+    }
+
+    const attempt = await _attempt({ account, model, body, signal, timeoutMs, reservation });
+    if (attempt.ok || !_accountIsSpent(attempt.code)) return attempt;
+
+    log.warn(`Workers AI account ${account.fingerprint} is done for the day (${attempt.code}); rotating.`);
+    lastFailure = attempt;
+    await markExhausted(account.fingerprint);
   }
 
-  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+  // A call did go out and Cloudflare cut the account off: that answer is more
+  // specific than "out of budget", and the fallback policy handles both alike.
+  if (lastFailure) return lastFailure;
+
+  // Nothing was ever sent: every account was either already spent or too low
+  // for this call. With a single account its own numbers are the useful answer.
+  return {
+    ok: false,
+    code: CF_ERROR.BUDGET,
+    error: (accounts.length === 1 && budgetReason)
+      || 'Every Cloudflare Workers AI account has spent its free allowance for today. It resets at 00:00 UTC.'
+  };
+}
+
+/** One request on one account, settling its reservation whatever the outcome. */
+async function _attempt({ account, model, body, signal, timeoutMs, reservation }) {
+  const payloadBody = typeof body === 'function' ? body() : body;
+  const isForm = typeof FormData !== 'undefined' && payloadBody instanceof FormData;
   let committed = false;
   try {
-    const res = await fetch(_url(model), {
+    const res = await fetch(_url(account.accountId, model), {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${envConfig.CLOUDFLARE_AI_API_TOKEN}`,
+        Authorization: `Bearer ${account.apiToken}`,
         ...(isForm ? {} : { 'Content-Type': 'application/json' })
       },
-      body: isForm ? body : JSON.stringify(body),
+      body: isForm ? payloadBody : JSON.stringify(payloadBody),
       signal: signalWithTimeout(signal, timeoutMs)
     });
     const raw = await res.text();
@@ -107,6 +161,7 @@ async function callWorkersAi({ model, body, estimatedNeurons, signal, timeoutMs 
     // Only a call that produced something consumes the reservation.
     committed = await reservation.commit();
     if (!committed) log.warn(`Workers AI ${model} succeeded but its neuron reservation could not be committed`);
+    await markWorking(account.fingerprint);
     return { ok: true, payload, status: res.status };
   } catch (err) {
     const timedOut = err.name === 'AbortError' || err.name === 'TimeoutError';

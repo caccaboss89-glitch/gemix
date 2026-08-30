@@ -220,7 +220,7 @@ async function generateImage(args, userCtx) {
   log.info(`generate_image: backends=${[primary, fallback].filter(Boolean).join(' -> ')}, `
     + `refs=${refList.length}, prompt="${prompt.slice(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
-  // Weekly per-user quota (admins exempt). Reserve the slot before the network
+  // Daily per-user quota (admins exempt). Reserve the slot before the network
   // call so parallel calls in one round cannot exceed the cap; refund on failure.
   const quota = await reserveGeneration('image', userCtx);
   if (!quota.ok) return { success: false, error: quota.error };

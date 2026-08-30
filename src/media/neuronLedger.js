@@ -1,11 +1,16 @@
 // src/media/neuronLedger.js
 //
-// The shared budget behind every Cloudflare Workers AI call.
+// The budget behind every Cloudflare Workers AI call, counted per account.
 //
-// Workers AI bills in "neurons" and the free plan grants 10,000 a day across
-// the whole account. Whisper and FLUX draw on the same pool, so neither can be
-// metered on its own: a day of heavy transcription is a day with fewer images,
-// and the only way to know that before the request is to count both here.
+// Workers AI bills in "neurons" and the free plan grants 10,000 a day to each
+// account. Whisper and FLUX draw on the same pool, so neither can be metered on
+// its own: a day of heavy transcription is a day with fewer images, and the
+// only way to know that before the request is to count both here.
+//
+// The deployment can hold several accounts (cloudflareAccounts.js), and each
+// one carries its own daily allowance — so the count is keyed by the account
+// fingerprint the ring hands out. The ledger only answers "how much is left on
+// this account"; which account to use is the ring's decision.
 //
 // Prices reflect the current Workers AI billing rates:
 //
@@ -26,7 +31,7 @@ import { withKeyedLock } from '../utils/keyedLock.js';
 
 const log = createLogger('NeuronLedger');
 
-/** Free-plan daily allowance, shared by every model on the account. */
+/** Free-plan daily allowance, granted to each account separately. */
 const DAILY_NEURONS = 10_000;
 
 /** Neurons per 512x512 tile of generated image, and per tile of input image. */
@@ -58,7 +63,7 @@ function _load() {
     const raw = JSON.parse(fs.readFileSync(LEDGER_FILE, 'utf-8'));
     if (raw && typeof raw === 'object' && typeof raw.day === 'string') return raw;
   } catch { /* first run, or a corrupted file we are about to replace */ }
-  return { day: _today(), spent: 0, calls: 0 };
+  return { day: _today(), accounts: {} };
 }
 
 function _save(state) {
@@ -75,29 +80,47 @@ function _save(state) {
   }
 }
 
-/** The state for today, rolling the day over when it has changed. */
-function _state(now = Date.now()) {
-  const state = _load();
-  const day = _today(now);
-  if (state.day !== day) return { day, spent: 0, calls: 0, reservations: {} };
+/** One account's counters, normalized and with stale reservations dropped. */
+function _accountState(raw, now) {
   const reservations = {};
-  for (const [id, reservation] of Object.entries(state.reservations || {})) {
+  for (const [id, reservation] of Object.entries(raw?.reservations || {})) {
     const createdAt = Number(reservation?.createdAt);
     const cost = Math.max(0, Number(reservation?.cost) || 0);
     if (!createdAt || now - createdAt > RESERVATION_MAX_AGE_MS) continue;
     reservations[id] = { cost, createdAt };
   }
   return {
-    day,
-    spent: Math.max(0, Number(state.spent) || 0),
-    calls: Math.max(0, Number(state.calls) || 0),
+    spent: Math.max(0, Number(raw?.spent) || 0),
+    calls: Math.max(0, Number(raw?.calls) || 0),
     reservations
   };
 }
 
-function _reservedNeurons(state) {
-  return Object.values(state.reservations || {})
+/** The whole ledger for today, rolling the day over when it has changed. */
+function _state(now = Date.now()) {
+  const state = _load();
+  const day = _today(now);
+  if (state.day !== day) return { day, accounts: {} };
+  const accounts = {};
+  for (const [fingerprint, raw] of Object.entries(state.accounts || {})) {
+    accounts[fingerprint] = _accountState(raw, now);
+  }
+  return { day, accounts };
+}
+
+/** One account's counters within a loaded ledger, created on demand. */
+function _account(state, fingerprint) {
+  if (!state.accounts[fingerprint]) state.accounts[fingerprint] = _accountState(null, 0);
+  return state.accounts[fingerprint];
+}
+
+function _reservedNeurons(account) {
+  return Object.values(account.reservations || {})
     .reduce((sum, reservation) => sum + Math.max(0, Number(reservation.cost) || 0), 0);
+}
+
+function _remaining(account) {
+  return Math.max(0, DAILY_NEURONS - RESERVE_NEURONS - account.spent - _reservedNeurons(account));
 }
 
 /** Tiles a WxH image occupies, at Cloudflare's 512x512 tile size. */
@@ -122,38 +145,46 @@ function estimateSttNeurons(durationSec) {
   return Math.max(1, Number(durationSec) || 0) * NEURONS_PER_AUDIO_SECOND;
 }
 
-/** What is left today, after the reserve. */
-function remainingNeurons(now = Date.now()) {
-  const state = _state(now);
-  return Math.max(0, DAILY_NEURONS - RESERVE_NEURONS - state.spent - _reservedNeurons(state));
+/**
+ * What is left on one account today, after the reserve.
+ * @param {string} fingerprint
+ * @param {number} [now]
+ * @returns {number}
+ */
+function remainingNeurons(fingerprint, now = Date.now()) {
+  return _remaining(_account(_state(now), fingerprint));
 }
 
-async function _settleReservation(id, commit, now = Date.now()) {
+async function _settleReservation(fingerprint, id, commit, now = Date.now()) {
   return withKeyedLock(ledgerLocks, LEDGER_FILE, async () => {
     const state = _state(now);
-    const reservation = state.reservations[id];
+    const account = _account(state, fingerprint);
+    const reservation = account.reservations[id];
     if (!reservation) return false;
-    delete state.reservations[id];
+    delete account.reservations[id];
     if (commit) {
-      state.spent = Math.round((state.spent + reservation.cost) * 100) / 100;
-      state.calls += 1;
+      account.spent = Math.round((account.spent + reservation.cost) * 100) / 100;
+      account.calls += 1;
     }
     return _save(state);
   });
 }
 
 /**
- * Atomically reserve estimated cost before network work starts. Parallel calls
- * see each other's pending reservations, so only calls that fit can launch.
+ * Atomically reserve estimated cost on one account before network work starts.
+ * Parallel calls see each other's pending reservations, so only calls that fit
+ * can launch.
+ *
+ * @param {string} fingerprint - the account the ring handed out
+ * @param {number} estimated
+ * @param {number} [now]
  */
-async function reserveNeurons(estimated, now = Date.now()) {
+async function reserveNeurons(fingerprint, estimated, now = Date.now()) {
   const cost = Math.max(0, Number(estimated) || 0);
   return withKeyedLock(ledgerLocks, LEDGER_FILE, async () => {
     const state = _state(now);
-    const remaining = Math.max(
-      0,
-      DAILY_NEURONS - RESERVE_NEURONS - state.spent - _reservedNeurons(state)
-    );
+    const account = _account(state, fingerprint);
+    const remaining = _remaining(account);
     if (cost > remaining) {
       return {
         ok: false,
@@ -166,7 +197,7 @@ async function reserveNeurons(estimated, now = Date.now()) {
     }
 
     const id = crypto.randomUUID();
-    state.reservations[id] = { cost, createdAt: now };
+    account.reservations[id] = { cost, createdAt: now };
     if (!_save(state)) {
       return {
         ok: false,
@@ -183,34 +214,39 @@ async function reserveNeurons(estimated, now = Date.now()) {
       estimated: cost,
       async commit() {
         if (settled) return false;
-        settled = await _settleReservation(id, true);
+        settled = await _settleReservation(fingerprint, id, true);
         return settled;
       },
       async release() {
         if (settled) return false;
-        settled = await _settleReservation(id, false);
+        settled = await _settleReservation(fingerprint, id, false);
         return settled;
       }
     };
   });
 }
 
-/** Today's figures, for the Runtime block and for diagnostics. */
-function ledgerSnapshot(now = Date.now()) {
+/**
+ * Today's figures for one account, for diagnostics.
+ * @param {string} fingerprint
+ * @param {number} [now]
+ */
+function ledgerSnapshot(fingerprint, now = Date.now()) {
   const state = _state(now);
+  const account = _account(state, fingerprint);
   return {
     day: state.day,
-    spent: state.spent,
-    reserved: _reservedNeurons(state),
-    calls: state.calls,
-    remaining: remainingNeurons(now),
+    spent: account.spent,
+    reserved: _reservedNeurons(account),
+    calls: account.calls,
+    remaining: _remaining(account),
     dailyLimit: DAILY_NEURONS
   };
 }
 
-/** Reset today's count. Tests, and the operator command that follows a mis-count. */
+/** Reset today's counts. Tests, and the operator command that follows a mis-count. */
 function resetLedger(now = Date.now()) {
-  _save({ day: _today(now), spent: 0, calls: 0, reservations: {} });
+  _save({ day: _today(now), accounts: {} });
 }
 
 export {

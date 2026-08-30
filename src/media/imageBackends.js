@@ -185,13 +185,18 @@ async function generateWithFlux({ prompt, size, references = [], signal }) {
   const { width, height } = resolveFluxSize(size);
   const refs = references.slice(0, FLUX_MAX_REFERENCES);
 
-  const form = new FormData();
-  form.append('prompt', prompt);
-  form.append('width', String(width));
-  form.append('height', String(height));
-  for (const ref of refs) {
-    form.append('image', new Blob([ref.buffer], { type: ref.mime || 'image/png' }), ref.name || 'reference.png');
-  }
+  // Built per attempt: the client may retry on another account, and a FormData
+  // whose body has been sent once cannot be sent again.
+  const form = () => {
+    const body = new FormData();
+    body.append('prompt', prompt);
+    body.append('width', String(width));
+    body.append('height', String(height));
+    for (const ref of refs) {
+      body.append('image', new Blob([ref.buffer], { type: ref.mime || 'image/png' }), ref.name || 'reference.png');
+    }
+    return body;
+  };
 
   const res = await callWorkersAi({
     model: envConfig.CLOUDFLARE_IMAGE_MODEL,

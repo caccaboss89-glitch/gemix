@@ -39,6 +39,13 @@ import {
   resetLedger,
   tilesFor
 } from '../src/media/neuronLedger.js';
+import {
+  CLOUDFLARE_STATE_FILE,
+  isCloudflareConfigured,
+  markExhausted as markAccountExhausted,
+  markWorking as markAccountWorking,
+  usableAccounts
+} from '../src/media/cloudflareAccounts.js';
 import { _runImageChain } from '../src/tools/imagineGenerator.js';
 import { FEATURE, backendFor, isFeatureAvailable } from '../src/features/featureBindings.js';
 import { _resetActiveProfileForTests, getProviderProfile } from '../src/ai/providers/providerProfile.js';
@@ -46,21 +53,37 @@ import envConfig from '../src/config/env.js';
 import { getToolsForUser } from '../src/ai/tools.js';
 import constants from '../src/config/constants.js';
 
+/** Two accounts, so rotation has somewhere to rotate to. */
+const ACCOUNT_POOL = [
+  { accountId: 'cf-account-1', apiToken: 'cf-token-1' },
+  { accountId: 'cf-account-2', apiToken: 'cf-token-2' }
+];
+
 let ledgerBackup = null;
+let ringBackup = null;
+let accountsBackup = null;
 
 before(() => {
   try { ledgerBackup = fs.readFileSync(LEDGER_FILE, 'utf-8'); }
   catch { ledgerBackup = null; }
+  try { ringBackup = fs.readFileSync(CLOUDFLARE_STATE_FILE, 'utf-8'); }
+  catch { ringBackup = null; }
+  accountsBackup = envConfig.CLOUDFLARE_AI_ACCOUNTS;
 });
 
 after(() => {
+  envConfig.CLOUDFLARE_AI_ACCOUNTS = accountsBackup;
   if (ledgerBackup === null) { try { fs.unlinkSync(LEDGER_FILE); } catch { /* never existed */ } }
   else fs.writeFileSync(LEDGER_FILE, ledgerBackup);
+  if (ringBackup === null) { try { fs.unlinkSync(CLOUDFLARE_STATE_FILE); } catch { /* never existed */ } }
+  else fs.writeFileSync(CLOUDFLARE_STATE_FILE, ringBackup);
 });
 
 beforeEach(() => {
   resetLedger();
   _resetCooldownsForTests();
+  envConfig.CLOUDFLARE_AI_ACCOUNTS = ACCOUNT_POOL.map(account => ({ ...account }));
+  try { fs.unlinkSync(CLOUDFLARE_STATE_FILE); } catch { /* already absent */ }
 });
 
 // -- routing -----------------------------------------------------------------
@@ -287,45 +310,59 @@ test('transcription is charged by audio length', () => {
   assert.ok(estimateSttNeurons(0) > 0, 'a clip always costs something');
 });
 
-async function commitSpend(cost, now = Date.now()) {
-  const reservation = await reserveNeurons(cost, now);
+/** Two accounts' worth of counters, addressed the way the ring addresses them. */
+const ACCOUNT_A = 'account-a';
+const ACCOUNT_B = 'account-b';
+
+async function commitSpend(cost, now = Date.now(), account = ACCOUNT_A) {
+  const reservation = await reserveNeurons(account, cost, now);
   assert.equal(reservation.ok, true, reservation.reason);
   assert.equal(await reservation.commit(), true);
 }
 
 test('images and speech draw on one shared allowance', async () => {
-  const start = remainingNeurons();
+  const start = remainingNeurons(ACCOUNT_A);
   await commitSpend(estimateImageNeurons({ width: 1024, height: 1024 }));
-  const afterImage = remainingNeurons();
+  const afterImage = remainingNeurons(ACCOUNT_A);
   assert.ok(afterImage < start);
 
   await commitSpend(estimateSttNeurons(300));
-  assert.ok(remainingNeurons() < afterImage, 'the transcription came out of the same pool');
+  assert.ok(remainingNeurons(ACCOUNT_A) < afterImage, 'the transcription came out of the same pool');
+});
+
+test('each account carries its own daily allowance', async () => {
+  await commitSpend(DAILY_NEURONS - RESERVE_NEURONS);
+  assert.equal(remainingNeurons(ACCOUNT_A), 0);
+  assert.equal(
+    remainingNeurons(ACCOUNT_B),
+    DAILY_NEURONS - RESERVE_NEURONS,
+    'a spent account must not eat into the next one'
+  );
 });
 
 test('the allowance is refused before the call, with the numbers in the message', async () => {
   await commitSpend(DAILY_NEURONS - RESERVE_NEURONS);
-  const verdict = await reserveNeurons(50);
+  const verdict = await reserveNeurons(ACCOUNT_A, 50);
   assert.equal(verdict.ok, false);
   assert.match(verdict.reason, /allowance for today is spent/);
   assert.match(verdict.reason, /00:00 UTC/);
 });
 
 test('a reserve is kept back rather than spending down to the last neuron', async () => {
-  assert.equal(remainingNeurons(), DAILY_NEURONS - RESERVE_NEURONS);
-  const exact = await reserveNeurons(DAILY_NEURONS - RESERVE_NEURONS);
+  assert.equal(remainingNeurons(ACCOUNT_A), DAILY_NEURONS - RESERVE_NEURONS);
+  const exact = await reserveNeurons(ACCOUNT_A, DAILY_NEURONS - RESERVE_NEURONS);
   assert.equal(exact.ok, true);
   await exact.release();
-  const over = await reserveNeurons(DAILY_NEURONS - RESERVE_NEURONS + 1);
+  const over = await reserveNeurons(ACCOUNT_A, DAILY_NEURONS - RESERVE_NEURONS + 1);
   assert.equal(over.ok, false);
 });
 
 test('the count rolls over on the UTC day Cloudflare resets on', async () => {
   await commitSpend(500);
-  assert.ok(ledgerSnapshot().spent >= 500);
+  assert.ok(ledgerSnapshot(ACCOUNT_A).spent >= 500);
   const tomorrow = Date.now() + 25 * 60 * 60 * 1000;
-  assert.equal(ledgerSnapshot(tomorrow).spent, 0);
-  assert.equal(remainingNeurons(tomorrow), DAILY_NEURONS - RESERVE_NEURONS);
+  assert.equal(ledgerSnapshot(ACCOUNT_A, tomorrow).spent, 0);
+  assert.equal(remainingNeurons(ACCOUNT_A, tomorrow), DAILY_NEURONS - RESERVE_NEURONS);
 });
 
 test('parallel reservations cannot collectively overspend the remaining allowance', async () => {
@@ -333,16 +370,79 @@ test('parallel reservations cannot collectively overspend the remaining allowanc
   await commitSpend(available - 100);
 
   const [first, second] = await Promise.all([
-    reserveNeurons(75),
-    reserveNeurons(75)
+    reserveNeurons(ACCOUNT_A, 75),
+    reserveNeurons(ACCOUNT_A, 75)
   ]);
   assert.equal([first.ok, second.ok].filter(Boolean).length, 1);
   const accepted = first.ok ? first : second;
   const refused = first.ok ? second : first;
   assert.match(refused.reason, /allowance for today is spent/);
-  assert.equal(ledgerSnapshot().reserved, 75);
+  assert.equal(ledgerSnapshot(ACCOUNT_A).reserved, 75);
   await accepted.release();
-  assert.equal(ledgerSnapshot().reserved, 0);
+  assert.equal(ledgerSnapshot(ACCOUNT_A).reserved, 0);
+});
+
+// -- account rotation --------------------------------------------------------
+
+const idsOf = (accounts) => accounts.map(account => account.accountId);
+
+test('the pool is offered in .env order, with the ids and tokens paired', () => {
+  const accounts = usableAccounts();
+  assert.deepEqual(idsOf(accounts), ['cf-account-1', 'cf-account-2']);
+  assert.deepEqual(accounts.map(a => a.apiToken), ['cf-token-1', 'cf-token-2']);
+});
+
+test('the account that last served a call is offered first after a restart', async () => {
+  const [, second] = usableAccounts();
+  await markAccountWorking(second.fingerprint);
+  assert.deepEqual(
+    idsOf(usableAccounts()),
+    ['cf-account-2', 'cf-account-1'],
+    'the working account leads, and the rest stay available behind it'
+  );
+});
+
+test('an account Cloudflare has cut off drops out of the pool for the day', async () => {
+  const [first] = usableAccounts();
+  await markAccountExhausted(first.fingerprint);
+  assert.deepEqual(idsOf(usableAccounts()), ['cf-account-2']);
+
+  const [second] = usableAccounts();
+  await markAccountExhausted(second.fingerprint);
+  assert.deepEqual(usableAccounts(), []);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const state = JSON.parse(fs.readFileSync(CLOUDFLARE_STATE_FILE, 'utf-8'));
+  assert.deepEqual(Object.values(state.exhausted), Array(ACCOUNT_POOL.length).fill(today));
+});
+
+test('an account spent on an earlier day is eligible again', async () => {
+  const [spent] = usableAccounts();
+  await markAccountExhausted(spent.fingerprint);
+  fs.writeFileSync(CLOUDFLARE_STATE_FILE, JSON.stringify({
+    active: null,
+    exhausted: { [spent.fingerprint]: '2020-01-01' }
+  }));
+  assert.deepEqual(idsOf(usableAccounts()), ['cf-account-1', 'cf-account-2']);
+});
+
+test('an account added to .env later joins the pool without disturbing the others', async () => {
+  const [first] = usableAccounts();
+  await markAccountExhausted(first.fingerprint);
+
+  envConfig.CLOUDFLARE_AI_ACCOUNTS = [
+    { accountId: 'cf-account-0', apiToken: 'cf-token-0' },
+    ...ACCOUNT_POOL
+  ];
+  // Fingerprints follow the credentials, not their position, so the account
+  // already written down as spent stays spent.
+  assert.deepEqual(idsOf(usableAccounts()), ['cf-account-0', 'cf-account-2']);
+});
+
+test('an empty pool reports itself unconfigured rather than half-configured', () => {
+  envConfig.CLOUDFLARE_AI_ACCOUNTS = [];
+  assert.equal(isCloudflareConfigured(), false);
+  assert.deepEqual(usableAccounts(), []);
 });
 
 // -- what the model is actually offered -------------------------------------
@@ -354,18 +454,17 @@ test('parallel reservations cannot collectively overspend the remaining allowanc
 function withDeployment({ provider, cloudflare }, fn) {
   const saved = {
     provider: envConfig.AI_PROVIDER,
-    account: envConfig.CLOUDFLARE_AI_ACCOUNT_ID,
-    token: envConfig.CLOUDFLARE_AI_API_TOKEN
+    accounts: envConfig.CLOUDFLARE_AI_ACCOUNTS
   };
   envConfig.AI_PROVIDER = provider;
-  envConfig.CLOUDFLARE_AI_ACCOUNT_ID = cloudflare ? 'test-account' : '';
-  envConfig.CLOUDFLARE_AI_API_TOKEN = cloudflare ? 'test-token' : '';
+  envConfig.CLOUDFLARE_AI_ACCOUNTS = cloudflare
+    ? [{ accountId: 'test-account', apiToken: 'test-token' }]
+    : [];
   _resetActiveProfileForTests();
   try { return fn(); }
   finally {
     envConfig.AI_PROVIDER = saved.provider;
-    envConfig.CLOUDFLARE_AI_ACCOUNT_ID = saved.account;
-    envConfig.CLOUDFLARE_AI_API_TOKEN = saved.token;
+    envConfig.CLOUDFLARE_AI_ACCOUNTS = saved.accounts;
     _resetActiveProfileForTests();
   }
 }

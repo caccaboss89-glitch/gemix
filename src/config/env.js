@@ -17,6 +17,17 @@ const toIntInRange = (val, min, max, defaultVal) => {
 const XAI_USE_API_KEY = toBool(process.env.XAI_USE_API_KEY, false);
 const GEMIX_TEMP_FILE_PORT = toIntInRange(process.env.GEMIX_TEMP_FILE_PORT, 1, 65535, 0);
 
+// A Workers AI account is a pair: the id goes in the request URL, the token in
+// the Authorization header. The two lists are zipped positionally, so the nth
+// id belongs to the nth token; a length mismatch would silently pair the wrong
+// halves, and is refused below instead.
+const CLOUDFLARE_AI_ACCOUNT_IDS = toList(process.env.CLOUDFLARE_AI_ACCOUNT_ID);
+const CLOUDFLARE_AI_API_TOKENS = toList(process.env.CLOUDFLARE_AI_API_TOKEN);
+const CLOUDFLARE_AI_ACCOUNTS = CLOUDFLARE_AI_ACCOUNT_IDS.map((accountId, i) => ({
+  accountId,
+  apiToken: CLOUDFLARE_AI_API_TOKENS[i]
+})).filter((account) => account.apiToken);
+
 // Every value below must be set in .env (no || null in exports).
 const REQUIRED = [
   'OPENROUTER_BASE_URL',
@@ -41,6 +52,10 @@ const REQUIRED = [
 const missing = REQUIRED.filter((k) => !process.env[k] || !String(process.env[k]).trim());
 if (String(process.env.GEMIX_TEMP_FILE_PORT || '').trim() && !GEMIX_TEMP_FILE_PORT) {
   missing.push('GEMIX_TEMP_FILE_PORT (must be a port number between 1 and 65535)');
+}
+if (CLOUDFLARE_AI_ACCOUNT_IDS.length !== CLOUDFLARE_AI_API_TOKENS.length) {
+  missing.push(`CLOUDFLARE_AI_API_TOKEN (${CLOUDFLARE_AI_ACCOUNT_IDS.length} account ids but `
+    + `${CLOUDFLARE_AI_API_TOKENS.length} tokens; list one token per account, in the same order)`);
 }
 
 // Per-profile requirements: only the selected AI_PROVIDER's settings are
@@ -126,10 +141,12 @@ export default {
   VIDEO_GEN_MODEL: process.env.VIDEO_GEN_MODEL || '',
 
   // Cloudflare Workers AI: the free-tier backend behind STT on every profile
-  // and behind image generation where xAI Imagine is absent. Without the two
-  // credentials the backend reports itself unconfigured instead of guessing.
-  CLOUDFLARE_AI_ACCOUNT_ID: process.env.CLOUDFLARE_AI_ACCOUNT_ID || '',
-  CLOUDFLARE_AI_API_TOKEN: process.env.CLOUDFLARE_AI_API_TOKEN || '',
+  // and behind image generation where xAI Imagine is absent. Each account
+  // carries its own daily neuron allowance, so the pool is a list of id/token
+  // pairs and GemiX works through it one account at a time
+  // (media/cloudflareAccounts.js). With the list empty the backend reports
+  // itself unconfigured instead of guessing.
+  CLOUDFLARE_AI_ACCOUNTS,
   CLOUDFLARE_STT_MODEL: process.env.CLOUDFLARE_STT_MODEL || '@cf/openai/whisper-large-v3-turbo',
   CLOUDFLARE_IMAGE_MODEL: process.env.CLOUDFLARE_IMAGE_MODEL || '@cf/black-forest-labs/flux-2-klein-4b',
 
@@ -174,11 +191,13 @@ export default {
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),
   STARTUP_SYSTEM_CLEANUP: toBool(process.env.STARTUP_SYSTEM_CLEANUP, false),
 
-  // Weekly media quota reset (Europe/Rome). Used for period keys + prompt/tool wording.
-  // Weekday: 0=Sunday … 6=Saturday (default Monday=1). Hour 0–23, minute 0–59 (default 00:00).
-  MEDIA_WEEKLY_RESET_WEEKDAY: toIntInRange(process.env.MEDIA_WEEKLY_RESET_WEEKDAY, 0, 6, 1),
-  MEDIA_WEEKLY_RESET_HOUR: toIntInRange(process.env.MEDIA_WEEKLY_RESET_HOUR, 0, 23, 0),
-  MEDIA_WEEKLY_RESET_MINUTE: toIntInRange(process.env.MEDIA_WEEKLY_RESET_MINUTE, 0, 59, 0),
+  // Media quota reset (Europe/Rome). Used for period keys + prompt/tool wording.
+  // Hour/minute apply to both the daily and the weekly caps; the weekday only to
+  // the weekly ones: 0=Sunday … 6=Saturday (default Monday=1). Hour 0–23,
+  // minute 0–59 (default 00:00).
+  MEDIA_QUOTA_RESET_WEEKDAY: toIntInRange(process.env.MEDIA_QUOTA_RESET_WEEKDAY, 0, 6, 1),
+  MEDIA_QUOTA_RESET_HOUR: toIntInRange(process.env.MEDIA_QUOTA_RESET_HOUR, 0, 23, 0),
+  MEDIA_QUOTA_RESET_MINUTE: toIntInRange(process.env.MEDIA_QUOTA_RESET_MINUTE, 0, 59, 0),
 
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   FFPROBE_PATH: process.env.FFPROBE_PATH || 'ffprobe',

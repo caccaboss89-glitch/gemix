@@ -164,26 +164,20 @@ function underCaseDeployment(id, fn) {
   const deployment = CASES[id]?.deployment || { provider: 'chatgpt', cloudflare: true };
   const saved = {
     provider: envConfig.AI_PROVIDER,
-    account: envConfig.CLOUDFLARE_AI_ACCOUNT_ID,
-    token: envConfig.CLOUDFLARE_AI_API_TOKEN
+    accounts: envConfig.CLOUDFLARE_AI_ACCOUNTS
   };
   envConfig.AI_PROVIDER = deployment.provider;
-  if (deployment.cloudflare) {
-    // Placeholders: the dump only asks whether a backend is configured, and
-    // never calls it.
-    envConfig.CLOUDFLARE_AI_ACCOUNT_ID = envConfig.CLOUDFLARE_AI_ACCOUNT_ID || 'dump-account';
-    envConfig.CLOUDFLARE_AI_API_TOKEN = envConfig.CLOUDFLARE_AI_API_TOKEN || 'dump-token';
-  } else {
-    envConfig.CLOUDFLARE_AI_ACCOUNT_ID = '';
-    envConfig.CLOUDFLARE_AI_API_TOKEN = '';
-  }
+  // Placeholder pair: the dump only asks whether a backend is configured, and
+  // never calls it.
+  envConfig.CLOUDFLARE_AI_ACCOUNTS = deployment.cloudflare
+    ? (saved.accounts.length > 0 ? saved.accounts : [{ accountId: 'dump-account', apiToken: 'dump-token' }])
+    : [];
   _resetActiveProfileForTests();
   try { return fn(); }
   finally {
     Object.assign(envConfig, {
       AI_PROVIDER: saved.provider,
-      CLOUDFLARE_AI_ACCOUNT_ID: saved.account,
-      CLOUDFLARE_AI_API_TOKEN: saved.token
+      CLOUDFLARE_AI_ACCOUNTS: saved.accounts
     });
     _resetActiveProfileForTests();
   }

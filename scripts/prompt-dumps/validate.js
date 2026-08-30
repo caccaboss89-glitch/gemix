@@ -298,7 +298,7 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
       ISSUES.push({ caseId, msg: `static must not include the ${tag} block (belongs in Runtime)` });
     }
   }
-  if (/Weekly generation quota for this user/.test(staticPart)) {
+  if (/Generation quota for this user/.test(staticPart)) {
     ISSUES.push({ caseId, msg: 'static must not include media quota line (belongs in Runtime)' });
   }
   // Caller identity is Runtime-only: it changes turn to turn.
@@ -521,11 +521,11 @@ function _validateWorkspaceGuidance(staticPart, caseId) {
 }
 
 /**
- * Weekly media generation quota line: shown to non-admin callers for exactly
- * the generation tools available in this case.
+ * Media generation quota line: shown to non-admin callers for exactly the
+ * generation tools available in this case, grouped by the period each resets on.
  */
 function _validateQuotaLine(dynamicPart, id, caseId) {
-  const hasQuotaLine = /Weekly generation quota for this user/.test(dynamicPart);
+  const hasQuotaLine = /Generation quota for this user/.test(dynamicPart);
   const ctx = _ctx(id);
   const liveNames = new Set(getToolsForUser({
     platform: ctx.platform,
@@ -540,23 +540,34 @@ function _validateQuotaLine(dynamicPart, id, caseId) {
   const expected = !ctx.userIdentity?.isAdmin && labels.length > 0;
   if (!expected) {
     if (hasQuotaLine) {
-      ISSUES.push({ caseId, msg: 'weekly media quota line must not appear (admin or non-media platform)' });
+      ISSUES.push({ caseId, msg: 'media quota line must not appear (admin or non-media platform)' });
     }
     return;
   }
   if (!hasQuotaLine) {
-    ISSUES.push({ caseId, msg: 'missing weekly media quota line in Runtime (non-admin on a media platform)' });
+    ISSUES.push({ caseId, msg: 'missing media quota line in Runtime (non-admin on a media platform)' });
   } else {
-    const quotaLine = dynamicPart.match(/Weekly generation quota for this user — ([^\n]+)/)?.[1] || '';
+    // Only the counts, without the sentence that follows them: the period
+    // groups are split on ';' and the prose carries no reset boundary.
+    const quotaLine = dynamicPart.match(/Generation quota for this user — (.+?)\. At the cap/)?.[1] || '';
     for (const label of labels) {
       if (!new RegExp(`${label}: \\d+\\/\\d+`).test(quotaLine)) {
-        ISSUES.push({ caseId, msg: `weekly media quota line missing ${label}` });
+        ISSUES.push({ caseId, msg: `media quota line missing ${label}` });
       }
     }
     for (const absent of ['Immagini', 'Video', 'Canzoni'].filter(label => !labels.includes(label))) {
       if (quotaLine.includes(`${absent}:`)) {
-        ISSUES.push({ caseId, msg: `weekly media quota line exposes unavailable ${absent}` });
+        ISSUES.push({ caseId, msg: `media quota line exposes unavailable ${absent}` });
       }
+    }
+    // Each period group states its own boundary, and images are the daily cap.
+    for (const group of quotaLine.split(';')) {
+      if (!/\(resets every [^)]+ at \d{2}:\d{2}\)/.test(group)) {
+        ISSUES.push({ caseId, msg: 'media quota line lacks a reset boundary for one of its periods' });
+      }
+    }
+    if (labels.includes('Immagini') && !/Immagini: \d+\/\d+ \(resets every day/.test(quotaLine)) {
+      ISSUES.push({ caseId, msg: 'image quota must be stated as the daily one' });
     }
   }
 }
