@@ -523,6 +523,18 @@ test('the exec environment carries no credential', () => {
   assert.ok(env.some(e => e.startsWith('HTTPS_PROXY=')));
 });
 
+test('the quota is quoted to the model in the unit it was written in', () => {
+  // A budget in GB read back as four digits of MB is the same number and a
+  // worse sentence, so everything model-facing goes through one label.
+  assert.equal(constants.formatSizeLabel(10 * 1024), '10 GB');
+  assert.equal(constants.formatSizeLabel(1536), '1.5 GB');
+  assert.equal(constants.formatSizeLabel(512), '512 MB');
+  assert.equal(constants.WORKSPACE_QUOTA_LABEL, constants.formatSizeLabel(constants.WORKSPACE_QUOTA_MB));
+
+  const listed = listFiles({ path: 'workspace/' }, WORKSPACE_ID);
+  assert.match(listed.message, new RegExp(`holds up to ${constants.WORKSPACE_QUOTA_LABEL} `));
+});
+
 test('a workspace under quota reports ok', () => {
   const quota = checkRootQuota(WORKSPACE_ID, 'workspace');
   assert.equal(quota.ok, true);

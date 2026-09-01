@@ -23,7 +23,7 @@ const {
   PLATFORM_WA_DEDICATED,
   SHELL_TIMEOUT_DEFAULT_MS,
   SHELL_TIMEOUT_MAX_MS,
-  WORKSPACE_QUOTA_MB,
+  WORKSPACE_QUOTA_LABEL,
   WORKSPACE_TTL_LABEL
 } = constants;
 
@@ -277,7 +277,7 @@ function renderWorkspaceRuntimeDump() {
     '--- HOST CONTRACT ---',
     '- Reads (read_file / list_files / search_files) run in-process on the host.',
     '- Mutations (write_file / edit_file / shell) run via docker exec and take the per-workspace lock.',
-    `- Quota ${WORKSPACE_QUOTA_MB} MB, checked after every mutation; TTL ${WORKSPACE_TTL_LABEL} of inactivity.`,
+    `- Quota ${WORKSPACE_QUOTA_LABEL}, checked after every mutation; TTL ${WORKSPACE_TTL_LABEL} of inactivity.`,
     '- Package installs (pip/npm/apt) are disabled in the image.',
     '',
     '--- TOOL SCHEMAS ---',

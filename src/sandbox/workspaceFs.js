@@ -150,8 +150,8 @@ function checkRootQuota(workspaceId, root = ROOT.WORKSPACE) {
     usedBytes,
     quotaBytes,
     quotaMb,
-    message: `${toDisplayPath(root, '')} is over its ${quotaMb} MB quota `
-      + `(${Math.round(usedBytes / (1024 * 1024))} MB used). Delete files you no longer need before writing more.`
+    message: `${toDisplayPath(root, '')} is over its ${constants.formatSizeLabel(quotaMb)} quota `
+      + `(${constants.formatSizeLabel(usedBytes / (1024 * 1024))} used). Delete files you no longer need before writing more.`
   };
 }
 
@@ -185,7 +185,7 @@ function assertRootCapacity(workspaceId, incomingBytes, replacedBytes = 0, root 
     - Math.max(0, replacedBytes)
     + Math.max(0, incomingBytes);
   if (sizeAfter <= quotaMb * 1024 * 1024) return;
-  const err = new Error(`${toDisplayPath(root, '')} quota would be exceeded (${quotaMb} MB cap).`);
+  const err = new Error(`${toDisplayPath(root, '')} quota would be exceeded (${constants.formatSizeLabel(quotaMb)} cap).`);
   err.code = 'EQUOTA';
   throw err;
 }

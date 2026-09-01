@@ -77,7 +77,7 @@ function listFiles(args = {}, workspaceId, opts = {}) {
     notes.push('skills/ is the shared skill library, read-only. Run a skill\'s scripts where they are; '
       + 'write anything they produce into workspace/.');
   } else {
-    notes.push(`workspace/ holds up to ${constants.WORKSPACE_QUOTA_MB} MB and is wiped after `
+    notes.push(`workspace/ holds up to ${constants.WORKSPACE_QUOTA_LABEL} and is wiped after `
       + `${constants.WORKSPACE_TTL_LABEL} without activity in this chat.`);
   }
 

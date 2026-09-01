@@ -42,7 +42,7 @@ function killNote(rc) {
   }
   // SIGXFSZ, from the per-file ceiling every command runs under.
   if (rc === 153) {
-    return `Killed writing a single file past the ${constants.WORKSPACE_QUOTA_MB} MB per-file ceiling.`;
+    return `Killed writing a single file past the ${constants.WORKSPACE_QUOTA_LABEL} per-file ceiling.`;
   }
   return null;
 }

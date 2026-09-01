@@ -449,7 +449,7 @@ function _buildWorkspaceLines(skills) {
     + 'with `shell` into `workspace/`, then inspect it there.',
     'The same file can exist in `workspace/` and `attachments/` at once (you made it, you sent it, it came back in '
     + 'the chat). That is normal: work from whichever copy the user means.',
-    `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `
+    `Limits: ${constants.WORKSPACE_QUOTA_LABEL} in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `
     + 'without activity in this chat. Delete what you no longer need instead of filling it. '
     + 'Package installs are disabled; the toolchain in `shell` is fixed.',
     'Network access from `shell` goes through a public-only proxy. Private and local destinations are blocked. A 403 '

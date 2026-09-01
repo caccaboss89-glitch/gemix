@@ -41,6 +41,15 @@ function formatDurationLabel(ms) {
   return mins >= 60 ? `${Math.round(mins / 60)}h` : `${mins}m`;
 }
 
+const WORKSPACE_QUOTA_MB = 10 * 1024;
+
+/** Human-readable size for prompt and tool text (e.g. "10 GB", "1.5 GB", "512 MB"). */
+function formatSizeLabel(mb) {
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  const gb = mb / 1024;
+  return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+}
+
 export default {
   GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
 
@@ -124,12 +133,20 @@ export default {
   //   - WORKSPACE_TTL_MS: time after the user's last interaction before wipe.
   //   - WORKSPACE_QUOTA_MB: API writes are preflighted; sandbox writes are
   //     monitored continuously and individual files cannot exceed this size.
+  //     Sized against disk alone - it is unrelated to SANDBOX_MEMORY_MB, and
+  //     what read_file and edit_file pull into RAM has its own smaller caps.
+  //     The budget is per workspace and a workspace lives for WORKSPACE_TTL_MS
+  //     past its chat's last message, so the disk at risk is this number times
+  //     the chats active in that window, not times SANDBOX_MAX_CONTAINERS.
   //   - SHELL_TIMEOUT_*_MS: default and ceiling for one `shell` call.
   //   - WORKSPACE_LOCK_WAIT_MS: wait for the per-workspace mutation lock.
   WORKSPACE_TTL_MS,
   // Same TTL as prose, for the prompt and the tool descriptions that quote it.
   WORKSPACE_TTL_LABEL: formatDurationLabel(WORKSPACE_TTL_MS),
-  WORKSPACE_QUOTA_MB: 2048,
+  WORKSPACE_QUOTA_MB,
+  // Same budget as prose, for the same reason.
+  WORKSPACE_QUOTA_LABEL: formatSizeLabel(WORKSPACE_QUOTA_MB),
+  formatSizeLabel,
   /**
    * Largest file edit_file pulls into memory. Deliberately not the quota: the
    * quota bounds a directory on disk, this bounds a Buffer plus the string it
