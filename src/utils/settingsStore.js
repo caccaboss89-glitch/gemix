@@ -46,26 +46,30 @@ function _preferenceOptions(options = {}) {
 
 /**
  * Effort choices for per-chat preferences on the active main-brain profile.
- * ProviderProfile owns the ordered scale; the chat default is its highest
- * supported value. profile.defaultEffort remains the fallback for calls that
- * have no per-chat setting at all.
+ * ProviderProfile owns both the ordered scale and the effort a chat starts on,
+ * so profile.defaultEffort answers for the per-chat default and for a call with
+ * no setting at all. Everything above it stays selectable — it is simply not
+ * where a chat begins.
  * @returns {{ supportedEfforts: readonly string[], chatDefaultEffort: string }}
  */
 function activeEffortPolicy() {
-  const supportedEfforts = resolveProviderProfile().supportedEfforts;
+  const { supportedEfforts, defaultEffort } = resolveProviderProfile();
   if (!Array.isArray(supportedEfforts) || supportedEfforts.length === 0) {
     throw new Error('The active provider profile declares no reasoning efforts.');
   }
-  return {
-    supportedEfforts,
-    chatDefaultEffort: supportedEfforts[supportedEfforts.length - 1]
-  };
+  if (!supportedEfforts.includes(defaultEffort)) {
+    throw new Error(
+      `The active provider profile defaults to reasoning effort "${defaultEffort}", `
+      + `which is not on its scale (${supportedEfforts.join(', ')}).`
+    );
+  }
+  return { supportedEfforts, chatDefaultEffort: defaultEffort };
 }
 
 /**
  * Program defaults. The voice comes from .env (envConfig.TTS_VOICE) so the
- * deployment decides the starting voice; reasoning starts at the highest
- * effort the active provider supports.
+ * deployment decides the starting voice; reasoning starts at the effort the
+ * active provider profile declares as its default.
  * @returns {{ voice: string, effort: string, language: string, memory: string }}
  */
 function defaultSettings(options = {}) {

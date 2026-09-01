@@ -3,9 +3,9 @@
 // Shared mutation boundary for workspace tools: lock error normalization,
 // atomic text replacement inside the container, and quota-result shaping.
 
-import constants from '../../config/constants.js';
 import workspaceRuntime from '../../sandbox/workspaceRuntime.js';
-import { checkWorkspaceQuota } from '../../sandbox/workspaceFs.js';
+import { checkRootQuota } from '../../sandbox/workspaceFs.js';
+import { toContainerPath } from '../../sandbox/workspacePaths.js';
 import { withWorkspaceLock } from '../../utils/workspaceState.js';
 
 const ATOMIC_WRITE_SCRIPT = [
@@ -14,7 +14,7 @@ const ATOMIC_WRITE_SCRIPT = [
   'allowed_root="${2:-/workspace}"',
   'dir="$(dirname -- "$dest")"',
   'root_real="$(realpath -e -- "$allowed_root")"',
-  'case "$dest" in "$allowed_root"/*) ;; *) echo "destination is outside the workspace" >&2; exit 73 ;; esac',
+  'case "$dest" in "$allowed_root"/*) ;; *) echo "destination is outside $allowed_root" >&2; exit 73 ;; esac',
   'check_parent() {',
   '  relative="${dir#"$allowed_root"}"',
   '  old_ifs="$IFS"; IFS="/"; set -- $relative; IFS="$old_ifs"',
@@ -25,7 +25,7 @@ const ATOMIC_WRITE_SCRIPT = [
   '    if [ -L "$current" ]; then echo "symbolic-link parent refused: $current" >&2; exit 73; fi',
   '  done',
   '  parent_real="$(realpath -m -- "$dir")"',
-  '  case "$parent_real" in "$root_real"|"$root_real"/*) ;; *) echo "parent resolves outside the workspace" >&2; exit 73 ;; esac',
+  '  case "$parent_real" in "$root_real"|"$root_real"/*) ;; *) echo "parent resolves outside $allowed_root" >&2; exit 73 ;; esac',
   '}',
   'check_parent',
   'mkdir -p -- "$dir"',
@@ -60,8 +60,12 @@ async function runWorkspaceMutation(workspaceId, opts = {}, fn) {
  * @param {string} content
  */
 async function commitWorkspaceText(workspaceId, resolved, content) {
+  // The allowed root is the one the path resolved into, so a write into the
+  // skill library is contained by `/skills` exactly as a workspace write is
+  // contained by `/workspace`.
+  const allowedRoot = toContainerPath(resolved.root, '');
   const run = await workspaceRuntime.execInWorkspace(workspaceId, {
-    command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', resolved.containerPath, '/workspace'],
+    command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', resolved.containerPath, allowedRoot],
     input: content
   });
   if (run.rc !== 0) {
@@ -73,14 +77,14 @@ async function commitWorkspaceText(workspaceId, resolved, content) {
   return {
     success: true,
     bytes: Buffer.byteLength(content, 'utf-8'),
-    quota: checkWorkspaceQuota(workspaceId)
+    quota: checkRootQuota(workspaceId, resolved.root)
   };
 }
 
 function quotaResultFields(quota) {
   return quota.ok
     ? {}
-    : { quota_exceeded: true, quota_mb: constants.WORKSPACE_QUOTA_MB };
+    : { quota_exceeded: true, quota_mb: quota.quotaMb };
 }
 
 export {

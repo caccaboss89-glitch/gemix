@@ -20,7 +20,8 @@ import { editFile } from '../src/tools/workspace/editFile.js';
 import { ATOMIC_WRITE_SCRIPT } from '../src/tools/workspace/mutation.js';
 import { shell } from '../src/tools/workspace/shell.js';
 import {
-  checkWorkspaceQuota,
+  checkRootQuota,
+  rootQuotaMb,
   ensureWorkspaceWritable
 } from '../src/sandbox/workspaceFs.js';
 import { listAgentDirectory } from '../src/sandbox/hostFileGateway.js';
@@ -494,10 +495,21 @@ test('the exec environment carries no credential', () => {
 });
 
 test('a workspace under quota reports ok', () => {
-  const quota = checkWorkspaceQuota(WORKSPACE_ID);
+  const quota = checkRootQuota(WORKSPACE_ID, 'workspace');
   assert.equal(quota.ok, true);
   assert.equal(quota.quotaBytes, constants.WORKSPACE_QUOTA_MB * 1024 * 1024);
   assert.ok(quota.usedBytes > 0);
+});
+
+test('each writable root is accounted against its own quota', () => {
+  assert.equal(rootQuotaMb('workspace'), constants.WORKSPACE_QUOTA_MB);
+  assert.equal(rootQuotaMb('skills'), constants.SKILLS_QUOTA_MB);
+  // The read-only mount has nothing to account: writes never reach it.
+  assert.throws(() => rootQuotaMb('attachments'), /No quota is defined/);
+
+  const skills = checkRootQuota(WORKSPACE_ID, 'skills');
+  assert.equal(skills.root, 'skills');
+  assert.equal(skills.quotaBytes, constants.SKILLS_QUOTA_MB * 1024 * 1024);
 });
 
 test('descriptor-safe listing skips symlinks so a planted link cannot widen it', () => {

@@ -19,6 +19,11 @@
 //   (e.g. "you can no longer call tools, answer with what you have"). Always
 //   program-authored, never shown to the user.
 //
+// <new-messages> — messages that reached this chat while the turn was already
+//   running (see utils/liveInbox.js). Written by real people, delivered by the
+//   program as a note rather than as a second request, and shown once: the same
+//   messages come back as ordinary user turns in the next turn's history.
+//
 // <user_query> — the one item here that IS the human: the request being
 //   answered this turn, marked so it cannot be confused with the history
 //   replayed above it. The prompt names this tag as the goal of the turn.
@@ -27,6 +32,7 @@
 
 const SYSTEM_NOTIFICATION_TAG = 'system-notification';
 const SYSTEM_REMINDER_TAG = 'system-reminder';
+const NEW_MESSAGES_TAG = 'new-messages';
 const USER_QUERY_TAG = 'user_query';
 
 /**
@@ -45,6 +51,15 @@ function wrapSystemNotification(text) {
  */
 function wrapSystemReminder(text) {
   return `<${SYSTEM_REMINDER_TAG}>${text}</${SYSTEM_REMINDER_TAG}>`;
+}
+
+/**
+ * Wrap the messages that arrived mid-turn, one per line.
+ * @param {string[]} lines - already formatted by utils/liveInbox.js
+ * @returns {string}
+ */
+function wrapNewMessages(lines) {
+  return `<${NEW_MESSAGES_TAG}>\n${lines.join('\n')}\n</${NEW_MESSAGES_TAG}>`;
 }
 
 /**
@@ -82,6 +97,7 @@ function wrapUserQuery(content) {
 }
 
 export {
+  wrapNewMessages,
   wrapSystemNotification,
   wrapSystemReminder,
   wrapUserQuery

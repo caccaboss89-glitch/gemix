@@ -39,8 +39,32 @@ function _readRaw() {
   }
 }
 
+/** Retries for a rename another reader is briefly blocking, and the pause between them. */
+const RENAME_ATTEMPTS = 5;
+const RENAME_BACKOFF_MS = 20;
+
+/**
+ * Replace the state file with the temp one, retrying while something else holds
+ * the destination open. On Windows a rename over a file another process is
+ * reading fails with EPERM/EBUSY, and every reader here holds it only for the
+ * length of one readFileSync — so a short pause is enough.
+ */
+function _renameOverState(tempFile) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(tempFile, STATE_FILE);
+      return;
+    } catch (err) {
+      const contended = err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'EACCES';
+      if (!contended || attempt >= RENAME_ATTEMPTS) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, RENAME_BACKOFF_MS);
+    }
+  }
+}
+
 function _writeRaw(state) {
-  const tempFile = STATE_FILE + '.tmp';
+  // One temp file per process: two writers must never share the staging path.
+  const tempFile = `${STATE_FILE}.${process.pid}.tmp`;
   try {
     if (!fs.existsSync(constants.DATA_DIR)) fs.mkdirSync(constants.DATA_DIR, { recursive: true });
 
@@ -48,7 +72,7 @@ function _writeRaw(state) {
     fs.writeFileSync(tempFile, JSON.stringify(state, null, 2), 'utf-8');
 
     // Rename to the actual file (atomic operation on most filesystems)
-    fs.renameSync(tempFile, STATE_FILE);
+    _renameOverState(tempFile);
 
     return true;
   } catch (err) {

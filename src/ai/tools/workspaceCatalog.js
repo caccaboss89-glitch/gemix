@@ -7,11 +7,11 @@ import { makeTool } from './schema.js';
 
 const WORKSPACE_PATH_HINT =
   'Path in the shared namespace: "workspace/<file>" for your own files, "attachments/<file>" for files '
-  + 'from this chat. A path with no prefix is read as workspace/.';
+  + 'from this chat, "skills/<name>/<file>" for the skill library. A path with no prefix is read as workspace/.';
 
 const TOOL_LIST_FILES = makeTool({
   name: 'list_files',
-  description: 'List what is in your workspace or in the files attached to this chat. Call it before assuming a file is or is not there.',
+  description: 'List what is in your workspace, in the files attached to this chat, or in the skill library. Call it before assuming a file is or is not there.',
   properties: {
     path: { type: 'string', description: `Directory to list, default "workspace/". ${WORKSPACE_PATH_HINT}` },
     recursive: { type: 'boolean', description: 'Descend into sub-directories. Default false: only the entries directly inside it.' }
@@ -56,11 +56,11 @@ const TOOL_READ_FILE = makeTool({
 
 const TOOL_WRITE_FILE = makeTool({
   name: 'write_file',
-  description: 'Create a file, or overwrite one completely. Only inside workspace/. '
+  description: 'Create a file, or overwrite one completely, under workspace/ or skills/. '
     + 'To change part of an existing file use edit_file instead — this replaces the whole content. '
     + 'To change a file from attachments/, copy it into workspace/ with shell first.',
   properties: {
-    path: { type: 'string', minLength: 1, description: 'Destination under workspace/. Parent directories are created for you.' },
+    path: { type: 'string', minLength: 1, description: 'Destination under workspace/ or skills/. Parent directories are created for you.' },
     content: { type: 'string', description: 'Full new content of the file.' }
   },
   required: ['path', 'content']
@@ -68,11 +68,11 @@ const TOOL_WRITE_FILE = makeTool({
 
 const TOOL_EDIT_FILE = makeTool({
   name: 'edit_file',
-  description: 'Replace an exact piece of text in an existing workspace file. '
+  description: 'Replace an exact piece of text in an existing file under workspace/ or skills/. '
     + 'oldText must appear exactly once: copy it verbatim from read_file, whitespace included, and add '
     + 'surrounding lines until it is unique. Set replaceAll to change every occurrence instead.',
   properties: {
-    path: { type: 'string', minLength: 1, description: 'File under workspace/.' },
+    path: { type: 'string', minLength: 1, description: 'File under workspace/ or skills/.' },
     oldText: { type: 'string', minLength: 1, description: 'Exact text to replace, copied verbatim from the file.' },
     newText: { type: 'string', description: 'Replacement text. Empty string deletes the matched text.' },
     replaceAll: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match.' }
@@ -101,7 +101,7 @@ function buildShellTool() {
       command: {
         type: 'string',
         minLength: 1,
-        description: 'Bash command line. Without workingDir it runs at `/`, so workspace/<path> and attachments/<path> work exactly as shown by the file tools. If workingDir is set, relative operands start there; `/workspace/<path>` and `/attachments/<path>` remain root-stable.'
+        description: 'Bash command line. Without workingDir it runs at `/`, so workspace/<path>, attachments/<path> and skills/<path> work exactly as shown by the file tools. If workingDir is set, relative operands start there; the absolute `/workspace/<path>`, `/attachments/<path>` and `/skills/<path>` remain root-stable.'
       },
       timeoutSeconds: {
         type: 'integer',
@@ -111,7 +111,7 @@ function buildShellTool() {
       },
       workingDir: {
         type: 'string',
-        description: `Optional command working directory. Omit it to use displayed namespace paths unchanged. When set, command-relative paths start in this directory; use absolute /workspace/... or /attachments/... when you still need a namespace-root path. ${WORKSPACE_PATH_HINT}`
+        description: `Optional command working directory. Omit it to use displayed namespace paths unchanged. When set, command-relative paths start in this directory; use an absolute /workspace/..., /attachments/... or /skills/... when you still need a namespace-root path. ${WORKSPACE_PATH_HINT}`
       }
     },
     required: ['command']

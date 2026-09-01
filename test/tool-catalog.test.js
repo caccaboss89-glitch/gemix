@@ -158,5 +158,5 @@ test('workspace tools document line-cap recovery and shell working-directory pat
   assert.match(readFile.description, /byte-slice it with shell/);
   assert.match(shell.parameters.properties.command.description, /Without workingDir it runs at `\/`/);
   assert.match(shell.parameters.properties.command.description, /relative operands start there/);
-  assert.match(shell.parameters.properties.workingDir.description, /use absolute \/workspace/);
+  assert.match(shell.parameters.properties.workingDir.description, /use an absolute \/workspace/);
 });

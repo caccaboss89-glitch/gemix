@@ -4,7 +4,7 @@
 // wrappers, and results are plain objects the dispatcher serializes into the
 // fixed `{ success, message?, error?, ... }` envelope.
 //
-// `list_files`: what is in `workspace/` or `attachments/` right now.
+// `list_files`: what is in `workspace/`, `attachments/` or `skills/` right now.
 //
 import constants from '../../config/constants.js';
 import { listAgentDirectory, statAgentFile } from '../../sandbox/hostFileGateway.js';
@@ -72,6 +72,8 @@ function listFiles(args = {}, workspaceId) {
   }
   if (resolved.root === ROOT.ATTACHMENTS) {
     notes.push('attachments/ is read-only. Copy a file into workspace/ before changing it.');
+  } else if (resolved.root === ROOT.SKILLS) {
+    notes.push(`skills/ is the shared skill library: writable, never wiped, up to ${constants.SKILLS_QUOTA_MB} MB.`);
   } else {
     notes.push(`workspace/ holds up to ${constants.WORKSPACE_QUOTA_MB} MB and is wiped after `
       + `${constants.WORKSPACE_TTL_LABEL} without activity in this chat.`);

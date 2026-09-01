@@ -4,10 +4,20 @@ import os
 import tempfile
 import unittest
 
-from quota_guard import _should_kill_jobs, _tree_size
+from quota_guard import _parse_roots, _should_kill_jobs, _tree_size
 
 
 class QuotaGuardTests(unittest.TestCase):
+    def test_roots_parse_as_absolute_path_and_positive_limit_pairs(self) -> None:
+        self.assertEqual(
+            _parse_roots(["/workspace=10", "/skills=5"]),
+            [("/workspace", 10), ("/skills", 5)],
+        )
+
+    def test_malformed_or_missing_roots_are_refused(self) -> None:
+        for args in ([], ["/workspace"], ["workspace=10"], ["/workspace=0"], ["/workspace=x"]):
+            self.assertIsNone(_parse_roots(args), args)
+
     def test_overflow_kills_on_entry_and_on_further_growth(self) -> None:
         self.assertTrue(_should_kill_jobs(11, 10, 0, False))
         self.assertFalse(_should_kill_jobs(11, 10, 11, True))

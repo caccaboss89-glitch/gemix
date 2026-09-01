@@ -1,6 +1,7 @@
 // Shared batch→history→handleMessage→deliver sequence for all platforms.
 
 import responseLock from './responseLock.js';
+import { clearLiveMessages } from './liveInbox.js';
 import { pickLatestBatchEntry, filterBatchToTriggerSpeaker } from './batchContext.js';
 import constants from '../config/constants.js';
 import { handleMessage } from '../handler.js';
@@ -93,11 +94,16 @@ async function runTurnPipeline(opts) {
     activeStopRenew = _ensurePipelineLock(lockKey, activeStopRenew);
     if (!activeStopRenew) {
       try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
-      // Intentional: while a turn is in flight, new messages are discarded (not queued).
+      // Another turn holds this chat: its own messages reached it through the
+      // live inbox, and this batch is not queued behind it.
       log.warn(`   Batch discarded for ${discardLogLabel}: GemiX is already responding (not queued)`);
       return;
     }
     pipelineOwnsLock = true;
+    // The turn starts here: anything the inbox still holds predates it and is
+    // already in the history about to be loaded. From now on what lands there
+    // is genuinely new, and the agent loop shows it between rounds.
+    clearLiveMessages(lockKey);
 
     // Runs before anything reads the chat or fetches media, so a turn it answers
     // costs no history rebuild and no attachment download.
@@ -124,6 +130,7 @@ async function runTurnPipeline(opts) {
       entries, history, historyLoadIncomplete, latest, first, session
     });
     if (ctx && typeof ctx.then === 'function') ctx = await ctx;
+    if (ctx) ctx.liveInboxKey = lockKey;
     const response = await handleMessage(ctx);
 
     await deliverTurn(ctx, response);
@@ -134,6 +141,9 @@ async function runTurnPipeline(opts) {
     } catch { }
     if (pipelineOwnsLock) {
       try { responseLock.unlock(lockKey); } catch { }
+      // Whatever arrived too late for this turn to read is left to the history:
+      // it comes back as an ordinary user turn, so it must not be shown twice.
+      clearLiveMessages(lockKey);
     }
     try {
       if (session && typeof session.stop === 'function') await session.stop();

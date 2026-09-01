@@ -1,9 +1,12 @@
-"""Keep a sandbox workspace within its aggregate byte budget.
+"""Keep each writable sandbox root within its aggregate byte budget.
 
 This process is PID 1 in each workspace container. It watches the bind-mounted
-tree for writes made by foreground or background commands and kills sandbox
-processes when the tree crosses the configured limit. Once the user removes
-enough data, monitoring arms again.
+trees for writes made by foreground or background commands and kills sandbox
+processes when one of them crosses its configured limit. Once the user removes
+enough data, monitoring arms again for that root.
+
+Roots are given as `<path>=<bytes>` arguments, one per writable mount, e.g.
+`/workspace=2147483648 /skills=104857600`.
 """
 
 from __future__ import annotations
@@ -14,7 +17,6 @@ import sys
 import time
 
 
-WORKSPACE = "/workspace"
 POLL_SECONDS = 0.1
 
 
@@ -64,35 +66,53 @@ def _reap_children(_signum: int, _frame: object) -> None:
             return
 
 
+def _parse_roots(args: list[str]) -> list[tuple[str, int]] | None:
+    """Turn `<path>=<bytes>` arguments into pairs, or None if any is malformed."""
+    roots: list[tuple[str, int]] = []
+    for raw in args:
+        path, separator, limit = raw.partition("=")
+        if not separator or not path.startswith("/"):
+            return None
+        try:
+            value = int(limit)
+        except ValueError:
+            return None
+        if value <= 0:
+            return None
+        roots.append((path, value))
+    return roots or None
+
+
 def _should_kill_jobs(size: int, limit: int, previous_size: int, was_over: bool) -> bool:
     """Stop the crossing writer, including the first command after an old overflow."""
     return size > limit and (not was_over or size > previous_size)
 
 
 def main() -> int:
-    try:
-        limit = int(sys.argv[1])
-    except (IndexError, ValueError):
-        print("quota_guard: byte limit argument required", file=sys.stderr, flush=True)
-        return 2
-    if limit <= 0:
-        print("quota_guard: byte limit must be positive", file=sys.stderr, flush=True)
+    roots = _parse_roots(sys.argv[1:])
+    if roots is None:
+        print(
+            "quota_guard: at least one <absolute-path>=<positive-byte-limit> argument required",
+            file=sys.stderr,
+            flush=True,
+        )
         return 2
 
     signal.signal(signal.SIGCHLD, _reap_children)
-    over_limit = False
-    previous_size = 0
+    over_limit = {path: False for path, _ in roots}
+    previous_size = {path: 0 for path, _ in roots}
     while True:
-        size = _tree_size(WORKSPACE)
-        if _should_kill_jobs(size, limit, previous_size, over_limit):
-            print(
-                f"quota_guard: workspace crossed limit ({size} > {limit}); killing sandbox jobs",
-                file=sys.stderr,
-                flush=True,
-            )
-            _kill_sandbox_processes()
-        over_limit = size > limit
-        previous_size = size
+        for path, limit in roots:
+            size = _tree_size(path)
+            if _should_kill_jobs(size, limit, previous_size[path], over_limit[path]):
+                print(
+                    f"quota_guard: {path} crossed limit ({size} > {limit}); killing sandbox jobs",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                _kill_sandbox_processes()
+            over_limit[path] = size > limit
+            previous_size[path] = size
         time.sleep(POLL_SECONDS)
 
 

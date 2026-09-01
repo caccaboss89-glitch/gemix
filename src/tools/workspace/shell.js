@@ -19,7 +19,7 @@
 
 import constants from '../../config/constants.js';
 import workspaceRuntime from '../../sandbox/workspaceRuntime.js';
-import { checkWorkspaceQuota } from '../../sandbox/workspaceFs.js';
+import { checkWritableQuotas } from '../../sandbox/workspaceFs.js';
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { callTimeoutWithin } from '../../utils/turnBudget.js';
 import { quotaResultFields, runWorkspaceMutation } from './mutation.js';
@@ -67,7 +67,7 @@ async function shell(args = {}, workspaceId, opts = {}) {
     const notes = [];
     if (run.timedOut) notes.push(`Killed after ${cappedSec}s. Background long work with nohup and poll it in a later call.`);
     if (run.truncated) notes.push('Output was truncated; only the tail is shown.');
-    const quota = checkWorkspaceQuota(workspaceId);
+    const quota = checkWritableQuotas(workspaceId);
     if (!quota.ok) notes.push(quota.message);
     const commandSucceeded = run.rc === 0 && !run.timedOut;
 

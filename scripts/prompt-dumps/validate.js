@@ -19,6 +19,7 @@ import {
   customizedFields,
   defaultSettings
 } from '../../src/utils/settingsStore.js';
+import { listInstalledSkills } from '../../src/sandbox/skillsLibrary.js';
 import { CASES } from './cases.js';
 
 const { PLATFORM_DISCORD } = constants;
@@ -195,10 +196,11 @@ function _validateStaticShape(staticPart, prompt, caseId) {
   if (!opening.includes('<user_query>')) {
     ISSUES.push({ caseId, msg: 'opening must point at the <user_query> tag as the goal' });
   }
-  // Only program data may open a line with a tag; instructions are prose.
+  // Only program data may open a line with a tag; instructions are prose. The
+  // skill index spans several lines, so its closing tag opens one too.
   for (const line of staticPart.split('\n')) {
     if (!line.startsWith('<')) continue;
-    if (/^<(ActiveMembers|Statute)>/.test(line)) continue;
+    if (/^<\/?(ActiveMembers|Statute|Skills)>/.test(line)) continue;
     ISSUES.push({ caseId, msg: `static instruction rendered as XML: ${line.slice(0, 48)}` });
     break;
   }
@@ -521,6 +523,42 @@ function _validateWorkspaceGuidance(staticPart, caseId) {
 }
 
 /**
+ * The skill library, as the prompt advertises it. Only the frontmatter belongs
+ * here — the procedure is in the SKILL.md the model opens — so the section is
+ * checked against the live library rather than against fixed text.
+ */
+function _validateSkills(staticPart, caseId) {
+  const skills = _promptSection(staticPart, 'Skills');
+  const installed = listInstalledSkills();
+  if (!skills) {
+    if (installed.length > 0) {
+      ISSUES.push({ caseId, msg: 'skill library is installed but the prompt carries no Skills section' });
+    }
+    return;
+  }
+  for (const skill of installed) {
+    if (!skills.includes(`<Skill name="${skill.name}" path="${skill.path}">`)) {
+      ISSUES.push({ caseId, msg: `Skills section missing "${skill.name}"` });
+    }
+  }
+  const advertised = (skills.match(/<Skill /g) || []).length;
+  if (advertised !== installed.length) {
+    ISSUES.push({ caseId, msg: `Skills section lists ${advertised} skills, library holds ${installed.length}` });
+  }
+  // The section is an index. A procedure written into it would be paid for on
+  // every turn of every chat, which is the cost the library exists to avoid.
+  if (!/read its SKILL.md/.test(skills)) {
+    ISSUES.push({ caseId, msg: 'Skills section must send the model to the SKILL.md before acting' });
+  }
+  if (/```|^\d+\. /m.test(skills)) {
+    ISSUES.push({ caseId, msg: 'Skills section carries procedure steps that belong in a SKILL.md' });
+  }
+  if (!/never mention them/.test(skills)) {
+    ISSUES.push({ caseId, msg: 'Skills section must keep the library out of the answers' });
+  }
+}
+
+/**
  * Media generation quota line: shown to non-admin callers for exactly the
  * generation tools available in this case, grouped by the period each resets on.
  */
@@ -651,6 +689,7 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
   _validateVisibility(staticPart, caseId);
   _validateThisChat(staticPart, id, caseId);
   _validateWorkspaceGuidance(staticPart, caseId);
+  _validateSkills(staticPart, caseId);
   _validateQuotaLine(dynamicPart, id, caseId);
   _validateSettingsBlocks(dynamicPart, prompt, id, caseId);
   validateNoImplLeaks(prompt, caseId, 'system prompt');

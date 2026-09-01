@@ -2,38 +2,52 @@
 //
 // The single path namespace every tool and the structured reply share.
 //
-// The model sees exactly two roots and nothing else:
+// The model sees exactly three roots and nothing else:
 //
 //   workspace/     its own writable area          -> /workspace in the container
 //   attachments/   this conversation's files      -> /attachments, read-only
+//   skills/        the shared skill library       -> /skills in the container
 //
 // One path shape means a file named by `write_file` is the same string the
 // model passes to `read_file`, to `send_email`, and to `attachments[]` in the
 // final reply. Nothing here resolves a bare basename against a directory
 // listing: a path either names a real file or it does not.
 //
-// A path with no root prefix is read as `workspace/`, because that is the only
-// place the model can create anything. Everything else — `..`, null bytes,
-// absolute host paths, a symlink pointing out of the tree — is refused.
+// `workspace/` and `attachments/` belong to one conversation; `skills/` is the
+// same directory for every chat on the deployment, which is why its resolver
+// ignores the workspace id.
+//
+// A path with no root prefix is read as `workspace/`, because that is where the
+// model creates things unless it says otherwise. Everything else — `..`, null
+// bytes, absolute host paths, a symlink pointing out of the tree — is refused.
 
 import fs from 'fs';
 import path from 'path';
+import constants from '../config/constants.js';
 import { getAttachmentsPath, getWorkspacePath } from '../utils/workspaceId.js';
 
-/** The two roots of the namespace. Their names are also the container mounts. */
+/** The three roots of the namespace. Their names are also the container mounts. */
 const ROOT = Object.freeze({
   WORKSPACE: 'workspace',
-  ATTACHMENTS: 'attachments'
+  ATTACHMENTS: 'attachments',
+  SKILLS: 'skills'
 });
 
 const HOST_ROOT_RESOLVER = Object.freeze({
   [ROOT.WORKSPACE]: getWorkspacePath,
-  [ROOT.ATTACHMENTS]: getAttachmentsPath
+  [ROOT.ATTACHMENTS]: getAttachmentsPath,
+  [ROOT.SKILLS]: () => constants.SKILLS_DIR
 });
 
-/** Only `workspace/` accepts writes; `/attachments` is mounted read-only. */
+/** Every root the model may create, change and delete files in. */
+const WRITABLE_ROOTS = Object.freeze([ROOT.WORKSPACE, ROOT.SKILLS]);
+
+/** Lowercased root names, for deciding whether a first segment names a root. */
+const ROOT_NAMES = new Set(Object.values(ROOT));
+
+/** `/attachments` is the one read-only mount; the other two accept writes. */
 function isWritableRoot(root) {
-  return root === ROOT.WORKSPACE;
+  return WRITABLE_ROOTS.includes(root);
 }
 
 /**
@@ -69,12 +83,12 @@ function parseAgentPath(raw) {
   if (segments.some(seg => seg === '..')) return null;
 
   const first = segments[0].toLowerCase();
-  const named = first === ROOT.WORKSPACE || first === ROOT.ATTACHMENTS;
+  const named = ROOT_NAMES.has(first);
   // `/etc/passwd` is an attempt at a host path, not a relative workspace file:
-  // a leading slash only means something when it names one of the two roots.
+  // a leading slash only means something when it names one of the roots.
   if (wasAbsolute && !named) return null;
 
-  const root = first === ROOT.ATTACHMENTS ? ROOT.ATTACHMENTS : ROOT.WORKSPACE;
+  const root = named ? first : ROOT.WORKSPACE;
   // A rootless path belongs to the workspace, so only strip a prefix we matched.
   const rest = named ? segments.slice(1) : segments;
   const relPath = rest.join('/');
@@ -198,13 +212,15 @@ function resolveAgentPath(workspaceId, raw, opts = {}) {
 function invalidPathError(raw) {
   return {
     success: false,
-    error: `Invalid path ${JSON.stringify(String(raw ?? ''))}. Use "workspace/<file>" for your own files `
-      + 'or "attachments/<file>" for this conversation\'s files. Parent traversal and host paths are refused.'
+    error: `Invalid path ${JSON.stringify(String(raw ?? ''))}. Use "workspace/<file>" for your own files, `
+      + '"attachments/<file>" for this conversation\'s files, or "skills/<name>/<file>" for the skill library. '
+      + 'Parent traversal and host paths are refused.'
   };
 }
 
 export {
   ROOT,
+  WRITABLE_ROOTS,
   parseAgentPath,
   resolveAgentPath,
   hostRoot,

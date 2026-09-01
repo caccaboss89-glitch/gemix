@@ -16,7 +16,7 @@
 
 import constants from '../../config/constants.js';
 import { readAgentFileBuffer } from '../../sandbox/hostFileGateway.js';
-import { assertWorkspaceCapacity } from '../../sandbox/workspaceFs.js';
+import { assertRootCapacity } from '../../sandbox/workspaceFs.js';
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { isProbablyText } from './textFiles.js';
 import {
@@ -111,7 +111,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
       : before.replace(args.oldText, args.newText);
 
     try {
-      assertWorkspaceCapacity(workspaceId, Buffer.byteLength(after, 'utf-8'), buffer.length);
+      assertRootCapacity(workspaceId, Buffer.byteLength(after, 'utf-8'), buffer.length, lockedResolved.root);
     } catch (err) {
       if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };
       throw err;

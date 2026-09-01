@@ -55,6 +55,11 @@ export default {
 
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
+  // The skill library: one directory for the whole deployment, versioned with
+  // the code rather than per conversation, mounted read-write in every sandbox
+  // (see sandbox/skillsLibrary.js). It survives the workspace TTL on purpose —
+  // a skill is a procedure GemiX keeps, not a file it produced for one chat.
+  SKILLS_DIR: path.join(__dirname, '..', '..', 'skills'),
   MAX_HISTORY: 30,
   // Images are the only file type that reaches the model natively, and only
   // from the message being answered or the one it replies to. Past that cap the
@@ -125,6 +130,13 @@ export default {
   // Same TTL as prose, for the prompt and the tool descriptions that quote it.
   WORKSPACE_TTL_LABEL: formatDurationLabel(WORKSPACE_TTL_MS),
   WORKSPACE_QUOTA_MB: 2048,
+  /**
+   * Cap on the whole skill library, enforced the same two ways as the workspace
+   * one. Deliberately small: a skill is instructions plus the scripts and
+   * references they need, and the library is shared by every conversation, so a
+   * chat that wants room for data has `workspace/` for that.
+   */
+  SKILLS_QUOTA_MB: 100,
   /**
    * Largest file edit_file pulls into memory. Deliberately not the quota: the
    * quota bounds a directory on disk, this bounds a Buffer plus the string it

@@ -13,6 +13,7 @@
 //
 //   /workspace     rw   host build_workspace dir for this workspaceId
 //   /attachments   ro   host projection of this conversation's files
+//   /skills        rw   the deployment's shared skill library
 //
 // Nothing else is mounted and no credential is passed in. The container runs
 // GemiX's own tools and whatever the model asks for, so it gets no bearer, no
@@ -34,6 +35,7 @@ import envConfig from '../config/env.js';
 import { workspaceIdToSlug } from '../utils/workspaceId.js';
 import {
   ensureAttachmentsDir,
+  ensureSkillsDir,
   ensureWorkspace,
   ensureWorkspaceWritable,
   sandboxUserString
@@ -48,6 +50,7 @@ const PROXY_HOSTNAME = envConfig.GEMIX_SANDBOX_PROXY_HOST;
 const PROXY_PORT = envConfig.GEMIX_SANDBOX_PROXY_PORT;
 const PROXY_URL = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
 const WORKSPACE_QUOTA_BYTES = constants.WORKSPACE_QUOTA_MB * 1024 * 1024;
+const SKILLS_QUOTA_BYTES = constants.SKILLS_QUOTA_MB * 1024 * 1024;
 
 /**
  * Map<workspaceId, Promise<WorkspaceContainerEntry>>.
@@ -158,6 +161,8 @@ async function _spawnContainer(workspaceId) {
   // root has to exist even before anything is projected into it.
   const attachmentsDir = ensureAttachmentsDir(workspaceId);
   if (!attachmentsDir) throw new Error('Cannot ensure attachments directory');
+  const skillsDir = ensureSkillsDir();
+  if (!skillsDir) throw new Error('Cannot ensure skills directory');
   ensureWorkspaceWritable(workspaceId);
 
   const nonce = crypto.randomBytes(3).toString('hex');
@@ -169,7 +174,8 @@ async function _spawnContainer(workspaceId) {
 
   const binds = [
     `${workspaceDir}:/workspace:rw`,
-    `${attachmentsDir}:/attachments:ro`
+    `${attachmentsDir}:/attachments:ro`,
+    `${skillsDir}:/skills:rw`
   ];
 
   const hostConfig = {
@@ -192,7 +198,12 @@ async function _spawnContainer(workspaceId) {
     Image: SANDBOX_IMAGE,
     Hostname: 'workspace',
     Entrypoint: [],
-    Cmd: ['python', '/opt/sandbox/quota_guard.py', String(WORKSPACE_QUOTA_BYTES)],
+    Cmd: [
+      'python',
+      '/opt/sandbox/quota_guard.py',
+      `/workspace=${WORKSPACE_QUOTA_BYTES}`,
+      `/skills=${SKILLS_QUOTA_BYTES}`
+    ],
     User: sandboxUserString(),
     Env: containerEnv(),
     HostConfig: hostConfig,

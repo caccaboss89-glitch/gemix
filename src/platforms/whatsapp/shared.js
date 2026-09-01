@@ -572,6 +572,29 @@ async function buildIncomingContentPartsFromMessages(
 }
 
 /** True when the message should enter the batch pipeline (incl. quote-only, like Discord). */
+/**
+ * One WhatsApp message reduced to the fields utils/liveInbox.js holds, for a
+ * message that arrived while the chat's turn was already running.
+ *
+ * Deliberately synchronous and shallow: mentions stay as raw ids and media is
+ * only flagged, because this is a note handed to a turn in flight, not the
+ * history item. The same message is rebuilt in full — mentions resolved, media
+ * ingested — when it comes back through buildWhatsAppHistory next turn.
+ *
+ * @param {object} msg - whatsapp-web.js Message
+ * @param {string} userName - sender label, already resolved by the caller
+ * @returns {{ userName: string, text: string, timestampMs: number, hasMedia: boolean }}
+ */
+function describeWaLiveMessage(msg, userName) {
+  const text = cleanIncomingText(msg?.body || '');
+  return {
+    userName,
+    text: specialMessageText(msg, text) ?? text,
+    timestampMs: Number(msg?.timestamp) * 1000,
+    hasMedia: Boolean(msg?.hasMedia)
+  };
+}
+
 function waMessageHasUsableContent(msg) {
   if (!msg) return false;
   if (msg.hasMedia) return true;
@@ -585,6 +608,7 @@ function waMessageHasUsableContent(msg) {
 export {
   buildWhatsAppHistory,
   buildIncomingContentPartsFromMessages,
+  describeWaLiveMessage,
   fetchWhatsAppMessageWindow,
   sendWhatsAppResponse,
   getRecentWhatsAppMessageIds,

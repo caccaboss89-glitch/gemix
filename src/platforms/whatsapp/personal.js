@@ -8,6 +8,7 @@
 
 import {
   buildWhatsAppHistory,
+  describeWaLiveMessage,
   fetchWhatsAppMessageWindow,
   sendWhatsAppResponse,
   _waMessageKey,
@@ -142,7 +143,8 @@ async function onPersonalMessage(msg) {
     entry: { msg, chat, userName, phoneJid, userIdentity, messageKey },
     handler: _handlePersonalBatch,
     log,
-    discardLogLabel: chat.id._serialized
+    discardLogLabel: chat.id._serialized,
+    describeLiveMessage: () => describeWaLiveMessage(msg, userName)
   });
   if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);

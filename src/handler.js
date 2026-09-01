@@ -67,7 +67,8 @@ import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { providerFailureReply } from './ai/providers/errorPolicy.js';
 import { notifyAdminDetailed, withAdminNotificationPolicy } from './utils/adminNotifier.js';
 import { clearCallNotifications  } from './utils/notificationDedup.js';
-import { wrapSystemReminder  } from './utils/systemTags.js';
+import { wrapNewMessages, wrapSystemReminder  } from './utils/systemTags.js';
+import { drainLiveMessages, renderLiveMessages } from './utils/liveInbox.js';
 import { systemReply, textReply  } from './utils/replyEnvelope.js';
 
 const log = createLogger('Handler');
@@ -220,6 +221,24 @@ async function _handleMessage(ctx) {
       contactedEmail: new Set()
     };
 
+    /**
+     * Hand the model whatever reached this chat since the last round.
+     *
+     * A message that arrives while a turn is running does not start a second
+     * one (see utils/batchIngress.js); it is held per chat and shown here, so a
+     * long turn can still take in the correction the user forgot or someone
+     * else's reply instead of finishing on a request that has moved on. It is a
+     * note, not the request: the same message returns as an ordinary user turn
+     * in the next turn's history, which is why it is shown exactly once.
+     */
+    const showNewMessages = () => {
+      const drained = drainLiveMessages(ctx?.liveInboxKey);
+      const lines = renderLiveMessages(drained);
+      if (lines.length === 0) return;
+      input.push(userItem(wrapNewMessages(lines)));
+      log.info(`   ${drained.messages.length + drained.overflow} message(s) arrived mid-turn`);
+    };
+
     let rounds = 0;
     // A completed response can occasionally contain reasoning but no message
     // or tool call. One extra attempt only, never the whole round budget.
@@ -240,6 +259,8 @@ async function _handleMessage(ctx) {
 
       const pLabel = (typeof ctx?.platform === 'string' && ctx.platform) ? ctx.platform.toUpperCase() : 'UNKNOWN';
       log.info(`[${pLabel}] AI call (round ${rounds}/${constants.MAX_TOOL_ROUNDS})`);
+
+      showNewMessages();
 
       const { roundTools, responseFormat } = prepareRound();
       const callOpts = {
@@ -381,6 +402,7 @@ async function _handleMessage(ctx) {
       const wrapUpNote = workBudgetLimitReached
         ? 'This turn reached its work deadline. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.'
         : 'You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.';
+      showNewMessages();
       input.push(userItem(wrapSystemReminder(wrapUpNote)));
       const { reply: finalReply, model: finalModel, searchStats } = await callAI(input, wrapUpTools, {
         toolChoice: 'none',

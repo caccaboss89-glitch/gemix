@@ -276,7 +276,13 @@ async function onDiscordMessage(msg) {
     entry: batchEntry,
     handler: _handleDiscordBatch,
     log,
-    discardLogLabel: `thread ${channel.id}`
+    discardLogLabel: `thread ${channel.id}`,
+    describeLiveMessage: () => ({
+      userName: senderName,
+      text: msg.content || '',
+      timestampMs: msg.createdTimestamp,
+      hasMedia: msg.attachments.size > 0
+    })
   });
   if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);

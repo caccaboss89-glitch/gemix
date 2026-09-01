@@ -1,6 +1,6 @@
 // src/sandbox/workspaceFs.js
 //
-// Host-side filesystem for the agent's two roots.
+// Host-side filesystem for the agent's roots.
 //
 // Per-conversation layout under data/users/<workspaceSlug>/ :
 //   build_workspace/        <- /workspace, writable by the agent
@@ -8,12 +8,15 @@
 //   .build_state.json       <- activity timestamp (see utils/workspaceState.js)
 //   .workspace_lock/        <- atomic mutation mutex (utils/workspaceState.js)
 //
+// Plus one directory shared by every conversation:
+//   <repo>/skills/          <- /skills, the writable skill library
+//
 // Directory metadata and quota accounting run here. File bytes cross the host
 // through hostFileGateway.js, while model-authored writes and shell commands
 // run in the container.
 //
-// Quota: constants.WORKSPACE_QUOTA_MB over the workspace tree. The attachment
-// projection is not the agent's to fill, so it does not count against it.
+// Quota: one cap per writable root, over that root's own tree. The attachment
+// projection is not the agent's to fill, so it does not count against either.
 
 import fs from 'fs';
 import path from 'path';
@@ -21,10 +24,15 @@ import constants from '../config/constants.js';
 import { getAttachmentsPath, getWorkspacePath } from '../utils/workspaceId.js';
 import { createLogger } from '../utils/logger.js';
 import { listAgentDirectory } from './hostFileGateway.js';
+import { ROOT, WRITABLE_ROOTS, toDisplayPath } from './workspacePaths.js';
 
 const log = createLogger('WorkspaceFs');
 
-const QUOTA_BYTES = constants.WORKSPACE_QUOTA_MB * 1024 * 1024;
+/** Megabyte cap of each writable root. A root without one cannot be written. */
+const ROOT_QUOTA_MB = Object.freeze({
+  [ROOT.WORKSPACE]: constants.WORKSPACE_QUOTA_MB,
+  [ROOT.SKILLS]: constants.SKILLS_QUOTA_MB
+});
 
 /**
  * Ensure the workspace directory exists for `workspaceId`. Returns the
@@ -46,6 +54,18 @@ function ensureWorkspace(workspaceId) {
 function ensureAttachmentsDir(workspaceId) {
   const dir = getAttachmentsPath(workspaceId);
   if (!dir) return null;
+  try { fs.mkdirSync(dir, { recursive: true }); }
+  catch (err) { log.warn(`mkdir ${dir}: ${err.message}`); return null; }
+  return dir;
+}
+
+/**
+ * Ensure the skill library exists. Shared by every conversation and mounted
+ * read-write, so like the projection root it has to be there before docker
+ * starts a container, even on a deployment that ships no skill at all.
+ */
+function ensureSkillsDir() {
+  const dir = constants.SKILLS_DIR;
   try { fs.mkdirSync(dir, { recursive: true }); }
   catch (err) { log.warn(`mkdir ${dir}: ${err.message}`); return null; }
   return dir;
@@ -96,44 +116,77 @@ function ensureWorkspaceWritable(workspaceId) {
   }
 }
 
-/** Recursive size in bytes of the workspace tree. */
-function workspaceSizeBytes(workspaceId) {
-  return listAgentDirectory(workspaceId, 'workspace/', { limit: 1 })?.totalBytes || 0;
+/** Megabyte cap of one writable root; throws for a root nothing may write to. */
+function rootQuotaMb(root) {
+  const quotaMb = ROOT_QUOTA_MB[root];
+  if (!quotaMb) throw new Error(`No quota is defined for the "${root}" root.`);
+  return quotaMb;
+}
+
+/** Recursive size in bytes of one writable root's tree. */
+function _rootSizeBytes(workspaceId, root) {
+  return listAgentDirectory(workspaceId, toDisplayPath(root, ''), { limit: 1 })?.totalBytes || 0;
 }
 
 /**
- * Quota state of the workspace, for the Runtime block and post-write checks.
- * @returns {{ usedBytes: number, quotaBytes: number, overBy: number }}
- */
-function workspaceQuotaState(workspaceId) {
-  const usedBytes = workspaceSizeBytes(workspaceId);
-  return { usedBytes, quotaBytes: QUOTA_BYTES, overBy: Math.max(0, usedBytes - QUOTA_BYTES) };
-}
-
-/**
- * Report quota state after a mutation. API writes are rejected by
- * assertWorkspaceCapacity before they begin; the container quota monitor stops
- * shell processes that cross the aggregate cap while still allowing cleanup.
+ * Report quota state of one root after a mutation. API writes are rejected by
+ * assertRootCapacity before they begin; the container quota monitor stops
+ * shell processes that cross a root's aggregate cap while still allowing cleanup.
  *
  * @param {string} workspaceId
- * @returns {{ ok: boolean, usedBytes: number, quotaBytes: number, message: string|null }}
+ * @param {string} [root] - namespace root the mutation wrote to
+ * @returns {{ ok: boolean, root: string, usedBytes: number, quotaBytes: number,
+ *   quotaMb: number, message: string|null }}
  */
-function checkWorkspaceQuota(workspaceId) {
-  const { usedBytes, quotaBytes, overBy } = workspaceQuotaState(workspaceId);
-  if (overBy === 0) return { ok: true, usedBytes, quotaBytes, message: null };
+function checkRootQuota(workspaceId, root = ROOT.WORKSPACE) {
+  const quotaMb = rootQuotaMb(root);
+  const quotaBytes = quotaMb * 1024 * 1024;
+  const usedBytes = _rootSizeBytes(workspaceId, root);
+  if (usedBytes <= quotaBytes) {
+    return { ok: true, root, usedBytes, quotaBytes, quotaMb, message: null };
+  }
   return {
     ok: false,
+    root,
     usedBytes,
     quotaBytes,
-    message: `Workspace is over its ${constants.WORKSPACE_QUOTA_MB} MB quota `
+    quotaMb,
+    message: `${toDisplayPath(root, '')} is over its ${quotaMb} MB quota `
       + `(${Math.round(usedBytes / (1024 * 1024))} MB used). Delete files you no longer need before writing more.`
   };
 }
 
-function assertWorkspaceCapacity(workspaceId, incomingBytes, replacedBytes = 0) {
-  const sizeAfter = workspaceSizeBytes(workspaceId) - Math.max(0, replacedBytes) + Math.max(0, incomingBytes);
-  if (sizeAfter <= QUOTA_BYTES) return;
-  const err = new Error(`Workspace quota would be exceeded (${constants.WORKSPACE_QUOTA_MB} MB cap).`);
+/**
+ * The first writable root left over its cap, or the last root's ok state.
+ * `shell` runs commands that can grow either root, so it checks them all
+ * rather than guessing which one a command line touched.
+ *
+ * @param {string} workspaceId
+ * @returns {ReturnType<typeof checkRootQuota>}
+ */
+function checkWritableQuotas(workspaceId) {
+  let state = null;
+  for (const root of WRITABLE_ROOTS) {
+    state = checkRootQuota(workspaceId, root);
+    if (!state.ok) return state;
+  }
+  return state;
+}
+
+/**
+ * Refuse a write that would push one root past its cap, before it starts.
+ * @param {string} workspaceId
+ * @param {number} incomingBytes
+ * @param {number} [replacedBytes] - bytes the write overwrites in place
+ * @param {string} [root] - namespace root being written to
+ */
+function assertRootCapacity(workspaceId, incomingBytes, replacedBytes = 0, root = ROOT.WORKSPACE) {
+  const quotaMb = rootQuotaMb(root);
+  const sizeAfter = _rootSizeBytes(workspaceId, root)
+    - Math.max(0, replacedBytes)
+    + Math.max(0, incomingBytes);
+  if (sizeAfter <= quotaMb * 1024 * 1024) return;
+  const err = new Error(`${toDisplayPath(root, '')} quota would be exceeded (${quotaMb} MB cap).`);
   err.code = 'EQUOTA';
   throw err;
 }
@@ -161,9 +214,12 @@ function wipeWorkspace(workspaceId) {
 export {
   ensureWorkspace,
   ensureAttachmentsDir,
+  ensureSkillsDir,
   ensureWorkspaceWritable,
   sandboxUserString,
-  checkWorkspaceQuota,
-  assertWorkspaceCapacity,
+  rootQuotaMb,
+  checkRootQuota,
+  checkWritableQuotas,
+  assertRootCapacity,
   wipeWorkspace
 };

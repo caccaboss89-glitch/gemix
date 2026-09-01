@@ -31,7 +31,7 @@ test('a rootless path belongs to the workspace', () => {
   });
 });
 
-test('both roots parse, with or without a leading slash', () => {
+test('every root parses, with or without a leading slash', () => {
   for (const raw of ['workspace/a/b.txt', '/workspace/a/b.txt', './workspace/a/b.txt']) {
     assert.equal(parseAgentPath(raw).display, 'workspace/a/b.txt', raw);
   }
@@ -39,6 +39,11 @@ test('both roots parse, with or without a leading slash', () => {
     const parsed = parseAgentPath(raw);
     assert.equal(parsed.root, ROOT.ATTACHMENTS);
     assert.equal(parsed.display, 'attachments/voice.ogg');
+  }
+  for (const raw of ['skills/tiktok-video/SKILL.md', '/skills/tiktok-video/SKILL.md']) {
+    const parsed = parseAgentPath(raw);
+    assert.equal(parsed.root, ROOT.SKILLS);
+    assert.equal(parsed.display, 'skills/tiktok-video/SKILL.md');
   }
 });
 
@@ -79,6 +84,7 @@ test('an absolute path is only accepted when it names one of the two roots', () 
   assert.equal(parseAgentPath('/var/lib/gemix'), null);
   assert.equal(parseAgentPath('/workspace/a.txt').display, 'workspace/a.txt');
   assert.equal(parseAgentPath('/attachments/a.txt').display, 'attachments/a.txt');
+  assert.equal(parseAgentPath('/skills/a/SKILL.md').display, 'skills/a/SKILL.md');
 });
 
 test('a traversal that stays inside the root is still refused', () => {
@@ -87,10 +93,12 @@ test('a traversal that stays inside the root is still refused', () => {
   assert.equal(parseAgentPath('workspace/sub/../file.txt'), null);
 });
 
-test('only the workspace root is writable', () => {
+test('attachments is the one read-only root', () => {
   assert.equal(isWritableRoot(ROOT.WORKSPACE), true);
+  assert.equal(isWritableRoot(ROOT.SKILLS), true);
   assert.equal(isWritableRoot(ROOT.ATTACHMENTS), false);
   assert.equal(resolveAgentPath(WORKSPACE_ID, 'workspace/x.txt').writable, true);
+  assert.equal(resolveAgentPath(WORKSPACE_ID, 'skills/x/SKILL.md').writable, true);
   assert.equal(resolveAgentPath(WORKSPACE_ID, 'attachments/x.txt').writable, false);
 });
 
@@ -112,19 +120,23 @@ test('resolveAgentPath lands under the right host root', () => {
   assert.ok(attached.abs.startsWith(hostRoot(WORKSPACE_ID, ROOT.ATTACHMENTS)));
 });
 
-test('the two roots are different directories', () => {
+test('the roots are different directories, and only skills is shared', () => {
   assert.notEqual(hostRoot(WORKSPACE_ID, ROOT.WORKSPACE), hostRoot(WORKSPACE_ID, ROOT.ATTACHMENTS));
+  assert.notEqual(hostRoot(WORKSPACE_ID, ROOT.WORKSPACE), hostRoot(WORKSPACE_ID, ROOT.SKILLS));
+  // One library for the whole deployment: the workspace id does not move it.
+  assert.equal(hostRoot(WORKSPACE_ID, ROOT.SKILLS), hostRoot('user:someone-else@c.us', ROOT.SKILLS));
 });
 
 test('an unresolvable workspace id yields no path at all', () => {
   assert.equal(resolveAgentPath('not-a-workspace-id', 'workspace/a.txt'), null);
 });
 
-test('the refusal names both roots so the model can correct itself', () => {
+test('the refusal names every root so the model can correct itself', () => {
   const err = invalidPathError('../etc/passwd');
   assert.equal(err.success, false);
   assert.match(err.error, /workspace\/</);
   assert.match(err.error, /attachments\/</);
+  assert.match(err.error, /skills\/</);
 });
 
 test('a missing leaf below an outward symlink is refused', (t) => {

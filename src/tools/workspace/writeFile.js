@@ -4,19 +4,19 @@
 // wrappers, and results are plain objects the dispatcher serializes into the
 // fixed `{ success, message?, error?, ... }` envelope.
 //
-// `write_file`: create or overwrite one file in `workspace/`.
+// `write_file`: create or overwrite one file in a writable root.
 //
 // The write happens inside the container, not on the host bind mount, so the
 // file lands owned by the sandbox user with the sandbox's own limits, and a
 // symlink planted from inside cannot redirect a host-side write out of the
 // tree. Content travels on stdin rather than in argv.
 //
-// Only `workspace/` is writable. `/attachments` is a read-only mount: to change
-// a conversation file the model copies it across first.
+// `workspace/` and `skills/` are writable. `/attachments` is a read-only mount:
+// to change a conversation file the model copies it across first.
 
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { statAgentFile } from '../../sandbox/hostFileGateway.js';
-import { assertWorkspaceCapacity } from '../../sandbox/workspaceFs.js';
+import { assertRootCapacity } from '../../sandbox/workspaceFs.js';
 import {
   commitWorkspaceText,
   quotaResultFields,
@@ -54,10 +54,11 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
     if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
     const current = statAgentFile(workspaceId, raw);
     try {
-      assertWorkspaceCapacity(
+      assertRootCapacity(
         workspaceId,
         Buffer.byteLength(args.content, 'utf-8'),
-        current?.stat?.size || 0
+        current?.stat?.size || 0,
+        lockedResolved.root
       );
     } catch (err) {
       if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };

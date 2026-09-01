@@ -137,7 +137,7 @@ test('workspace guidance states shell path and proxy failures without false abso
   const prompt = promptFor(false);
 
   assert.match(prompt, /omit `workingDir` to start at `\/`/);
-  assert.match(prompt, /use `\/workspace\/\.\.\.` or `\/attachments\/\.\.\.`/);
+  assert.match(prompt, /use `\/workspace\/\.\.\.`, `\/attachments\/\.\.\.` or `\/skills\/\.\.\.`/);
   assert.match(prompt, /A 403 can be either a proxy policy rejection or the remote site refusing the request/);
   assert.doesNotMatch(prompt, /A 403 from it means the destination is not public/);
 });

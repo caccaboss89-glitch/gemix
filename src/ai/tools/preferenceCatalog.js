@@ -34,7 +34,7 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
       type: 'string',
       enum: supportedEfforts,
       description: `How much reasoning you spend per reply. Supported by the current main model: ${supportedEfforts.join(', ')}; `
-        + `default ${defaults.effort}, the highest available. Lower is faster; higher is more thorough.`
+        + `default ${defaults.effort}. Lower is faster; higher is more thorough.`
     },
     language: {
       type: 'string',

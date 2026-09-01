@@ -8,7 +8,7 @@
 // is the path `read_file`, `send_email` and the reply's `attachments[]` take
 // so nothing has to be named back before it can be used.
 
-import { assertWorkspaceCapacity } from '../../sandbox/workspaceFs.js';
+import { assertRootCapacity } from '../../sandbox/workspaceFs.js';
 import { stageUniqueWorkspaceBuffer } from '../../sandbox/hostFileGateway.js';
 import { ROOT, toDisplayPath } from '../../sandbox/workspacePaths.js';
 import { withWorkspaceLock } from '../../utils/workspaceState.js';
@@ -27,7 +27,7 @@ async function stageToolOutput(workspaceId, desiredName, source) {
   if (!workspaceId) throw new Error('Cannot resolve the workspace for this conversation.');
   if (!Buffer.isBuffer(source)) throw new Error('Tool output must be provided as bytes.');
   return withWorkspaceLock(workspaceId, {}, async () => {
-    assertWorkspaceCapacity(workspaceId, source.length);
+    assertRootCapacity(workspaceId, source.length);
     const staged = stageUniqueWorkspaceBuffer(workspaceId, desiredName, source);
     return {
       display: toDisplayPath(ROOT.WORKSPACE, staged.finalName),

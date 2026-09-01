@@ -47,7 +47,7 @@ function effortSchema() {
   return tool?.function?.parameters?.properties?.effort;
 }
 
-test('each provider exposes its full effort scale and defaults chats to its maximum', async () => {
+test('each provider exposes its full effort scale and defaults chats to its profile default', async () => {
   const expected = {
     xai: ['low', 'medium', 'high'],
     chatgpt: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
@@ -58,17 +58,33 @@ test('each provider exposes its full effort scale and defaults chats to its maxi
     await withProvider(provider, () => {
       const profile = resolveProviderProfile();
       const policy = activeEffortPolicy();
-      const maximum = profile.supportedEfforts[profile.supportedEfforts.length - 1];
       const schema = effortSchema();
 
       assert.deepEqual(profile.supportedEfforts, expected[provider]);
       assert.deepEqual(policy.supportedEfforts, profile.supportedEfforts);
-      assert.equal(policy.chatDefaultEffort, maximum);
-      assert.equal(defaultSettings().effort, maximum);
+      assert.equal(profile.defaultEffort, 'high');
+      assert.equal(policy.chatDefaultEffort, profile.defaultEffort);
+      assert.equal(defaultSettings().effort, profile.defaultEffort);
       assert.deepEqual(schema.enum, profile.supportedEfforts);
-      assert.match(schema.description, new RegExp(`default ${maximum}\\b`));
+      assert.match(schema.description, new RegExp(`default ${profile.defaultEffort}\\b`));
     });
   }
+});
+
+test('efforts above the default stay selectable on the GPT-5.6 ladder', async (t) => {
+  const fileId = `test_effort_max_${process.pid}_${Date.now()}`;
+  const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
+  t.after(() => {
+    try { fs.unlinkSync(filePath); } catch { /* already absent */ }
+  });
+
+  await withProvider('chatgpt', async () => {
+    for (const effort of ['xhigh', 'max']) {
+      const result = await managePreferences({ effort }, fileId);
+      assert.equal(result.success, true);
+      assert.equal(readSettings(fileId).effort, effort);
+    }
+  });
 });
 
 test('ChatGPT 5.6 accepts none as an explicit no-reasoning preference', async (t) => {

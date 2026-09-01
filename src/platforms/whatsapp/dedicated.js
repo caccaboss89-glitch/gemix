@@ -7,6 +7,7 @@
 
 import {
   buildWhatsAppHistory,
+  describeWaLiveMessage,
   fetchWhatsAppMessageWindow,
   sendWhatsAppResponse,
   _waMessageKey,
@@ -136,7 +137,8 @@ async function onDedicatedMessage(msg) {
     },
     handler: _handleDedicatedBatch,
     log,
-    discardLogLabel: chat.id._serialized
+    discardLogLabel: chat.id._serialized,
+    describeLiveMessage: () => describeWaLiveMessage(msg, userName)
   });
   if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);

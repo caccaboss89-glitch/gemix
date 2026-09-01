@@ -130,6 +130,10 @@ function _buildXaiProfile() {
  * `supportsMaxOutputTokens` is deliberately absent: this backend answers
  * `HTTP 400 UNSUPPORTED_INPUT: Unsupported parameter: max_output_tokens` and
  * fails the entire request. The length of the answer is left to the endpoint.
+ *
+ * `defaultEffort` stays at `high` even though the GPT-5.6 ladder goes further:
+ * `xhigh` and `max` remain selectable per chat, but they cost enough latency to
+ * be a deliberate choice rather than where every conversation starts.
  */
 function _buildChatgptProfile() {
   return {
