@@ -225,14 +225,18 @@ export default {
   TASK_PREFIX_WA: 'wa_',
   TASK_PREFIX_GROUP: 'group_',
 
-  // WhatsApp Puppeteer
+  // WhatsApp Puppeteer. --password-store=basic keeps Chromium away from the
+  // Secret Service, and so off the D-Bus session bus: that bus belongs to the
+  // login session, and on a server it can be torn down under a running browser,
+  // which Chromium answers with LOG(FATAL) and an abort.
   PUPPETEER_ARGS: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
     '--no-zygote',
-    '--single-process'
+    '--single-process',
+    '--password-store=basic'
   ],
   WA_QR_TIMEOUT: 120_000
 };
