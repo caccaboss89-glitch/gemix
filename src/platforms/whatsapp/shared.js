@@ -15,6 +15,7 @@ import { formatTimestamp } from '../../utils/time.js';
 import { hasScheduledFooter } from '../../utils/footer.js';
 import { buildPersonalGemixFlags } from '../../utils/personalWaHistory.js';
 import { isSystemMessage } from '../../config/systemMessages.js';
+import { isPrivacyWipeCommand } from './privacyGate.js';
 import { wrapSystemNotification } from '../../utils/systemTags.js';
 import { buildAttachmentTag } from '../../attachments/ingress.js';
 import { resolveChatWorkspaceId } from '../../utils/workspaceId.js';
@@ -581,11 +582,16 @@ async function buildIncomingContentPartsFromMessages(
  * history item. The same message is rebuilt in full — mentions resolved, media
  * ingested — when it comes back through buildWhatsAppHistory next turn.
  *
+ * The wipe command is the one message that gets nothing back: the privacy gate
+ * owns it, the prompt tells GemiX it never reaches the model, and a turn already
+ * running must not become the hole in that promise.
+ *
  * @param {object} msg - whatsapp-web.js Message
  * @param {string} userName - sender label, already resolved by the caller
- * @returns {{ userName: string, text: string, timestampMs: number, hasMedia: boolean }}
+ * @returns {{ userName: string, text: string, timestampMs: number, hasMedia: boolean }|null}
  */
 function describeWaLiveMessage(msg, userName) {
+  if (isPrivacyWipeCommand(msg?.body)) return null;
   const text = cleanIncomingText(msg?.body || '');
   return {
     userName,
