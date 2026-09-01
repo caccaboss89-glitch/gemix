@@ -41,6 +41,7 @@ python3 /skills/tiktok-video/scripts/tiktok_fetch.py '<the URL exactly as it was
 
 The script exits non-zero and prints `REASON=` on stderr. Read it before doing anything else.
 
+- No `REASON=` at all: the sandbox stopped the process, the script did not give up, and the shell result says what stopped it. Run it once more; if it dies the same way, tell the user the download will not go through right now rather than blaming the link.
 - Private, deleted, login-gated, region-blocked, a LIVE or a photo slideshow: nothing retrieves it. Say so plainly and move on — do not retry, and never pretend you watched it.
 - Anything else (a changed embed shape, a yt-dlp error): it already tried both paths. Run it once more only if the reason names a timeout or a transient network error. If it fails again, tell the user TikTok is not serving that one right now, and fix this skill if the reason shows the procedure itself is out of date.
 - `read_file` refusing the clip as too long is not a download failure: cut the part you need with `ffmpeg` and read that.

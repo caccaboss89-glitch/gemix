@@ -458,6 +458,35 @@ test('shell caps its own timeout and then the turn budget caps it again', async 
   }
 });
 
+test('a command the sandbox kills says so, instead of leaving a bare exit code', async () => {
+  const realExec = workspaceRuntime.execInWorkspace;
+  const run = (rc, timedOut = false) => {
+    workspaceRuntime.execInWorkspace = async () => ({
+      rc, stdout: '', stderr: '', durationMs: 12, timedOut, truncated: false
+    });
+    return shell({ command: 'python3 fetch.py' }, WORKSPACE_ID);
+  };
+  try {
+    // SIGKILL leaves no output of its own, so the note is the only diagnosis.
+    const killed = await run(137);
+    assert.equal(killed.success, false);
+    assert.match(killed.message, /SIGKILL/);
+    assert.match(killed.message, new RegExp(`${constants.SANDBOX_MEMORY_MB} MB container memory cap`));
+
+    assert.match((await run(153)).message, /per-file ceiling/);
+
+    // The same code at the deadline is a timeout, and stays described as one.
+    const timedOut = await run(137, true);
+    assert.match(timedOut.message, /Killed after/);
+    assert.equal(/SIGKILL/.test(timedOut.message), false, timedOut.message);
+
+    // An ordinary non-zero exit is the command's own, and gets no note.
+    assert.match((await run(1)).message, /^Exit 1 in \d+ ms\.$/);
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
+});
+
 // -- exec shaping and quota ---------------------------------------------------
 
 test('buildExecSpec wraps a shell line in a hard timeout', () => {

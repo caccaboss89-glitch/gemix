@@ -25,6 +25,29 @@ import { callTimeoutWithin } from '../../utils/turnBudget.js';
 import { quotaResultFields, runWorkspaceMutation } from './mutation.js';
 
 /**
+ * What stopped a command the sandbox killed, phrased so the model stops looking
+ * for a fault in the command itself. A timeout is not in here: a call that ran
+ * to its deadline is reported as one instead.
+ *
+ * @param {number} rc - exit code, 128 + signal number for a death by signal
+ * @returns {string|null} - null when the command chose its own exit code
+ */
+function killNote(rc) {
+  // SIGKILL: nothing in the container survives it, so a command still working
+  // simply stops, with no failure of its own to report.
+  if (rc === 137) {
+    return 'Killed with SIGKILL, so it never reached its own error handling: in this sandbox that is '
+      + `the ${constants.SANDBOX_MEMORY_MB} MB container memory cap, or the quota monitor when workspace/ `
+      + 'is over its limit. Hold less in memory at once, or free space, and run it again.';
+  }
+  // SIGXFSZ, from the per-file ceiling every command runs under.
+  if (rc === 153) {
+    return `Killed writing a single file past the ${constants.WORKSPACE_QUOTA_MB} MB per-file ceiling.`;
+  }
+  return null;
+}
+
+/**
  * @param {object} args
  * @param {string} args.command - a shell line, run with bash
  * @param {number} [args.timeoutSeconds]
@@ -67,6 +90,10 @@ async function shell(args = {}, workspaceId, opts = {}) {
 
     const notes = [];
     if (run.timedOut) notes.push(`Killed after ${cappedSec}s. Background long work with nohup and poll it in a later call.`);
+    else {
+      const killed = killNote(run.rc);
+      if (killed) notes.push(killed);
+    }
     if (run.truncated) notes.push('Output was truncated; only the tail is shown.');
     const quota = checkWritableQuotas(workspaceId);
     if (!quota.ok) notes.push(quota.message);
