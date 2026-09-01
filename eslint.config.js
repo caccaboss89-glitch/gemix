@@ -13,6 +13,7 @@ export default [
       '__pycache__/',
       '**/__pycache__/',
       'bin/',
+      'docs/',
       'src/logs/',
       'src/data/',
       '.tempfiles/'

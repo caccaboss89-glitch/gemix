@@ -53,7 +53,7 @@ test('Runtime tells the model when the current caller is the administrator', () 
     isGroup: false,
     chatId: 'admin-fixture@c.us',
     userName: 'Test Admin',
-    userIdentity: { isActiveMember: true, isAdmin: true },
+    userIdentity: { isActiveMember: true, isAdmin: true, member: { name: 'Test Admin', admin: true } },
     userWorkspace: null
   });
   assert.match(runtime, /<Caller>Test Admin \(GemiX creator and Discord server administrator, active member\)/);

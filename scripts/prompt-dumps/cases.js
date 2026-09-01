@@ -23,7 +23,7 @@ const ADMIN_FIRST_NAME = (envConfig.ADMIN_NAME || 'Test Admin').split(/\s+/)[0];
 const ACTIVE = {
   isActiveMember: true,
   isAdmin: true,
-  member: { name: envConfig.ADMIN_NAME, wa: 'admin@c.us', email: 'a@test.it' },
+  member: { name: envConfig.ADMIN_NAME, wa: 'admin@c.us', email: 'a@test.it', admin: true },
   taskFileId: 'member_test_admin'
 };
 const ACTIVE_NON_ADMIN = {

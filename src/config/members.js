@@ -179,7 +179,7 @@ function getRoles(member) {
 function formatRoleLabel(member) {
   const roles = getRoles(member);
   if (!roles.isAdmin && !roles.isLegal) return '';
-  
+
   if (roles.isAdmin && roles.isLegal) {
     return 'GemiX creator and Discord server administrator, legal advisor';
   }
