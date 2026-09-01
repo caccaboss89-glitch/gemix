@@ -14,6 +14,20 @@ const FIXTURE_MEMBERS = [{
   email: 'fixture@example.invalid'
 }];
 
+const FIXTURE_MEMBERS_WITH_ADMIN = [
+  {
+    name: 'Regular Member',
+    wa: '390000000001@c.us',
+    email: 'member@example.invalid'
+  },
+  {
+    name: 'Test Admin',
+    wa: '390000000099@c.us',
+    email: 'admin@example.invalid',
+    admin: true
+  }
+];
+
 const XAI_ONLY_PROMPT_MATERIAL =
   /render_inline_citation|Grok\/SuperGrok|\bxAI\b|\bx_search\b|X posts/i;
 
@@ -36,7 +50,7 @@ test('Runtime tells the model when the current caller is the administrator', () 
     userIdentity: { isActiveMember: true, isAdmin: true },
     userWorkspace: null
   });
-  assert.match(runtime, /<Caller>Test Admin \(Discord server administrator, active member\)/);
+  assert.match(runtime, /<Caller>Test Admin \(GemiX creator and Discord server administrator, active member\)/);
 });
 
 function underProvider(provider, fn) {
@@ -60,6 +74,20 @@ test('an injected prompt roster preserves admin-only identifiers without using d
   assert.doesNotMatch(
     promptFor(false),
     /390000000099|fixture@example\.invalid/
+  );
+});
+
+test('a non-admin member sees the administrator labeled in the active members list', () => {
+  const prompt = buildStaticInstructions({
+    platform: constants.PLATFORM_WA_DEDICATED,
+    isGroup: false,
+    chatId: 'member-fixture@c.us',
+    userName: 'Regular Member',
+    userIdentity: { isActiveMember: true, isAdmin: false }
+  }, undefined, { activeMembers: FIXTURE_MEMBERS_WITH_ADMIN });
+  assert.match(
+    prompt,
+    /<ActiveMembers>Regular Member, Test Admin \(GemiX creator and Discord server administrator\)<\/ActiveMembers>/
   );
 });
 

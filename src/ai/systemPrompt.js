@@ -101,7 +101,7 @@ function toolsFingerprint(tools) {
 
 function _callerLineInner(ctx, promptOpts) {
   const status = promptOpts.isAdmin
-    ? 'Discord server administrator, active member'
+    ? 'GemiX creator and Discord server administrator, active member'
     : (promptOpts.isActiveMember !== false ? 'active member' : 'non-active');
   return `${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.`;
 }
@@ -265,7 +265,14 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
           + 'and takes a recipient when the reminder is for someone else.'
     );
   } else {
-    lines.push(`<ActiveMembers>${activeMembers.map(m => escapeXml(m.name)).join(', ')}</ActiveMembers>`);
+    const roster = activeMembers.map(m => {
+      const name = escapeXml(m.name);
+      if (m.admin === true) {
+        return `${name} (GemiX creator and Discord server administrator)`;
+      }
+      return name;
+    }).join(', ');
+    lines.push(`<ActiveMembers>${roster}</ActiveMembers>`);
     lines.push('Address them by their roster name in the delivery tools.');
   }
 

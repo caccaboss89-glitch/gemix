@@ -307,7 +307,7 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
   if (!dynamicPart.includes('<Caller>')) {
     ISSUES.push({ caseId, msg: 'Runtime missing <Caller>' });
   }
-  const callerSaysAdmin = /<Caller>[^<]*\(Discord server administrator, active member\)/.test(dynamicPart);
+  const callerSaysAdmin = /<Caller>[^<]*\(GemiX creator and Discord server administrator, active member\)/.test(dynamicPart);
   if (Boolean(ctx?.userIdentity?.isAdmin) !== callerSaysAdmin) {
     ISSUES.push({ caseId, msg: 'Runtime caller administrator label does not match identity' });
   }
