@@ -4,7 +4,14 @@ import os
 import tempfile
 import unittest
 
-from quota_guard import _parse_roots, _should_kill_jobs, _tree_size
+from quota_guard import (
+    POLL_MAX_SECONDS,
+    POLL_MIN_SECONDS,
+    _parse_roots,
+    _poll_seconds,
+    _should_kill_jobs,
+    _tree_size,
+)
 
 
 class QuotaGuardTests(unittest.TestCase):
@@ -23,6 +30,19 @@ class QuotaGuardTests(unittest.TestCase):
         self.assertFalse(_should_kill_jobs(11, 10, 11, True))
         self.assertTrue(_should_kill_jobs(12, 10, 11, True))
         self.assertFalse(_should_kill_jobs(9, 10, 12, True))
+
+    def test_poll_interval_tracks_the_headroom_it_is_watching(self) -> None:
+        # Room to spare: walking ten times a second buys nothing.
+        self.assertEqual(_poll_seconds(10 * 1024**3), POLL_MAX_SECONDS)
+        # Close to the limit, and at the limit or past it, react at full rate.
+        self.assertEqual(_poll_seconds(0), POLL_MIN_SECONDS)
+        self.assertEqual(_poll_seconds(-1024), POLL_MIN_SECONDS)
+        # In between the interval is the time that headroom survives a writer
+        # going flat out, so it rises with the room left.
+        middle = _poll_seconds(256 * 1024**2)
+        self.assertGreater(middle, POLL_MIN_SECONDS)
+        self.assertLess(middle, POLL_MAX_SECONDS)
+        self.assertLess(middle, _poll_seconds(512 * 1024**2))
 
     def test_tree_size_counts_regular_files(self) -> None:
         with tempfile.TemporaryDirectory() as root:

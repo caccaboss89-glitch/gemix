@@ -6,7 +6,12 @@ processes when one of them crosses its configured limit. Once the user removes
 enough data, monitoring arms again for that root.
 
 Roots are given as `<path>=<bytes>` arguments, one per writable mount, e.g.
-`/workspace=2147483648 /skills=104857600`.
+`/workspace=10737418240`.
+
+Watching costs one full walk of each tree, whose price is the number of files
+in it rather than their size, so the interval tracks the risk instead of being
+fixed: it stretches while a root sits far below its limit and tightens as one
+approaches it.
 """
 
 from __future__ import annotations
@@ -17,7 +22,17 @@ import sys
 import time
 
 
-POLL_SECONDS = 0.1
+POLL_MIN_SECONDS = 0.1
+POLL_MAX_SECONDS = 5.0
+# Bytes per second a runaway writer is assumed not to beat. The interval is how
+# long the tightest headroom would survive at this rate, so crossing a limit
+# unnoticed takes a writer faster than any disk the sandbox runs on.
+ASSUMED_WRITE_RATE = 200 * 1024 * 1024
+
+
+def _poll_seconds(headroom: int) -> float:
+    """How long the tightest headroom can be left unwatched, in seconds."""
+    return max(POLL_MIN_SECONDS, min(POLL_MAX_SECONDS, headroom / ASSUMED_WRITE_RATE))
 
 
 def _tree_size(root: str) -> int:
@@ -102,6 +117,7 @@ def main() -> int:
     over_limit = {path: False for path, _ in roots}
     previous_size = {path: 0 for path, _ in roots}
     while True:
+        headrooms = []
         for path, limit in roots:
             size = _tree_size(path)
             if _should_kill_jobs(size, limit, previous_size[path], over_limit[path]):
@@ -113,7 +129,8 @@ def main() -> int:
                 _kill_sandbox_processes()
             over_limit[path] = size > limit
             previous_size[path] = size
-        time.sleep(POLL_SECONDS)
+            headrooms.append(limit - size)
+        time.sleep(_poll_seconds(min(headrooms)))
 
 
 if __name__ == "__main__":

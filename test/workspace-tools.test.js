@@ -460,23 +460,29 @@ test('shell caps its own timeout and then the turn budget caps it again', async 
 
 test('a command the sandbox kills says so, instead of leaving a bare exit code', async () => {
   const realExec = workspaceRuntime.execInWorkspace;
-  const run = (rc, timedOut = false) => {
+  const run = (rc, { timedOut = false, killCause = null } = {}) => {
     workspaceRuntime.execInWorkspace = async () => ({
-      rc, stdout: '', stderr: '', durationMs: 12, timedOut, truncated: false
+      rc, stdout: '', stderr: '', durationMs: 12, timedOut, killCause, truncated: false
     });
     return shell({ command: 'python3 fetch.py' }, WORKSPACE_ID);
   };
   try {
-    // SIGKILL leaves no output of its own, so the note is the only diagnosis.
-    const killed = await run(137);
-    assert.equal(killed.success, false);
-    assert.match(killed.message, /SIGKILL/);
-    assert.match(killed.message, new RegExp(`${constants.SANDBOX_MEMORY_MB} MB container memory cap`));
+    // SIGKILL leaves no output of its own, so the note is the only diagnosis,
+    // and the runtime asks Docker for it rather than listing every suspect.
+    const gone = await run(137, { killCause: 'container-stopped' });
+    assert.equal(gone.success, false);
+    assert.match(gone.message, /container stopped mid-command/);
+    assert.match(gone.message, /running it again will not help/);
 
+    const oom = await run(137, { killCause: 'oom' });
+    assert.match(oom.message, new RegExp(`Killed by the ${constants.SANDBOX_MEMORY_MB} MB container memory cap`));
+
+    // A live container leaves the quota monitor as the one thing that kills.
+    assert.match((await run(137)).message, /quota\s+monitor/);
     assert.match((await run(153)).message, /per-file ceiling/);
 
     // The same code at the deadline is a timeout, and stays described as one.
-    const timedOut = await run(137, true);
+    const timedOut = await run(137, { timedOut: true });
     assert.match(timedOut.message, /Killed after/);
     assert.equal(/SIGKILL/.test(timedOut.message), false, timedOut.message);
 

@@ -30,15 +30,25 @@ import { quotaResultFields, runWorkspaceMutation } from './mutation.js';
  * to its deadline is reported as one instead.
  *
  * @param {number} rc - exit code, 128 + signal number for a death by signal
+ * @param {'oom'|'container-stopped'|null} [killCause] - what the runtime found
+ *   when it asked Docker why a SIGKILL happened
  * @returns {string|null} - null when the command chose its own exit code
  */
-function killNote(rc) {
+function killNote(rc, killCause) {
   // SIGKILL: nothing in the container survives it, so a command still working
   // simply stops, with no failure of its own to report.
   if (rc === 137) {
-    return 'Killed with SIGKILL, so it never reached its own error handling: in this sandbox that is '
-      + `the ${constants.SANDBOX_MEMORY_MB} MB container memory cap, or the quota monitor when workspace/ `
-      + 'is over its limit. Hold less in memory at once, or free space, and run it again.';
+    if (killCause === 'container-stopped') {
+      return 'The workspace container stopped mid-command, which kills everything inside it. Nothing is wrong '
+        + 'with the command and running it again will not help until the sandbox is healthy: say the workspace '
+        + 'is unavailable rather than reading anything into it.';
+    }
+    if (killCause === 'oom') {
+      return `Killed by the ${constants.SANDBOX_MEMORY_MB} MB container memory cap. Work in smaller pieces, `
+        + 'stream instead of loading whole files, and stop anything left running in the background.';
+    }
+    return 'Killed with SIGKILL from inside the container, so it never reached its own error handling. The quota '
+      + 'monitor does that when a root is over its limit; free space and run it again.';
   }
   // SIGXFSZ, from the per-file ceiling every command runs under.
   if (rc === 153) {
@@ -91,7 +101,7 @@ async function shell(args = {}, workspaceId, opts = {}) {
     const notes = [];
     if (run.timedOut) notes.push(`Killed after ${cappedSec}s. Background long work with nohup and poll it in a later call.`);
     else {
-      const killed = killNote(run.rc);
+      const killed = killNote(run.rc, run.killCause);
       if (killed) notes.push(killed);
     }
     if (run.truncated) notes.push('Output was truncated; only the tail is shown.');

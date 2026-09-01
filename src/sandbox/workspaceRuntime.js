@@ -257,6 +257,27 @@ async function _spawnContainer(workspaceId, { mountSkills = false } = {}) {
   };
 }
 
+/**
+ * Why a command came back as SIGKILL, asked of Docker rather than guessed.
+ *
+ * The cgroup records an OOM kill on the container itself, and a container whose
+ * PID 1 exits takes every exec down with it - which AutoRemove then collects,
+ * so a probe that finds nothing left is the same answer as one that finds it
+ * stopped. Null means the container is still up and something inside it, the
+ * quota monitor above all, did the killing.
+ *
+ * @returns {Promise<'oom'|'container-stopped'|null>}
+ */
+async function _killCause(entry) {
+  try {
+    const state = (await entry.container.inspect()).State || {};
+    if (state.OOMKilled) return 'oom';
+    return state.Running ? null : 'container-stopped';
+  } catch {
+    return 'container-stopped';
+  }
+}
+
 /** Whether Docker still reports this entry's container as running. */
 async function _isAlive(entry) {
   try { return Boolean((await entry.container.inspect()).State?.Running); }
@@ -397,7 +418,8 @@ function buildExecSpec({ command, timeoutMs } = {}) {
  * @param {Buffer|string} [opts.input] - written to the command's stdin
  * @param {number} [opts.timeoutMs]
  * @param {string} [opts.workingDir] - defaults to /workspace
- * @returns {Promise<{rc:number,stdout:string,stderr:string,truncated:boolean,timedOut:boolean,durationMs:number}>}
+ * @returns {Promise<{rc:number,stdout:string,stderr:string,truncated:boolean,timedOut:boolean,
+ *   killCause:'oom'|'container-stopped'|null,durationMs:number}>}
  */
 async function execInWorkspace(workspaceId, opts = {}) {
   const { cmd, timeoutMs } = buildExecSpec(opts);
@@ -465,6 +487,22 @@ async function execInWorkspace(workspaceId, opts = {}) {
   // classify that code as a timeout when it arrived at the configured edge.
   if (rc === 124 || (rc === 137 && Date.now() - startedAt >= timeoutMs - 1_000)) timedOut = true;
 
+  // SIGKILL leaves the command nothing to report, so the reason has to come
+  // from Docker before the caller can say anything useful about it.
+  const killCause = rc === 137 && !timedOut ? await _killCause(entry) : null;
+  if (killCause === 'container-stopped') {
+    log.warn(
+      `workspace container stopped mid-command workspace=${workspaceId} container=${entry.containerName}: `
+      + 'its PID 1 exited. Check the sandbox image is not older than this runtime and rebuild it, '
+      + 'then the host for memory pressure.'
+    );
+  } else if (killCause === 'oom') {
+    log.warn(
+      `workspace command hit the ${constants.SANDBOX_MEMORY_MB} MB memory cap `
+      + `workspace=${workspaceId} container=${entry.containerName}`
+    );
+  }
+
   const stdout = _capBufferChunks(stdoutBuf);
   const stderr = _capBufferChunks(stderrBuf);
   const durationMs = Date.now() - startedAt;
@@ -476,6 +514,7 @@ async function execInWorkspace(workspaceId, opts = {}) {
     stderr: stderr.text,
     truncated: stdout.truncated || stderr.truncated,
     timedOut,
+    killCause,
     durationMs
   };
 }

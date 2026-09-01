@@ -55,7 +55,7 @@ services:
     container_name: gemix-sandbox-example
     depends_on: [proxy]
     entrypoint: ""
-    command: ["python", "/opt/sandbox/quota_guard.py", "524288000"]
+    command: ["python", "/opt/sandbox/quota_guard.py", "/workspace=524288000"]
     user: "1000:1000"
     environment:
       HTTP_PROXY:  "http://gemix-sandbox-proxy:8080"
