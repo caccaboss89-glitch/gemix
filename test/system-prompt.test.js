@@ -109,6 +109,26 @@ test('Runtime tells the model when the current caller is a legal advisor', () =>
   assert.match(runtime, /<Caller>Legal Advisor \(Legal advisor, active member\)/);
 });
 
+test('Runtime names both roles when the caller is administrator and legal advisor', () => {
+  const runtime = buildDynamicRuntimeContext({
+    platform: constants.PLATFORM_WA_DEDICATED,
+    isGroup: false,
+    chatId: 'admin-legal-fixture@c.us',
+    userName: 'Test Admin',
+    userIdentity: {
+      isActiveMember: true,
+      isAdmin: true,
+      isLegal: true,
+      member: { name: 'Test Admin', admin: true, legal: true }
+    },
+    userWorkspace: null
+  });
+  assert.match(
+    runtime,
+    /<Caller>Test Admin \(GemiX creator and Discord server administrator, legal advisor, active member\)/
+  );
+});
+
 test('generic and xAI provider guidance replace one another without legacy leaks', () => {
   const generic = underProvider('chatgpt', () => promptFor(false));
   assert.match(generic, /## Provider integration\nThe model provider supplies reasoning, vision, structured replies/);

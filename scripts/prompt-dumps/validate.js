@@ -311,6 +311,12 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
   if (Boolean(ctx?.userIdentity?.isAdmin) !== callerSaysAdmin) {
     ISSUES.push({ caseId, msg: 'Runtime caller administrator label does not match identity' });
   }
+  // Matched case-insensitively: the label leads the parenthesis on its own and
+  // trails the administrator one when a member holds both roles.
+  const callerSaysLegal = /<Caller>[^<]*\([^)]*\blegal advisor\b[^)]*\)/i.test(dynamicPart);
+  if (Boolean(ctx?.userIdentity?.isLegal) !== callerSaysLegal) {
+    ISSUES.push({ caseId, msg: 'Runtime caller legal advisor label does not match identity' });
+  }
   if (/^(Caller|Participants):/m.test(staticPart)) {
     ISSUES.push({ caseId, msg: 'static must not name the caller or the roster (belongs in Runtime)' });
   }

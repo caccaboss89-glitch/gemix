@@ -23,18 +23,28 @@ const ADMIN_FIRST_NAME = (envConfig.ADMIN_NAME || 'Test Admin').split(/\s+/)[0];
 const ACTIVE = {
   isActiveMember: true,
   isAdmin: true,
+  isLegal: false,
   member: { name: envConfig.ADMIN_NAME, wa: 'admin@c.us', email: 'a@test.it', admin: true },
   taskFileId: 'member_test_admin'
 };
 const ACTIVE_NON_ADMIN = {
   isActiveMember: true,
   isAdmin: false,
+  isLegal: false,
   member: { name: 'Member User', wa: 'member@c.us', email: 'm@test.it' },
   taskFileId: 'member_test_member'
+};
+const ACTIVE_LEGAL = {
+  isActiveMember: true,
+  isAdmin: false,
+  isLegal: true,
+  member: { name: 'Legal User', wa: 'legal@c.us', email: 'l@test.it', legal: true },
+  taskFileId: 'member_test_legal'
 };
 const NON_ACTIVE = {
   isActiveMember: false,
   isAdmin: false,
+  isLegal: false,
   member: null,
   taskFileId: 'wa_3999999999'
 };
@@ -53,6 +63,13 @@ const MOCK_ACTIVE_MEMBERS = [
     nicks: ['test-member'],
     email: 'member@example.invalid',
     wa: '390000000002@c.us'
+  },
+  {
+    name: 'Legal User',
+    nicks: ['test-legal'],
+    email: 'legal@example.invalid',
+    wa: '390000000003@c.us',
+    legal: true
   }
 ];
 
@@ -338,6 +355,20 @@ const CASES = {
       chatId: 'wa_priv@test',
       userName: envConfig.ADMIN_NAME,
       userIdentity: ACTIVE,
+      userWorkspace: EMPTY_WORKSPACE
+    }
+  },
+  // The legal advisor is the third role formatRoleLabel renders. Like the
+  // non-admin cases it gets the names-only roster, so this dump also carries
+  // the role as it appears from the outside, in <ActiveMembers>.
+  20: {
+    label: 'WA dedicated private — legal advisor active caller',
+    ctx: {
+      platform: PLATFORM_WA_DEDICATED,
+      isGroup: false,
+      chatId: 'wa_priv@test',
+      userName: 'Legal User',
+      userIdentity: ACTIVE_LEGAL,
       userWorkspace: EMPTY_WORKSPACE
     }
   }
