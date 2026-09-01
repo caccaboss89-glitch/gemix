@@ -141,6 +141,7 @@ async function prepareTurn(ctx, ui) {
   const userCtx = {
     isActiveMember: ui.isActiveMember,
     isAdmin: Boolean(ui.isAdmin),
+    isLegal: Boolean(ui.isLegal),
     member: ui.member,
     taskFileId: ui.taskFileId,
     settingsFileId,

@@ -16,7 +16,7 @@
 
 import pkg from '../../package.json' with { type: 'json' };
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
-import { ACTIVE_MEMBERS  } from '../config/members.js';
+import { ACTIVE_MEMBERS, formatRoleLabel  } from '../config/members.js';
 import envConfig from '../config/env.js';
 import {
   activePreferenceFields,
@@ -100,8 +100,10 @@ function toolsFingerprint(tools) {
 }
 
 function _callerLineInner(ctx, promptOpts) {
-  const status = promptOpts.isAdmin
-    ? 'GemiX creator and Discord server administrator, active member'
+  const member = ctx.userIdentity?.member;
+  const roleLabel = formatRoleLabel(member);
+  const status = roleLabel
+    ? `${roleLabel}, active member`
     : (promptOpts.isActiveMember !== false ? 'active member' : 'non-active');
   return `${escapeXml(ctx.userName)} (${status}) — the user who triggered this turn.`;
 }
@@ -267,8 +269,9 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   } else {
     const roster = activeMembers.map(m => {
       const name = escapeXml(m.name);
-      if (m.admin === true) {
-        return `${name} (GemiX creator and Discord server administrator)`;
+      const roleLabel = formatRoleLabel(m);
+      if (roleLabel) {
+        return `${name} (${roleLabel})`;
       }
       return name;
     }).join(', ');
@@ -282,9 +285,11 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   );
   if (!cap.isDiscord) {
     // read_server_rules is gone: the statute only reaches the model on Discord.
+    // Formal request PDFs, Monarca, and Statute discussions require Discord context.
     lines.push(
-      'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server), formal requests, '
-      + 'or Monarca/King belong to the gemix thread on Discord: tell the user to open that thread.'
+      'IMPORTANT: You cannot create formal request PDFs, discuss Monarca (King), or answer questions about the Statute (Statuto Albertino) on this platform. '
+      + 'These topics require the full Discord context and belong to the gemix thread on Discord. '
+      + 'If the user asks about any of these, REFUSE firmly and direct them to the gemix thread on Discord.'
     );
   }
   return lines;

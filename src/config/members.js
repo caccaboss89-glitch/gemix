@@ -142,11 +142,54 @@ function findMemberByEmail(email) {
 
 /**
  * Check if a member has admin privileges.
- * @param {object|null} member - The member object
+ * @param {object|null|undefined} member - The member object
  * @returns {boolean} True if member exists and has admin flag set to true
  */
 function isAdmin(member) {
-  return member !== null && member.admin === true;
+  return member && member.admin === true;
+}
+
+/**
+ * Check if a member has legal advisor privileges.
+ * @param {object|null|undefined} member - The member object
+ * @returns {boolean} True if member exists and has legal flag set to true
+ */
+function isLegal(member) {
+  return member && member.legal === true;
+}
+
+/**
+ * Extract role flags from a member object.
+ * @param {object|null} member - The member object
+ * @returns {{ isAdmin: boolean, isLegal: boolean }} Role flags
+ */
+function getRoles(member) {
+  return {
+    isAdmin: isAdmin(member),
+    isLegal: isLegal(member)
+  };
+}
+
+/**
+ * Format a member's role label for prompt display.
+ * Centralizes the logic for how roles are presented to the model.
+ * @param {object|null} member - The member object
+ * @returns {string} Role label (empty string if no roles, e.g. "GemiX creator and Discord server administrator")
+ */
+function formatRoleLabel(member) {
+  const roles = getRoles(member);
+  if (!roles.isAdmin && !roles.isLegal) return '';
+  
+  if (roles.isAdmin && roles.isLegal) {
+    return 'GemiX creator and Discord server administrator, legal advisor';
+  }
+  if (roles.isAdmin) {
+    return 'GemiX creator and Discord server administrator';
+  }
+  if (roles.isLegal) {
+    return 'Legal advisor';
+  }
+  return '';
 }
 
 export {
@@ -155,5 +198,8 @@ export {
   findMemberByDiscord,
   findMemberByEmail,
   resolveActiveMemberByName,
-  isAdmin
+  isAdmin,
+  isLegal,
+  getRoles,
+  formatRoleLabel
 };

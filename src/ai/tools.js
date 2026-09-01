@@ -35,6 +35,7 @@ import { workspaceTools } from './tools/workspaceCatalog.js';
  * @typedef {object} ToolContext
  * @property {boolean} [isActiveMember]
  * @property {boolean} [isAdmin]
+ * @property {boolean} [isLegal]
  * @property {string} platform
  * @property {boolean} [isGroup]
  */

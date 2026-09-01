@@ -25,6 +25,12 @@ const FIXTURE_MEMBERS_WITH_ADMIN = [
     wa: '390000000099@c.us',
     email: 'admin@example.invalid',
     admin: true
+  },
+  {
+    name: 'Legal Advisor',
+    wa: '390000000002@c.us',
+    email: 'legal@example.invalid',
+    legal: true
   }
 ];
 
@@ -87,8 +93,20 @@ test('a non-admin member sees the administrator labeled in the active members li
   }, undefined, { activeMembers: FIXTURE_MEMBERS_WITH_ADMIN });
   assert.match(
     prompt,
-    /<ActiveMembers>Regular Member, Test Admin \(GemiX creator and Discord server administrator\)<\/ActiveMembers>/
+    /<ActiveMembers>Regular Member, Test Admin \(GemiX creator and Discord server administrator\), Legal Advisor \(Legal advisor\)<\/ActiveMembers>/
   );
+});
+
+test('Runtime tells the model when the current caller is a legal advisor', () => {
+  const runtime = buildDynamicRuntimeContext({
+    platform: constants.PLATFORM_WA_DEDICATED,
+    isGroup: false,
+    chatId: 'legal-fixture@c.us',
+    userName: 'Legal Advisor',
+    userIdentity: { isActiveMember: true, isAdmin: false, isLegal: true, member: { name: 'Legal Advisor', legal: true } },
+    userWorkspace: null
+  });
+  assert.match(runtime, /<Caller>Legal Advisor \(Legal advisor, active member\)/);
 });
 
 test('generic and xAI provider guidance replace one another without legacy leaks', () => {
