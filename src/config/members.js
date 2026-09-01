@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import constants from './constants.js';
+import envConfig from './env.js';
 import { createLogger } from '../utils/logger.js';
 
 const { DATA_DIR } = constants;
@@ -100,6 +101,40 @@ function resolveActiveMemberByName(query) {
   }
   return { ok: true, member: matches[0] };
 }
+
+/**
+ * Report a role holder that .env and the member file disagree about.
+ *
+ * Each role is stated twice: as a name in .env, which prompts and tool schemas
+ * quote, and as a flag here, which decides what the model is told about the
+ * caller. Nothing forced the two to agree, and they silently did not -
+ * LEGAL_NAME named the advisor while no member carried `legal`, so the role
+ * never reached a prompt. A mismatch costs a label, not the roster, so it is
+ * reported and startup continues.
+ *
+ * @param {string} envValue - the name configured in .env
+ * @param {'admin'|'legal'} flag - the member field that grants the role
+ * @param {string} envKey - the variable name, for the message
+ */
+function _reportRoleMismatch(envValue, flag, envKey) {
+  const resolved = resolveActiveMemberByName(envValue);
+  if (!resolved.ok) {
+    log.warn(`${envKey}="${envValue}" does not name an active member: ${resolved.error}`);
+  } else if (resolved.member[flag] !== true) {
+    log.warn(
+      `${envKey}="${envValue}" names ${resolved.member.name}, who has no "${flag}": true `
+      + `in ${MEMBERS_FILE}. The role will not appear in any prompt.`
+    );
+  }
+  for (const holder of ACTIVE_MEMBERS.filter((m) => m[flag] === true)) {
+    if (!resolved.ok || holder !== resolved.member) {
+      log.warn(`${holder.name} has "${flag}": true but ${envKey} is "${envValue}".`);
+    }
+  }
+}
+
+_reportRoleMismatch(envConfig.ADMIN_NAME, 'admin', 'ADMIN_NAME');
+_reportRoleMismatch(envConfig.LEGAL_NAME, 'legal', 'LEGAL_NAME');
 
 /**
  * Find a member by WhatsApp JID.
