@@ -16,8 +16,7 @@
 
 import pkg from '../../package.json' with { type: 'json' };
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
-import { ACTIVE_MEMBERS, formatRoleLabel  } from '../config/members.js';
-import envConfig from '../config/env.js';
+import { ACTIVE_MEMBERS, ADMIN_NAME, formatRoleLabel  } from '../config/members.js';
 import {
   activePreferenceFields,
   customizedFields,
@@ -82,6 +81,7 @@ function resolvePromptTools(ctx) {
   return getToolsForUser({
     isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
     isAdmin: Boolean(ctx.userIdentity?.isAdmin),
+    isLegal: Boolean(ctx.userIdentity?.isLegal),
     platform: ctx.platform,
     isGroup: ctx.isGroup
   });
@@ -200,7 +200,7 @@ function _buildChatLines(ctx, cap, profile) {
     lines.push(
       'Platform: WhatsApp. The admin\'s own account, in a chat with one other person. Reply only when the message '
       + 'contains @gemix. History, memory and workspace are shared between the two of them.',
-      `In the chat: ${escapeXml(envConfig.ADMIN_NAME)} (the account owner) and ${otherName}.`,
+      `In the chat: ${escapeXml(ADMIN_NAME)} (the account owner) and ${otherName}.`,
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
       + 'name. Your own replies carry no speaker prefix.',
       'You cannot mention anyone in this chat, neither the other person nor yourself: mentions only work '

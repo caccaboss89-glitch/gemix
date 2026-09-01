@@ -15,16 +15,16 @@
 // against), so no case needs to model it.
 
 import constants from '../../src/config/constants.js';
-import envConfig from '../../src/config/env.js';
+import { ADMIN_NAME } from '../../src/config/members.js';
 
 const { PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED, PLATFORM_DISCORD } = constants;
-const ADMIN_FIRST_NAME = (envConfig.ADMIN_NAME || 'Test Admin').split(/\s+/)[0];
+const ADMIN_FIRST_NAME = (ADMIN_NAME || 'Test Admin').split(/\s+/)[0];
 
 const ACTIVE = {
   isActiveMember: true,
   isAdmin: true,
   isLegal: false,
-  member: { name: envConfig.ADMIN_NAME, wa: 'admin@c.us', email: 'a@test.it', admin: true },
+  member: { name: ADMIN_NAME, wa: 'admin@c.us', email: 'a@test.it', admin: true },
   taskFileId: 'member_test_admin'
 };
 const ACTIVE_NON_ADMIN = {
@@ -52,7 +52,7 @@ const NON_ACTIVE = {
 /** Stable, non-sensitive roster used by the offline prompt corpus. */
 const MOCK_ACTIVE_MEMBERS = [
   {
-    name: envConfig.ADMIN_NAME,
+    name: ADMIN_NAME,
     nicks: ['test-admin'],
     email: 'admin@example.invalid',
     wa: '390000000001@c.us',
@@ -96,7 +96,7 @@ const CASES = {
       platform: PLATFORM_WA_PERSONAL,
       isGroup: false,
       chatId: 'personal_chat@test',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       userWorkspace: EMPTY_WORKSPACE
     }
@@ -129,7 +129,7 @@ const CASES = {
       platform: PLATFORM_WA_PERSONAL,
       isGroup: false,
       chatId: 'personal_chat@test',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
         language: 'es-ES',
@@ -145,7 +145,7 @@ const CASES = {
       platform: PLATFORM_WA_PERSONAL,
       isGroup: false,
       chatId: 'personal_chat@test',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       userWorkspace: {
         state: 'ready',
@@ -163,7 +163,7 @@ const CASES = {
       platform: PLATFORM_WA_DEDICATED,
       isGroup: false,
       chatId: 'wa_priv@test',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       userWorkspace: EMPTY_WORKSPACE
     }
@@ -186,7 +186,7 @@ const CASES = {
       platform: PLATFORM_WA_DEDICATED,
       isGroup: false,
       chatId: 'wa_priv@test',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
         voice: 'female',
@@ -206,7 +206,7 @@ const CASES = {
       groupId: 'grp@test.g.us',
       groupName: 'Test Group',
       chatId: 'grp@test.g.us',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       userWorkspace: EMPTY_WORKSPACE,
       groupParticipants: MOCK_GROUP_PARTICIPANTS
@@ -314,7 +314,7 @@ const CASES = {
       platform: PLATFORM_WA_DEDICATED,
       isGroup: false,
       chatId: 'wa_priv@test',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       settings: {
         voice: 'female',
@@ -353,23 +353,28 @@ const CASES = {
       platform: PLATFORM_WA_DEDICATED,
       isGroup: false,
       chatId: 'wa_priv@test',
-      userName: envConfig.ADMIN_NAME,
+      userName: ADMIN_NAME,
       userIdentity: ACTIVE,
       userWorkspace: EMPTY_WORKSPACE
     }
   },
   // The legal advisor is the third role formatRoleLabel renders. Like the
   // non-admin cases it gets the names-only roster, so this dump also carries
-  // the role as it appears from the outside, in <ActiveMembers>.
+  // the role as it appears from the outside, in <ActiveMembers>. It is a
+  // Discord case because that is where generate_formal_request_pdf lives, and
+  // his is the only turn that offers the legalSignature field.
   20: {
-    label: 'WA dedicated private — legal advisor active caller',
+    label: 'Discord — legal advisor active caller (countersignature field)',
     ctx: {
-      platform: PLATFORM_WA_DEDICATED,
+      platform: PLATFORM_DISCORD,
       isGroup: false,
-      chatId: 'wa_priv@test',
+      chatId: 'channel123',
       userName: 'Legal User',
       userIdentity: ACTIVE_LEGAL,
-      userWorkspace: EMPTY_WORKSPACE
+      threadName: 'Statute question',
+      rulesContext: '[STATUTE EXCERPT PLACEHOLDER]',
+      serverEvents: '',
+      availableEmojis: ''
     }
   }
 };

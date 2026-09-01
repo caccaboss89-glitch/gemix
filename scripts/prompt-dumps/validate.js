@@ -101,6 +101,13 @@ function validateToolDumpLeaks(dump, caseId) {
     if (Boolean(ctx.userIdentity?.isAdmin) === hasBugReport) {
       ISSUES.push({ caseId, msg: 'bug_report availability does not match administrator status' });
     }
+    // Only the legal advisor's own turn carries the countersignature field.
+    if (toolText.includes('[function] generate_formal_request_pdf')) {
+      const hasLegalSignature = /legalSignature/.test(toolText);
+      if (Boolean(ctx.userIdentity?.isLegal) !== hasLegalSignature) {
+        ISSUES.push({ caseId, msg: 'legalSignature field does not match legal advisor status' });
+      }
+    }
     const generic = resolveProviderProfile().promptVariant === PROMPT_VARIANT.GENERIC;
     if (generic && _containsXaiOnlyMaterial(toolText)) {
       ISSUES.push({ caseId, msg: 'generic provider tool schema leaks xAI-only material' });

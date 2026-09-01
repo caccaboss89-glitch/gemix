@@ -13,7 +13,7 @@ import {
   buildReadSentMessagesTool,
   buildWhatsAppTool
 } from './tools/deliveryCatalog.js';
-import { TOOL_GENERATE_FORMAL_REQUEST_PDF } from './tools/documentCatalog.js';
+import { buildGenerateFormalRequestPdfTool } from './tools/documentCatalog.js';
 import {
   TOOL_GENERATE_MUSIC,
   TOOL_GENERATE_VIDEO,
@@ -53,6 +53,7 @@ function getToolsForUser(toolCtx) {
   }
   const isActiveMember = Boolean(toolCtx.isActiveMember);
   const isAdmin = Boolean(toolCtx.isAdmin);
+  const isLegal = Boolean(toolCtx.isLegal);
   const isWhatsApp = constants.isWhatsAppPlatform(toolCtx.platform);
   const isWhatsAppGroup = isWhatsApp && Boolean(toolCtx.isGroup);
   const isDiscord = toolCtx.platform === constants.PLATFORM_DISCORD;
@@ -77,7 +78,7 @@ function getToolsForUser(toolCtx) {
   // is not: where the platform does not offer it, no schema may name it.
   tools.push(...workspaceTools({ skills: Boolean(getCapabilities(toolCtx).skills) }));
 
-  if (isDiscord) tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
+  if (isDiscord) tools.push(buildGenerateFormalRequestPdfTool(isLegal));
   if (isActiveMember) {
     tools.push(buildEmailTool(isAdmin));
     tools.push(buildWhatsAppTool(isAdmin));

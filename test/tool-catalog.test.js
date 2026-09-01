@@ -186,3 +186,22 @@ test('the skill library is described on WhatsApp and named nowhere on Discord', 
   assert.match(discord, /"attachments\/<file>" for files from this chat\./);
   assert.match(discord, /from attachments\/, copy it into workspace\//);
 });
+
+test('the formal request countersignature field is offered to the legal advisor alone', () => {
+  const pdfFor = (isLegal) => getToolsForUser({
+    isActiveMember: true,
+    isAdmin: true,
+    isLegal,
+    platform: constants.PLATFORM_DISCORD,
+    isGroup: true
+  }).find(tool => tool.function?.name === 'generate_formal_request_pdf').function;
+
+  const legal = pdfFor(true);
+  assert.ok('legalSignature' in legal.parameters.properties);
+  assert.doesNotMatch(legal.description, /only from his own turn/);
+
+  // The administrator has no say here: the schema is the same as any member's.
+  const other = pdfFor(false);
+  assert.equal('legalSignature' in other.parameters.properties, false);
+  assert.match(other.description, /only from his own turn/);
+});

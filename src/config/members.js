@@ -5,11 +5,14 @@
 // The member list is stored in src/data/members.json (gitignored).
 // This module loads the active members at startup.
 //
+// It is also the only place a role is configured: the `admin` and `legal`
+// flags decide both what the model is told about the caller and who
+// ADMIN_NAME / LEGAL_NAME name, so the two can no longer disagree.
+//
 // If the members file is missing or invalid, the loader returns an empty list.
 import fs from 'fs';
 import path from 'path';
 import constants from './constants.js';
-import envConfig from './env.js';
 import { createLogger } from '../utils/logger.js';
 
 const { DATA_DIR } = constants;
@@ -103,38 +106,39 @@ function resolveActiveMemberByName(query) {
 }
 
 /**
- * Report a role holder that .env and the member file disagree about.
+ * The name behind a role, read from the flag that grants it.
  *
- * Each role is stated twice: as a name in .env, which prompts and tool schemas
- * quote, and as a flag here, which decides what the model is told about the
- * caller. Nothing forced the two to agree, and they silently did not -
- * LEGAL_NAME named the advisor while no member carried `legal`, so the role
- * never reached a prompt. A mismatch costs a label, not the roster, so it is
- * reported and startup continues.
+ * Each role used to be configured twice - a name in .env and a flag here - and
+ * the two drifted apart in silence: .env named the legal advisor while no
+ * member carried `legal`, so isLegal was false for everyone and the role never
+ * reached a prompt. The flag is what the code acts on, so it is also where the
+ * name comes from, and there is nothing left to keep in sync.
  *
- * @param {string} envValue - the name configured in .env
+ * Both roles are singular by design: the prompts name one account owner and
+ * one advisor. A second holder is a mistake worth saying out loud, not worth
+ * refusing to start over.
+ *
  * @param {'admin'|'legal'} flag - the member field that grants the role
- * @param {string} envKey - the variable name, for the message
+ * @param {string} label - the role, for the message
+ * @returns {string} The holder's name, or an empty string if nobody holds it
  */
-function _reportRoleMismatch(envValue, flag, envKey) {
-  const resolved = resolveActiveMemberByName(envValue);
-  if (!resolved.ok) {
-    log.warn(`${envKey}="${envValue}" does not name an active member: ${resolved.error}`);
-  } else if (resolved.member[flag] !== true) {
+function _roleHolderName(flag, label) {
+  const holders = ACTIVE_MEMBERS.filter((m) => m[flag] === true);
+  if (holders.length === 0) {
+    log.warn(`No active member has "${flag}": true in ${MEMBERS_FILE}, so nothing names the ${label}.`);
+    return '';
+  }
+  if (holders.length > 1) {
     log.warn(
-      `${envKey}="${envValue}" names ${resolved.member.name}, who has no "${flag}": true `
-      + `in ${MEMBERS_FILE}. The role will not appear in any prompt.`
+      `${holders.length} active members have "${flag}": true (${holders.map((m) => m.name).join(', ')}); `
+      + `treating ${holders[0].name} as the ${label}.`
     );
   }
-  for (const holder of ACTIVE_MEMBERS.filter((m) => m[flag] === true)) {
-    if (!resolved.ok || holder !== resolved.member) {
-      log.warn(`${holder.name} has "${flag}": true but ${envKey} is "${envValue}".`);
-    }
-  }
+  return holders[0].name;
 }
 
-_reportRoleMismatch(envConfig.ADMIN_NAME, 'admin', 'ADMIN_NAME');
-_reportRoleMismatch(envConfig.LEGAL_NAME, 'legal', 'LEGAL_NAME');
+const ADMIN_NAME = _roleHolderName('admin', 'administrator');
+const LEGAL_NAME = _roleHolderName('legal', 'legal advisor');
 
 /**
  * Find a member by WhatsApp JID.
@@ -229,6 +233,8 @@ function formatRoleLabel(member) {
 
 export {
   ACTIVE_MEMBERS,
+  ADMIN_NAME,
+  LEGAL_NAME,
   findMemberByWa,
   findMemberByDiscord,
   findMemberByEmail,

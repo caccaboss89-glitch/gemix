@@ -210,7 +210,8 @@ function renderCase(id) {
   const tools = getToolsForUser({
     ...userCtx,
     isActiveMember: Boolean(identity.isActiveMember),
-    isAdmin: Boolean(identity.isAdmin)
+    isAdmin: Boolean(identity.isAdmin),
+    isLegal: Boolean(identity.isLegal)
   });
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
   const responseFormat = buildGemixResponseFormat({
