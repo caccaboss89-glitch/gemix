@@ -16,11 +16,6 @@ function workspacePathHint(skills) {
     + 'A path with no prefix is read as workspace/.';
 }
 
-/** The roots a write may name, so a tool never offers one this chat lacks. */
-function writableRoots(skills) {
-  return skills ? 'workspace/ or skills/' : 'workspace/';
-}
-
 const buildListFilesTool = (skills) => makeTool({
   name: 'list_files',
   description: `List what is in your workspace${skills ? ', in the skill library,' : ''} or in the files attached `
@@ -69,23 +64,23 @@ const buildReadFileTool = (skills) => makeTool({
 
 const buildWriteFileTool = (skills) => makeTool({
   name: 'write_file',
-  description: `Create a file, or overwrite one completely, under ${writableRoots(skills)}. `
+  description: 'Create a file, or overwrite one completely, under workspace/, the one root you can write in. '
     + 'To change part of an existing file use edit_file instead — this replaces the whole content. '
-    + 'To change a file from attachments/, copy it into workspace/ with shell first.',
+    + `To change a file from attachments/${skills ? ' or skills/' : ''}, copy it into workspace/ with shell first.`,
   properties: {
-    path: { type: 'string', minLength: 1, description: `Destination under ${writableRoots(skills)}. Parent directories are created for you.` },
+    path: { type: 'string', minLength: 1, description: 'Destination under workspace/. Parent directories are created for you.' },
     content: { type: 'string', description: 'Full new content of the file.' }
   },
   required: ['path', 'content']
 });
 
-const buildEditFileTool = (skills) => makeTool({
+const TOOL_EDIT_FILE = makeTool({
   name: 'edit_file',
-  description: `Replace an exact piece of text in an existing file under ${writableRoots(skills)}. `
+  description: 'Replace an exact piece of text in an existing file under workspace/. '
     + 'oldText must appear exactly once: copy it verbatim from read_file, whitespace included, and add '
     + 'surrounding lines until it is unique. Set replaceAll to change every occurrence instead.',
   properties: {
-    path: { type: 'string', minLength: 1, description: `File under ${writableRoots(skills)}.` },
+    path: { type: 'string', minLength: 1, description: 'File under workspace/.' },
     oldText: { type: 'string', minLength: 1, description: 'Exact text to replace, copied verbatim from the file.' },
     newText: { type: 'string', description: 'Replacement text. Empty string deletes the matched text.' },
     replaceAll: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match.' }
@@ -151,7 +146,7 @@ function workspaceTools({ skills = true } = {}) {
     buildSearchFilesTool(skills),
     buildReadFileTool(skills),
     buildWriteFileTool(skills),
-    buildEditFileTool(skills),
+    TOOL_EDIT_FILE,
     buildShellTool(skills)
   ];
 }

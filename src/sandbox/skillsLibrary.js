@@ -10,13 +10,14 @@
 // applies — which is the whole point of the split: the catalog costs a line per
 // skill, the procedure costs nothing until it is used.
 //
-// The library is one directory for the whole deployment, mounted read-write in
-// every sandbox, and GemiX writes its own skills into it. So the catalog is
-// re-read whenever a SKILL.md is added, changed or removed, and cached in
-// between: a stale prompt would advertise a skill that is no longer there.
+// The library is one directory for the whole deployment, shipped with the repo
+// and mounted read-only: the skills are ours, not something the model adds to.
+// It still changes under a running process — a deploy pulls new ones — so the
+// catalog is re-read whenever a SKILL.md is added, changed or removed, and
+// cached in between: a stale prompt would advertise a skill that is not there.
 //
-// The directory is model-controlled, which is why the listing and the reads go
-// through the descriptor-safe host gateway rather than plain fs calls.
+// The listing and the reads go through the descriptor-safe host gateway, like
+// every other path the model can name.
 
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';

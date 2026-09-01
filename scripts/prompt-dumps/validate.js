@@ -566,6 +566,14 @@ function _validateSkills(staticPart, id, caseId) {
   if (!/never mention them/.test(skills)) {
     ISSUES.push({ caseId, msg: 'Skills section must keep the library out of the answers' });
   }
+  // The library ships with the release. Nothing may invite the model to add to
+  // it, and the section has to say where a skill's output goes instead.
+  if (!/The library is read-only/.test(skills)) {
+    ISSUES.push({ caseId, msg: 'Skills section must state that the library is read-only' });
+  }
+  if (/\b(write|create|add|change|delete|maintain)\b[^.]*\bskills?\b/i.test(skills)) {
+    ISSUES.push({ caseId, msg: 'Skills section invites the model to maintain the library, which is read-only' });
+  }
 }
 
 /**

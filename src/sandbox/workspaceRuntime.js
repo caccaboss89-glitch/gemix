@@ -13,7 +13,7 @@
 //
 //   /workspace     rw   host build_workspace dir for this workspaceId
 //   /attachments   ro   host projection of this conversation's files
-//   /skills        rw   the deployment's shared skill library, on the platforms
+//   /skills        ro   the deployment's shared skill library, on the platforms
 //                       that offer it (see config/platformCapabilities.js)
 //
 // Nothing else is mounted and no credential is passed in. The container runs
@@ -51,7 +51,6 @@ const PROXY_HOSTNAME = envConfig.GEMIX_SANDBOX_PROXY_HOST;
 const PROXY_PORT = envConfig.GEMIX_SANDBOX_PROXY_PORT;
 const PROXY_URL = `http://${PROXY_HOSTNAME}:${PROXY_PORT}`;
 const WORKSPACE_QUOTA_BYTES = constants.WORKSPACE_QUOTA_MB * 1024 * 1024;
-const SKILLS_QUOTA_BYTES = constants.SKILLS_QUOTA_MB * 1024 * 1024;
 
 /**
  * Map<workspaceId, Promise<WorkspaceContainerEntry>>.
@@ -151,14 +150,12 @@ function containerEnv() {
 /**
  * Spawn a fresh container for `workspaceId`. Its quota monitor is PID 1 and
  * tools attach through docker exec.
- */
-/**
- * Whether this container gets the skill library mounted.
  *
- * A workspace belongs to exactly one chat, so the answer never changes for a
- * given id and the pooled container can be reused without rechecking it. The
- * caller passes what its platform allows; nothing here can derive it, and a
- * missing answer means no mount, so a new caller cannot get it by accident.
+ * `mountSkills` decides whether the library is bound in at all. A workspace
+ * belongs to exactly one chat, so the answer never changes for a given id and
+ * the pooled container can be reused without rechecking it. The caller passes
+ * what its platform allows; nothing here can derive it, and a missing answer
+ * means no mount, so a new caller cannot get it by accident.
  */
 async function _spawnContainer(workspaceId, { mountSkills = false } = {}) {
   const slug = workspaceIdToSlug(workspaceId);
@@ -188,7 +185,7 @@ async function _spawnContainer(workspaceId, { mountSkills = false } = {}) {
     `${workspaceDir}:/workspace:rw`,
     `${attachmentsDir}:/attachments:ro`
   ];
-  if (skillsDir) binds.push(`${skillsDir}:/skills:rw`);
+  if (skillsDir) binds.push(`${skillsDir}:/skills:ro`);
 
   const hostConfig = {
     NetworkMode: networkName,
@@ -213,8 +210,7 @@ async function _spawnContainer(workspaceId, { mountSkills = false } = {}) {
     Cmd: [
       'python',
       '/opt/sandbox/quota_guard.py',
-      `/workspace=${WORKSPACE_QUOTA_BYTES}`,
-      ...(skillsDir ? [`/skills=${SKILLS_QUOTA_BYTES}`] : [])
+      `/workspace=${WORKSPACE_QUOTA_BYTES}`
     ],
     User: sandboxUserString(),
     Env: containerEnv(),

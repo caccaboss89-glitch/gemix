@@ -501,15 +501,11 @@ test('a workspace under quota reports ok', () => {
   assert.ok(quota.usedBytes > 0);
 });
 
-test('each writable root is accounted against its own quota', () => {
+test('workspace is the one root with a quota, because it is the one that takes writes', () => {
   assert.equal(rootQuotaMb('workspace'), constants.WORKSPACE_QUOTA_MB);
-  assert.equal(rootQuotaMb('skills'), constants.SKILLS_QUOTA_MB);
-  // The read-only mount has nothing to account: writes never reach it.
+  // The read-only mounts have nothing to account: writes never reach them.
   assert.throws(() => rootQuotaMb('attachments'), /No quota is defined/);
-
-  const skills = checkRootQuota(WORKSPACE_ID, 'skills');
-  assert.equal(skills.root, 'skills');
-  assert.equal(skills.quotaBytes, constants.SKILLS_QUOTA_MB * 1024 * 1024);
+  assert.throws(() => rootQuotaMb('skills'), /No quota is defined/);
 });
 
 test('descriptor-safe listing skips symlinks so a planted link cannot widen it', () => {

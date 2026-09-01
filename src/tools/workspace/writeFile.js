@@ -11,9 +11,9 @@
 // symlink planted from inside cannot redirect a host-side write out of the
 // tree. Content travels on stdin rather than in argv.
 //
-// `workspace/`, and `skills/` where the chat has it, are writable.
-// `/attachments` is a read-only mount: to change a conversation file the model
-// copies it across first.
+// `workspace/` is the only writable root. `/attachments` and `/skills` are
+// read-only mounts: to change a file from either, the model copies it across
+// first.
 
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { statAgentFile } from '../../sandbox/hostFileGateway.js';

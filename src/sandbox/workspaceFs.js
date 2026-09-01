@@ -9,7 +9,7 @@
 //   .workspace_lock/        <- atomic mutation mutex (utils/workspaceState.js)
 //
 // Plus one directory shared by every conversation:
-//   <repo>/skills/          <- /skills, the writable skill library
+//   <repo>/skills/          <- /skills, the shared skill library, read-only
 //
 // Directory metadata and quota accounting run here. File bytes cross the host
 // through hostFileGateway.js, while model-authored writes and shell commands
@@ -30,8 +30,7 @@ const log = createLogger('WorkspaceFs');
 
 /** Megabyte cap of each writable root. A root without one cannot be written. */
 const ROOT_QUOTA_MB = Object.freeze({
-  [ROOT.WORKSPACE]: constants.WORKSPACE_QUOTA_MB,
-  [ROOT.SKILLS]: constants.SKILLS_QUOTA_MB
+  [ROOT.WORKSPACE]: constants.WORKSPACE_QUOTA_MB
 });
 
 /**
@@ -61,7 +60,7 @@ function ensureAttachmentsDir(workspaceId) {
 
 /**
  * Ensure the skill library exists. Shared by every conversation and mounted
- * read-write, so like the projection root it has to be there before docker
+ * read-only, so like the projection root it has to be there before docker
  * starts a container, even on a deployment that ships no skill at all.
  */
 function ensureSkillsDir() {

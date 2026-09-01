@@ -93,12 +93,14 @@ test('a traversal that stays inside the root is still refused', () => {
   assert.equal(parseAgentPath('workspace/sub/../file.txt'), null);
 });
 
-test('attachments is the one read-only root', () => {
+test('workspace is the one writable root', () => {
   assert.equal(isWritableRoot(ROOT.WORKSPACE), true);
-  assert.equal(isWritableRoot(ROOT.SKILLS), true);
+  // The library ships with the release; the model reads it and runs its
+  // scripts, it does not add to it.
+  assert.equal(isWritableRoot(ROOT.SKILLS), false);
   assert.equal(isWritableRoot(ROOT.ATTACHMENTS), false);
   assert.equal(resolveAgentPath(WORKSPACE_ID, 'workspace/x.txt').writable, true);
-  assert.equal(resolveAgentPath(WORKSPACE_ID, 'skills/x/SKILL.md').writable, true);
+  assert.equal(resolveAgentPath(WORKSPACE_ID, 'skills/x/SKILL.md').writable, false);
   assert.equal(resolveAgentPath(WORKSPACE_ID, 'attachments/x.txt').writable, false);
 });
 

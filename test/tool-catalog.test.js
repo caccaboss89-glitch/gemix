@@ -175,11 +175,14 @@ test('the skill library is described on WhatsApp and named nowhere on Discord', 
 
   const wa = descriptions(constants.PLATFORM_WA_DEDICATED);
   assert.match(wa, /"skills\/<name>\/<file>" for the skill library/);
-  assert.match(wa, /under workspace\/ or skills\//);
+  // Readable, never a write target: workspace/ is the only root offered there.
+  assert.match(wa, /under workspace\/, the one root you can write in/);
+  assert.match(wa, /from attachments\/ or skills\/, copy it into workspace\//);
+  assert.equal(/workspace\/ or skills\//.test(wa), false, wa);
 
   // On Discord `skills/` is not a root at all, so no schema may offer it.
   const discord = descriptions(constants.PLATFORM_DISCORD);
   assert.equal(/skills/i.test(discord), false, discord);
   assert.match(discord, /"attachments\/<file>" for files from this chat\./);
-  assert.match(discord, /under workspace\/\./);
+  assert.match(discord, /from attachments\/, copy it into workspace\//);
 });

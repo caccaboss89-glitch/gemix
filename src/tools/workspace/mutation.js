@@ -61,12 +61,12 @@ async function runWorkspaceMutation(workspaceId, opts = {}, fn) {
  * @param {object} [opts]
  * @param {boolean} [opts.skills] - whether this chat has the skill library, and
  *   so whether its container mounts it. A property of the chat, not of the path
- *   being written: the same container serves later calls that may need it.
+ *   being written — writes only ever land in `workspace/` — but the same
+ *   container serves later calls that do read from the library.
  */
 async function commitWorkspaceText(workspaceId, resolved, content, opts = {}) {
-  // The allowed root is the one the path resolved into, so a write into the
-  // skill library is contained by `/skills` exactly as a workspace write is
-  // contained by `/workspace`.
+  // The allowed root is the one the path resolved into, which the caller has
+  // already checked is writable: the script refuses anything outside it.
   const allowedRoot = toContainerPath(resolved.root, '');
   const run = await workspaceRuntime.execInWorkspace(workspaceId, {
     command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', resolved.containerPath, allowedRoot],

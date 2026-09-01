@@ -414,16 +414,19 @@ function _renderWorkspace(ws) {
 
 /**
  * The workspace rules the model needs before it touches a file: namespace,
- * inspection workflow, writable area, quota, TTL and network behavior.
+ * inspection workflow, the one writable root, quota, TTL and network behavior.
  *
  * @param {boolean} skills - whether this chat has the skill library, and so
  *   whether `skills/` is a root of its namespace at all.
  */
 function _buildWorkspaceLines(skills) {
   return [
-    'You have a working area of your own. `workspace/` is yours to write in and persists across turns in this chat. '
-    + '`attachments/` holds this chat\'s files, mounted read-only: to change one, copy it into `workspace/` first.'
-    + (skills ? ' The third root, `skills/`, is writable as well.' : ''),
+    'You have a working area of your own. `workspace/` is yours to write in, persists across turns in this chat, and '
+    + 'is the only root you can write to. `attachments/` holds this chat\'s files'
+    + (skills
+      ? ' and `skills/` the skill library; both are mounted read-only, so to change a file from either, copy it '
+        + 'into `workspace/` first.'
+      : ', mounted read-only: to change one, copy it into `workspace/` first.'),
     'One path namespace covers everything: the path `list_files` shows you is the same string you pass to `read_file` '
     + 'and put in `attachments` in your final reply. With `shell`, omit `workingDir` to start at `/`, where that same '
     + 'root string works unchanged. If you set `workingDir`, command-relative paths start there; use `/workspace/...`'
@@ -440,9 +443,7 @@ function _buildWorkspaceLines(skills) {
     'The same file can exist in `workspace/` and `attachments/` at once (you made it, you sent it, it came back in '
     + 'the chat). That is normal: work from whichever copy the user means.',
     `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `
-    + `without activity in this chat`
-    + `${skills ? `, and ${constants.SKILLS_QUOTA_MB} MB in \`skills/\`, which is never wiped` : ''}. `
-    + `Delete what you no longer need instead of filling ${skills ? 'them' : 'it'}. `
+    + 'without activity in this chat. Delete what you no longer need instead of filling it. '
     + 'Package installs are disabled; the toolchain in `shell` is fixed.',
     'Network access from `shell` goes through a public-only proxy. Private and local destinations are blocked. A 403 '
     + 'can be either a proxy policy rejection or the remote site refusing the request; it does not by itself prove '
@@ -462,15 +463,15 @@ function _buildSkillsLines() {
   const skills = listInstalledSkills();
   if (skills.length === 0) return [];
   return [
-    'A skill is a procedure you keep: one directory under `skills/`, with a SKILL.md and whatever scripts or '
-    + 'reference files it needs. Each one below describes what it is for.',
+    'A skill is a procedure worked out in advance: one directory under `skills/`, with a SKILL.md and whatever '
+    + 'scripts or reference files it needs. Each one below describes what it is for.',
     'When a skill covers what you are about to do, read its SKILL.md and follow it instead of working the task '
     + 'out again; when none does, proceed as usual. Skills are yours, not the user\'s: never mention them.',
     _block('Skills', skills.map(
       s => `<Skill name="${escapeXml(s.name)}" path="${escapeXml(s.path)}">${escapeXml(s.description)}</Skill>`
     )),
-    'You maintain the library yourself — write, change and delete skills there. It is shared by every chat, so a '
-    + 'skill you add is one every conversation gets, from your next turn onward.'
+    'The library is read-only: run a skill\'s scripts where they are, and write what they produce into `workspace/`. '
+    + 'If a skill turns out not to fit the case in front of you, finish the task your own way.'
   ];
 }
 

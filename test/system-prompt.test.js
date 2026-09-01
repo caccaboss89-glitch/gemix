@@ -145,8 +145,10 @@ test('workspace guidance states shell path and proxy failures without false abso
 test('the Skills section and the `skills/` root are a WhatsApp surface only', () => {
   const wa = promptFor(true);
   assert.match(wa, /^## Skills$/m);
-  assert.match(wa, /The third root, `skills\/`, is writable as well\./);
-  assert.match(wa, /MB in `skills\/`, which is never wiped/);
+  assert.match(wa, /`skills\/` the skill library; both are mounted read-only/);
+  assert.match(wa, /The library is read-only/);
+  // Nothing may invite the model to add to a library it cannot write to.
+  assert.equal(/\b(maintain|create|delete) (a |the )?skill/i.test(wa), false);
 
   const discord = buildStaticInstructions({
     platform: constants.PLATFORM_DISCORD,

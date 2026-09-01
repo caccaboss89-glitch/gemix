@@ -6,7 +6,10 @@
 //
 //   workspace/     its own writable area          -> /workspace in the container
 //   attachments/   this conversation's files      -> /attachments, read-only
-//   skills/        the shared skill library       -> /skills in the container
+//   skills/        the shared skill library       -> /skills, read-only
+//
+// `workspace/` is the one root the model writes in. The library ships with the
+// repo: the model reads a skill and runs its scripts, it does not maintain it.
 //
 // The third one is a platform capability (see config/platformCapabilities.js).
 // Where the chat does not have it, callers pass `skills: false` and `skills` is
@@ -44,12 +47,12 @@ const HOST_ROOT_RESOLVER = Object.freeze({
 });
 
 /** Every root the model may create, change and delete files in. */
-const WRITABLE_ROOTS = Object.freeze([ROOT.WORKSPACE, ROOT.SKILLS]);
+const WRITABLE_ROOTS = Object.freeze([ROOT.WORKSPACE]);
 
 /** Lowercased root names, for deciding whether a first segment names a root. */
 const ROOT_NAMES = new Set(Object.values(ROOT));
 
-/** `/attachments` is the one read-only mount; the other two accept writes. */
+/** `workspace/` is the one root that accepts writes; the other two are mounted read-only. */
 function isWritableRoot(root) {
   return WRITABLE_ROOTS.includes(root);
 }
