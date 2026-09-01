@@ -72,7 +72,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw, opts);
     let opened;
     try {
-      opened = readAgentFileBuffer(workspaceId, raw, constants.WORKSPACE_EDIT_MAX_BYTES);
+      opened = readAgentFileBuffer(workspaceId, lockedResolved.display, constants.WORKSPACE_EDIT_MAX_BYTES);
     } catch (err) {
       if (err?.code === 'EFILETOOLARGE') {
         return { success: false, error: `${lockedResolved.display} is too large to edit as text.` };

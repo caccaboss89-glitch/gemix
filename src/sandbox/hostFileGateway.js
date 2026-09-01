@@ -5,6 +5,12 @@
 // and the opened descriptor is checked against the canonical root before any
 // bytes are read or written. This closes the check/open race that path-only
 // containment checks cannot close when a background process can swap links.
+//
+// The parse here is the full namespace, with every root the deployment has. A
+// caller whose chat offers fewer of them (see config/platformCapabilities.js)
+// resolves the model's string itself and passes the resulting `display`, which
+// re-parses to the same file: handing the raw string over instead would resolve
+// a root that chat does not have.
 
 import fs from 'fs';
 import os from 'os';

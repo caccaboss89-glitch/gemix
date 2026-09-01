@@ -54,8 +54,11 @@ async function readFile(args = {}, workspaceId, opts = {}) {
   const parsed = parseAgentPath(raw, opts);
   if (!parsed) return invalidPathError(raw, opts);
 
+  // The gateway resolves in the full namespace, so it is handed the path this
+  // chat resolved to and not the model's string: where the library is off,
+  // `skills/x` is a workspace directory and must be read as one.
   let snapshot;
-  try { snapshot = snapshotAgentFile(workspaceId, raw); }
+  try { snapshot = snapshotAgentFile(workspaceId, parsed.display); }
   catch (err) {
     return {
       success: false,

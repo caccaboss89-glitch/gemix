@@ -34,7 +34,8 @@ function _wrapBatchHandler(batchKey, handler, log, discardLogLabel) {
  * @param {Function} [opts.describeLiveMessage] - () => { userName, text, timestampMs, hasMedia }.
  *   Called only when the message misses the batch, to hand it to the running
  *   turn as a mid-turn note. The adapter supplies it because only it knows how
- *   to read its own platform's message.
+ *   to read its own platform's message, and returns null for one the running
+ *   turn must not see.
  * @returns {'batched'|'started'|'live'} live = lock held, so the message goes to
  *   the running turn's inbox instead of starting one
  */

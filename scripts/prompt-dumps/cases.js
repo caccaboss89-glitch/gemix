@@ -15,9 +15,12 @@
 // against), so no case needs to model it.
 
 import constants from '../../src/config/constants.js';
-import { ADMIN_NAME } from '../../src/config/members.js';
+import { ADMIN_NAME, LEGAL_NAME } from '../../src/config/members.js';
 
 const { PLATFORM_WA_PERSONAL, PLATFORM_WA_DEDICATED, PLATFORM_DISCORD } = constants;
+// generate_formal_request_pdf names the countersigner from the same constant,
+// so the legal fixture has to carry that name or the dump contradicts itself.
+const LEGAL_USER_NAME = LEGAL_NAME || 'Legal User';
 const ADMIN_FIRST_NAME = (ADMIN_NAME || 'Test Admin').split(/\s+/)[0];
 
 const ACTIVE = {
@@ -38,7 +41,7 @@ const ACTIVE_LEGAL = {
   isActiveMember: true,
   isAdmin: false,
   isLegal: true,
-  member: { name: 'Legal User', wa: 'legal@c.us', email: 'l@test.it', legal: true },
+  member: { name: LEGAL_USER_NAME, wa: 'legal@c.us', email: 'l@test.it', legal: true },
   taskFileId: 'member_test_legal'
 };
 const NON_ACTIVE = {
@@ -65,7 +68,7 @@ const MOCK_ACTIVE_MEMBERS = [
     wa: '390000000002@c.us'
   },
   {
-    name: 'Legal User',
+    name: LEGAL_USER_NAME,
     nicks: ['test-legal'],
     email: 'legal@example.invalid',
     wa: '390000000003@c.us',
@@ -358,18 +361,19 @@ const CASES = {
       userWorkspace: EMPTY_WORKSPACE
     }
   },
-  // The legal advisor is the third role formatRoleLabel renders. Like the
-  // non-admin cases it gets the names-only roster, so this dump also carries
-  // the role as it appears from the outside, in <ActiveMembers>. It is a
-  // Discord case because that is where generate_formal_request_pdf lives, and
-  // his is the only turn that offers the legalSignature field.
+  // The legal advisor is the second role formatRoleLabel renders. He is not the
+  // admin, so his roster is the one that carries roles rather than identifiers:
+  // this dump shows the label both on the caller and, from the outside, in
+  // <ActiveMembers>. It is a Discord case because that is where
+  // generate_formal_request_pdf lives, and his is the only turn that offers the
+  // legalSignature field.
   20: {
     label: 'Discord — legal advisor active caller (countersignature field)',
     ctx: {
       platform: PLATFORM_DISCORD,
       isGroup: false,
       chatId: 'channel123',
-      userName: 'Legal User',
+      userName: LEGAL_USER_NAME,
       userIdentity: ACTIVE_LEGAL,
       threadName: 'Statute question',
       rulesContext: '[STATUTE EXCERPT PLACEHOLDER]',

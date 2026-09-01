@@ -56,7 +56,10 @@ test('past the cap the extras are counted, not held', () => {
   const key = 'wa:flood@c.us';
   clearLiveMessages(key);
   for (let i = 0; i < MAX_LIVE_MESSAGES + 3; i++) {
-    recordLiveMessage(key, { userName: 'Spam', text: `msg ${i}`, timestampMs: AT });
+    const held = recordLiveMessage(key, { userName: 'Spam', text: `msg ${i}`, timestampMs: AT });
+    // The place in the hold, and 0 once there is no place left: the caller logs
+    // it as "handed to the running turn", which a counted message was not.
+    assert.equal(held, i < MAX_LIVE_MESSAGES ? i + 1 : 0);
   }
 
   const lines = renderLiveMessages(drainLiveMessages(key));
@@ -94,13 +97,25 @@ test('a text-less message with no file is dropped rather than shown blank', () =
 test('a restricted inbox holds only the speaker the turn is answering', () => {
   const key = 'discord:thread';
   openLiveInbox(key, { onlySenderId: 'u-1' });
-  recordLiveMessage(key, { userName: 'Asker', senderId: 'u-1', text: 'also check the date', timestampMs: AT });
-  recordLiveMessage(key, { userName: 'Someone else', senderId: 'u-2', text: 'lol', timestampMs: AT });
-  recordLiveMessage(key, { userName: 'Third', text: 'no id at all', timestampMs: AT });
+  assert.equal(recordLiveMessage(key, { userName: 'Asker', senderId: 'u-1', text: 'also check the date', timestampMs: AT }), 1);
+  assert.equal(recordLiveMessage(key, { userName: 'Someone else', senderId: 'u-2', text: 'lol', timestampMs: AT }), 0);
+  assert.equal(recordLiveMessage(key, { userName: 'Third', text: 'no id at all', timestampMs: AT }), 0);
 
   const lines = renderLiveMessages(drainLiveMessages(key));
   assert.equal(lines.length, 1);
   assert.match(lines[0], /Asker: also check the date/);
+});
+
+test('the restriction outlives the drain, because the turn does', () => {
+  const key = 'discord:thread-rounds';
+  openLiveInbox(key, { onlySenderId: 'u-1' });
+  recordLiveMessage(key, { userName: 'Asker', senderId: 'u-1', text: 'round one', timestampMs: AT });
+  assert.equal(drainLiveMessages(key).messages.length, 1);
+
+  // Same turn, next round: the rest of the thread is still not addressing GemiX.
+  recordLiveMessage(key, { userName: 'Someone else', senderId: 'u-2', text: 'lol', timestampMs: AT });
+  assert.deepEqual(drainLiveMessages(key).messages, []);
+  clearLiveMessages(key);
 });
 
 test('an unrestricted inbox holds everyone, which is what WhatsApp wants', () => {
@@ -128,6 +143,15 @@ test('the wipe notice is claimed once per turn, then again after it ends', () =>
 
   clearLiveMessages(key);
   assert.equal(claimWipeNotice(key), true, 'the next turn gets its own notice');
+  clearLiveMessages(key);
+});
+
+test('the wipe notice stays claimed across the rounds of one turn', () => {
+  const key = 'wa:wipe-rounds@c.us';
+  openLiveInbox(key);
+  assert.equal(claimWipeNotice(key), true);
+  drainLiveMessages(key);
+  assert.equal(claimWipeNotice(key), false, 'a drain must not re-arm the notice');
   clearLiveMessages(key);
 });
 

@@ -318,9 +318,9 @@ function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
   if (Boolean(ctx?.userIdentity?.isAdmin) !== callerSaysAdmin) {
     ISSUES.push({ caseId, msg: 'Runtime caller administrator label does not match identity' });
   }
-  // Matched case-insensitively: the label leads the parenthesis on its own and
-  // trails the administrator one when a member holds both roles.
-  const callerSaysLegal = /<Caller>[^<]*\([^)]*\blegal advisor\b[^)]*\)/i.test(dynamicPart);
+  // The label reads the same wherever it appears: on its own, or after the
+  // administrator one when a member holds both roles.
+  const callerSaysLegal = /<Caller>[^<]*\([^)]*\blegal advisor\b[^)]*\)/.test(dynamicPart);
   if (Boolean(ctx?.userIdentity?.isLegal) !== callerSaysLegal) {
     ISSUES.push({ caseId, msg: 'Runtime caller legal advisor label does not match identity' });
   }
@@ -579,13 +579,14 @@ function _validateSkills(staticPart, id, caseId) {
   if (!/never mention them/.test(skills)) {
     ISSUES.push({ caseId, msg: 'Skills section must keep the library out of the answers' });
   }
-  // The library ships with the release. Nothing may invite the model to add to
-  // it, and the section has to say where a skill's output goes instead.
+  // The library ships with the release. `skills/` is not a writable root
+  // anywhere (sandbox/workspacePaths.js) and the mount is read-only, so the
+  // section only has to say so, and say where a skill's output goes instead.
   if (!/The library is read-only/.test(skills)) {
     ISSUES.push({ caseId, msg: 'Skills section must state that the library is read-only' });
   }
-  if (/\b(write|create|add|change|delete|maintain)\b[^.]*\bskills?\b/i.test(skills)) {
-    ISSUES.push({ caseId, msg: 'Skills section invites the model to maintain the library, which is read-only' });
+  if (!/into `workspace\/`/.test(skills)) {
+    ISSUES.push({ caseId, msg: 'Skills section must send what a skill produces to `workspace/`' });
   }
 }
 
@@ -782,6 +783,35 @@ function _validateWorkspaceToolDescriptions(platform) {
 }
 
 /**
+ * The mounts the dump advertises, against the roots its own tool schemas name.
+ * A schema that sends the model to a root with no mount line behind it is the
+ * document contradicting itself, which is the whole thing this dump exists for.
+ *
+ * @param {string} dump
+ * @param {string} platform - platform the schemas in this dump were built for
+ */
+function _validateWorkspaceMounts(dump, platform) {
+  const block = dump.split('--- MOUNTS ---')[1]?.split('\n\n')[0] || '';
+  for (const root of ['/workspace', '/attachments']) {
+    if (!block.includes(root)) {
+      ISSUES.push({ caseId: 'workspace', msg: `MOUNTS does not list ${root}` });
+    }
+  }
+  const skills = Boolean(getCapabilities({ platform, isGroup: false }).skills);
+  if (skills !== block.includes('/skills')) {
+    ISSUES.push({
+      caseId: 'workspace',
+      msg: skills
+        ? 'MOUNTS omits /skills, which the tool schemas in this dump name'
+        : 'MOUNTS lists /skills, which this platform does not mount'
+    });
+  }
+  if (/\/(attachments|skills)\s+rw/.test(block)) {
+    ISSUES.push({ caseId: 'workspace', msg: 'MOUNTS shows a read-only root as writable' });
+  }
+}
+
+/**
  * @param {string} dump - full workspace-runtime-dump.txt text
  * @param {string} platform - platform to read the live tool schema from
  */
@@ -790,6 +820,7 @@ function validateWorkspaceRuntimeDump(dump, platform) {
     ISSUES.push({ caseId: 'workspace', msg: 'workspace dump missing its header' });
     return;
   }
+  _validateWorkspaceMounts(dump, platform);
   _validateWorkspaceExecEnv(dump);
   _validateWorkspaceToolDescriptions(platform);
   validateToolDumpLeaks(dump, 'workspace');

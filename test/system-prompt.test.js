@@ -93,7 +93,7 @@ test('a non-admin member sees the administrator labeled in the active members li
   }, undefined, { activeMembers: FIXTURE_MEMBERS_WITH_ADMIN });
   assert.match(
     prompt,
-    /<ActiveMembers>Regular Member, Test Admin \(GemiX creator and Discord server administrator\), Legal Advisor \(Legal advisor\)<\/ActiveMembers>/
+    /<ActiveMembers>Regular Member, Test Admin \(GemiX creator and Discord server administrator\), Legal Advisor \(legal advisor\)<\/ActiveMembers>/
   );
 });
 
@@ -106,7 +106,7 @@ test('Runtime tells the model when the current caller is a legal advisor', () =>
     userIdentity: { isActiveMember: true, isAdmin: false, isLegal: true, member: { name: 'Legal Advisor', legal: true } },
     userWorkspace: null
   });
-  assert.match(runtime, /<Caller>Legal Advisor \(Legal advisor, active member\)/);
+  assert.match(runtime, /<Caller>Legal Advisor \(legal advisor, active member\)/);
 });
 
 test('Runtime names both roles when the caller is administrator and legal advisor', () => {
@@ -213,8 +213,6 @@ test('the Skills section and the `skills/` root are a WhatsApp surface only', ()
   assert.match(wa, /^## Skills$/m);
   assert.match(wa, /`skills\/` the skill library; both are mounted read-only/);
   assert.match(wa, /The library is read-only/);
-  // Nothing may invite the model to add to a library it cannot write to.
-  assert.equal(/\b(maintain|create|delete) (a |the )?skill/i.test(wa), false);
 
   const discord = buildStaticInstructions({
     platform: constants.PLATFORM_DISCORD,

@@ -29,6 +29,7 @@ PART_SAMPLE_RATE = "16000"
 
 DEFAULT_OUT_DIR = "/workspace/audio"
 NAMESPACE_ROOTS = ("workspace", "attachments", "skills")
+WRITABLE_ROOT = "workspace"
 PROBE_TIMEOUT = 60
 SPLIT_TIMEOUT = 1800
 
@@ -59,6 +60,19 @@ def container_path(raw):
 def display_path(absolute):
     """The namespace string the model passes to read_file."""
     return str(absolute).replace("\\", "/").lstrip("/")
+
+
+def writable_container_path(raw):
+    """Same, for somewhere the parts can actually be written.
+
+    The other roots are read-only mounts: creating a directory there fails with
+    an OSError this script has no reason to dress up as a diagnosis, so it is
+    refused with a reason of its own before anything is attempted.
+    """
+    resolved = container_path(raw)
+    if resolved.split("/")[1].lower() != WRITABLE_ROOT:
+        raise SplitError(f"{display_path(resolved)} is read-only; the parts have to go under {WRITABLE_ROOT}/")
+    return resolved
 
 
 def timecode(seconds):
@@ -103,7 +117,8 @@ def probe(path):
     except subprocess.TimeoutExpired:
         raise SplitError("ffprobe timed out")
     if run.returncode != 0:
-        raise SplitError(f"ffprobe refused the file: {run.stderr.strip().splitlines()[-1:] or ['unreadable']}")
+        detail = (run.stderr or "").strip().splitlines()
+        raise SplitError(f"ffprobe refused the file: {detail[-1] if detail else 'unreadable'}")
 
     try:
         data = json.loads(run.stdout or "{}")
@@ -174,6 +189,7 @@ def main():
     args = parser.parse_args()
 
     source = container_path(args.input)
+    out_dir = writable_container_path(args.out_dir)
     if not os.path.isfile(source):
         raise SplitError(f"{display_path(source)} is not a file")
     if args.chunk_seconds < 30:
@@ -207,7 +223,7 @@ def main():
         print(f"PART=1 PATH={display_path(source)} START=00:00:00 START_S=0 SECONDS={int(round(duration))}")
         return
 
-    parts = split(source, Path(container_path(args.out_dir)), args.chunk_seconds, start_at, stop_at)
+    parts = split(source, Path(out_dir), args.chunk_seconds, start_at, stop_at)
     print("ACTION=split")
     print(f"PARTS={len(parts)}")
     for index, part in enumerate(parts):

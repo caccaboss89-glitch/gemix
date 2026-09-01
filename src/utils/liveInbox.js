@@ -82,17 +82,19 @@ function claimWipeNotice(chatKey) {
  * @param {string} [message.text] - body as the platform delivered it
  * @param {number} [message.timestampMs]
  * @param {boolean} [message.hasMedia]
- * @returns {number} how many messages are now held for this chat
+ * @returns {number} this message's place in the hold, or 0 when it was not
+ *   held: no chat, another speaker's message in a restricted inbox, or past
+ *   the cap, where it is only counted
  */
 function recordLiveMessage(chatKey, message) {
   if (!chatKey || !message) return 0;
   const entry = _inboxes.get(chatKey) || _newInbox();
   if (!_inboxes.has(chatKey)) _inboxes.set(chatKey, entry);
-  if (entry.onlySenderId && message.senderId !== entry.onlySenderId) return entry.messages.length;
+  if (entry.onlySenderId && message.senderId !== entry.onlySenderId) return 0;
 
   if (entry.messages.length >= MAX_LIVE_MESSAGES) {
     entry.overflow += 1;
-    return entry.messages.length;
+    return 0;
   }
 
   const raw = typeof message.text === 'string' ? message.text.trim() : '';
@@ -109,14 +111,20 @@ function recordLiveMessage(chatKey, message) {
  * Take everything held for a chat and leave the inbox empty, so the same
  * message is shown to the model exactly once.
  *
+ * The inbox itself stays open: the turn draining it is still running, and the
+ * sender restriction and the wipe notice it was opened with have to survive
+ * into its next round. Only clearLiveMessages ends it.
+ *
  * @param {string} chatKey
  * @returns {{ messages: Array<object>, overflow: number }}
  */
 function drainLiveMessages(chatKey) {
   const entry = chatKey ? _inboxes.get(chatKey) : null;
   if (!entry) return { messages: [], overflow: 0 };
-  _inboxes.delete(chatKey);
-  return entry;
+  const drained = { messages: entry.messages, overflow: entry.overflow };
+  entry.messages = [];
+  entry.overflow = 0;
+  return drained;
 }
 
 /**

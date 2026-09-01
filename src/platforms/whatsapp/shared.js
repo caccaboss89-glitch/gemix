@@ -573,7 +573,6 @@ async function buildIncomingContentPartsFromMessages(
   return contentParts;
 }
 
-/** True when the message should enter the batch pipeline (incl. quote-only, like Discord). */
 /**
  * One WhatsApp message reduced to the fields utils/liveInbox.js holds, for a
  * message that arrived while the chat's turn was already running.
@@ -627,6 +626,7 @@ async function noteWipeDuringTurn(chat, batchKey) {
   }
 }
 
+/** True when the message should enter the batch pipeline (incl. quote-only, like Discord). */
 function waMessageHasUsableContent(msg) {
   if (!msg) return false;
   if (msg.hasMedia) return true;

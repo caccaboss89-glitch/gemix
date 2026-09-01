@@ -182,7 +182,7 @@ test('the two kinds of 429 are told apart by what Cloudflare says', () => {
   assert.equal(classifyFailure(429, '3040: rate limited'), CF_ERROR.RATE_LIMIT);
 });
 
-test('an exhausted pool and a burst limit are not the same outage', () => {
+test('an exhausted pool and a burst limit take the same fallback, worded apart', () => {
   // Both send the request elsewhere and cool the backend down, but only the
   // first is written into the ring, so the wording has to stay distinguishable.
   assert.deepEqual(failurePlan(CF_ERROR.BUDGET), failurePlan(CF_ERROR.RATE_LIMIT));

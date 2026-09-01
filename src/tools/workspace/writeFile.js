@@ -53,7 +53,7 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
     // for a symlink between validation and serialization.
     const lockedResolved = resolveAgentPath(workspaceId, raw, { ...opts, forWrite: true });
     if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw, opts);
-    const current = statAgentFile(workspaceId, raw);
+    const current = statAgentFile(workspaceId, lockedResolved.display);
     try {
       assertRootCapacity(
         workspaceId,

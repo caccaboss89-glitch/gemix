@@ -78,7 +78,7 @@ The fetch script handles one post per call. Loop over the links with a distinct 
 
 ```
 for url in '<URL1>' '<URL2>'; do
-  python3 /skills/tiktok-video/scripts/tiktok_fetch.py "$url" --out "/workspace/tiktok/$(date +%s%N).mp4"
+  python3 /skills/tiktok-video/scripts/tiktok_fetch.py "$url" --out "workspace/tiktok/$(date +%s%N).mp4"
 done
 ```
 
@@ -92,4 +92,4 @@ If `tiktok_fetch.py` fails on posts that are plainly public, TikTok changed some
 python3 /skills/tiktok-video/scripts/tiktok_fetch.py '<URL>'; yt-dlp -v --no-playlist --simulate '<URL>' 2>&1 | tail -30
 ```
 
-Then fix `skills/tiktok-video/scripts/tiktok_fetch.py` in place so the next chat gets the working version, and update [SKILL.md](skills/tiktok-video/SKILL.md) if the steps changed.
+The library is read-only, so the fix is not yours to make: say plainly that TikTok downloads are not working right now, and quote the `REASON=` and the yt-dlp tail so the person who maintains GemiX has the diagnosis. Copying the script into `workspace/` and patching it there fixes nothing beyond this chat, so do not.

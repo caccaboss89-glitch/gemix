@@ -185,7 +185,7 @@ function findMemberByEmail(email) {
  * @returns {boolean} True if member exists and has admin flag set to true
  */
 function isAdmin(member) {
-  return member && member.admin === true;
+  return member?.admin === true;
 }
 
 /**
@@ -194,41 +194,25 @@ function isAdmin(member) {
  * @returns {boolean} True if member exists and has legal flag set to true
  */
 function isLegal(member) {
-  return member && member.legal === true;
+  return member?.legal === true;
 }
 
 /**
- * Extract role flags from a member object.
+ * A member's roles as the prompt names them, in one shape for both places that
+ * name them: the <ActiveMembers> roster and the <Caller> line, where the label
+ * sits inside a parenthesis after the member's name. Both roles are lower case
+ * bar the proper noun, so a label reads as one item of that parenthesis rather
+ * than as a sentence of its own.
+ *
  * @param {object|null} member - The member object
- * @returns {{ isAdmin: boolean, isLegal: boolean }} Role flags
- */
-function getRoles(member) {
-  return {
-    isAdmin: isAdmin(member),
-    isLegal: isLegal(member)
-  };
-}
-
-/**
- * Format a member's role label for prompt display.
- * Centralizes the logic for how roles are presented to the model.
- * @param {object|null} member - The member object
- * @returns {string} Role label (empty string if no roles, e.g. "GemiX creator and Discord server administrator")
+ * @returns {string} e.g. "GemiX creator and Discord server administrator";
+ *   empty when the member holds no role
  */
 function formatRoleLabel(member) {
-  const roles = getRoles(member);
-  if (!roles.isAdmin && !roles.isLegal) return '';
-
-  if (roles.isAdmin && roles.isLegal) {
-    return 'GemiX creator and Discord server administrator, legal advisor';
-  }
-  if (roles.isAdmin) {
-    return 'GemiX creator and Discord server administrator';
-  }
-  if (roles.isLegal) {
-    return 'Legal advisor';
-  }
-  return '';
+  const roles = [];
+  if (isAdmin(member)) roles.push('GemiX creator and Discord server administrator');
+  if (isLegal(member)) roles.push('legal advisor');
+  return roles.join(', ');
 }
 
 export {
@@ -241,6 +225,5 @@ export {
   resolveActiveMemberByName,
   isAdmin,
   isLegal,
-  getRoles,
   formatRoleLabel
 };

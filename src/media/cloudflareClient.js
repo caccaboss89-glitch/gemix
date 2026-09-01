@@ -118,8 +118,10 @@ async function callWorkersAi({ model, body, signal, timeoutMs = REQUEST_TIMEOUT_
     await markExhausted(account.fingerprint);
   }
 
-  // Either the pool was already empty, or this call emptied it. Both mean the
-  // same thing to the caller, and the pool-wide wording is the honest one.
+  // Either the pool was already empty or this call emptied it, and both mean
+  // the same thing to the caller: the pool-wide wording is the honest one. A
+  // credential Cloudflare would not accept is the exception — that is a
+  // deployment fault rather than a spent allowance, so it is passed through.
   return lastFailure?.code === CF_ERROR.AUTH
     ? lastFailure
     : { ok: false, code: CF_ERROR.BUDGET, error: EXHAUSTED_POOL_ERROR };

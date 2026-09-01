@@ -284,12 +284,12 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
     + 'e.g. "Marco mi ha chiesto di dirti...".'
   );
   if (!cap.isDiscord) {
-    // read_server_rules is gone: the statute only reaches the model on Discord.
-    // Formal request PDFs, Monarca, and Statute discussions require Discord context.
+    // read_server_rules is gone and generate_formal_request_pdf is Discord-only:
+    // neither the statute nor the PDF is reachable from here.
     lines.push(
-      'IMPORTANT: You cannot create formal request PDFs, discuss Monarca (King), or answer questions about the Statute (Statuto Albertino) on this platform. '
-      + 'These topics require the full Discord context and belong to the gemix thread on Discord. '
-      + 'If the user asks about any of these, REFUSE firmly and direct them to the gemix thread on Discord.'
+      'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server) or '
+      + 'Monarca/King, and formal requests, belong to the gemix thread on Discord: you have neither the rules '
+      + 'nor the tool here, so do not attempt an answer — tell the user to open that thread.'
     );
   }
   return lines;

@@ -218,6 +218,22 @@ test('read_file refuses a traversal', async () => {
   assert.equal(res.success, false);
 });
 
+test('a chat without the skill library cannot reach it by naming the root', async () => {
+  // The host gateway parses in the full namespace, so a tool that handed it the
+  // model's string instead of the path this chat resolved to would open the
+  // shared library on a platform that is not offered it at all.
+  const off = { skills: false };
+  const res = await readFile({ path: 'skills/tiktok-video/SKILL.md' }, WORKSPACE_ID, off);
+  assert.equal(res.success, false);
+  assert.match(res.error, /^workspace\/skills\/tiktok-video\/SKILL\.md /);
+
+  // The segment is an ordinary workspace directory there, and reads back as one.
+  write('skills/mine/note.txt', 'local');
+  const mine = await readFile({ path: 'skills/mine/note.txt' }, WORKSPACE_ID, off);
+  assert.equal(mine.content, 'local');
+  assert.equal(mine.metadata.path, 'workspace/skills/mine/note.txt');
+});
+
 // -- mutation guards ----------------------------------------------------------
 
 test('write_file refuses the read-only attachments root', async () => {

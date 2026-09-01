@@ -40,6 +40,10 @@ from urllib.parse import unquote, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 DEFAULT_OUT = "/workspace/tiktok/video.mp4"
+# The namespace the model names paths in, and the one root of it that takes
+# writes: `/attachments` and `/skills` are read-only mounts.
+NAMESPACE_ROOTS = ("workspace", "attachments", "skills")
+WRITABLE_ROOT = "workspace"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -317,6 +321,26 @@ def display_path(out_file: Path) -> str:
     return str(out_file).replace("\\", "/").lstrip("/")
 
 
+def writable_container_path(raw: str) -> Path:
+    """Resolve `--out` into an absolute sandbox path the video can be written to.
+
+    The model names paths in the namespace ("workspace/tiktok/1.mp4"), which is
+    relative until the mount is prepended — and only `/workspace` accepts a
+    write, so the other roots are refused with a reason rather than left to
+    surface as an OSError with no REASON= line at all.
+    """
+    text = str(raw).strip().replace("\\", "/").lstrip("/")
+    if not text:
+        raise FetchError("no output path given")
+    first = text.split("/", 1)[0].lower()
+    # A first segment the namespace does not know is a path inside the
+    # workspace, the same default the file tools apply.
+    resolved = "/" + text if first in NAMESPACE_ROOTS else f"/{WRITABLE_ROOT}/{text}"
+    if resolved.split("/")[1].lower() != WRITABLE_ROOT:
+        raise FetchError(f"{display_path(Path(resolved))} is read-only; the video has to go under {WRITABLE_ROOT}/")
+    return Path(resolved)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download one public TikTok video.")
     parser.add_argument("url", help="TikTok share URL, or text containing one")
@@ -328,13 +352,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    out_file = Path(args.out)
-    # Clear the destination before anything can fail: a stale video left from an
-    # earlier link would otherwise be read as if it were this one.
-    out_file.unlink(missing_ok=True)
-    out_file.with_suffix(out_file.suffix + ".json").unlink(missing_ok=True)
-
     try:
+        out_file = writable_container_path(args.out)
+        # Clear the destination before anything else can fail: a stale video
+        # left from an earlier link would be read as if it were this one.
+        out_file.unlink(missing_ok=True)
+        out_file.with_suffix(out_file.suffix + ".json").unlink(missing_ok=True)
+
         source_url = extract_url(args.url)
         if not is_tiktok_url(source_url):
             raise FetchError("the supplied URL is not on tiktok.com")

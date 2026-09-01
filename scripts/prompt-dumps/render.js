@@ -250,20 +250,29 @@ function renderWorkspaceRuntimeDump() {
   const writeSpec = workspaceRuntime.buildExecSpec({
     command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', '/workspace/report.md']
   });
-  const tools = getToolsForUser({
+  // One context for the whole dump: the mounts a container gets and the roots
+  // the schemas name come from the same capability, so they cannot disagree.
+  const runtimeCtx = {
     isActiveMember: true,
     isAdmin: true,
     platform: PLATFORM_WA_DEDICATED,
     isGroup: false
-  });
+  };
+  const tools = getToolsForUser(runtimeCtx);
   const workspaceTools = tools.filter(t => WORKSPACE_TOOL_NAMES.has(t?.function?.name));
+  const mounts = [
+    '/workspace    rw   the agent working area',
+    '/attachments  ro   projection of the conversation files'
+  ];
+  if (getCapabilities(runtimeCtx).skills) {
+    mounts.push('/skills       ro   the shared skill library, one per deployment');
+  }
 
   return [
     '=== WORKSPACE RUNTIME (container exec contract + filesystem tools) ===',
     '',
     '--- MOUNTS ---',
-    '/workspace    rw   the agent working area',
-    '/attachments  ro   projection of the conversation files',
+    ...mounts,
     '',
     '--- EXEC ENV (every exec; no credential is ever passed) ---',
     JSON.stringify(workspaceRuntime.containerEnv(), null, 2),

@@ -47,8 +47,11 @@ function killNote(rc, killCause) {
       return `Killed by the ${constants.SANDBOX_MEMORY_MB} MB container memory cap. Work in smaller pieces, `
         + 'stream instead of loading whole files, and stop anything left running in the background.';
     }
+    // Docker reports OOMKilled for the container, not for one exec'd command,
+    // so a single greedy command reaching the cap arrives here too.
     return 'Killed with SIGKILL from inside the container, so it never reached its own error handling. The quota '
-      + 'monitor does that when a root is over its limit; free space and run it again.';
+      + 'monitor does that when a root is over its limit, and the kernel does it when one command asks for too '
+      + 'much memory at once: free space if a quota note says you are over, otherwise work in smaller pieces.';
   }
   // SIGXFSZ, from the per-file ceiling every command runs under.
   if (rc === 153) {
