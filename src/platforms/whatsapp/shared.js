@@ -14,8 +14,9 @@ import { participantPhoneDigits, pickCaptionMessage, specialMessageText } from '
 import { formatTimestamp } from '../../utils/time.js';
 import { hasScheduledFooter } from '../../utils/footer.js';
 import { buildPersonalGemixFlags } from '../../utils/personalWaHistory.js';
-import { isSystemMessage } from '../../config/systemMessages.js';
+import { isSystemMessage, PRIVACY_WIPE_BUSY_MESSAGE } from '../../config/systemMessages.js';
 import { isPrivacyWipeCommand } from './privacyGate.js';
+import { claimWipeNotice } from '../../utils/liveInbox.js';
 import { wrapSystemNotification } from '../../utils/systemTags.js';
 import { buildAttachmentTag } from '../../attachments/ingress.js';
 import { resolveChatWorkspaceId } from '../../utils/workspaceId.js';
@@ -601,6 +602,31 @@ function describeWaLiveMessage(msg, userName) {
   };
 }
 
+/**
+ * Tell the person their wipe command could not run, at most once per turn.
+ *
+ * The gate that owns the command runs at the start of a turn. One arriving
+ * mid-turn would delete the workspace and the history the turn in flight is
+ * working from, so it is refused rather than queued — and refused for everyone,
+ * not only the person being answered, because it empties the whole chat.
+ * Nothing about it reaches the model either way.
+ *
+ * @param {object} chat - whatsapp-web.js Chat
+ * @param {string} batchKey - the chat's lock key, which its inbox is keyed by
+ */
+async function noteWipeDuringTurn(chat, batchKey) {
+  if (!claimWipeNotice(batchKey)) return;
+  try {
+    await withWaPuppeteerRetry(
+      () => chat.sendMessage(PRIVACY_WIPE_BUSY_MESSAGE),
+      { retries: 1, delayMs: 500 }
+    );
+    log.info(`   Wipe command for ${batchKey} refused: a turn is in flight (user told to resend)`);
+  } catch (err) {
+    log.warn(`   Could not tell ${batchKey} the wipe command arrived mid-turn: ${formatWaError(err)}`);
+  }
+}
+
 function waMessageHasUsableContent(msg) {
   if (!msg) return false;
   if (msg.hasMedia) return true;
@@ -616,6 +642,7 @@ export {
   buildIncomingContentPartsFromMessages,
   describeWaLiveMessage,
   fetchWhatsAppMessageWindow,
+  noteWipeDuringTurn,
   sendWhatsAppResponse,
   getRecentWhatsAppMessageIds,
   waMessageHasUsableContent,

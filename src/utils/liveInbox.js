@@ -16,6 +16,13 @@
 // This is a notification, not a turn. The message itself is never promoted to
 // the current request: it comes back as an ordinary role:user item on the next
 // turn, in its own place in the rebuilt history, exactly as it always did.
+//
+// Which messages get held is the platform's call, made when the turn opens its
+// inbox. WhatsApp reaches this module only for messages that already addressed
+// GemiX — the adapters require a mention or a reply — so it holds them all. A
+// Discord thread has no such gate: every message in it starts a turn, so a turn
+// there holds only what its own speaker adds, and the rest of the room carrying
+// on is left to the next turn's history.
 
 import { formatLabeledUserContent } from './text.js';
 
@@ -28,8 +35,41 @@ const MAX_TEXT_CHARS = 1000;
 /** Stand-in for a message whose only content is a file GemiX has not ingested. */
 const MEDIA_ONLY_TEXT = '[sent a file — you will see it in the history next turn]';
 
-/** Map<chatKey, { messages: Array<object>, overflow: number }> */
+/** Map<chatKey, { messages, overflow, onlySenderId, wipeNoticeSent }> */
 const _inboxes = new Map();
+
+function _newInbox(onlySenderId = null) {
+  return { messages: [], overflow: 0, onlySenderId, wipeNoticeSent: false };
+}
+
+/**
+ * Start a turn's inbox, dropping whatever the previous one left behind.
+ *
+ * @param {string} chatKey - the chat's lock key
+ * @param {object} [opts]
+ * @param {string|null} [opts.onlySenderId] - hold only this sender's messages;
+ *   null holds everyone's
+ */
+function openLiveInbox(chatKey, { onlySenderId = null } = {}) {
+  if (!chatKey) return;
+  _inboxes.set(chatKey, _newInbox(onlySenderId || null));
+}
+
+/**
+ * Record that the person was already told the wipe command cannot run right
+ * now, so a repeated command does not repeat the notice.
+ *
+ * @param {string} chatKey
+ * @returns {boolean} true the first time in this turn, false afterwards
+ */
+function claimWipeNotice(chatKey) {
+  if (!chatKey) return false;
+  const entry = _inboxes.get(chatKey) || _newInbox();
+  if (!_inboxes.has(chatKey)) _inboxes.set(chatKey, entry);
+  if (entry.wipeNoticeSent) return false;
+  entry.wipeNoticeSent = true;
+  return true;
+}
 
 /**
  * Hold one message that arrived mid-turn.
@@ -37,6 +77,8 @@ const _inboxes = new Map();
  * @param {string} chatKey - the chat's lock key
  * @param {object} message
  * @param {string} message.userName - who sent it
+ * @param {string} [message.senderId] - platform id, matched against the
+ *   restriction the turn opened its inbox with
  * @param {string} [message.text] - body as the platform delivered it
  * @param {number} [message.timestampMs]
  * @param {boolean} [message.hasMedia]
@@ -44,8 +86,9 @@ const _inboxes = new Map();
  */
 function recordLiveMessage(chatKey, message) {
   if (!chatKey || !message) return 0;
-  const entry = _inboxes.get(chatKey) || { messages: [], overflow: 0 };
+  const entry = _inboxes.get(chatKey) || _newInbox();
   if (!_inboxes.has(chatKey)) _inboxes.set(chatKey, entry);
+  if (entry.onlySenderId && message.senderId !== entry.onlySenderId) return entry.messages.length;
 
   if (entry.messages.length >= MAX_LIVE_MESSAGES) {
     entry.overflow += 1;
@@ -77,11 +120,10 @@ function drainLiveMessages(chatKey) {
 }
 
 /**
- * Drop whatever is held for a chat without showing it.
+ * Close a chat's inbox, dropping whatever is left without showing it.
  *
- * Called once the turn has its history snapshot — anything recorded before that
- * point is already in the history the model is reading — and again when the
- * turn ends, so nothing survives into the next one.
+ * Called when the turn ends: anything that arrived too late for it to read is
+ * left to the next turn's history, so nothing survives into the next turn here.
  *
  * @param {string} chatKey
  */
@@ -112,7 +154,9 @@ function renderLiveMessages(drained) {
 
 export {
   MAX_LIVE_MESSAGES,
+  claimWipeNotice,
   clearLiveMessages,
+  openLiveInbox,
   drainLiveMessages,
   recordLiveMessage,
   renderLiveMessages

@@ -135,6 +135,16 @@ const PRIVACY_NOTICE_PREFIX = '🔒 *Informativa privacy GemiX*';
 /** Confirmation sent once PRIVACY_WIPE_COMMAND erased everything. */
 const PRIVACY_WIPE_DONE_PREFIX = '🗑️ *Dati eliminati*';
 
+/**
+ * Sent instead of running the wipe when it arrives while GemiX is answering.
+ * The command deletes the workspace and the history the turn in flight is
+ * working from, so it is refused rather than queued: the person is told to send
+ * it again in a moment, when nothing is running.
+ */
+const PRIVACY_WIPE_BUSY_MESSAGE =
+  '🗑️ GemiX sta rispondendo in questo momento, quindi il comando non è stato eseguito e nessun dato è stato '
+  + 'eliminato. Rimandalo appena ha finito.';
+
 /** Sent when the chat clear or one of the deletions failed. */
 const PRIVACY_WIPE_FAILED_MESSAGE =
   '⚠️ *Eliminazione non riuscita*\n\nNon è stato possibile eliminare tutti i tuoi dati per un errore tecnico. '
@@ -225,6 +235,7 @@ const SYSTEM_MESSAGE_PREFIXES = [
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   PRIVACY_NOTICE_PREFIX,
   PRIVACY_WIPE_DONE_PREFIX,
+  PRIVACY_WIPE_BUSY_MESSAGE,
   PRIVACY_WIPE_FAILED_MESSAGE
 ];
 
@@ -273,6 +284,7 @@ export {
   TEMP_ATTACHMENT_PREFIX,
   ATTACHMENT_FALLBACK_FAILED_MESSAGE,
   PRIVACY_WIPE_COMMAND,
+  PRIVACY_WIPE_BUSY_MESSAGE,
   PRIVACY_WIPE_FAILED_MESSAGE,
   buildPrivacyNoticeMessage,
   buildPrivacyWipeDoneMessage,

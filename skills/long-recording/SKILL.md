@@ -1,6 +1,6 @@
 ---
-name: long-audio
-description: Get the full transcript of a recording too long for read_file to take in one go — one shell call splits it, one round of read_file transcribes every part. Use when you need the words out of an audio or video longer than about ten minutes, or when read_file has already refused one as too long.
+name: long-recording
+description: Get the full transcript of an audio or a video too long for read_file to take in one go — one shell call splits it, one round of read_file transcribes every part. Use when you need what was said in a recording of more than a few minutes, whether it arrived as audio or as video.
 ---
 
 # Transcribing a long recording
@@ -13,14 +13,16 @@ The whole recording transcribed, in three rounds: one to split, one to read ever
 
 `read_file` is the only thing here that can turn speech into text — there is no speech-to-text command in the container, so nothing you run in `shell` will transcribe anything. It transcribes audio up to about ten minutes and 25 MB, and refuses a **video** far sooner, at two minutes. So the words of a long video come from its audio track, never from reading the video file.
 
-The script below turns any recording into audio parts that fit, in one ffmpeg pass.
+The script below turns any recording — audio file, voice note, video — into audio parts that fit, in one ffmpeg pass.
+
+This is for what was **said**. If what matters is what is on screen, this is the wrong tool: cut that stretch of video with `ffmpeg` and read the piece, and the parser samples its frames for you.
 
 ## The three rounds
 
 **1. `shell`**, `timeoutSeconds: 300`:
 
 ```
-python3 /skills/long-audio/scripts/audio_split.py 'workspace/<file>'
+python3 /skills/long-recording/scripts/audio_split.py 'workspace/<file>'
 ```
 
 It prints `ACTION=` and one `PART=` line per piece:

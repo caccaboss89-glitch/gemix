@@ -9,8 +9,10 @@ import test from 'node:test';
 
 import {
   MAX_LIVE_MESSAGES,
+  claimWipeNotice,
   clearLiveMessages,
   drainLiveMessages,
+  openLiveInbox,
   recordLiveMessage,
   renderLiveMessages
 } from '../src/utils/liveInbox.js';
@@ -87,6 +89,55 @@ test('a text-less message with no file is dropped rather than shown blank', () =
   recordLiveMessage(key, { userName: 'Nobody', text: '   ', timestampMs: AT });
 
   assert.deepEqual(renderLiveMessages(drainLiveMessages(key)), []);
+});
+
+test('a restricted inbox holds only the speaker the turn is answering', () => {
+  const key = 'discord:thread';
+  openLiveInbox(key, { onlySenderId: 'u-1' });
+  recordLiveMessage(key, { userName: 'Asker', senderId: 'u-1', text: 'also check the date', timestampMs: AT });
+  recordLiveMessage(key, { userName: 'Someone else', senderId: 'u-2', text: 'lol', timestampMs: AT });
+  recordLiveMessage(key, { userName: 'Third', text: 'no id at all', timestampMs: AT });
+
+  const lines = renderLiveMessages(drainLiveMessages(key));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /Asker: also check the date/);
+});
+
+test('an unrestricted inbox holds everyone, which is what WhatsApp wants', () => {
+  const key = 'wa:group@g.us';
+  openLiveInbox(key);
+  recordLiveMessage(key, { userName: 'A', senderId: 'u-1', text: 'one', timestampMs: AT });
+  recordLiveMessage(key, { userName: 'B', senderId: 'u-2', text: 'two', timestampMs: AT });
+
+  assert.equal(drainLiveMessages(key).messages.length, 2);
+});
+
+test('opening an inbox drops whatever the previous turn left', () => {
+  const key = 'wa:reopen@c.us';
+  recordLiveMessage(key, { userName: 'Old', text: 'from before', timestampMs: AT });
+  openLiveInbox(key);
+  assert.deepEqual(drainLiveMessages(key).messages, []);
+});
+
+test('the wipe notice is claimed once per turn, then again after it ends', () => {
+  const key = 'wa:wipe@c.us';
+  openLiveInbox(key);
+  assert.equal(claimWipeNotice(key), true);
+  assert.equal(claimWipeNotice(key), false);
+  assert.equal(claimWipeNotice(key), false);
+
+  clearLiveMessages(key);
+  assert.equal(claimWipeNotice(key), true, 'the next turn gets its own notice');
+  clearLiveMessages(key);
+});
+
+test('claiming the wipe notice does not disturb the held messages', () => {
+  const key = 'wa:wipe-mixed@c.us';
+  openLiveInbox(key);
+  recordLiveMessage(key, { userName: 'A', text: 'a real message', timestampMs: AT });
+  claimWipeNotice(key);
+
+  assert.equal(drainLiveMessages(key).messages.length, 1);
 });
 
 test('recording without a chat key holds nothing', () => {

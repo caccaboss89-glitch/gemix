@@ -52,5 +52,5 @@ function filterBatchToTriggerSpeaker(entries, platform) {
   return { entries: kept, dropped: list.length - kept.length };
 }
 
-export { pickLatestBatchEntry, filterBatchToTriggerSpeaker
+export { getBatchSpeakerKey, pickLatestBatchEntry, filterBatchToTriggerSpeaker
 };

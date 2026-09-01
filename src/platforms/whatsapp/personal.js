@@ -10,6 +10,7 @@ import {
   buildWhatsAppHistory,
   describeWaLiveMessage,
   fetchWhatsAppMessageWindow,
+  noteWipeDuringTurn,
   sendWhatsAppResponse,
   _waMessageKey,
   waMessageHasUsableContent
@@ -148,6 +149,8 @@ async function onPersonalMessage(msg) {
   });
   if (status === 'batched') {
     log.info(`   Batching additional message for ${batchKey}`);
+  } else if (status === 'live' && isPrivacyWipeCommand(msg.body)) {
+    await noteWipeDuringTurn(chat, batchKey);
   }
 }
 

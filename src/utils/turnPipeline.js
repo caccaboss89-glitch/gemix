@@ -1,8 +1,8 @@
 // Shared batch→history→handleMessage→deliver sequence for all platforms.
 
 import responseLock from './responseLock.js';
-import { clearLiveMessages } from './liveInbox.js';
-import { pickLatestBatchEntry, filterBatchToTriggerSpeaker } from './batchContext.js';
+import { clearLiveMessages, openLiveInbox } from './liveInbox.js';
+import { getBatchSpeakerKey, pickLatestBatchEntry, filterBatchToTriggerSpeaker } from './batchContext.js';
 import constants from '../config/constants.js';
 import { handleMessage } from '../handler.js';
 
@@ -38,6 +38,10 @@ function _ensurePipelineLock(lockKey, stopLockRenew) {
  *   { response, onDelivered?: Function } | null. A returned response becomes the whole
  *   turn: no history load, no media ingress, no AI call. onDelivered runs only once the
  *   response actually went out. Used by the WhatsApp privacy gate.
+ * @param {boolean} [opts.restrictLiveMessagesToSpeaker] - hold only the turn
+ *   speaker's mid-turn messages. For a platform where any message in the room
+ *   starts a turn (Discord threads), so that people talking to each other do
+ *   not arrive as if they were addressing GemiX.
  * @param {Function} [opts.transformResponse] - (response, ctx) => response
  * @param {Function} opts.deliver - async (ctx, response) => void
  * @param {Function} [opts.onDeliverError] - async (ctx, err) => void
@@ -54,6 +58,7 @@ async function runTurnPipeline(opts) {
     buildHandlerCtx,
     prepareSession,
     interceptTurn,
+    restrictLiveMessagesToSpeaker,
     transformResponse,
     deliver,
     onDeliverError
@@ -103,7 +108,9 @@ async function runTurnPipeline(opts) {
     // The turn starts here: anything the inbox still holds predates it and is
     // already in the history about to be loaded. From now on what lands there
     // is genuinely new, and the agent loop shows it between rounds.
-    clearLiveMessages(lockKey);
+    openLiveInbox(lockKey, {
+      onlySenderId: restrictLiveMessagesToSpeaker ? getBatchSpeakerKey(first, platform) : null
+    });
 
     // Runs before anything reads the chat or fetches media, so a turn it answers
     // costs no history rebuild and no attachment download.

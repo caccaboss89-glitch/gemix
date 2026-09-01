@@ -279,6 +279,7 @@ async function onDiscordMessage(msg) {
     discardLogLabel: `thread ${channel.id}`,
     describeLiveMessage: () => ({
       userName: senderName,
+      senderId: msg.author.id,
       text: msg.content || '',
       timestampMs: msg.createdTimestamp,
       hasMedia: msg.attachments.size > 0
@@ -407,6 +408,10 @@ async function _handleDiscordBatch(entries) {
     stopLockRenew,
     entries,
     discardLogLabel: `thread ${channel.id}`,
+    // Every message in a gemix thread starts a turn, so mid-turn ones are only
+    // certainly for GemiX when they come from the person it is already
+    // answering. The rest of the thread returns in the next turn's history.
+    restrictLiveMessagesToSpeaker: true,
     loadHistory: async ({ entries: ents }) => {
       const excludeMessageIds = new Set(ents.map(e => e.messageId).filter(Boolean));
       return fetchHistoryWithTimeout(
