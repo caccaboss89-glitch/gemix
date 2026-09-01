@@ -356,7 +356,13 @@ def main() -> int:
             # shape changed, or a post it will not serve, still often works
             # through the extractor.
             print(f"NOTE=embed path failed ({embed_error}); trying yt-dlp", file=sys.stderr)
-            download_with_ytdlp(source_url, out_file)
+            try:
+                download_with_ytdlp(source_url, out_file)
+            except FetchError as ytdlp_error:
+                # Both are gone. The embed reason describes the post itself,
+                # the extractor only ever reports its own trouble, so lead
+                # with the one the caller can actually act on.
+                raise FetchError(f"{embed_error}; and {ytdlp_error}") from ytdlp_error
             result["VIA"] = "yt-dlp"
 
         duration = probe_duration(out_file)
