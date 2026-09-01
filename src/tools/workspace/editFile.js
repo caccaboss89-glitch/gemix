@@ -56,8 +56,8 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     return { success: false, error: 'Missing required argument "newText" (pass an empty string to delete the text).' };
   }
 
-  const resolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
-  if (!resolved) return invalidPathError(raw);
+  const resolved = resolveAgentPath(workspaceId, raw, { ...opts, forWrite: true });
+  if (!resolved) return invalidPathError(raw, opts);
   if (!resolved.writable) {
     return {
       success: false,
@@ -68,8 +68,8 @@ async function editFile(args = {}, workspaceId, opts = {}) {
   return runWorkspaceMutation(workspaceId, opts, async () => {
     // Re-resolve before the read while holding the lock. This closes the gap
     // between the initial permission check and the read-transform-write cycle.
-    const lockedResolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
-    if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
+    const lockedResolved = resolveAgentPath(workspaceId, raw, { ...opts, forWrite: true });
+    if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw, opts);
     let opened;
     try {
       opened = readAgentFileBuffer(workspaceId, raw, constants.WORKSPACE_EDIT_MAX_BYTES);
@@ -117,7 +117,7 @@ async function editFile(args = {}, workspaceId, opts = {}) {
       throw err;
     }
 
-    const committed = await commitWorkspaceText(workspaceId, lockedResolved, after);
+    const committed = await commitWorkspaceText(workspaceId, lockedResolved, after, opts);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;
     const replaced = args.replaceAll ? occurrences : 1;

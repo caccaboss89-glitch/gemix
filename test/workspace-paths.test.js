@@ -167,3 +167,22 @@ test('mutations reject an internal symlink even when reads remain contained', (t
     fs.rmSync(getWorkspaceMetaDir(workspaceId), { recursive: true, force: true });
   }
 });
+
+test('with the library off, skills is an ordinary workspace directory', () => {
+  const off = { skills: false };
+  // Not a root: the segment stays part of the relative path under workspace/.
+  assert.equal(parseAgentPath('skills/a/SKILL.md', off).root, ROOT.WORKSPACE);
+  assert.equal(parseAgentPath('skills/a/SKILL.md', off).display, 'workspace/skills/a/SKILL.md');
+  // And a leading slash only means something on a real root, so it is refused.
+  assert.equal(parseAgentPath('/skills/a/SKILL.md', off), null);
+  assert.equal(resolveAgentPath(WORKSPACE_ID, 'skills/x/SKILL.md', off).containerPath, '/workspace/skills/x/SKILL.md');
+  // The other two roots are unaffected.
+  assert.equal(parseAgentPath('/attachments/voice.ogg', off).root, ROOT.ATTACHMENTS);
+});
+
+test('the refusal offers only the roots this chat actually has', () => {
+  const err = invalidPathError('../etc/passwd', { skills: false });
+  assert.match(err.error, /workspace\/</);
+  assert.match(err.error, /attachments\/</);
+  assert.equal(/skills/.test(err.error), false, err.error);
+});

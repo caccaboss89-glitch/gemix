@@ -5,20 +5,33 @@
 import constants from '../../config/constants.js';
 import { makeTool } from './schema.js';
 
-const WORKSPACE_PATH_HINT =
-  'Path in the shared namespace: "workspace/<file>" for your own files, "attachments/<file>" for files '
-  + 'from this chat, "skills/<name>/<file>" for the skill library. A path with no prefix is read as workspace/.';
+/**
+ * How the model is told to name a path. The skill library is a platform
+ * capability, so the two variants exist rather than one hint that mentions a
+ * root the caller may not have.
+ */
+function workspacePathHint(skills) {
+  return 'Path in the shared namespace: "workspace/<file>" for your own files, "attachments/<file>" for files '
+    + `from this chat${skills ? ', "skills/<name>/<file>" for the skill library' : ''}. `
+    + 'A path with no prefix is read as workspace/.';
+}
 
-const TOOL_LIST_FILES = makeTool({
+/** The roots a write may name, so a tool never offers one this chat lacks. */
+function writableRoots(skills) {
+  return skills ? 'workspace/ or skills/' : 'workspace/';
+}
+
+const buildListFilesTool = (skills) => makeTool({
   name: 'list_files',
-  description: 'List what is in your workspace, in the files attached to this chat, or in the skill library. Call it before assuming a file is or is not there.',
+  description: `List what is in your workspace${skills ? ', in the skill library,' : ''} or in the files attached `
+    + 'to this chat. Call it before assuming a file is or is not there.',
   properties: {
-    path: { type: 'string', description: `Directory to list, default "workspace/". ${WORKSPACE_PATH_HINT}` },
+    path: { type: 'string', description: `Directory to list, default "workspace/". ${workspacePathHint(skills)}` },
     recursive: { type: 'boolean', description: 'Descend into sub-directories. Default false: only the entries directly inside it.' }
   }
 });
 
-const TOOL_SEARCH_FILES = makeTool({
+const buildSearchFilesTool = (skills) => makeTool({
   name: 'search_files',
   description: 'Find files by name pattern, lines by exact text, or both, without reading whole files. '
     + 'Each filter works on its own; when both are set, only files satisfying both are returned. '
@@ -30,11 +43,11 @@ const TOOL_SEARCH_FILES = makeTool({
       description: 'Glob on the name, e.g. "*.py". Include a slash to match the whole relative path, e.g. "src/*.md".'
     },
     contains: { type: 'string', description: 'Exact text to find inside text files. Returns path, line number and the matching line.' },
-    path: { type: 'string', description: `Directory to search under, default "workspace/". ${WORKSPACE_PATH_HINT}` }
+    path: { type: 'string', description: `Directory to search under, default "workspace/". ${workspacePathHint(skills)}` }
   }
 });
 
-const TOOL_READ_FILE = makeTool({
+const buildReadFileTool = (skills) => makeTool({
   name: 'read_file',
   description: 'Bring a supported local file into your context. Text and code come '
     + 'back as content; PDFs, Office documents, email and archives come back as their text, with pages or '
@@ -47,32 +60,32 @@ const TOOL_READ_FILE = makeTool({
     + 'and a single line over the output cap returns an explicit error directing you to byte-slice it with shell. '
     + `Documents up to ${Math.round(constants.PARSE_MAX_DOCUMENT_BYTES / (1024 * 1024))} MB are accepted; larger ones need shell to extract the relevant part first.`,
   properties: {
-    path: { type: 'string', minLength: 1, description: WORKSPACE_PATH_HINT },
+    path: { type: 'string', minLength: 1, description: workspacePathHint(skills) },
     offset: { type: 'integer', minimum: 1, description: 'Text files only: first line to return, 1-based; ignored for images, audio, video and other non-text formats. Use with limit to page through a long file.' },
     limit: { type: 'integer', minimum: 1, description: 'Text files only: how many lines to return from offset; ignored for images, audio, video and other non-text formats.' }
   },
   required: ['path']
 });
 
-const TOOL_WRITE_FILE = makeTool({
+const buildWriteFileTool = (skills) => makeTool({
   name: 'write_file',
-  description: 'Create a file, or overwrite one completely, under workspace/ or skills/. '
+  description: `Create a file, or overwrite one completely, under ${writableRoots(skills)}. `
     + 'To change part of an existing file use edit_file instead — this replaces the whole content. '
     + 'To change a file from attachments/, copy it into workspace/ with shell first.',
   properties: {
-    path: { type: 'string', minLength: 1, description: 'Destination under workspace/ or skills/. Parent directories are created for you.' },
+    path: { type: 'string', minLength: 1, description: `Destination under ${writableRoots(skills)}. Parent directories are created for you.` },
     content: { type: 'string', description: 'Full new content of the file.' }
   },
   required: ['path', 'content']
 });
 
-const TOOL_EDIT_FILE = makeTool({
+const buildEditFileTool = (skills) => makeTool({
   name: 'edit_file',
-  description: 'Replace an exact piece of text in an existing file under workspace/ or skills/. '
+  description: `Replace an exact piece of text in an existing file under ${writableRoots(skills)}. `
     + 'oldText must appear exactly once: copy it verbatim from read_file, whitespace included, and add '
     + 'surrounding lines until it is unique. Set replaceAll to change every occurrence instead.',
   properties: {
-    path: { type: 'string', minLength: 1, description: 'File under workspace/ or skills/.' },
+    path: { type: 'string', minLength: 1, description: `File under ${writableRoots(skills)}.` },
     oldText: { type: 'string', minLength: 1, description: 'Exact text to replace, copied verbatim from the file.' },
     newText: { type: 'string', description: 'Replacement text. Empty string deletes the matched text.' },
     replaceAll: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match.' }
@@ -80,7 +93,7 @@ const TOOL_EDIT_FILE = makeTool({
   required: ['path', 'oldText', 'newText']
 });
 
-function buildShellTool() {
+function buildShellTool(skills) {
   const defaultSec = Math.round(constants.SHELL_TIMEOUT_DEFAULT_MS / 1000);
   const maxSec = Math.round(constants.SHELL_TIMEOUT_MAX_MS / 1000);
   const idleMinutes = Math.round(constants.SANDBOX_IDLE_TTL_MS / 60_000);
@@ -101,7 +114,10 @@ function buildShellTool() {
       command: {
         type: 'string',
         minLength: 1,
-        description: 'Bash command line. Without workingDir it runs at `/`, so workspace/<path>, attachments/<path> and skills/<path> work exactly as shown by the file tools. If workingDir is set, relative operands start there; the absolute `/workspace/<path>`, `/attachments/<path>` and `/skills/<path>` remain root-stable.'
+        description: 'Bash command line. Without workingDir it runs at `/`, so workspace/<path>'
+          + `${skills ? ', attachments/<path> and skills/<path>' : ' and attachments/<path>'} work exactly as shown by the file tools. `
+          + 'If workingDir is set, relative operands start there; the absolute `/workspace/<path>`'
+          + `${skills ? ', `/attachments/<path>` and `/skills/<path>`' : ' and `/attachments/<path>`'} remain root-stable.`
       },
       timeoutSeconds: {
         type: 'integer',
@@ -111,21 +127,32 @@ function buildShellTool() {
       },
       workingDir: {
         type: 'string',
-        description: `Optional command working directory. Omit it to use displayed namespace paths unchanged. When set, command-relative paths start in this directory; use an absolute /workspace/..., /attachments/... or /skills/... when you still need a namespace-root path. ${WORKSPACE_PATH_HINT}`
+        description: 'Optional command working directory. Omit it to use displayed namespace paths unchanged. '
+          + 'When set, command-relative paths start in this directory; use an absolute '
+          + `${skills ? '/workspace/..., /attachments/... or /skills/...' : '/workspace/... or /attachments/...'} `
+          + `when you still need a namespace-root path. ${workspacePathHint(skills)}`
       }
     },
     required: ['command']
   });
 }
 
-function workspaceTools() {
+/**
+ * The six tools, described for a chat that has the skill library or for one
+ * that does not: where it is off, `skills/` is not a root anywhere in the
+ * namespace, so no description may name it.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.skills]
+ */
+function workspaceTools({ skills = true } = {}) {
   return [
-    TOOL_LIST_FILES,
-    TOOL_SEARCH_FILES,
-    TOOL_READ_FILE,
-    TOOL_WRITE_FILE,
-    TOOL_EDIT_FILE,
-    buildShellTool()
+    buildListFilesTool(skills),
+    buildSearchFilesTool(skills),
+    buildReadFileTool(skills),
+    buildWriteFileTool(skills),
+    buildEditFileTool(skills),
+    buildShellTool(skills)
   ];
 }
 

@@ -41,7 +41,7 @@ function _globToRegExp(pattern) {
  * @param {string} [args.path] - root to search, defaults to `workspace/`
  * @param {string} workspaceId
  */
-function searchFiles(args = {}, workspaceId) {
+function searchFiles(args = {}, workspaceId, opts = {}) {
   const namePattern = typeof args.namePattern === 'string' ? args.namePattern.trim() : '';
   const contains = typeof args.contains === 'string' ? args.contains : '';
   if (!namePattern && !contains) {
@@ -49,8 +49,8 @@ function searchFiles(args = {}, workspaceId) {
   }
 
   const raw = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : `${ROOT.WORKSPACE}/`;
-  const resolved = parseAgentPath(raw);
-  if (!resolved) return invalidPathError(raw);
+  const resolved = parseAgentPath(raw, opts);
+  if (!resolved) return invalidPathError(raw, opts);
   const listing = listAgentDirectory(workspaceId, resolved.display, { limit: 10_000 });
   if (!listing) {
     if (resolved.relPath) {

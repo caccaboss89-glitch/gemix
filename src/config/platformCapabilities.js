@@ -54,6 +54,7 @@ const CAPS = {
     isGroup: false,
     longTermMemory: true,
     workspace: true,
+    skills: true,
     historyTranscriptionNote: false,
     voiceReply: false
   },
@@ -64,6 +65,7 @@ const CAPS = {
     isGroup: false,
     longTermMemory: true,
     workspace: true,
+    skills: true,
     historyTranscriptionNote: true,
     voiceReply: true
   },
@@ -74,6 +76,7 @@ const CAPS = {
     isGroup: true,
     longTermMemory: true,
     workspace: true,
+    skills: true,
     historyTranscriptionNote: true,
     voiceReply: true
   },
@@ -84,6 +87,9 @@ const CAPS = {
     isGroup: false,
     longTermMemory: false,
     workspace: true,
+    // The skill library is a WhatsApp surface: one shared library, and a forum
+    // thread is not where a procedure kept for every chat should be written.
+    skills: false,
     historyTranscriptionNote: false,
     voiceReply: false
   }

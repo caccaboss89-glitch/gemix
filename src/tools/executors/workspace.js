@@ -9,6 +9,7 @@ import { searchFiles } from '../workspace/searchFiles.js';
 import { shell } from '../workspace/shell.js';
 import { writeFile } from '../workspace/writeFile.js';
 import { resolveWorkspaceId } from '../../utils/workspaceId.js';
+import { getCapabilities } from '../../config/platformCapabilities.js';
 import { SANDBOX_BUSY_CODE } from '../../sandbox/workspaceRuntime.js';
 import { SANDBOX_BUSY_MESSAGE } from '../../config/systemMessages.js';
 import { createLogger } from '../../utils/logger.js';
@@ -30,14 +31,22 @@ async function _executeWorkspaceTool(name, { args, userCtx }) {
   const workspaceId = resolveWorkspaceId(userCtx);
   if (!workspaceId) return { success: false, error: 'Cannot resolve a workspace for this chat.' };
 
+  // The skill library is offered on some platforms only, and every path the
+  // model can name is resolved against that one answer: where it is off,
+  // `skills/` is not a root, the container gets no mount for it, and the path
+  // error does not advertise it.
+  const skills = Boolean(getCapabilities(userCtx).skills);
+  const pathOpts = { skills };
   const lockOpts = {
+    skills,
     lockOwnerId: userCtx.requestId ? `${userCtx.requestId}:workspace` : undefined
   };
   try {
-    if (name === 'list_files') return await listFiles(args, workspaceId);
-    if (name === 'search_files') return await searchFiles(args, workspaceId);
+    if (name === 'list_files') return await listFiles(args, workspaceId, pathOpts);
+    if (name === 'search_files') return await searchFiles(args, workspaceId, pathOpts);
     if (name === 'read_file') {
       return await readFile(args, workspaceId, {
+        ...pathOpts,
         language: userCtx.settings?.language,
         signal: userCtx.turnBudget?.signal
       });

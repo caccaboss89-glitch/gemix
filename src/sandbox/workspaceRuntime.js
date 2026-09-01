@@ -13,7 +13,8 @@
 //
 //   /workspace     rw   host build_workspace dir for this workspaceId
 //   /attachments   ro   host projection of this conversation's files
-//   /skills        rw   the deployment's shared skill library
+//   /skills        rw   the deployment's shared skill library, on the platforms
+//                       that offer it (see config/platformCapabilities.js)
 //
 // Nothing else is mounted and no credential is passed in. The container runs
 // GemiX's own tools and whatever the model asks for, so it gets no bearer, no
@@ -151,7 +152,15 @@ function containerEnv() {
  * Spawn a fresh container for `workspaceId`. Its quota monitor is PID 1 and
  * tools attach through docker exec.
  */
-async function _spawnContainer(workspaceId) {
+/**
+ * Whether this container gets the skill library mounted.
+ *
+ * A workspace belongs to exactly one chat, so the answer never changes for a
+ * given id and the pooled container can be reused without rechecking it. The
+ * caller passes what its platform allows; nothing here can derive it, and a
+ * missing answer means no mount, so a new caller cannot get it by accident.
+ */
+async function _spawnContainer(workspaceId, { mountSkills = false } = {}) {
   const slug = workspaceIdToSlug(workspaceId);
   if (!slug) throw new Error('Cannot resolve workspace slug');
 
@@ -161,8 +170,11 @@ async function _spawnContainer(workspaceId) {
   // root has to exist even before anything is projected into it.
   const attachmentsDir = ensureAttachmentsDir(workspaceId);
   if (!attachmentsDir) throw new Error('Cannot ensure attachments directory');
-  const skillsDir = ensureSkillsDir();
-  if (!skillsDir) throw new Error('Cannot ensure skills directory');
+  let skillsDir = null;
+  if (mountSkills) {
+    skillsDir = ensureSkillsDir();
+    if (!skillsDir) throw new Error('Cannot ensure skills directory');
+  }
   ensureWorkspaceWritable(workspaceId);
 
   const nonce = crypto.randomBytes(3).toString('hex');
@@ -174,9 +186,9 @@ async function _spawnContainer(workspaceId) {
 
   const binds = [
     `${workspaceDir}:/workspace:rw`,
-    `${attachmentsDir}:/attachments:ro`,
-    `${skillsDir}:/skills:rw`
+    `${attachmentsDir}:/attachments:ro`
   ];
+  if (skillsDir) binds.push(`${skillsDir}:/skills:rw`);
 
   const hostConfig = {
     NetworkMode: networkName,
@@ -202,7 +214,7 @@ async function _spawnContainer(workspaceId) {
       'python',
       '/opt/sandbox/quota_guard.py',
       `/workspace=${WORKSPACE_QUOTA_BYTES}`,
-      `/skills=${SKILLS_QUOTA_BYTES}`
+      ...(skillsDir ? [`/skills=${SKILLS_QUOTA_BYTES}`] : [])
     ],
     User: sandboxUserString(),
     Env: containerEnv(),
@@ -269,7 +281,7 @@ async function _isAlive(entry) {
  *
  * @param {string} workspaceId
  */
-async function getOrCreate(workspaceId) {
+async function getOrCreate(workspaceId, opts = {}) {
   if (!workspaceId) throw new Error('workspaceId is required');
 
   const pending = _pool.get(workspaceId);
@@ -301,7 +313,7 @@ async function getOrCreate(workspaceId) {
     }
   }
 
-  const boot = _spawnContainer(workspaceId).then((entry) => {
+  const boot = _spawnContainer(workspaceId, opts).then((entry) => {
     entry.lastUsedAt = Date.now();
     log.info(`workspace container ready workspace=${workspaceId} container=${entry.containerName}`);
     return entry;
@@ -394,7 +406,7 @@ function buildExecSpec({ command, timeoutMs } = {}) {
 async function execInWorkspace(workspaceId, opts = {}) {
   const { cmd, timeoutMs } = buildExecSpec(opts);
   const hasInput = opts.input !== undefined && opts.input !== null;
-  const entry = await getOrCreate(workspaceId);
+  const entry = await getOrCreate(workspaceId, { mountSkills: Boolean(opts.mountSkills) });
   entry.lastUsedAt = Date.now();
 
   const exec = await entry.container.exec({

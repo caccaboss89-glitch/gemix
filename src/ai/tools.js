@@ -5,6 +5,7 @@
 // by the dispatcher and capability matrix.
 
 import constants from '../config/constants.js';
+import { getCapabilities } from '../config/platformCapabilities.js';
 import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
 import { resolveProviderProfile } from './providers/providerProfile.js';
 import {
@@ -71,8 +72,9 @@ function getToolsForUser(toolCtx) {
   }
 
   // The agentic workspace is foundational on every platform, including
-  // Discord; read_file is the universal local-file gateway.
-  tools.push(...workspaceTools());
+  // Discord; read_file is the universal local-file gateway. The skill library
+  // is not: where the platform does not offer it, no schema may name it.
+  tools.push(...workspaceTools({ skills: Boolean(getCapabilities(toolCtx).skills) }));
 
   if (isDiscord) tools.push(TOOL_GENERATE_FORMAL_REQUEST_PDF);
   if (isActiveMember) {

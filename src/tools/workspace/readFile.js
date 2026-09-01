@@ -51,8 +51,8 @@ async function readFile(args = {}, workspaceId, opts = {}) {
   const raw = typeof args.path === 'string' ? args.path : '';
   if (!raw.trim()) return { success: false, error: 'Missing required argument "path".' };
 
-  const parsed = parseAgentPath(raw);
-  if (!parsed) return invalidPathError(raw);
+  const parsed = parseAgentPath(raw, opts);
+  if (!parsed) return invalidPathError(raw, opts);
 
   let snapshot;
   try { snapshot = snapshotAgentFile(workspaceId, raw); }

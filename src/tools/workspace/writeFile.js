@@ -11,8 +11,9 @@
 // symlink planted from inside cannot redirect a host-side write out of the
 // tree. Content travels on stdin rather than in argv.
 //
-// `workspace/` and `skills/` are writable. `/attachments` is a read-only mount:
-// to change a conversation file the model copies it across first.
+// `workspace/`, and `skills/` where the chat has it, are writable.
+// `/attachments` is a read-only mount: to change a conversation file the model
+// copies it across first.
 
 import { invalidPathError, resolveAgentPath } from '../../sandbox/workspacePaths.js';
 import { statAgentFile } from '../../sandbox/hostFileGateway.js';
@@ -38,8 +39,8 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
     return { success: false, error: 'Missing required argument "content" (pass an empty string for an empty file).' };
   }
 
-  const resolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
-  if (!resolved) return invalidPathError(raw);
+  const resolved = resolveAgentPath(workspaceId, raw, { ...opts, forWrite: true });
+  if (!resolved) return invalidPathError(raw, opts);
   if (!resolved.writable) {
     return {
       success: false,
@@ -50,8 +51,8 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
   return runWorkspaceMutation(workspaceId, opts, async () => {
     // Resolve again under the mutation lock so a parent cannot be exchanged
     // for a symlink between validation and serialization.
-    const lockedResolved = resolveAgentPath(workspaceId, raw, { forWrite: true });
-    if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw);
+    const lockedResolved = resolveAgentPath(workspaceId, raw, { ...opts, forWrite: true });
+    if (!lockedResolved || !lockedResolved.writable) return invalidPathError(raw, opts);
     const current = statAgentFile(workspaceId, raw);
     try {
       assertRootCapacity(
@@ -64,7 +65,7 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
       if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };
       throw err;
     }
-    const committed = await commitWorkspaceText(workspaceId, lockedResolved, args.content);
+    const committed = await commitWorkspaceText(workspaceId, lockedResolved, args.content, opts);
     if (!committed.success) return committed;
     const { bytes, quota } = committed;
     return {

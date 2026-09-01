@@ -42,8 +42,8 @@ async function shell(args = {}, workspaceId, opts = {}) {
   // exactly the same paths here as in every filesystem tool and final reply.
   let workingDir = '/';
   if (typeof args.workingDir === 'string' && args.workingDir.trim()) {
-    const resolved = resolveAgentPath(workspaceId, args.workingDir);
-    if (!resolved) return invalidPathError(args.workingDir);
+    const resolved = resolveAgentPath(workspaceId, args.workingDir, opts);
+    if (!resolved) return invalidPathError(args.workingDir, opts);
     workingDir = resolved.containerPath;
   }
 
@@ -61,7 +61,8 @@ async function shell(args = {}, workspaceId, opts = {}) {
     const run = await workspaceRuntime.execInWorkspace(workspaceId, {
       command,
       timeoutMs,
-      workingDir
+      workingDir,
+      mountSkills: Boolean(opts.skills)
     });
 
     const notes = [];

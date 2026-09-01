@@ -160,3 +160,26 @@ test('workspace tools document line-cap recovery and shell working-directory pat
   assert.match(shell.parameters.properties.command.description, /relative operands start there/);
   assert.match(shell.parameters.properties.workingDir.description, /use an absolute \/workspace/);
 });
+
+test('the skill library is described on WhatsApp and named nowhere on Discord', () => {
+  const workspaceNames = new Set(['list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell']);
+  const ctx = { isActiveMember: true, isAdmin: true, isGroup: false };
+  const descriptions = (platform) => getToolsForUser({ ...ctx, platform })
+    .filter(tool => workspaceNames.has(tool.function?.name))
+    .flatMap(tool => [
+      tool.function.description,
+      ...Object.values(tool.function.parameters?.properties || {}).map(p => p.description)
+    ])
+    .filter(Boolean)
+    .join('\n');
+
+  const wa = descriptions(constants.PLATFORM_WA_DEDICATED);
+  assert.match(wa, /"skills\/<name>\/<file>" for the skill library/);
+  assert.match(wa, /under workspace\/ or skills\//);
+
+  // On Discord `skills/` is not a root at all, so no schema may offer it.
+  const discord = descriptions(constants.PLATFORM_DISCORD);
+  assert.equal(/skills/i.test(discord), false, discord);
+  assert.match(discord, /"attachments\/<file>" for files from this chat\./);
+  assert.match(discord, /under workspace\/\./);
+});

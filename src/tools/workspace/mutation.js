@@ -58,15 +58,20 @@ async function runWorkspaceMutation(workspaceId, opts = {}, fn) {
  * @param {string} workspaceId
  * @param {object} resolved - a path already resolved under the mutation lock
  * @param {string} content
+ * @param {object} [opts]
+ * @param {boolean} [opts.skills] - whether this chat has the skill library, and
+ *   so whether its container mounts it. A property of the chat, not of the path
+ *   being written: the same container serves later calls that may need it.
  */
-async function commitWorkspaceText(workspaceId, resolved, content) {
+async function commitWorkspaceText(workspaceId, resolved, content, opts = {}) {
   // The allowed root is the one the path resolved into, so a write into the
   // skill library is contained by `/skills` exactly as a workspace write is
   // contained by `/workspace`.
   const allowedRoot = toContainerPath(resolved.root, '');
   const run = await workspaceRuntime.execInWorkspace(workspaceId, {
     command: ['/bin/bash', '-c', ATOMIC_WRITE_SCRIPT, 'workspace_text_write', resolved.containerPath, allowedRoot],
-    input: content
+    input: content,
+    mountSkills: Boolean(opts.skills)
   });
   if (run.rc !== 0) {
     return {

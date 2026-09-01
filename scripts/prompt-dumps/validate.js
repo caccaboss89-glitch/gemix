@@ -526,10 +526,20 @@ function _validateWorkspaceGuidance(staticPart, caseId) {
  * The skill library, as the prompt advertises it. Only the frontmatter belongs
  * here — the procedure is in the SKILL.md the model opens — so the section is
  * checked against the live library rather than against fixed text.
+ *
+ * The library is a WhatsApp surface, so a Discord prompt must carry neither the
+ * section nor any mention of the root behind it.
  */
-function _validateSkills(staticPart, caseId) {
+function _validateSkills(staticPart, id, caseId) {
   const skills = _promptSection(staticPart, 'Skills');
   const installed = listInstalledSkills();
+  if (DISCORD_CASES.includes(id)) {
+    if (skills) ISSUES.push({ caseId, msg: 'Discord must not carry a Skills section' });
+    if (/skills\//.test(staticPart)) {
+      ISSUES.push({ caseId, msg: 'Discord prompt names the `skills/` root, which does not exist there' });
+    }
+    return;
+  }
   if (!skills) {
     if (installed.length > 0) {
       ISSUES.push({ caseId, msg: 'skill library is installed but the prompt carries no Skills section' });
@@ -689,7 +699,7 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
   _validateVisibility(staticPart, caseId);
   _validateThisChat(staticPart, id, caseId);
   _validateWorkspaceGuidance(staticPart, caseId);
-  _validateSkills(staticPart, caseId);
+  _validateSkills(staticPart, id, caseId);
   _validateQuotaLine(dynamicPart, id, caseId);
   _validateSettingsBlocks(dynamicPart, prompt, id, caseId);
   validateNoImplLeaks(prompt, caseId, 'system prompt');

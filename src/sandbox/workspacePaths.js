@@ -2,11 +2,15 @@
 //
 // The single path namespace every tool and the structured reply share.
 //
-// The model sees exactly three roots and nothing else:
+// The model sees these roots and nothing else:
 //
 //   workspace/     its own writable area          -> /workspace in the container
 //   attachments/   this conversation's files      -> /attachments, read-only
 //   skills/        the shared skill library       -> /skills in the container
+//
+// The third one is a platform capability (see config/platformCapabilities.js).
+// Where the chat does not have it, callers pass `skills: false` and `skills` is
+// not a root name here at all: such a path is an ordinary workspace directory.
 //
 // One path shape means a file named by `write_file` is the same string the
 // model passes to `read_file`, to `send_email`, and to `attachments[]` in the
@@ -60,7 +64,7 @@ function isWritableRoot(root) {
  * @param {string} raw
  * @returns {{ root: string, relPath: string, display: string }|null}
  */
-function parseAgentPath(raw) {
+function parseAgentPath(raw, { skills = true } = {}) {
   if (typeof raw !== 'string') return null;
   let s = raw.trim();
   if (!s || s.includes('\0')) return null;
@@ -83,7 +87,10 @@ function parseAgentPath(raw) {
   if (segments.some(seg => seg === '..')) return null;
 
   const first = segments[0].toLowerCase();
-  const named = ROOT_NAMES.has(first);
+  // Where the skill library is not offered, `skills` is not a root name: a path
+  // starting with it is an ordinary workspace directory, exactly like any other
+  // first segment the namespace does not recognise.
+  const named = ROOT_NAMES.has(first) && (skills || first !== ROOT.SKILLS);
   // `/etc/passwd` is an attempt at a host path, not a relative workspace file:
   // a leading slash only means something when it names one of the roots.
   if (wasAbsolute && !named) return null;
@@ -192,7 +199,7 @@ function _hasExistingSymlink(base, relPath) {
  * @returns {{ root, relPath, display, containerPath, abs, writable }|null}
  */
 function resolveAgentPath(workspaceId, raw, opts = {}) {
-  const parsed = parseAgentPath(raw);
+  const parsed = parseAgentPath(raw, opts);
   if (!parsed) return null;
   const abs = hostPathFor(workspaceId, parsed.root, parsed.relPath, opts);
   if (!abs) return null;
@@ -209,11 +216,12 @@ function resolveAgentPath(workspaceId, raw, opts = {}) {
  * @param {string} raw
  * @returns {{ success: false, error: string }}
  */
-function invalidPathError(raw) {
+function invalidPathError(raw, { skills = true } = {}) {
+  const roots = '"workspace/<file>" for your own files, "attachments/<file>" for this conversation\'s files'
+    + (skills ? ', or "skills/<name>/<file>" for the skill library' : '');
   return {
     success: false,
-    error: `Invalid path ${JSON.stringify(String(raw ?? ''))}. Use "workspace/<file>" for your own files, `
-      + '"attachments/<file>" for this conversation\'s files, or "skills/<name>/<file>" for the skill library. '
+    error: `Invalid path ${JSON.stringify(String(raw ?? ''))}. Use ${roots}. `
       + 'Parent traversal and host paths are refused.'
   };
 }

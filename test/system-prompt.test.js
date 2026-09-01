@@ -141,3 +141,22 @@ test('workspace guidance states shell path and proxy failures without false abso
   assert.match(prompt, /A 403 can be either a proxy policy rejection or the remote site refusing the request/);
   assert.doesNotMatch(prompt, /A 403 from it means the destination is not public/);
 });
+
+test('the Skills section and the `skills/` root are a WhatsApp surface only', () => {
+  const wa = promptFor(true);
+  assert.match(wa, /^## Skills$/m);
+  assert.match(wa, /The third root, `skills\/`, is writable as well\./);
+  assert.match(wa, /MB in `skills\/`, which is never wiped/);
+
+  const discord = buildStaticInstructions({
+    platform: constants.PLATFORM_DISCORD,
+    isGroup: false,
+    chatId: 'channel123',
+    userName: 'Test Admin',
+    userIdentity: { isActiveMember: true, isAdmin: true }
+  }, undefined, { activeMembers: FIXTURE_MEMBERS });
+
+  assert.equal(/skill/i.test(discord), false, 'Discord names a library it does not have');
+  assert.match(discord, /use `\/workspace\/\.\.\.` or `\/attachments\/\.\.\.` for a root-stable shell path/);
+  assert.match(discord, /Delete what you no longer need instead of filling it\./);
+});

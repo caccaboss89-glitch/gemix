@@ -4,7 +4,8 @@
 // wrappers, and results are plain objects the dispatcher serializes into the
 // fixed `{ success, message?, error?, ... }` envelope.
 //
-// `list_files`: what is in `workspace/`, `attachments/` or `skills/` right now.
+// `list_files`: what is in `workspace/`, `attachments/`, or `skills/` where the
+// chat has it, right now.
 //
 import constants from '../../config/constants.js';
 import { listAgentDirectory, statAgentFile } from '../../sandbox/hostFileGateway.js';
@@ -24,10 +25,10 @@ const MAX_ENTRIES = 300;
  * @param {boolean} [args.recursive]
  * @param {string} workspaceId
  */
-function listFiles(args = {}, workspaceId) {
+function listFiles(args = {}, workspaceId, opts = {}) {
   const raw = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : `${ROOT.WORKSPACE}/`;
-  const resolved = parseAgentPath(raw);
-  if (!resolved) return invalidPathError(raw);
+  const resolved = parseAgentPath(raw, opts);
+  if (!resolved) return invalidPathError(raw, opts);
 
   const listing = listAgentDirectory(workspaceId, resolved.display, {
     limit: MAX_ENTRIES,

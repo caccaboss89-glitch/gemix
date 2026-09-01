@@ -142,9 +142,11 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
   sections.push(_section('How you answer', buildAnswerLines(profile, promptOpts)));
 
   if (cap.workspace) {
-    sections.push(_section('Your workspace', _buildWorkspaceLines()));
-    const skills = _buildSkillsLines();
-    if (skills.length > 0) sections.push(_section('Skills', skills));
+    sections.push(_section('Your workspace', _buildWorkspaceLines(cap.skills)));
+    if (cap.skills) {
+      const skills = _buildSkillsLines();
+      if (skills.length > 0) sections.push(_section('Skills', skills));
+    }
   }
 
   const sendingFiles = buildSendingFilesLines(profile, promptOpts);
@@ -413,16 +415,20 @@ function _renderWorkspace(ws) {
 /**
  * The workspace rules the model needs before it touches a file: namespace,
  * inspection workflow, writable area, quota, TTL and network behavior.
+ *
+ * @param {boolean} skills - whether this chat has the skill library, and so
+ *   whether `skills/` is a root of its namespace at all.
  */
-function _buildWorkspaceLines() {
+function _buildWorkspaceLines(skills) {
   return [
     'You have a working area of your own. `workspace/` is yours to write in and persists across turns in this chat. '
-    + '`attachments/` holds this chat\'s files, mounted read-only: to change one, copy it into `workspace/` first. '
-    + 'The third root, `skills/`, is writable as well.',
+    + '`attachments/` holds this chat\'s files, mounted read-only: to change one, copy it into `workspace/` first.'
+    + (skills ? ' The third root, `skills/`, is writable as well.' : ''),
     'One path namespace covers everything: the path `list_files` shows you is the same string you pass to `read_file` '
     + 'and put in `attachments` in your final reply. With `shell`, omit `workingDir` to start at `/`, where that same '
-    + 'root string works unchanged. If you set `workingDir`, command-relative paths start there; use `/workspace/...`, '
-    + '`/attachments/...` or `/skills/...` for a root-stable shell path. Never invent or shorten a path.',
+    + 'root string works unchanged. If you set `workingDir`, command-relative paths start there; use `/workspace/...`'
+    + `${skills ? ', `/attachments/...` or `/skills/...`' : ' or `/attachments/...`'} for a root-stable shell path. `
+    + 'Never invent or shorten a path.',
     'When you know a local file path, start with `read_file`: it is the standard gateway that brings its contents '
     + 'into your context. If you do not know the path, use `list_files` or `search_files` first. Reading may need '
     + 'format-specific parsing — look before you assume, '
@@ -434,8 +440,9 @@ function _buildWorkspaceLines() {
     'The same file can exist in `workspace/` and `attachments/` at once (you made it, you sent it, it came back in '
     + 'the chat). That is normal: work from whichever copy the user means.',
     `Limits: ${constants.WORKSPACE_QUOTA_MB} MB in \`workspace/\`, wiped after ${constants.WORKSPACE_TTL_LABEL} `
-    + `without activity in this chat, and ${constants.SKILLS_QUOTA_MB} MB in \`skills/\`, which is never wiped. `
-    + 'Delete what you no longer need instead of filling them. '
+    + `without activity in this chat`
+    + `${skills ? `, and ${constants.SKILLS_QUOTA_MB} MB in \`skills/\`, which is never wiped` : ''}. `
+    + `Delete what you no longer need instead of filling ${skills ? 'them' : 'it'}. `
     + 'Package installs are disabled; the toolchain in `shell` is fixed.',
     'Network access from `shell` goes through a public-only proxy. Private and local destinations are blocked. A 403 '
     + 'can be either a proxy policy rejection or the remote site refusing the request; it does not by itself prove '
