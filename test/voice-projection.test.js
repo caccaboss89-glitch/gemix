@@ -133,6 +133,30 @@ test('a clip whose raw is gone keeps its tag instead of inventing a transcript',
   assert.equal(out.projected, 0);
 });
 
+test('a clip removed between metadata lookup and read does not abort the turn', async (t) => {
+  const name = 'voice_race.ogg';
+  const absPath = path.join(historyDir, name);
+  fs.writeFileSync(absPath, Buffer.from('race bytes'));
+  const originalRead = fs.readFileSync;
+  t.after(() => {
+    fs.readFileSync = originalRead;
+    try { fs.unlinkSync(absPath); } catch { /* already absent */ }
+  });
+  fs.readFileSync = (target, ...args) => {
+    if (typeof target === 'number') {
+      const error = new Error('file vanished');
+      error.code = 'ENOENT';
+      throw error;
+    }
+    return originalRead(target, ...args);
+  };
+
+  const tag = `[Attachment: attachments/${name}]`;
+  const out = await projectUserVoiceMessages({ history: [], current: tag, storageId: STORAGE_ID });
+  assert.equal(out.current, tag);
+  assert.equal(out.projected, 0);
+});
+
 test('without a conversation to look the clip up in, the tag reports the failure', async () => {
   const out = await projectUserVoiceMessages({
     history: [],

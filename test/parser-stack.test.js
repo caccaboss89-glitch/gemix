@@ -23,8 +23,9 @@ import {
   sweepParserCache,
   writeCache
 } from '../src/parsers/parserCache.js';
-import { parseImage } from '../src/parsers/mediaParser.js';
+import { frameOffsets, parseImage } from '../src/parsers/mediaParser.js';
 import { handlesExt, ocrAvailable } from '../src/parsers/documentParser.js';
+import { runKreuzbergOperation } from '../src/parsers/kreuzbergProcess.js';
 import { readFile } from '../src/tools/workspace/readFile.js';
 
 const WORKSPACE_ID = `user:parsers-${process.pid}@c.us`;
@@ -220,12 +221,28 @@ test('the cache key changes with the bytes, the parser and the parameters', () =
 
 test('a stored parse comes back, and a corrupted entry is dropped instead', () => {
   const key = cacheKey(Buffer.from('payload'), 'document', {});
-  assert.equal(writeCache(WORKSPACE_ID, key, { ok: true, content: 'cached text' }), true);
+  assert.equal(writeCache(WORKSPACE_ID, key, {
+    ok: true,
+    kind: 'document',
+    content: 'cached text',
+    metadata: {},
+    images: [],
+    notes: []
+  }), true);
   assert.equal(readCache(WORKSPACE_ID, key).content, 'cached text');
 
   fs.writeFileSync(path.join(cacheDir(WORKSPACE_ID), `${key}.json`), '{ truncated');
   assert.equal(readCache(WORKSPACE_ID, key), null);
   assert.equal(fs.existsSync(path.join(cacheDir(WORKSPACE_ID), `${key}.json`)), false);
+});
+
+test('a valid JSON cache entry with an obsolete shape is invalidated', () => {
+  const key = cacheKey(Buffer.from('obsolete'), 'document', {});
+  const file = path.join(cacheDir(WORKSPACE_ID), `${key}.json`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ ok: true, content: 'old shape' }));
+  assert.equal(readCache(WORKSPACE_ID, key), null);
+  assert.equal(fs.existsSync(file), false);
 });
 
 test('the cache never lives where the model can see it', () => {
@@ -295,6 +312,24 @@ test('hashing honors an already-aborted turn', async () => {
   const controller = new AbortController();
   controller.abort(new Error('turn ended'));
   await assert.rejects(() => hashFile(path.join(ROOT, 'notes.md'), { signal: controller.signal }), /turn ended/);
+});
+
+test('aborting an in-flight native document operation rejects promptly', async () => {
+  const controller = new AbortController();
+  const reason = new Error('turn ended during parsing');
+  const startedAt = Date.now();
+  const pending = runKreuzbergOperation('extractFile', {
+    path: path.join(ROOT, 'missing-after-abort.pdf'),
+    options: {}
+  }, { signal: controller.signal, timeoutMs: 10_000 });
+  controller.abort(reason);
+  await assert.rejects(pending, error => error === reason);
+  assert.ok(Date.now() - startedAt < 1_000);
+});
+
+test('unknown video duration produces one poster offset instead of duplicate frames', () => {
+  assert.deepEqual(frameOffsets(null, constants.PARSE_MAX_VIDEO_FRAMES), [0]);
+  assert.deepEqual(frameOffsets(10, 4), [1.25, 3.75, 6.25, 8.75]);
 });
 
 // -- through read_file --------------------------------------------------------

@@ -58,7 +58,27 @@ const fileRegistry = new Map();
 const MAX_TOKEN_REQUESTS = 20;
 
 let _server = null;
+let _startPromise = null;
 let _cleanupInterval = null;
+
+function _isUnderTempDir(filePath) {
+  const absPath = path.resolve(filePath).toLowerCase();
+  const tempDir = path.resolve(TEMP_DIR).toLowerCase();
+  return absPath === tempDir || absPath.startsWith(tempDir + path.sep.toLowerCase());
+}
+
+function _expireEntry(token, { unlinkTempFile = true } = {}) {
+  const entry = fileRegistry.get(token);
+  if (!entry) return false;
+  fileRegistry.delete(token);
+  if (unlinkTempFile && _isUnderTempDir(entry.filePath)) {
+    try { fs.unlinkSync(entry.filePath); }
+    catch (err) {
+      if (err.code !== 'ENOENT') log.warn(`Failed to delete expired file: ${err.message}`);
+    }
+  }
+  return true;
+}
 
 /**
  * Remove one-shot staging left by an earlier process. Its token registry was
@@ -201,7 +221,7 @@ function registerTempFile(filePath, originalName, opts = {}) {
     });
 
     const publicUrl = getPublicBaseUrl();
-    if (publicUrl === 'http://localhost:9998') {
+    if (publicUrl === `http://localhost:${PORT}`) {
       log.warn(`No public tunnel URL - temp links will be ${publicUrl} (not reachable from outside)`);
     }
     const url = `${publicUrl}/temp/${token}/${encodeURIComponent(finalName)}`;
@@ -241,25 +261,7 @@ function cleanupExpiredFiles() {
 
   for (const [token, entry] of fileRegistry.entries()) {
     if (entry.expiresAt <= now) {
-      try {
-        const absPath = path.resolve(entry.filePath);
-        const tempDirAbs = path.resolve(TEMP_DIR);
-        const sep = path.sep;
-        const absPathLower = absPath.toLowerCase();
-        const tempDirLower = tempDirAbs.toLowerCase();
-        const isUnderTempDir = absPathLower === tempDirLower || absPathLower.startsWith(tempDirLower + sep);
-        // Only delete files under our private temp dir. Files registered
-        // from history live there forever (until the history pruner removes
-        // them); deleting on token expiry would lose user content.
-        if (isUnderTempDir && fs.existsSync(absPath)) {
-          fs.unlinkSync(absPath);
-          log.debug(`🗑️  Deleted expired temp file: ${entry.originalName}`);
-        }
-      } catch (err) {
-        log.warn(`Failed to delete expired file: ${err.message}`);
-      }
-      fileRegistry.delete(token);
-      cleanedCount++;
+      if (_expireEntry(token)) cleanedCount++;
     }
   }
 
@@ -307,18 +309,16 @@ function cleanupExpiredFiles() {
 /**
  * Start the temporary file server
  */
-function startTempFileServer() {
-  if (_server) {
-    log.warn('Temp file server already running');
-    return;
-  }
+function startTempFileServer(options = {}) {
+  if (_startPromise) return _startPromise;
+  if (_server?.listening) return Promise.resolve(_server);
 
   // Ensure temp dir exists
   if (!fs.existsSync(TEMP_DIR)) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
   }
 
-  _server = http.createServer((req, res) => {
+  const server = (options.createServer || http.createServer)((req, res) => {
     try {
       // Only handle GET requests to /temp/...
       if (req.method !== 'GET') {
@@ -341,7 +341,7 @@ function startTempFileServer() {
       }
 
       if (entry.expiresAt <= Date.now()) {
-        fileRegistry.delete(token);
+        _expireEntry(token);
         res.writeHead(410, { 'Content-Type': 'text/plain' }).end('File expired');
         return;
       }
@@ -360,7 +360,7 @@ function startTempFileServer() {
 
       // Safety check: file must exist and be inside allowed temp dir
       if (!fs.existsSync(filePath) || !_isAllowedPath(filePath)) {
-        fileRegistry.delete(token);
+        _expireEntry(token);
         res.writeHead(404, { 'Content-Type': 'text/plain' }).end('File not found');
         return;
       }
@@ -415,29 +415,71 @@ function startTempFileServer() {
     }
   });
 
-  _server.listen(PORT, '127.0.0.1', () => {
-    const tempH = Math.round(constants.TUNNEL_TOKEN_TTL_TEMP_MS / 60000);
-    const histH = Math.round(constants.TUNNEL_TOKEN_TTL_HISTORY_MS / 3600000);
-    log.info(`Temp file server listening on 127.0.0.1:${PORT} (TTL: ${tempH}min temp / ${histH}h history)`);
-  });
+  _server = server;
+  const listenPort = options.port ?? PORT;
+  const listenHost = options.host || '127.0.0.1';
+  _startPromise = new Promise((resolve, reject) => {
+    const reset = () => {
+      if (_server === server) _server = null;
+      _startPromise = null;
+    };
+    const onStartupError = (err) => {
+      reset();
+      try { server.close(); } catch { /* not listening */ }
+      reject(err);
+    };
+    server.once('error', onStartupError);
+    server.listen(listenPort, listenHost, () => {
+      server.off('error', onStartupError);
+      server.on('error', (err) => {
+        log.error(`Temp file server error: ${err.message}`);
+        if (_server === server) {
+          _server = null;
+          _startPromise = null;
+          if (_cleanupInterval) clearInterval(_cleanupInterval);
+          _cleanupInterval = null;
+        }
+        try { server.close(); } catch { /* already closed */ }
+      });
 
-  _server.on('error', (err) => {
-    log.error(`Temp file server error: ${err.message}`);
+      if (_cleanupInterval) clearInterval(_cleanupInterval);
+      cleanupExpiredFiles();
+      _cleanupInterval = setInterval(cleanupExpiredFiles, CLEANUP_INTERVAL_MS);
+      _cleanupInterval.unref?.();
+      const address = server.address();
+      const boundPort = typeof address === 'object' && address ? address.port : listenPort;
+      const tempMinutes = Math.round(constants.TUNNEL_TOKEN_TTL_TEMP_MS / 60000);
+      const historyHours = Math.round(constants.TUNNEL_TOKEN_TTL_HISTORY_MS / 3600000);
+      log.info(
+        `Temp file server listening on ${listenHost}:${boundPort} `
+        + `(TTL: ${tempMinutes}min temp / ${historyHours}h history)`
+      );
+      log.info(`Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
+      resolve(server);
+    });
   });
+  return _startPromise;
+}
 
-  // Start periodic cleanup
+async function stopTempFileServer() {
+  const server = _server;
+  _server = null;
+  _startPromise = null;
   if (_cleanupInterval) clearInterval(_cleanupInterval);
-  cleanupExpiredFiles();
-  _cleanupInterval = setInterval(cleanupExpiredFiles, CLEANUP_INTERVAL_MS);
-  if (_cleanupInterval.unref) _cleanupInterval.unref();
-  log.info(`Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_MS / 60000} minutes)`);
+  _cleanupInterval = null;
+  if (!server) return;
+  await new Promise((resolve, reject) => {
+    server.close(err => err ? reject(err) : resolve());
+  });
 }
 
 export {
   startTempFileServer,
+  stopTempFileServer,
   clearTempStagingOnStartup,
   registerTempFile,
   tempDirForOwner,
   TEMP_DIR,
-  _detectDisposition
+  _detectDisposition,
+  _expireEntry
 };

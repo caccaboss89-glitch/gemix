@@ -88,6 +88,26 @@ test('a generation that fails gives its slot back', async () => {
   assert.equal((await reserveGeneration('image', member)).ok, false);
 });
 
+test('a reservation release is idempotent when cleanup runs twice', async () => {
+  await spend('image', 1);
+  const reservation = await reserveGeneration('image', member);
+  assert.equal(reservation.ok, true);
+  await Promise.all([reservation.release(), reservation.release(), reservation.release()]);
+  assert.match(formatQuotaCounts(USER, ['image']), /Immagini: 1\/5/);
+  await spend('image', 4);
+  assert.equal((await reserveGeneration('image', member)).ok, false);
+});
+
+test('a late refund cannot consume a reservation from the next quota period', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-05T12:00:00Z') });
+  const oldReservation = await reserveGeneration('image', member);
+  assert.equal(oldReservation.ok, true);
+  t.mock.timers.tick(48 * 60 * 60 * 1000);
+  await spend('image', 1);
+  await oldReservation.release();
+  assert.match(formatQuotaCounts(USER, ['image']), /Immagini: 1\/5/);
+});
+
 test('the admin is exempt from every cap', async () => {
   const admin = { isAdmin: true, taskFileId: 'admin-user' };
   await spend('image', 7, admin);

@@ -199,11 +199,45 @@ test('an unreachable sidecar is reported as such, not as an empty web', async ()
   assert.match(res.error, /unreachable/i);
 });
 
+test('web and image search propagate turn cancellation instead of degrading it', async () => {
+  globalThis.fetch = async (_url, options) => new Promise((resolve, reject) => {
+    const signal = options?.signal;
+    const abort = () => reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
+  });
+
+  const webAbort = new AbortController();
+  const web = searchWeb({ query: 'x' }, null, { signal: webAbort.signal });
+  webAbort.abort(new Error('web turn ended'));
+  await assert.rejects(web, /web turn ended/);
+
+  const imageAbort = new AbortController();
+  const image = searchImage({ query: 'x' }, { signal: imageAbort.signal });
+  imageAbort.abort(new Error('image turn ended'));
+  await assert.rejects(image, /image turn ended/);
+});
+
 test('a malformed body is a failure, not a silent empty result', async () => {
   stubSidecar(200, 'not json at all');
   const res = await searchWeb({ query: 'x' });
   assert.equal(res.success, false);
   assert.match(res.error, /malformed/i);
+});
+
+test('invalid configured base URLs fail cleanly before URL construction', async () => {
+  const savedAgent = envConfig.AGENT_SEARCH_BASE_URL;
+  const savedImages = envConfig.SEARCH_IMAGE_BASE_URL;
+  try {
+    envConfig.AGENT_SEARCH_BASE_URL = 'http://[';
+    envConfig.SEARCH_IMAGE_BASE_URL = 'not a url';
+    assert.equal((await searchWeb({ query: 'x' })).success, false);
+    assert.equal((await searchImage({ query: 'x' })).success, false);
+    assert.equal(calls.length, 0);
+  } finally {
+    envConfig.AGENT_SEARCH_BASE_URL = savedAgent;
+    envConfig.SEARCH_IMAGE_BASE_URL = savedImages;
+  }
 });
 
 test('image search selects its engines with supported SearXNG bang syntax', async () => {

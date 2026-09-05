@@ -4,17 +4,12 @@
 
 import { downloadPublicFile } from '../utils/fetch.js';
 import { createLogger } from '../utils/logger.js';
+import constants from '../config/constants.js';
+import { runKreuzbergOperation } from '../parsers/kreuzbergProcess.js';
 
 const log = createLogger('DirectPage');
 const MAX_DIRECT_PAGE_BYTES = 10 * 1024 * 1024;
 const DIRECT_PAGE_TIMEOUT_MS = 25_000;
-
-let _extractBytes = null;
-
-async function _extract(buffer, mimetype) {
-  if (!_extractBytes) ({ extractBytes: _extractBytes } = await import('@kreuzberg/node'));
-  return _extractBytes(buffer, mimetype || 'application/octet-stream');
-}
 
 /** True when Google Cache returned its own consent/search UI, not the target. */
 function isGoogleInterstice(content, strategy) {
@@ -26,23 +21,33 @@ function isGoogleInterstice(content, strategy) {
 }
 
 async function readPublicPageDirect(url, maxChars, signal) {
+  const cap = Number.isFinite(maxChars) && maxChars > 0
+    ? Math.floor(maxChars)
+    : constants.READ_PAGE_MAX_CHARS;
   try {
+    signal?.throwIfAborted();
     const downloaded = await downloadPublicFile(url, {
       maxBytes: MAX_DIRECT_PAGE_BYTES,
       timeoutMs: DIRECT_PAGE_TIMEOUT_MS,
       signal
     });
-    const extracted = await _extract(downloaded.buffer, downloaded.mimetype);
+    signal?.throwIfAborted();
+    const extracted = await runKreuzbergOperation('extractBytes', {
+      buffer: downloaded.buffer,
+      mime: downloaded.mimetype || 'application/octet-stream'
+    }, { signal, timeoutMs: DIRECT_PAGE_TIMEOUT_MS });
+    signal?.throwIfAborted();
     const content = typeof extracted?.content === 'string' ? extracted.content.trim() : '';
     if (!content) return { ok: false, error: 'Direct extraction returned no readable text.' };
     return {
       ok: true,
-      content: content.slice(0, maxChars),
+      content: content.slice(0, cap),
       strategy: 'direct-kreuzberg',
-      chars: Math.min(content.length, maxChars),
+      chars: Math.min(content.length, cap),
       trustTier: 'unknown'
     };
   } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
     log.warn(`Direct extraction failed for ${String(url).slice(0, 160)}: ${err.message}`);
     return { ok: false, error: err.message };
   }

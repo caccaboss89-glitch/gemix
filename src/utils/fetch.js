@@ -52,6 +52,46 @@ async function readResponseBodyWithTimeout(readPromise, timeoutMs) {
   }
 }
 
+/** Read a WHATWG Response body without ever retaining more than maxBytes. */
+async function readWebResponseBodyWithLimit(response, maxBytes, signal = null) {
+  const cap = Number(maxBytes);
+  if (!Number.isSafeInteger(cap) || cap <= 0) {
+    throw new Error('A positive byte limit is required.');
+  }
+  const declared = Number(response?.headers?.get?.('content-length') || 0);
+  if (Number.isFinite(declared) && declared > cap) {
+    try { await response.body?.cancel?.(); } catch { /* best effort */ }
+    throw new Error(`File too large (${declared} bytes, max ${cap})`);
+  }
+  if (!response?.body?.getReader) {
+    throw new Error('Response body is not readable.');
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  try {
+    while (true) {
+      signal?.throwIfAborted?.();
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      received += chunk.length;
+      if (received > cap) {
+        throw new Error(`File too large (${received} bytes, max ${cap})`);
+      }
+      chunks.push(chunk);
+    }
+  } catch (err) {
+    try { await reader.cancel(err); } catch { /* best effort */ }
+    throw err;
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+  if (received === 0) throw new Error('Download returned an empty body.');
+  return Buffer.concat(chunks, received);
+}
+
 /**
  * Fetch with automatic timeout, preserving any caller cancellation.
  * Wraps native fetch with a configurable timeout (default: constants.FETCH_TIMEOUT_MS from constants).
@@ -165,5 +205,6 @@ export {
   fetchWithTimeout,
   fetchExternal,
   downloadPublicFile,
-  readResponseBodyWithTimeout
+  readResponseBodyWithTimeout,
+  readWebResponseBodyWithLimit
 };

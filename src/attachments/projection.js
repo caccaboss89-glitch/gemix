@@ -264,9 +264,14 @@ function sweepExpiredAttachments(now = Date.now()) {
 /** Wipe a conversation's whole projection (privacy wipe, workspace expiry). */
 function clearProjection(workspaceId) {
   const root = getAttachmentsPath(workspaceId);
-  if (!root) return;
-  try { fs.rmSync(root, { recursive: true, force: true }); }
-  catch (err) { log.warn(`Cannot clear the projection: ${err.message}`); }
+  if (!root) return false;
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+    return true;
+  } catch (err) {
+    log.warn(`Cannot clear the projection: ${err.message}`);
+    return false;
+  }
 }
 
 /** Where a conversation's projection lives, for the privacy wipe report. */

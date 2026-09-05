@@ -10,9 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import constants from '../../config/constants.js';
 import { mimeForExtension } from '../../config/mimeExtensions.js';
-
-/** Formats a vision model reads directly. */
-const INLINE_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+import { INLINE_IMAGE_EXTS } from '../../config/mediaTypes.js';
 
 /**
  * Build an `input_image` part from a file on disk.

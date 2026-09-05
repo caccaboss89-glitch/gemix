@@ -5,6 +5,7 @@
 // Never access process.env directly anywhere else in the codebase.
 
 import 'dotenv/config';
+import { normalizeHttpBaseUrl } from '../utils/httpUrl.js';
 
 const toBool = (val, defaultVal) => (val ? /^(1|true|yes|on)$/i.test(val) : defaultVal);
 // Comma-separated list, e.g. a pool of interchangeable API keys.
@@ -16,6 +17,12 @@ const toIntInRange = (val, min, max, defaultVal) => {
 
 const XAI_USE_API_KEY = toBool(process.env.XAI_USE_API_KEY, false);
 const GEMIX_TEMP_FILE_PORT = toIntInRange(process.env.GEMIX_TEMP_FILE_PORT, 1, 65535, 0);
+const SEARCH_IMAGE_BASE_URL = normalizeHttpBaseUrl(
+  process.env.SEARCH_IMAGE_BASE_URL || 'http://127.0.0.1:8888'
+) || '';
+const AGENT_SEARCH_BASE_URL = normalizeHttpBaseUrl(
+  process.env.AGENT_SEARCH_BASE_URL || 'http://127.0.0.1:3939'
+) || '';
 
 // A Workers AI account is a pair: the id goes in the request URL, the token in
 // the Authorization header. The two lists are zipped positionally, so the nth
@@ -206,12 +213,12 @@ export default {
 
   // Local SearXNG instance used by the search_image tool (JSON API).
   // Bind to loopback only in production. No trailing slash.
-  SEARCH_IMAGE_BASE_URL: (process.env.SEARCH_IMAGE_BASE_URL || 'http://127.0.0.1:8888').replace(/\/+$/, ''),
+  SEARCH_IMAGE_BASE_URL,
 
   // agent-search sidecar in front of the same SearXNG: text search and page
   // reading for search_web / read_page. Loopback only, no trailing slash. The
   // token is optional and only set when the sidecar itself requires one.
-  AGENT_SEARCH_BASE_URL: (process.env.AGENT_SEARCH_BASE_URL || 'http://127.0.0.1:3939').replace(/\/+$/, ''),
+  AGENT_SEARCH_BASE_URL,
   AGENT_SEARCH_TOKEN: process.env.AGENT_SEARCH_TOKEN || '',
 
   GEMIX_NOTIFY_SECRET: process.env.GEMIX_NOTIFY_SECRET || '',

@@ -18,7 +18,7 @@ import { createWhatsAppClient, isWaClientReady } from './client.js';
 import { resolveWaSender } from '../../utils/waContact.js';
 import { materializeWhatsAppBatchContent } from '../../utils/batchContentRefresh.js';
 import { identifyUser } from '../../utils/userIdentifier.js';
-import { setDedicatedClient } from '../../tools/whatsappSender.js';
+import { setReadyDedicatedClient } from './dedicatedClientRegistry.js';
 import constants from '../../config/constants.js';
 import { containsMetaAiTag } from '../../utils/waMentions.js';
 import { createLogger } from '../../utils/logger.js';
@@ -51,7 +51,7 @@ function initDedicatedWhatsApp(opts = {}) {
     log,
     messageEvent: 'message',
     onMessage: onDedicatedMessage,
-    onReady: (c) => setDedicatedClient(c),
+    onReady: (c) => setReadyDedicatedClient(c),
     onFatal: opts.onFatal
   });
   return client;
@@ -154,7 +154,7 @@ async function onDedicatedMessage(msg) {
  */
 async function _handleDedicatedBatch(entries) {
   const first = entries[0];
-  const { chat, isGroup, stopLockRenew } = first;
+  const { chat, isGroup, lockLease, stopLockRenew } = first;
   let waPresence = null;
   // One fetchMessages per turn, shared by the history build and the quote
   // window. Closed over rather than stashed on a batch entry, which is not a
@@ -170,6 +170,7 @@ async function _handleDedicatedBatch(entries) {
     log,
     lockKey: `wa_dedicated:${chat.id._serialized}`,
     platform: PLATFORM_WA_DEDICATED,
+    lockLease,
     stopLockRenew,
     entries,
     discardLogLabel: chat.id._serialized,
@@ -183,14 +184,16 @@ async function _handleDedicatedBatch(entries) {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
       const historyUserId = resolveHistoryUserId(ents);
       return fetchHistoryWithTimeout(
-        async () => {
+        async (signal) => {
           messageWindow = await fetchWhatsAppMessageWindow(chat);
+          signal.throwIfAborted();
           return buildWhatsAppHistory(
             chat,
             PLATFORM_WA_DEDICATED,
             historyUserId,
             excludeKeys.size > 0 ? excludeKeys : null,
-            messageWindow
+            messageWindow,
+            { signal }
           );
         },
         log,
@@ -239,7 +242,7 @@ async function _handleDedicatedBatch(entries) {
       };
     },
     deliver: async (_ctx, response) => {
-      await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_DEDICATED });
+      return sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_DEDICATED });
     },
     onDeliverError: async (ctx, err) => {
       const adminIsCaller = Boolean(ctx?.userIdentity?.isAdmin);

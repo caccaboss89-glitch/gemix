@@ -20,7 +20,14 @@ function extractAttachmentTagPaths(text) {
   return paths;
 }
 
+/** Remove every canonical live or expired attachment tag from user-facing text. */
+function stripAttachmentTags(text) {
+  if (typeof text !== 'string' || !text) return text || '';
+  return text.replace(/\[Attachment(?:\s*\(expired\))?:\s*[^\]\n\r]+\]/gi, '');
+}
+
 export {
   isSupportedMedia,
-  extractAttachmentTagPaths
+  extractAttachmentTagPaths,
+  stripAttachmentTags
 };

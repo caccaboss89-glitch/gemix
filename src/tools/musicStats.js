@@ -22,10 +22,6 @@ async function readMusicStats() {
       headers: { 'User-Agent': 'GemiX-MusicStats/1.0' }
     }, 'Music Stats');
 
-    if (!res.ok) {
-      return { success: false, error: `Failed to fetch music stats: HTTP ${res.status}` };
-    }
-
     const data = await res.json();
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       return { success: false, error: 'Failed to fetch music stats: response body is not a JSON object' };

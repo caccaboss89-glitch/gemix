@@ -68,8 +68,9 @@ async function managePreferences(args, settingsFileId, options = {}) {
   }
 
   let memoryNote = '';
-  if (args.memory !== undefined && args.memory !== null) {
-    const resolved = resolveMemoryContent(current.memory, args.memory, args.replace !== false);
+  const memoryInput = args.memory !== undefined && args.memory !== null ? args.memory : null;
+  if (memoryInput !== null && args.replace !== false) {
+    const resolved = resolveMemoryContent(current.memory, memoryInput, true);
     if (resolved.cleared) {
       // Clearing restores the default guidance rather than leaving it empty.
       patch.memory = defaultSettings(options).memory;
@@ -82,20 +83,20 @@ async function managePreferences(args, settingsFileId, options = {}) {
         };
       }
       patch.memory = resolved.content;
-      const mode = args.replace === false ? 'appended to' : 'updated';
-      memoryNote = ` Memory ${mode} (${resolved.content.length}/${MAX_MEMORY_CHARS} chars).`;
+      memoryNote = ` Memory updated (${resolved.content.length}/${MAX_MEMORY_CHARS} chars).`;
     }
   }
 
-  if (Object.keys(patch).length === 0) {
+  if (Object.keys(patch).length === 0 && memoryInput === null) {
     return {
       success: false,
       error: `Nothing to update: pass at least one of ${activePreferenceFields(options).join(', ')}.`
     };
   }
 
-  const changedKeys = Object.keys(patch).filter(key => patch[key] !== current[key]);
-  if (changedKeys.length === 0) {
+  const requestedKeys = Object.keys(patch);
+  const changedKeys = requestedKeys.filter(key => patch[key] !== current[key]);
+  if (changedKeys.length === 0 && memoryInput === null) {
     return {
       success: true,
       changed: false,
@@ -104,20 +105,44 @@ async function managePreferences(args, settingsFileId, options = {}) {
     };
   }
 
-  const changedPatch = Object.fromEntries(changedKeys.map(key => [key, patch[key]]));
-  const written = await updateSettings(settingsFileId, changedPatch, options);
+  const staticPatch = Object.fromEntries(
+    Object.entries(patch).filter(([key]) => key !== 'memory')
+  );
+  const written = await updateSettings(settingsFileId, (latest) => {
+    const nextPatch = { ...staticPatch };
+    if (memoryInput !== null) {
+      const resolved = resolveMemoryContent(latest.memory, memoryInput, args.replace !== false);
+      if (resolved.cleared) {
+        nextPatch.memory = defaultSettings(options).memory;
+      } else if (resolved.content.length > MAX_MEMORY_CHARS) {
+        return {
+          error: `Memory exceeds the ${MAX_MEMORY_CHARS} character limit (${resolved.content.length} chars).`
+        };
+      } else {
+        nextPatch.memory = resolved.content;
+      }
+    }
+    return nextPatch;
+  }, options);
   if (!written.success) {
     return { success: false, error: written.error };
   }
 
-  const changes = changedKeys.map(key => key === 'memory' ? 'memory' : `${key}=${patch[key]}`);
-  const effectiveMemoryNote = changedKeys.includes('memory') ? memoryNote : '';
+  const effectiveChangedKeys = written.changedKeys || [];
+  const changes = effectiveChangedKeys.map(key => key === 'memory' ? 'memory' : `${key}=${patch[key]}`);
+  const effectiveMemoryNote = effectiveChangedKeys.includes('memory')
+    ? (memoryInput !== null && args.replace === false
+      ? ` Memory appended to (${written.settings.memory.length}/${MAX_MEMORY_CHARS} chars).`
+      : memoryNote)
+    : '';
   return {
     success: true,
-    changed: true,
+    changed: Boolean(written.changed),
     settings: settingsForModel(written.settings, options),
-    message: `Preferences updated (${changes.join(', ')}).${effectiveMemoryNote} `
-      + 'The new values are active from your next reply.'
+    message: written.changed
+      ? `Preferences updated (${changes.join(', ')}).${effectiveMemoryNote} `
+        + 'The new values are active from your next reply.'
+      : 'Preferences already matched these values; nothing was written.'
   };
 }
 

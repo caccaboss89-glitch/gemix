@@ -90,11 +90,11 @@ function touchActivity(workspaceId) {
  * forever; the next turn re-stamps it through touchActivity.
  */
 function clearActivity(workspaceId) {
-  if (!workspaceId) return;
+  if (!workspaceId) return false;
   const state = _readState(workspaceId);
   delete state.lastActivityAt;
   state.workspaceId = workspaceId;
-  _writeState(workspaceId, state);
+  return _writeState(workspaceId, state);
 }
 
 function readWorkspaceActivity(workspaceId) {

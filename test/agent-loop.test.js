@@ -1,11 +1,7 @@
 // test/agent-loop.test.js
 //
-// The two seams the unit suites cannot see: transport → callAI → the handler's
-// round loop, and the model's final reply → delivery.
-//
-// Every other suite tests one module against its own signature, which is
-// exactly why a call-site shape mismatch at a seam stays invisible while all of
-// them pass. These tests drive the real modules across the seam.
+// Real handler and provider integration: admission, model/tool rounds, reserved
+// wrap-up, partial streams, preference snapshots and final file delivery.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,12 +9,37 @@ import path from 'node:path';
 import test, { afterEach, beforeEach } from 'node:test';
 import { OpenAIResponsesTransport } from '../src/ai/transport/openAIResponsesTransport.js';
 import { callAI, _resetProviderClientForTests, _setTransportForTests } from '../src/ai/aiProvider.js';
+import { handleMessage } from '../src/handler.js';
+import { TransportError, TRANSPORT_ERROR } from '../src/ai/transport/errors.js';
+import { providerFailureReply } from '../src/ai/providers/errorPolicy.js';
+import { resolveProviderProfile } from '../src/ai/providers/providerProfile.js';
+import { readSettings, updateSettings } from '../src/utils/settingsStore.js';
+import { resolveSettingsFileId } from '../src/utils/userPaths.js';
+import { resolveWorkspaceId } from '../src/utils/workspaceId.js';
+import workspaceRuntime from '../src/sandbox/workspaceRuntime.js';
+import constants from '../src/config/constants.js';
 import { resolveDeliverySelection } from '../src/utils/deliverySelection.js';
 import { systemItem, userItem } from '../src/ai/responsesItems.js';
 import { ensureWorkspace } from '../src/sandbox/workspaceFs.js';
+import { getWorkspaceMetaDir } from '../src/utils/workspaceId.js';
 import { sweepHistoryStore, getUserHistoryPaths, HISTORY_RETENTION_MS } from '../src/utils/historySync.js';
 
 const realFetch = globalThis.fetch;
+
+function handlerContext(t, platform = constants.PLATFORM_DISCORD) {
+  const id = `handler-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  const ctx = {
+    platform, userId: id, chatId: `thread-${id}`, waJid: `${id}@c.us`,
+    content: 'hello', history: [], isGroup: false,
+    userIdentity: { isActiveMember: true, isAdmin: true, isLegal: false, member: null, taskFileId: id }
+  };
+  t.after(() => fs.rmSync(getWorkspaceMetaDir(resolveWorkspaceId(ctx)), { recursive: true, force: true }));
+  return ctx;
+}
+
+function completedResponse(items = [MESSAGE_ITEM]) {
+  return { response: { status: 'completed', output: items } };
+}
 
 /** An SSE body carrying the events a real round produces. */
 function sseBody(events) {
@@ -43,22 +64,32 @@ const CALL_ITEM = {
   arguments: '{"path":"workspace/a.txt"}'
 };
 
-function stubStream(items) {
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    headers: new Map([['content-type', 'text/event-stream']]),
-    body: sseBody([
-      ...items.map((item, i) => ({ type: 'response.output_item.done', output_index: i, item })),
-      { type: 'response.completed', response: { status: 'completed', output: [], usage: { total_tokens: 7 } } }
-    ])
-  });
+function stubStream(items, assertRequest = null) {
+  globalThis.fetch = async (_url, request) => {
+    assertRequest?.(request);
+    return {
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'text/event-stream']]),
+      body: sseBody([
+        ...items.map((item, i) => ({ type: 'response.output_item.done', output_index: i, item })),
+        { type: 'response.completed', response: { status: 'completed', output: [], usage: { total_tokens: 7 } } }
+      ])
+    };
+  };
 }
 
 /** A transport whose credentials are a fixed fake — no store, no network auth. */
 function fakeTransport() {
   return new OpenAIResponsesTransport({
-    credentialProvider: { get: async () => ({ token: 'test-token', accountId: null }), markStatus() {} },
+    credentialProvider: {
+      get: async () => ({
+        accessToken: 'test-token',
+        baseUrl: 'https://example.invalid/v1',
+        accountId: null
+      }),
+      markStatus() {}
+    },
     baseUrl: 'https://example.invalid/v1',
     extensions: null,
     label: 'test'
@@ -71,7 +102,9 @@ afterEach(() => { globalThis.fetch = realFetch; _resetProviderClientForTests(); 
 // -- transport → callAI -------------------------------------------------------
 
 test('callAI reads the assembled response, not the envelope around it', async () => {
-  stubStream([MESSAGE_ITEM]);
+  stubStream([MESSAGE_ITEM], request => {
+    assert.equal(request.headers.Authorization, 'Bearer test-token');
+  });
   _setTransportForTests(fakeTransport());
   const { reply } = await callAI([systemItem('rules'), userItem('hi')]);
 
@@ -127,6 +160,146 @@ test('a workspace path in the final reply resolves to a real file', async () => 
   } finally {
     fs.rmSync(path.dirname(root), { recursive: true, force: true });
   }
+});
+
+test('the real handler consumes a structured reply through the provider seam', async () => {
+  const userId = `agent-loop-handler-${process.pid}-${Date.now()}`;
+  stubStream([MESSAGE_ITEM]);
+  _setTransportForTests(fakeTransport());
+  try {
+    const result = await handleMessage({
+      platform: constants.PLATFORM_DISCORD,
+      userId,
+      chatId: `thread-${userId}`,
+      content: 'hello',
+      history: [],
+      isGroup: false,
+      userIdentity: {
+        isActiveMember: true,
+        isAdmin: false,
+        isLegal: false,
+        member: null,
+        taskFileId: `dc_${userId}`
+      }
+    });
+    assert.equal(result.text, 'done');
+  } finally {
+    fs.rmSync(getWorkspaceMetaDir(`user:thread-${userId}`), { recursive: true, force: true });
+  }
+});
+
+test('handler maintenance awaits subscription persistence before returning', async t => {
+  const ctx = handlerContext(t);
+  ctx.userIdentity.isAdmin = false;
+  ctx.content = '/updates please';
+  const order = [];
+  _setTransportForTests({ createResponse() { assert.fail('maintenance must stop normal admission'); } });
+  const result = await handleMessage(ctx, { maintenance: {
+    maintenanceMode: true,
+    adminOnly: true,
+    async enableReleaseNotify() {
+      await Promise.resolve();
+      order.push('persisted');
+      return { success: true };
+    },
+    async sendWhatsAppDirect() { order.push('mirrored'); }
+  } });
+  order.push('returned');
+  assert.deepEqual(order, ['persisted', 'mirrored', 'returned']);
+  assert.match(result.text, /aggiornamento/);
+});
+
+test('handler reaches a tool-free wrap-up using the reserved budget after work expires', async t => {
+  const ctx = handlerContext(t);
+  const phases = [];
+  _setTransportForTests({ async createResponse({ budget, context, body }) {
+    phases.push(context.phase);
+    if (context.phase === 'work') {
+      budget.deadlineAt = Date.now() - 1;
+      throw new TransportError(TRANSPORT_ERROR.TIMEOUT, 'work deadline');
+    }
+    assert.equal(budget.expired, false);
+    assert.equal(body.tool_choice, 'none');
+    return completedResponse();
+  } });
+  assert.equal((await handleMessage(ctx)).text, 'done');
+  assert.deepEqual(phases, ['work', 'wrap_up']);
+});
+
+for (const kind of [TRANSPORT_ERROR.AUTH, TRANSPORT_ERROR.QUOTA, TRANSPORT_ERROR.RATE_LIMIT]) {
+  test(`handler preserves ${kind} from forced wrap-up`, async t => {
+    const ctx = handlerContext(t);
+    const refusal = new TransportError(kind, 'provider refusal');
+    _setTransportForTests({ async createResponse({ budget, context }) {
+      if (context.phase === 'work') {
+        budget.deadlineAt = Date.now() - 1;
+        throw new TransportError(TRANSPORT_ERROR.TIMEOUT, 'work deadline');
+      }
+      throw refusal;
+    } });
+    const result = await handleMessage(ctx);
+    assert.equal(result.text, providerFailureReply(refusal, resolveProviderProfile()).text);
+  });
+}
+
+test('a credential refusal at the deadline is not replaced by a wrap-up call', async t => {
+  const ctx = handlerContext(t);
+  const refusal = new TransportError(TRANSPORT_ERROR.AUTH, 'credentials rejected');
+  let calls = 0;
+  _setTransportForTests({ async createResponse({ budget }) {
+    calls++;
+    budget.deadlineAt = Date.now() - 1;
+    throw refusal;
+  } });
+  const result = await handleMessage(ctx);
+  assert.equal(calls, 1);
+  assert.equal(result.text, providerFailureReply(refusal, resolveProviderProfile()).text);
+});
+
+test('handler never dispatches an unfinished function call from a partial stream', async t => {
+  const ctx = handlerContext(t);
+  const exec = t.mock.method(workspaceRuntime, 'execInWorkspace', () => assert.fail('partial tool was executed'));
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return {
+      ok: true, status: 200, headers: new Map([['content-type', 'text/event-stream']]),
+      body: sseBody([{ type: 'response.output_item.added', output_index: 0, item: {
+        type: 'function_call', id: 'partial', call_id: 'partial', name: 'shell', arguments: '{"command":"echo wrong"}'
+      } }])
+    };
+  };
+  _setTransportForTests(fakeTransport());
+  const result = await handleMessage(ctx);
+  assert.equal(result.systemMessage, true);
+  assert.equal(calls, 1);
+  assert.equal(exec.mock.callCount(), 0);
+});
+
+test('manage_preferences changes the next turn, while all rounds retain admitted settings', async t => {
+  const ctx = handlerContext(t, constants.PLATFORM_WA_DEDICATED);
+  const settingsId = resolveSettingsFileId(ctx, ctx.userIdentity);
+  t.after(() => fs.rmSync(path.join(constants.DATA_DIR, 'memories', `${settingsId}.json`), { force: true }));
+  const efforts = resolveProviderProfile().supportedEfforts;
+  const initialEffort = efforts[0];
+  const nextEffort = efforts[efforts.length - 1];
+  await updateSettings(settingsId, { effort: initialEffort, voice: 'male' });
+  const seenEfforts = [];
+  _setTransportForTests({ async createResponse({ body }) {
+    seenEfforts.push(body.reasoning.effort);
+    if (seenEfforts.length === 1) return completedResponse([{
+      type: 'function_call', call_id: 'preferences', name: 'manage_preferences',
+      arguments: JSON.stringify({ effort: nextEffort, voice: 'female' })
+    }]);
+    return completedResponse();
+  } });
+  assert.equal((await handleMessage(ctx)).text, 'done');
+  assert.deepEqual(seenEfforts, [initialEffort, initialEffort]);
+  assert.equal(ctx.settings.voice, 'male');
+  assert.equal(readSettings(settingsId).voice, 'female');
+  assert.equal((await handleMessage(ctx)).text, 'done');
+  assert.equal(seenEfforts[2], nextEffort);
+  assert.equal(ctx.settings.voice, 'female');
 });
 
 // -- history retention -------------------------------------------------------

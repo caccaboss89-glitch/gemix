@@ -1,40 +1,50 @@
-// src/tools/workspace/toolOutput.js
-//
-// Where a file a tool produced ends up, and what the model is told about it.
-//
-// Everything a tool generates — an image, a song, a PDF — lands in the same
-// `workspace/` the model reads and writes itself, and the tool answers with the
-// path. There is no separate buffer of pending files: the path the tool returns
-// is the path `read_file`, `send_email` and the reply's `attachments[]` take
-// so nothing has to be named back before it can be used.
+// Tool-generated files reserve aggregate quota under one workspace lock.
+// Multi-file results are built outside the model's workspace and published
+// together by directory rename, so an interrupted batch is never half-visible.
 
 import { assertRootCapacity } from '../../sandbox/workspaceFs.js';
-import { stageUniqueWorkspaceBuffer } from '../../sandbox/hostFileGateway.js';
+import {
+  clearPendingWorkspaceOutputs,
+  stageUniqueWorkspaceBuffer,
+  stageWorkspaceBufferBatch
+} from '../../sandbox/hostFileGateway.js';
 import { ROOT, toDisplayPath } from '../../sandbox/workspacePaths.js';
 import { withWorkspaceLock } from '../../utils/workspaceState.js';
 
-/**
- * Put a produced file in the workspace and describe it in namespace terms.
- *
- * @param {string} workspaceId
- * @param {string} desiredName - sanitized and de-duplicated by the staging layer
- * @param {Buffer} source
- * @returns {Promise<{ display: string, name: string, sizeBytes: number }>}
- * @throws when the workspace cannot be resolved, or the quota would be exceeded
- *   (`err.code === 'EQUOTA'`)
- */
-async function stageToolOutput(workspaceId, desiredName, source) {
-  if (!workspaceId) throw new Error('Cannot resolve the workspace for this conversation.');
-  if (!Buffer.isBuffer(source)) throw new Error('Tool output must be provided as bytes.');
-  return withWorkspaceLock(workspaceId, {}, async () => {
-    assertRootCapacity(workspaceId, source.length);
-    const staged = stageUniqueWorkspaceBuffer(workspaceId, desiredName, source);
-    return {
-      display: toDisplayPath(ROOT.WORKSPACE, staged.finalName),
-      name: staged.finalName,
-      sizeBytes: staged.sizeBytes
-    };
+function _validateOutputs(outputs) {
+  if (!Array.isArray(outputs) || outputs.length === 0) {
+    throw new Error('At least one tool output is required.');
+  }
+  return outputs.map((output, index) => {
+    if (!output || !Buffer.isBuffer(output.source)) {
+      throw new Error(`Tool output ${index + 1} must be provided as bytes.`);
+    }
+    return { desiredName: output.desiredName, source: output.source };
   });
 }
 
-export { stageToolOutput };
+async function stageToolOutputsBatch(workspaceId, rawOutputs) {
+  if (!workspaceId) throw new Error('Cannot resolve the workspace for this conversation.');
+  const outputs = _validateOutputs(rawOutputs);
+  return withWorkspaceLock(workspaceId, {}, async () => {
+    clearPendingWorkspaceOutputs(workspaceId);
+    const incomingBytes = outputs.reduce((total, output) => total + output.source.length, 0);
+    const extraDirectory = outputs.length > 1 ? 1 : 0;
+    assertRootCapacity(workspaceId, incomingBytes, 0, ROOT.WORKSPACE, outputs.length + extraDirectory);
+    const staged = outputs.length === 1
+      ? [stageUniqueWorkspaceBuffer(workspaceId, outputs[0].desiredName, outputs[0].source)]
+      : stageWorkspaceBufferBatch(workspaceId, outputs);
+    return staged.map(file => ({
+      display: toDisplayPath(ROOT.WORKSPACE, file.finalName),
+      name: file.finalName,
+      sizeBytes: file.sizeBytes
+    }));
+  });
+}
+
+async function stageToolOutput(workspaceId, desiredName, source) {
+  const [staged] = await stageToolOutputsBatch(workspaceId, [{ desiredName, source }]);
+  return staged;
+}
+
+export { stageToolOutput, stageToolOutputsBatch };

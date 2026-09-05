@@ -23,13 +23,11 @@ import crypto from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
 import { TurnBudget, sleepWithin } from '../../utils/turnBudget.js';
 import { logApiRequest, logApiResponse } from '../apiLogs.js';
-import { SseDecoder } from './sse.js';
-import { ResponseAssembler } from './responsesProtocol.js';
+import { consumeResponseStream } from './responseStreamReader.js';
 import {
   TRANSPORT_ERROR,
   TransportError,
   classifyHttpFailure,
-  classifyStreamFailure,
   isRetryableKind,
   retryAfterMs,
   summarizeErrorBody
@@ -57,7 +55,7 @@ class OpenAIResponsesTransport {
   /**
    * @param {object} opts
    * @param {import('../credentials/credentialProvider.js').CredentialProvider} opts.credentialProvider
-   * @param {string} [opts.baseUrl] - overrides the credential's own base URL
+   * @param {string} [opts.baseUrl] - profile fallback when the credential has no account override
    * @param {object} [opts.extensions] - provider extension (see ai/extensions/)
    * @param {string} [opts.label] - short name for log lines
    * @param {Function} [opts.fetchImpl] - injected for tests
@@ -120,7 +118,7 @@ class OpenAIResponsesTransport {
         throw this._error(TRANSPORT_ERROR.AUTH, `No usable credential: ${err.message}`);
       }
 
-      const url = _joinUrl(this.baseUrl || credential.baseUrl, 'responses');
+      const url = _joinUrl(credential.baseUrl || this.baseUrl, 'responses');
       const wireBody = this.extensions?.decorateBody
         ? this.extensions.decorateBody({ ...body }, context)
         : body;
@@ -269,7 +267,14 @@ class OpenAIResponsesTransport {
       let assembled;
       const streamCapture = { receivedBytes: 0, events: [], assembledResponse: null };
       try {
-        assembled = await this._consumeStream(res, budget, upstreamRequestId, streamCapture);
+        assembled = await consumeResponseStream({
+          response: res,
+          budget,
+          requestId: upstreamRequestId,
+          capture: streamCapture,
+          errorFactory: (kind, message, extra) => this._error(kind, message, extra),
+          log: this._log
+        });
       } catch (err) {
         this._writeApiLog('response', wireBody.model, url, {
           http: {
@@ -332,84 +337,6 @@ class OpenAIResponsesTransport {
       return this.extensions.decorateHeaders(headers, context) || headers;
     }
     return headers;
-  }
-
-  /**
-   * Read the SSE body into a normalized response. A stream that dies after
-   * producing content is a partial response and is never retried automatically.
-   */
-  async _consumeStream(res, budget, upstreamRequestId, capture = null) {
-    const decoder = new SseDecoder();
-    const assembler = new ResponseAssembler();
-
-    try {
-      try {
-        for await (const chunk of res.body) {
-          if (capture) {
-            capture.receivedBytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
-          }
-          for (const event of decoder.push(chunk)) {
-            if (capture) capture.events.push(event);
-            assembler.apply(event);
-          }
-          if (budget.expired) {
-            throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Turn budget expired while reading the model stream.', {
-              partial: assembler.sawMeaningfulEvent,
-              requestId: upstreamRequestId
-            });
-          }
-        }
-        for (const event of decoder.end()) {
-          if (capture) capture.events.push(event);
-          assembler.apply(event);
-        }
-      } catch (err) {
-        if (err instanceof TransportError) throw err;
-        throw this._error(
-          assembler.sawMeaningfulEvent ? TRANSPORT_ERROR.MALFORMED : TRANSPORT_ERROR.TRANSIENT,
-          `Model stream ended early: ${err.message}`,
-          { partial: assembler.sawMeaningfulEvent, requestId: upstreamRequestId }
-        );
-      }
-
-      if (assembler.error) {
-        const message = assembler.error.message || JSON.stringify(assembler.error).slice(0, 300);
-        throw this._error(classifyStreamFailure(assembler.error), `Model reported an error: ${message}`, {
-          requestId: upstreamRequestId,
-          partial: assembler.sawMeaningfulEvent
-        });
-      }
-      if (assembler.status === 'failed') {
-        throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model reported a failed response.', {
-          requestId: upstreamRequestId
-        });
-      }
-      if (!assembler.status) {
-        // EOF without a terminal event is usable only when complete items have
-        // arrived. Deltas prove that work started, but are not replayable output.
-        if (!assembler.sawMeaningfulEvent) {
-          throw this._error(TRANSPORT_ERROR.TRANSIENT, 'Model stream closed before sending anything.', {
-            partial: false,
-            requestId: upstreamRequestId
-          });
-        }
-        if (!assembler.hasOutputItems) {
-          throw this._error(TRANSPORT_ERROR.MALFORMED, 'Model stream closed after deltas but before opening an output item.', {
-            partial: true,
-            requestId: upstreamRequestId
-          });
-        }
-        this._log.warn('stream closed without a terminal event; using the items already received');
-      }
-
-      return {
-        response: assembler.toResponse(),
-        requestId: upstreamRequestId,
-        usage: assembler.usage
-      };
-    } finally {
-      if (capture) capture.assembledResponse = assembler.toResponse();
-    }
   }
 
   _writeApiLog(kind, model, url, body, extra) {

@@ -21,7 +21,7 @@
 
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
-import { listAgentDirectory, readAgentFileBuffer } from './hostFileGateway.js';
+import { listAgentDirectory, readAgentFileBuffer, statAgentFile } from './hostFileGateway.js';
 import { ROOT, toDisplayPath } from './workspacePaths.js';
 
 const log = createLogger('SkillsLibrary');
@@ -37,9 +37,6 @@ const SHARED_LIBRARY = null;
 
 /** Ceiling on one SKILL.md. Frontmatter plus a procedure, never a data file. */
 const MAX_SKILL_FILE_BYTES = 256 * 1024;
-
-/** Files tracked when deciding whether the catalog changed. */
-const MAX_TRACKED_FILES = 5000;
 
 /** Ceiling on one description in the prompt, so a runaway line cannot grow it. */
 const MAX_DESCRIPTION_CHARS = 400;
@@ -80,20 +77,25 @@ function _normalizeDescription(raw) {
 
 /**
  * Every `<skill>/SKILL.md` in the library, with the size and mtime that decide
- * whether the cached catalog is still current.
+ * whether the cached catalog is still current. Only top-level directories are
+ * enumerated: assets inside a skill cannot consume a cap or hide a later
+ * manifest.
  * @returns {Array<{ dir: string, relPath: string, size: number, mtimeMs: number }>}
  */
 function _skillFileEntries() {
   const listing = listAgentDirectory(SHARED_LIBRARY, toDisplayPath(ROOT.SKILLS, ''), {
-    limit: MAX_TRACKED_FILES,
-    depth: 2
+    depth: 1,
+    limit: constants.WORKSPACE_MAX_ENTRIES
   });
   if (!listing) return [];
+  if (!listing.complete) log.warn('Skill discovery stopped at the bounded inventory limit');
   const entries = [];
-  for (const file of listing.files) {
-    const parts = file.relPath.split('/');
-    if (parts.length !== 2 || parts[1] !== SKILL_FILE) continue;
-    entries.push({ dir: parts[0], relPath: file.relPath, size: file.size, mtimeMs: file.mtimeMs });
+  for (const dir of listing.dirs) {
+    if (dir.includes('/')) continue;
+    const relPath = `${dir}/${SKILL_FILE}`;
+    const manifest = statAgentFile(SHARED_LIBRARY, toDisplayPath(ROOT.SKILLS, relPath));
+    if (!manifest) continue;
+    entries.push({ dir, relPath, size: manifest.stat.size, mtimeMs: manifest.stat.mtimeMs });
   }
   return entries;
 }

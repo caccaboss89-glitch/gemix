@@ -11,6 +11,7 @@
 // spend the turn's time budget on noise.
 
 import path from 'path';
+import constants from '../../config/constants.js';
 import { listAgentDirectory, readAgentFileBuffer } from '../../sandbox/hostFileGateway.js';
 import {
   ROOT,
@@ -30,7 +31,7 @@ const MAX_LINE_CHARS = 300;
 function _globToRegExp(pattern) {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   const globstar = '__GEMIX_GLOBSTAR__';
-  const body = escaped.replace(/\*\*/g, globstar).replace(/\*/g, '[^/]*').replaceAll(globstar, '.*').replace(/\?/g, '.');
+  const body = escaped.replace(/\*\*/g, globstar).replace(/\*/g, '[^/]*').replaceAll(globstar, '.*').replace(/\?/g, '[^/]');
   return new RegExp(`^${body}$`, 'i');
 }
 
@@ -51,7 +52,10 @@ function searchFiles(args = {}, workspaceId, opts = {}) {
   const raw = typeof args.path === 'string' && args.path.trim() ? args.path.trim() : `${ROOT.WORKSPACE}/`;
   const resolved = parseAgentPath(raw, opts);
   if (!resolved) return invalidPathError(raw, opts);
-  const listing = listAgentDirectory(workspaceId, resolved.display, { limit: 10_000 });
+  const listing = listAgentDirectory(workspaceId, resolved.display, {
+    limit: constants.WORKSPACE_MAX_ENTRIES,
+    maxEntries: constants.WORKSPACE_MAX_ENTRIES
+  });
   if (!listing) {
     if (resolved.relPath) {
       return {
@@ -85,27 +89,37 @@ function searchFiles(args = {}, workspaceId, opts = {}) {
     }));
     return {
       success: true,
-      status: candidates.length > MAX_MATCHES ? 'degraded' : 'ok',
+      status: candidates.length > MAX_MATCHES || !listing.complete ? 'degraded' : 'ok',
       path: resolved.display,
       matches,
       returned_matches: matches.length,
-      truncated: candidates.length > MAX_MATCHES,
+      truncated: candidates.length > MAX_MATCHES || !listing.complete,
+      inventory_complete: listing.complete,
       message: candidates.length > MAX_MATCHES
         ? `${candidates.length} files match; the first ${MAX_MATCHES} are listed.`
-        : `${candidates.length} file(s) match out of ${total}.`
+        : `${candidates.length} file(s) match out of ${total}${listing.complete ? '.' : ' inventoried before the bounded scan stopped.'}`
     };
   }
 
   const matches = [];
   let scanned = 0;
+  let openedFiles = 0;
   let skippedBinary = 0;
   let skippedLarge = 0;
+  let skippedUnreadable = 0;
   for (const f of candidates) {
-    if (matches.length >= MAX_MATCHES || scanned >= MAX_SCANNED_FILES) break;
+    if (matches.length >= MAX_MATCHES || openedFiles >= MAX_SCANNED_FILES) break;
     if (f.size > TEXT_SCAN_MAX_BYTES) { skippedLarge++; continue; }
     const display = toDisplayPath(resolved.root, `${prefix}${f.relPath}`);
-    const opened = readAgentFileBuffer(workspaceId, display, TEXT_SCAN_MAX_BYTES);
-    if (!opened) continue;
+    openedFiles++;
+    let opened;
+    try {
+      opened = readAgentFileBuffer(workspaceId, display, TEXT_SCAN_MAX_BYTES);
+    } catch {
+      skippedUnreadable++;
+      continue;
+    }
+    if (!opened) { skippedUnreadable++; continue; }
     const content = opened.buffer;
     if (!isProbablyText(content)) { skippedBinary++; continue; }
     scanned++;
@@ -122,12 +136,16 @@ function searchFiles(args = {}, workspaceId, opts = {}) {
 
   const truncationReasons = [];
   if (matches.length >= MAX_MATCHES) truncationReasons.push('match_limit');
-  if (scanned >= MAX_SCANNED_FILES && scanned < candidates.length) truncationReasons.push('scan_limit');
+  if (openedFiles >= MAX_SCANNED_FILES && openedFiles + skippedLarge < candidates.length) truncationReasons.push('scan_limit');
   if (skippedLarge > 0) truncationReasons.push('large_files_skipped');
   if (skippedBinary > 0) truncationReasons.push('binary_files_skipped');
+  if (skippedUnreadable > 0) truncationReasons.push('unreadable_files_skipped');
+  if (!listing.complete) truncationReasons.push('inventory_incomplete');
   const notes = [`Searched ${scanned} text file(s) under ${resolved.display}.`];
   if (skippedBinary > 0) notes.push(`${skippedBinary} binary file(s) skipped — use read_file on those.`);
   if (skippedLarge > 0) notes.push(`${skippedLarge} file(s) skipped as too large to scan.`);
+  if (skippedUnreadable > 0) notes.push(`${skippedUnreadable} file(s) could not be read.`);
+  if (truncationReasons.includes('scan_limit')) notes.push(`Stopped after opening ${MAX_SCANNED_FILES} files; narrow the query.`);
   if (matches.length >= MAX_MATCHES) notes.push(`Stopped at ${MAX_MATCHES} matches; narrow the query.`);
 
   return {
@@ -136,11 +154,16 @@ function searchFiles(args = {}, workspaceId, opts = {}) {
     path: resolved.display,
     matches,
     candidate_files: candidates.length,
+    opened_files: openedFiles,
     scanned_text_files: scanned,
     skipped_binary_files: skippedBinary,
     skipped_large_files: skippedLarge,
+    skipped_unreadable_files: skippedUnreadable,
     returned_matches: matches.length,
-    truncated: truncationReasons.includes('match_limit') || truncationReasons.includes('scan_limit'),
+    inventory_complete: listing.complete,
+    truncated: truncationReasons.includes('match_limit')
+      || truncationReasons.includes('scan_limit')
+      || truncationReasons.includes('inventory_incomplete'),
     truncation_reasons: truncationReasons,
     message: notes.join(' ')
   };

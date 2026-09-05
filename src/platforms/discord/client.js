@@ -43,6 +43,8 @@ import { materializeDiscordBatchContent  } from '../../utils/batchContentRefresh
 import { discordReactionTag  } from '../../utils/reactions.js';
 import { isSystemMessage  } from '../../config/systemMessages.js';
 import { wrapSystemNotification  } from '../../utils/systemTags.js';
+import { createDeliveryReceipt } from '../../utils/deliveryReceipt.js';
+import { withPromiseTimeout } from '../../utils/promiseTimeout.js';
 
 const log = createLogger('DISCORD');
 
@@ -51,6 +53,34 @@ const log = createLogger('DISCORD');
 const HISTORY_INGRESS_CONCURRENCY = 15;
 
 let discordClient;
+const DISCORD_LOGIN_ATTEMPTS = 5;
+const DISCORD_LOGIN_TIMEOUT_MS = 60_000;
+const DISCORD_LOGIN_MAX_DELAY_MS = 30_000;
+
+async function loginDiscordWithRetry(client, token, options = {}) {
+  const maxAttempts = options.maxAttempts || DISCORD_LOGIN_ATTEMPTS;
+  const timeoutMs = options.timeoutMs || DISCORD_LOGIN_TIMEOUT_MS;
+  const sleep = options.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await withPromiseTimeout(
+        Promise.resolve().then(() => client.login(token)),
+        timeoutMs,
+        'Discord login'
+      );
+      return { attempts: attempt };
+    } catch (err) {
+      lastError = err;
+      if (attempt >= maxAttempts) break;
+      const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), DISCORD_LOGIN_MAX_DELAY_MS);
+      await sleep(delayMs);
+    }
+  }
+  const failure = new Error(`Discord login failed after ${maxAttempts} attempts: ${lastError?.message || lastError}`);
+  failure.cause = lastError;
+  throw failure;
+}
 
 /**
  * Initialize Discord bot client.
@@ -58,7 +88,7 @@ let discordClient;
  * Bot will only respond in threads within the "gemix" forum category.
  * @returns {object} The discord.js Client instance
  */
-function initDiscord() {
+async function initDiscord(options = {}) {
   discordClient = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -71,6 +101,7 @@ function initDiscord() {
   });
 
   discordClient.on(Events.ClientReady, () => {
+    discordClient.gemixLifecycleState = { status: 'ready', error: null };
     log.info(`Bot ready: ${discordClient.user.tag}`);
   });
 
@@ -84,9 +115,15 @@ function initDiscord() {
     }
   });
 
-  discordClient.login(BOT_TOKEN).catch(err => {
+  discordClient.gemixLifecycleState = { status: 'connecting', error: null };
+  try {
+    await loginDiscordWithRetry(discordClient, BOT_TOKEN, options.login);
+  } catch (err) {
+    discordClient.gemixLifecycleState = { status: 'failed', error: err.message };
     log.error('Discord login failed:', err.message);
-  });
+    if (typeof options.onFatal === 'function') await options.onFatal('Discord login failed', err);
+    throw err;
+  }
   return discordClient;
 }
 
@@ -315,14 +352,45 @@ async function _discordGuildExtras(guild) {
   return { availableEmojis, serverEvents };
 }
 
-async function _sendDiscordLinkFallback(channel, attachments) {
-  if (!Array.isArray(attachments) || attachments.length === 0) return;
+async function _sendDiscordLinkFallback(channel, attachments, buildFallback = buildFallbackAttachmentMessage) {
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return { linked: 0, failures: [] };
+  }
   try {
-    const fallbackData = buildFallbackAttachmentMessage(attachments, { platform: PLATFORM.DISCORD });
-    await channel.send({ content: fallbackData.message });
-    log.info(`   Sent Discord fallback links for ${attachments.length} attachment(s)`);
+    const fallbackData = buildFallback(attachments, { platform: PLATFORM.DISCORD });
+    const failures = fallbackData.failedAttachments.map(item => ({
+      component: 'attachment_link',
+      name: item.attachment?.name || 'unknown',
+      error: item.error || 'Could not create a fallback link.'
+    }));
+    if (fallbackData.fallbackAttachments.length === 0) return { linked: 0, failures };
+    try {
+      await channel.send({ content: fallbackData.message });
+      log.info(`   Sent Discord fallback links for ${fallbackData.fallbackAttachments.length} attachment(s)`);
+      return { linked: fallbackData.fallbackAttachments.length, failures };
+    } catch (err) {
+      return {
+        linked: 0,
+        failures: [
+          ...failures,
+          ...fallbackData.fallbackAttachments.map(attachment => ({
+            component: 'attachment_link',
+            name: attachment.name || 'unknown',
+            error: err.message
+          }))
+        ]
+      };
+    }
   } catch (err) {
     log.error(`   Failed to send Discord link fallback: ${err.message}`);
+    return {
+      linked: 0,
+      failures: attachments.map(attachment => ({
+        component: 'attachment_link',
+        name: attachment?.name || 'unknown',
+        error: err.message
+      }))
+    };
   }
 }
 
@@ -336,6 +404,11 @@ async function deliverDiscordResponse(channel, response) {
     .filter(Boolean)
     .map((a) => new AttachmentBuilder(a.data, { name: a.name }));
 
+  let textAccepted = false;
+  let direct = 0;
+  let linked = 0;
+  const failures = [];
+
   /** One batch send failed: retry the files one by one, then link what still won't go. */
   const sendFilesIndividually = async () => {
     const result = await sendAttachmentsWithFallback(hostable, async (att) => {
@@ -343,44 +416,68 @@ async function deliverDiscordResponse(channel, response) {
       if (!a) throw new Error('Invalid attachment');
       await channel.send({ files: [new AttachmentBuilder(a.data, { name: a.name })] });
     }, { platform: PLATFORM.DISCORD });
-    if (result.fallbackMessage) {
-      await channel.send({ content: result.fallbackMessage });
+    direct += result.sent.length;
+    failures.push(...result.fallbackFailures.map(item => ({
+      component: 'attachment',
+      name: item.attachment?.name || 'unknown',
+      error: item.error || 'Could not create a fallback link.'
+    })));
+    if (result.fallbackAttachments.length > 0) {
+      try {
+        await channel.send({ content: result.fallbackMessage });
+        linked += result.fallbackAttachments.length;
+      } catch (err) {
+        failures.push(...result.fallbackAttachments.map(attachment => ({
+          component: 'attachment_link',
+          name: attachment.name || 'unknown',
+          error: err.message
+        })));
+      }
     }
   };
 
   if (finalText) {
     const chunks = splitDiscordMessage(finalText);
     if (chunks.length > 1) log.info(`   Message split into ${chunks.length} parts`);
-
-    for (let i = 0; i < chunks.length; i++) {
-      const isLastChunk = i === chunks.length - 1;
-      if (isLastChunk && files.length > 0) {
-        try {
-          await channel.send({ content: chunks[i], files });
-          log.info('   Discord message and files sent');
-        } catch (err) {
-          log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
-          await channel.send({ content: chunks[i] });
-          await sendFilesIndividually();
-        }
-      } else {
-        await channel.send({ content: chunks[i] });
+    let acceptedChunks = 0;
+    try {
+      for (const chunk of chunks) {
+        await channel.send({ content: chunk });
+        acceptedChunks++;
       }
+      textAccepted = true;
+    } catch (err) {
+      direct += acceptedChunks;
+      failures.push({ component: 'text', error: err.message });
     }
-  } else if (files.length > 0) {
+  }
+
+  if (files.length > 0) {
     try {
       await channel.send({ files });
+      direct += hostable.length;
       log.info('   Discord files sent');
     } catch (err) {
       log.error(`   Failed to send files directly: ${err.message}. Using fallback...`);
-      await sendFilesIndividually();
+      try {
+        await sendFilesIndividually();
+      } catch (fallbackErr) {
+        failures.push(...hostable.map(attachment => ({
+          component: 'attachment',
+          name: attachment?.name || 'unknown',
+          error: fallbackErr.message
+        })));
+      }
     }
-  } else {
+  } else if (!finalText && linkOnly.length === 0) {
     log.warn('   No content or files to send');
+    failures.push({ component: 'response', error: 'No deliverable text or attachments.' });
   }
 
   if (linkOnly.length > 0) {
-    await _sendDiscordLinkFallback(channel, linkOnly);
+    const fallback = await _sendDiscordLinkFallback(channel, linkOnly);
+    linked += fallback.linked;
+    failures.push(...fallback.failures);
   }
 
   if (newTitle && newTitle.length > 0) {
@@ -391,11 +488,13 @@ async function deliverDiscordResponse(channel, response) {
         .catch(err => log.error('Thread rename error:', err.message));
     }
   }
+
+  return createDeliveryReceipt({ textAccepted, direct, linked, failures });
 }
 
 async function _handleDiscordBatch(entries) {
   const first = entries[0];
-  const { channel, starterMessageId, historyStorageId, guild, stopLockRenew } = first;
+  const { channel, starterMessageId, historyStorageId, guild, lockLease, stopLockRenew } = first;
   // One fetch per turn, shared by the history build and the quote window.
   // Closed over rather than stashed on a batch entry, which is not a channel
   // the pipeline declares.
@@ -405,6 +504,7 @@ async function _handleDiscordBatch(entries) {
     log,
     lockKey: `discord:${channel.id}`,
     platform: PLATFORM_DISCORD,
+    lockLease,
     stopLockRenew,
     entries,
     discardLogLabel: `thread ${channel.id}`,
@@ -415,10 +515,11 @@ async function _handleDiscordBatch(entries) {
     loadHistory: async ({ entries: ents }) => {
       const excludeMessageIds = new Set(ents.map(e => e.messageId).filter(Boolean));
       return fetchHistoryWithTimeout(
-        async () => {
+        async (signal) => {
           messageWindow = await fetchDiscordMessageWindow(channel, starterMessageId);
+          signal.throwIfAborted();
           return buildDiscordHistory(
-            channel, starterMessageId, historyStorageId, excludeMessageIds, messageWindow
+            channel, starterMessageId, historyStorageId, excludeMessageIds, messageWindow, { signal }
           );
         },
         log,
@@ -464,7 +565,7 @@ async function _handleDiscordBatch(entries) {
       };
     },
     deliver: async (_ctx, response) => {
-      await deliverDiscordResponse(channel, response);
+      return deliverDiscordResponse(channel, response);
     },
     onDeliverError: async (ctx, err) => {
       try {
@@ -494,7 +595,9 @@ async function _handleDiscordBatch(entries) {
  *   - shared with the quote window, one fetch per turn (see fetchDiscordMessageWindow)
  * @returns {Promise<Array>} the history items, oldest first
  */
-async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds, window) {
+async function buildDiscordHistory(channel, starterMessageId, historyStorageId, excludeMessageIds, window, options = {}) {
+  const { signal = null } = options;
+  signal?.throwIfAborted();
   const raw = window.raw;
   // Quote window from fetchDiscordMessageWindow (starter id is excluded there so
   // reply-to-starter is treated as outside recent model history).
@@ -518,6 +621,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
   const workspaceId = resolveChatWorkspaceId(PLATFORM_DISCORD, channel, historyStorageId);
 
   async function processDiscordHistoryMessage(m) {
+    signal?.throwIfAborted();
     const ts = formatTimestamp(m.createdAt);
     const isBot = m.author.id === discordClient.user.id;
     let textContent = cleanIncomingText(m.content || '');
@@ -528,8 +632,10 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
       const ingress = await ingressDiscordAttachment(att, historyStorageId, {
         workspaceId,
         inline: false,
-        metadataDurationSec: Number(att.duration || 0)
+        metadataDurationSec: Number(att.duration || 0),
+        signal
       });
+      signal?.throwIfAborted();
       if (ingress.oversize) {
         textContent = `${textContent} ${ingress.textFragment.trim()}`.trim();
         continue;
@@ -558,6 +664,7 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
           textContent = `${quoted.prefix}${textContent || ''}`.trimEnd();
         }
       } catch (err) {
+        if (signal?.aborted) throw signal.reason || err;
         log.warn(`History quote expand failed: ${err.message}`);
       }
     }
@@ -583,9 +690,10 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
 
   // Build entries in parallel, preserving order.
   const built = await mapWithConcurrency(messages, HISTORY_INGRESS_CONCURRENCY, processDiscordHistoryMessage);
+  signal?.throwIfAborted();
   history.push(...built.filter(Boolean));
 
   return history;
 }
 
-export { initDiscord };
+export { initDiscord, loginDiscordWithRetry, deliverDiscordResponse, _sendDiscordLinkFallback };

@@ -10,7 +10,8 @@ import {
   _isOAuthCredentialError,
   _redactInlineData,
   _requestBodyForLog,
-  _responseForLog
+  _responseForLog,
+  _runXaiServiceRequest
 } from '../src/ai/apiClient.js';
 import { ApiLogStore, LOG_MAX_AGE_MS } from '../src/ai/apiLogs.js';
 import { deleteConversationApiLogs } from '../src/utils/privacyWipe.js';
@@ -40,6 +41,55 @@ test('xAI media reinterprets unauthenticated 403 as quota only for OAuth', () =>
     assert.equal(_classifyXaiServiceAuthOrQuota('HTTP 403: API key revoked'), 'AUTH');
   } finally {
     envConfig.XAI_USE_API_KEY = saved;
+  }
+});
+
+test('a second xAI OAuth rejection marks the refreshed account invalid before returning', async () => {
+  const savedMode = envConfig.XAI_USE_API_KEY;
+  const savedFetch = globalThis.fetch;
+  const statuses = [];
+  const authorizations = [];
+  try {
+    envConfig.XAI_USE_API_KEY = false;
+    globalThis.fetch = async (_url, options) => {
+      authorizations.push(options.headers.Authorization);
+      return new Response('{"error":"rejected"}', { status: 401 });
+    };
+    const credentialAccess = {
+      async get({ forceRefresh }) {
+        return forceRefresh
+          ? { token: 'refreshed-token', accountId: 'account-2' }
+          : { token: 'initial-token', accountId: 'account-1' };
+      },
+      async mark(status, accountId) {
+        statuses.push([status, accountId]);
+      }
+    };
+
+    await assert.rejects(
+      _runXaiServiceRequest({
+        label: 'test-xai',
+        url: 'https://api.example.invalid/media',
+        fetchOptions: { method: 'POST' },
+        logBody: null,
+        timeoutMs: 1_000,
+        maxAttempts: 1,
+        callerSignal: null,
+        retryDelayBaseMs: 0,
+        terminalError: async ({ error }) => error,
+        credentialAccess,
+        logTraffic: false
+      }),
+      /HTTP 401/
+    );
+    assert.deepEqual(authorizations, ['Bearer initial-token', 'Bearer refreshed-token']);
+    assert.deepEqual(statuses, [
+      ['auth_failed', 'account-1'],
+      ['auth_failed', 'account-2']
+    ]);
+  } finally {
+    envConfig.XAI_USE_API_KEY = savedMode;
+    globalThis.fetch = savedFetch;
   }
 });
 

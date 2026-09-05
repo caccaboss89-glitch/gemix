@@ -17,7 +17,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import pkg from 'node-edge-tts';
+import { runOwnedWorker } from '../utils/ownedWorker.js';
 import { spawn  } from 'child_process';
 import { fetchWithTimeout, readResponseBodyWithTimeout  } from '../utils/fetch.js';
 import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
@@ -28,7 +28,6 @@ import { cartesiaLanguage, cartesiaVoiceId, edgeVoice } from '../media/ttsVoices
 import { markExhausted, markWorking, nextUsableKey } from '../media/cartesiaKeyRing.js';
 import { signalWithTimeout } from '../utils/turnBudget.js';
 
-const { EdgeTTS } = pkg;
 
 const log = createLogger('TTS');
 
@@ -212,7 +211,9 @@ async function cartesiaTTS(text, voice, language, signal) {
   });
 
   let entry = nextUsableKey();
-  while (entry) {
+  const attemptedFingerprints = new Set();
+  while (entry && !attemptedFingerprints.has(entry.fingerprint)) {
+    attemptedFingerprints.add(entry.fingerprint);
     _assertDeadline(signal);
     const res = await fetchWithTimeout(`${envConfig.CARTESIA_BASE_URL}/tts/bytes`, {
       method: 'POST',
@@ -256,16 +257,23 @@ async function edgeTTS(text, voice, language, signal) {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gemix-tts-'));
   const file = path.join(dir, 'voice.mp3');
   try {
-    const tts = new EdgeTTS({
-      voice: selected.voice,
-      lang: selected.lang,
-      outputFormat: EDGE_OUTPUT_FORMAT,
-      pitch: 'default',
-      rate: 'default',
-      volume: 'default',
-      timeout: TTS_REQUEST_TIMEOUT_MS
-    });
-    await tts.ttsPromise(text, file);
+    await runOwnedWorker(
+      new URL('../media/edgeTtsWorkerThread.js', import.meta.url),
+      {
+        text,
+        file,
+        options: {
+          voice: selected.voice,
+          lang: selected.lang,
+          outputFormat: EDGE_OUTPUT_FORMAT,
+          pitch: 'default',
+          rate: 'default',
+          volume: 'default',
+          timeout: TTS_REQUEST_TIMEOUT_MS
+        }
+      },
+      { signal, timeoutMs: TTS_REQUEST_TIMEOUT_MS, label: 'Microsoft Edge TTS' }
+    );
     _assertDeadline(signal);
     const buffer = await fs.promises.readFile(file);
     if (buffer.length === 0) throw new Error('Microsoft Edge TTS returned an empty audio file.');

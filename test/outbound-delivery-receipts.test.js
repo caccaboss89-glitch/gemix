@@ -13,6 +13,11 @@ import {
   estimateEmailMimeAttachmentBytes
 } from '../src/utils/attachmentDelivery.js';
 import {
+  WA_DIRECT_MAX_BYTES,
+  shouldWhatsAppUseTempLink,
+  toWhatsAppMediaArgs
+} from '../src/utils/attachments.js';
+import {
   recordSentMessage,
   readSentRecords,
   deleteSentMessages
@@ -23,6 +28,17 @@ import {
   outboundStatusWithAudit,
   recordOutbound
 } from '../src/tools/outboundDelivery.js';
+
+test('oversized WhatsApp voice audio uses the same link fallback as every other media type', () => {
+  const attachment = {
+    name: 'voice.ogg',
+    mimetype: 'audio/ogg',
+    buffer: Buffer.alloc(WA_DIRECT_MAX_BYTES + 1),
+    sendAudioAsVoice: true
+  };
+  assert.equal(shouldWhatsAppUseTempLink(attachment), true);
+  assert.equal(toWhatsAppMediaArgs(attachment), null);
+});
 
 test('an accepted send uses the canonical ok status when no attachment failed', () => {
   assert.equal(outboundStatusFor(buildAttachmentDeliverySummary({ selected: 1, direct: 1 })), 'ok');

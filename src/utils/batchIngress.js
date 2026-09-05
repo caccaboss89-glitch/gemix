@@ -12,15 +12,24 @@ import responseLock from './responseLock.js';
 import { recordLiveMessage } from './liveInbox.js';
 
 import constants from '../config/constants.js';
+import { isTerminating } from './processLifecycle.js';
 
 function _wrapBatchHandler(batchKey, handler, log, discardLogLabel) {
   return async (entries) => {
-    if (!responseLock.refresh(batchKey, constants.BATCH_LOCK_TTL_MS)) {
-      if (!responseLock.tryLock(batchKey, constants.BATCH_LOCK_TTL_MS)) {
+    const first = entries[0];
+    let lease = first?.lockLease || null;
+    if (!lease || !responseLock.refresh(lease, constants.BATCH_LOCK_TTL_MS)) {
+      try { first?.stopLockRenew?.(); } catch { /* stale renewal */ }
+      lease = responseLock.tryLock(batchKey, constants.BATCH_LOCK_TTL_MS);
+      if (!lease) {
         if (log && typeof log.warn === 'function') {
           log.warn(`   Batch handler skipped for ${discardLogLabel}: lock not held (not queued)`);
         }
         return;
+      }
+      if (first) {
+        first.lockLease = lease;
+        first.stopLockRenew = responseLock.startAutoRenew(lease, constants.BATCH_LOCK_TTL_MS);
       }
     }
     return handler(entries);
@@ -36,16 +45,21 @@ function _wrapBatchHandler(batchKey, handler, log, discardLogLabel) {
  *   turn as a mid-turn note. The adapter supplies it because only it knows how
  *   to read its own platform's message, and returns null for one the running
  *   turn must not see.
- * @returns {'batched'|'started'|'live'} live = lock held, so the message goes to
+ * @returns {'batched'|'started'|'live'|'stopped'} live = lock held, so the message goes to
  *   the running turn's inbox instead of starting one
  */
 function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel, describeLiveMessage }) {
+  if (isTerminating()) {
+    log?.warn?.(`   Ignoring ${discardLogLabel}: GemiX is shutting down`);
+    return 'stopped';
+  }
   const wrappedHandler = _wrapBatchHandler(batchKey, handler, log, discardLogLabel);
   if (hasPendingBatch(batchKey)) {
     pushMessage(batchKey, entry, wrappedHandler);
     return 'batched';
   }
-  if (!responseLock.tryLock(batchKey, constants.BATCH_LOCK_TTL_MS)) {
+  const lockLease = responseLock.tryLock(batchKey, constants.BATCH_LOCK_TTL_MS);
+  if (!lockLease) {
     const held = typeof describeLiveMessage === 'function'
       ? recordLiveMessage(batchKey, describeLiveMessage())
       : 0;
@@ -57,8 +71,8 @@ function enqueueBatchedTurn({ batchKey, entry, handler, log, discardLogLabel, de
     }
     return 'live';
   }
-  const stopLockRenew = responseLock.startAutoRenew(batchKey, constants.BATCH_LOCK_TTL_MS);
-  pushMessage(batchKey, { ...entry, stopLockRenew }, wrappedHandler);
+  const stopLockRenew = responseLock.startAutoRenew(lockLease, constants.BATCH_LOCK_TTL_MS);
+  pushMessage(batchKey, { ...entry, lockLease, stopLockRenew }, wrappedHandler);
   return 'started';
 }
 

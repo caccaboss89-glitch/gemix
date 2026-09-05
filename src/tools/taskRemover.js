@@ -28,6 +28,7 @@ function _removeFailure(requestedIds, error, notFound = requestedIds) {
     count: 0,
     requested_count: requestedIds.length,
     not_found_count: notFound.length,
+    in_progress_count: 0,
     tasks: [],
     results,
     ids: [],
@@ -36,6 +37,7 @@ function _removeFailure(requestedIds, error, notFound = requestedIds) {
       : [{ index: null, id: null, error }],
     removed: [],
     not_found: notFound,
+    in_progress: [],
     error
   };
 }
@@ -51,6 +53,11 @@ function _removedTaskProjection(task, options) {
     scope: options.scope || 'personal',
     recipient: recipient || (options.scope === 'group' ? 'group' : null)
   });
+}
+
+function _taskIsDispatching(task) {
+  return Object.values(task?.deliveryClaim?.destinations || {})
+    .some(state => state?.status === 'sending');
 }
 
 /**
@@ -89,23 +96,56 @@ async function removeTasks(taskIds, fileId, options = {}) {
       }
 
       const byId = new Map(data.tasks.map(task => [task.id, task]));
-      const removed = requestedIds.filter(id => byId.has(id));
+      const inProgress = requestedIds.filter(id => _taskIsDispatching(byId.get(id)));
+      const inProgressSet = new Set(inProgress);
+      const removed = requestedIds.filter(id => byId.has(id) && !inProgressSet.has(id));
       const notFound = requestedIds.filter(id => !byId.has(id));
 
       if (removed.length === 0) {
-        result = _removeFailure(requestedIds, 'No tasks found with the specified IDs.', notFound);
+        if (inProgress.length === 0) {
+          result = _removeFailure(requestedIds, 'No tasks found with the specified IDs.', notFound);
+          return undefined;
+        }
+        const results = requestedIds.map((id, index) => taskOperationResult({
+          index,
+          id,
+          success: false,
+          error: inProgressSet.has(id)
+            ? 'Task delivery is already in progress and can no longer be cancelled safely.'
+            : 'Task ID was not found.'
+        }));
+        result = {
+          success: false,
+          status: 'failed',
+          count: 0,
+          requested_count: requestedIds.length,
+          not_found_count: notFound.length,
+          in_progress_count: inProgress.length,
+          tasks: [],
+          results,
+          ids: [],
+          errors: taskErrorsFromResults(results),
+          removed: [],
+          not_found: notFound,
+          in_progress: inProgress,
+          error: 'One or more tasks are already being delivered and cannot be cancelled safely.'
+        };
         return undefined;
       }
 
       const removedSet = new Set(removed);
       const removedTasks = removed.map(id => _removedTaskProjection(byId.get(id), options));
       data.tasks = data.tasks.filter(task => !removedSet.has(task.id));
-      const status = notFound.length > 0 ? 'degraded' : 'ok';
+      const status = notFound.length > 0 || inProgress.length > 0 ? 'degraded' : 'ok';
       const results = requestedIds.map((id, index) => taskOperationResult({
         index,
         id,
         success: removedSet.has(id),
-        error: removedSet.has(id) ? null : 'Task ID was not found.'
+        error: removedSet.has(id)
+          ? null
+          : inProgressSet.has(id)
+            ? 'Task delivery is already in progress and can no longer be cancelled safely.'
+            : 'Task ID was not found.'
       }));
       result = {
         success: true,
@@ -113,13 +153,15 @@ async function removeTasks(taskIds, fileId, options = {}) {
         count: removed.length,
         requested_count: requestedIds.length,
         not_found_count: notFound.length,
+        in_progress_count: inProgress.length,
         tasks: removedTasks,
         results,
         ids: removed,
         errors: taskErrorsFromResults(results),
         removed,
         not_found: notFound,
-        message: `${removed.length} task(s) removed successfully.${notFound.length > 0 ? ` ${notFound.length} requested ID(s) were not found.` : ''}`
+        in_progress: inProgress,
+        message: `${removed.length} task(s) removed successfully.${notFound.length > 0 ? ` ${notFound.length} requested ID(s) were not found.` : ''}${inProgress.length > 0 ? ` ${inProgress.length} task(s) were already being delivered and were not removed.` : ''}`
       };
       return data;
     });

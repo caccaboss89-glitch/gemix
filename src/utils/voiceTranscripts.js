@@ -11,8 +11,7 @@ import { extractAttachmentTagPaths  } from './media.js';
 import { getStoredHistoryVoiceTranscription  } from './historySync.js';
 import { escapeXml  } from './xmlEscape.js';
 import { attachmentDisplayPath  } from '../attachments/projection.js';
-
-const VOICE_AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a']);
+import { VOICE_AUDIO_EXTS } from '../config/mediaTypes.js';
 
 function _formatPastVoiceReply(name, text) {
   const safePath = escapeXml(attachmentDisplayPath(name));

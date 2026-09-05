@@ -28,13 +28,6 @@ import { wrapUserQuery } from '../utils/systemTags.js';
 
 const log = createLogger('TurnPreparation');
 
-/** Re-read persisted preferences so manage_preferences takes effect next round. */
-function reloadSettings(ctx, ui) {
-  if (ctx.platform === constants.PLATFORM_DISCORD) return;
-  const allowVoice = Boolean(getCapabilities(ctx).voiceReply);
-  ctx.settings = readSettings(resolveSettingsFileId(ctx, ui), { allowVoice });
-}
-
 async function _prepareWorkspace(ctx) {
   const workspaceId = resolveWorkspaceId(ctx);
   ctx.userWorkspace = { state: 'unknown' };
@@ -177,4 +170,4 @@ async function prepareTurn(ctx, ui) {
   return { isDiscord, allowVoice, userCtx, workspaceId, staticInstructions, toolsFp, input };
 }
 
-export { prepareTurn, reloadSettings };
+export { prepareTurn };

@@ -23,7 +23,7 @@ import path from 'path';
 import constants from '../config/constants.js';
 import { getAttachmentsPath, getWorkspacePath } from '../utils/workspaceId.js';
 import { createLogger } from '../utils/logger.js';
-import { listAgentDirectory } from './hostFileGateway.js';
+import { clearPendingWorkspaceOutputs, listAgentDirectory } from './hostFileGateway.js';
 import { ROOT, WRITABLE_ROOTS, toDisplayPath } from './workspacePaths.js';
 
 const log = createLogger('WorkspaceFs');
@@ -122,9 +122,17 @@ function rootQuotaMb(root) {
   return quotaMb;
 }
 
-/** Recursive size in bytes of one writable root's tree. */
-function _rootSizeBytes(workspaceId, root) {
-  return listAgentDirectory(workspaceId, toDisplayPath(root, ''), { limit: 1 })?.totalBytes || 0;
+/** Complete bounded inventory of one writable root. */
+function _rootInventory(workspaceId, root) {
+  if (root === ROOT.WORKSPACE) ensureWorkspace(workspaceId);
+  const listing = listAgentDirectory(workspaceId, toDisplayPath(root, ''), {
+    limit: 0,
+    maxEntries: constants.WORKSPACE_MAX_ENTRIES
+  });
+  if (!listing) {
+    return { complete: false, totalBytes: 0, totalEntries: 0, errors: [{ path: '.', error: 'unreadable' }] };
+  }
+  return listing;
 }
 
 /**
@@ -140,9 +148,32 @@ function _rootSizeBytes(workspaceId, root) {
 function checkRootQuota(workspaceId, root = ROOT.WORKSPACE) {
   const quotaMb = rootQuotaMb(root);
   const quotaBytes = quotaMb * 1024 * 1024;
-  const usedBytes = _rootSizeBytes(workspaceId, root);
+  const inventory = _rootInventory(workspaceId, root);
+  const usedBytes = inventory.totalBytes;
+  if (!inventory.complete) {
+    return {
+      ok: false,
+      root,
+      usedBytes,
+      quotaBytes,
+      quotaMb,
+      inventoryComplete: false,
+      inventoryEntries: inventory.totalEntries,
+      message: `Cannot verify the ${toDisplayPath(root, '')} quota because its bounded filesystem inventory was incomplete. `
+        + 'Reduce the number of entries or remove unreadable paths before writing more.'
+    };
+  }
   if (usedBytes <= quotaBytes) {
-    return { ok: true, root, usedBytes, quotaBytes, quotaMb, message: null };
+    return {
+      ok: true,
+      root,
+      usedBytes,
+      quotaBytes,
+      quotaMb,
+      inventoryComplete: true,
+      inventoryEntries: inventory.totalEntries,
+      message: null
+    };
   }
   return {
     ok: false,
@@ -150,6 +181,8 @@ function checkRootQuota(workspaceId, root = ROOT.WORKSPACE) {
     usedBytes,
     quotaBytes,
     quotaMb,
+    inventoryComplete: true,
+    inventoryEntries: inventory.totalEntries,
     message: `${toDisplayPath(root, '')} is over its ${constants.formatSizeLabel(quotaMb)} quota `
       + `(${constants.formatSizeLabel(usedBytes / (1024 * 1024))} used). Delete files you no longer need before writing more.`
   };
@@ -179,9 +212,28 @@ function checkWritableQuotas(workspaceId) {
  * @param {number} [replacedBytes] - bytes the write overwrites in place
  * @param {string} [root] - namespace root being written to
  */
-function assertRootCapacity(workspaceId, incomingBytes, replacedBytes = 0, root = ROOT.WORKSPACE) {
+function assertRootCapacity(
+  workspaceId,
+  incomingBytes,
+  replacedBytes = 0,
+  root = ROOT.WORKSPACE,
+  entryDelta = 0
+) {
   const quotaMb = rootQuotaMb(root);
-  const sizeAfter = _rootSizeBytes(workspaceId, root)
+  const inventory = _rootInventory(workspaceId, root);
+  if (!inventory.complete) {
+    const err = new Error(`Cannot verify ${toDisplayPath(root, '')} capacity because its filesystem inventory is incomplete.`);
+    err.code = 'EINVENTORY';
+    throw err;
+  }
+  if (inventory.totalEntries + Math.max(0, entryDelta) > constants.WORKSPACE_MAX_ENTRIES) {
+    const err = new Error(
+      `${toDisplayPath(root, '')} would exceed its ${constants.WORKSPACE_MAX_ENTRIES} filesystem-entry limit.`
+    );
+    err.code = 'EQUOTA';
+    throw err;
+  }
+  const sizeAfter = inventory.totalBytes
     - Math.max(0, replacedBytes)
     + Math.max(0, incomingBytes);
   if (sizeAfter <= quotaMb * 1024 * 1024) return;
@@ -197,17 +249,25 @@ function assertRootCapacity(workspaceId, incomingBytes, replacedBytes = 0, root 
  */
 function wipeWorkspace(workspaceId) {
   const root = getWorkspacePath(workspaceId);
-  if (!root || !fs.existsSync(root)) return;
+  if (!root) return false;
+  try { clearPendingWorkspaceOutputs(workspaceId); }
+  catch (err) { log.warn(`pending output cleanup failed: ${err.message}`); return false; }
+  if (!fs.existsSync(root)) return true;
   let entries;
   try { entries = fs.readdirSync(root, { withFileTypes: true }); }
-  catch (err) { log.warn(`wipeWorkspace readdir: ${err.message}`); return; }
+  catch (err) { log.warn(`wipeWorkspace readdir: ${err.message}`); return false; }
+  let complete = true;
   for (const e of entries) {
     const full = path.join(root, e.name);
     try {
       if (e.isDirectory()) fs.rmSync(full, { recursive: true, force: true });
       else fs.unlinkSync(full);
-    } catch (err) { log.warn(`wipeWorkspace failed on ${full}: ${err.message}`); }
+    } catch (err) {
+      complete = false;
+      log.warn(`wipeWorkspace failed on ${full}: ${err.message}`);
+    }
   }
+  return complete;
 }
 
 export {
@@ -220,5 +280,6 @@ export {
   checkRootQuota,
   checkWritableQuotas,
   assertRootCapacity,
+  _rootInventory,
   wipeWorkspace
 };

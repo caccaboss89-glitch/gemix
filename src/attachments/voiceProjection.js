@@ -43,10 +43,9 @@ import {
   transcribeAudioFile
 } from '../media/speechToText.js';
 import { createLogger } from '../utils/logger.js';
+import { VOICE_AUDIO_EXTS } from '../config/mediaTypes.js';
 
 const log = createLogger('VoiceProjection');
-
-const VOICE_AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a', '.aac', '.flac', '.amr']);
 
 /** Clips transcribed in parallel; keeps a burst of voice notes from serialising. */
 const MAX_CONCURRENT_TRANSCRIPTIONS = 3;
@@ -126,9 +125,25 @@ const HASH_CACHE_MAX_ENTRIES = 512;
 function _contentHashOfFile(absPath, stat) {
   const hit = _hashCache.get(absPath);
   if (hit && hit.size === stat.size && hit.mtimeMs === stat.mtimeMs) return hit.hash;
-  const hash = contentHashOf(fs.readFileSync(absPath));
+  let fd;
+  let buffer;
+  let finalStat;
+  try {
+    fd = fs.openSync(absPath, 'r');
+    buffer = fs.readFileSync(fd);
+    finalStat = fs.fstatSync(fd);
+  } catch (err) {
+    log.warn(`Voice note "${path.basename(absPath)}" disappeared while being inspected: ${err.message}`);
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* descriptor already closed */ }
+    }
+  }
+  if (!finalStat.isFile() || buffer.length === 0 || buffer.length !== finalStat.size) return null;
+  const hash = contentHashOf(buffer);
   if (_hashCache.size >= HASH_CACHE_MAX_ENTRIES) _hashCache.clear();
-  _hashCache.set(absPath, { size: stat.size, mtimeMs: stat.mtimeMs, hash });
+  _hashCache.set(absPath, { size: finalStat.size, mtimeMs: finalStat.mtimeMs, hash });
   return hash;
 }
 
@@ -149,6 +164,7 @@ function _inspect(storageId, name, opts) {
   if (stat.size === 0) return { absPath, contentHash: null, cached: { status: STT_STATUS.ERROR, text: '' } };
 
   const contentHash = _contentHashOfFile(absPath, stat);
+  if (!contentHash) return null;
   return {
     absPath,
     contentHash,
@@ -162,7 +178,15 @@ function _inspect(storageId, name, opts) {
 
 /** Transcribe one clip and remember only deterministic outcomes. */
 async function _transcribe(storageId, name, info, opts) {
-  const durationSec = await getMediaDurationSecFromPath(info.absPath, opts.signal).catch(() => 0);
+  let durationSec = null;
+  try {
+    durationSec = await getMediaDurationSecFromPath(info.absPath, opts.signal);
+  } catch (err) {
+    if (opts.signal?.aborted || err?.name === 'AbortError') {
+      throw opts.signal?.reason || err;
+    }
+    log.warn(`Could not determine the duration of "${name}": ${err.message}`);
+  }
   const result = await transcribeAudioFile(info.absPath, {
     durationSec,
     language: opts.language,

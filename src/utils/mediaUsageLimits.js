@@ -154,7 +154,7 @@ function limitReachedError(kind) {
  * Atomically reserve one slot for `kind` in its current period.
  * @param {'image'|'video'|'song'} kind
  * @param {string} userKey
- * @returns {Promise<{ allowed:boolean, used:number, limit:number }>}
+ * @returns {Promise<{ allowed:boolean, used:number, limit:number, period?:string }>}
  */
 async function reserveMediaQuota(kind, userKey) {
   const spec = MEDIA_LIMITS[kind];
@@ -171,8 +171,9 @@ async function reserveMediaQuota(kind, userKey) {
       outcome = { allowed: false, used, limit };
       return next;
     }
-    next[userKey] = { ...base, [kind]: { period: periodKeyFor(kind), used: used + 1 } };
-    outcome = { allowed: true, used: used + 1, limit };
+    const period = periodKeyFor(kind);
+    next[userKey] = { ...base, [kind]: { period, used: used + 1 } };
+    outcome = { allowed: true, used: used + 1, limit, period };
     return next;
   });
 
@@ -183,15 +184,17 @@ async function reserveMediaQuota(kind, userKey) {
  * Give back one previously reserved slot (only within the same period).
  * @param {'image'|'video'|'song'} kind
  * @param {string} userKey
+ * @param {string} period - The period in which the reservation was made
  * @returns {Promise<void>}
  */
-async function refundMediaQuota(kind, userKey) {
+async function refundMediaQuota(kind, userKey, period) {
   await systemState.update(STATE_MODULE, (current) => {
     const next = { ...(current || {}) };
     const record = next[userKey];
+    if (record?.[kind]?.period !== period) return next;
     const used = usedCount(record, kind);
     if (used <= 0) return next; // rolled over or absent
-    next[userKey] = { ...record, [kind]: { period: periodKeyFor(kind), used: used - 1 } };
+    next[userKey] = { ...record, [kind]: { period, used: used - 1 } };
     return next;
   });
 }
@@ -234,16 +237,20 @@ async function reserveGeneration(kind, userCtx) {
   }
 
   let committed = false;
+  let released = false;
+  let releasePromise = null;
   return {
     ok: true,
-    commit() { committed = true; },
+    commit() {
+      if (!released) committed = true;
+    },
     async release() {
-      if (committed) return;
-      try {
-        await refundMediaQuota(kind, userKey);
-      } catch (err) {
+      if (committed || released) return releasePromise;
+      released = true;
+      releasePromise = refundMediaQuota(kind, userKey, res.period).catch((err) => {
         log.warn(`quota refund failed (${kind}, ${userKey}): ${err.message}`);
-      }
+      });
+      return releasePromise;
     }
   };
 }

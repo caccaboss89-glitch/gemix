@@ -17,14 +17,11 @@
 // still lets the rest go through and the caller can tell the user the wipe was
 // incomplete instead of silently claiming success.
 
-import fs from 'fs';
-import path from 'path';
-import constants from '../config/constants.js';
 import { createLogger  } from './logger.js';
-import { getUserRoot, resolveSettingsFileId  } from './userPaths.js';
-import { resolveWorkspaceId, getWorkspaceMetaDir  } from './workspaceId.js';
+import { resolveSettingsFileId, resolveStorageId } from './userPaths.js';
+import { resolveWorkspaceId } from './workspaceId.js';
 import { getGroupTaskFileId  } from './userIdentifier.js';
-import { forgetRecentVoiceText  } from './historySync.js';
+import { deleteHistoryStore, forgetRecentVoiceText  } from './historySync.js';
 import { deleteSentMessages  } from './sentMessagesStore.js';
 import { clearMediaUsage  } from './mediaUsageLimits.js';
 import { forgetUser  } from './privacyConsent.js';
@@ -32,6 +29,13 @@ import { toggleReleaseNotify  } from '../tools/releaseNotify.js';
 import { deleteApiLogsForConversation } from '../ai/apiLogs.js';
 import { generatePromptCacheKey } from './promptCacheKey.js';
 import { deleteBugReportsForContext } from './bugReportStore.js';
+import { deleteSettings } from './settingsStore.js';
+import { deleteTaskFile } from './taskStore.js';
+import { withWorkspaceLock, clearActivity } from './workspaceState.js';
+import workspaceRuntime from '../sandbox/workspaceRuntime.js';
+import { wipeWorkspace } from '../sandbox/workspaceFs.js';
+import { clearProjection } from '../attachments/projection.js';
+import { clearParserCache } from '../parsers/parserCache.js';
 
 const log = createLogger('PrivacyWipe');
 
@@ -42,32 +46,22 @@ function deleteConversationApiLogs(ctx, deleteLogs = deleteApiLogsForConversatio
   return deleteLogs(conversationKey);
 }
 
-/** Guard against a malformed chat id turning a recursive delete loose. */
-function _isInsideDataDir(target) {
-  const rel = path.relative(constants.DATA_DIR, path.resolve(target));
-  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
-}
-
-/**
- * Recursively remove a path under constants.DATA_DIR. A missing path counts as removed,
- * and so does a null one: nothing is stored where an id does not resolve.
- * @param {string|null} target
- * @param {string} label - what it holds, for the log line
- * @returns {boolean}
- */
-function _removeTree(target, label) {
-  if (!target) return true;
-  if (!_isInsideDataDir(target)) {
-    log.error(`Refusing to delete ${label} outside the data directory: ${target}`);
-    return false;
-  }
-  try {
-    fs.rmSync(target, { recursive: true, force: true });
+async function _wipeWorkspaceStore(workspaceId) {
+  if (!workspaceId) return true;
+  return withWorkspaceLock(workspaceId, { ownerId: `privacy:${process.pid}` }, async () => {
+    const failures = [];
+    try { await workspaceRuntime.shutdown(workspaceId); }
+    catch (err) { failures.push(`runtime: ${err.message}`); }
+    if (!wipeWorkspace(workspaceId)) failures.push('workspace files');
+    if (!clearProjection(workspaceId)) failures.push('attachment projection');
+    if (!clearParserCache(workspaceId)) failures.push('parser cache');
+    if (failures.length === 0 && !clearActivity(workspaceId)) failures.push('activity state');
+    if (failures.length > 0) {
+      log.warn(`Workspace wipe incomplete for ${workspaceId}: ${failures.join(', ')}`);
+      return false;
+    }
     return true;
-  } catch (err) {
-    log.warn(`Failed to delete ${label} (${target}): ${err.message}`);
-    return false;
-  }
+  });
 }
 
 /**
@@ -93,8 +87,19 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
     failed.push('chat');
   }
 
-  step('history', _removeTree(getUserRoot(ctx), 'chat history'));
-  step('workspace', _removeTree(getWorkspaceMetaDir(resolveWorkspaceId(ctx)), 'workspace'));
+  try {
+    step('history', await deleteHistoryStore(resolveStorageId(ctx)));
+  } catch (err) {
+    log.warn(`History deletion failed for ${ctx.chatId}: ${err.message}`);
+    failed.push('history');
+  }
+
+  try {
+    step('workspace', await _wipeWorkspaceStore(resolveWorkspaceId(ctx)));
+  } catch (err) {
+    log.warn(`Workspace deletion failed for ${ctx.chatId}: ${err.message}`);
+    failed.push('workspace');
+  }
 
   try {
     const apiLogs = deleteConversationApiLogs(ctx);
@@ -109,16 +114,24 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
 
   const settingsFileId = resolveSettingsFileId(ctx, { taskFileId });
   if (settingsFileId) {
-    step('settings', _removeTree(path.join(constants.DATA_DIR, 'memories', `${settingsFileId}.json`), 'saved preferences'));
+    try { step('settings', await deleteSettings(settingsFileId)); }
+    catch (err) {
+      log.warn(`Settings deletion failed for ${settingsFileId}: ${err.message}`);
+      failed.push('settings');
+    }
   }
 
   // In a group the shared reminder file goes too: it belongs to the very
   // conversation being emptied.
-  const taskFileIds = [taskFileId];
-  if (ctx.isGroup && ctx.groupId) taskFileIds.push(getGroupTaskFileId(ctx.groupId));
+  const taskFileIds = new Set([taskFileId]);
+  if (ctx.isGroup && ctx.groupId) taskFileIds.add(getGroupTaskFileId(ctx.groupId));
   for (const fileId of taskFileIds) {
     if (!fileId) continue;
-    step(`tasks:${fileId}`, _removeTree(path.join(constants.TASKS_DIR, `${fileId}.json`), 'scheduled reminders'));
+    try { step(`tasks:${fileId}`, await deleteTaskFile(fileId)); }
+    catch (err) {
+      log.warn(`Task deletion failed for ${fileId}: ${err.message}`);
+      failed.push(`tasks:${fileId}`);
+    }
   }
 
   try {

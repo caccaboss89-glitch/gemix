@@ -248,9 +248,9 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   if (!promptOpts.isActiveMember) return lines;
 
   if (isAdmin) {
-    // The admin addresses members directly by phone/email (see send_* and
-    // schedule_tasks), so the roster carries the exact identifiers: no name
-    // lookup is needed and reminders never default to the caller by mistake.
+    // The admin can address roster members by name or exact phone/email (see
+    // send_* and schedule_tasks), while reminders without a recipient still
+    // target the current conversation.
     const roster = activeMembers.map((m) => {
       const digits = (m.wa || '').split('@')[0].split(':')[0];
       const num = digits ? `+${digits}` : '?';
@@ -260,9 +260,9 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
     lines.push(`<ActiveMembers>${roster}</ActiveMembers>`);
     lines.push(
       cap.isDiscord
-        ? 'Address them by the phone number or email in that list. send_whatsapp_message and send_email only '
+        ? 'Address them by name, phone number or email from that list. send_whatsapp_message and send_email only '
           + 'reach destinations outside this thread.'
-        : 'Address them by the phone number or email in that list. send_whatsapp_message and send_email only '
+        : 'Address them by name, phone number or email from that list. send_whatsapp_message and send_email only '
           + 'reach destinations outside this chat; schedule_tasks with no destination means the current chat, '
           + 'and takes a recipient when the reminder is for someone else.'
     );
@@ -321,8 +321,8 @@ function buildDynamicRuntimeContext(ctx) {
     if (ctx.threadName) {
       blocks.push(`Thread title: ${escapeXml(ctx.threadName)}`);
     }
-    if (ctx.availableEmojis) blocks.push(`Emojis: ${ctx.availableEmojis}`);
-    if (ctx.serverEvents) blocks.push(`Events: ${ctx.serverEvents}`);
+    if (ctx.availableEmojis) blocks.push(`Emojis: ${escapeXml(ctx.availableEmojis)}`);
+    if (ctx.serverEvents) blocks.push(`Events: ${escapeXml(ctx.serverEvents)}`);
   } else if (ctx.isGroup) {
     const roster = Array.isArray(ctx.groupParticipants) ? ctx.groupParticipants : [];
     if (roster.length > 0) {
@@ -378,7 +378,7 @@ function _renderCurrentSettings(ctx) {
   const mark = (field) => (custom.has(field) ? 'custom' : 'default');
   const labels = { voice: 'Voice', effort: 'Effort', language: 'Language', memory: 'Memory' };
   const lines = activePreferenceFields(preferenceOptions).map((field) => {
-    const value = field === 'memory' ? escapeXml(settings[field]) : settings[field];
+    const value = escapeXml(settings[field]);
     return `${labels[field]}: ${value} (${mark(field)})`;
   });
   lines.push(`Last update: ${settings.updatedAt ? formatTimestamp(settings.updatedAt) : 'never (all defaults)'}`);
@@ -417,8 +417,8 @@ function _renderWorkspace(ws) {
   }
 
   const lines = [
-    ...files.map(f => `- workspace/${f.relPath}`),
-    ...dirs.map(d => `- workspace/${d}/`)
+    ...files.map(f => `- workspace/${escapeXml(f.relPath)}`),
+    ...dirs.map(d => `- workspace/${escapeXml(d)}/`)
   ];
   if (ws.more) lines.push('... and more');
   return _block(open, lines, 'Workspace');

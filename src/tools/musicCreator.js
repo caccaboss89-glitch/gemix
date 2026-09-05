@@ -15,6 +15,7 @@ import { reserveGeneration  } from '../utils/mediaUsageLimits.js';
 import { fetchWithTimeout  } from '../utils/fetch.js';
 import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
 import { convertMp3ToWhatsAppOpus  } from './voiceMessage.js';
+import { SseDecoder } from '../ai/transport/sse.js';
 
 const log = createLogger('MusicCreator');
 
@@ -59,16 +60,9 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey, signal) {
   const timeoutMs = 180000;
 
   const audio = createMusicAudioAccumulator();
-  let buffer = '';
+  const decoder = new SseDecoder({ maxBufferedChars: audio.maxEncodedChars + 64 * 1024 });
 
-  const consumeLine = (line) => {
-    if (!line.startsWith('data: ')) return;
-    const dataStr = line.slice(6).trim();
-    if (!dataStr || dataStr === '[DONE]') return;
-
-    let data;
-    try { data = JSON.parse(dataStr); }
-    catch { log.debug('Failed to parse SSE line'); return; }
+  const consumeEvent = (data) => {
     const delta = data.choices?.[0]?.delta || {};
     if (delta.audio?.data) audio.add(delta.audio.data);
 
@@ -81,6 +75,8 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey, signal) {
     }
   };
 
+  let reader = null;
+  let streamEnded = false;
   try {
     log.info(`Lyria streaming call to ${model}`);
 
@@ -101,24 +97,21 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey, signal) {
       throw new Error(`HTTP ${res.status}: ${errText}`);
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    reader = res.body.getReader();
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      if (buffer.length > audio.maxEncodedChars + 64 * 1024) {
-        throw new Error('Music stream contains an oversized SSE event.');
+      if (done) {
+        streamEnded = true;
+        break;
       }
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) consumeLine(line.trimEnd());
+      for (const event of decoder.push(value)) consumeEvent(event);
     }
 
-    buffer += decoder.decode();
-    if (buffer.trim()) consumeLine(buffer.trimEnd());
+    for (const event of decoder.end()) consumeEvent(event);
+    if (decoder.malformedEvents > 0) {
+      throw new Error(`Music stream contained ${decoder.malformedEvents} malformed SSE event(s).`);
+    }
     const fullAudioBase64 = audio.joined();
     log.info(`Stream finished - Audio chunks: ${audio.count()}`);
 
@@ -130,6 +123,11 @@ async function callLyriaStreaming(model, apiUrl, body, apiKey, signal) {
       throw new Error(`Music generation timed out after ${timeoutMs / 1000}s`);
     }
     throw err;
+  } finally {
+    if (reader) {
+      if (!streamEnded) await reader.cancel().catch(() => {});
+      try { reader.releaseLock(); } catch { /* already released */ }
+    }
   }
 }
 
@@ -269,6 +267,7 @@ async function musicCreator(prompt, userCtx) {
 
 export {
   musicCreator,
+  callLyriaStreaming,
   createMusicAudioAccumulator,
   decodeMusicAudio
 };

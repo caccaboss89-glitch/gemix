@@ -8,10 +8,15 @@
 // a blank-line terminator.
 
 class SseDecoder {
-  constructor() {
+  constructor(options = {}) {
     this._decoder = new TextDecoder('utf-8');
     this._buffer = '';
     this._dataLines = [];
+    this._pendingDataChars = 0;
+    this._maxBufferedChars = Number.isFinite(options.maxBufferedChars)
+      ? Math.max(1, Math.floor(options.maxBufferedChars))
+      : Infinity;
+    this.malformedEvents = 0;
   }
 
   /**
@@ -25,12 +30,14 @@ class SseDecoder {
     this._buffer += typeof chunk === 'string'
       ? chunk
       : this._decoder.decode(chunk, { stream: true });
+    this._assertBounded();
     return this._drain(false);
   }
 
   /** Flush whatever a truncated stream left behind. */
   end() {
     this._buffer += this._decoder.decode();
+    this._assertBounded();
     return this._drain(true);
   }
 
@@ -60,19 +67,31 @@ class SseDecoder {
     if (line === '') return this._flushEvent();
     if (line.startsWith(':')) return undefined; // comment / keep-alive
     if (!line.startsWith('data:')) return undefined; // event:/id:/retry: carry no payload here
-    this._dataLines.push(line.slice(5).replace(/^ /, ''));
+    const data = line.slice(5).replace(/^ /, '');
+    this._dataLines.push(data);
+    this._pendingDataChars += data.length + 1;
+    this._assertBounded();
     return undefined;
+  }
+
+  _assertBounded() {
+    if (this._buffer.length + this._pendingDataChars > this._maxBufferedChars) {
+      throw new Error(`SSE event exceeds the ${this._maxBufferedChars}-character buffer limit.`);
+    }
   }
 
   _flushEvent() {
     if (this._dataLines.length === 0) return undefined;
     const payload = this._dataLines.join('\n');
     this._dataLines = [];
+    this._pendingDataChars = 0;
     if (payload === '[DONE]') return undefined;
     try {
       return JSON.parse(payload);
     } catch {
-      // A single malformed event must not poison the rest of the stream.
+      // Keep decoding later events, but let the transport reject a response
+      // assembled from a stream that has demonstrably lost a frame.
+      this.malformedEvents += 1;
       return undefined;
     }
   }

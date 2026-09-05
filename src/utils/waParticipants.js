@@ -3,7 +3,7 @@
 // @<phone-number>. GemiX itself is always included for context.
 
 import { createLogger } from './logger.js';
-import { getDedicatedClient } from '../platforms/whatsapp/dedicated.js';
+import { getReadyDedicatedClient } from '../platforms/whatsapp/dedicatedClientRegistry.js';
 
 const log = createLogger('WaParticipants');
 
@@ -16,7 +16,7 @@ const log = createLogger('WaParticipants');
  * @returns {Promise<Array<{number:string,name:string,isGemix:boolean}>>}
  */
 async function buildGroupParticipants(chat) {
-  const client = getDedicatedClient();
+  const client = getReadyDedicatedClient();
   if (!client) return [];
 
   const participants = Array.isArray(chat?.participants) ? chat.participants : [];

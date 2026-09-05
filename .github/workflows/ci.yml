@@ -17,8 +17,6 @@ jobs:
       OPENROUTER_API_KEY: test
       MUSIC_MODEL: music
       OPENROUTER_HTTP_REFERER: https://gemix.invalid
-      ADMIN_NAME: Test Admin
-      LEGAL_NAME: Test Legal Name
       BOT_TOKEN: test
       GUILD_ID: test
       BOT_EMAIL: test@example.invalid

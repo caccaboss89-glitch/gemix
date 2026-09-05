@@ -39,12 +39,17 @@ import { withKeyedLock } from './keyedLock.js';
  *   usable: () => Array<{ credential: *, fingerprint: string }>,
  *   next: () => ({ credential: *, fingerprint: string }|null),
  *   markWorking: (fingerprint: string) => Promise<void>,
- *   markExhausted: (fingerprint: string) => Promise<{ credential: *, fingerprint: string }|null>
+ *   markExhausted: (fingerprint: string, reason?: string) => Promise<{ credential: *, fingerprint: string }|null>,
+ *   exhaustionReasons: () => string[]
  * }}
  */
 function createCredentialRing({ label, stateFile, listCredentials, identify, periodKey }) {
   const log = createLogger(`${label}Keys`);
   const locks = new Map();
+  // A failed disk write must not make the current process forget a credential
+  // it has already proved unusable. The latest unsaved state remains
+  // authoritative until a later mutation is persisted successfully.
+  let volatileState = null;
 
   function _ring() {
     return listCredentials().map(credential => ({
@@ -54,16 +59,26 @@ function createCredentialRing({ label, stateFile, listCredentials, identify, per
   }
 
   function _load() {
+    if (volatileState) {
+      return {
+        active: volatileState.active,
+        exhausted: { ...volatileState.exhausted },
+        exhaustionReasons: { ...volatileState.exhaustionReasons }
+      };
+    }
     try {
       const raw = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
       if (raw && typeof raw === 'object') {
         return {
           active: typeof raw.active === 'string' ? raw.active : null,
-          exhausted: raw.exhausted && typeof raw.exhausted === 'object' ? raw.exhausted : {}
+          exhausted: raw.exhausted && typeof raw.exhausted === 'object' ? raw.exhausted : {},
+          exhaustionReasons: raw.exhaustionReasons && typeof raw.exhaustionReasons === 'object'
+            ? raw.exhaustionReasons
+            : {}
         };
       }
     } catch { /* first run, or a corrupted file we are about to replace */ }
-    return { active: null, exhausted: {} };
+    return { active: null, exhausted: {}, exhaustionReasons: {} };
   }
 
   function _save(state) {
@@ -72,10 +87,17 @@ function createCredentialRing({ label, stateFile, listCredentials, identify, per
       fs.mkdirSync(path.dirname(stateFile), { recursive: true });
       fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
       fs.renameSync(tmp, stateFile);
+      volatileState = null;
+      return true;
     } catch (err) {
       try { fs.unlinkSync(tmp); } catch { /* nothing staged */ }
-      // The ring still works for this process; it just re-probes after a restart.
+      volatileState = {
+        active: typeof state.active === 'string' ? state.active : null,
+        exhausted: { ...(state.exhausted || {}) },
+        exhaustionReasons: { ...(state.exhaustionReasons || {}) }
+      };
       log.warn(`Cannot persist the ${label} credential state: ${err.message}`);
+      return false;
     }
   }
 
@@ -112,6 +134,20 @@ function createCredentialRing({ label, stateFile, listCredentials, identify, per
     return usable()[0] || null;
   }
 
+  /** Typed reasons for credentials excluded in the current allowance period. */
+  function exhaustionReasons() {
+    const state = _load();
+    const period = periodKey();
+    const reasons = [];
+    for (const fingerprint of _spentThisPeriod(state, period)) {
+      const detail = state.exhaustionReasons?.[fingerprint];
+      reasons.push(detail?.period === period && typeof detail.reason === 'string'
+        ? detail.reason
+        : 'BUDGET');
+    }
+    return reasons;
+  }
+
   /** Record that a credential did the work, so the next turn starts on it. */
   async function markWorking(fingerprint) {
     await withKeyedLock(locks, stateFile, async () => {
@@ -128,23 +164,32 @@ function createCredentialRing({ label, stateFile, listCredentials, identify, per
    * on the way through, so the file never accumulates credentials the
    * deployment has stopped using.
    */
-  async function markExhausted(fingerprint) {
+  async function markExhausted(fingerprint, reason = 'BUDGET') {
     await withKeyedLock(locks, stateFile, async () => {
       const period = periodKey();
       const state = _load();
       const exhausted = {};
-      for (const fp of _spentThisPeriod(state, period)) exhausted[fp] = period;
+      const reasons = {};
+      for (const fp of _spentThisPeriod(state, period)) {
+        exhausted[fp] = period;
+        const previous = state.exhaustionReasons?.[fp];
+        reasons[fp] = previous?.period === period
+          ? previous
+          : { period, reason: 'BUDGET' };
+      }
       exhausted[fingerprint] = period;
+      reasons[fingerprint] = { period, reason: String(reason || 'BUDGET') };
       _save({
         active: state.active === fingerprint ? null : state.active,
-        exhausted
+        exhausted,
+        exhaustionReasons: reasons
       });
     });
     log.info(`Credential ${fingerprint} has spent its allowance; rotating.`);
     return next();
   }
 
-  return { STATE_FILE: stateFile, usable, next, markWorking, markExhausted };
+  return { STATE_FILE: stateFile, usable, next, markWorking, markExhausted, exhaustionReasons };
 }
 
 export { createCredentialRing };

@@ -20,6 +20,8 @@ import constants from '../config/constants.js';
 import envConfig from '../config/env.js';
 import { mimeForExtension } from '../config/mimeExtensions.js';
 import { createLogger } from '../utils/logger.js';
+import { sniffImageType } from '../utils/imageType.js';
+import { runKreuzbergOperation } from './kreuzbergProcess.js';
 
 const log = createLogger('DocumentParser');
 
@@ -37,39 +39,11 @@ const ARCHIVE_EXTS = new Set(['.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z
  */
 const THIN_TEXT_CHARS_PER_PAGE = 200;
 
-let _kreuzberg = null;
-let _kreuzbergError = null;
 let _ocrAvailable = null;
 let _ocrProbe = null;
 
 function _abortReason(signal) {
   return signal?.reason || new Error('Document parsing aborted.');
-}
-
-function _abortable(promise, signal) {
-  if (!signal) return promise;
-  if (signal.aborted) return Promise.reject(_abortReason(signal));
-  return new Promise((resolve, reject) => {
-    const onAbort = () => reject(_abortReason(signal));
-    signal.addEventListener('abort', onAbort, { once: true });
-    Promise.resolve(promise).then(resolve, reject).finally(() => {
-      signal.removeEventListener('abort', onAbort);
-    });
-  });
-}
-
-/** Load the native binding once, remembering a failure so it is not retried per read. */
-async function _load() {
-  if (_kreuzberg) return _kreuzberg;
-  if (_kreuzbergError) return null;
-  try {
-    _kreuzberg = await import('@kreuzberg/node');
-    return _kreuzberg;
-  } catch (err) {
-    _kreuzbergError = err;
-    log.warn(`Document parsing is unavailable: ${err.message}`);
-    return null;
-  }
 }
 
 /**
@@ -133,17 +107,22 @@ function _cleanMetadata(raw) {
 }
 
 /** Render the first pages of a PDF so vision can read what the text layer lost. */
-async function _renderPages(kreuzberg, absPath, pageCount, notes, signal) {
+async function _renderPages(absPath, pageCount, notes, signal) {
   const pages = Math.min(pageCount || 1, constants.PARSE_MAX_PDF_RENDER_PAGES);
   const images = [];
   // The renderer indexes from 0; everything the model sees counts from 1.
   for (let index = 0; index < pages; index++) {
     if (signal?.aborted) throw _abortReason(signal);
     try {
-      const png = await _abortable(kreuzberg.renderPdfPage(absPath, index, { scale: 2 }), signal);
+      const png = await runKreuzbergOperation('renderPdfPage', {
+        path: absPath,
+        page: index,
+        options: { scale: 2 }
+      }, { signal });
       const buffer = Buffer.isBuffer(png) ? png : Buffer.from(png);
       if (buffer.length > 0) images.push({ page: index + 1, buffer, mime: 'image/png' });
     } catch (err) {
+      if (signal?.aborted) throw _abortReason(signal);
       notes.push(`Page ${index + 1} could not be rendered: ${err.message}`);
       break;
     }
@@ -164,7 +143,11 @@ function _embeddedImages(result, notes) {
     if (!data) continue;
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
     if (buffer.length === 0) continue;
-    out.push({ buffer, mime: img.mimeType || img.format || 'image/png', label: img.name || null });
+    const hintedMime = typeof img.mimeType === 'string' && img.mimeType.startsWith('image/')
+      ? img.mimeType
+      : mimeForExtension(img.format || '', 'image/png');
+    const mime = sniffImageType(buffer)?.mime || hintedMime;
+    out.push({ buffer, mime, label: img.name || null });
   }
   if (raw.length > out.length) {
     notes.push(`${raw.length} images are embedded; the first ${out.length} are attached.`);
@@ -192,23 +175,24 @@ function _tables(result) {
  * }>}
  */
 async function parseDocument(absPath, opts = {}) {
-  const kreuzberg = await _abortable(_load(), opts.signal);
-  if (!kreuzberg) {
-    return { ok: false, error: 'The document parser is not installed on this deployment.' };
-  }
+  opts.signal?.throwIfAborted();
 
   const ext = opts.ext || path.extname(absPath).toLowerCase();
   const notes = [];
-  const useOcr = opts.ocr !== false && await _abortable(ocrAvailable(), opts.signal);
+  const useOcr = opts.ocr !== false && await ocrAvailable();
+  opts.signal?.throwIfAborted();
   let result;
   try {
-    result = await _abortable(kreuzberg.extractFile(
-      absPath,
-      mimeForExtension(ext) || undefined,
-      useOcr ? { ocr: { backend: 'tesseract' } } : {}
-    ), opts.signal);
+    result = await runKreuzbergOperation('extractFile', {
+      path: absPath,
+      mime: mimeForExtension(ext) || undefined,
+      options: useOcr ? { ocr: { backend: 'tesseract' } } : {}
+    }, { signal: opts.signal });
   } catch (err) {
     if (opts.signal?.aborted) throw _abortReason(opts.signal);
+    if (err.code === 'ERR_MODULE_NOT_FOUND') {
+      return { ok: false, error: 'The document parser is not installed on this deployment.' };
+    }
     return { ok: false, error: `Could not parse this file: ${err.message}` };
   }
 
@@ -232,9 +216,11 @@ async function parseDocument(absPath, opts = {}) {
     if (thin) {
       notes.push('The text layer is thin for this page count, so the pages are attached as images.');
       if (!useOcr) notes.push('OCR is not available on this host, so scanned text is only in those images.');
-      images.push(...await _renderPages(kreuzberg, absPath, pageCount, notes, opts.signal));
+      images.push(...await _renderPages(absPath, pageCount, notes, opts.signal));
     }
   }
+
+  opts.signal?.throwIfAborted();
 
   return {
     ok: true,

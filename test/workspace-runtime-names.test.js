@@ -4,7 +4,11 @@ import { once } from 'node:events';
 import test from 'node:test';
 
 import workspaceRuntime from '../src/sandbox/workspaceRuntime.js';
-import { _ownedResourceIsOrphan, admitWorkspaceRequest } from '../src/sandbox/workspaceRuntime.js';
+import {
+  _ownedResourceIsOrphan,
+  _replacePoolGeneration,
+  admitWorkspaceRequest
+} from '../src/sandbox/workspaceRuntime.js';
 import constants from '../src/config/constants.js';
 import { workspaceIdToSlug } from '../src/utils/workspaceId.js';
 
@@ -65,4 +69,26 @@ test('the sandbox ceiling only ever refuses a container that does not exist yet'
 
   // Identity cannot bypass the total host ceiling.
   assert.equal(admitWorkspaceRequest({ pooled: false, activeCount: cap, isAdmin: true }), false);
+});
+
+test('only one caller can replace a stale pool generation', async () => {
+  const pool = new Map();
+  const stale = Promise.resolve({ id: 'stale' });
+  pool.set('workspace', stale);
+  let boots = 0;
+  const first = _replacePoolGeneration(pool, 'workspace', stale, async () => ({ id: ++boots }));
+  const second = _replacePoolGeneration(pool, 'workspace', stale, async () => ({ id: ++boots }));
+  assert.equal(second, first);
+  assert.deepEqual(await first, { id: 1 });
+  assert.equal(boots, 1);
+});
+
+test('a failed pool replacement preserves the resource handle for later cleanup', async () => {
+  const stale = Promise.resolve({ id: 'stale' });
+  const pool = new Map([['workspace', stale]]);
+  const replacement = _replacePoolGeneration(pool, 'workspace', stale, async () => {
+    throw new Error('Docker cleanup failed');
+  });
+  await assert.rejects(replacement, /Docker cleanup failed/);
+  assert.equal(pool.get('workspace'), stale);
 });

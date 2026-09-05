@@ -26,7 +26,7 @@ test('readTasks returns a successful empty machine-readable result', async () =>
   assert.deepEqual(result.results, []);
   assert.deepEqual(result.ids, []);
   assert.deepEqual(result.errors, []);
-  assert.match(result.message, /No personal reminders/);
+  assert.match(result.message, /No reminders/);
 });
 
 test('readTasks exposes personal and group reminders as stable records', async (t) => {
@@ -91,4 +91,28 @@ test('readTasks fails closed with empty arrays for a corrupt task shape', async 
   assert.deepEqual(result.ids, []);
   assert.equal(result.errors.length, 1);
   assert.match(result.error, /invalid tasks field/);
+});
+
+test('readTasks pages the complete records and returns a compact summary', async (t) => {
+  const id = fileId('test_read_page');
+  writeTasks(t, id, [1, 2, 3].map(n => ({
+    id: `task-${n}`,
+    content: `Task ${n}`,
+    scheduledAt: '2026-12-01T10:00:00+01:00'
+  })));
+
+  const first = await readTasks(id, null, false, {}, { limit: 2 });
+  assert.equal(first.count, 2);
+  assert.equal(first.totalCount, 3);
+  assert.deepEqual(first.ids, ['task-1', 'task-2']);
+  assert.equal(first.nextCursor, '2');
+  assert.match(first.summary, /Showing reminders 1-2 of 3/);
+
+  const second = await readTasks(id, null, false, {}, { limit: 2, cursor: first.nextCursor });
+  assert.deepEqual(second.ids, ['task-3']);
+  assert.equal(second.nextCursor, undefined);
+
+  const exhausted = await readTasks(id, null, false, {}, { limit: 2, cursor: 3 });
+  assert.equal(exhausted.count, 0);
+  assert.equal(exhausted.summary, 'No more reminders; 3 total.');
 });

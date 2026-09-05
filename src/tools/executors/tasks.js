@@ -38,7 +38,7 @@ async function _readTasks({ args, userCtx }) {
     isAdmin: userCtx.isAdmin,
     isActiveMember: userCtx.isActiveMember,
     waJid: userCtx.waJid
-  });
+  }, { limit: args.limit, cursor: args.cursor });
 }
 
 async function _removeTasks({ args, userCtx }) {

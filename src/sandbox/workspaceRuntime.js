@@ -60,6 +60,7 @@ const WORKSPACE_QUOTA_BYTES = constants.WORKSPACE_QUOTA_MB * 1024 * 1024;
  * there is a single place where "is it ready" is answered.
  */
 const _pool = new Map();
+let _shuttingDown = false;
 
 /** Error code a caller matches to tell "no slot free" from a real failure. */
 const SANDBOX_BUSY_CODE = 'ESANDBOXBUSY';
@@ -210,7 +211,7 @@ async function _spawnContainer(workspaceId, { mountSkills = false } = {}) {
     Cmd: [
       'python',
       '/opt/sandbox/quota_guard.py',
-      `/workspace=${WORKSPACE_QUOTA_BYTES}`
+      `/workspace=${WORKSPACE_QUOTA_BYTES}:${constants.WORKSPACE_MAX_ENTRIES}`
     ],
     User: sandboxUserString(),
     Env: containerEnv(),
@@ -284,6 +285,33 @@ async function _isAlive(entry) {
   catch { return false; }
 }
 
+/** Reserve a pool generation synchronously before its asynchronous work starts. */
+function _replacePoolGeneration(pool, key, expected, factory) {
+  if (pool.get(key) !== expected) return pool.get(key) || null;
+  const generation = Promise.resolve().then(factory).catch(error => {
+    if (pool.get(key) === generation) {
+      if (expected) pool.set(key, expected);
+      else pool.delete(key);
+    }
+    throw error;
+  });
+  pool.set(key, generation);
+  return generation;
+}
+
+function _bootGeneration(workspaceId, opts, staleEntry = null) {
+  return async () => {
+    if (staleEntry) {
+      log.warn(`Stale workspace container for ${workspaceId}, recreating`);
+      await _killEntry(staleEntry);
+    }
+    const entry = await _spawnContainer(workspaceId, opts);
+    entry.lastUsedAt = Date.now();
+    log.info(`workspace container ready workspace=${workspaceId} container=${entry.containerName}`);
+    return entry;
+  };
+}
+
 /**
  * Public API: get (or spawn) the running container for this workspace.
  *
@@ -300,67 +328,102 @@ async function _isAlive(entry) {
  */
 async function getOrCreate(workspaceId, opts = {}) {
   if (!workspaceId) throw new Error('workspaceId is required');
+  if (_shuttingDown) throw new Error('Sandbox runtime is shutting down.');
 
-  const pending = _pool.get(workspaceId);
-  if (!admitWorkspaceRequest({
-    pooled: Boolean(pending),
-    activeCount: _pool.size
-  })) {
-    log.warn(
-      `sandbox at capacity (${_pool.size}/${constants.SANDBOX_MAX_CONTAINERS}): `
-      + `no new container for ${workspaceId}`
-    );
-    const err = new Error('Every sandbox slot is in use.');
-    err.code = SANDBOX_BUSY_CODE;
-    throw err;
-  }
-  if (pending) {
-    let entry = null;
-    try { entry = await pending; }
-    catch { /* that boot failed; fall through and start a new one */ }
+  while (true) {
+    let pending = _pool.get(workspaceId);
+    if (!pending) {
+      if (!admitWorkspaceRequest({ pooled: false, activeCount: _pool.size })) {
+        log.warn(
+          `sandbox at capacity (${_pool.size}/${constants.SANDBOX_MAX_CONTAINERS}): `
+          + `no new container for ${workspaceId}`
+        );
+        const err = new Error('Every sandbox slot is in use.');
+        err.code = SANDBOX_BUSY_CODE;
+        throw err;
+      }
+      pending = _replacePoolGeneration(
+        _pool,
+        workspaceId,
+        undefined,
+        _bootGeneration(workspaceId, opts)
+      );
+      if (!pending) continue;
+    }
+
+    let entry;
+    try {
+      entry = await pending;
+    } catch (err) {
+      if (_pool.get(workspaceId) === pending) _pool.delete(workspaceId);
+      throw err;
+    }
+    if (_pool.get(workspaceId) !== pending) continue;
     if (entry && await _isAlive(entry)) {
+      if (_pool.get(workspaceId) !== pending) continue;
       entry.lastUsedAt = Date.now();
       return entry;
     }
-    // Drop it only if nobody replaced it while we were awaiting.
-    if (_pool.get(workspaceId) === pending) _pool.delete(workspaceId);
-    if (entry) {
-      log.warn(`Stale workspace container for ${workspaceId}, recreating`);
-      await _killEntry(entry).catch(err => log.warn(`stale purge: ${err.message}`));
+
+    const replacement = _replacePoolGeneration(
+      _pool,
+      workspaceId,
+      pending,
+      _bootGeneration(workspaceId, opts, entry)
+    );
+    if (!replacement || replacement === pending) continue;
+    try {
+      return await replacement;
+    } catch (err) {
+      if (_pool.get(workspaceId) === replacement) _pool.delete(workspaceId);
+      throw err;
     }
-  }
-
-  const boot = _spawnContainer(workspaceId, opts).then((entry) => {
-    entry.lastUsedAt = Date.now();
-    log.info(`workspace container ready workspace=${workspaceId} container=${entry.containerName}`);
-    return entry;
-  });
-  _pool.set(workspaceId, boot);
-
-  try {
-    return await boot;
-  } catch (err) {
-    if (_pool.get(workspaceId) === boot) _pool.delete(workspaceId);
-    throw err;
   }
 }
 
-function _capBufferChunks(chunks, maxBytes = constants.WORKSPACE_OUTPUT_MAX_BYTES) {
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  if (total <= maxBytes) return { text: Buffer.concat(chunks).toString('utf-8'), truncated: false };
-  // Keep the tail (most relevant for errors / final output).
-  const out = Buffer.alloc(maxBytes);
-  let remaining = maxBytes;
-  let offset = maxBytes;
-  for (let i = chunks.length - 1; i >= 0 && remaining > 0; i--) {
-    const chunk = chunks[i];
-    const take = Math.min(remaining, chunk.length);
-    offset -= take;
-    chunk.copy(out, offset, chunk.length - take);
-    remaining -= take;
+class SharedOutputTail {
+  constructor(maxBytes = constants.WORKSPACE_OUTPUT_MAX_BYTES) {
+    this.maxBytes = Math.max(1, Math.floor(maxBytes));
+    this.segments = [];
+    this.retainedBytes = 0;
+    this.droppedBytes = 0;
   }
-  return { text: out.toString('utf-8'), truncated: true };
+
+  append(streamName, rawChunk) {
+    const chunk = Buffer.from(rawChunk);
+    if (chunk.length >= this.maxBytes) {
+      this.droppedBytes += this.retainedBytes + chunk.length - this.maxBytes;
+      this.segments = [{ streamName, chunk: chunk.subarray(chunk.length - this.maxBytes) }];
+      this.retainedBytes = this.maxBytes;
+      return;
+    }
+    this.segments.push({ streamName, chunk });
+    this.retainedBytes += chunk.length;
+    while (this.retainedBytes > this.maxBytes && this.segments.length > 0) {
+      const overflow = this.retainedBytes - this.maxBytes;
+      const first = this.segments[0];
+      if (first.chunk.length <= overflow) {
+        this.segments.shift();
+        this.retainedBytes -= first.chunk.length;
+        this.droppedBytes += first.chunk.length;
+      } else {
+        first.chunk = first.chunk.subarray(overflow);
+        this.retainedBytes -= overflow;
+        this.droppedBytes += overflow;
+      }
+    }
+  }
+
+  result() {
+    const chunks = { stdout: [], stderr: [] };
+    for (const segment of this.segments) chunks[segment.streamName].push(segment.chunk);
+    return {
+      stdout: Buffer.concat(chunks.stdout).toString('utf-8'),
+      stderr: Buffer.concat(chunks.stderr).toString('utf-8'),
+      truncated: this.droppedBytes > 0,
+      droppedBytes: this.droppedBytes
+    };
+  }
 }
 
 /**
@@ -418,7 +481,7 @@ function buildExecSpec({ command, timeoutMs } = {}) {
  * @param {Buffer|string} [opts.input] - written to the command's stdin
  * @param {number} [opts.timeoutMs]
  * @param {string} [opts.workingDir] - defaults to /workspace
- * @returns {Promise<{rc:number,stdout:string,stderr:string,truncated:boolean,timedOut:boolean,
+ * @returns {Promise<{rc:number,stdout:string,stderr:string,truncated:boolean,droppedBytes:number,timedOut:boolean,
  *   killCause:'oom'|'container-stopped'|null,durationMs:number}>}
  */
 async function execInWorkspace(workspaceId, opts = {}) {
@@ -445,12 +508,11 @@ async function execInWorkspace(workspaceId, opts = {}) {
     execStream.end();
   }
 
-  const stdoutBuf = [];
-  const stderrBuf = [];
+  const output = new SharedOutputTail();
   const stdoutStream = new stream.PassThrough();
   const stderrStream = new stream.PassThrough();
-  stdoutStream.on('data', (chunk) => stdoutBuf.push(chunk));
-  stderrStream.on('data', (chunk) => stderrBuf.push(chunk));
+  stdoutStream.on('data', (chunk) => output.append('stdout', chunk));
+  stderrStream.on('data', (chunk) => output.append('stderr', chunk));
   entry.container.modem.demuxStream(execStream, stdoutStream, stderrStream);
 
   let timedOut = false;
@@ -503,53 +565,94 @@ async function execInWorkspace(workspaceId, opts = {}) {
     );
   }
 
-  const stdout = _capBufferChunks(stdoutBuf);
-  const stderr = _capBufferChunks(stderrBuf);
+  const captured = output.result();
   const durationMs = Date.now() - startedAt;
   ensureWorkspaceWritable(workspaceId);
   entry.lastUsedAt = Date.now();
   return {
     rc,
-    stdout: stdout.text,
-    stderr: stderr.text,
-    truncated: stdout.truncated || stderr.truncated,
+    stdout: captured.stdout,
+    stderr: captured.stderr,
+    truncated: captured.truncated,
+    droppedBytes: captured.droppedBytes,
     timedOut,
     killCause,
     durationMs
   };
 }
 
+function _resourceAlreadyAbsent(err) {
+  const status = Number(err?.statusCode || err?.status);
+  return status === 304
+    || status === 404
+    || /(?:already stopped|not found|no such|not connected)/i.test(String(err?.message || ''));
+}
+
 async function _killEntry(entry) {
   if (!entry) return;
+  const failures = [];
+  const attempt = async (label, operation) => {
+    try { await operation(); }
+    catch (err) {
+      if (!_resourceAlreadyAbsent(err)) failures.push(new Error(`${label}: ${err.message}`, { cause: err }));
+    }
+  };
   if (entry.container) {
-    try { await entry.container.stop({ t: 2 }); } catch { /* already stopped */ }
-    try { await entry.container.remove({ force: true }); } catch { /* already removed */ }
+    await attempt('container stop', () => entry.container.stop({ t: 2 }));
+    await attempt('container removal', () => entry.container.remove({ force: true }));
   }
   if (entry.network) {
-    try {
-      await entry.network.disconnect({ Container: entry.proxyContainer?.id || PROXY_HOSTNAME, Force: true });
-    } catch { /* already disconnected */ }
-    try { await entry.network.remove(); } catch { /* already removed */ }
+    await attempt('proxy disconnect', () => entry.network.disconnect({
+      Container: entry.proxyContainer?.id || PROXY_HOSTNAME,
+      Force: true
+    }));
+    await attempt('network removal', () => entry.network.remove());
+  }
+  if (failures.length > 0) {
+    const error = new AggregateError(failures, 'Could not fully remove the workspace runtime resources.');
+    error.workspaceEntry = entry;
+    throw error;
   }
 }
 
 async function shutdown(workspaceId) {
   const pending = _pool.get(workspaceId);
   if (!pending) return;
-  _pool.delete(workspaceId);
-  let entry = null;
-  // A boot that never succeeded left nothing to tear down.
-  try { entry = await pending; } catch { return; }
-  await _killEntry(entry);
+  const closing = _replacePoolGeneration(_pool, workspaceId, pending, async () => {
+    let entry;
+    try { entry = await pending; }
+    catch { return null; }
+    await _killEntry(entry);
+    return null;
+  });
+  if (!closing) return;
+  try {
+    await closing;
+  } catch (err) {
+    if (_pool.get(workspaceId) === closing && err?.workspaceEntry) {
+      _pool.set(workspaceId, Promise.resolve(err.workspaceEntry));
+    }
+    throw err;
+  }
+  if (_pool.get(workspaceId) === closing) _pool.delete(workspaceId);
   log.info(`workspace container shut down workspace=${workspaceId}`);
 }
 
 async function shutdownAll() {
-  const pending = [..._pool.values()];
-  _pool.clear();
-  await Promise.all(pending.map(p => p
-    .then(_killEntry)
-    .catch(err => log.warn(`shutdownAll: ${err.message}`))));
+  _shuttingDown = true;
+  const closing = [];
+  for (const [workspaceId, pending] of [..._pool.entries()]) {
+    const generation = _replacePoolGeneration(_pool, workspaceId, pending, async () => {
+      try { await _killEntry(await pending); }
+      catch (err) { log.warn(`shutdownAll: ${err.message}`); }
+      return null;
+    });
+    if (generation) closing.push([workspaceId, generation]);
+  }
+  await Promise.all(closing.map(([, generation]) => generation));
+  for (const [workspaceId, generation] of closing) {
+    if (_pool.get(workspaceId) === generation) _pool.delete(workspaceId);
+  }
 }
 
 /**
@@ -641,9 +744,15 @@ function _reapIdleContainers() {
       if (idleMs <= constants.SANDBOX_IDLE_TTL_MS) return null;
       // Leave it alone if a replacement took its place in the pool.
       if (_pool.get(workspaceId) !== pending) return null;
-      _pool.delete(workspaceId);
       log.info(`reaping idle workspace container ${workspaceId} (idle ${idleMs / 1000 | 0}s)`);
-      return _killEntry(entry);
+      const closing = _replacePoolGeneration(_pool, workspaceId, pending, async () => {
+        await _killEntry(entry);
+        return null;
+      });
+      if (!closing || closing === pending) return null;
+      return closing.finally(() => {
+        if (_pool.get(workspaceId) === closing) _pool.delete(workspaceId);
+      });
     }).catch(err => log.warn(`reap failed for ${workspaceId}: ${err.message}`));
   }
 }
@@ -658,7 +767,13 @@ function init() {
   cleanupOrphanContainers().catch(err => log.error(`Background orphan cleanup failed: ${err.message}`));
 }
 
-export { _ownedResourceIsOrphan, admitWorkspaceRequest, SANDBOX_BUSY_CODE };
+export {
+  SharedOutputTail,
+  _ownedResourceIsOrphan,
+  _replacePoolGeneration,
+  admitWorkspaceRequest,
+  SANDBOX_BUSY_CODE
+};
 
 export default {
   init,

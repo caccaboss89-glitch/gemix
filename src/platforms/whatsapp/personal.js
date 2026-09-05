@@ -169,7 +169,7 @@ async function resolvePersonalChatOtherName(chat) {
  */
 async function _handlePersonalBatch(entries) {
   const first = entries[0];
-  const { chat, stopLockRenew } = first;
+  const { chat, lockLease, stopLockRenew } = first;
   let waPresence = null;
   // One fetchMessages per turn, shared by the history build and the quote
   // window. Closed over rather than stashed on a batch entry, which is not a
@@ -182,6 +182,7 @@ async function _handlePersonalBatch(entries) {
     log,
     lockKey: `wa_personal:${chat.id._serialized}`,
     platform: PLATFORM_WA_PERSONAL,
+    lockLease,
     stopLockRenew,
     entries,
     discardLogLabel: chat.id._serialized,
@@ -194,14 +195,16 @@ async function _handlePersonalBatch(entries) {
     loadHistory: async ({ entries: ents }) => {
       const excludeKeys = new Set(ents.map(e => e.messageKey).filter(Boolean));
       return fetchHistoryWithTimeout(
-        async () => {
+        async (signal) => {
           messageWindow = await fetchWhatsAppMessageWindow(chat);
+          signal.throwIfAborted();
           return buildWhatsAppHistory(
             chat,
             PLATFORM_WA_PERSONAL,
             historyStorageId,
             excludeKeys.size > 0 ? excludeKeys : null,
-            messageWindow
+            messageWindow,
+            { signal }
           );
         },
         log,
@@ -250,7 +253,7 @@ async function _handlePersonalBatch(entries) {
       return { ...response, text };
     },
     deliver: async (_ctx, response) => {
-      await sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_PERSONAL });
+      return sendWhatsAppResponse(chat, response, { platform: PLATFORM_WA_PERSONAL });
     },
     onDeliverError: async (ctx, err) => {
       const adminIsCaller = Boolean(ctx?.userIdentity?.isAdmin);

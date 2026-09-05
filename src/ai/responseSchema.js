@@ -114,16 +114,10 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
   };
 }
 
-/**
- * Extract top-level JSON objects from a string (brace-balanced, string-aware).
- * Used when the model emits multiple JSON objects back-to-back.
- *
- * @param {string} str
- * @returns {object[]}
- */
-function _extractTopLevelJsonObjects(str) {
-  const objects = [];
-  if (typeof str !== 'string' || !str) return objects;
+/** Extract complete top-level objects together with their source boundaries. */
+function _extractTopLevelJsonSegments(str) {
+  const segments = [];
+  if (typeof str !== 'string' || !str) return segments;
 
   let i = 0;
   while (i < str.length) {
@@ -153,7 +147,7 @@ function _extractTopLevelJsonObjects(str) {
           try {
             const obj = JSON.parse(str.slice(start, j + 1));
             if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-              objects.push(obj);
+              segments.push({ object: obj, start, end: j + 1 });
             }
           } catch { /* skip invalid slice */ }
           i = j + 1;
@@ -164,7 +158,7 @@ function _extractTopLevelJsonObjects(str) {
     }
     if (!closed) break;
   }
-  return objects;
+  return segments;
 }
 
 /**
@@ -248,6 +242,8 @@ function parseStructuredReply(raw) {
   if (fence) candidate = fence[1].trim();
 
   let parsed = null;
+  let trailingSalvaged = '';
+  let trailingCandidate = candidate;
   try {
     parsed = JSON.parse(candidate);
   } catch {
@@ -258,17 +254,33 @@ function parseStructuredReply(raw) {
         parsed = JSON.parse(candidate.slice(start, end + 1));
       } catch {
         // e.g. two objects concatenated: `{...}{...}` — take the last reply-like one.
-        const objects = _extractTopLevelJsonObjects(candidate);
-        for (let i = objects.length - 1; i >= 0; i--) {
-          const o = objects[i];
-          if (typeof o.response === 'string') {
-            parsed = o;
-            break;
-          }
+      }
+      const segments = _extractTopLevelJsonSegments(candidate);
+      for (let i = segments.length - 1; i >= 0; i--) {
+        const o = segments[i].object;
+        if (typeof o.response === 'string') {
+          parsed = o;
+          break;
         }
-        if (!parsed && objects.length > 0) parsed = objects[objects.length - 1];
+      }
+      if (!parsed && segments.length > 0) parsed = segments[segments.length - 1].object;
+      if (segments.length > 0) {
+        trailingCandidate = candidate.slice(segments[segments.length - 1].end);
+        trailingSalvaged = _salvageTruncatedResponse(trailingCandidate);
       }
     }
+  }
+
+  // A complete diagnostic/reply object can be followed by a newer reply that
+  // was cut off. Prefer the newer response fragment over the older object.
+  if (trailingSalvaged.trim()) {
+    return {
+      structured: true,
+      text: trailingSalvaged,
+      title: null,
+      attachments: [],
+      voice: _salvageTruncatedVoice(trailingCandidate)
+    };
   }
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

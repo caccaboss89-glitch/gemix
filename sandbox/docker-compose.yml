@@ -27,7 +27,7 @@ services:
     #
     # host.docker.internal is how the container reaches GemiX's notify endpoint
     # on the host; GEMIX_NOTIFY_BIND must name an address the host actually
-    # listens on for that (see SERVER_SETUP.md).
+    # listens on for that (the deployment options are documented in .env.example).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -55,7 +55,7 @@ services:
     container_name: gemix-sandbox-example
     depends_on: [proxy]
     entrypoint: ""
-    command: ["python", "/opt/sandbox/quota_guard.py", "/workspace=524288000"]
+    command: ["python", "/opt/sandbox/quota_guard.py", "/workspace=10737418240:100000"]
     user: "1000:1000"
     environment:
       HTTP_PROXY:  "http://gemix-sandbox-proxy:8080"
@@ -76,8 +76,9 @@ services:
     cpus: 1.0
     # Mount a real pair here in tests, as the manager does per conversation:
     # volumes:
-    #   - /path/to/workspace:/workspace:rw
+    #   - /path/to/build_workspace:/workspace:rw
     #   - /path/to/attachments:/attachments:ro
+    #   - ../skills:/skills:ro
 
 networks:
   # Internal-only network where sandboxes live; no direct internet.

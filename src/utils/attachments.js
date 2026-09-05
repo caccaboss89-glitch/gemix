@@ -110,7 +110,6 @@ function isWhatsAppOversizedAttachment(att) {
  * Failed direct sends still fall back to temp links.
  */
 function shouldWhatsAppUseTempLink(att) {
-  if (att?.sendAudioAsVoice) return false;
   return isWhatsAppOversizedAttachment(att);
 }
 
@@ -123,7 +122,7 @@ function toWhatsAppMediaArgs(att) {
     return null;
   }
   const buf = readAttachmentBuffer(att);
-  if (!buf) return null;
+  if (!buf || buf.length > WA_DIRECT_MAX_BYTES) return null;
   return { mimetype: att.mimetype, base64: buf.toString('base64'), name: att.name };
 }
 

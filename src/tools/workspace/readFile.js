@@ -22,6 +22,8 @@ import { snapshotAgentFile } from '../../sandbox/hostFileGateway.js';
 import { invalidPathError, parseAgentPath } from '../../sandbox/workspacePaths.js';
 import { PARSE_ERROR, parse } from '../../parsers/parserRegistry.js';
 import { inlineImagePartFromBuffer } from './inlineImage.js';
+import { mimeForExtension } from '../../config/mimeExtensions.js';
+import { sniffImageType } from '../../utils/imageType.js';
 
 /** Structured reasons a read can fail, so the model can act on them. */
 const READ_ERROR = PARSE_ERROR;
@@ -34,6 +36,30 @@ function _imageLabel(kind, img, index) {
   if (img.page) return `page ${img.page}`;
   if (img.label) return kind === 'video' ? `frame at ${img.label}` : img.label;
   return `image ${index + 1}`;
+}
+
+function collectInlineImageParts(source, kind, options = {}) {
+  const limit = Number.isFinite(options.limit) ? options.limit : MAX_ATTACHED_IMAGES;
+  const toPart = options.toPart || inlineImagePartFromBuffer;
+  const accepted = [];
+  const notes = [];
+  for (const [index, image] of source.slice(0, limit).entries()) {
+    if (!image.buffer) continue;
+    const mime = sniffImageType(image.buffer)?.mime || image.mime || 'image/png';
+    const part = toPart(image.buffer, mime);
+    const label = _imageLabel(kind, image, index);
+    if (part) accepted.push({ part, label });
+    else if (kind === 'image') {
+      notes.push(`Too large to show inline (cap ${Math.round(constants.MAX_IMAGE_BYTES / (1024 * 1024))} MB). `
+        + 'Resize it with shell first.');
+    } else {
+      notes.push(`Could not attach ${label}.`);
+    }
+  }
+  if (source.length > limit) {
+    notes.push(`${source.length} images available; the first ${limit} are attached.`);
+  }
+  return { accepted, notes };
 }
 
 /**
@@ -112,32 +138,23 @@ async function readFile(args = {}, workspaceId, opts = {}) {
 
   const metadata = { ...fileInfo, ...result.metadata };
   const notes = [...(result.notes || [])];
-  const parts = [];
-
   // The file itself is the image, so it is attached whole rather than as a
   // derived one; everything else attaches what the parser produced.
   const source = result.kind === 'image'
-    ? [{ buffer: sourceImage, mime: null }]
+    ? [{
+      buffer: sourceImage,
+      mime: sniffImageType(sourceImage)?.mime || mimeForExtension(ext, 'image/png')
+    }]
     : (result.images || []);
 
-  for (const [i, img] of source.slice(0, MAX_ATTACHED_IMAGES).entries()) {
-    if (!img.buffer) continue;
-    const part = inlineImagePartFromBuffer(img.buffer, img.mime || 'image/png');
-    if (part) parts.push(part);
-    else if (result.kind === 'image') {
-      notes.push(`Too large to show inline (cap ${Math.round(constants.MAX_IMAGE_BYTES / (1024 * 1024))} MB). `
-        + 'Resize it with shell first.');
-    } else {
-      notes.push(`Could not attach ${_imageLabel(result.kind, img, i)}.`);
-    }
+  const collectedImages = collectInlineImageParts(source, result.kind);
+  const acceptedImages = collectedImages.accepted;
+  notes.push(...collectedImages.notes);
+  if (acceptedImages.length > 0 && result.kind !== 'image') {
+    notes.push(`Attached below, in order: ${acceptedImages.map(image => image.label).join(', ')}.`);
   }
-  if (source.length > MAX_ATTACHED_IMAGES) {
-    notes.push(`${source.length} images available; the first ${MAX_ATTACHED_IMAGES} are attached.`);
-  }
-  if (parts.length > 0 && result.kind !== 'image') {
-    const labels = source.slice(0, parts.length).map((img, i) => _imageLabel(result.kind, img, i));
-    notes.push(`Attached below, in order: ${labels.join(', ')}.`);
-  }
+
+  const parts = acceptedImages.map(image => image.part);
 
   const envelope = {
     success: true,
@@ -160,4 +177,4 @@ function _defaultMessage(result, attached) {
   return attached > 0 ? 'Parsed; images attached below.' : 'Parsed.';
 }
 
-export { readFile, READ_ERROR };
+export { collectInlineImageParts, readFile, READ_ERROR };

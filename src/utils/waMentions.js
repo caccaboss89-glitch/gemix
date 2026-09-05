@@ -9,7 +9,7 @@
 // allowed to send (Meta AI, and on the personal account its own @gemix).
 
 import constants from '../config/constants.js';
-import { getDedicatedClient } from '../platforms/whatsapp/dedicated.js';
+import { getReadyDedicatedClient } from '../platforms/whatsapp/dedicatedClientRegistry.js';
 
 const { META_AI_NUMBER } = constants;
 
@@ -70,7 +70,7 @@ async function resolveMentionsForMessage(msg, isGroup) {
   const unresolvedLids = mentions.filter(c => c?.id?.server === 'lid' && !c.number && !c._resolvedNumber);
   if (unresolvedLids.length > 0) {
     try {
-      const client = getDedicatedClient();
+      const client = getReadyDedicatedClient();
       if (client && typeof client.getContactLidAndPhone === 'function') {
         const mappings = await client.getContactLidAndPhone(unresolvedLids.map(c => c.id._serialized));
         const byLid = new Map();
@@ -123,7 +123,7 @@ async function resolveLidTagsInBody(body, knownPhones, lidCache) {
 
   if (toResolve.length > 0) {
     try {
-      const client = getDedicatedClient();
+      const client = getReadyDedicatedClient();
       if (client && typeof client.getContactLidAndPhone === 'function') {
         const mappings = await client.getContactLidAndPhone(toResolve.map(d => `${d}@lid`));
         const byLidUser = new Map();

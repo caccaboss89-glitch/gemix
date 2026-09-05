@@ -44,8 +44,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Resolve the target email.
- * Non-member: blocked. Admin: any address. Active member: another member by name.
- * Otherwise: the caller themselves.
+ * Non-member: blocked. Admin: any address or an active member by name. Active
+ * member: another member by name. The tool always needs an explicit target.
  */
 function _resolveTargetEmail(args, userCtx) {
   if (!userCtx.isActiveMember) {
@@ -68,8 +68,7 @@ function _resolveTargetEmail(args, userCtx) {
     }
     return { email: resolved.member.email, display: resolved.member.name };
   }
-  if (!userCtx.email) return { error: { success: false, error: 'No email address available.' } };
-  return { email: userCtx.email, display: 'yourself' };
+  return { error: { success: false, error: 'Missing email recipient.' } };
 }
 
 /** Recipient record for the sent-message log, enriched with member data when known. */

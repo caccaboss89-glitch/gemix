@@ -14,9 +14,12 @@ import {
 
 function createMemoizedFetchBuffer(fetchOnce) {
   let promise = null;
-  return async () => {
-    if (!promise) promise = fetchOnce();
-    return promise;
+  return async (signal = null) => {
+    signal?.throwIfAborted();
+    if (!promise) promise = fetchOnce(signal);
+    const buffer = await promise;
+    signal?.throwIfAborted();
+    return buffer;
   };
 }
 
@@ -31,6 +34,8 @@ function createMemoizedFetchBuffer(fetchOnce) {
  * @param {number} [options.imagesInlined] - running per-turn inline image count
  */
 async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
+  const { signal = null } = options;
+  signal?.throwIfAborted();
   const mediaType = msg.type;
   const waFilename = msg._data?.filename;
   const mimetypeHint = msg._data?.mimetype || null;
@@ -68,8 +73,9 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
   const duration = Number(msg.duration || msg._data?.duration || 0);
 
   let mimetype = mimetypeHint;
-  const fetchBuffer = createMemoizedFetchBuffer(async () => {
+  const fetchBuffer = createMemoizedFetchBuffer(async (fetchSignal) => {
     const media = await msg.downloadMedia();
+    fetchSignal?.throwIfAborted();
     if (!media) return null;
     if (media.mimetype) mimetype = media.mimetype;
     return Buffer.from(media.data, 'base64');
@@ -77,8 +83,11 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
 
   let syncedPath = null;
   try {
-    syncedPath = await syncFileToHistory(historyStorageId, msgId, fetchBuffer, filename);
-  } catch { /* tag-only */ }
+    syncedPath = await syncFileToHistory(historyStorageId, msgId, fetchBuffer, filename, { signal });
+  } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
+    // Keep a tag even when durable history storage is unavailable.
+  }
 
   const ingress = await ingestAttachment({
     workspaceId: options.workspaceId || null,
@@ -90,7 +99,8 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
     metadataDurationSec: duration,
     inline: options.inline === true,
     imagesInlined: options.imagesInlined || 0,
-    platformAttachmentId: msgId
+    platformAttachmentId: msgId,
+    signal
   });
 
   return {
@@ -109,7 +119,8 @@ async function ingressWaMessageMedia(msg, historyStorageId, options = {}) {
  * Sync + project one Discord attachment (current turn, quote, or history rebuild).
  */
 async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
-  const { metadataDurationSec = 0, inline = false, imagesInlined = 0 } = options;
+  const { metadataDurationSec = 0, inline = false, imagesInlined = 0, signal = null } = options;
+  signal?.throwIfAborted();
 
   if (isDiscordAttachmentOversize(att)) {
     const tag = buildAttachmentTag(att.name, true);
@@ -126,8 +137,11 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
   const fetchBuffer = createDiscordAttachmentBufferFetcher(att);
   let syncedPath = null;
   try {
-    syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, ingressName);
-  } catch { /* tag-only */ }
+    syncedPath = await syncFileToHistory(historyStorageId, att.id, fetchBuffer, ingressName, { signal });
+  } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
+    // Keep a tag even when durable history storage is unavailable.
+  }
 
   const ingress = await ingestAttachment({
     workspaceId: options.workspaceId || null,
@@ -139,7 +153,8 @@ async function ingressDiscordAttachment(att, historyStorageId, options = {}) {
     metadataDurationSec,
     inline,
     imagesInlined,
-    platformAttachmentId: att.id
+    platformAttachmentId: att.id,
+    signal
   });
 
   return {

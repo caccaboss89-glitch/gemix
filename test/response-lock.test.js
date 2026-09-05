@@ -23,10 +23,11 @@ test('an expiry timer alone does not keep a Node process alive', () => {
 test('auto-renew gives up at its ceiling instead of holding a chat for good', async () => {
   const key = 'auto-renew-ceiling';
   const ttl = 60_000;
-  assert.equal(responseLock.tryLock(key, ttl), true);
+  const lease = responseLock.tryLock(key, ttl);
+  assert.ok(lease);
   // A caller that never releases: the stop function is deliberately ignored
   // here, which is the situation the ceiling exists for.
-  const stop = responseLock.startAutoRenew(key, ttl, 5);
+  const stop = responseLock.startAutoRenew(lease, ttl, 5);
 
   const realNow = Date.now;
   // Past the ceiling without touching a real clock. Renewals that still ran
@@ -34,10 +35,25 @@ test('auto-renew gives up at its ceiling instead of holding a chat for good', as
   Date.now = () => realNow.call(Date) + 26 * 60 * 1000;
   try {
     await new Promise((resolve) => setTimeout(resolve, 60));
-    assert.equal(responseLock.tryLock(key, ttl), true);
+    const replacement = responseLock.tryLock(key, ttl);
+    assert.ok(replacement);
+    responseLock.unlock(replacement);
   } finally {
     Date.now = realNow;
     stop();
-    responseLock.unlock(key);
+    responseLock.unlock(lease);
   }
+});
+
+test('an expired owner cannot refresh or unlock its replacement', async () => {
+  const first = responseLock.tryLock('owner-generation', 5);
+  assert.ok(first);
+  await new Promise(resolve => setTimeout(resolve, 15));
+
+  const replacement = responseLock.tryLock('owner-generation', 60_000);
+  assert.ok(replacement);
+  assert.equal(responseLock.refresh(first, 60_000), false);
+  assert.equal(responseLock.unlock(first), false);
+  assert.equal(responseLock.tryLock('owner-generation', 60_000), null);
+  assert.equal(responseLock.unlock(replacement), true);
 });

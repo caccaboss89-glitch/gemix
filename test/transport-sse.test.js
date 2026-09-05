@@ -39,9 +39,10 @@ test('SseDecoder joins multiple data lines and ignores comments and [DONE]', () 
   assert.deepEqual(events, [{ a: 1 }]);
 });
 
-test('SseDecoder drops one malformed event without poisoning the rest', () => {
+test('SseDecoder records one malformed event without poisoning the rest', () => {
   const d = new SseDecoder();
   assert.deepEqual(d.push(enc('data: not json\n\ndata: {"ok":true}\n\n')), [{ ok: true }]);
+  assert.equal(d.malformedEvents, 1);
 });
 
 test('SseDecoder flushes a stream that ends without a blank line', () => {
@@ -104,6 +105,18 @@ test('ResponseAssembler upgrades an added item when its done event arrives', () 
   const out = a.toResponse();
   assert.equal(out.output.length, 1);
   assert.equal(out.output[0].content[0].text, 'ok');
+});
+
+test('ResponseAssembler never exposes an added item before its done event', () => {
+  const a = new ResponseAssembler();
+  a.apply({
+    type: 'response.output_item.added',
+    output_index: 0,
+    item: { id: 'fc1', type: 'function_call', call_id: 'c1', name: 'shell', arguments: '{}' }
+  });
+  assert.equal(a.hasOutputItems, false);
+  assert.equal(a.hasIncompleteOutputItems, true);
+  assert.deepEqual(a.toResponse().output, []);
 });
 
 test('ResponseAssembler records errors, incomplete reasons and the meaningful-event flag', () => {

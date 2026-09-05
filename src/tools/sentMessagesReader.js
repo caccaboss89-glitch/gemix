@@ -18,18 +18,8 @@
 import { resolveActiveMemberByName, findMemberByWa, findMemberByEmail  } from '../config/members.js';
 import { normalizePhoneToJid  } from './whatsappSender.js';
 import constants from '../config/constants.js';
-import { formatTimestamp  } from '../utils/time.js';
-import { readSentRecords, resolveStoredAttachmentPath  } from '../utils/sentMessagesStore.js';
-import { resolveWorkspaceId  } from '../utils/workspaceId.js';
-import { projectFile  } from '../attachments/projection.js';
-import { isInlineableImage  } from '../attachments/ingress.js';
-import { inlineImagePart  } from './workspace/inlineImage.js';
-import { createLogger  } from '../utils/logger.js';
-
-const log = createLogger('SentMessagesReader');
-
-/** Images shown inline in one lookup; the rest still come back as paths. */
-const MAX_RECOVERED_IMAGES = constants.MAX_INLINE_IMAGES_PER_TURN;
+import { readSentRecords } from '../utils/sentMessagesStore.js';
+import { presentSentMessages, projectionStorageName } from './sentMessagesPresentation.js';
 
 function _phoneDigits(value) {
   return String(value || '').split('@')[0].split(':')[0].replace(/\D/g, '');
@@ -95,34 +85,6 @@ function _resolveRecipientFilter(entry, userCtx) {
   const resolved = resolveActiveMemberByName(raw);
   if (!resolved.ok) return { error: resolved.error };
   return _memberFilter(resolved.member);
-}
-
-/**
- * Put a stored attachment back where the model can reach it: a path under
- * `attachments/`, plus an inline copy when it is an image and there is still
- * room in this lookup budget.
- *
- * @returns {{ path: string|null, part?: object }}
- */
-function _recoverAttachment(workspaceId, senderKey, stored, imagesReadCount) {
-  try {
-    const absPath = stored.storedFile
-      ? resolveStoredAttachmentPath(senderKey, stored.storedFile)
-      : null;
-    if (!absPath || !workspaceId) return { path: null };
-
-    const projected = projectFile(workspaceId, absPath, stored.originalName || undefined);
-    if (!projected) return { path: null };
-
-    const part = imagesReadCount < MAX_RECOVERED_IMAGES
-      && isInlineableImage(projected.name, stored.mimetype || '')
-      ? inlineImagePart(projected.abs)
-      : null;
-    return part ? { path: projected.display, part } : { path: projected.display };
-  } catch (err) {
-    log.warn(`Attachment recovery failed for "${stored.originalName}": ${err.message}`);
-    return { path: null };
-  }
 }
 
 /**
@@ -199,89 +161,7 @@ async function readSentMessages(args, userCtx) {
     };
   }
 
-  // Newest first — most useful when confirming a message just sent.
-  const ordered = matched.slice().reverse();
-  const workspaceId = resolveWorkspaceId(userCtx);
-  const groups = new Map();
-  const nativeParts = [];
-  let imagesReadCount = 0;
-  let anyRecovered = false;
-  let anyExpired = false;
-
-  for (const r of ordered) {
-    const rec = r.recipient || {};
-    const key = rec.phone || rec.email || rec.display || 'unknown';
-    if (!groups.has(key)) {
-      groups.set(key, {
-        recipient: rec.display || (rec.phone ? `+${rec.phone}` : rec.email) || 'unknown',
-        phone: rec.phone || null,
-        email: rec.email || null,
-        messages: []
-      });
-    }
-    const group = groups.get(key);
-
-    const msgOut = {
-      channel: r.channel,
-      acceptanceStatus: r.acceptanceStatus ?? 'accepted',
-      toolStatus: r.toolStatus ?? (r.status === 'degraded' ? 'degraded' : 'ok'),
-      // Europe/Rome, DST-aware — same formatting as reminders/history (never UTC).
-      sentAt: formatTimestamp(r.ts)
-    };
-    if (r.channel === 'email') {
-      msgOut.subject = r.subject || '';
-      msgOut.body = r.body || '';
-    } else {
-      msgOut.text = r.text || '';
-    }
-
-    if (Array.isArray(r.attachments) && r.attachments.length > 0) {
-      msgOut.attachments = [];
-      for (const a of r.attachments) {
-        const recovered = _recoverAttachment(workspaceId, senderKey, a, imagesReadCount);
-        if (recovered.path) {
-          if (recovered.part) {
-            nativeParts.push(recovered.part);
-            imagesReadCount += 1;
-          }
-          anyRecovered = true;
-          msgOut.attachments.push({
-            name: a.originalName || 'file',
-            path: recovered.path,
-            deliveryMethod: a.deliveryMethod || 'unknown'
-          });
-        } else {
-          anyExpired = true;
-          msgOut.attachments.push({
-            name: a.originalName || 'file',
-            status: 'expired',
-            deliveryMethod: a.deliveryMethod || 'unknown'
-          });
-        }
-      }
-    }
-
-    group.messages.push(msgOut);
-  }
-
-  let message = `Found ${matched.length} ${channelLabel} outbound message(s) GemiX submitted on your behalf `
-    + '(only your last 10 outgoing messages are kept; acceptanceStatus records service acceptance, while '
-    + 'toolStatus distinguishes complete from degraded attachment submission; neither proves device/inbox '
-    + 'delivery or reading).';
-  if (anyRecovered) {
-    message += ' Their attachments are back under attachments/, so you can open them with read_file;'
-      + ' images are attached below.';
-  }
-  if (anyExpired) {
-    message += ' Some attachments could no longer be retrieved and are marked as expired.';
-  }
-
-  const payload = { success: true, message, recipients: [...groups.values()] };
-
-  if (nativeParts.length > 0) {
-    return [{ type: 'input_text', text: JSON.stringify(payload) }, ...nativeParts];
-  }
-  return payload;
+  return presentSentMessages(matched.slice().reverse(), { senderKey, userCtx, channelLabel });
 }
 
-export { readSentMessages };
+export { readSentMessages, projectionStorageName as _projectionStorageName };

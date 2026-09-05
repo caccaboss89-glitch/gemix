@@ -1,0 +1,3 @@
+const ISSUES = [];
+
+export { ISSUES };

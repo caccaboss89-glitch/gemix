@@ -21,18 +21,48 @@ const MEMBERS_FILE = path.join(DATA_DIR, 'members.json');
 
 const log = createLogger('Members');
 
+function _validateMembers(value) {
+  const errors = [];
+  if (!Array.isArray(value) || value.length === 0) {
+    return { ok: false, errors: ['members.json must contain a non-empty array.'], members: [] };
+  }
+  const members = [];
+  value.forEach((member, index) => {
+    const prefix = `members[${index}]`;
+    const fields = [];
+    if (!member || typeof member !== 'object' || Array.isArray(member)) {
+      errors.push(`${prefix} must be an object.`);
+      return;
+    }
+    if (typeof member.name !== 'string' || !member.name.trim()) fields.push('name must be a non-empty string');
+    if (!Array.isArray(member.nicks) || member.nicks.some(nick => typeof nick !== 'string' || !nick.trim())) {
+      fields.push('nicks must be an array of non-empty strings');
+    }
+    if (typeof member.email !== 'string' || !member.email.trim()) fields.push('email must be a non-empty string');
+    if (typeof member.wa !== 'string' || !member.wa.trim()) fields.push('wa must be a non-empty string');
+    for (const role of ['admin', 'legal']) {
+      if (member[role] !== undefined && typeof member[role] !== 'boolean') {
+        fields.push(`${role} must be boolean when present`);
+      }
+    }
+    if (fields.length > 0) errors.push(`${prefix}: ${fields.join('; ')}.`);
+    else members.push(member);
+  });
+  return { ok: errors.length === 0, errors, members: errors.length === 0 ? members : [] };
+}
+
 function _loadMembers() {
   try {
     if (fs.existsSync(MEMBERS_FILE)) {
       const raw = fs.readFileSync(MEMBERS_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
 
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        log.info(`Loaded ${parsed.length} active member(s) from ${MEMBERS_FILE}`);
-        return parsed;
+      const validation = _validateMembers(parsed);
+      if (validation.ok) {
+        log.info(`Loaded ${validation.members.length} active member(s) from ${MEMBERS_FILE}`);
+        return validation.members;
       }
-
-      log.warn(`Members file at ${MEMBERS_FILE} exists but is empty or invalid. No members loaded.`);
+      log.error(`Members file at ${MEMBERS_FILE} is invalid:\n${validation.errors.join('\n')}`);
       return [];
     }
   } catch (err) {
@@ -225,5 +255,6 @@ export {
   resolveActiveMemberByName,
   isAdmin,
   isLegal,
-  formatRoleLabel
+  formatRoleLabel,
+  _validateMembers
 };

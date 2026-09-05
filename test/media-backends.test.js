@@ -9,7 +9,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test, { after, before, beforeEach } from 'node:test';
-import { CF_ERROR, EXHAUSTED_POOL_ERROR, classifyFailure } from '../src/media/cloudflareClient.js';
+import {
+  CF_ERROR,
+  EXHAUSTED_POOL_ERROR,
+  classifyFailure,
+  exhaustedPoolFailure
+} from '../src/media/cloudflareClient.js';
 import {
   BACKEND,
   FLUX_DEFAULT_SIZE,
@@ -84,14 +89,12 @@ test('a subscription backend is not treated as the whole product line', () => {
   assert.equal(isFeatureAvailable(chatgpt, FEATURE.GENERATE_VIDEO), false);
 });
 
-test('the search and workspace features stay GemiX-owned on every profile', () => {
+test('profiles contain only backend choices consumed by runtime dispatch', () => {
   for (const id of ['xai', 'chatgpt']) {
-    const profile = getProviderProfile(id);
-    assert.equal(backendFor(profile, FEATURE.SEARCH_WEB), 'gemix-web');
-    assert.equal(backendFor(profile, FEATURE.SEARCH_IMAGE), 'gemix-image-search');
-    assert.equal(backendFor(profile, FEATURE.SHELL), 'gemix');
-    assert.equal(backendFor(profile, FEATURE.MUSIC_GENERATION), 'openrouter-lyria');
-    assert.equal(backendFor(profile, FEATURE.TTS), 'gemix-tts');
+    assert.deepEqual(
+      Object.keys(getProviderProfile(id).features).sort(),
+      [FEATURE.GENERATE_IMAGE, FEATURE.GENERATE_VIDEO, FEATURE.STT].sort()
+    );
   }
 });
 
@@ -187,6 +190,17 @@ test('an exhausted pool and a burst limit take the same fallback, worded apart',
   // first is written into the ring, so the wording has to stay distinguishable.
   assert.deepEqual(failurePlan(CF_ERROR.BUDGET), failurePlan(CF_ERROR.RATE_LIMIT));
   assert.match(EXHAUSTED_POOL_ERROR, /00:00 UTC/);
+});
+
+test('an already-empty pool preserves an all-auth failure on later calls', () => {
+  const first = exhaustedPoolFailure([CF_ERROR.AUTH]);
+  assert.equal(first.code, CF_ERROR.AUTH);
+  assert.match(first.error, /credential.*rejected/i);
+  assert.equal(exhaustedPoolFailure([CF_ERROR.BUDGET]).code, CF_ERROR.BUDGET);
+  assert.equal(
+    exhaustedPoolFailure([CF_ERROR.AUTH, CF_ERROR.BUDGET]).code,
+    CF_ERROR.BUDGET
+  );
 });
 
 // -- FLUX sizes ---------------------------------------------------------------

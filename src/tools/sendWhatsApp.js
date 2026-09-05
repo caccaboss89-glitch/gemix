@@ -161,7 +161,13 @@ async function sendWhatsAppTool(args, userCtx, deliveryCtx) {
   if (contacted) return contacted;
 
   const { attachments, missing, missingNote } = resolveOutboundAttachments(args.attachments, userCtx);
-  const text = stripOutgoingDeliveryArtifacts(args.message);
+  const text = stripOutgoingDeliveryArtifacts(args.message).trim();
+  if (!text) {
+    return {
+      success: false,
+      error: 'The WhatsApp message is empty after removing internal delivery markers.'
+    };
+  }
   try {
     await sendWhatsAppDirect(target.jid, text);
     // Reserved as soon as the text is out: a later attachment failure must not

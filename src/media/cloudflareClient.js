@@ -29,6 +29,7 @@
 
 import {
   isCloudflareConfigured,
+  exhaustionReasons,
   markExhausted,
   markWorking,
   usableAccounts
@@ -90,6 +91,20 @@ function _accountIsSpent(code) {
   return code === CF_ERROR.AUTH || code === CF_ERROR.BUDGET;
 }
 
+function exhaustedPoolFailure(reasons, lastFailure = null) {
+  const allInvalid = reasons.length > 0 && reasons.every(reason => reason === CF_ERROR.AUTH);
+  if (allInvalid) {
+    return lastFailure?.code === CF_ERROR.AUTH
+      ? lastFailure
+      : {
+        ok: false,
+        code: CF_ERROR.AUTH,
+        error: 'Every configured Cloudflare Workers AI credential was rejected.'
+      };
+  }
+  return { ok: false, code: CF_ERROR.BUDGET, error: EXHAUSTED_POOL_ERROR };
+}
+
 /**
  * POST to one Workers AI model, moving down the account pool for as long as the
  * accounts themselves are the thing refusing.
@@ -115,16 +130,14 @@ async function callWorkersAi({ model, body, signal, timeoutMs = REQUEST_TIMEOUT_
 
     log.warn(`Workers AI account ${account.fingerprint} is done for the day (${attempt.code}); rotating.`);
     lastFailure = attempt;
-    await markExhausted(account.fingerprint);
+    await markExhausted(account.fingerprint, attempt.code);
   }
 
   // Either the pool was already empty or this call emptied it, and both mean
   // the same thing to the caller: the pool-wide wording is the honest one. A
   // credential Cloudflare would not accept is the exception — that is a
   // deployment fault rather than a spent allowance, so it is passed through.
-  return lastFailure?.code === CF_ERROR.AUTH
-    ? lastFailure
-    : { ok: false, code: CF_ERROR.BUDGET, error: EXHAUSTED_POOL_ERROR };
+  return exhaustedPoolFailure(exhaustionReasons(), lastFailure);
 }
 
 /** One request on one account. */
@@ -170,5 +183,6 @@ export {
   REQUEST_TIMEOUT_MS,
   callWorkersAi,
   classifyFailure,
+  exhaustedPoolFailure,
   isCloudflareConfigured
 };

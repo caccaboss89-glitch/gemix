@@ -103,8 +103,8 @@ function buildShellTool(skills) {
       + `Each container has ${constants.SANDBOX_MEMORY_MB} MB RAM; at most ${constants.SANDBOX_MAX_CONTAINERS} chat containers run at once. A background job outlives the foreground call, `
       + `but the idle reaper stops the whole container after ${idleMinutes} minutes without a container command; workspace files remain. `
       + 'Do not let background jobs edit files that another tool call may change before they finish. '
-      + `Captured stdout/stderr are capped at ${Math.round(constants.WORKSPACE_OUTPUT_MAX_BYTES / 1024)} KB (tail kept); read a larger result from its redirected file with read_file instead. `
-      + 'The result reports exit_code, timed_out, output_truncated, duration_ms, stdout and stderr.',
+      + `Captured stdout and stderr share one ${Math.round(constants.WORKSPACE_OUTPUT_MAX_BYTES / 1024)} KB cap (tail kept); read a larger result from its redirected file with read_file instead. `
+      + 'The result reports exit_code, timed_out, output_truncated, output_dropped_bytes, duration_ms, stdout and stderr.',
     properties: {
       command: {
         type: 'string',

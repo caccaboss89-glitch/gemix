@@ -57,8 +57,16 @@ async function modifyTaskFile(fileId, fn) {
     }
     const result = await fn(data);
     if (result === undefined || result === null) return;
-    if (!result.tasks || result.tasks.length === 0) {
-      try { await fsPromises.unlink(filePath); } catch { }
+    const hasQuarantinedTasks = Array.isArray(result.quarantinedTasks)
+      && result.quarantinedTasks.length > 0;
+    if (!result.tasks || (result.tasks.length === 0 && !hasQuarantinedTasks)) {
+      try {
+        await fsPromises.unlink(filePath);
+      } catch (err) {
+        if (err.code !== 'ENOENT') {
+          throw new Error(`Cannot remove empty task file ${fileId}: ${err.message}`, { cause: err });
+        }
+      }
       return;
     }
     const tempPath = filePath + '.tmp';
@@ -72,4 +80,19 @@ async function modifyTaskFile(fileId, fn) {
   });
 }
 
-export { readTaskFile, modifyTaskFile };
+/** Delete one task file under the same lock used by scheduler/tool mutations. */
+async function deleteTaskFile(fileId) {
+  if (!fileId) return true;
+  return _withLock(fileId, async () => {
+    const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
+    try {
+      await fsPromises.unlink(filePath);
+      return true;
+    } catch (err) {
+      if (err.code === 'ENOENT') return true;
+      throw new Error(`Cannot delete task file ${fileId}: ${err.message}`, { cause: err });
+    }
+  });
+}
+
+export { readTaskFile, modifyTaskFile, deleteTaskFile };

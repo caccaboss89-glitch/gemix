@@ -6,9 +6,9 @@
 // to, and what they do once ready — everything else about staying connected is
 // identical, so it lives here once.
 //
-// Failure policy is deliberate: a failed initialization requests coordinated
-// recovery, while a disconnect is retried in-process (WhatsApp Web drops
-// sessions routinely). Waiting for a QR scan is not a failure. A browser that
+// Initialization failures and disconnects retry with a bounded backoff before
+// coordinated recovery. Waiting for a QR scan is not a readiness failure;
+// an initialization call that never settles still has a hard timeout. A browser that
 // dies under a ready client is neither: it is reported as a lifecycle failure,
 // because nothing else in the stack would ever notice it.
 
@@ -19,11 +19,14 @@ import qrcode from 'qrcode-terminal';
 import constants from '../../config/constants.js';
 import envConfig from '../../config/env.js';
 import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppeteer.js';
+import { withPromiseTimeout } from '../../utils/promiseTimeout.js';
 
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
 const LIVENESS_CHECK_INTERVAL_MS = 60 * 1000;
 const AUTH_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
+const MAX_INITIALIZE_ATTEMPTS = 5;
+const INITIALIZE_CALL_TIMEOUT_MS = AUTH_TIMEOUT_MS + 30_000;
 const PROTOCOL_TIMEOUT_MS = 120_000;
 const shutdownByClient = new WeakMap();
 
@@ -88,6 +91,11 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     qr_timeout: constants.WA_QR_TIMEOUT
   });
 
+  return startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage, onReady, onFatal });
+}
+
+/** Attach the shared lifecycle to an existing client, then initialize it. */
+function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage, onReady, onFatal }) {
   let reconnectAttempts = 0;
   let reconnectTimer = null;
   let initializeInProgress = false;
@@ -96,7 +104,10 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   let fatalReported = false;
   let waitingForQr = false;
   let livenessTimer = null;
+  let watchedBrowser = null;
+  let browserDisconnected = null;
   let livenessCheckInFlight = false;
+  let readyWatchdog = null;
 
   const clearReconnectTimer = () => {
     if (reconnectTimer) {
@@ -106,10 +117,18 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   };
 
   const clearLivenessTimer = () => {
+    if (watchedBrowser && browserDisconnected) watchedBrowser.removeListener('disconnected', browserDisconnected);
+    watchedBrowser = null;
+    browserDisconnected = null;
     if (livenessTimer) {
       clearInterval(livenessTimer);
       livenessTimer = null;
     }
+  };
+
+  const clearReadyWatchdog = () => {
+    if (readyWatchdog) clearTimeout(readyWatchdog);
+    readyWatchdog = null;
   };
 
   /**
@@ -127,10 +146,12 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     // Bound to this browser instance: a reconnect replaces it, and the handler
     // left behind by the previous one must not report a failure for it.
     const browser = client.pupBrowser;
-    browser?.once('disconnected', () => {
+    watchedBrowser = browser;
+    browserDisconnected = () => {
       if (shuttingDown || client.pupBrowser !== browser) return;
       requestFatalRecovery('Chromium disconnected');
-    });
+    };
+    browser?.once('disconnected', browserDisconnected);
 
     livenessTimer = setInterval(async () => {
       if (shuttingDown || fatalReported || livenessCheckInFlight) return;
@@ -140,7 +161,7 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
       }
       livenessCheckInFlight = true;
       try {
-        await client.pupPage.evaluate(() => true);
+        await withPromiseTimeout(client.pupPage.evaluate(() => true), PROTOCOL_TIMEOUT_MS, 'WhatsApp liveness check');
       } catch (err) {
         if (!shuttingDown) requestFatalRecovery('WhatsApp Web page unresponsive', err);
       } finally {
@@ -150,28 +171,33 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     livenessTimer.unref();
   };
 
-  const watchdog = setTimeout(() => {
-    if (!shuttingDown && !_isReady(client)) {
+  const armReadyWatchdog = () => {
+    clearReadyWatchdog();
+    readyWatchdog = setTimeout(() => {
+      readyWatchdog = null;
+      if (shuttingDown || fatalReported) return;
       if (waitingForQr) {
         log.warn(`${clientId} WhatsApp client is waiting for a QR scan; leaving the other platforms online.`);
+        armReadyWatchdog();
         return;
       }
-      requestFatalRecovery('init timeout after 5 minutes');
-    }
-  }, READY_WATCHDOG_MS);
-  watchdog.unref();
+      initializeInProgress = false;
+      scheduleReconnect(new Error('ready event timeout'));
+    }, READY_WATCHDOG_MS);
+    readyWatchdog.unref();
+  };
 
   function requestFatalRecovery(reason, err = null) {
     if (shuttingDown || fatalReported) return;
     fatalReported = true;
-    clearTimeout(watchdog);
+    clearReadyWatchdog();
     clearReconnectTimer();
     clearLivenessTimer();
     const detail = err ? `: ${formatWaError(err)}` : '';
     log.error(`${clientId} WhatsApp lifecycle failure (${reason})${detail}. Requesting clean recovery.`);
 
     if (typeof onFatal === 'function') {
-      Promise.resolve(onFatal(reason, err)).catch((fatalErr) => {
+      Promise.resolve().then(() => onFatal(reason, err)).catch((fatalErr) => {
         log.error(`Fatal restart callback failed: ${formatWaError(fatalErr)}`);
       });
       return;
@@ -189,14 +215,18 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   });
 
   client.on('ready', () => {
-    clearTimeout(watchdog);
+    if (shuttingDown || fatalReported) return;
+    clearReadyWatchdog();
     clearReconnectTimer();
     startLivenessMonitor();
     initializeInProgress = false;
     reconnectAttempts = 0;
     waitingForQr = false;
     log.info('Client ready:', client.info.wid._serialized);
-    if (typeof onReady === 'function') onReady(client);
+    if (typeof onReady === 'function') {
+      Promise.resolve().then(() => onReady(client))
+        .catch(err => requestFatalRecovery('ready callback failed', err));
+    }
   });
 
   client.on('auth_failure', (msg) => {
@@ -209,22 +239,49 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
     log.warn('Disconnected:', reason);
     initializeInProgress = false;
     clearReconnectTimer();
+    clearReadyWatchdog();
     clearLivenessTimer();
+    scheduleReconnect(new Error(String(reason || 'disconnected')));
+  });
+
+  function scheduleReconnect(lastError) {
+    if (shuttingDown || fatalReported || reconnectTimer) return;
+    if (reconnectAttempts >= MAX_INITIALIZE_ATTEMPTS) {
+      requestFatalRecovery(`initialization failed after ${reconnectAttempts} attempts`, lastError);
+      return;
+    }
     reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
-    log.info(`Reconnect attempt ${reconnectAttempts} in ${delay / 1000}s...`);
+    log.info(`Reconnect attempt ${reconnectAttempts}/${MAX_INITIALIZE_ATTEMPTS} in ${delay / 1000}s...`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      if (initializeInProgress) {
-        log.info('Initialize already in progress — skipping stacked reconnect');
-        return;
-      }
-      initializeInProgress = true;
-      Promise.resolve(client.initialize())
-        .catch((err) => log.error(`Reconnect initialize failed: ${err?.message || err}`))
-        .finally(() => { initializeInProgress = false; });
+      void initializeClient();
     }, delay);
-  });
+    reconnectTimer.unref?.();
+  }
+
+  async function initializeClient() {
+    if (shuttingDown || fatalReported || initializeInProgress) return;
+    initializeInProgress = true;
+    waitingForQr = false;
+    armReadyWatchdog();
+    try {
+      await withPromiseTimeout(
+        Promise.resolve().then(() => client.initialize()),
+        INITIALIZE_CALL_TIMEOUT_MS,
+        `${clientId} WhatsApp initialize`
+      );
+    } catch (err) {
+      clearReadyWatchdog();
+      if (err.code === 'ETIMEOUT') {
+        requestFatalRecovery('initialize call timeout', err);
+      } else {
+        scheduleReconnect(err);
+      }
+    } finally {
+      initializeInProgress = false;
+    }
+  }
 
   client.on(messageEvent, async (msg) => {
     try {
@@ -245,18 +302,14 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
   shutdownByClient.set(client, () => {
     if (shutdownPromise) return shutdownPromise;
     shuttingDown = true;
-    clearTimeout(watchdog);
+    clearReadyWatchdog();
     clearReconnectTimer();
     clearLivenessTimer();
     shutdownPromise = Promise.resolve().then(() => client.destroy());
     return shutdownPromise;
   });
 
-  initializeInProgress = true;
-  Promise.resolve()
-    .then(() => client.initialize())
-    .catch((err) => requestFatalRecovery('initialization rejected', err))
-    .finally(() => { initializeInProgress = false; });
+  void initializeClient();
   return client;
 }
 
@@ -270,5 +323,5 @@ async function shutdownWhatsAppClient(client) {
   if (typeof client.destroy === 'function') await client.destroy();
 }
 
-export { createWhatsAppClient, shutdownWhatsAppClient };
+export { createWhatsAppClient, startWhatsAppLifecycle, shutdownWhatsAppClient };
 export { _isReady as isWaClientReady };

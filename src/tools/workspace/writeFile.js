@@ -59,10 +59,13 @@ async function writeFile(args = {}, workspaceId, opts = {}) {
         workspaceId,
         Buffer.byteLength(args.content, 'utf-8'),
         current?.stat?.size || 0,
-        lockedResolved.root
+        lockedResolved.root,
+        current ? 0 : 1
       );
     } catch (err) {
-      if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };
+      if (err.code === 'EQUOTA' || err.code === 'EINVENTORY') {
+        return { success: false, error: err.message, ...quotaResultFields(err) };
+      }
       throw err;
     }
     const committed = await commitWorkspaceText(workspaceId, lockedResolved, args.content, opts);

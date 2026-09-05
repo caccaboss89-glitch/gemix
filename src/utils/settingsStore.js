@@ -183,9 +183,11 @@ function hasCustomSettings(settings, options = {}) {
 
 /**
  * Apply a partial update and stamp `updatedAt` only when an effective value
- * changes. Only the provided keys change, so the tool can touch one preference.
+ * changes. A function updater is evaluated under the per-file lock so callers
+ * can derive a patch from the current settings without losing a concurrent
+ * update. Only the provided keys change, so the tool can touch one preference.
  * @param {string} fileId
- * @param {{ voice?: string, effort?: string, language?: string, memory?: string }} patch
+ * @param {{ voice?: string, effort?: string, language?: string, memory?: string }|Function} patch
  * @returns {Promise<{ success: boolean, changed?: boolean, error?: string, settings?: object }>}
  */
 async function updateSettings(fileId, patch, options = {}) {
@@ -193,10 +195,15 @@ async function updateSettings(fileId, patch, options = {}) {
   return _withLock(fileId, async () => {
     const stored = _readRawUnlocked(fileId) || {};
     const current = readSettings(fileId, options);
-    const changedEntries = Object.entries(patch || {})
+    const requested = typeof patch === 'function' ? await patch(current) : patch;
+    if (requested?.error) return { success: false, error: String(requested.error) };
+    const actualPatch = requested?.patch && typeof requested.patch === 'object'
+      ? requested.patch
+      : requested;
+    const changedEntries = Object.entries(actualPatch || {})
       .filter(([key, value]) => value !== undefined && current[key] !== value);
     if (changedEntries.length === 0) {
-      return { success: true, changed: false, settings: current };
+      return { success: true, changed: false, changedKeys: [], settings: current };
     }
     const next = { ...stored };
     for (const [key, value] of changedEntries) next[key] = value;
@@ -205,7 +212,12 @@ async function updateSettings(fileId, patch, options = {}) {
     next.reviewedAt = next.updatedAt;
     const written = _writeRawUnlocked(fileId, next);
     if (!written.success) return written;
-    return { success: true, changed: true, settings: readSettings(fileId, options) };
+    return {
+      success: true,
+      changed: true,
+      changedKeys: changedEntries.map(([key]) => key),
+      settings: readSettings(fileId, options)
+    };
   });
 }
 
@@ -247,6 +259,19 @@ async function markReviewed(fileId) {
   });
 }
 
+/** Delete one settings file under the same lock used by preference updates. */
+async function deleteSettings(fileId) {
+  if (!fileId) return true;
+  return _withLock(fileId, async () => {
+    try {
+      fs.unlinkSync(_filePath(fileId));
+      return true;
+    } catch (err) {
+      return err.code === 'ENOENT';
+    }
+  });
+}
+
 /**
  * Combine incoming memory text with the stored memory.
  * @param {string|null} existing
@@ -284,5 +309,6 @@ export {
   customizedFields,
   isReviewDue,
   markReviewed,
+  deleteSettings,
   resolveMemoryContent
 };

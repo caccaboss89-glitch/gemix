@@ -201,3 +201,13 @@ test('readResponse extracts text, tool calls and replay items', () => {
   assert.equal(read.replayItems.length, 3);
   assert.equal(read.status, 'completed');
 });
+
+test('readResponse does not expose an in-progress function call', () => {
+  const read = readResponse({
+    status: 'incomplete',
+    output: [
+      { type: 'function_call', status: 'in_progress', call_id: 'c1', name: 'shell', arguments: '{}' }
+    ]
+  });
+  assert.deepEqual(read.toolCalls, []);
+});

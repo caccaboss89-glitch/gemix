@@ -13,9 +13,8 @@ const log = createLogger('Presence');
 // We refresh well below that threshold to leave headroom for slow `sendState*`
 // roundtrips (which can take several seconds when the WA Web client is busy).
 const REFRESH_INTERVAL_MS = 10_000;
-// Per-update timeout: if a sendState* call hangs longer than this, abort and
-// let the next tick try again, otherwise the indicator can stall for tens of
-// seconds while the previous update is still pending.
+// Per-update timeout: if a sendState* call hangs longer than this, return to
+// the turn while keeping the in-flight guard until the SDK call settles.
 const UPDATE_TIMEOUT_MS = 4_000;
 
 function _withTimeout(promise, ms, label) {
@@ -32,11 +31,17 @@ function _withTimeout(promise, ms, label) {
  * Required because WhatsApp clears these states automatically after ~25s.
  */
 class WhatsAppPresence {
-  constructor(chat) {
+  constructor(chat, opts = {}) {
     this.chat = chat;
     this.currentState = null; // 'typing' | 'recording' | null
     this.intervalId = null;
     this._isRefreshing = false;
+    this._updateTimeoutMs = Number.isFinite(opts.updateTimeoutMs)
+      ? Math.max(1, opts.updateTimeoutMs)
+      : UPDATE_TIMEOUT_MS;
+    this._refreshIntervalMs = Number.isFinite(opts.refreshIntervalMs)
+      ? Math.max(1, opts.refreshIntervalMs)
+      : REFRESH_INTERVAL_MS;
   }
 
   /**
@@ -65,10 +70,12 @@ class WhatsAppPresence {
 
     // Setup refresh interval (WhatsApp auto-clears after ~25-30s)
     if (this.intervalId) clearInterval(this.intervalId);
-    this.intervalId = setInterval(async () => {
+    this.intervalId = setInterval(() => {
       if (this._isRefreshing) return;
-      await this._update();
-    }, REFRESH_INTERVAL_MS);
+      void this._update().catch(err => {
+        log.warn(`Presence refresh failed: ${err.message}`);
+      });
+    }, this._refreshIntervalMs);
     if (this.intervalId && typeof this.intervalId.unref === 'function') {
       this.intervalId.unref();
     }
@@ -102,7 +109,7 @@ class WhatsAppPresence {
     if (wasActive && this.chat) {
       try {
         if (typeof this.chat.clearState === 'function') {
-          await _withTimeout(this.chat.clearState(), UPDATE_TIMEOUT_MS, 'clearState');
+          await _withTimeout(this.chat.clearState(), this._updateTimeoutMs, 'clearState');
         }
       } catch (err) {
         log.warn(`Failed to clear presence state: ${err.message}`);
@@ -115,6 +122,7 @@ class WhatsAppPresence {
     this._isRefreshing = true;
     let sendPromise = null;
     let label = 'sendState';
+    let releaseGuardInBackground = false;
     try {
       if (this.currentState === 'recording') {
         if (typeof this.chat.sendStateRecording === 'function') {
@@ -133,16 +141,20 @@ class WhatsAppPresence {
       }
       if (sendPromise) {
         try {
-          await _withTimeout(sendPromise, UPDATE_TIMEOUT_MS, label);
+          await _withTimeout(sendPromise, this._updateTimeoutMs, label);
         } catch (err) {
           log.warn(`Failed to send presence state (${this.currentState}): ${err.message}`);
           // Keep the guard until the underlying RPC settles so the next
-          // interval tick does not stack concurrent sendState* calls.
-          await Promise.resolve(sendPromise).catch(() => {});
+          // interval tick does not stack concurrent sendState* calls, but do
+          // not keep the turn itself waiting for an optional indicator.
+          releaseGuardInBackground = true;
+          void Promise.resolve(sendPromise)
+            .catch(() => {})
+            .finally(() => { this._isRefreshing = false; });
         }
       }
     } finally {
-      this._isRefreshing = false;
+      if (!releaseGuardInBackground) this._isRefreshing = false;
     }
   }
 }

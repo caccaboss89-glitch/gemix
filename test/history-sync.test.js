@@ -6,6 +6,7 @@ import test, { after } from 'node:test';
 import constants from '../src/config/constants.js';
 import {
   bindGemixVoiceTranscription,
+  deleteHistoryStore,
   getUserHistoryPaths,
   storeRecentVoiceText,
   storeUserTranscription,
@@ -48,6 +49,26 @@ test('all history metadata writers share one read-modify-write lock', async () =
   assert.equal(meta['file:voice.ogg'].userTranscription.text, 'hello');
 });
 
+test('history deletion waits for an in-flight writer and leaves no recreated store', async () => {
+  const storageId = `history-wipe-lock-${process.pid}`;
+  let releaseFetch;
+  let markFetchStarted;
+  const fetchStarted = new Promise(resolve => { markFetchStarted = resolve; });
+  const fetchGate = new Promise(resolve => { releaseFetch = resolve; });
+  const syncing = syncFileToHistory(storageId, 'late-file', async () => {
+    markFetchStarted();
+    await fetchGate;
+    return Buffer.from('late attachment');
+  }, 'late.txt');
+
+  await fetchStarted;
+  const deleting = deleteHistoryStore(storageId);
+  releaseFetch();
+  assert.equal(await syncing, 'late.txt');
+  assert.equal(await deleting, true);
+  assert.equal(fs.existsSync(path.join(constants.DATA_DIR, 'users', storageId)), false);
+});
+
 test('one cached GemiX reply can be claimed by only one voice file', async () => {
   const timestamp = Date.now();
   storeRecentVoiceText(CHAT_ID, 'the generated reply', timestamp);
@@ -56,4 +77,33 @@ test('one cached GemiX reply can be claimed by only one voice file', async () =>
     bindGemixVoiceTranscription(STORAGE_ID, 'second.ogg', CHAT_ID, timestamp)
   ]);
   assert.deepEqual(results.filter(Boolean), ['the generated reply']);
+});
+
+test('history sync rolls bytes back when metadata cannot be committed', async (t) => {
+  const storageId = `history-meta-failure-${process.pid}`;
+  const { historyDir, metaFile: failingMetaFile } = getUserHistoryPaths(storageId);
+  const originalRename = fs.renameSync;
+  t.after(() => {
+    fs.renameSync = originalRename;
+    fs.rmSync(path.join(constants.DATA_DIR, 'users', storageId), { recursive: true, force: true });
+  });
+  fs.renameSync = (from, to) => {
+    if (to === failingMetaFile) {
+      const error = new Error('metadata disk failure');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalRename(from, to);
+  };
+
+  const result = await syncFileToHistory(
+    storageId,
+    'uncommitted-id',
+    async () => Buffer.from('must roll back'),
+    'orphan.txt'
+  );
+
+  assert.equal(result, null);
+  assert.equal(fs.existsSync(path.join(historyDir, 'orphan.txt')), false);
+  assert.equal(fs.existsSync(failingMetaFile), false);
 });

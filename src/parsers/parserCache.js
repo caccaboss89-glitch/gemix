@@ -28,6 +28,7 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('ParserCache');
 
 const CACHE_DIRNAME = 'parser_cache';
+const PARSER_CACHE_VERSION = 1;
 const TTL_MS = constants.WORKSPACE_TTL_MS;
 const GLOBAL_CAP_BYTES = constants.PARSER_CACHE_CAP_MB * 1024 * 1024;
 
@@ -78,6 +79,29 @@ function _entryPath(workspaceId, key) {
   return dir && /^[0-9a-f]{64}$/.test(key) ? path.join(dir, `${key}.json`) : null;
 }
 
+/** Cached payloads are untrusted disk data and must match the parser contract. */
+function _isCacheEntry(payload) {
+  if (!payload || typeof payload !== 'object' || payload.cacheVersion !== PARSER_CACHE_VERSION) return false;
+  if (payload.ok !== true || typeof payload.kind !== 'string') return false;
+  if (payload.content !== undefined && typeof payload.content !== 'string') return false;
+  if (!Array.isArray(payload.images) || !Array.isArray(payload.notes)) return false;
+  if (payload.metadata !== undefined && (
+    !payload.metadata || typeof payload.metadata !== 'object' || Array.isArray(payload.metadata)
+  )) return false;
+  return payload.images.every((image) => (
+    image && typeof image === 'object' && typeof image.buffer === 'string'
+      && typeof image.mime === 'string'
+      && (image.page === undefined || Number.isInteger(image.page))
+      && (image.label === undefined || typeof image.label === 'string')
+  )) && payload.notes.every(note => typeof note === 'string');
+}
+
+function _invalidate(file) {
+  try { fs.unlinkSync(file); } catch (err) {
+    if (err.code !== 'ENOENT') log.debug(`invalidate ${path.basename(file)}: ${err.message}`);
+  }
+}
+
 /**
  * Read a cached parse, refreshing its retention clock on the way out.
  * @returns {object|null} the stored payload, or null on a miss
@@ -94,7 +118,13 @@ function readCache(workspaceId, key) {
   try { payload = JSON.parse(fs.readFileSync(file, 'utf-8')); }
   catch {
     // A truncated entry is worse than no entry: drop it rather than keep missing.
-    try { fs.unlinkSync(file); } catch { /* already gone */ }
+    _invalidate(file);
+    return null;
+  }
+  if (!_isCacheEntry(payload)) {
+    // A syntactically valid entry from an older schema or a partial write is
+    // still a miss; invalidate it before the parser can touch its buffers.
+    _invalidate(file);
     return null;
   }
   if (Date.now() - stat.mtimeMs > TOUCH_DEBOUNCE_MS) {
@@ -117,7 +147,7 @@ function writeCache(workspaceId, key, payload) {
   const tmp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(payload));
+    fs.writeFileSync(tmp, JSON.stringify({ ...payload, cacheVersion: PARSER_CACHE_VERSION }));
     fs.renameSync(tmp, file);
     return true;
   } catch (err) {
@@ -184,13 +214,19 @@ function sweepParserCache(now = Date.now()) {
 /** Wipe one conversation cache (privacy wipe, workspace expiry). */
 function clearParserCache(workspaceId) {
   const dir = cacheDir(workspaceId);
-  if (!dir) return;
-  try { fs.rmSync(dir, { recursive: true, force: true }); }
-  catch (err) { log.warn(`Cannot clear the parser cache: ${err.message}`); }
+  if (!dir) return false;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch (err) {
+    log.warn(`Cannot clear the parser cache: ${err.message}`);
+    return false;
+  }
 }
 
 export {
   GLOBAL_CAP_BYTES,
+  PARSER_CACHE_VERSION,
   cacheDir,
   cacheKey,
   hashFile,

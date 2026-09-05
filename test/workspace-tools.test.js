@@ -50,6 +50,7 @@ before(() => {
   write('notes.md', '# Title\nalpha beta\ngamma\n');
   write('src/app.py', 'def main():\n    print("alpha")\n');
   write('src/util.py', 'X = 1\n');
+  write('src/a/b.py', 'X = 2\n');
   write('logo.png', TINY_PNG);
   write('report.pdf', Buffer.from('%PDF-1.4 not really a pdf'));
   write('blob.dat', Buffer.from([0x00, 0x01, 0x02, 0x00, 0xff]));
@@ -113,13 +114,22 @@ test('missing sub-directories are not confused with an empty fresh root', () => 
 
 test('search_files matches a basename glob', () => {
   const res = searchFiles({ namePattern: '*.py' }, WORKSPACE_ID);
-  assert.deepEqual(res.matches.map(m => m.path).sort(), ['workspace/src/app.py', 'workspace/src/util.py']);
+  assert.deepEqual(res.matches.map(m => m.path).sort(), [
+    'workspace/src/a/b.py',
+    'workspace/src/app.py',
+    'workspace/src/util.py'
+  ]);
 });
 
 test('search_files matches a path glob when the pattern has a slash', () => {
   const res = searchFiles({ namePattern: 'src/*.py' }, WORKSPACE_ID);
   assert.equal(res.matches.length, 2);
   assert.equal(searchFiles({ namePattern: 'other/*.py' }, WORKSPACE_ID).matches.length, 0);
+});
+
+test('search_files question marks stay within one path segment', () => {
+  const res = searchFiles({ namePattern: 'src/a?b.py' }, WORKSPACE_ID);
+  assert.deepEqual(res.matches, []);
 });
 
 test('search_files finds a line and reports its number', () => {
@@ -144,6 +154,22 @@ test('search_files skips binaries instead of dumping bytes', () => {
 
 test('search_files needs something to search for', () => {
   assert.equal(searchFiles({}, WORKSPACE_ID).success, false);
+});
+
+test('the content search scan cap includes binary files opened and skipped', () => {
+  const dir = path.join(ROOT, 'binary-scan-cap');
+  fs.mkdirSync(dir);
+  try {
+    for (let i = 0; i < 401; i++) fs.writeFileSync(path.join(dir, `${i}.bin`), Buffer.from([0]));
+    const result = searchFiles({ path: 'workspace/binary-scan-cap', contains: 'anything' }, WORKSPACE_ID);
+    assert.equal(result.opened_files, 400);
+    assert.equal(result.scanned_text_files, 0);
+    assert.equal(result.skipped_binary_files, 400);
+    assert.equal(result.truncated, true);
+    assert.ok(result.truncation_reasons.includes('scan_limit'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // -- read_file ----------------------------------------------------------------
@@ -299,12 +325,84 @@ test('write_file failure leaves an existing destination untouched', async () => 
   }
 });
 
+test('write_file rolls back a committed replacement when the post-write quota check fails', async () => {
+  const destination = write('quota-rollback.txt', 'original\n');
+  const realExec = workspaceRuntime.execInWorkspace;
+  let backup = null;
+  workspaceRuntime.execInWorkspace = async (_id, spec) => {
+    const operation = spec.command[3];
+    if (operation === 'workspace_text_write') {
+      backup = fs.readFileSync(destination);
+      fs.writeFileSync(destination, spec.input, 'utf-8');
+      return { rc: 0, stdout: '1', stderr: '', durationMs: 1, timedOut: false, truncated: false };
+    }
+    if (operation === 'workspace_text_rollback') {
+      fs.writeFileSync(destination, backup);
+      return { rc: 0, stdout: '', stderr: '', durationMs: 1, timedOut: false, truncated: false };
+    }
+    throw new Error(`Unexpected operation ${operation}`);
+  };
+  try {
+    const res = await writeFile(
+      { path: 'workspace/quota-rollback.txt', content: 'replacement\n' },
+      WORKSPACE_ID,
+      {
+        checkQuota: () => ({
+          ok: false,
+          inventoryComplete: true,
+          quotaMb: constants.WORKSPACE_QUOTA_MB,
+          message: 'workspace/ is over quota.'
+        })
+      }
+    );
+    assert.equal(res.success, false);
+    assert.equal(res.rolled_back, true);
+    assert.equal(fs.readFileSync(destination, 'utf-8'), 'original\n');
+  } finally {
+    workspaceRuntime.execInWorkspace = realExec;
+  }
+});
+
+test('write_file and edit_file expose an incomplete quota inventory as such', async () => {
+  const originalMaxEntries = constants.WORKSPACE_MAX_ENTRIES;
+  constants.WORKSPACE_MAX_ENTRIES = 1;
+  try {
+    for (const listing of [listFiles({ recursive: true }, WORKSPACE_ID), searchFiles({ namePattern: '*' }, WORKSPACE_ID)]) {
+      assert.equal(listing.status, 'degraded');
+      assert.equal(listing.inventory_complete, false);
+      assert.equal(listing.truncated, true);
+    }
+    assert.equal(checkRootQuota(WORKSPACE_ID).inventoryComplete, false);
+    const written = await writeFile(
+      { path: 'workspace/inventory-not-written.txt', content: 'blocked' },
+      WORKSPACE_ID
+    );
+    assert.equal(written.success, false);
+    assert.equal(written.inventory_incomplete, true);
+    assert.equal(written.quota_exceeded, undefined);
+    assert.equal(fs.existsSync(path.join(ROOT, 'inventory-not-written.txt')), false);
+
+    const edited = await editFile({
+      path: 'workspace/notes.md',
+      oldText: 'alpha beta',
+      newText: 'must not be written'
+    }, WORKSPACE_ID);
+    assert.equal(edited.success, false);
+    assert.equal(edited.inventory_incomplete, true);
+    assert.equal(edited.quota_exceeded, undefined);
+    assert.match(fs.readFileSync(path.join(ROOT, 'notes.md'), 'utf8'), /alpha beta/);
+  } finally {
+    constants.WORKSPACE_MAX_ENTRIES = originalMaxEntries;
+  }
+});
+
 test('the production atomic writer runs end-to-end without deleting unrelated files', {
   skip: process.platform !== 'linux'
 }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-atomic-'));
   const destination = path.join(root, 'nested', 'result.txt');
   const unrelated = path.join(root, 'nested', '.gemix-write.user-file');
+  const backup = path.join(root, '.private-rollback');
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.writeFileSync(destination, 'old content', 'utf-8');
   fs.chmodSync(destination, 0o640);
@@ -315,7 +413,8 @@ test('the production atomic writer runs end-to-end without deleting unrelated fi
       ATOMIC_WRITE_SCRIPT,
       'workspace_text_write_test',
       destination,
-      root
+      root,
+      backup
     ], { input: 'new complete content\n', encoding: 'utf-8' });
     assert.equal(run.status, 0, run.stderr || run.stdout);
     assert.equal(fs.readFileSync(destination, 'utf-8'), 'new complete content\n');
@@ -331,6 +430,7 @@ test('the production atomic writer rejects a symlink parent', {
 }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-atomic-root-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-atomic-outside-'));
+  const backup = path.join(root, '.private-rollback');
   fs.symlinkSync(outside, path.join(root, 'escape'), 'dir');
   try {
     const run = spawnSync('/bin/bash', [
@@ -338,7 +438,8 @@ test('the production atomic writer rejects a symlink parent', {
       ATOMIC_WRITE_SCRIPT,
       'workspace_text_write_test',
       path.join(root, 'escape', 'result.txt'),
-      root
+      root,
+      backup
     ], { input: 'must not escape', encoding: 'utf-8' });
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /symbolic-link parent refused|outside the workspace/);
@@ -580,6 +681,25 @@ test('descriptor-safe listing skips symlinks so a planted link cannot widen it',
     assert.equal(listing.files.some(f => f.relPath.startsWith('escape/')), false);
   } finally {
     fs.unlinkSync(linkPath);
+  }
+});
+
+test('directory inventory shares one return budget and reports a bounded scan as incomplete', () => {
+  const dir = path.join(ROOT, 'inventory-limit');
+  fs.mkdirSync(path.join(dir, 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
+  fs.writeFileSync(path.join(dir, 'b.txt'), 'b');
+  try {
+    const listing = listAgentDirectory(WORKSPACE_ID, 'workspace/inventory-limit', {
+      limit: 2,
+      maxEntries: 2
+    });
+    assert.ok(listing.files.length + listing.dirs.length <= 2);
+    assert.equal(listing.complete, false);
+    assert.equal(listing.more, true);
+    assert.equal(listing.scannedEntries, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

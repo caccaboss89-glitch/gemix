@@ -346,12 +346,16 @@ async function bindGemixVoiceTranscription(userId, syncedPath, chatId, msgTimest
  * @param {string} uniqueId - A unique ID for the attachment (e.g., Discord attachment ID or WA message ID)
  * @param {function} fetchBufferFn - Async function returning the file Buffer (called only if needed)
  * @param {string} originalName - Original file name
+ * @param {{signal?: AbortSignal}} [options]
  * @returns {Promise<string>} The relative filename like 'filename.ext'
  */
-async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) {
+async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName, options = {}) {
   if (!userId || !uniqueId) return null;
+  const signal = options.signal || null;
+  signal?.throwIfAborted();
 
   return _withSyncLock(userId, async () => {
+    signal?.throwIfAborted();
     const { historyDir, metaFile } = getUserHistoryPaths(userId);
     ensureDir(historyDir);
 
@@ -377,13 +381,14 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
       }
       // Stale entry: empty/unreadable file above, or missing from disk entirely.
       delete meta[uniqueId];
-      _saveMeta(metaFile, meta, userId);
+      if (!_saveMeta(metaFile, meta, userId)) return null;
     }
 
     // We need the buffer now
     let buffer;
     try {
-      buffer = await fetchBufferFn();
+      buffer = await fetchBufferFn(signal);
+      signal?.throwIfAborted();
       if (!buffer) return null;
     } catch (err) {
       log.error(`Failed to fetch buffer for ${originalName}: ${err.message}`);
@@ -410,16 +415,56 @@ async function syncFileToHistory(userId, uniqueId, fetchBufferFn, originalName) 
       }
     }
 
-    // Write file and update meta
+    // Publish bytes and metadata as one application transaction. A metadata
+    // failure rolls the new file back so callers never receive an unindexed
+    // filename that cannot be recovered by attachment ID.
     const filePath = path.join(historyDir, finalName);
+    let wroteFile = false;
     try {
+      signal?.throwIfAborted();
       fs.writeFileSync(filePath, buffer);
+      wroteFile = true;
+      signal?.throwIfAborted();
       meta[uniqueId] = { filename: finalName };
-      _saveMeta(metaFile, meta, userId);
+      if (!_saveMeta(metaFile, meta, userId)) {
+        delete meta[uniqueId];
+        try { fs.unlinkSync(filePath); } catch (rollbackErr) {
+          log.warn(`Failed to roll back unindexed history file ${finalName}: ${rollbackErr.message}`);
+        }
+        return null;
+      }
       return finalName;
     } catch (err) {
+      delete meta[uniqueId];
+      if (wroteFile) {
+        try { fs.unlinkSync(filePath); } catch (rollbackErr) {
+          log.warn(`Failed to roll back history file ${finalName}: ${rollbackErr.message}`);
+        }
+      }
       log.error(`Failed to save history file for user ${userId}: ${err.message}`);
       return null;
+    }
+  });
+}
+
+/**
+ * Remove one conversation's complete durable history while holding the same
+ * lock used by attachment and transcription writers.
+ *
+ * @param {string} userId
+ * @returns {Promise<boolean>} whether the store is absent after the operation
+ */
+async function deleteHistoryStore(userId) {
+  if (!userId) return true;
+  return _withSyncLock(userId, async () => {
+    const { historyDir } = getUserHistoryPaths(userId);
+    const userRoot = path.dirname(historyDir);
+    try {
+      fs.rmSync(userRoot, { recursive: true, force: true });
+      return !fs.existsSync(userRoot);
+    } catch (err) {
+      log.warn(`Failed to delete history store for ${userId}: ${err.message}`);
+      return false;
     }
   });
 }
@@ -520,6 +565,7 @@ async function sweepAllHistoryStores(now = Date.now()) {
 export {
   getUserHistoryPaths,
   syncFileToHistory,
+  deleteHistoryStore,
   bindGemixVoiceTranscription,
   getStoredHistoryVoiceTranscription,
   getStoredUserTranscription,

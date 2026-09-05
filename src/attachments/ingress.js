@@ -25,7 +25,13 @@
 import fs from 'fs';
 import path from 'path';
 import constants from '../config/constants.js';
-import { mimeBase } from '../config/mimeExtensions.js';
+import {
+  mediaFamilyFor,
+  IMAGE_EXTS,
+  AUDIO_EXTS,
+  VIDEO_EXTS,
+  INLINE_IMAGE_EXTS
+} from '../config/mediaTypes.js';
 import { isNonReadableExt } from '../config/nonReadableExts.js';
 import { syncFileToHistory, getUserHistoryPaths } from '../utils/historySync.js';
 import {
@@ -35,14 +41,11 @@ import {
   isVideoOverDurationLimit,
   resolveMediaDurationSec
 } from '../utils/mediaIngressLimits.js';
-import { INLINE_IMAGE_EXTS, inlineImagePart } from '../tools/workspace/inlineImage.js';
+import { inlineImagePart } from '../tools/workspace/inlineImage.js';
 import { attachmentDisplayPath, projectBuffer, projectFile } from './projection.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('AttachmentIngress');
-
-const AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a', '.flac', '.aac']);
-const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi']);
 
 /** What a tag says about a file no parser can open. */
 const UNREADABLE_NOTE = ' (binary — read_file cannot open it; use shell if you need to inspect it)';
@@ -56,16 +59,14 @@ function _extOf(name) {
 
 /** Which duration gate applies, if any. */
 function mediaKindFor(name, contentType = '') {
-  const ext = _extOf(name);
-  const base = mimeBase(contentType);
-  if (AUDIO_EXTS.has(ext) || base.startsWith('audio/')) return 'audio';
-  if (VIDEO_EXTS.has(ext) || base.startsWith('video/')) return 'video';
-  return 'other';
+  return mediaFamilyFor({ name, contentType }) || 'other';
 }
 
 /** True when this is an image the model's vision can read directly. */
 function isInlineableImage(name, contentType = '') {
-  return INLINE_IMAGE_EXTS.has(_extOf(name)) || mimeBase(contentType).startsWith('image/');
+  const ext = _extOf(name);
+  return INLINE_IMAGE_EXTS.has(ext)
+    || (!IMAGE_EXTS.has(ext) && mediaFamilyFor({ name, contentType }) === 'image');
 }
 
 /**
@@ -110,10 +111,12 @@ function _tagResult(name, { expired = false, note = '' } = {}) {
  * @returns {Promise<{ name: string, abs: string }|null>}
  */
 async function _materialize(opts, prefetched = null) {
-  const { workspaceId, historyStorageId, syncedPath, name, fetchBuffer } = opts;
+  const { workspaceId, historyStorageId, syncedPath, name, fetchBuffer, signal = null } = opts;
+  signal?.throwIfAborted();
 
   const historyAbs = syncedPath ? resolveHistoryAbsPath(historyStorageId, syncedPath) : null;
   if (historyAbs) {
+    signal?.throwIfAborted();
     const projected = projectFile(workspaceId, historyAbs, path.basename(syncedPath));
     if (projected) return projected;
   }
@@ -124,23 +127,33 @@ async function _materialize(opts, prefetched = null) {
   let buffer = prefetched;
   if (!buffer) {
     if (typeof fetchBuffer !== 'function') return null;
-    try { buffer = await fetchBuffer(); }
+    try { buffer = await fetchBuffer(signal); }
     catch (err) {
+      if (signal?.aborted) throw signal.reason || err;
       log.debug(`Rehydration of ${name} failed: ${err.message}`);
       return null;
     }
   }
   if (!buffer || !buffer.length) return null;
+  signal?.throwIfAborted();
 
   let finalName = syncedPath ? path.basename(syncedPath) : path.basename(name || 'file');
   if (historyStorageId && opts.platformAttachmentId) {
     try {
-      const saved = await syncFileToHistory(historyStorageId, opts.platformAttachmentId, async () => buffer, finalName);
+      const saved = await syncFileToHistory(
+        historyStorageId,
+        opts.platformAttachmentId,
+        async () => buffer,
+        finalName,
+        { signal }
+      );
       if (saved) finalName = path.basename(saved);
     } catch (err) {
+      if (signal?.aborted) throw signal.reason || err;
       log.debug(`History sync failed for ${finalName}: ${err.message}`);
     }
   }
+  signal?.throwIfAborted();
   return projectBuffer(workspaceId, finalName, buffer);
 }
 
@@ -172,6 +185,8 @@ async function ingestAttachment(opts) {
     inline = false,
     imagesInlined = 0
   } = opts;
+  const signal = opts.signal || null;
+  signal?.throwIfAborted();
 
   const displayName = path.basename(syncedPath || name || 'file');
 
@@ -188,7 +203,7 @@ async function ingestAttachment(opts) {
     try {
       const historyAbsPath = syncedPath ? resolveHistoryAbsPath(opts.historyStorageId, syncedPath) : null;
       if (!historyAbsPath && !(Number(metadataDurationSec) > 0) && typeof opts.fetchBuffer === 'function') {
-        probeBuffer = await opts.fetchBuffer();
+        probeBuffer = await opts.fetchBuffer(signal);
       }
       const dur = await resolveMediaDurationSec({
         metadataSec: metadataDurationSec,
@@ -203,7 +218,10 @@ async function ingestAttachment(opts) {
         overDurationLimit = 'video';
         durationNote = formatVideoTooLongNote(dur);
       }
-    } catch { /* no note, and the file is projected as usual */ }
+    } catch (err) {
+      if (signal?.aborted) throw signal.reason || err;
+      // A failed duration probe does not make the underlying file unreadable.
+    }
   }
 
   // Raw binaries reach no parser, but they are still files in this chat: the
@@ -213,6 +231,7 @@ async function ingestAttachment(opts) {
   const note = unreadable ? UNREADABLE_NOTE : durationNote;
 
   const materialized = await _materialize(opts, probeBuffer);
+  signal?.throwIfAborted();
   if (!materialized) {
     // The invariant in its explicit form: no live tag without a file.
     return { ..._tagResult(displayName, { expired: true }), syncedPath };

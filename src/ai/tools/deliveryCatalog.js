@@ -23,8 +23,9 @@ function buildWhatsAppTool(isAdmin) {
       phone: {
         type: 'string',
         pattern: E164_PHONE_PATTERN,
-        description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user. Required — external number only.'
-      }
+        description: 'External recipient phone with country code (e.g. +393XXXXXXXXX). Use either phone or name.'
+      },
+      name: { type: 'string', minLength: 1, description: 'Active member name. Use either name or phone.' }
     }
     : { name: { type: 'string', description: 'Recipient active member name (not yourself).' } };
   return makeTool({
@@ -35,10 +36,10 @@ function buildWhatsAppTool(isAdmin) {
       recipient: {
         type: 'object',
         description: isAdmin
-          ? 'Target recipient (phone). Required — external number only; never the current chat.'
+          ? 'Target recipient: exactly one of external phone or active-member name; never the current chat.'
           : 'Target active member. Required — never the current chat.',
         properties: recipientProps,
-        required: isAdmin ? ['phone'] : ['name']
+        required: isAdmin ? [] : ['name']
       },
       attachments: DELIVERY_ATTACHMENTS_PROP
     },
@@ -52,8 +53,9 @@ function buildEmailTool(isAdmin) {
       email: {
         type: 'string',
         pattern: EMAIL_PATTERN,
-        description: 'Recipient email address, from the ActiveMembers roster or given by the user.'
-      }
+        description: 'External recipient email address. Use either email or name.'
+      },
+      name: { type: 'string', minLength: 1, description: 'Active member name. Use either name or email.' }
     }
     : { name: { type: 'string', description: 'Member name (email resolved from name)' } };
   return makeTool({
@@ -72,9 +74,11 @@ function buildEmailTool(isAdmin) {
       },
       recipient: {
         type: 'object',
-        description: isAdmin ? 'Target recipient (email).' : 'Recipient',
+        description: isAdmin
+          ? 'Target recipient: exactly one of external email or active-member name.'
+          : 'Recipient',
         properties: recipientProps,
-        required: isAdmin ? ['email'] : ['name']
+        required: isAdmin ? [] : ['name']
       },
       attachments: DELIVERY_ATTACHMENTS_PROP
     },

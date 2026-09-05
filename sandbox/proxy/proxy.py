@@ -9,7 +9,7 @@ tunnel is involved: the value here is the chokepoint, not the exit IP.
 
 Protocol support:
 - HTTP CONNECT  (HTTPS tunneling) - by far the common case (requests, httpx, yt-dlp).
-- Plain HTTP GET/POST/...           - forwarded verbatim.
+- Plain HTTP GET/POST/...           - bounded Content-Length bodies, rebuilt framing.
 
 Routing:
 - Arbitrary public hosts are reachable, while loopback, private, link-local,
@@ -52,6 +52,28 @@ TUNNEL_TIMEOUT_S: int = int(os.environ.get("TUNNEL_TIMEOUT_S", "120"))
 MAX_UPSTREAM_CONNECT_S: int = int(os.environ.get("UPSTREAM_CONNECT_TIMEOUT_S", "15"))
 CLIENT_REQUEST_TIMEOUT_S = 30
 MAX_HTTP_REQUEST_BODY_BYTES = 8 * 1024 * 1024
+
+# RFC 9110 hop-by-hop fields are meaningful only on the client-to-proxy
+# connection. Connection may nominate additional fields, removed below too.
+_HOP_BY_HOP_HEADERS = frozenset({
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+})
+
+
+def _connection_tokens(value: str) -> set[str]:
+    return {token.strip().lower() for token in value.split(",") if token.strip()}
+
+
+def _unsupported_transfer_encoding(value: str) -> bool:
+    return bool(value.strip()) and value.strip().lower() != "identity"
 
 GEMIX_NOTIFY_URL: str | None = os.environ.get(
     "GEMIX_NOTIFY_URL"
@@ -250,16 +272,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     # -- Plain HTTP forwarding ---------------------------------------------
     def _forward_http(self) -> None:
-        parsed = urlparse(self.path)
-        host_header = urlparse(f"//{self.headers.get('Host', '')}")
-        host = parsed.hostname or host_header.hostname or ""
         try:
+            parsed = urlparse(self.path)
+            host_header = urlparse(f"//{self.headers.get('Host', '')}")
+            host = parsed.hostname or host_header.hostname or ""
             port = parsed.port or host_header.port or 80
         except ValueError:
             self._reject(400, "bad target")
             return
         if not host:
             self._reject(400, "missing host")
+            return
+
+        transfer_encoding = self.headers.get("Transfer-Encoding", "")
+        if _unsupported_transfer_encoding(transfer_encoding):
+            # The proxy reads a bounded Content-Length body only. Rejecting
+            # chunked/other transfer codings prevents forwarding a stale
+            # Transfer-Encoding header with an empty or partially read body.
+            self._reject(501, "Transfer-Encoding is not supported; use Content-Length")
             return
 
         path = parsed.path or "/"
@@ -306,7 +336,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         req_lines = [f"{self.command} {path} HTTP/1.1".encode()]
         # Connection and Host are derived here, never trusted from the client.
-        skip = {"proxy-connection", "connection", "host"}
+        # Connection can nominate arbitrary additional hop-by-hop fields.
+        connection_tokens = _connection_tokens(self.headers.get("Connection", ""))
+        skip = _HOP_BY_HOP_HEADERS | connection_tokens | {"host", "content-length"}
         for k, v in self.headers.items():
             if k.lower() in skip:
                 continue
@@ -315,6 +347,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if port != 80:
             host_value = f"{host_value}:{port}"
         req_lines.append(f"Host: {host_value}".encode())
+        req_lines.append(f"Content-Length: {len(body)}".encode())
         req_lines.append(b"Connection: close")
         req_data = b"\r\n".join(req_lines) + b"\r\n\r\n" + body
 
@@ -327,7 +360,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 host=host,
                 body_bytes=len(body),
             )
-            self._pipe(upstream, self.connection, close_other=True)
+            self._pipe(upstream, self.connection)
         finally:
             try:
                 upstream.close()
@@ -369,10 +402,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
-    def _pipe(
-        self, a: socket.socket, b: socket.socket, close_other: bool = False
-    ) -> None:
-        """Bidirectional byte relay until one side closes or timeout expires."""
+    def _pipe(self, a: socket.socket, b: socket.socket) -> None:
+        """Relay both directions independently until each closes or becomes idle."""
         a.settimeout(TUNNEL_TIMEOUT_S)
         b.settimeout(TUNNEL_TIMEOUT_S)
 

@@ -15,6 +15,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import constants from '../config/constants.js';
 import { sanitizeFilename } from '../utils/text.js';
 import { ROOT, hostRoot, parseAgentPath } from './workspacePaths.js';
@@ -167,49 +168,82 @@ function _openAgentDirectory(workspaceId, raw) {
 function listAgentDirectory(workspaceId, raw, opts = {}) {
   const opened = _openAgentDirectory(workspaceId, raw);
   if (!opened) return null;
-  const limit = Number.isFinite(opts.limit) ? Math.max(1, Math.floor(opts.limit)) : 200;
+  const limit = Number.isFinite(opts.limit) ? Math.max(0, Math.floor(opts.limit)) : 200;
+  const maxEntries = Number.isFinite(opts.maxEntries)
+    ? Math.max(1, Math.floor(opts.maxEntries))
+    : constants.WORKSPACE_MAX_ENTRIES;
   const maxDepth = Number.isFinite(opts.depth) ? Math.max(1, Math.floor(opts.depth)) : Infinity;
   const files = [];
   const dirs = [];
-  let total = 0;
+  const errors = [];
+  let totalFiles = 0;
+  let totalDirs = 0;
   let totalBytes = 0;
+  let scannedEntries = 0;
+  let complete = true;
+  let stopped = false;
+
+  const recordError = (relPath, err) => {
+    complete = false;
+    if (errors.length < 20) {
+      errors.push({ path: relPath || '.', error: err?.code || err?.message || 'unreadable' });
+    }
+  };
+
+  const retain = (collection, value) => {
+    if (files.length + dirs.length < limit) collection.push(value);
+  };
 
   const walk = (fd, openedPath, prefix, depth) => {
+    if (stopped) return;
     const dirPath = process.platform === 'linux' ? `/proc/self/fd/${fd}` : openedPath;
-    let entries;
-    try { entries = fs.readdirSync(dirPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)); }
-    catch { return; }
-    for (const entry of entries) {
-      const childPath = _descriptorChildPath(fd, openedPath, entry.name);
-      let info;
-      try { info = fs.lstatSync(childPath); }
-      catch { continue; }
-      if (info.isSymbolicLink()) continue;
-      const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (info.isDirectory()) {
-        if (depth >= maxDepth) {
-          dirs.push(relPath);
+    let directory;
+    try {
+      directory = fs.opendirSync(dirPath);
+      let entry;
+      while (!stopped && (entry = directory.readSync())) {
+        if (scannedEntries >= maxEntries) {
+          complete = false;
+          stopped = true;
+          break;
+        }
+        scannedEntries++;
+        const childPath = _descriptorChildPath(fd, openedPath, entry.name);
+        let info;
+        try { info = fs.lstatSync(childPath); }
+        catch (err) { recordError(prefix ? `${prefix}/${entry.name}` : entry.name, err); continue; }
+        if (info.isSymbolicLink()) continue;
+        const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (info.isDirectory()) {
+          totalDirs++;
+          retain(dirs, relPath);
+          if (depth >= maxDepth) {
+            continue;
+          }
+          let childFd;
+          try {
+            childFd = fs.openSync(childPath, fs.constants.O_RDONLY | DIRECTORY | NOFOLLOW);
+            if (!fs.fstatSync(childFd).isDirectory()) throw new Error('path is not a directory');
+            const target = _descriptorTarget(childFd, childPath);
+            if (!target || !_isContained(opened.realBase, path.resolve(target))) throw new Error('escaped directory');
+            walk(childFd, childPath, relPath, depth + 1);
+          } catch (err) { recordError(relPath, err); }
+          finally {
+            if (childFd !== undefined) {
+              try { fs.closeSync(childFd); } catch { /* already closed */ }
+            }
+          }
           continue;
         }
-        let childFd;
-        try {
-          childFd = fs.openSync(childPath, fs.constants.O_RDONLY | DIRECTORY | NOFOLLOW);
-          if (!fs.fstatSync(childFd).isDirectory()) throw new Error('path is not a directory');
-          const target = _descriptorTarget(childFd, childPath);
-          if (!target || !_isContained(opened.realBase, path.resolve(target))) throw new Error('escaped directory');
-          walk(childFd, childPath, relPath, depth + 1);
-        } catch { /* raced, linked or unreadable */ }
-        finally {
-          if (childFd !== undefined) {
-            try { fs.closeSync(childFd); } catch { /* already closed */ }
-          }
-        }
-        continue;
+        if (!info.isFile()) continue;
+        totalFiles++;
+        totalBytes += info.size;
+        retain(files, { relPath, size: info.size, mtimeMs: info.mtimeMs });
       }
-      if (!info.isFile()) continue;
-      total++;
-      totalBytes += info.size;
-      if (files.length < limit) files.push({ relPath, size: info.size, mtimeMs: info.mtimeMs });
+    } catch (err) { recordError(prefix, err); }
+    finally {
+      try { directory?.closeSync(); }
+      catch (err) { recordError(prefix, err); }
     }
   };
 
@@ -217,7 +251,20 @@ function listAgentDirectory(workspaceId, raw, opts = {}) {
   finally { try { fs.closeSync(opened.fd); } catch { /* already closed */ } }
   files.sort((a, b) => a.relPath.localeCompare(b.relPath));
   dirs.sort();
-  return { files, dirs, total, totalBytes, more: total > limit };
+  const totalEntries = totalFiles + totalDirs;
+  return {
+    files,
+    dirs,
+    total: totalFiles,
+    totalFiles,
+    totalDirs,
+    totalEntries,
+    totalBytes,
+    scannedEntries,
+    complete,
+    errors,
+    more: !complete || totalEntries > files.length + dirs.length
+  };
 }
 
 /** Copy a validated file into a private temporary path for path-based parsers. */
@@ -259,9 +306,13 @@ function _unlinkIfSame(filePath, identity) {
 
 /** Publish produced bytes under a collision-free root filename without links. */
 function stageUniqueWorkspaceBuffer(workspaceId, desiredName, buffer) {
-  if (!Buffer.isBuffer(buffer)) throw new Error('Produced file must be a Buffer.');
   const root = hostRoot(workspaceId, ROOT.WORKSPACE);
   if (!root) throw new Error('Cannot resolve workspace path.');
+  return _stageUniqueBuffer(root, desiredName, buffer);
+}
+
+function _stageUniqueBuffer(root, desiredName, buffer) {
+  if (!Buffer.isBuffer(buffer)) throw new Error('Produced file must be a Buffer.');
   fs.mkdirSync(root, { recursive: true });
   const rootStat = fs.lstatSync(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('Workspace root is not a real directory.');
@@ -299,7 +350,8 @@ function stageUniqueWorkspaceBuffer(workspaceId, desiredName, buffer) {
         finalName,
         renamed: finalName !== baseName,
         originalName: baseName,
-        sizeBytes: buffer.length
+        sizeBytes: buffer.length,
+        identity: { dev: identity.dev, ino: identity.ino }
       };
     } catch (err) {
       if (fd !== undefined) {
@@ -313,10 +365,48 @@ function stageUniqueWorkspaceBuffer(workspaceId, desiredName, buffer) {
   throw new Error('Too many attachment-name collisions in workspace.');
 }
 
+/** Remove an interrupted private batch; caller must hold the workspace lock. */
+function clearPendingWorkspaceOutputs(workspaceId) {
+  const root = hostRoot(workspaceId, ROOT.WORKSPACE);
+  if (!root) throw new Error('Cannot resolve workspace path.');
+  const pending = path.join(path.dirname(root), '.tool-output-pending');
+  fs.rmSync(pending, { recursive: true, force: true });
+}
+
+/** Publish a whole media set with one directory rename, including across process interruption. */
+function stageWorkspaceBufferBatch(workspaceId, outputs) {
+  const root = hostRoot(workspaceId, ROOT.WORKSPACE);
+  if (!root) throw new Error('Cannot resolve workspace path.');
+  fs.mkdirSync(root, { recursive: true });
+  clearPendingWorkspaceOutputs(workspaceId);
+  const opened = _openAgentDirectory(workspaceId, 'workspace/');
+  if (!opened) throw new Error('Workspace root is not a real directory.');
+  const pending = path.join(path.dirname(root), '.tool-output-pending');
+  const directoryName = `output-${randomUUID()}`;
+  const destination = _descriptorChildPath(opened.fd, opened.openedPath, directoryName);
+  try {
+    fs.mkdirSync(pending, { mode: 0o700 });
+    const staged = outputs.map(output => _stageUniqueBuffer(pending, output.desiredName, output.source));
+    // The directory becomes readable by the sandbox only when every file is
+    // complete. A crash before rename leaves only private, recoverable staging.
+    fs.chmodSync(pending, 0o755);
+    fs.renameSync(pending, destination);
+    return staged.map(file => ({ ...file, finalName: `${directoryName}/${file.finalName}` }));
+  } catch (error) {
+    try { clearPendingWorkspaceOutputs(workspaceId); }
+    catch (cleanupError) { error.message += ` Private staging cleanup failed: ${cleanupError.message}`; }
+    throw error;
+  } finally {
+    fs.closeSync(opened.fd);
+  }
+}
+
 export {
   readAgentFileBuffer,
   listAgentDirectory,
   snapshotAgentFile,
   statAgentFile,
-  stageUniqueWorkspaceBuffer
+  stageUniqueWorkspaceBuffer,
+  stageWorkspaceBufferBatch,
+  clearPendingWorkspaceOutputs
 };

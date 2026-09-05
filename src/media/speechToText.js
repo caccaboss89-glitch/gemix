@@ -130,8 +130,8 @@ function _result(status, provider, extra = {}) {
  * @returns {Promise<Buffer|null>}
  */
 function _toWav16k(absPath, signal) {
-  return new Promise((resolve) => {
-    if (signal?.aborted) return resolve(null);
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason || new Error('Audio conversion aborted.'));
     const outPath = path.join(tempDirForOwner(null), `stt_${crypto.randomBytes(8).toString('hex')}.wav`);
     let child;
     try {
@@ -146,20 +146,36 @@ function _toWav16k(absPath, signal) {
     // only the kill timer below would ever end it.
     child.stdout.on('data', () => {});
     child.stderr.on('data', () => {});
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, FFMPEG_TIMEOUT_MS);
-    const onAbort = () => { try { child.kill('SIGKILL'); } catch { /* gone */ } };
-    signal?.addEventListener?.('abort', onAbort, { once: true });
-
-    const finish = (buffer) => {
+    let settled = false;
+    const cleanupFile = () => {
+      try { fs.unlinkSync(outPath); } catch { /* never written or already removed */ }
+    };
+    const finish = (error, buffer = null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       signal?.removeEventListener?.('abort', onAbort);
-      try { fs.unlinkSync(outPath); } catch { /* never written */ }
-      resolve(buffer);
+      cleanupFile();
+      if (error) reject(error);
+      else resolve(buffer);
     };
+    const stop = (error = null) => {
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      finish(error, null);
+    };
+    const timer = setTimeout(() => stop(), FFMPEG_TIMEOUT_MS);
+    timer.unref?.();
+    const onAbort = () => stop(signal.reason || new Error('Audio conversion aborted.'));
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+
     child.on('error', () => finish(null));
     child.on('close', (code) => {
+      if (settled) {
+        cleanupFile();
+        return;
+      }
       if (code !== 0) return finish(null);
-      try { finish(fs.readFileSync(outPath)); }
+      try { finish(null, fs.readFileSync(outPath)); }
       catch { finish(null); }
     });
   });

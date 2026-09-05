@@ -4,10 +4,30 @@ import path from 'node:path';
 import test from 'node:test';
 
 import constants from '../src/config/constants.js';
-import { _executeTaskWithRetries, _finalizeDueTasks, setSchedulerWaClient } from '../src/scheduler/engine.js';
+import {
+  _finalizeDueTasks,
+  _cleanupStaleWorkspace,
+  _processTaskFile,
+  setSchedulerWaClient
+} from '../src/scheduler/engine.js';
 import { scheduleTasks } from '../src/tools/scheduler.js';
 import { setDedicatedClient } from '../src/tools/whatsappSender.js';
 import { readTaskFile } from '../src/utils/taskStore.js';
+
+test('stale workspace cleanup preserves retry state after any partial failure', async () => {
+  const calls = [];
+  const result = await _cleanupStaleWorkspace('user:test', {
+    shutdown: async () => { calls.push('shutdown'); },
+    workspace: () => { calls.push('workspace'); return false; },
+    projection: () => { calls.push('projection'); return true; },
+    parserCache: () => { calls.push('parserCache'); return true; },
+    clearActivity: () => { calls.push('clearActivity'); return true; }
+  });
+
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.failures, ['workspace']);
+  assert.deepEqual(calls, ['shutdown', 'workspace', 'projection', 'parserCache']);
+});
 
 function futureLocal() {
   return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 19);
@@ -91,6 +111,16 @@ test('schedule_tasks rejects model-supplied offsets and invalid Rome wall-clock 
   assert.equal(result.errors.length, 4);
 });
 
+test('schedule_tasks rejects content that becomes empty after delivery-marker cleanup', async () => {
+  const result = await scheduleTasks([
+    { content: '[GemiX]', scheduledAt: futureLocal() }
+  ], taskContext(`test_schedule_marker_only_${process.pid}_${Date.now()}`));
+
+  assert.equal(result.success, false);
+  assert.equal(result.count, 0);
+  assert.match(result.results[0].error, /empty after removing internal delivery markers/);
+});
+
 test('a corrupt task file fails closed and is not overwritten', async (t) => {
   const fileId = `test_schedule_corrupt_${process.pid}_${Date.now()}`;
   const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);
@@ -111,6 +141,9 @@ test('a corrupt task file fails closed and is not overwritten', async (t) => {
 });
 
 test('delivery retries only destinations that have not accepted the message', async (t) => {
+  const fileId = `test_scheduler_retry_${process.pid}_${Date.now()}`;
+  const fileName = `${fileId}.json`;
+  const filePath = path.join(constants.TASKS_DIR, fileName);
   const calls = [];
   let groupCalls = 0;
   const client = {
@@ -124,21 +157,27 @@ test('delivery retries only destinations that have not accepted the message', as
   t.after(() => {
     setSchedulerWaClient(null);
     setDedicatedClient(null);
+    try { fs.unlinkSync(filePath); } catch { /* already absent */ }
   });
 
-  const outcome = await _executeTaskWithRetries({
-    id: 'delivery-retry',
-    content: 'Reminder',
-    createdAt: new Date().toISOString(),
-    destinations: {
-      whatsapp: '393331234567@c.us',
-      whatsappGroup: '12345@g.us'
-    }
-  }, { maxAttempts: 2, sleep: async () => {} });
+  fs.writeFileSync(filePath, JSON.stringify({
+    tasks: [{
+      id: 'delivery-retry',
+      content: 'Reminder',
+      scheduledAt: new Date(Date.now() - 1000).toISOString(),
+      createdAt: new Date().toISOString(),
+      destinations: {
+        whatsapp: '393331234567@c.us',
+        whatsappGroup: '12345@g.us'
+      }
+    }]
+  }));
 
-  assert.equal(outcome.delivered, true);
+  await _processTaskFile(fileName, Date.now(), { maxAttempts: 2, sleep: async () => {} });
+
   assert.equal(calls.filter(jid => jid.endsWith('@c.us')).length, 1);
   assert.equal(calls.filter(jid => jid.endsWith('@g.us')).length, 2);
+  assert.equal(await readTaskFile(fileId), null);
 });
 
 test('a terminal one-time delivery failure remains visible instead of being dropped', () => {
@@ -162,4 +201,99 @@ test('a terminal one-time delivery failure remains visible instead of being drop
   assert.equal(result.tasks.length, 1);
   assert.equal(result.tasks[0].deliveryFailure.status, 'failed');
   assert.equal(result.tasks[0].deliveryFailure.lastError, 'offline');
+});
+
+test('scheduler persists a sending claim before the external delivery', async (t) => {
+  const fileId = `test_scheduler_claim_${process.pid}_${Date.now()}`;
+  const fileName = `${fileId}.json`;
+  const filePath = path.join(constants.TASKS_DIR, fileName);
+  fs.writeFileSync(filePath, JSON.stringify({
+    tasks: [{
+      id: 'claimed-before-send',
+      content: 'Reminder',
+      scheduledAt: new Date(Date.now() - 1000).toISOString(),
+      createdAt: new Date().toISOString(),
+      destinations: { whatsapp: '393331234567@c.us' }
+    }]
+  }));
+  t.after(() => {
+    setSchedulerWaClient(null);
+    setDedicatedClient(null);
+    try { fs.unlinkSync(filePath); } catch { /* already absent */ }
+  });
+
+  const client = {
+    async sendMessage() {
+      const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      assert.equal(persisted.tasks[0].deliveryClaim.destinations.whatsapp.status, 'sending');
+    }
+  };
+  setSchedulerWaClient(client);
+  setDedicatedClient(client);
+
+  await _processTaskFile(fileName, Date.now());
+
+  assert.equal(await readTaskFile(fileId), null);
+});
+
+test('an interrupted in-flight delivery is not sent again after claim recovery', async (t) => {
+  const fileId = `test_scheduler_recover_${process.pid}_${Date.now()}`;
+  const fileName = `${fileId}.json`;
+  const filePath = path.join(constants.TASKS_DIR, fileName);
+  fs.writeFileSync(filePath, JSON.stringify({
+    tasks: [{
+      id: 'unknown-delivery',
+      content: 'Reminder',
+      scheduledAt: new Date(Date.now() - 1000).toISOString(),
+      destinations: { whatsapp: '393331234567@c.us' },
+      deliveryClaim: {
+        id: 'expired-claim',
+        ownerId: 'previous-process',
+        claimedAt: 0,
+        updatedAt: 0,
+        destinations: {
+          whatsapp: { status: 'sending', attempts: 1, lastError: null }
+        }
+      }
+    }]
+  }));
+  t.after(() => {
+    setSchedulerWaClient(null);
+    setDedicatedClient(null);
+    try { fs.unlinkSync(filePath); } catch { /* already absent */ }
+  });
+
+  let sends = 0;
+  const client = { async sendMessage() { sends++; } };
+  setSchedulerWaClient(client);
+  setDedicatedClient(client);
+
+  await _processTaskFile(fileName, Date.now());
+
+  const persisted = await readTaskFile(fileId);
+  assert.equal(sends, 0);
+  assert.equal(persisted.tasks[0].deliveryFailure.status, 'failed');
+  assert.match(persisted.tasks[0].deliveryFailure.lastError, /not retried to avoid a duplicate/);
+  assert.equal(persisted.tasks[0].deliveryClaim, undefined);
+});
+
+test('scheduler quarantines one malformed record without blocking valid tasks', async (t) => {
+  const fileId = `test_scheduler_quarantine_${process.pid}_${Date.now()}`;
+  const fileName = `${fileId}.json`;
+  const filePath = path.join(constants.TASKS_DIR, fileName);
+  const validTask = {
+    id: 'future-task',
+    content: 'Reminder',
+    scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+    destinations: { whatsapp: '393331234567@c.us' }
+  };
+  fs.writeFileSync(filePath, JSON.stringify({ tasks: [null, validTask] }));
+  t.after(() => { try { fs.unlinkSync(filePath); } catch { /* already absent */ } });
+
+  await _processTaskFile(fileName, Date.now());
+
+  const persisted = await readTaskFile(fileId);
+  assert.deepEqual(persisted.tasks, [validTask]);
+  assert.equal(persisted.quarantinedTasks.length, 1);
+  assert.match(persisted.quarantinedTasks[0].reason, /not an object/);
 });

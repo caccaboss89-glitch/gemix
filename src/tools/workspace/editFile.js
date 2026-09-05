@@ -113,7 +113,9 @@ async function editFile(args = {}, workspaceId, opts = {}) {
     try {
       assertRootCapacity(workspaceId, Buffer.byteLength(after, 'utf-8'), buffer.length, lockedResolved.root);
     } catch (err) {
-      if (err.code === 'EQUOTA') return { success: false, error: err.message, quota_exceeded: true };
+      if (err.code === 'EQUOTA' || err.code === 'EINVENTORY') {
+        return { success: false, error: err.message, ...quotaResultFields(err) };
+      }
       throw err;
     }
 

@@ -6,6 +6,7 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -81,6 +82,25 @@ test('a directory without a SKILL.md is not a skill', () => {
     assert.equal(listInstalledSkills().some(s => s.name === 'zz-test-empty'), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+    _resetSkillsCacheForTests();
+  }
+});
+
+test('root files and nested assets cannot hide later skill manifests', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gemix-skill-discovery-'));
+  const original = constants.SKILLS_DIR;
+  constants.SKILLS_DIR = root;
+  try {
+    for (let i = 0; i < 205; i++) fs.writeFileSync(path.join(root, `file-${i}.txt`), 'asset');
+    withSkill('first', '---\ndescription: First skill\n---\n', dir => {
+      for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(dir, `asset-${i}.txt`), 'asset');
+      withSkill('zz-last', '---\ndescription: Last skill\n---\n', () => {
+        assert.deepEqual(listInstalledSkills().map(skill => skill.name), ['first', 'zz-last']);
+      });
+    });
+  } finally {
+    constants.SKILLS_DIR = original;
+    fs.rmSync(root, { recursive: true, force: true });
     _resetSkillsCacheForTests();
   }
 });

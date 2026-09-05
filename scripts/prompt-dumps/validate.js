@@ -21,16 +21,16 @@ import {
 } from '../../src/utils/settingsStore.js';
 import { listInstalledSkills } from '../../src/sandbox/skillsLibrary.js';
 import { CASES } from './cases.js';
+import { ISSUES } from './validationIssues.js';
+import { containsXaiOnlyMaterial } from './validationText.js';
+import {
+  validateNoImplLeaks,
+  validateResponseFormat,
+  validateToolDumpLeaks
+} from './schemaValidators.js';
+import { validateWorkspaceRuntimeDump } from './workspaceValidators.js';
 
 const { PLATFORM_DISCORD } = constants;
-
-const ISSUES = [];
-
-const XAI_GUIDANCE_RE = /\bxAI\b|\bGrok\b|\bx_search\b|X posts|X\/Twitter|CDN URL|SuperGrok/i;
-
-function _containsXaiOnlyMaterial(text) {
-  return XAI_GUIDANCE_RE.test(text);
-}
 
 /** Remove program data whose literal contents are not model instructions. */
 function _withoutStaticProgramData(text) {
@@ -52,109 +52,6 @@ const NON_ADMIN_ACTIVE_CASES = _is(c => c.userIdentity?.isActiveMember !== false
 const VOICE_CASES = caseIds.filter(i => getCapabilities(_ctx(i)).voiceReply);
 const CUSTOM_SETTINGS_CASES = _is(c => c.settings !== undefined);
 const REVIEW_DUE_CASES = _is(c => c.settingsReviewDue === true);
-
-// -- Implementation-leak sweep ---------------------------------------------
-
-/** Agent-facing prompts/tool text must not leak backend wiring. */
-const IMPL_LEAK_PATTERNS = [
-  { re: /input_file/i, label: 'input_file' },
-  { re: /input_image/i, label: 'input_image' },
-  { re: /numbered lines/i, label: 'numbered lines' },
-  { re: /server-side via public/i, label: 'server-side via public' },
-  { re: /display-only/i, label: 'display-only' },
-  { re: /raw file bytes/i, label: 'raw file bytes' },
-  { re: /tmpfile\.link/i, label: 'tmpfile.link' },
-  { re: /attached server-side/i, label: 'attached server-side' },
-  { re: /returns inline in the tool result/i, label: 'returns inline in the tool result' },
-  { re: /injected into the current turn/i, label: 'injected into the current turn' },
-  { re: /Added to the current turn/i, label: 'Added to the current turn' },
-  { re: /render_inline_citation/i, label: 'legacy render_inline_citation' },
-  { re: /\[\[[^\]]*\]\]\(https?:/i, label: 'legacy inline source marker' }
-];
-
-function validateNoImplLeaks(text, caseId, scope) {
-  for (const { re, label } of IMPL_LEAK_PATTERNS) {
-    if (re.test(text)) {
-      ISSUES.push({ caseId, msg: `${scope} leaks implementation detail: ${label}` });
-    }
-  }
-}
-
-function validateToolDumpLeaks(dump, caseId) {
-  const toolsStart = dump.indexOf('--- TOOLS');
-  if (toolsStart < 0) return;
-  const toolText = dump.slice(toolsStart);
-  validateNoImplLeaks(toolText, caseId, 'tool schema');
-  if (toolText.includes('[function] schedule_tasks')) {
-    if (!/wall-clock time unchanged/.test(toolText)
-        || !/Do not convert the hour/.test(toolText)
-        || !/do not add Z or a UTC offset/.test(toolText)) {
-      ISSUES.push({
-        caseId,
-        msg: 'schedule_tasks must tell the model to copy wall-clock time unchanged and leave timezone conversion to the backend'
-      });
-    }
-  }
-  const ctx = _ctx(Number(caseId));
-  if (ctx) {
-    const hasBugReport = toolText.includes('[function] bug_report');
-    if (Boolean(ctx.userIdentity?.isAdmin) === hasBugReport) {
-      ISSUES.push({ caseId, msg: 'bug_report availability does not match administrator status' });
-    }
-    // Only the legal advisor's own turn carries the countersignature field.
-    if (toolText.includes('[function] generate_formal_request_pdf')) {
-      const hasLegalSignature = /legalSignature/.test(toolText);
-      if (Boolean(ctx.userIdentity?.isLegal) !== hasLegalSignature) {
-        ISSUES.push({ caseId, msg: 'legalSignature field does not match legal advisor status' });
-      }
-    }
-    const generic = resolveProviderProfile().promptVariant === PROMPT_VARIANT.GENERIC;
-    if (generic && _containsXaiOnlyMaterial(toolText)) {
-      ISSUES.push({ caseId, msg: 'generic provider tool schema leaks xAI-only material' });
-    }
-    const nativeX = toolText.match(/\[native\] (\{[^\n]+"type":"x_search"[^\n]+\})/);
-    if (nativeX) {
-      let schema;
-      try { schema = JSON.parse(nativeX[1]); } catch { schema = null; }
-      if (!schema
-          || Object.hasOwn(schema, 'limit')
-          || schema?.enable_image_understanding !== true
-          || schema?.enable_video_understanding !== true) {
-        ISSUES.push({ caseId, msg: 'native x_search dump must omit the obsolete limit and keep both media-understanding flags' });
-      }
-    }
-  }
-}
-
-// -- Structured output -----------------------------------------------------
-
-function validateResponseFormat(dump, caseId) {
-  const fmtStart = dump.indexOf('--- STRUCTURED OUTPUT');
-  if (fmtStart < 0) return;
-  const fmtEnd = dump.indexOf('\n--- AUDIT APPENDIX', fmtStart);
-  const fmt = fmtEnd >= 0 ? dump.slice(fmtStart, fmtEnd) : dump.slice(fmtStart);
-  const hasVoice = /voice \(boolean, required\)/.test(fmt);
-  const hasSpokenDesc = /natural spoken words/.test(fmt);
-  const hasTitle = /conversation_title \(string, required\)/.test(fmt);
-  const id = Number(caseId);
-
-  if (VOICE_CASES.includes(id)) {
-    if (!hasVoice) ISSUES.push({ caseId, msg: 'WA dedicated case missing voice schema field' });
-    if (!hasSpokenDesc) ISSUES.push({ caseId, msg: 'voice case missing natural spoken-word instructions' });
-  } else {
-    if (hasVoice) ISSUES.push({ caseId, msg: 'non-voice case must not expose voice schema field' });
-    if (hasSpokenDesc) ISSUES.push({ caseId, msg: 'non-voice case must not expose spoken-word instructions in response schema' });
-  }
-  // conversation_title is required in text.format on every Discord turn.
-  if (DISCORD_CASES.includes(id)) {
-    if (!hasTitle) ISSUES.push({ caseId, msg: 'Discord text.format must require conversation_title' });
-  } else if (hasTitle) {
-    ISSUES.push({ caseId, msg: 'non-Discord case must not expose conversation_title schema field' });
-  }
-  if (!/schema: object additionalProperties=false required=\[[^\]]*response[^\]]*attachments/.test(fmt)) {
-    ISSUES.push({ caseId, msg: 'structured reply dump must expose its closed object and required fields' });
-  }
-}
 
 // -- Prompt ----------------------------------------------------------------
 
@@ -277,7 +174,7 @@ function _validateProviderGuidance(staticPart, caseId) {
     const withoutOpeningAndProvider = _withoutStaticProgramData(
       staticPart.slice(staticPart.indexOf('\n## This chat\n'))
     );
-    if (_containsXaiOnlyMaterial(withoutOpeningAndProvider)) {
+    if (containsXaiOnlyMaterial(withoutOpeningAndProvider)) {
       ISSUES.push({ caseId, msg: 'xAI-only operating guidance escaped the provider integration block' });
     }
     return;
@@ -286,7 +183,7 @@ function _validateProviderGuidance(staticPart, caseId) {
       || !/GemiX itself supplies every user-facing feature/i.test(guidance)) {
     ISSUES.push({ caseId, msg: 'generic provider block missing the baseline provider contract' });
   }
-  if (_containsXaiOnlyMaterial(_withoutStaticProgramData(staticPart))) {
+  if (containsXaiOnlyMaterial(_withoutStaticProgramData(staticPart))) {
     ISSUES.push({ caseId, msg: 'generic provider prompt contains an xAI-only instruction or identifier' });
   }
 }
@@ -725,105 +622,6 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
   _validateQuotaLine(dynamicPart, id, caseId);
   _validateSettingsBlocks(dynamicPart, prompt, id, caseId);
   validateNoImplLeaks(prompt, caseId, 'system prompt');
-}
-
-// -- Workspace runtime -----------------------------------------------------
-
-/**
- * The workspace-runtime dump is where the "no secret reaches the container"
- * rule is actually checkable: the exec environment is printed verbatim, so a
- * credential leaking into it fails the build instead of shipping.
- */
-function _validateWorkspaceExecEnv(dump) {
-  const marker = '--- EXEC ENV';
-  const start = dump.indexOf(marker);
-  if (start < 0) {
-    ISSUES.push({ caseId: 'workspace', msg: 'workspace dump missing the exec env section' });
-    return;
-  }
-  const end = dump.indexOf('\n--- EXEC:', start);
-  const envText = end >= 0 ? dump.slice(start, end) : dump.slice(start);
-  const forbidden = /API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|BEARER|AUTHORIZATION|OAUTH|_SECRET|_TOKEN\b/i;
-  if (forbidden.test(envText)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'workspace exec env carries a credential-looking variable' });
-  }
-  if (!/HTTPS_PROXY/.test(envText)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'workspace exec env missing the fail-closed proxy settings' });
-  }
-}
-
-/** The workspace tool descriptions, read off the live schema. */
-function _validateWorkspaceToolDescriptions(platform) {
-  const tools = getToolsForUser({ isActiveMember: true, isAdmin: true, platform, isGroup: false });
-  const byName = new Map(tools.filter(t => t?.function).map(t => [t.function.name, t.function.description || '']));
-
-  for (const name of ['list_files', 'search_files', 'read_file', 'write_file', 'edit_file', 'shell']) {
-    if (!byName.has(name)) {
-      ISSUES.push({ caseId: 'workspace', msg: `main tool schema is missing "${name}"` });
-    }
-  }
-  if (byName.has('build')) {
-    ISSUES.push({ caseId: 'workspace', msg: 'the build sub-agent tool is still offered to the model' });
-  }
-  const readFile = byName.get('read_file') || '';
-  if (!/bring a supported local file into your context/i.test(readFile)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'read_file description does not state its context-ingestion role' });
-  }
-  if (/whatever its format|only way to open|long or complex documents|use shell/i.test(readFile)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'read_file schema contains workspace-level strategy guidance' });
-  }
-  const editFile = byName.get('edit_file') || '';
-  if (!/exactly once/i.test(editFile)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'edit_file description does not state the unique-match contract' });
-  }
-  const shell = byName.get('shell') || '';
-  if (!/pip\/npm\/apt|package installs/i.test(shell)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'shell description does not state that package installs are disabled' });
-  }
-}
-
-/**
- * The mounts the dump advertises, against the roots its own tool schemas name.
- * A schema that sends the model to a root with no mount line behind it is the
- * document contradicting itself, which is the whole thing this dump exists for.
- *
- * @param {string} dump
- * @param {string} platform - platform the schemas in this dump were built for
- */
-function _validateWorkspaceMounts(dump, platform) {
-  const block = dump.split('--- MOUNTS ---')[1]?.split('\n\n')[0] || '';
-  for (const root of ['/workspace', '/attachments']) {
-    if (!block.includes(root)) {
-      ISSUES.push({ caseId: 'workspace', msg: `MOUNTS does not list ${root}` });
-    }
-  }
-  const skills = Boolean(getCapabilities({ platform, isGroup: false }).skills);
-  if (skills !== block.includes('/skills')) {
-    ISSUES.push({
-      caseId: 'workspace',
-      msg: skills
-        ? 'MOUNTS omits /skills, which the tool schemas in this dump name'
-        : 'MOUNTS lists /skills, which this platform does not mount'
-    });
-  }
-  if (/\/(attachments|skills)\s+rw/.test(block)) {
-    ISSUES.push({ caseId: 'workspace', msg: 'MOUNTS shows a read-only root as writable' });
-  }
-}
-
-/**
- * @param {string} dump - full workspace-runtime-dump.txt text
- * @param {string} platform - platform to read the live tool schema from
- */
-function validateWorkspaceRuntimeDump(dump, platform) {
-  if (!dump || !dump.includes('=== WORKSPACE RUNTIME')) {
-    ISSUES.push({ caseId: 'workspace', msg: 'workspace dump missing its header' });
-    return;
-  }
-  _validateWorkspaceMounts(dump, platform);
-  _validateWorkspaceExecEnv(dump);
-  _validateWorkspaceToolDescriptions(platform);
-  validateToolDumpLeaks(dump, 'workspace');
 }
 
 export {

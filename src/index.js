@@ -12,17 +12,24 @@ import envConfig from './config/env.js';
 import { initDedicatedWhatsApp } from './platforms/whatsapp/dedicated.js';
 import { initPersonalWhatsApp } from './platforms/whatsapp/personal.js';
 import { initDiscord } from './platforms/discord/client.js';
-import { startScheduler, setSchedulerWaClient } from './scheduler/engine.js';
+import { startScheduler, stopScheduler, setSchedulerWaClient } from './scheduler/engine.js';
 import { notifyAdmin, setAdminNotifierClient } from './utils/adminNotifier.js';
 import workspaceRuntime from './sandbox/workspaceRuntime.js';
-import { startInternalNotifyServer } from './utils/internalNotifyServer.js';
-import { clearTempStagingOnStartup, startTempFileServer } from './utils/tempFileServer.js';
+import { startInternalNotifyServer, stopInternalNotifyServer } from './utils/internalNotifyServer.js';
+import {
+  clearTempStagingOnStartup,
+  startTempFileServer,
+  stopTempFileServer
+} from './utils/tempFileServer.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { runProviderPreflight, logFeatureBindings } from './ai/providers/preflight.js';
 import { getCredentialProvider } from './ai/aiProvider.js';
 import { initApiLogRetention } from './ai/apiLogs.js';
 import { shutdownWhatsAppClient } from './platforms/whatsapp/client.js';
 import { isWaLifecycleRestartError } from './utils/waPuppeteer.js';
+import { beginTermination } from './utils/processLifecycle.js';
+import { settleWithDeadline } from './utils/shutdownDeadline.js';
+import { withPromiseTimeout } from './utils/promiseTimeout.js';
 
 const { TASKS_DIR, DATA_DIR } = constants;
 const { STARTUP_SYSTEM_CLEANUP } = envConfig;
@@ -32,6 +39,7 @@ let dedicatedWaClient = null;
 let personalWaClient = null;
 let discordClient = null;
 let shutdownStarted = false;
+let shutdownPromise = null;
 let personalRecoveryInProgress = false;
 let personalRecoveryTimer = null;
 
@@ -77,7 +85,7 @@ function runStartupCleanup() {
   clearTempStagingOnStartup();
 
   // System cleanup on startup (opt-in via STARTUP_SYSTEM_CLEANUP).
-  // See env.js for flag definition and SERVER_SETUP.md for operational notes.
+  // See env.js for flag behavior and .env.example for deployment options.
   if (STARTUP_SYSTEM_CLEANUP && process.platform === 'linux') {
     try {
       log.info('Running system cleanup on startup (STARTUP_SYSTEM_CLEANUP=true)...');
@@ -143,7 +151,7 @@ runStartupCleanup();
   logFeatureBindings(profile);
 
   dedicatedWaClient = initDedicatedWhatsApp({
-    onFatal: (reason) => shutdownHandler(`WA dedicated ${reason}`, 1)
+    onFatal: (reason, err) => fatalExit(`WA dedicated ${reason}`, err)
   });
 
   dedicatedWaClient.on('ready', () => {
@@ -153,42 +161,69 @@ runStartupCleanup();
 
   startPersonalWhatsApp();
 
-  discordClient = initDiscord();
+  discordClient = await initDiscord();
 
   workspaceRuntime.init();
   initApiLogRetention();
   startScheduler();
   startInternalNotifyServer();
-  startTempFileServer();
+  await startTempFileServer();
 })().catch((err) => {
   log.error('Startup failed:', err);
-  shutdownHandler('startup failure', 1);
+  void fatalExit('startup failure', err);
 });
 
-async function shutdownHandler(signal, exitCode = 0) {
-  if (shutdownStarted) return;
+async function shutdownHandler(signal, exitCode = 0, fatalError = null) {
+  if (shutdownPromise) return shutdownPromise;
   shutdownStarted = true;
+  beginTermination();
   if (personalRecoveryTimer) {
     clearTimeout(personalRecoveryTimer);
     personalRecoveryTimer = null;
   }
-  log.info(`\nGemiX - Shutting down (${signal})...`);
-  const closures = await Promise.allSettled([
-    shutdownWhatsAppClient(dedicatedWaClient),
-    shutdownWhatsAppClient(personalWaClient),
-    Promise.resolve().then(() => discordClient?.destroy())
-  ]);
-  for (const result of closures) {
-    if (result.status === 'rejected') {
-      log.warn(`Platform shutdown failed during ${signal}: ${result.reason?.message || result.reason}`);
+  shutdownPromise = (async () => {
+    log.info(`\nGemiX - Shutting down (${signal})...`);
+    if (fatalError) {
+      try {
+        await withPromiseTimeout(
+          notifyAdmin('Fatal Process Error', formatProcessErrorForAdmin(fatalError)),
+          3_000,
+          'fatal admin notification'
+        );
+      } catch (err) {
+        log.warn(`Fatal admin notification failed: ${err.message}`);
+      }
     }
-  }
-  try { await workspaceRuntime.shutdownAll(); } catch (err) { log.warn(`Workspace container shutdown failed during ${signal}: ${err.message}`); }
-  process.exit(exitCode);
+
+    stopScheduler();
+    const cleanup = await settleWithDeadline([
+      () => shutdownWhatsAppClient(dedicatedWaClient),
+      () => shutdownWhatsAppClient(personalWaClient),
+      () => discordClient?.destroy(),
+      () => stopInternalNotifyServer(),
+      () => stopTempFileServer(),
+      () => workspaceRuntime.shutdownAll()
+    ], 15_000);
+    if (cleanup.timedOut) {
+      log.error(`Shutdown deadline exceeded during ${signal}; forcing process exit.`);
+    } else {
+      for (const result of cleanup.results) {
+        if (result.status === 'rejected') {
+          log.warn(`Cleanup failed during ${signal}: ${result.reason?.message || result.reason}`);
+        }
+      }
+    }
+    process.exit(exitCode);
+  })();
+  return shutdownPromise;
 }
 
-process.on('SIGINT', () => shutdownHandler('SIGINT'));
-process.on('SIGTERM', () => shutdownHandler('SIGTERM'));
+function fatalExit(reason, err) {
+  return shutdownHandler(reason, 1, err);
+}
+
+process.once('SIGINT', () => { void shutdownHandler('SIGINT'); });
+process.once('SIGTERM', () => { void shutdownHandler('SIGTERM'); });
 
 /**
  * Format process-level errors for admin WhatsApp. Full stacks are useful in
@@ -215,13 +250,10 @@ process.on('unhandledRejection', (err) => {
     log.warn('Expected WhatsApp lifecycle rejection: restart is already being handled; admin alert suppressed.');
     return;
   }
-  notifyAdmin('Unhandled Rejection', formatProcessErrorForAdmin(err)).catch(() => {});
+  void fatalExit('unhandledRejection', err);
 });
 
-process.on('uncaughtException', (err) => {
+process.once('uncaughtException', (err) => {
   log.error('❌ Uncaught exception:', err);
-  notifyAdmin('Uncaught Exception', formatProcessErrorForAdmin(err)).catch(() => {});
-  // We deliberately don't exit: an uncaught exception here is almost always
-  // WhatsApp/Puppeteer noise, and terminating would cut off in-flight turns.
-  // A real process death (OOM, signal) is still handled by PM2.
+  void fatalExit('uncaughtException', err);
 });

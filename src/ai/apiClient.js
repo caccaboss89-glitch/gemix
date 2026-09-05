@@ -193,6 +193,159 @@ function _classifyXaiServiceAuthOrQuota(errMsg) {
   return null;
 }
 
+function _isRetryableXaiError(err) {
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return true;
+  const message = typeof err?.message === 'string' ? err.message : '';
+  return /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(message)
+    || /^HTTP (401|429|500|502|503|504|524)/.test(message);
+}
+
+/**
+ * One request engine for every authenticated xAI media endpoint.
+ * Provider status, refresh, logging and backoff live here so callers cannot
+ * drift on how a rejected account is classified.
+ */
+async function _runXaiServiceRequest({
+  label,
+  url,
+  fetchOptions,
+  logBody,
+  logExtra = {},
+  timeoutMs,
+  maxAttempts,
+  callerSignal,
+  retryDelayBaseMs,
+  warnRateLimit = false,
+  terminalError,
+  credentialAccess = {
+    get: getXaiServiceAuth,
+    mark: markXaiServiceStatus
+  },
+  logTraffic = true
+}) {
+  const apiLogId = crypto.randomUUID();
+  let networkAttempt = 0;
+  let forceCredentialRefresh = false;
+  let rejectedAccountId = null;
+  let credentialRefreshAttempted = false;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const attemptStarted = Date.now();
+    const method = String(fetchOptions.method || 'GET').toUpperCase();
+    const logMeta = {
+      ...logExtra,
+      apiLogId,
+      transport: 'xai-service',
+      attempt: ++networkAttempt,
+      method
+    };
+    let requestAccountId = null;
+    let responseLogged = false;
+
+    try {
+      if (callerSignal?.aborted) {
+        throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
+      }
+      const auth = await credentialAccess.get({
+        forceRefresh: forceCredentialRefresh,
+        accountId: rejectedAccountId
+      });
+      requestAccountId = auth.accountId;
+      forceCredentialRefresh = false;
+      rejectedAccountId = null;
+      const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
+      const headers = {
+        ...(fetchOptions.headers || {}),
+        Authorization: `Bearer ${auth.token}`
+      };
+
+      if (logTraffic) _writeServiceLog('request', label, url, logBody, logMeta);
+      const response = await fetch(url, {
+        ...fetchOptions,
+        headers,
+        signal: operationSignal
+      });
+      if (callerSignal?.aborted) {
+        throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
+      }
+
+      if (!response.ok) {
+        const bodyText = await response.text().catch(() => '');
+        if (logTraffic) {
+          _writeServiceLog('response', label, url, {
+            http: { status: response.status, headers: _headersForLog(response.headers) },
+            body: _parseLoggedText(bodyText)
+          }, { ...logMeta, durationMs: Date.now() - attemptStarted });
+        }
+        responseLogged = true;
+        if (warnRateLimit && response.status === 429) {
+          log.warn(`   ${_formatRateLimitLog(response.status, bodyText, response.headers)}`);
+        }
+        const detail = bodyText.startsWith('<!') ? 'Cloudflare error' : bodyText;
+        throw new Error(`HTTP ${response.status}: ${detail}`);
+      }
+
+      if (logTraffic) {
+        await _writeResponseSnapshot(label, url, response, {
+          ...logMeta,
+          durationMs: Date.now() - attemptStarted
+        });
+      }
+      responseLogged = true;
+      await credentialAccess.mark('ok', requestAccountId);
+      return response;
+    } catch (err) {
+      const attemptMs = Date.now() - attemptStarted;
+      if (logTraffic && !responseLogged) {
+        _writeServiceLog('response', label, url, {
+          http: null,
+          error: { name: err.name, message: err.message }
+        }, { ...logMeta, durationMs: attemptMs });
+      }
+      if (callerSignal?.aborted) throw callerSignal.reason || err;
+
+      lastError = err;
+      const errMsg = err.name === 'AbortError'
+        ? `Timeout (request aborted after ${timeoutMs / 1000}s)`
+        : err.message;
+
+      if (_isOAuthCredentialError(errMsg) && !credentialRefreshAttempted) {
+        credentialRefreshAttempted = true;
+        await credentialAccess.mark('auth_failed', requestAccountId);
+        forceCredentialRefresh = true;
+        rejectedAccountId = requestAccountId;
+        attempt--;
+        log.info('   Retrying API call with a refreshed xAI credential...');
+        continue;
+      }
+
+      if (_isRetryableXaiError(err) && attempt < maxAttempts) {
+        const delay = attempt * retryDelayBaseMs;
+        log.warn(
+          `   API attempt ${attempt}/${maxAttempts} failed after ${Math.round(attemptMs / 1000)}s: ${errMsg}`
+          + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${maxAttempts}...`
+        );
+        await sleepWithin(delay, callerSignal);
+        continue;
+      }
+
+      const classification = _classifyXaiServiceAuthOrQuota(errMsg);
+      if (classification === 'QUOTA') await credentialAccess.mark('quota', requestAccountId);
+      if (classification === 'AUTH') await credentialAccess.mark('auth_failed', requestAccountId);
+      throw await terminalError({
+        error: err,
+        errorMessage: errMsg,
+        attempt,
+        classification,
+        accountId: requestAccountId
+      });
+    }
+  }
+
+  throw lastError || new Error(`${label} request failed: retry budget exhausted`);
+}
+
 /**
  * POST to an xAI media endpoint with retry and timeout logic.
  *
@@ -219,138 +372,40 @@ async function callApiWithRetry(
   opts = {}
 ) {
   const callerSignal = opts.signal || null;
-  const apiLogId = crypto.randomUUID();
-  let networkAttempt = 0;
-  let forceCredentialRefresh = false;
-  let rejectedAccountId = null;
-  let credentialRefreshAttempted = false;
-  for (let attempt = 1; attempt <= constants.MAX_API_RETRIES; attempt++) {
-    const attemptStarted = Date.now();
-    const thisNetworkAttempt = ++networkAttempt;
-    const logMeta = {
-      ...logExtra,
-      apiLogId,
-      transport: 'xai-service',
-      attempt: thisNetworkAttempt,
-      method: 'POST'
-    };
-    let requestAccountId = null;
-    let responseLogged = false;
-    try {
-      if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
-      const { token, accountId } = await getXaiServiceAuth({
-        forceRefresh: forceCredentialRefresh,
-        accountId: rejectedAccountId
-      });
-      requestAccountId = accountId;
-      forceCredentialRefresh = false;
-      rejectedAccountId = null;
-      const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
-
-      _writeServiceLog('request', modelName, apiUrl, _requestBodyForLog(body), logMeta);
-
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(body),
-        signal: operationSignal
-      });
-      const duration = Date.now() - attemptStarted;
-
-      if (!res.ok) {
-        const errBody = await res.text();
-        _writeServiceLog('response', modelName, apiUrl, {
-          http: { status: res.status, headers: _headersForLog(res.headers) },
-          body: _parseLoggedText(errBody)
-        }, { ...logMeta, durationMs: duration });
-        responseLogged = true;
-        const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
-        if (res.status === 429) {
-          log.warn(`   ${_formatRateLimitLog(res.status, errBody, res.headers)}`);
-        }
-        throw new Error(`HTTP ${res.status}: ${shortErr}`);
-      }
-
-      await _writeResponseSnapshot(modelName, apiUrl, res, {
-        ...logMeta,
-        durationMs: duration
-      });
-      responseLogged = true;
-      log.debug(`   Model: ${modelName} - ${duration}ms${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
-      await markXaiServiceStatus('ok', requestAccountId);
-      return res;
-    } catch (err) {
-      const attemptMs = Date.now() - attemptStarted;
-      if (!responseLogged) {
-        _writeServiceLog('response', modelName, apiUrl, {
-          http: null,
-          error: { name: err.name, message: err.message }
-        }, { ...logMeta, durationMs: attemptMs });
-      }
-      if (callerSignal?.aborted) throw callerSignal.reason || err;
-      const isTimeout = err.name === 'AbortError'
-        || err.name === 'TimeoutError'
-        || (err.message && err.message.includes('524'));
-      const isNetworkError = err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message);
-      const is429 = err.message && /^HTTP 429/.test(err.message);
-      const isRetryable = isTimeout || isNetworkError || (err.message && /^HTTP (401|429|500|502|503|504)/.test(err.message));
-      const errMsg = err.name === 'AbortError'
-        ? `Timeout (request aborted after ${timeoutMs / 1000}s)`
-        : err.message;
-
-      if (_isOAuthCredentialError(errMsg) && !credentialRefreshAttempted) {
-        credentialRefreshAttempted = true;
-        await markXaiServiceStatus('auth_failed', requestAccountId);
-        forceCredentialRefresh = true;
-        rejectedAccountId = requestAccountId;
-        // A refresh is not a failed attempt: give back the budget so the retry
-        // still happens when the rejection landed on the last one.
-        attempt--;
-        log.info('   Retrying API call with a refreshed xAI credential...');
-        continue;
-      }
-
-      if (isRetryable && attempt < constants.MAX_API_RETRIES) {
-        const delay = attempt * 3000;
-        const waitHint = is429
-          ? ' (rate limit — check Retry-After / xAI console for quota reset)'
-          : '';
-        log.warn(
-          `   API attempt ${attempt}/${constants.MAX_API_RETRIES} failed after ${Math.round(attemptMs / 1000)}s: ${errMsg}`
-          + ` — pausing ${delay / 1000}s before retry ${attempt + 1}/${constants.MAX_API_RETRIES}${waitHint}...`
+  return _runXaiServiceRequest({
+    label: modelName,
+    url: apiUrl,
+    fetchOptions: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    },
+    logBody: _requestBodyForLog(body),
+    logExtra,
+    timeoutMs,
+    maxAttempts: constants.MAX_API_RETRIES,
+    callerSignal,
+    retryDelayBaseMs: 3000,
+    warnRateLimit: true,
+    terminalError: async ({ errorMessage, attempt, classification }) => {
+      log.error(`   API error after ${attempt} attempt(s): ${errorMessage}`);
+      if (classification === 'QUOTA') {
+        const creditErr = new Error(
+          `${modelName} API credit exhausted after ${attempt} attempt(s): ${errorMessage}`
         );
-        await sleepWithin(delay, callerSignal);
-        if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
-        continue;
-      }
-
-      log.error(`   API error after ${attempt} attempt(s), last try ${Math.round(attemptMs / 1000)}s: ${errMsg}`);
-      const authOrQuota = _classifyXaiServiceAuthOrQuota(errMsg);
-      if (authOrQuota === 'QUOTA') {
-        await markXaiServiceStatus('quota', requestAccountId);
-        const creditErr = new Error(`${modelName} API credit exhausted after ${attempt} attempt(s): ${errMsg}`);
         creditErr.code = GROK_CREDIT_EXHAUSTED_CODE;
-        throw creditErr;
-      }
-      if (authOrQuota === 'AUTH') {
-        await markXaiServiceStatus('auth_failed', requestAccountId);
+        return creditErr;
       }
       const notification = await notifyAdminDetailed(
         `API (${modelName})`,
-        `Error after ${attempt} attempt(s): ${errMsg}`
+        `Error after ${attempt} attempt(s): ${errorMessage}`
       );
-      throw new Error(
-        `${modelName} API unreachable after ${attempt} attempt(s): ${errMsg}`
+      return new Error(
+        `${modelName} API unreachable after ${attempt} attempt(s): ${errorMessage}`
         + buildAdminNotificationNote(notification)
       );
     }
-  }
-  // Defensive invariant: every path above returns or throws, so callers never
-  // receive an undefined Response.
-  throw new Error(`${modelName} API unreachable: retry loop exhausted`);
+  });
 }
 
 /**
@@ -368,106 +423,21 @@ async function fetchXaiWithOAuthRetry(url, options = {}, opts = {}) {
   const label = typeof opts.logLabel === 'string' && opts.logLabel.trim()
     ? opts.logLabel.trim()
     : 'xAI-Service';
-  const apiLogId = crypto.randomUUID();
-  let networkAttempt = 0;
-  let forceCredentialRefresh = false;
-  let rejectedAccountId = null;
-  let credentialRefreshAttempted = false;
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const attemptStarted = Date.now();
-    const thisNetworkAttempt = ++networkAttempt;
-    const method = String(options.method || 'GET').toUpperCase();
-    const logMeta = {
-      apiLogId,
-      transport: 'xai-service',
-      attempt: thisNetworkAttempt,
-      method
-    };
-    let requestAccountId = null;
-    let responseLogged = false;
-    try {
-      if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
-      const { token, accountId } = await getXaiServiceAuth({
-        forceRefresh: forceCredentialRefresh,
-        accountId: rejectedAccountId
-      });
-      requestAccountId = accountId;
-      forceCredentialRefresh = false;
-      rejectedAccountId = null;
-      const operationSignal = signalWithTimeout(callerSignal, timeoutMs);
-
-      _writeServiceLog('request', label, url, {
-        method,
-        headers: _headersForLog(options.headers),
-        body: _requestBodyForLog(options.body)
-      }, logMeta);
-
-      const res = await fetch(url, {
-        ...options,
-        headers: {
-          ...(options.headers || {}),
-          Authorization: `Bearer ${token}`
-        },
-        signal: operationSignal
-      });
-      if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
-
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '');
-        _writeServiceLog('response', label, url, {
-          http: { status: res.status, headers: _headersForLog(res.headers) },
-          body: _parseLoggedText(errBody)
-        }, { ...logMeta, durationMs: Date.now() - attemptStarted });
-        responseLogged = true;
-        const shortErr = errBody.startsWith('<!') ? 'Cloudflare error' : errBody;
-        const errMsg = `HTTP ${res.status}: ${shortErr}`;
-
-        if (_isOAuthCredentialError(errMsg) && !credentialRefreshAttempted) {
-          credentialRefreshAttempted = true;
-          await markXaiServiceStatus('auth_failed', requestAccountId);
-          forceCredentialRefresh = true;
-          rejectedAccountId = requestAccountId;
-          lastError = new Error(errMsg);
-          // A refresh is not a failed attempt: give back the budget so the
-          // retry still happens when the rejection landed on the last one.
-          attempt--;
-          continue;
-        }
-
-        throw new Error(errMsg);
-      }
-
-      await _writeResponseSnapshot(label, url, res, {
-        ...logMeta,
-        durationMs: Date.now() - attemptStarted
-      });
-      responseLogged = true;
-      await markXaiServiceStatus('ok', requestAccountId);
-      return res;
-    } catch (err) {
-      if (!responseLogged) {
-        _writeServiceLog('response', label, url, {
-          http: null,
-          error: { name: err.name, message: err.message }
-        }, { ...logMeta, durationMs: Date.now() - attemptStarted });
-      }
-      if (callerSignal?.aborted) throw callerSignal.reason || err;
-      lastError = err;
-      const isTimeout = err.name === 'AbortError' || err.name === 'TimeoutError';
-      const isRetryable = isTimeout
-        || (err.message && /ECONNRESET|ECONNREFUSED|ERR_NETWORK|timeout|timed out/i.test(err.message))
-        || (err.message && /^HTTP (401|429|500|502|503|504)/.test(err.message));
-      if (isRetryable && attempt < maxAttempts) {
-        await sleepWithin(attempt * 2000, callerSignal);
-        if (callerSignal?.aborted) throw callerSignal.reason || new DOMException('Aborted', 'AbortError');
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastError || new Error('xAI authenticated fetch failed: retry budget exhausted');
+  return _runXaiServiceRequest({
+    label,
+    url,
+    fetchOptions: options,
+    logBody: {
+      method: String(options.method || 'GET').toUpperCase(),
+      headers: _headersForLog(options.headers),
+      body: _requestBodyForLog(options.body)
+    },
+    timeoutMs,
+    maxAttempts,
+    callerSignal,
+    retryDelayBaseMs: 2000,
+    terminalError: async ({ error }) => error
+  });
 }
 
 export {
@@ -476,6 +446,7 @@ export {
   _isOAuthCredentialError,
   _requestBodyForLog,
   _responseForLog,
+  _runXaiServiceRequest,
   callApiWithRetry,
   logApiResponse,
   fetchXaiWithOAuthRetry,

@@ -4,6 +4,7 @@
 // multiple concurrent responses for the same chat. Used by the handler
 // to serialize AI calls per conversation.
 
+import crypto from 'node:crypto';
 import constants from '../config/constants.js';
 import { createLogger } from './logger.js';
 
@@ -37,43 +38,57 @@ function _armExpiry(key, lockId, ttl) {
   return timer;
 }
 
+function _isLease(value) {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && typeof value.key === 'string'
+    && typeof value.lockId === 'string'
+  );
+}
+
+function _ownedEntry(lease) {
+  if (!_isLease(lease)) return null;
+  const entry = locks.get(lease.key);
+  if (!entry || entry.lockId !== lease.lockId || entry.expiresAt <= _now()) return null;
+  return entry;
+}
+
 /**
  * Try to acquire a lock for the given chat key.
  * @param {string} key
  * @param {number} [ttl]
- * @returns {boolean} true if lock was acquired
+ * @returns {{key:string,lockId:string}|null} an opaque owner lease, or null
  */
 function tryLock(key, ttl = DEFAULT_TTL_MS) {
   const entry = locks.get(key);
   if (entry) {
-    if (entry.expiresAt > _now()) return false;
+    if (entry.expiresAt > _now()) return null;
     // expired - clean
     clearTimeout(entry.timeoutId);
     locks.delete(key);
   }
 
   const expiresAt = _now() + ttl;
-  const lockId = Math.random().toString(36).substring(2);
+  const lockId = crypto.randomUUID();
   const timeoutId = _armExpiry(key, lockId, ttl);
 
   locks.set(key, { expiresAt, timeoutId, lockId });
-  return true;
+  return Object.freeze({ key, lockId });
 }
 
 /**
  * Refresh/renew an existing lock's TTL.
- * @param {string} key
+ * @param {{key:string,lockId:string}} lease
  * @param {number} [ttl]
  * @returns {boolean}
  */
-function refresh(key, ttl = DEFAULT_TTL_MS) {
-  const entry = locks.get(key);
+function refresh(lease, ttl = DEFAULT_TTL_MS) {
+  const entry = _ownedEntry(lease);
   if (!entry) return false;
   clearTimeout(entry.timeoutId);
   entry.expiresAt = _now() + ttl;
-  entry.lockId = Math.random().toString(36).substring(2);
-  entry.timeoutId = _armExpiry(key, entry.lockId, ttl);
-  locks.set(key, entry);
+  entry.timeoutId = _armExpiry(lease.key, lease.lockId, ttl);
   return true;
 }
 
@@ -85,20 +100,21 @@ function refresh(key, ttl = DEFAULT_TTL_MS) {
  * calls the returned function cannot hold the key indefinitely: the lock is
  * left to expire on its own TTL and the chat answers again.
  *
- * @param {string} key
+ * @param {{key:string,lockId:string}} lease
  * @param {number} [ttl]
  * @param {number} [renewEveryMs]
  * @returns {() => void} stop function
  */
-function startAutoRenew(key, ttl = DEFAULT_TTL_MS, renewEveryMs = Math.max(10_000, Math.floor(ttl / 3))) {
+function startAutoRenew(lease, ttl = DEFAULT_TTL_MS, renewEveryMs = Math.max(10_000, Math.floor(ttl / 3))) {
+  if (!_ownedEntry(lease)) return () => {};
   const renewUntil = _now() + MAX_AUTO_RENEW_MS;
   const timer = setInterval(() => {
     if (_now() >= renewUntil) {
       clearInterval(timer);
-      log.warn(`Auto-renew ceiling reached for ${key} after ${MAX_AUTO_RENEW_MS / 60_000} min: nobody released the lock, letting it expire`);
+      log.warn(`Auto-renew ceiling reached for ${lease.key} after ${MAX_AUTO_RENEW_MS / 60_000} min: nobody released the lock, letting it expire`);
       return;
     }
-    if (!refresh(key, ttl)) {
+    if (!refresh(lease, ttl)) {
       clearInterval(timer);
     }
   }, renewEveryMs);
@@ -107,15 +123,15 @@ function startAutoRenew(key, ttl = DEFAULT_TTL_MS, renewEveryMs = Math.max(10_00
 }
 
 /**
- * Release a lock for the given key.
- * @param {string} key
+ * Release a lock only when the caller still owns it.
+ * @param {{key:string,lockId:string}} lease
  * @returns {boolean}
  */
-function unlock(key) {
-  const entry = locks.get(key);
+function unlock(lease) {
+  const entry = _ownedEntry(lease);
   if (!entry) return false;
   clearTimeout(entry.timeoutId);
-  locks.delete(key);
+  locks.delete(lease.key);
   return true;
 }
 

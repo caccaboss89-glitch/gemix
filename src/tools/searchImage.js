@@ -18,6 +18,7 @@ import { inlineImagePartFromBuffer  } from './workspace/inlineImage.js';
 import { stageToolOutput  } from './workspace/toolOutput.js';
 import { createLogger  } from '../utils/logger.js';
 import { sniffImageType } from '../utils/imageType.js';
+import { normalizeHttpBaseUrl } from '../utils/httpUrl.js';
 
 const log = createLogger('SearchImage');
 
@@ -98,12 +99,14 @@ function _imageUrlCandidates(hit) {
 async function _buildVisionPart(imageUrls, index, signal) {
   let lastError = 'No usable image URL was returned.';
   for (const imgUrl of imageUrls) {
+    signal?.throwIfAborted();
     try {
       const dl = await downloadPublicFile(imgUrl, {
         maxBytes: constants.MAX_IMAGE_BYTES,
         timeoutMs: VISION_DOWNLOAD_TIMEOUT_MS,
         signal
       });
+      signal?.throwIfAborted();
       const sniffed = sniffImageType(dl.buffer);
       if (!sniffed) {
         lastError = 'Downloaded body is not a recognized image (JPEG/PNG/WEBP/GIF/ICO).';
@@ -113,6 +116,7 @@ async function _buildVisionPart(imageUrls, index, signal) {
       if (part) return { part, url: imgUrl, buffer: dl.buffer, ext: sniffed.ext };
       lastError = 'Image is too large to attach inline.';
     } catch (err) {
+      if (signal?.aborted) throw signal.reason || err;
       lastError = err.message;
     }
   }
@@ -126,12 +130,14 @@ async function _buildVisionPart(imageUrls, index, signal) {
  * rest of the result stand.
  * @returns {Promise<string|null>} the namespace path, or null when not staged
  */
-async function _stageImage(workspaceId, index, vision) {
+async function _stageImage(workspaceId, index, vision, signal) {
   if (!workspaceId || !vision?.buffer) return null;
+  signal?.throwIfAborted();
   try {
     const staged = await stageToolOutput(workspaceId, `search_image_${index}.${vision.ext}`, vision.buffer);
     return staged.display;
   } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
     log.warn(`Cannot stage image ${index} in the workspace: ${err.message}`);
     return null;
   }
@@ -157,8 +163,8 @@ async function searchImage(args = {}, opts = {}) {
   }
 
   const count = _clampCount(args.count);
-  const base = String(envConfig.SEARCH_IMAGE_BASE_URL || '').replace(/\/+$/, '');
-  if (!base || !/^https?:\/\//i.test(base)) {
+  const base = normalizeHttpBaseUrl(envConfig.SEARCH_IMAGE_BASE_URL);
+  if (!base) {
     return {
       success: false,
       status: 'failed',
@@ -166,7 +172,7 @@ async function searchImage(args = {}, opts = {}) {
     };
   }
 
-  const url = new URL(`${base}/search`);
+  const url = new URL('/search', `${base}/`);
   // SearXNG's documented multi-engine selector is bang syntax. Its `engines`
   // query parameter is not part of the public Search API and was ignored,
   // allowing unrelated fallback engines to leak icons into image results.
@@ -216,6 +222,7 @@ async function searchImage(args = {}, opts = {}) {
       };
     }
   } catch (err) {
+    if (opts.signal?.aborted) throw opts.signal.reason || err;
     log.warn(`SearXNG request failed: ${err.message}`);
     return {
       success: false,
@@ -232,12 +239,13 @@ async function searchImage(args = {}, opts = {}) {
 
   for (const hit of rawResults) {
     const candidates = _imageUrlCandidates(hit);
-    const imgUrl = candidates[0];
-    if (!imgUrl || seen.has(imgUrl)) continue;
+    const freshCandidates = candidates.filter(candidate => !seen.has(candidate));
+    const imgUrl = freshCandidates[0];
+    if (!imgUrl) continue;
     seen.add(imgUrl);
     images.push({
       url: imgUrl,
-      candidates,
+      candidates: freshCandidates,
       title: typeof hit.title === 'string' ? hit.title.trim().slice(0, 200) : '',
       source_page: typeof hit.url === 'string' && hit.url !== imgUrl ? hit.url : undefined,
       engine: typeof hit.engine === 'string' ? hit.engine : undefined
@@ -262,11 +270,13 @@ async function searchImage(args = {}, opts = {}) {
   const visionSettled = await Promise.all(
     images.map((img, i) => _buildVisionPart(img.candidates, i, opts.signal))
   );
+  opts.signal?.throwIfAborted();
 
   // Sequential staging: the workspace lock serializes these writes anyway.
   const stagedPaths = [];
   for (let i = 0; i < images.length; i++) {
-    stagedPaths.push(await _stageImage(opts.workspaceId, i, visionSettled[i]));
+    opts.signal?.throwIfAborted();
+    stagedPaths.push(await _stageImage(opts.workspaceId, i, visionSettled[i], opts.signal));
   }
 
   const nativeParts = [];

@@ -65,7 +65,7 @@ export default {
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
   // The skill library: one directory for the whole deployment, versioned with
-  // the code rather than per conversation, mounted read-only in every sandbox
+  // the code rather than per conversation, mounted read-only where enabled
   // (see sandbox/skillsLibrary.js). It ships with the release rather than being
   // written at runtime, so no TTL and no quota apply to it.
   SKILLS_DIR: path.join(__dirname, '..', '..', 'skills'),
@@ -77,6 +77,7 @@ export default {
   MAX_INLINE_IMAGES_PER_TURN: 8,
   MAX_TASK_DAYS: 365,
   SCHEDULE_TASKS_MAX_BATCH: 50,
+  READ_TASKS_MAX_LIMIT: 50,
   REMOVE_TASKS_MAX_IDS: 100,
   RECURRENCE_MAX_INTERVAL: 10_000,
   SCHEDULER_INTERVAL_MS: 60_000,
@@ -159,6 +160,8 @@ export default {
   WORKSPACE_LOCK_WAIT_MS: 30 * 1000,
   /** Cap on captured stdout/stderr and on host-side file reads returned to the model. */
   WORKSPACE_OUTPUT_MAX_BYTES: 200 * 1024,
+  /** Maximum filesystem entries one workspace inventory may traverse. */
+  WORKSPACE_MAX_ENTRIES: 100_000,
 
   // read_file parser stack. The cache is host-only and invisible to the model
   // (never mounted in the container); it shares the workspace TTL and is swept

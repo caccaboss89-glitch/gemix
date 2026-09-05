@@ -10,6 +10,7 @@ import { stripPhoneMentionTags } from './waMentions.js';
 import { isSystemMessage } from '../config/systemMessages.js';
 import { removeFooter, removeScheduledFooter } from './footer.js';
 import { formatTimestamp } from './time.js';
+import { stripAttachmentTags } from './media.js';
 
 /**
  * Sanitize a string for use as a filename.
@@ -58,6 +59,7 @@ function sanitizeVoiceMessageText(text) {
 
 // Matches Markdown inline links (not images): [text](url).
 const MD_INLINE_LINK_RE = /(?<!!)\[[^\]]+\]\([^)]*\)/g;
+const MD_INLINE_LINK_PARTS_RE = /(?<!!)\[([^\]\n]+)\]\(([^)\n]+)\)/g;
 
 /**
  * Strip markdown link syntax from outgoing text. Bare https:// URLs are kept.
@@ -73,6 +75,16 @@ function stripMarkdownLinks(text) {
     .replace(/ +\n/g, '\n');
 }
 
+/** Render unsupported Markdown links as readable label plus reachable URL. */
+function renderMarkdownLinks(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(MD_INLINE_LINK_PARTS_RE, (_match, label, url) => {
+    const cleanLabel = label.trim();
+    const cleanUrl = url.trim();
+    return cleanLabel === cleanUrl ? cleanUrl : `${cleanLabel} (${cleanUrl})`;
+  });
+}
+
 /**
  * Normalize Markdown for WhatsApp (which has limited MD support).
  * - ### - removed (headings not supported)
@@ -80,13 +92,13 @@ function stripMarkdownLinks(text) {
  * - **text** - *text* (bold)
  * - __text__ - _text_ (italic)
  * - ~~text~~ - ~text~ (strikethrough)
- * - [text](url) - removed (bare URLs kept)
+ * - [text](url) - text (url), because WhatsApp does not render link markup
  * @param {string} text
  * @returns {string}
  */
 function normalizeMarkdown(text) {
   if (!text || typeof text !== 'string') return text;
-  text = stripMarkdownLinks(text);
+  text = renderMarkdownLinks(text);
   // Remove heading markers (###) completely - WhatsApp doesn't support them
   text = text.replace(/^#{1,6}\s+/gm, '');
   // * bullet points - - bullet points (better WhatsApp compatibility)
@@ -122,7 +134,6 @@ const RESEARCH_BADGE_RE = /\n*\s*(?:🌐:\s*\d+\s*sources?|𝕏:\s*\d+\s*(?:post
 const IN_REPLY_TO_PREFIX_RE = /^\[In reply to:\s*(?:\[[^\]]*\]|[^\]])*\](?:\n|\s)*/i;
 
 // Model must not echo these in user-facing text (history/ingress only).
-const OUT_ATTACHMENT_TAG_RE = /\[Attachment:\s*[^\]]+\]/gi;
 const PAST_VOICE_REPLY_RE = /<PastVoiceReply(?:\s[^>]*)?>[\s\S]*?<\/PastVoiceReply>/gi;
 // Program-owned wrappers (see utils/systemTags.js): drop the tags but keep the
 // text, so an echoed reminder body degrades to plain prose instead of markup.
@@ -177,7 +188,7 @@ function stripPastVoiceReplyTags(text) {
  */
 function stripOutgoingDeliveryArtifacts(text) {
   if (!text || typeof text !== 'string') return '';
-  let cleaned = text.replace(OUT_ATTACHMENT_TAG_RE, '');
+  let cleaned = stripAttachmentTags(text);
   cleaned = stripPastVoiceReplyTags(cleaned);
   cleaned = cleaned.replace(SYSTEM_TAG_RE, '');
   cleaned = cleaned.replace(/[ \t]{2,}/g, ' ');

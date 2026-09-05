@@ -1,9 +1,10 @@
-// Public HTTPS base for the temp attachment links GemiX sends to users on
+// Public HTTP(S) base for the temp attachment links GemiX sends to users on
 // WhatsApp and Discord. The model never receives one: its files come by path.
 // Set GEMIX_PUBLIC_ATTACHMENT_BASE_URL in .env (no trailing slash).
 
 import { createLogger  } from './logger.js';
 import env from '../config/env.js';
+import { normalizeHttpBaseUrl } from './httpUrl.js';
 
 const log = createLogger('PublicAttachmentUrl');
 
@@ -12,13 +13,9 @@ let _missingWarned = false;
 function getPublicBaseUrl() {
   const raw = env.GEMIX_PUBLIC_ATTACHMENT_BASE_URL;
   if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const normalized = raw.trim().replace(/\/+$/, '');
-      new URL(normalized);
-      return normalized;
-    } catch (err) {
-      log.error(`Invalid GEMIX_PUBLIC_ATTACHMENT_BASE_URL: ${err.message}`);
-    }
+    const normalized = normalizeHttpBaseUrl(raw);
+    if (normalized) return normalized;
+    log.error('Invalid GEMIX_PUBLIC_ATTACHMENT_BASE_URL: expected an absolute HTTP(S) URL.');
   }
   const localFallback = `http://localhost:${env.GEMIX_TEMP_FILE_PORT}`;
   if (!_missingWarned) {

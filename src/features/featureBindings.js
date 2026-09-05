@@ -1,56 +1,18 @@
 // src/features/featureBindings.js
 //
-// Which backend implements each GemiX feature, for one provider profile.
-//
-// This is the layer that answers "who does the work", and it is deliberately
-// separate from WireCapabilities, which only answers "can we talk to this
-// endpoint". A provider advertising hosted web search changes nothing here: the
-// binding is what the program routes on, and for search it is always GemiX
-// for every profile.
-//
-// Some bindings are not negotiable. Web search, image search, page reading, the
-// workspace, the filesystem, the shell, music generation and speech synthesis
-// belong to GemiX in every profile, so a profile cannot override them — the
-// definition throws rather than letting a provider quietly take one over.
-// Everything else has a GemiX-baseline default and a per-profile override.
+// Provider-dependent backend bindings. Only capabilities that runtime dispatch
+// actually resolves belong here; fixed GemiX tools do not need descriptive
+// entries in every provider profile.
 
 /** Every feature a profile can bind. */
 const FEATURE = Object.freeze({
-  SEARCH_WEB: 'search_web',
-  READ_PAGE: 'read_page',
-  SEARCH_IMAGE: 'search_image',
   GENERATE_IMAGE: 'generate_image',
   GENERATE_VIDEO: 'generate_video',
-  STT: 'stt',
-  TTS: 'tts',
-  WORKSPACE: 'workspace',
-  FILESYSTEM: 'filesystem',
-  SHELL: 'shell',
-  MUSIC_GENERATION: 'music_generation'
+  STT: 'stt'
 });
 
 /** The sentinel for a feature no backend implements on this profile. */
 const UNAVAILABLE = 'unavailable';
-
-/**
- * Features GemiX owns outright. A profile that tries to rebind one is a bug,
- * not a configuration choice: the whole point of the architecture is that the
- * provider never decides whether GemiX can search, read a file or run a shell.
- */
-const GEMIX_OWNED = Object.freeze({
-  [FEATURE.SEARCH_WEB]: 'gemix-web',
-  [FEATURE.READ_PAGE]: 'gemix-web',
-  [FEATURE.SEARCH_IMAGE]: 'gemix-image-search',
-  [FEATURE.WORKSPACE]: 'gemix',
-  [FEATURE.FILESYSTEM]: 'gemix',
-  [FEATURE.SHELL]: 'gemix',
-  // The music tool keeps its own OpenRouter/Lyria backend
-  // whatever the main brain runs on.
-  [FEATURE.MUSIC_GENERATION]: 'openrouter-lyria',
-  // Speech synthesis is the same two voices everywhere: Cartesia Sonic with a
-  // Microsoft Edge fallback behind it (tools/voiceMessage.js).
-  [FEATURE.TTS]: 'gemix-tts'
-});
 
 /**
  * Baselines for the features a profile may override. These are the answers for
@@ -78,13 +40,10 @@ const FALLBACKS = Object.freeze({
  * @returns {Readonly<Record<string, string>>}
  */
 function defineFeatureBindings(overrides = {}) {
-  const out = { ...GEMIX_OWNED, ...BASELINE };
+  const out = { ...BASELINE };
   for (const [feature, backend] of Object.entries(overrides)) {
     if (!Object.values(FEATURE).includes(feature)) {
       throw new Error(`Unknown feature "${feature}". Add it to FEATURE first.`);
-    }
-    if (feature in GEMIX_OWNED) {
-      throw new Error(`Feature "${feature}" is GemiX-owned and cannot be bound to a provider backend.`);
     }
     out[feature] = backend;
   }

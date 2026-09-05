@@ -1,8 +1,8 @@
 // test/provider-composition.test.js
 //
 // The separation the architecture rests on: wire capabilities gate whether a
-// provider may drive the main brain, feature bindings decide who implements
-// each user feature, and neither can quietly take over the other's job.
+// provider may drive the main brain while runtime bindings select the few
+// provider-dependent media backends independently.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -96,25 +96,14 @@ test('the minimum wire contract names every required flag', () => {
   assert.deepEqual(validateWireCapabilities(noSse), { ok: false, missing: ['supportsSse'] });
 });
 
-test('GemiX-owned features cannot be bound to a provider backend', () => {
-  for (const feature of [FEATURE.SEARCH_WEB, FEATURE.READ_PAGE, FEATURE.SEARCH_IMAGE,
-    FEATURE.WORKSPACE, FEATURE.FILESYSTEM, FEATURE.SHELL, FEATURE.MUSIC_GENERATION]) {
-    assert.throws(
-      () => defineFeatureBindings({ [feature]: 'provider-hosted' }),
-      /GemiX-owned/,
-      `${feature} must stay GemiX-owned`
-    );
-  }
+test('feature bindings reject descriptive entries that runtime never dispatches', () => {
+  assert.throws(() => defineFeatureBindings({ search_web: 'provider-hosted' }), /Unknown feature/);
 });
 
 test('a profile with no overrides gets the GemiX baselines', () => {
   const profile = { features: defineFeatureBindings({}) };
-  assert.equal(backendFor(profile, FEATURE.SEARCH_WEB), 'gemix-web');
-  assert.equal(backendFor(profile, FEATURE.SEARCH_IMAGE), 'gemix-image-search');
-  assert.equal(backendFor(profile, FEATURE.MUSIC_GENERATION), 'openrouter-lyria');
   assert.equal(backendFor(profile, FEATURE.GENERATE_IMAGE), 'cloudflare-flux');
   assert.equal(backendFor(profile, FEATURE.STT), 'cloudflare-whisper');
-  assert.equal(backendFor(profile, FEATURE.TTS), 'gemix-tts');
   assert.equal(backendFor(profile, FEATURE.GENERATE_VIDEO), UNAVAILABLE);
   assert.equal(isFeatureAvailable(profile, FEATURE.GENERATE_VIDEO), false);
 });

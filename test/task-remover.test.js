@@ -83,3 +83,42 @@ test('removeTasks deletes the task file after removing every task', async (t) =>
   assert.deepEqual(result.not_found, []);
   assert.equal(await readTaskFile(fileId), null);
 });
+
+test('removeTasks cancels a claimed task before any destination starts sending', async (t) => {
+  const fileId = fixture(t, [{
+    id: 'claimed',
+    content: 'Reminder',
+    scheduledAt: new Date().toISOString(),
+    deliveryClaim: {
+      id: 'claim',
+      destinations: { whatsapp: { status: 'pending', attempts: 0 } }
+    }
+  }]);
+
+  const result = await removeTasks(['claimed'], fileId);
+
+  assert.equal(result.success, true);
+  assert.deepEqual(result.removed, ['claimed']);
+  assert.equal(await readTaskFile(fileId), null);
+});
+
+test('removeTasks does not claim cancellation after delivery has started', async (t) => {
+  const task = {
+    id: 'dispatching',
+    content: 'Reminder',
+    scheduledAt: new Date().toISOString(),
+    deliveryClaim: {
+      id: 'claim',
+      destinations: { whatsapp: { status: 'sending', attempts: 1 } }
+    }
+  };
+  const fileId = fixture(t, [task]);
+
+  const result = await removeTasks(['dispatching'], fileId);
+
+  assert.equal(result.success, false);
+  assert.deepEqual(result.removed, []);
+  assert.deepEqual(result.in_progress, ['dispatching']);
+  assert.match(result.results[0].error, /already in progress/);
+  assert.deepEqual((await readTaskFile(fileId)).tasks, [task]);
+});

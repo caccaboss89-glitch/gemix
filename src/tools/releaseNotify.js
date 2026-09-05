@@ -10,9 +10,11 @@
 // for use by handler and admin flows. In-memory Map with disk backup.
 
 import { get as getSystemState, update as updateSystemState } from '../utils/systemState.js';
+import { withKeyedLock } from '../utils/keyedLock.js';
 
 /** @type {Map<string, string>} chatId -> waJid (delivery target) */
 let subscribedChats = new Map();
+const mutationLocks = new Map();
 
 function _load() {
   const state = getSystemState('releases');
@@ -21,10 +23,10 @@ function _load() {
   }
 }
 
-async function _save() {
+async function _save(nextSubscriptions) {
   await updateSystemState('releases', (current) => ({
     ...current,
-    subscriptions: Object.fromEntries(subscribedChats)
+    subscriptions: Object.fromEntries(nextSubscriptions)
   }));
 }
 
@@ -34,17 +36,21 @@ async function enableReleaseNotify(chatId, waJid) {
   if (!chatId || !waJid) {
     return { success: false, alreadyEnabled: false, error: 'Unable to determine the chat or WhatsApp number.' };
   }
-  if (subscribedChats.get(chatId) === waJid) {
-    return { success: true, alreadyEnabled: true, message: 'GemiX release notifications were already enabled for this chat.' };
-  }
-  for (const [existingChatId, existingWaJid] of [...subscribedChats.entries()]) {
-    if (existingChatId === chatId || existingWaJid === waJid) {
-      subscribedChats.delete(existingChatId);
+  return withKeyedLock(mutationLocks, 'subscriptions', async () => {
+    if (subscribedChats.get(chatId) === waJid) {
+      return { success: true, alreadyEnabled: true, message: 'GemiX release notifications were already enabled for this chat.' };
     }
-  }
-  subscribedChats.set(chatId, waJid);
-  await _save();
-  return { success: true, alreadyEnabled: false, message: 'GemiX release notifications enabled for this chat.' };
+    const next = new Map(subscribedChats);
+    for (const [existingChatId, existingWaJid] of next.entries()) {
+      if (existingChatId === chatId || existingWaJid === waJid) {
+        next.delete(existingChatId);
+      }
+    }
+    next.set(chatId, waJid);
+    await _save(next);
+    subscribedChats = next;
+    return { success: true, alreadyEnabled: false, message: 'GemiX release notifications enabled for this chat.' };
+  });
 }
 
 /**
@@ -61,22 +67,26 @@ async function toggleReleaseNotify(enabled, chatId, waJid) {
   if (enabled) {
     return await enableReleaseNotify(chatId, waJid);
   }
-  let removed = false;
-  if (subscribedChats.has(chatId)) {
-    subscribedChats.delete(chatId);
-    removed = true;
-  }
-  for (const [existingChatId, existingWaJid] of [...subscribedChats.entries()]) {
-    if (existingWaJid === waJid) {
-      subscribedChats.delete(existingChatId);
+  return withKeyedLock(mutationLocks, 'subscriptions', async () => {
+    const next = new Map(subscribedChats);
+    let removed = false;
+    if (next.has(chatId)) {
+      next.delete(chatId);
       removed = true;
     }
-  }
-  if (!removed) {
-    return { success: true, message: 'Release notifications were already disabled for this chat.' };
-  }
-  await _save();
-  return { success: true, message: 'GemiX release notifications disabled for this chat.' };
+    for (const [existingChatId, existingWaJid] of next.entries()) {
+      if (existingWaJid === waJid) {
+        next.delete(existingChatId);
+        removed = true;
+      }
+    }
+    if (!removed) {
+      return { success: true, message: 'Release notifications were already disabled for this chat.' };
+    }
+    await _save(next);
+    subscribedChats = next;
+    return { success: true, message: 'GemiX release notifications disabled for this chat.' };
+  });
 }
 
 /**

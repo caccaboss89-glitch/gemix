@@ -79,4 +79,13 @@ function startInternalNotifyServer() {
   });
 }
 
-export { startInternalNotifyServer };
+async function stopInternalNotifyServer() {
+  const server = _server;
+  _server = null;
+  if (!server) return;
+  await new Promise((resolve, reject) => {
+    server.close(err => err ? reject(err) : resolve());
+  });
+}
+
+export { startInternalNotifyServer, stopInternalNotifyServer };

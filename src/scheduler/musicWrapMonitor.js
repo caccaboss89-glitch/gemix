@@ -15,15 +15,16 @@ import { fetchExternal } from '../utils/fetch.js';
 import { MUSIC_WRAP_PREFIX } from '../config/systemMessages.js';
 
 const log = createLogger('MusicWrap');
+const STATS_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
 
 /**
  * Load monitor state from unified system state.
  * State tracks last stats timestamp, dates messages were sent to members, and last check date.
- * @returns {object} Monitor state { lastStatsTimestamp, lastSentDate, lastCheckDate }
+ * @returns {object} Monitor state { lastStatsTimestamp, lastSentDate, lastCheckDate, nextRetryAt }
  */
 function loadMonitorState() {
   const state = getSystemState('musicWrap');
-  return state || { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null };
+  return state || { lastStatsTimestamp: null, lastSentDate: {}, lastCheckDate: null, nextRetryAt: null };
 }
 
 /**
@@ -33,6 +34,19 @@ function loadMonitorState() {
  */
 async function saveMonitorState(state) {
   await updateSystemState('musicWrap', state);
+}
+
+function _statsRetryDeferred(state, now = Date.now()) {
+  const retryAt = state?.nextRetryAt ? Date.parse(state.nextRetryAt) : NaN;
+  return Number.isFinite(retryAt) && now < retryAt;
+}
+
+function _statsCheckCompletedToday(state, today, statsTimestamp) {
+  if (state?.lastCheckDate !== today || state?.lastStatsTimestamp !== statsTimestamp) {
+    return false;
+  }
+  if (ACTIVE_MEMBERS.length === 0) return true;
+  return ACTIVE_MEMBERS.every(member => state.lastSentDate?.[member.wa] === today);
 }
 
 /**
@@ -145,10 +159,9 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   const today = getItalyDateString();
   const state = loadMonitorState();
 
-  // If the check was already done today (per systemState lastCheckDate), skip.
-  if (state.lastCheckDate === today) {
-    log.info(`Already checked today (${today}), skipping`);
-    return true;
+  if (_statsRetryDeferred(state)) {
+    log.info(`Stats retry deferred until ${state.nextRetryAt}`);
+    return false;
   }
 
   log.info('First of month! Running checks...');
@@ -159,12 +172,16 @@ async function checkAndSendMusicWrap(dedicatedClient) {
     return false;
   }
 
-  if (state.lastStatsTimestamp === statsTimestamp) {
-    log.info('No new update detected (timestamp: ' + statsTimestamp + ')');
-    // Record the check even without updates.
-    state.lastCheckDate = today;
-    await saveMonitorState(state);
+  if (_statsCheckCompletedToday(state, today, statsTimestamp)) {
+    log.info(`Already completed today (${today}) for timestamp ${statsTimestamp}, skipping`);
     return true;
+  }
+
+  if (state.lastStatsTimestamp === statsTimestamp) {
+    state.nextRetryAt = new Date(Date.now() + STATS_RETRY_DELAY_MS).toISOString();
+    log.info(`No new update detected (timestamp: ${statsTimestamp}); retrying after ${state.nextRetryAt}`);
+    await saveMonitorState(state);
+    return false;
   }
 
   log.info(`New update detected (timestamp: ${statsTimestamp})`);
@@ -197,6 +214,7 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   if (!anyFailed) {
     state.lastStatsTimestamp = statsTimestamp;
     state.lastCheckDate = today;
+    state.nextRetryAt = null;
   }
   await saveMonitorState(state);
 
@@ -207,4 +225,4 @@ async function checkAndSendMusicWrap(dedicatedClient) {
   return !anyFailed;
 }
 
-export { checkAndSendMusicWrap };
+export { checkAndSendMusicWrap, _statsCheckCompletedToday, _statsRetryDeferred };

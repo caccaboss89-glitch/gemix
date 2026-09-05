@@ -13,15 +13,17 @@
 
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { stripDisallowedOutgoingMentions, normalizeOutgoingMentionTags, collectMentionJids  } from '../utils/waMentions.js';
-
-let dedicatedClient = null;
+import {
+  getReadyDedicatedClient,
+  setReadyDedicatedClient
+} from '../platforms/whatsapp/dedicatedClientRegistry.js';
 
 /**
  * Store reference to WhatsApp dedicated client for message sending.
  * @param {object} client - The whatsapp-web.js Client instance
  */
 function setDedicatedClient(client) {
-  dedicatedClient = client;
+  setReadyDedicatedClient(client);
 }
 
 /**
@@ -57,6 +59,7 @@ function normalizePhoneToJid(phone) {
  * Send a WhatsApp message directly to a JID (used by scheduler).
  */
 async function sendWhatsAppDirect(chatId, message, options = {}) {
+  const dedicatedClient = getReadyDedicatedClient();
   if (!dedicatedClient) throw new Error('Dedicated WhatsApp client not available');
   // Only clean text messages; MessageMedia objects must be passed through untouched.
   // Direct sends never go to the current chat, so @gemix self-tags and Meta AI

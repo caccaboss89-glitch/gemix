@@ -20,6 +20,7 @@ import envConfig from '../config/env.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
 import { createLogger } from '../utils/logger.js';
 import { isGoogleInterstice, readPublicPageDirect } from './directPage.js';
+import { normalizeHttpBaseUrl } from '../utils/httpUrl.js';
 
 const log = createLogger('AgentSearch');
 
@@ -41,8 +42,7 @@ const READ_TIMEOUT_MS = 60_000;
 
 /** True when a base URL is set at all. There is no cloud fallback for this. */
 function isAgentSearchConfigured() {
-  const base = String(envConfig.AGENT_SEARCH_BASE_URL || '');
-  return /^https?:\/\//i.test(base);
+  return normalizeHttpBaseUrl(envConfig.AGENT_SEARCH_BASE_URL) !== null;
 }
 
 function _headers() {
@@ -75,15 +75,15 @@ function _normalizeHits(raw) {
 
 /** Bypass only a stale degraded empty sidecar cache, using its same SearXNG. */
 async function _searchSearxFallback(query, count, signal) {
-  const base = String(envConfig.SEARCH_IMAGE_BASE_URL || '').replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(base)) return [];
-  const url = new URL(`${base}/search`);
-  url.searchParams.set('q', query);
-  url.searchParams.set('format', 'json');
-  url.searchParams.set('categories', 'general');
-  url.searchParams.set('pageno', '1');
-  url.searchParams.set('safesearch', '0');
   try {
+    const base = normalizeHttpBaseUrl(envConfig.SEARCH_IMAGE_BASE_URL);
+    if (!base) return [];
+    const url = new URL('/search', `${base}/`);
+    url.searchParams.set('q', query);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('categories', 'general');
+    url.searchParams.set('pageno', '1');
+    url.searchParams.set('safesearch', '0');
     const response = await fetchWithTimeout(url.toString(), {
       method: 'GET',
       headers: { Accept: 'application/json', 'User-Agent': 'GemiX-WebSearch/1.0' },
@@ -93,6 +93,7 @@ async function _searchSearxFallback(query, count, signal) {
     const body = await response.text();
     return _normalizeHits(JSON.parse(body)?.results).slice(0, count);
   } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
     log.warn(`direct SearXNG fallback failed: ${err.message}`);
     return [];
   }
@@ -117,16 +118,16 @@ async function _get(path, params, timeoutMs, signal) {
     };
   }
 
-  const base = String(envConfig.AGENT_SEARCH_BASE_URL).replace(/\/+$/, '');
-  const url = new URL(base + path);
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
-  }
-
   let res;
+  const base = normalizeHttpBaseUrl(envConfig.AGENT_SEARCH_BASE_URL);
   try {
+    const url = new URL(path, `${base}/`);
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
+    }
     res = await fetchWithTimeout(url.toString(), { method: 'GET', headers: _headers(), signal }, timeoutMs);
   } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
     log.warn(`${path} request failed: ${err.message}`);
     return {
       ok: false,

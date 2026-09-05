@@ -26,12 +26,9 @@ import { getMediaDurationSecFromPath } from '../utils/mediaDuration.js';
 import { STT_STATUS, isCacheableSttStatus, transcribeAudioFile } from '../media/speechToText.js';
 import { PARSE_ERROR } from './parseErrors.js';
 import { createLogger } from '../utils/logger.js';
+import { AUDIO_EXTS, VIDEO_EXTS, mediaFamilyFor } from '../config/mediaTypes.js';
 
 const log = createLogger('MediaParser');
-
-const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.svg', '.ico']);
-const AUDIO_EXTS = new Set(['.ogg', '.opus', '.oga', '.mp3', '.wav', '.m4a', '.flac', '.aac', '.amr', '.wma']);
-const VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.mpg', '.mpeg', '.wmv']);
 
 /** How long ffmpeg gets to pull frames or an audio track out of one clip. */
 const FFMPEG_TIMEOUT_MS = 120_000;
@@ -53,10 +50,7 @@ async function _loadSharp() {
 }
 
 function familyOf(ext) {
-  if (IMAGE_EXTS.has(ext)) return 'image';
-  if (AUDIO_EXTS.has(ext)) return 'audio';
-  if (VIDEO_EXTS.has(ext)) return 'video';
-  return null;
+  return mediaFamilyFor({ ext });
 }
 
 /** A private scratch dir for one parse, removed whatever happens. */
@@ -104,6 +98,16 @@ function _runFfmpeg(args, timeoutMs = FFMPEG_TIMEOUT_MS, signal) {
 function _timecode(seconds) {
   const s = Math.max(0, Math.round(seconds));
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+async function _probeDuration(absPath, signal) {
+  try {
+    const duration = await getMediaDurationSecFromPath(absPath, signal);
+    return Number.isFinite(duration) && duration > 0 ? duration : null;
+  } catch (err) {
+    if (signal?.aborted) throw signal.reason || err;
+    return null;
+  }
 }
 
 /**
@@ -157,7 +161,9 @@ function _sttOutcome(result, durationSec, { timed = false } = {}) {
     notes.push('No speech in this audio. That does not mean it is silent — music, ambient sound and '
       + 'tone are not transcribed, so work from the file itself if that is what matters.');
   } else if (result.status === STT_STATUS.TOO_LONG) {
-    notes.push(`This is ${_timecode(durationSec)} long, past the transcription limit. Cut a segment with shell and read that.`);
+    notes.push(durationSec === null
+      ? 'This file is past the transcription size or duration limit. Cut a segment with shell and read that.'
+      : `This is ${_timecode(durationSec)} long, past the transcription limit. Cut a segment with shell and read that.`);
   } else if (result.status === STT_STATUS.UNCONFIGURED) {
     notes.push(result.message || 'Speech-to-text is not configured on this deployment.');
   } else if (result.status === STT_STATUS.CONTENT_POLICY) {
@@ -170,21 +176,23 @@ function _sttOutcome(result, durationSec, { timed = false } = {}) {
 
 /** Audio: what was said, or an honest note about why there is nothing. */
 async function parseAudio(absPath, opts = {}) {
-  const durationSec = await getMediaDurationSecFromPath(absPath, opts.signal).catch(() => 0);
+  const durationSec = await _probeDuration(absPath, opts.signal);
   const result = await transcribeAudioFile(absPath, {
     durationSec,
     language: opts.language,
     signal: opts.signal
   });
   const { content, notes } = _sttOutcome(result, durationSec);
+  if (durationSec === null) notes.push('The audio duration could not be determined.');
   return {
     ok: true,
     cacheable: isCacheableSttStatus(result.status),
     kind: 'audio',
     content,
     metadata: {
-      durationSec: durationSec || undefined,
-      duration: durationSec ? _timecode(durationSec) : undefined,
+      durationSec: durationSec ?? undefined,
+      duration: durationSec !== null ? _timecode(durationSec) : undefined,
+      durationUnknown: durationSec === null ? true : undefined,
       transcriptStatus: result.status,
       transcribedBy: result.provider || undefined
     },
@@ -209,13 +217,17 @@ async function _extractAudioTrack(absPath, dir, signal) {
 }
 
 /** Sample frames evenly across the clip, so the whole thing is represented. */
+function frameOffsets(durationSec, wanted) {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return [0];
+  const count = Math.max(1, Math.min(wanted, constants.PARSE_MAX_VIDEO_FRAMES));
+  return Array.from({ length: count }, (_, index) => (durationSec * (index + 0.5)) / count);
+}
+
 async function _extractFrames(absPath, dir, durationSec, wanted, signal) {
   const frames = [];
-  const count = Math.max(1, Math.min(wanted, constants.PARSE_MAX_VIDEO_FRAMES));
   // Offsets sit at the middle of each slice: the first frame of a video is
   // often a black or title frame and says nothing about the content.
-  for (let i = 0; i < count; i++) {
-    const at = durationSec > 0 ? (durationSec * (i + 0.5)) / count : 0;
+  for (const [i, at] of frameOffsets(durationSec, wanted).entries()) {
     const out = path.join(dir, `frame_${i}.jpg`);
     const run = await _runFfmpeg([
       '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
@@ -240,8 +252,8 @@ async function _extractFrames(absPath, dir, durationSec, wanted, signal) {
  * @returns {Promise<object>}
  */
 async function parseVideo(absPath, opts = {}) {
-  const durationSec = await getMediaDurationSecFromPath(absPath, opts.signal).catch(() => 0);
-  if (durationSec > constants.MAX_VIDEO_DURATION_S) {
+  const durationSec = await _probeDuration(absPath, opts.signal);
+  if (durationSec !== null && durationSec > constants.MAX_VIDEO_DURATION_S) {
     return {
       ok: false,
       error_code: PARSE_ERROR.TOO_LARGE,
@@ -253,7 +265,7 @@ async function parseVideo(absPath, opts = {}) {
   const dir = _scratchDir();
   const notes = [];
   let content = '';
-  let transcriptStatus = 'skipped';
+  let transcriptStatus;
   let transcribedBy;
 
   try {
@@ -274,11 +286,15 @@ async function parseVideo(absPath, opts = {}) {
       notes.push(`No transcript: ${track.error}.`);
     }
 
+    if (durationSec === null) {
+      notes.push('The video duration could not be determined; only one poster frame was sampled.');
+    }
+
     const frames = await _extractFrames(
       absPath,
       dir,
       durationSec,
-      constants.PARSE_MAX_VIDEO_FRAMES,
+      durationSec === null ? 1 : constants.PARSE_MAX_VIDEO_FRAMES,
       opts.signal
     );
     if (frames.length === 0) notes.push('No frames could be extracted from this clip.');
@@ -286,12 +302,13 @@ async function parseVideo(absPath, opts = {}) {
 
     return {
       ok: true,
-      cacheable: transcriptStatus === 'skipped' || isCacheableSttStatus(transcriptStatus),
+      cacheable: isCacheableSttStatus(transcriptStatus),
       kind: 'video',
       content,
       metadata: {
-        durationSec: durationSec || undefined,
-        duration: durationSec ? _timecode(durationSec) : undefined,
+        durationSec: durationSec ?? undefined,
+        duration: durationSec !== null ? _timecode(durationSec) : undefined,
+        durationUnknown: durationSec === null ? true : undefined,
         transcriptStatus,
         transcribedBy
       },
@@ -308,6 +325,7 @@ export {
   AUDIO_EXTS,
   VIDEO_EXTS,
   familyOf,
+  frameOffsets,
   parseAudio,
   parseImage,
   parseVideo

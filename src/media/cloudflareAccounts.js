@@ -61,14 +61,19 @@ function markWorking(fingerprint) {
  * @param {string} fingerprint
  * @returns {Promise<void>}
  */
-async function markExhausted(fingerprint) {
-  await ring.markExhausted(fingerprint);
+async function markExhausted(fingerprint, reason = 'BUDGET') {
+  await ring.markExhausted(fingerprint, reason);
+}
+
+function exhaustionReasons() {
+  return ring.exhaustionReasons();
 }
 
 export {
   CLOUDFLARE_STATE_FILE,
   isCloudflareConfigured,
   usableAccounts,
+  exhaustionReasons,
   markWorking,
   markExhausted
 };

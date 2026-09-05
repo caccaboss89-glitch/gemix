@@ -107,7 +107,7 @@ async function shell(args = {}, workspaceId, opts = {}) {
       const killed = killNote(run.rc, run.killCause);
       if (killed) notes.push(killed);
     }
-    if (run.truncated) notes.push('Output was truncated; only the tail is shown.');
+    if (run.truncated) notes.push(`Output was truncated; only the shared stdout/stderr tail is shown (${run.droppedBytes || 0} byte(s) dropped).`);
     const quota = checkWritableQuotas(workspaceId);
     if (!quota.ok) notes.push(quota.message);
     const commandSucceeded = run.rc === 0 && !run.timedOut;
@@ -117,6 +117,7 @@ async function shell(args = {}, workspaceId, opts = {}) {
       exit_code: run.rc,
       timed_out: run.timedOut,
       output_truncated: run.truncated,
+      output_dropped_bytes: run.droppedBytes || 0,
       duration_ms: run.durationMs,
       stdout: run.stdout,
       stderr: run.stderr,

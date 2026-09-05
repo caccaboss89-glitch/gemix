@@ -10,6 +10,7 @@ from quota_guard import (
     _parse_roots,
     _poll_seconds,
     _should_kill_jobs,
+    _tree_inventory,
     _tree_size,
 )
 
@@ -17,12 +18,15 @@ from quota_guard import (
 class QuotaGuardTests(unittest.TestCase):
     def test_roots_parse_as_absolute_path_and_positive_limit_pairs(self) -> None:
         self.assertEqual(
-            _parse_roots(["/workspace=10", "/skills=5"]),
-            [("/workspace", 10), ("/skills", 5)],
+            _parse_roots(["/workspace=10:20", "/skills=5:7"]),
+            [("/workspace", 10, 20), ("/skills", 5, 7)],
         )
 
     def test_malformed_or_missing_roots_are_refused(self) -> None:
-        for args in ([], ["/workspace"], ["workspace=10"], ["/workspace=0"], ["/workspace=x"]):
+        for args in (
+            [], ["/workspace"], ["workspace=10:20"], ["/workspace=0:20"],
+            ["/workspace=10:0"], ["/workspace=x:20"], ["/workspace=10"],
+        ):
             self.assertIsNone(_parse_roots(args), args)
 
     def test_overflow_kills_on_entry_and_on_further_growth(self) -> None:
@@ -61,6 +65,16 @@ class QuotaGuardTests(unittest.TestCase):
             except (OSError, NotImplementedError):
                 self.skipTest("symlinks unavailable")
             self.assertEqual(_tree_size(root), len(b"inside"))
+
+    def test_tree_inventory_stops_at_the_entry_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            for index in range(3):
+                with open(os.path.join(root, f"{index}.txt"), "wb") as handle:
+                    handle.write(b"x")
+            size, entries, complete = _tree_inventory(root, 2)
+            self.assertFalse(complete)
+            self.assertEqual(entries, 3)
+            self.assertLessEqual(size, 2)
 
 
 if __name__ == "__main__":

@@ -58,6 +58,12 @@ test('truncated reply salvage reads voice only before response and handles unico
   assert.equal(cutSurrogate.voice, false);
 });
 
+test('a newer truncated reply after a complete object wins over the older object', () => {
+  const parsed = parseStructuredReply('{"diagnostic":"done"}{"response":"new answer');
+  assert.equal(parsed.structured, true);
+  assert.equal(parsed.text, 'new answer');
+});
+
 test('structured reply parser enforces attachment and title caps defensively', () => {
   const raw = JSON.stringify({
     response: 'ok',

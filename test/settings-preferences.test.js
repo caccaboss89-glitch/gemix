@@ -20,9 +20,33 @@ import { managePreferences } from '../src/tools/preferences.js';
 import {
   activeEffortPolicy,
   defaultSettings,
+  deleteSettings,
   readSettings,
-  settingsForModel
+  settingsForModel,
+  updateSettings
 } from '../src/utils/settingsStore.js';
+
+test('settings deletion is serialized after an in-flight update', async (t) => {
+  const fileId = `test_settings_wipe_${process.pid}_${Date.now()}`;
+  const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
+  t.after(() => { try { fs.unlinkSync(filePath); } catch { /* already absent */ } });
+  let releaseUpdate;
+  let markStarted;
+  const started = new Promise(resolve => { markStarted = resolve; });
+  const gate = new Promise(resolve => { releaseUpdate = resolve; });
+  const updating = updateSettings(fileId, async () => {
+    markStarted();
+    await gate;
+    return { memory: 'must be deleted' };
+  });
+
+  await started;
+  const deleting = deleteSettings(fileId);
+  releaseUpdate();
+  assert.equal((await updating).success, true);
+  assert.equal(await deleting, true);
+  assert.equal(fs.existsSync(filePath), false);
+});
 
 async function withProvider(provider, fn) {
   const saved = envConfig.AI_PROVIDER;
@@ -214,4 +238,20 @@ test('every supported effort persists, while a provider-only value degrades with
   await withProvider('chatgpt', () => {
     assert.equal(readSettings(fileId).effort, providerOnlyEffort);
   });
+});
+
+test('concurrent memory appends are serialized under the settings lock', async (t) => {
+  const fileId = `test_memory_append_${process.pid}_${Date.now()}`;
+  const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
+  t.after(() => {
+    try { fs.unlinkSync(filePath); } catch { /* already absent */ }
+  });
+
+  await managePreferences({ memory: 'base' }, fileId);
+  const results = await Promise.all([
+    managePreferences({ memory: 'first', replace: false }, fileId),
+    managePreferences({ memory: 'second', replace: false }, fileId)
+  ]);
+  assert.equal(results.every(result => result.success), true);
+  assert.equal(readSettings(fileId).memory, 'base\nfirst\nsecond');
 });

@@ -5,18 +5,22 @@ import { clearLiveMessages, openLiveInbox } from './liveInbox.js';
 import { getBatchSpeakerKey, pickLatestBatchEntry, filterBatchToTriggerSpeaker } from './batchContext.js';
 import constants from '../config/constants.js';
 import { handleMessage } from '../handler.js';
+import { deliveryFailureError, normalizeDeliveryReceipt } from './deliveryReceipt.js';
 
 const { BATCH_LOCK_TTL_MS } = constants;
 
-/** Keep or re-acquire the per-chat lock before running a batched turn. */
-function _ensurePipelineLock(lockKey, stopLockRenew) {
-  if (responseLock.refresh(lockKey, BATCH_LOCK_TTL_MS)) {
-    return stopLockRenew || responseLock.startAutoRenew(lockKey, BATCH_LOCK_TTL_MS);
+/** Keep the owner's lease or acquire a new one before running a batched turn. */
+function _ensurePipelineLock(lockKey, lockLease, stopLockRenew) {
+  if (lockLease && responseLock.refresh(lockLease, BATCH_LOCK_TTL_MS)) {
+    return {
+      lease: lockLease,
+      stop: stopLockRenew || responseLock.startAutoRenew(lockLease, BATCH_LOCK_TTL_MS)
+    };
   }
-  if (responseLock.tryLock(lockKey, BATCH_LOCK_TTL_MS)) {
-    return responseLock.startAutoRenew(lockKey, BATCH_LOCK_TTL_MS);
-  }
-  return null;
+  try { stopLockRenew?.(); } catch { /* stale renewal */ }
+  const lease = responseLock.tryLock(lockKey, BATCH_LOCK_TTL_MS);
+  if (!lease) return null;
+  return { lease, stop: responseLock.startAutoRenew(lease, BATCH_LOCK_TTL_MS) };
 }
 
 /**
@@ -26,6 +30,7 @@ function _ensurePipelineLock(lockKey, stopLockRenew) {
  * @param {object} opts.log - logger
  * @param {string} opts.lockKey
  * @param {string} opts.platform - resolves each entry's speaker key
+ * @param {{key:string,lockId:string}|null} opts.lockLease
  * @param {Function|null} opts.stopLockRenew
  * @param {Array} opts.entries - batch entries (narrowed to the trigger speaker)
  * @param {string} opts.discardLogLabel - chat id for discard warning
@@ -43,7 +48,7 @@ function _ensurePipelineLock(lockKey, stopLockRenew) {
  *   starts a turn (Discord threads), so that people talking to each other do
  *   not arrive as if they were addressing GemiX.
  * @param {Function} [opts.transformResponse] - (response, ctx) => response
- * @param {Function} opts.deliver - async (ctx, response) => void
+ * @param {Function} opts.deliver - async (ctx, response) => a delivery receipt
  * @param {Function} [opts.onDeliverError] - async (ctx, err) => void
  */
 async function runTurnPipeline(opts) {
@@ -51,6 +56,7 @@ async function runTurnPipeline(opts) {
     log,
     lockKey,
     platform,
+    lockLease,
     stopLockRenew,
     entries: firedEntries,
     discardLogLabel,
@@ -72,8 +78,13 @@ async function runTurnPipeline(opts) {
     }
     try {
       log.info('\nSending response...');
-      await deliver(ctx, outgoing);
-      log.info('   Message sent');
+      const receipt = normalizeDeliveryReceipt(await deliver(ctx, outgoing));
+      if (receipt.status === 'failed') throw deliveryFailureError(receipt);
+      if (receipt.status === 'degraded') {
+        log.warn(`   Response accepted only partially (${receipt.failures.length} failure(s))`);
+      } else {
+        log.info('   Message sent');
+      }
       return true;
     } catch (err) {
       log.error('\nError sending response:');
@@ -93,17 +104,20 @@ async function runTurnPipeline(opts) {
   const latest = pickLatestBatchEntry(entries) || first;
 
   let activeStopRenew = stopLockRenew;
+  let activeLease = lockLease || null;
   let session = null;
   let pipelineOwnsLock = false;
   try {
-    activeStopRenew = _ensurePipelineLock(lockKey, activeStopRenew);
-    if (!activeStopRenew) {
+    const lockState = _ensurePipelineLock(lockKey, activeLease, activeStopRenew);
+    if (!lockState) {
       try { if (typeof stopLockRenew === 'function') stopLockRenew(); } catch { }
       // Another turn holds this chat: its own messages reached it through the
       // live inbox, and this batch is not queued behind it.
       log.warn(`   Batch discarded for ${discardLogLabel}: GemiX is already responding (not queued)`);
       return;
     }
+    activeLease = lockState.lease;
+    activeStopRenew = lockState.stop;
     pipelineOwnsLock = true;
     // The turn starts here: anything the inbox still holds predates it and is
     // already in the history about to be loaded. From now on what lands there
@@ -147,7 +161,7 @@ async function runTurnPipeline(opts) {
       if (typeof activeStopRenew === 'function' && activeStopRenew !== stopLockRenew) activeStopRenew();
     } catch { }
     if (pipelineOwnsLock) {
-      try { responseLock.unlock(lockKey); } catch { }
+      try { responseLock.unlock(activeLease); } catch { }
       // Whatever arrived too late for this turn to read is left to the history:
       // it comes back as an ordinary user turn, so it must not be shown twice.
       clearLiveMessages(lockKey);

@@ -315,8 +315,8 @@ function buildSendingFilesLines() {
  */
 function buildVisibilityLines(profile) {
   const cap = CAPS[profile];
-  // The real boundary is the message window, not a media count: the per-turn
-  // caps equal MAX_HISTORY, so inside a 30-message window they never bind.
+  // Only current/replied images are inlined, up to the per-turn image cap;
+  // excess images remain attachment paths that read_file can open on demand.
   let historyLine =
     `Your ordinary history window is the last ${MAX_HISTORY} messages of this chat. A reply quote can additionally `
     + 'carry an abbreviated excerpt of the older message being answered. Files inside the ordinary window are '

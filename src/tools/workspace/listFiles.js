@@ -67,7 +67,13 @@ function listFiles(args = {}, workspaceId, opts = {}) {
   const directories = listing.dirs.map(d => toDisplayPath(resolved.root, `${prefix}${d}`));
 
   const notes = [];
-  if (listing.more) notes.push(`Only the first ${MAX_ENTRIES} of ${listing.total} files are listed.`);
+  if (listing.more) {
+    const knownTotal = listing.complete ? String(listing.totalEntries) : `at least ${listing.totalEntries}`;
+    notes.push(`Only ${entries.length + directories.length} of ${knownTotal} entries are listed.`);
+  }
+  if (listing.errors.length > 0) {
+    notes.push(`${listing.errors.length} filesystem location(s) could not be inventoried.`);
+  }
   if (!args.recursive && directories.length > 0) {
     notes.push('Sub-directories are shown but not expanded; pass recursive=true to see inside them.');
   }
@@ -83,10 +89,13 @@ function listFiles(args = {}, workspaceId, opts = {}) {
 
   return {
     success: true,
-    status: listing.more ? 'degraded' : 'ok',
+    status: listing.more || !listing.complete ? 'degraded' : 'ok',
     path: resolved.display,
-    total: listing.total,
-    truncated: Boolean(listing.more),
+    total: listing.totalEntries,
+    file_count: listing.totalFiles,
+    directory_count: listing.totalDirs,
+    inventory_complete: listing.complete,
+    truncated: Boolean(listing.more || !listing.complete),
     entries,
     directories,
     message: notes.join(' ')

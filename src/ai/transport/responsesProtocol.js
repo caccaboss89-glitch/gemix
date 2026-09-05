@@ -340,7 +340,8 @@ class ResponseAssembler {
           // Match by id so a final item lands on the entry the stream already
           // built for it instead of duplicating it.
           const key = id ? this._idToKey.get(id) : null;
-          this._upsert(key || (id ? `id:${id}` : `ord:${this._order}`), item, true);
+          const itemDone = type === 'response.completed' || item.status === 'completed';
+          this._upsert(key || (id ? `id:${id}` : `ord:${this._order}`), item, itemDone);
         }
       }
       return;
@@ -356,6 +357,7 @@ class ResponseAssembler {
   /** The assembled response, in the shape a non-streaming call would return. */
   toResponse() {
     const output = [...this._items.values()]
+      .filter(entry => entry.done)
       .sort((a, b) => a.order - b.order)
       .map(entry => entry.item);
     return {
@@ -368,9 +370,14 @@ class ResponseAssembler {
     };
   }
 
-  /** True once at least one output item has been recorded, complete or not. */
+  /** True once at least one complete output item has been recorded. */
   get hasOutputItems() {
-    return this._items.size > 0;
+    return [...this._items.values()].some(entry => entry.done);
+  }
+
+  /** True while the stream still contains an item not finalized by the provider. */
+  get hasIncompleteOutputItems() {
+    return [...this._items.values()].some(entry => !entry.done);
   }
 }
 
@@ -432,7 +439,7 @@ function readResponse(response, opts = {}) {
         .map(p => p.text)
         .join('');
       if (text.trim()) texts.push(text);
-    } else if (item.type === 'function_call') {
+    } else if (item.type === 'function_call' && item.status !== 'in_progress') {
       const callId = item.call_id || item.id;
       if (callId && typeof item.name === 'string') {
         toolCalls.push({

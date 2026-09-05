@@ -5,14 +5,21 @@
 import { generateImage, generateVideo } from '../imagineGenerator.js';
 import { musicCreator } from '../musicCreator.js';
 import { readMusicStats } from '../musicStats.js';
-import { stageToolOutput } from '../workspace/toolOutput.js';
+import { stageToolOutputsBatch } from '../workspace/toolOutput.js';
 import { resolveWorkspaceId } from '../../utils/workspaceId.js';
+import { runAccessoryEffect } from '../../utils/accessoryEffect.js';
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('MediaExecutors');
 
 async function _generateImage({ args, userCtx }) {
   if (typeof userCtx.sendIntermediateNotification === 'function') {
-    await userCtx.sendIntermediateNotification(
-      'image_gen',
-      '🎨 Sto generando l\'immagine, attendi un attimo...'
+    await runAccessoryEffect(
+      () => userCtx.sendIntermediateNotification(
+        'image_gen',
+        '🎨 Sto generando l\'immagine, attendi un attimo...'
+      ),
+      { label: 'Image progress notification', log }
     );
   }
   return generateImage(args, userCtx);
@@ -20,9 +27,12 @@ async function _generateImage({ args, userCtx }) {
 
 async function _generateVideo({ args, userCtx }) {
   if (typeof userCtx.sendIntermediateNotification === 'function') {
-    await userCtx.sendIntermediateNotification(
-      'video_gen',
-      '🎬 Sto generando il video (può richiedere qualche minuto), attendi un attimo...'
+    await runAccessoryEffect(
+      () => userCtx.sendIntermediateNotification(
+        'video_gen',
+        '🎬 Sto generando il video (può richiedere qualche minuto), attendi un attimo...'
+      ),
+      { label: 'Video progress notification', log }
     );
   }
   return generateVideo(args, userCtx);
@@ -30,7 +40,10 @@ async function _generateVideo({ args, userCtx }) {
 
 async function _generateMusic({ args, userCtx }) {
   if (userCtx.presence && typeof userCtx.presence.setRecording === 'function') {
-    await userCtx.presence.setRecording();
+    await runAccessoryEffect(
+      () => userCtx.presence.setRecording(),
+      { label: 'Music recording presence', log }
+    );
   }
   if (!args.prompt) {
     return { success: false, error: 'Missing prompt parameter in tool call arguments.' };
@@ -44,8 +57,9 @@ async function _generateMusic({ args, userCtx }) {
   const reservation = musicResult.quotaReservation;
   try {
     const workspaceId = resolveWorkspaceId(userCtx);
-    const staged = await Promise.all(
-      musicResult.attachments.map(att => stageToolOutput(workspaceId, att.name, att.buffer))
+    const staged = await stageToolOutputsBatch(
+      workspaceId,
+      musicResult.attachments.map(att => ({ desiredName: att.name, source: att.buffer }))
     );
     reservation?.commit();
     const paths = staged.map(file => file.display);

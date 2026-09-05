@@ -121,6 +121,22 @@ test('a successful call assembles the stream and marks the credential healthy', 
   assert.deepEqual(credentials.statuses, ['ok']);
 });
 
+test('an account base URL overrides the profile fallback', async () => {
+  let seenUrl = null;
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    baseUrl: 'https://profile.test/v1',
+    label: 'test',
+    fetchImpl: async (url) => {
+      seenUrl = url;
+      return sseResponse(COMPLETED_STREAM);
+    }
+  });
+
+  await transport.createResponse({ body: { model: 'm', input: [] } });
+  assert.equal(seenUrl, 'https://api.test/v1/responses');
+});
+
 test('provider-neutral logs contain the decorated wire request and full response stream', async () => {
   const logs = { request: [], response: [] };
   const apiLogWriter = {
@@ -369,6 +385,74 @@ test('delta-only EOF is a partial malformed response and is never replayed', asy
     err => err.kind === TRANSPORT_ERROR.MALFORMED && err.partial === true
   );
   assert.equal(calls, 1);
+});
+
+test('an added function call followed by EOF is never executable', async () => {
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => sseResponse([
+      'data: {"type":"response.output_item.added","output_index":0,'
+      + '"item":{"id":"fc1","type":"function_call","call_id":"c1","name":"shell","arguments":"{}"}}\n\n'
+    ])
+  });
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [] } }),
+    err => err.kind === TRANSPORT_ERROR.MALFORMED && err.partial === true
+  );
+});
+
+test('a terminal event cannot make an unfinished function call executable', async () => {
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => sseResponse([
+      'data: {"type":"response.output_item.added","output_index":0,'
+      + '"item":{"id":"fc1","type":"function_call","call_id":"c1","name":"shell","arguments":"{}"}}\n\n',
+      'data: {"type":"response.completed","response":{"id":"r1","status":"completed","output":[]}}\n\n'
+    ])
+  });
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [] } }),
+    err => err.kind === TRANSPORT_ERROR.MALFORMED && err.partial === true
+  );
+});
+
+test('a malformed SSE event makes the stream malformed even if later output is valid', async () => {
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => sseResponse([
+      'data: not-json\n\n',
+      ...COMPLETED_STREAM
+    ])
+  });
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [] } }),
+    err => err.kind === TRANSPORT_ERROR.MALFORMED && err.partial === true
+  );
+});
+
+test('AbortError while reading a stream is classified as timeout', async () => {
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'text/event-stream' },
+      body: (async function* () {
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        throw err;
+      })(),
+      text: async () => ''
+    })
+  });
+  await assert.rejects(
+    transport.createResponse({ body: { model: 'm', input: [] } }),
+    err => err.kind === TRANSPORT_ERROR.TIMEOUT && err.partial === false
+  );
 });
 
 test('a non-SSE 200 answer is malformed, not silently parsed', async () => {

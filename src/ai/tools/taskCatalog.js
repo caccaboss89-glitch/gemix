@@ -14,15 +14,15 @@ function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, h
     return {
       recipient: {
         type: 'object',
-        description: `Private recipient by phone. Omit to use the current ${here}; explicitly naming the caller is equivalent to a self-reminder.`,
+        description: `Private recipient: exactly one of external phone or active-member name. Omit to use the current ${here}; explicitly naming the caller is equivalent to a self-reminder.`,
         properties: {
           phone: {
             type: 'string',
             pattern: E164_PHONE_PATTERN,
-            description: 'Recipient phone with country code (e.g. +393XXXXXXXXX), from the ActiveMembers roster or given by the user.'
-          }
-        },
-        required: ['phone']
+            description: 'External recipient phone with country code (e.g. +393XXXXXXXXX). Use either phone or name.'
+          },
+          name: { type: 'string', minLength: 1, description: 'Active member name. Use either name or phone.' }
+        }
       }
     };
   }
@@ -95,7 +95,7 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     taskItemProps.whatsapp = {
       type: 'object',
       description: isAdmin
-        ? `Delivery destination. Omit = current ${here}. Set recipient = private reminder to that phone.`
+        ? `Delivery destination. Omit = current ${here}. Set recipient = private reminder to that member or phone.`
         : (canTargetOthers
           ? (isWhatsAppGroup
             ? 'Destination. Omit = current group. For a private reminder set toPrivate; add recipient to send it to someone else (without recipient it goes to the current user).'
@@ -125,13 +125,25 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
 }
 
 function buildReadMyTasksTool(isWhatsAppGroup) {
-  const properties = {};
+  const properties = {
+    limit: {
+      type: 'integer',
+      minimum: 1,
+      maximum: constants.READ_TASKS_MAX_LIMIT,
+      description: `Maximum reminders to return (default ${constants.READ_TASKS_MAX_LIMIT}).`
+    },
+    cursor: {
+      type: 'string',
+      pattern: '^[0-9]+$',
+      description: 'Offset cursor returned as nextCursor; omit on the first page.'
+    }
+  };
   if (isWhatsAppGroup) {
     properties.includeGroupTasks = { type: 'boolean', description: 'Include group tasks' };
   }
   return makeTool({
     name: 'read_my_tasks',
-    description: 'Read scheduled reminders with time, recurrence, recipient, delivery state and removal ID — including ones you created for someone else, which live in your own task file, never theirs. Returns count, tasks, ids, results and errors; no reminders is success with empty arrays.',
+    description: 'Read a page of scheduled reminders with time, recurrence, recipient, delivery state and removal ID — including ones you created for someone else, which live in your own task file, never theirs. Returns a compact summary, count, totalCount, tasks, ids, results, errors and optional nextCursor; no reminders is success with empty arrays.',
     properties
   });
 }

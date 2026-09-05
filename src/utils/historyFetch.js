@@ -17,27 +17,39 @@ function normalizeHistoryLoad(payload) {
 
 /**
  * Run a history builder with a wall-clock cap.
- * @param {() => Promise<Array|{history:Array}>} buildFn
+ * @param {(signal: AbortSignal) => Promise<Array|{history:Array}>} buildFn
  * @param {object} log - logger with .warn
  * @param {string} label - platform label for logs
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs]
  * @returns {Promise<{history:Array,incomplete:boolean}>}
  */
-async function fetchHistoryWithTimeout(buildFn, log, label) {
+async function fetchHistoryWithTimeout(buildFn, log, label, options = {}) {
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs >= 0
+    ? options.timeoutMs
+    : HISTORY_FETCH_TIMEOUT_MS;
+  const controller = new AbortController();
   let timer;
   try {
     const result = await Promise.race([
-      buildFn().finally(() => { if (timer) clearTimeout(timer); }),
+      buildFn(controller.signal).finally(() => { if (timer) clearTimeout(timer); }),
       new Promise((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('History fetch timeout')),
-          HISTORY_FETCH_TIMEOUT_MS
-        );
+        timer = setTimeout(() => {
+          const error = new Error('History fetch timeout');
+          controller.abort(error);
+          reject(error);
+        }, timeoutMs);
       })
     ]);
     return normalizeHistoryLoad(result);
   } catch (err) {
     log.warn(`   History fetch failed (${label}: ${err.message}), proceeding without history`);
     return { history: [], incomplete: true };
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (!controller.signal.aborted) {
+      controller.abort(new Error('History fetch completed'));
+    }
   }
 }
 

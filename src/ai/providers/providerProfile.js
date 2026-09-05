@@ -2,7 +2,7 @@
 //
 // A ProviderProfile is a preset, not an implementation. It says which model,
 // which endpoint, which credential source, which transport extension and which
-// backend implements each GemiX feature — and nothing else. Every module that
+// backend implements each provider-dependent media feature — and nothing else. Every module that
 // needs one of those answers reads it here instead of re-deriving it from a
 // model slug, a base URL or the contents of an auth file.
 //
@@ -12,11 +12,11 @@
 //   profile.wire        -> WireCapabilities: can we talk to this endpoint at all
 //   profile.credentials -> CredentialProvider: how a request is authenticated
 //   profile.extensions  -> provider-specific Responses behaviour, behind a boundary
-//   profile.features    -> which backend implements each GemiX feature
+//   profile.features    -> runtime-routed image/video/STT backends
 //
 // The provider is resolved once, at startup, from AI_PROVIDER. It can never
-// change mid-turn, and it never decides whether GemiX can read a file, run a
-// shell or search the web — those are feature bindings, and they are GemiX's.
+// change mid-turn. Fixed GemiX tools such as file access, shell and web search
+// are deliberately absent from the provider profile.
 
 import envConfig from '../../config/env.js';
 import { defineWireCapabilities, validateWireCapabilities } from './wireCapabilities.js';
