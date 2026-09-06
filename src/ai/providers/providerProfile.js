@@ -64,10 +64,14 @@ function _xaiDisplayName(model) {
   return slug.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/** Release number plus the variant name the slug carries: gpt-5.6-sol -> ChatGPT 5.6 Sol. */
 function _chatgptDisplayName(model) {
   const slug = String(model || '').trim();
-  const gpt = slug.match(/^gpt-(\d+(?:\.\d+)?)(?:-|$)/i);
-  if (gpt) return `ChatGPT ${gpt[1]}`;
+  const gpt = slug.match(/^gpt-(\d+(?:\.\d+)?)(?:-(.*))?$/i);
+  if (gpt) {
+    const variant = (gpt[2] || '').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+    return variant ? `ChatGPT ${gpt[1]} ${variant}` : `ChatGPT ${gpt[1]}`;
+  }
   return slug ? `ChatGPT (${slug})` : 'ChatGPT';
 }
 

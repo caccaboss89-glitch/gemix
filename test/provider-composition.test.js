@@ -64,10 +64,12 @@ test('prompt_cache_key is optional and never assumed for a generic endpoint', ()
   assert.ok(!REQUIRED_WIRE_CAPABILITIES.includes('supportsPromptCacheKey'));
 });
 
-test('the ChatGPT display name strips provider implementation suffixes', () => {
+test('the ChatGPT display name carries the model variant, when the slug names one', () => {
   const saved = envConfig.CHATGPT_MODEL;
-  envConfig.CHATGPT_MODEL = 'gpt-5.6-sol';
   try {
+    envConfig.CHATGPT_MODEL = 'gpt-5.6-sol';
+    assert.equal(getProviderProfile('chatgpt').displayName, 'ChatGPT 5.6 Sol');
+    envConfig.CHATGPT_MODEL = 'gpt-5.6';
     assert.equal(getProviderProfile('chatgpt').displayName, 'ChatGPT 5.6');
   } finally {
     envConfig.CHATGPT_MODEL = saved;
