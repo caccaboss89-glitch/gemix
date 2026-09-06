@@ -5,7 +5,7 @@
 //
 //   1. the wipe command, whenever it is the whole message — it empties the chat
 //      and deletes the conversation data GemiX stores, and never reaches the model;
-//   2. the privacy notice, on a person's first ever request — sent instead of
+//   2. the privacy notice, on a person's first dedicated DM request — sent instead of
 //      the turn, which is why nothing they attached to it is ever downloaded:
 //      the gate returns before history and media ingress run.
 //
@@ -21,6 +21,7 @@ import {
 import { hasBeenInformed, markInformed  } from '../../utils/privacyConsent.js';
 import { wipeWhatsAppUserData  } from '../../utils/privacyWipe.js';
 import { systemReply } from '../../utils/replyEnvelope.js';
+import constants from '../../config/constants.js';
 
 /**
  * True when a message body is exactly the wipe command. Deliberately strict:
@@ -78,7 +79,7 @@ function buildWhatsAppPrivacyIntercept({ chat, platform, isGroup, log }) {
       };
     }
 
-    if (hasBeenInformed(waJid)) return null;
+    if (platform !== constants.PLATFORM_WA_DEDICATED || isGroup || hasBeenInformed(waJid)) return null;
 
     // Whether the burst carried files decides one line of the notice: nothing
     // was downloaded, and saying so is only meaningful if there was something.

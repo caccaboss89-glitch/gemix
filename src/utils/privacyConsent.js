@@ -6,10 +6,10 @@
 //   data/privacyConsent.json   { "<digits>@c.us": { informedAt: "<ISO>" } }
 //
 // A person missing from it gets the notice instead of an AI turn on their next
-// message (platforms/whatsapp/privacyGate.js), so the same number is informed
-// once across every WhatsApp surface: dedicated DM, group, admin personal chat.
+// dedicated DM (platforms/whatsapp/privacyGate.js), so the same number is informed
+// once in private chats on the dedicated account.
 // The wipe command removes the entry, which is why refusing the terms brings
-// the notice back if the person ever writes again.
+// the notice back if the person writes in that private chat again.
 //
 // Discord is deliberately out of scope: nothing there reads or writes this file.
 

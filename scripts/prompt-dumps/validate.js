@@ -375,6 +375,14 @@ function _validateVisibility(staticPart, caseId) {
 function _validateThisChat(staticPart, id, caseId) {
   const chat = _promptSection(staticPart, 'This chat');
   if (!chat) return;
+  const expectsPrivacyNotice = _ctx(id).platform === constants.PLATFORM_WA_DEDICATED && !_ctx(id).isGroup;
+  if (expectsPrivacyNotice) {
+    if (!/accepted the privacy notice/.test(chat) || !/never bring that up yourself/.test(chat)) {
+      ISSUES.push({ caseId, msg: 'dedicated WhatsApp DM missing the silent-acceptance rule' });
+    }
+  } else if (/privacy notice|never bring that up yourself/.test(chat)) {
+    ISSUES.push({ caseId, msg: 'privacy notice must appear only in dedicated WhatsApp DMs' });
+  }
   if (!WHATSAPP_CASES.includes(id)) {
     if (!chat.includes('Platform: Discord.')) {
       ISSUES.push({ caseId, msg: 'Discord This chat section must name the platform explicitly' });
@@ -411,8 +419,6 @@ function _validateThisChat(staticPart, id, caseId) {
     ISSUES.push({ caseId, msg: `WhatsApp case missing the ${PRIVACY_WIPE_COMMAND} privacy command line` });
   } else if (!/never reaches you/.test(chat) || !/failed because/.test(chat)) {
     ISSUES.push({ caseId, msg: 'privacy command line must say it never reaches the model and what a readable attempt means' });
-  } else if (!/never bring that up yourself/.test(chat)) {
-    ISSUES.push({ caseId, msg: 'privacy command line missing the silent-acceptance rule' });
   }
 }
 

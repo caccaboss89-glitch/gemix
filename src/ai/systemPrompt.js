@@ -232,9 +232,14 @@ function _buildChatLines(ctx, cap, profile) {
     `The user can send the \`${PRIVACY_WIPE_COMMAND}\` command (and nothing else) at any moment to empty this chat and delete `
     + 'the conversation data GemiX stores on the server; that message is handled before you and never reaches you. So an attempt at '
     + 'it that you can read is one that failed because the message carried something else too — tell them to send '
-    + 'it on its own. And a request reaching you at all means they accepted the privacy notice they were shown '
-    + 'before their first one: never bring that up yourself.'
+    + 'it on its own.'
   );
+  if (ctx.platform === constants.PLATFORM_WA_DEDICATED && !ctx.isGroup) {
+    lines.push(
+      'A request reaching you means they accepted the privacy notice they were shown '
+      + 'before their first one: never bring that up yourself.'
+    );
+  }
   return lines;
 }
 
