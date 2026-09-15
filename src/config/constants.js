@@ -51,7 +51,7 @@ function formatSizeLabel(mb) {
 }
 
 export default {
-  GEMIX_FOOTER_PREFIX: '\n\n--GemiX • ',
+  GEMIX_FOOTER_PREFIX: '\n\n> GemiX • ',
 
   // Maintenance mode (MAINTENANCE_MODE itself is a deployment flag: read it from env.js)
   MAINTENANCE_ADMIN_ONLY: true,

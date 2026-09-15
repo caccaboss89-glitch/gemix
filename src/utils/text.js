@@ -219,7 +219,7 @@ function stripHistoryPrefixes(text) {
  * 4. Strips any self-generated research badges (e.g. "🌐: N sources. 𝕏: N searches.")
  * 5. Strips any GemiX system-message lines accidentally echoed by the AI
  *    (release banners, maintenance, temp-attachment notice, fallback error...)
- * 6. Strips any accidental footers (e.g. "--GemiX • ...")
+ * 6. Strips any accidental footers (e.g. "> GemiX • ...")
  * @param {string} text
  * @returns {string} Cleaned response text
  */

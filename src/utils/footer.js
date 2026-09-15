@@ -45,7 +45,7 @@ function addFooter(text, modelName) {
  */
 function removeFooter(text) {
   if (!text) return '';
-  return text.replace(/\n*--GemiX\s*•(?!\s*Messaggio Programmato)[^\n]*/gi, '').trim();
+  return text.replace(/\n*(?:--|>)\s*GemiX\s*•(?!\s*Messaggio Programmato)[^\n]*/gi, '').trim();
 }
 
 /**
@@ -55,7 +55,7 @@ function removeFooter(text) {
  */
 function hasFooter(text) {
   if (!text) return false;
-  return /--GemiX\s*•/i.test(text);
+  return /(?:--|>)\s*GemiX\s*•/i.test(text);
 }
 
 /**
@@ -75,7 +75,7 @@ function hasScheduledFooter(text) {
  */
 function removeScheduledFooter(text) {
   if (!text) return '';
-  return text.replace(/\n*--GemiX\s*•\s*Messaggio Programmato il[^\n]*/gi, '').trim();
+  return text.replace(/\n*(?:--|>)\s*GemiX\s*•\s*Messaggio Programmato il[^\n]*/gi, '').trim();
 }
 
 /**
