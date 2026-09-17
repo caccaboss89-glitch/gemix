@@ -298,15 +298,11 @@ function buildAnswerLines(profile, opts = {}) {
  * scratch. Without the second, files that were generated this turn are never
  * sent, or are regenerated to be sent.
  */
-function buildSendingFilesLines(profile) {
-  const skillNote = CAPS[profile]?.skills
-    ? ' For TikTok, follow the installed tiktok-video skill.'
-    : '';
+function buildSendingFilesLines() {
   return [
     'Only files that exist here travel: every entry in `attachments` is a path under `workspace/` or `attachments/`, '
     + 'never a URL. To send media from X, YouTube, TikTok or any other site, download it into `workspace/` with shell '
-    + 'first (yt-dlp for a video page, curl for a direct file), then list the local path.'
-    + skillNote,
+    + 'first (yt-dlp for a video page, curl for a direct file), then list the local path.',
     'A tool that produces a file tells you the exact path it wrote. Send it by listing that path, unchanged; the '
     + 'file stays there afterwards, so nothing has to be regenerated to be sent again.'
   ];

@@ -189,7 +189,7 @@ function _validateProviderGuidance(staticPart, caseId) {
 }
 
 /** Remote-media delivery is one provider-neutral instruction, not a backend quirk. */
-function _validateSendingFiles(staticPart, id, caseId) {
+function _validateSendingFiles(staticPart, caseId) {
   const sending = _promptSection(staticPart, 'Sending files');
   if (!sending) {
     ISSUES.push({ caseId, msg: 'missing "## Sending files" section' });
@@ -201,9 +201,8 @@ function _validateSendingFiles(staticPart, id, caseId) {
       || !/never a URL/.test(sending)) {
     ISSUES.push({ caseId, msg: 'Sending files lacks the shared web-media download/path rule' });
   }
-  const expectsSkills = !DISCORD_CASES.includes(id);
-  if (expectsSkills !== /tiktok-video skill/.test(sending)) {
-    ISSUES.push({ caseId, msg: `TikTok skill routing does not match this platform (skills: ${expectsSkills})` });
+  if (/\bskills?\b|SKILL\.md|tiktok-video/i.test(sending)) {
+    ISSUES.push({ caseId, msg: 'Sending files must not hardcode a skill reference' });
   }
   if ((staticPart.match(/yt-dlp for a video page/g) || []).length !== 1) {
     ISSUES.push({ caseId, msg: 'web-media shell workflow must appear in one prompt section only' });
@@ -471,6 +470,15 @@ function _validateWorkspaceGuidance(staticPart, caseId) {
 function _validateSkills(staticPart, id, caseId) {
   const skills = _promptSection(staticPart, 'Skills');
   const installed = listInstalledSkills();
+  const outsideSkills = skills
+    ? staticPart.replace(`\n## Skills\n${skills}`, '')
+    : staticPart;
+  for (const skill of installed) {
+    const escapedName = String(skill.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escapedName}\\b`, 'i').test(outsideSkills)) {
+      ISSUES.push({ caseId, msg: `skill "${skill.name}" is referenced outside the Skills section` });
+    }
+  }
   if (DISCORD_CASES.includes(id)) {
     if (skills) ISSUES.push({ caseId, msg: 'Discord must not carry a Skills section' });
     if (/skills\//.test(staticPart)) {
@@ -645,7 +653,7 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
   _validateStaticShape(staticPart, prompt, caseId);
   _validateNoStaleClaims(staticPart, prompt, caseId);
   _validateProviderGuidance(staticPart, caseId);
-  _validateSendingFiles(staticPart, id, caseId);
+  _validateSendingFiles(staticPart, caseId);
   _validateStaticDynamicSplit(staticPart, dynamicPart, caseId);
   _validateWorkspaceBlock(dynamicPart, id, caseId);
   _validateDiscordSplit(staticPart, dynamicPart, id, caseId);

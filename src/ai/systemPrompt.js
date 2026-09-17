@@ -151,7 +151,7 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
     }
   }
 
-  const sendingFiles = buildSendingFilesLines(profile);
+  const sendingFiles = buildSendingFilesLines();
   if (sendingFiles.length > 0) sections.push(_section('Sending files', sendingFiles));
 
   // Statute is process-cached and conversation-stable (~24KB) — keep it in the
@@ -479,6 +479,8 @@ function _buildWorkspaceLines(skills) {
 function _buildSkillsLines() {
   const skills = listInstalledSkills();
   if (skills.length === 0) return [];
+  // Skill names and routing belong only in this section. Keep every other
+  // prompt section generic instead of hardcoding one installed skill there.
   return [
     'A skill is a procedure worked out in advance: one directory under `skills/`, with a SKILL.md and whatever '
     + 'scripts or reference files it needs. Each one below describes what it is for.',

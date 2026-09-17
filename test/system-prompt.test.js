@@ -136,7 +136,8 @@ test('generic and xAI provider guidance replace one another without legacy leaks
     generic,
     XAI_ONLY_PROMPT_MATERIAL
   );
-  assert.match(generic, /## Sending files[\s\S]*X, YouTube, TikTok or any other site[\s\S]*tiktok-video skill/);
+  assert.match(generic, /## Sending files[\s\S]*X, YouTube, TikTok or any other site/);
+  assert.doesNotMatch(generic, /tiktok-video skill/);
 
   const xai = underProvider('xai', () => promptFor(false));
   assert.match(xai, /## Provider integration\nRegular web search[\s\S]*native X search/);
@@ -146,7 +147,8 @@ test('generic and xAI provider guidance replace one another without legacy leaks
     xai.indexOf('\n## This chat\n')
   );
   assert.doesNotMatch(providerBlock, /CDN URL|download .*X result/i);
-  assert.match(xai, /## Sending files[\s\S]*X, YouTube, TikTok or any other site[\s\S]*tiktok-video skill/);
+  assert.match(xai, /## Sending files[\s\S]*X, YouTube, TikTok or any other site/);
+  assert.doesNotMatch(xai, /tiktok-video skill/);
   const afterProviderBlock = xai.slice(xai.indexOf('\n## This chat\n'));
   assert.doesNotMatch(
     afterProviderBlock,
