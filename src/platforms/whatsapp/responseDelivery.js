@@ -25,11 +25,32 @@ async function _sendTextWithRetry(chat, text, mentions = []) {
     chunks.push(cleanedText.slice(i, i + WA_TEXT_CHUNK_CHARS));
   }
   const sendOptions = mentions.length > 0 ? { mentions } : undefined;
+  // One unresolvable mention JID (hallucinated number, @lid vs @c.us mismatch)
+  // makes WA Web reject the whole sendMessage with an opaque page-side error
+  // ("Data passed to getter must include an id property..."). Retrying the
+  // failed chunk onward as plain text keeps the ping loss from silencing the
+  // entire reply: the @number tags stay readable, just without highlighting.
   let acceptedChunks = 0;
+  let withMentions = true;
   try {
-    for (const chunk of chunks) {
-      await withWaPuppeteerRetry(() => chat.sendMessage(chunk, sendOptions), { retries: 2, delayMs: 2000 });
-      acceptedChunks++;
+    for (; acceptedChunks < chunks.length; acceptedChunks++) {
+      try {
+        await withWaPuppeteerRetry(
+          () => chat.sendMessage(chunks[acceptedChunks], withMentions ? sendOptions : undefined),
+          { retries: 2, delayMs: 2000 }
+        );
+      } catch (err) {
+        if (withMentions && sendOptions) {
+          withMentions = false;
+          log.warn(`   Retrying WhatsApp text without mentions (${mentions.length} dropped): ${formatWaError(err)}`);
+          await withWaPuppeteerRetry(
+            () => chat.sendMessage(chunks[acceptedChunks], undefined),
+            { retries: 2, delayMs: 2000 }
+          );
+        } else {
+          throw err;
+        }
+      }
     }
   } catch (err) {
     err.acceptedChunks = acceptedChunks;

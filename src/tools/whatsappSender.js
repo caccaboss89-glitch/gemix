@@ -13,10 +13,13 @@
 
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { stripDisallowedOutgoingMentions, normalizeOutgoingMentionTags, collectMentionJids  } from '../utils/waMentions.js';
+import { createLogger } from '../utils/logger.js';
 import {
   getReadyDedicatedClient,
   setReadyDedicatedClient
 } from '../platforms/whatsapp/dedicatedClientRegistry.js';
+
+const log = createLogger('WhatsAppDirect');
 
 /**
  * Store reference to WhatsApp dedicated client for message sending.
@@ -77,7 +80,21 @@ async function sendWhatsAppDirect(chatId, message, options = {}) {
     message = normalizeMarkdown(stripOutgoingDeliveryArtifacts(message));
   }
 
-  await dedicatedClient.sendMessage(chatId, message, sendOptions);
+  // An unresolvable mention JID makes WA Web reject the send with an opaque
+  // page-side error; retry as plain text so a bad tag never silences the send.
+  try {
+    await dedicatedClient.sendMessage(chatId, message, sendOptions);
+  } catch (err) {
+    if (typeof message === 'string'
+      && Array.isArray(sendOptions.mentions) && sendOptions.mentions.length > 0) {
+      log.warn(`   Retrying direct WhatsApp send without mentions (${sendOptions.mentions.length} dropped): ${err?.message || err}`);
+      const plainOptions = { ...sendOptions };
+      delete plainOptions.mentions;
+      await dedicatedClient.sendMessage(chatId, message, plainOptions);
+    } else {
+      throw err;
+    }
+  }
 }
 
 export { sendWhatsAppDirect, setDedicatedClient, normalizePhoneToJid
