@@ -11,6 +11,7 @@ import { OpenAIResponsesTransport } from '../src/ai/transport/openAIResponsesTra
 import { TRANSPORT_ERROR } from '../src/ai/transport/errors.js';
 import { CredentialProvider } from '../src/ai/credentials/credentialProvider.js';
 import { TurnBudget } from '../src/utils/turnBudget.js';
+import constants from '../src/config/constants.js';
 
 class StubCredentials extends CredentialProvider {
   constructor() {
@@ -277,6 +278,31 @@ test('a stream that produced nothing is replayed', async () => {
       return sseResponse(COMPLETED_STREAM);
     }
   });
+  const { response } = await transport.createResponse({ body: { model: 'm', input: [] } });
+  assert.equal(calls, 2);
+  assert.equal(response.status, 'completed');
+});
+
+test('a runaway unfinished schedule_tasks argument stream is cut off and replayed', async () => {
+  let calls = 0;
+  const runaway = [
+    'data: {"type":"response.output_item.added","output_index":0,'
+      + '"item":{"id":"fc1","type":"function_call","call_id":"c1","name":"schedule_tasks","arguments":""}}\n\n',
+    ...Array.from(
+      { length: constants.MODEL_STREAM_MAX_SCHEDULE_ARGUMENT_DELTAS + 1 },
+      () => 'data: {"type":"response.function_call_arguments.delta","output_index":0,'
+        + '"item_id":"fc1","delta":"x"}\n\n'
+    )
+  ];
+  const transport = new OpenAIResponsesTransport({
+    credentialProvider: new StubCredentials(),
+    label: 'test',
+    fetchImpl: async () => {
+      calls++;
+      return calls === 1 ? sseResponse(runaway) : sseResponse(COMPLETED_STREAM);
+    }
+  });
+
   const { response } = await transport.createResponse({ body: { model: 'm', input: [] } });
   assert.equal(calls, 2);
   assert.equal(response.status, 'completed');

@@ -67,12 +67,12 @@ function classifyHttpFailure(status, bodyText, refine = null) {
   }
   if (status === 401) return TRANSPORT_ERROR.AUTH;
   if (status === 403) {
-    return /quota|billing|plan|subscription|spending-limit|credit/i.test(body)
+    return /quota|billing|plan|subscription|spending-limit|credit|usage[_ -]?limit/i.test(body)
       ? TRANSPORT_ERROR.QUOTA
       : TRANSPORT_ERROR.AUTH;
   }
   if (status === 429) {
-    return /insufficient_quota|billing|spending-limit|credit/i.test(body)
+    return /insufficient_quota|billing|spending-limit|credit|usage[_ -]?limit(?:[_ -]?(?:reached|exceeded))?/i.test(body)
       ? TRANSPORT_ERROR.QUOTA
       : TRANSPORT_ERROR.RATE_LIMIT;
   }
@@ -103,7 +103,7 @@ function classifyStreamFailure(error) {
       .filter(value => typeof value === 'string')
       .join(' ');
 
-  if (/insufficient[_ -]?quota|billing|spending[_ -]?limit|credit/i.test(details)) {
+  if (/insufficient[_ -]?quota|billing|spending[_ -]?limit|credit|usage[_ -]?limit(?:[_ -]?(?:reached|exceeded))?/i.test(details)) {
     return TRANSPORT_ERROR.QUOTA;
   }
   if (/rate[_ -]?limit|too many requests|throttl/i.test(details)) {

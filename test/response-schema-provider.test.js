@@ -32,6 +32,10 @@ test('the reply schema is closed and every declared top-level field is required'
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['voice', 'response', 'attachments', 'conversation_title']);
   assert.equal(schema.properties.attachments.maxItems, 10);
+  const attachmentPattern = new RegExp(schema.properties.attachments.items.pattern);
+  assert.match('workspace/video.mp4', attachmentPattern);
+  assert.match('attachments/photo.jpg', attachmentPattern);
+  assert.doesNotMatch('https://video.twimg.com/file.mp4', attachmentPattern);
   assert.equal(schema.properties.conversation_title.maxLength, 80);
 });
 
@@ -73,4 +77,17 @@ test('structured reply parser enforces attachment and title caps defensively', (
   const parsed = parseStructuredReply(raw);
   assert.equal(parsed.attachments.length, 10);
   assert.equal(parsed.title.length, 80);
+});
+
+test('structured reply parser drops URLs and non-workspace attachment values', () => {
+  const parsed = parseStructuredReply(JSON.stringify({
+    response: 'ok',
+    attachments: [
+      'https://video.twimg.com/file.mp4',
+      'video.mp4',
+      'workspace/video.mp4',
+      'attachments/source.mp4'
+    ]
+  }));
+  assert.deepEqual(parsed.attachments, ['workspace/video.mp4', 'attachments/source.mp4']);
 });

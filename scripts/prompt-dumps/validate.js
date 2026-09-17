@@ -188,6 +188,28 @@ function _validateProviderGuidance(staticPart, caseId) {
   }
 }
 
+/** Remote-media delivery is one provider-neutral instruction, not a backend quirk. */
+function _validateSendingFiles(staticPart, id, caseId) {
+  const sending = _promptSection(staticPart, 'Sending files');
+  if (!sending) {
+    ISSUES.push({ caseId, msg: 'missing "## Sending files" section' });
+    return;
+  }
+  if (!/X, YouTube, TikTok or any other site/.test(sending)
+      || !/download it into `workspace\/` with shell/.test(sending)
+      || !/yt-dlp for a video page/.test(sending)
+      || !/never a URL/.test(sending)) {
+    ISSUES.push({ caseId, msg: 'Sending files lacks the shared web-media download/path rule' });
+  }
+  const expectsSkills = !DISCORD_CASES.includes(id);
+  if (expectsSkills !== /tiktok-video skill/.test(sending)) {
+    ISSUES.push({ caseId, msg: `TikTok skill routing does not match this platform (skills: ${expectsSkills})` });
+  }
+  if ((staticPart.match(/yt-dlp for a video page/g) || []).length !== 1) {
+    ISSUES.push({ caseId, msg: 'web-media shell workflow must appear in one prompt section only' });
+  }
+}
+
 /** Turn-varying material must sit in Runtime, never in the cached static prefix. */
 function _validateStaticDynamicSplit(staticPart, dynamicPart, caseId) {
   const ctx = _ctx(Number(caseId));
@@ -572,6 +594,12 @@ function _validateSettingsBlocks(dynamicPart, prompt, id, caseId) {
     if (!/\((default|custom)\)/.test(settingsBlock[0])) {
       ISSUES.push({ caseId, msg: 'CurrentSettings missing (default)/(custom) markers' });
     }
+    const defaultMemory = settingsBlock[0].split('\n')
+      .find(line => /^Memory: .*\(default\)$/.test(line));
+    if (defaultMemory
+        && !/default guidelines: change them whenever they conflict with the user's preferences/.test(defaultMemory)) {
+      ISSUES.push({ caseId, msg: 'default memory must yield to the user\'s preferences' });
+    }
     if (prompt.includes('<Memory>')) {
       ISSUES.push({ caseId, msg: '<Memory> is forbidden; settings belong in <CurrentSettings>' });
     }
@@ -617,6 +645,7 @@ function validatePrompt(staticPart, dynamicPart, caseId) {
   _validateStaticShape(staticPart, prompt, caseId);
   _validateNoStaleClaims(staticPart, prompt, caseId);
   _validateProviderGuidance(staticPart, caseId);
+  _validateSendingFiles(staticPart, id, caseId);
   _validateStaticDynamicSplit(staticPart, dynamicPart, caseId);
   _validateWorkspaceBlock(dynamicPart, id, caseId);
   _validateDiscordSplit(staticPart, dynamicPart, id, caseId);

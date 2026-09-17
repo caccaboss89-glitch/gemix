@@ -20,8 +20,10 @@ test('classifyHttpFailure separates auth, quota, throttling and bad input', () =
   assert.equal(classifyHttpFailure(401, ''), TRANSPORT_ERROR.AUTH);
   assert.equal(classifyHttpFailure(403, 'forbidden'), TRANSPORT_ERROR.AUTH);
   assert.equal(classifyHttpFailure(403, '{"code":"team-blocked:spending-limit"}'), TRANSPORT_ERROR.QUOTA);
+  assert.equal(classifyHttpFailure(403, '{"code":"usage_limit_reached"}'), TRANSPORT_ERROR.QUOTA);
   assert.equal(classifyHttpFailure(429, 'slow down'), TRANSPORT_ERROR.RATE_LIMIT);
   assert.equal(classifyHttpFailure(429, '{"error":"insufficient_quota"}'), TRANSPORT_ERROR.QUOTA);
+  assert.equal(classifyHttpFailure(429, '{"code":"usage_limit_reached"}'), TRANSPORT_ERROR.QUOTA);
   assert.equal(classifyHttpFailure(400, 'bad field'), TRANSPORT_ERROR.UNSUPPORTED_INPUT);
   assert.equal(classifyHttpFailure(413, ''), TRANSPORT_ERROR.UNSUPPORTED_INPUT);
   assert.equal(classifyHttpFailure(408, ''), TRANSPORT_ERROR.TIMEOUT);

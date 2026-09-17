@@ -62,7 +62,12 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       : 'Reminder text delivered to you at the scheduled time.')) + contentSuffix;
 
   const taskItemProps = {
-    content: { type: 'string', minLength: 1, description: contentDesc },
+    content: {
+      type: 'string',
+      minLength: 1,
+      maxLength: constants.SCHEDULE_TASK_CONTENT_MAX_CHARS,
+      description: contentDesc
+    },
     scheduledAt: {
       type: 'string',
       pattern: LOCAL_WALL_CLOCK_PATTERN,

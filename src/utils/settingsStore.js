@@ -29,16 +29,22 @@ const VALID_LANGUAGES = [
   'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'es-MX', 'es-ES', 'tr', 'vi'
 ];
 
-/** Default free-text memory for chats where spoken replies are available. */
-const DEFAULT_MEMORY =
+const LEGACY_DEFAULT_MEMORY =
   'Use voice replies (voice:true) for short, casual, non-technical messages; use text for long or technical ones. '
   + 'Vary voice vs text across your recent replies so you are not repetitive. '
   + 'Use emojis sometimes.';
 
-/** Default memory for platforms that can only return text. */
-const DEFAULT_TEXT_MEMORY =
+/** Default free-text memory for chats where spoken replies are available. */
+const DEFAULT_MEMORY = LEGACY_DEFAULT_MEMORY
+  + ' These are default guidelines: change them whenever they conflict with the user\'s preferences.';
+
+const LEGACY_DEFAULT_TEXT_MEMORY =
   'Use text replies. Vary tone and phrasing across your recent replies so you are not repetitive. '
   + 'Use emojis sometimes.';
+
+/** Default memory for platforms that can only return text. */
+const DEFAULT_TEXT_MEMORY = LEGACY_DEFAULT_TEXT_MEMORY
+  + ' These are default guidelines: change them whenever they conflict with the user\'s preferences.';
 
 function _preferenceOptions(options = {}) {
   return { allowVoice: options.allowVoice !== false };
@@ -153,9 +159,15 @@ function readSettings(fileId, options = {}) {
   let memory = typeof stored.memory === 'string' && stored.memory.trim()
     ? stored.memory
     : defaults.memory;
-  // Older files could persist the former built-in voice guidance. It is still
-  // a default, not a user preference, so do not expose it on a text-only chat.
-  if (!allowVoice && memory === DEFAULT_MEMORY) memory = defaults.memory;
+  // Persisted built-in text from either platform or the previous release is
+  // still a default, not a user preference. Normalize it to this chat's live
+  // default so it does not become a false custom setting after an upgrade.
+  if ([
+    DEFAULT_MEMORY,
+    DEFAULT_TEXT_MEMORY,
+    LEGACY_DEFAULT_MEMORY,
+    LEGACY_DEFAULT_TEXT_MEMORY
+  ].includes(memory)) memory = defaults.memory;
   return {
     voice: VALID_VOICES.includes(stored.voice) ? stored.voice : defaults.voice,
     effort: supportedEfforts.includes(stored.effort) ? stored.effort : defaults.effort,

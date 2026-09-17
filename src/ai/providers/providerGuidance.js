@@ -29,8 +29,7 @@ function _xaiGuidance(toolNames) {
   if (_has(toolNames, 'x_search')) {
     lines.push(
       'xAI additionally provides native X search for X posts, accounts, threads and their image or video media. '
-        + 'Use it only for X; use search_web and read_page for the ordinary web. When the user wants media from an '
-        + 'X result, download the CDN URL it returned into `workspace/` with shell and send that path.'
+        + 'Use it only for X; use search_web and read_page for the ordinary web.'
     );
   }
 

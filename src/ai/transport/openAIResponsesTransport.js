@@ -10,16 +10,19 @@
 // nothing in it reads a token from disk: credentials come from the profile's
 // CredentialProvider and go straight into an outbound header.
 //
-// Retry policy: cold only. Once a stream has produced a meaningful
-// event the model may already have run a tool, so a truncated stream is a
-// partial response to report, never something to replay. `Retry-After` is
-// honoured and clamped to what is left of the turn.
+// Retry policy: cold only. Once a stream has produced a meaningful event the
+// model may already have run a tool, so a truncated stream is a partial
+// response to report, never something to replay. The reader has one explicit
+// exception: a bounded, unfinished schedule_tasks argument loop, which never
+// reached GemiX's executor. `Retry-After` is honoured and clamped to what is
+// left of the model-call budget.
 //
 // Every actual wire attempt writes the provider-neutral request, SSE events and
 // assembled response. Credentials and opaque binary/encrypted payloads are
 // redacted by the shared API logger before they reach disk.
 
 import crypto from 'node:crypto';
+import constants from '../../config/constants.js';
 import { createLogger } from '../../utils/logger.js';
 import { TurnBudget, sleepWithin } from '../../utils/turnBudget.js';
 import { logApiRequest, logApiResponse } from '../apiLogs.js';
@@ -37,9 +40,6 @@ import {
 const MAX_COLD_ATTEMPTS = 3;
 /** A credential with less than this left is refreshed before the call, not after a 401. */
 const MIN_TOKEN_REMAINING_MS = 2 * 60 * 1000;
-/** Default ceiling for one model call when the caller passes no budget. */
-const DEFAULT_CALL_TIMEOUT_MS = 4 * 60 * 1000;
-
 function _joinUrl(baseUrl, path) {
   const base = String(baseUrl || '').replace(/\/+$/, '');
   const tail = String(path || '').replace(/^\/+/, '');
@@ -89,17 +89,20 @@ class OpenAIResponsesTransport {
    *
    * @param {object} opts
    * @param {object} opts.body - from buildResponsesBody (stream/store already set)
-   * @param {TurnBudget} [opts.budget] - the turn's deadline; one is created when absent
+   * @param {TurnBudget} [opts.budget] - parent turn deadline; the model call
+   *   derives its own API_TIMEOUT_MS child and cannot consume the whole turn
    * @param {string|null} [opts.requestId] - GemiX request id, for log correlation only
    * @param {object} [opts.context] - opaque data handed to the extension hooks
    * @returns {Promise<{ response: object, requestId: string|null, usage: object|null }>}
    */
   async createResponse({ body, budget = null, requestId = null, context = {} }) {
-    const ownBudget = budget || new TurnBudget(DEFAULT_CALL_TIMEOUT_MS);
+    const callBudget = budget
+      ? budget.childFor(constants.API_TIMEOUT_MS)
+      : new TurnBudget(constants.API_TIMEOUT_MS);
     try {
-      return await this._attemptLoop({ body, budget: ownBudget, requestId, context });
+      return await this._attemptLoop({ body, budget: callBudget, requestId, context });
     } finally {
-      if (!budget) ownBudget.dispose();
+      callBudget.dispose();
     }
   }
 
@@ -108,7 +111,7 @@ class OpenAIResponsesTransport {
 
     for (let attempt = 1; attempt <= MAX_COLD_ATTEMPTS; attempt++) {
       if (budget.expired) {
-        throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Turn budget exhausted before the request could start.');
+        throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Model-call budget exhausted before the request could start.');
       }
 
       let credential;
@@ -156,7 +159,7 @@ class OpenAIResponsesTransport {
           durationMs: Date.now() - startedAt
         });
         if (budget.signal.aborted) {
-          throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Turn budget expired while contacting the model.');
+          throw this._error(TRANSPORT_ERROR.TIMEOUT, 'Model-call budget expired while contacting the model.');
         }
         // Nothing was received, so replaying is safe.
         if (attempt < MAX_COLD_ATTEMPTS) {
@@ -289,10 +292,10 @@ class OpenAIResponsesTransport {
           upstreamRequestId,
           durationMs: Date.now() - startedAt
         });
-        // A stream that produced nothing can be replayed: no tool ran and no
-        // partial reply exists. Anything else is reported as it is.
+        // Empty streams and the reader's explicit unfinished-schedule guard
+        // are safe to replay. Ordinary partial streams are still reported.
         if (isRetryableKind(err.kind) && !err.partial && attempt < MAX_COLD_ATTEMPTS) {
-          this._log.warn(`stream attempt ${attempt} produced nothing: ${err.message}`);
+          this._log.warn(`stream attempt ${attempt} is safe to replay: ${err.message}`);
           await sleepWithin(Math.min(attempt * 2000, budget.remainingMs), budget.signal);
           continue;
         }

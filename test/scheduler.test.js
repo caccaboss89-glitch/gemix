@@ -121,6 +121,16 @@ test('schedule_tasks rejects content that becomes empty after delivery-marker cl
   assert.match(result.results[0].error, /empty after removing internal delivery markers/);
 });
 
+test('schedule_tasks rejects reminder content beyond the declared bound', async () => {
+  const result = await scheduleTasks([
+    { content: 'x'.repeat(constants.SCHEDULE_TASK_CONTENT_MAX_CHARS + 1), scheduledAt: futureLocal() }
+  ], taskContext(`test_schedule_long_content_${process.pid}_${Date.now()}`));
+
+  assert.equal(result.success, false);
+  assert.equal(result.count, 0);
+  assert.match(result.results[0].error, new RegExp(`at most ${constants.SCHEDULE_TASK_CONTENT_MAX_CHARS}`));
+});
+
 test('a corrupt task file fails closed and is not overwritten', async (t) => {
   const fileId = `test_schedule_corrupt_${process.pid}_${Date.now()}`;
   const filePath = path.join(constants.TASKS_DIR, `${fileId}.json`);

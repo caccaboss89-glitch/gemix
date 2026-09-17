@@ -58,23 +58,16 @@ const VIDEO_GENERATION_PROGRESS_PREFIX = '🎬 Sto generando il video';
 // -- Provider refusals (user-facing) ----------------------------------------
 
 /**
- * Shown when xAI reports the SuperGrok allowance is spent. It names the plan and
- * its weekly renewal, so it may only ever answer a QUOTA failure that really
- * came from the xAI profile — ai/providers/errorPolicy.js decides that on the
- * error's kind and the active profile, never on the wording of a message.
- * Its dedicated prefix makes it a system message without classifying a quota
- * refusal as an administrator alert.
+ * Shown when any main-model profile reports that its allowance is spent. The
+ * wording is deliberately provider-neutral so ChatGPT, Grok and compatible
+ * profiles all use the same GemiX notice without naming the wrong plan.
  */
-const GROK_CREDIT_EXHAUSTED_PREFIX = '⚠️ *LIMITE MODELLO — Grok*';
-const GROK_CREDIT_EXHAUSTED_MESSAGE =
-  `${GROK_CREDIT_EXHAUSTED_PREFIX}\n\nScusa ma i crediti sono finiti al momento, `
-  + 'tornerò disponibile con il prossimo rinnovo settimanale di SuperGrok 💰💶';
+const CREDIT_EXHAUSTED_PREFIX = '⚠️ *LIMITE MODELLO — CREDITI ESAURITI*';
+const CREDIT_EXHAUSTED_MESSAGE =
+  `${CREDIT_EXHAUSTED_PREFIX}\n\nScusa ma i crediti sono finiti al momento; `
+  + 'tornerò disponibile con il prossimo rinnovo 💰💶';
 
-/**
- * The same situation on any other profile. It names no provider and no plan:
- * the user cannot act on which backend GemiX runs, and a message that said
- * "SuperGrok" elsewhere would simply be wrong.
- */
+/** Temporary throttling, distinct from an exhausted allowance. */
 const PROVIDER_LIMIT_PREFIX = '⚠️ *LIMITE MODELLO*';
 const PROVIDER_LIMIT_MESSAGE =
   `${PROVIDER_LIMIT_PREFIX}\n\nHo esaurito la disponibilità del modello per il momento. `
@@ -221,7 +214,7 @@ const SYSTEM_MESSAGE_PREFIXES = [
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
   ADMIN_ERROR_PREFIX,
-  GROK_CREDIT_EXHAUSTED_PREFIX,
+  CREDIT_EXHAUSTED_PREFIX,
   PROVIDER_LIMIT_PREFIX,
   PROVIDER_AUTH_PREFIX,
   MAINTENANCE_PREFIX,
@@ -245,6 +238,7 @@ const SYSTEM_MESSAGE_PREFIXES = [
  * replies; safe to drop once no live chat reaches back that far.
  */
 const LEGACY_SYSTEM_MESSAGE_PREFIXES = [
+  '⚠️ *LIMITE MODELLO — Grok*',
   '⚠️ *ERRORE API —',
   '❌ *ERRORE',
   '⚠️ *AVVISO',
@@ -275,8 +269,8 @@ export {
   VIDEO_GENERATION_PROGRESS_PREFIX,
   SANDBOX_BUSY_MESSAGE,
   SANDBOX_BUSY_PREFIX,
-  GROK_CREDIT_EXHAUSTED_PREFIX,
-  GROK_CREDIT_EXHAUSTED_MESSAGE,
+  CREDIT_EXHAUSTED_PREFIX,
+  CREDIT_EXHAUSTED_MESSAGE,
   PROVIDER_LIMIT_PREFIX,
   PROVIDER_LIMIT_MESSAGE,
   PROVIDER_AUTH_PREFIX,

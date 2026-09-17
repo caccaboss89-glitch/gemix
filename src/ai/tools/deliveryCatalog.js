@@ -12,7 +12,11 @@ const EMAIL_PATTERN = '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$';
 
 const DELIVERY_ATTACHMENTS_PROP = {
   type: 'array',
-  items: { type: 'string', minLength: 1 },
+  items: {
+    type: 'string',
+    minLength: 1,
+    pattern: constants.AGENT_ATTACHMENT_PATH_PATTERN
+  },
   maxItems: MAX_DELIVERY_ATTACHMENTS,
   description: `OPTIONAL, up to ${MAX_DELIVERY_ATTACHMENTS}. Same entries as reply attachments: paths exactly as you saw them, never URLs. Oversized files are sent as a link instead of failing. Omit if none.`
 };

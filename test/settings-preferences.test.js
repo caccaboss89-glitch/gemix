@@ -19,6 +19,7 @@ import envConfig from '../src/config/env.js';
 import { managePreferences } from '../src/tools/preferences.js';
 import {
   activeEffortPolicy,
+  customizedFields,
   defaultSettings,
   deleteSettings,
   readSettings,
@@ -190,6 +191,8 @@ test('text-only chats hide voice preferences and use text-only default memory', 
     assert.equal('voice' in dedicatedProperties, true);
     const textDefaults = defaultSettings({ allowVoice: false });
     assert.doesNotMatch(textDefaults.memory, /voice:true|voice replies|spoken replies/i);
+    assert.match(textDefaults.memory, /default guidelines: change them whenever they conflict with the user's preferences/);
+    assert.match(defaultSettings().memory, /default guidelines: change them whenever they conflict with the user's preferences/);
     assert.equal('voice' in settingsForModel(textDefaults, { allowVoice: false }), false);
 
     const rejected = await managePreferences(
@@ -200,6 +203,20 @@ test('text-only chats hide voice preferences and use text-only default memory', 
     assert.equal(rejected.success, false);
     assert.match(rejected.error, /cannot send spoken replies/);
   });
+});
+
+test('persisted former default guidance migrates without becoming a custom preference', async (t) => {
+  const fileId = `test_legacy_default_memory_${process.pid}_${Date.now()}`;
+  const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
+  t.after(() => { try { fs.unlinkSync(filePath); } catch { /* already absent */ } });
+  fs.writeFileSync(filePath, JSON.stringify({
+    memory: 'Use voice replies (voice:true) for short, casual, non-technical messages; use text for long or technical ones. '
+      + 'Vary voice vs text across your recent replies so you are not repetitive. Use emojis sometimes.'
+  }));
+
+  const settings = readSettings(fileId);
+  assert.equal(settings.memory, defaultSettings().memory);
+  assert.deepEqual(customizedFields(settings), []);
 });
 
 test('every supported effort persists, while a provider-only value degrades without being erased', async (t) => {

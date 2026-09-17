@@ -6,6 +6,7 @@ import { normalizeMarkdown, stripOutgoingDeliveryArtifacts } from '../utils/text
 import { parseRecurrenceRule, describeRecurrence, toRomeISO, isDateSkipped } from '../utils/recurrence.js';
 import { formatTaskRecipient } from '../utils/taskRecipient.js';
 import { projectTaskForTool } from '../utils/taskToolResult.js';
+import constants from '../config/constants.js';
 
 function _failure(error) {
   return { result: { success: false, error } };
@@ -166,6 +167,9 @@ function buildScheduledTask(rawTask, ctx, { nowTime, maxDateMs }) {
   if (typeof task.content !== 'string' || !task.content.trim()) {
     return _failure('Reminder content must be a non-empty string.');
   }
+  if (task.content.length > constants.SCHEDULE_TASK_CONTENT_MAX_CHARS) {
+    return _failure(`Reminder content must be at most ${constants.SCHEDULE_TASK_CONTENT_MAX_CHARS} characters.`);
+  }
 
   const schedule = _resolveSchedule(task, nowTime, maxDateMs);
   if (schedule.error) return _failure(schedule.error);
@@ -178,6 +182,9 @@ function buildScheduledTask(rawTask, ctx, { nowTime, maxDateMs }) {
     stripOutgoingDeliveryArtifacts(task.content.replace(/^\[GemiX\]\s*/i, ''))
   ).trim();
   if (!content) return _failure('Reminder content is empty after removing internal delivery markers.');
+  if (content.length > constants.SCHEDULE_TASK_CONTENT_MAX_CHARS) {
+    return _failure(`Reminder content must be at most ${constants.SCHEDULE_TASK_CONTENT_MAX_CHARS} characters.`);
+  }
 
   const recurrence = recurrenceResult.recurrence;
   const durableTask = {

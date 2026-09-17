@@ -151,7 +151,7 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
     }
   }
 
-  const sendingFiles = buildSendingFilesLines(profile, promptOpts);
+  const sendingFiles = buildSendingFilesLines(profile);
   if (sendingFiles.length > 0) sections.push(_section('Sending files', sendingFiles));
 
   // Statute is process-cached and conversation-stable (~24KB) — keep it in the

@@ -136,10 +136,17 @@ test('generic and xAI provider guidance replace one another without legacy leaks
     generic,
     XAI_ONLY_PROMPT_MATERIAL
   );
+  assert.match(generic, /## Sending files[\s\S]*X, YouTube, TikTok or any other site[\s\S]*tiktok-video skill/);
 
   const xai = underProvider('xai', () => promptFor(false));
   assert.match(xai, /## Provider integration\nRegular web search[\s\S]*native X search/);
   assert.doesNotMatch(xai, /render_inline_citation|\[\[[^\]]*\]\]\(https?:|"Fonti:" list/i);
+  const providerBlock = xai.slice(
+    xai.indexOf('## Provider integration'),
+    xai.indexOf('\n## This chat\n')
+  );
+  assert.doesNotMatch(providerBlock, /CDN URL|download .*X result/i);
+  assert.match(xai, /## Sending files[\s\S]*X, YouTube, TikTok or any other site[\s\S]*tiktok-video skill/);
   const afterProviderBlock = xai.slice(xai.indexOf('\n## This chat\n'));
   assert.doesNotMatch(
     afterProviderBlock,
@@ -158,6 +165,7 @@ test('personal WhatsApp runtime never exposes spoken-reply defaults', () => {
   }));
   assert.match(runtime, /<CurrentSettings scope="chat">/);
   assert.doesNotMatch(runtime, /Voice:|voice:true|voice replies|spoken replies/i);
+  assert.match(runtime, /default guidelines: change them whenever they conflict with the user's preferences/);
 });
 
 test('workspace runtime distinguishes an empty snapshot from unknown and failed snapshots', () => {
@@ -250,5 +258,7 @@ test('the Skills section and the `skills/` root are a WhatsApp surface only', ()
 
   assert.equal(/skill/i.test(discord), false, 'Discord names a library it does not have');
   assert.match(discord, /use `\/workspace\/\.\.\.` or `\/attachments\/\.\.\.` for a root-stable shell path/);
+  assert.match(discord, /X, YouTube, TikTok or any other site/);
+  assert.doesNotMatch(discord, /tiktok-video skill/);
   assert.match(discord, /Delete what you no longer need instead of filling it\./);
 });

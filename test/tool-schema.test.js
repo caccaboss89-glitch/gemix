@@ -168,6 +168,10 @@ test('catalog schemas formalize their documented portable limits', () => {
   const schedule = buildScheduleTasksTool(true, false, false);
   const scheduleParams = parametersOf(schedule);
   assert.equal(scheduleParams.properties.tasks.minItems, 1);
+  assert.equal(
+    scheduleParams.properties.tasks.items.properties.content.maxLength,
+    constants.SCHEDULE_TASK_CONTENT_MAX_CHARS
+  );
   const scheduledAt = scheduleParams.properties.tasks.items.properties.scheduledAt;
   assert.match('2026-12-01T12:00:00', new RegExp(scheduledAt.pattern));
   assert.doesNotMatch('2026-12-01T12:00:00Z', new RegExp(scheduledAt.pattern));
@@ -182,6 +186,18 @@ test('catalog schemas formalize their documented portable limits', () => {
   assert.match(validateToolArgs({ taskIds: [] }, remove), /at least 1 item/);
 
   const whatsapp = buildWhatsAppTool(true);
+  assert.equal(
+    parametersOf(whatsapp).properties.attachments.items.pattern,
+    constants.AGENT_ATTACHMENT_PATH_PATTERN
+  );
+  assert.match(
+    validateToolArgs({
+      recipient: { name: 'Fixture Member' },
+      message: 'test',
+      attachments: ['https://video.twimg.com/file.mp4']
+    }, whatsapp),
+    /required format/
+  );
   assert.match(
     validateToolArgs({ recipient: { phone: '393123' }, message: 'test' }, whatsapp),
     /required format/

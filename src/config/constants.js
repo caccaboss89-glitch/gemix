@@ -77,6 +77,8 @@ export default {
   MAX_INLINE_IMAGES_PER_TURN: 8,
   MAX_TASK_DAYS: 365,
   SCHEDULE_TASKS_MAX_BATCH: 50,
+  /** Largest reminder body accepted by both the tool schema and executor. */
+  SCHEDULE_TASK_CONTENT_MAX_CHARS: 1000,
   READ_TASKS_MAX_LIMIT: 50,
   REMOVE_TASKS_MAX_IDS: 100,
   RECURRENCE_MAX_INTERVAL: 10_000,
@@ -91,6 +93,12 @@ export default {
   // API
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 4 * 60 * 1000,
+  /**
+   * A reminder call normally finishes its arguments in a few dozen fragments.
+   * Stop a provider repetition loop before it can occupy the whole turn; an
+   * unfinished call has not reached the executor, so the transport can retry it.
+   */
+  MODEL_STREAM_MAX_SCHEDULE_ARGUMENT_DELTAS: 4096,
   // Absolute ceiling for one turn, shared by the model calls and the shell.
   // Individual timeouts bound one call; nothing bounds their sum, and a turn
   // that keeps hitting slow rounds would hold the user's request open long
@@ -162,6 +170,8 @@ export default {
   WORKSPACE_OUTPUT_MAX_BYTES: 200 * 1024,
   /** Maximum filesystem entries one workspace inventory may traverse. */
   WORKSPACE_MAX_ENTRIES: 100_000,
+  /** Portable model-facing path shape for final and delivery attachments. */
+  AGENT_ATTACHMENT_PATH_PATTERN: '^(?:workspace|attachments)/.+$',
 
   // read_file parser stack. The cache is host-only and invisible to the model
   // (never mounted in the container); it shares the workspace TTL and is swept

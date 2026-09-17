@@ -18,6 +18,7 @@ import constants from '../config/constants.js';
 
 const MAX_REPLY_ATTACHMENTS = 10;
 const MAX_CONVERSATION_TITLE_CHARS = 80;
+const ATTACHMENT_PATH_RE = new RegExp(constants.AGENT_ATTACHMENT_PATH_PATTERN);
 
 // Which markup actually renders is stated once, in the "This chat" section of
 // the system prompt — not restated here.
@@ -40,8 +41,7 @@ const VOICE_RESPONSE_FIELD_DESC =
 
 function _attachmentsFieldDesc() {
   return 'The ONLY way to send files in this chat. Use null when you are sending nothing. '
-    + 'Each entry is a path exactly as you saw it (workspace/... or attachments/...) — never a URL: '
-    + 'a remote file has to be downloaded into workspace/ first and then sent by its path. '
+    + 'Each entry must be a local workspace/... or attachments/... path exactly as you saw it; URLs are invalid. '
     + 'Never use any other file syntax.';
 }
 
@@ -86,7 +86,7 @@ function buildGemixResponseFormat({ includeTitle = false, allowVoice = false } =
   // reject the schema, so the portable shape is the one built here.
   properties.attachments = {
     type: ['array', 'null'],
-    items: { type: 'string' },
+    items: { type: 'string', pattern: constants.AGENT_ATTACHMENT_PATH_PATTERN },
     maxItems: MAX_REPLY_ATTACHMENTS,
     description: _attachmentsFieldDesc()
   };
@@ -309,7 +309,7 @@ function parseStructuredReply(raw) {
     : null;
   const attachments = Array.isArray(parsed.attachments)
     ? parsed.attachments
-      .filter(a => typeof a === 'string' && a.trim())
+      .filter(a => typeof a === 'string' && ATTACHMENT_PATH_RE.test(a.trim()))
       .map(a => a.trim())
       .slice(0, MAX_REPLY_ATTACHMENTS)
     : [];
