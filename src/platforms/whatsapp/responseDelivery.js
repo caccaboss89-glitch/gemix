@@ -17,6 +17,11 @@ const { MessageMedia } = pkg;
 const { PLATFORM_WA_PERSONAL, WA_TEXT_CHUNK_CHARS } = constants;
 const log = createLogger('WhatsAppDelivery');
 
+function _isWhatsAppMediaMessageIdError(err) {
+  return /Data passed to getter must include an id property \(it's how we memoize\) but got undefined/i
+    .test(String(err?.message || err || ''));
+}
+
 async function _sendTextWithRetry(chat, text, mentions = []) {
   const cleanedText = normalizeMarkdown(stripOutgoingDeliveryArtifacts(text)).trim();
   if (!cleanedText) throw new Error('Cannot send an empty WhatsApp text message');
@@ -136,6 +141,18 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
       }
     } catch (err) {
       failures.push({ component: 'voice', error: formatWaError(err) });
+      // Temporary compatibility fallback while whatsapp-web.js carries the
+      // media-ID regression. It is scoped to the known pre-send error so an
+      // ambiguous media failure cannot produce a duplicate text reply.
+      if (_isWhatsAppMediaMessageIdError(err) && typeof responseData.voiceTranscriptText === 'string') {
+        try {
+          await _sendTextWithRetry(chat, responseData.voiceTranscriptText);
+          textAccepted = true;
+          log.warn('   Voice send failed in WhatsApp Web; sent its transcript as text instead.');
+        } catch (fallbackErr) {
+          failures.push({ component: 'voice_transcript', error: formatWaError(fallbackErr) });
+        }
+      }
     }
     const researchFooter = typeof responseData.researchFooter === 'string'
       ? normalizeMarkdown(stripOutgoingDeliveryArtifacts(responseData.researchFooter)).trim()

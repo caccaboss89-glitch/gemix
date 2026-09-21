@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
+    "postinstall": "node scripts/patch-whatsapp-web.js",
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "auth": "node scripts/gemix-auth.js",

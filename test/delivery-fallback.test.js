@@ -84,6 +84,27 @@ test('a WhatsApp reply that fails even without mentions still reports the text f
   assert.equal(receipt.failures.length, 1);
 });
 
+test('a voice reply with the WhatsApp media-ID error falls back to its transcript', async () => {
+  const calls = [];
+  const chat = {
+    isGroup: false,
+    async sendMessage(content) {
+      calls.push(content);
+      if (typeof content !== 'string') throw new Error(MEMOIZE_ERROR);
+    }
+  };
+  const receipt = await sendWhatsAppResponse(chat, {
+    isVoiceOnly: true,
+    voiceBuffer: Buffer.from('voice'),
+    voiceTranscriptText: 'Ciao, questa e la trascrizione.'
+  });
+  assert.equal(receipt.status, 'degraded');
+  assert.equal(receipt.textAccepted, true);
+  assert.equal(receipt.failures[0].component, 'voice');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1], 'Ciao, questa e la trascrizione.');
+});
+
 test('a direct group send with an unresolvable mention is retried as plain text', async () => {
   const calls = [];
   setDedicatedClient({
