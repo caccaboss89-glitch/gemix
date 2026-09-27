@@ -20,6 +20,12 @@ import {
   prependHtmlBlock
 } from '../src/utils/emailHtml.js';
 
+function useActiveMembers(t, members) {
+  const originalMembers = [...ACTIVE_MEMBERS];
+  t.after(() => ACTIVE_MEMBERS.splice(0, ACTIVE_MEMBERS.length, ...originalMembers));
+  ACTIVE_MEMBERS.splice(0, ACTIVE_MEMBERS.length, ...members);
+}
+
 test('program attribution uses the canonical active-member name and is classified as a system message', () => {
   const userCtx = {
     member: { name: 'Requester & One' },
@@ -65,11 +71,23 @@ test('WhatsApp history keeps a program-attributed outbound message as a system n
   assert.match(text, /Requester One/);
 });
 
-test('the WhatsApp delivery tool stamps the caller before sending', async () => {
-  const caller = ACTIVE_MEMBERS.find(member => member.admin);
-  const recipient = ACTIVE_MEMBERS.find(member => member.name !== caller?.name);
-  assert.ok(caller?.wa);
-  assert.ok(recipient?.wa);
+test('the WhatsApp delivery tool stamps the caller before sending', async t => {
+  const caller = {
+    name: 'Caller One',
+    nicks: [],
+    email: 'caller@example.invalid',
+    wa: '390000000001@c.us',
+    admin: true
+  };
+  const recipient = {
+    name: 'Recipient Two',
+    nicks: [],
+    email: 'recipient@example.invalid',
+    wa: '390000000002@c.us'
+  };
+  useActiveMembers(t, [caller, recipient]);
+  assert.ok(caller.wa);
+  assert.ok(recipient.wa);
   const sent = [];
   const userCtx = {
     isActiveMember: true,
