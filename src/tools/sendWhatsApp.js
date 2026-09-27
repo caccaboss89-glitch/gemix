@@ -11,6 +11,7 @@
 import { sendWhatsAppDirect, normalizePhoneToJid  } from './whatsappSender.js';
 import { resolveActiveMemberByName, findMemberByWa  } from '../config/members.js';
 import { stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { prependOutboundAttribution } from '../utils/outboundAttribution.js';
 import { sendAttachmentsWithFallback  } from '../utils/attachmentFallback.js';
 import { sendWhatsAppAttachment, PLATFORM  } from '../utils/attachmentDelivery.js';
 import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
@@ -160,14 +161,21 @@ async function sendWhatsAppTool(args, userCtx, deliveryCtx) {
   const contacted = alreadyContactedError(deliveryCtx.contactedWA, target.jid, 'WhatsApp message');
   if (contacted) return contacted;
 
-  const { attachments, missing, missingNote } = resolveOutboundAttachments(args.attachments, userCtx);
-  const text = stripOutgoingDeliveryArtifacts(args.message).trim();
-  if (!text) {
+  const messageBody = stripOutgoingDeliveryArtifacts(args.message).trim();
+  if (!messageBody) {
     return {
       success: false,
       error: 'The WhatsApp message is empty after removing internal delivery markers.'
     };
   }
+  const text = prependOutboundAttribution(messageBody, userCtx);
+  if (!text) {
+    return {
+      success: false,
+      error: 'Could not identify the active member requesting this WhatsApp message.'
+    };
+  }
+  const { attachments, missing, missingNote } = resolveOutboundAttachments(args.attachments, userCtx);
   try {
     await sendWhatsAppDirect(target.jid, text);
     // Reserved as soon as the text is out: a later attachment failure must not

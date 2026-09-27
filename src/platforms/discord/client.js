@@ -675,10 +675,9 @@ async function buildDiscordHistory(channel, starterMessageId, historyStorageId, 
     const reactionTag = discordReactionTag(m);
     if (reactionTag) textContent = `${textContent} ${reactionTag}`.trim();
 
-    // Banners our own account posted (maintenance, fallback error, credit
-    // notice, release confirmations) are program-to-user notices, not GemiX
-    // replies: they go in as role:user inside <system-notification> so the
-    // model never reads them as its own past words. See utils/systemTags.js.
+    // Program-attributed posts by our account (banners and cross-member
+    // deliveries) are notices, not GemiX replies: they go in as role:user
+    // inside <system-notification>. See utils/systemTags.js.
     const isSystemNotice = isBot && isSystemMessage(textContent);
     const senderName = m.member?.nickname || m.author.displayName || m.author.username;
     let finalText;

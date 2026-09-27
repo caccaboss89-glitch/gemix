@@ -27,6 +27,8 @@ import {
   updateSettings
 } from '../src/utils/settingsStore.js';
 
+const CHATGPT_TEST_MODEL = 'gpt-5.6-sol';
+
 test('settings deletion is serialized after an in-flight update', async (t) => {
   const fileId = `test_settings_wipe_${process.pid}_${Date.now()}`;
   const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
@@ -51,12 +53,15 @@ test('settings deletion is serialized after an in-flight update', async (t) => {
 
 async function withProvider(provider, fn) {
   const saved = envConfig.AI_PROVIDER;
+  const savedChatgptModel = envConfig.CHATGPT_MODEL;
   envConfig.AI_PROVIDER = provider;
+  if (provider === 'chatgpt') envConfig.CHATGPT_MODEL = CHATGPT_TEST_MODEL;
   _resetActiveProfileForTests();
   try {
     return await fn();
   } finally {
     envConfig.AI_PROVIDER = saved;
+    envConfig.CHATGPT_MODEL = savedChatgptModel;
     _resetActiveProfileForTests();
   }
 }

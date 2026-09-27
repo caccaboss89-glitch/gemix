@@ -76,6 +76,19 @@ test('a WhatsApp reply with an unresolvable mention is retried as plain text ins
   assert.ok(!calls[1].options?.mentions);
 });
 
+test('a WhatsApp reply with a different send error is not retried without mentions', async () => {
+  const calls = [];
+  const chat = groupChatStub(async (text, options) => {
+    calls.push({ text, options });
+    throw new Error('recipient temporarily unavailable');
+  });
+  const receipt = await sendWhatsAppResponse(chat, { text: 'ciao @393331234567 come va?' }, {});
+  assert.equal(receipt.status, 'failed');
+  assert.equal(receipt.failures.length, 1);
+  assert.match(receipt.failures[0].error, /recipient temporarily unavailable/);
+  assert.equal(calls.length, 1);
+});
+
 test('a WhatsApp reply that fails even without mentions still reports the text failure', async () => {
   const chat = groupChatStub(async () => { throw new Error(MEMOIZE_ERROR); });
   const receipt = await sendWhatsAppResponse(chat, { text: 'ciao @393331234567 come va?' }, {});
@@ -121,4 +134,24 @@ test('a direct group send with an unresolvable mention is retried as plain text'
   assert.equal(calls.length, 2);
   assert.ok(calls[0].options?.mentions?.length > 0);
   assert.ok(!calls[1].options?.mentions);
+});
+
+test('a direct WhatsApp send with a different error is not retried without mentions', async () => {
+  const calls = [];
+  const failure = new Error('recipient temporarily unavailable');
+  setDedicatedClient({
+    async sendMessage(chatId, message, options) {
+      calls.push({ chatId, message, options });
+      throw failure;
+    }
+  });
+  try {
+    await assert.rejects(
+      sendWhatsAppDirect('12345@g.us', 'ciao @393331234567 come va?'),
+      err => err === failure
+    );
+  } finally {
+    setReadyDedicatedClient(null);
+  }
+  assert.equal(calls.length, 1);
 });

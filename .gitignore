@@ -3,7 +3,6 @@
 .claude/
 AGENTS.md
 GROK.md
-CLAUDE.md
 
 # Dependency and cache
 node_modules/

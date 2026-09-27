@@ -175,6 +175,32 @@ function appendHtmlBlock(html, block) {
   return base + block;
 }
 
+/** Insert an HTML block at the start of the visible email body. */
+function prependHtmlBlock(html, block) {
+  const base = String(html || '');
+  if (!block) return base;
+  const bodyOpen = /<body\b[^>]*>/i.exec(base);
+  if (bodyOpen) {
+    const insertAt = bodyOpen.index + bodyOpen[0].length;
+    return base.slice(0, insertAt) + block + base.slice(insertAt);
+  }
+  const headClose = /<\/head\s*>/i.exec(base);
+  if (headClose) {
+    const insertAt = headClose.index + headClose[0].length;
+    return base.slice(0, insertAt) + block + base.slice(insertAt);
+  }
+  const htmlOpen = /<html\b[^>]*>/i.exec(base);
+  if (!htmlOpen) return block + base;
+  const insertAt = htmlOpen.index + htmlOpen[0].length;
+  return base.slice(0, insertAt) + block + base.slice(insertAt);
+}
+
+/** Render the program-added sender attribution as a compact email heading. */
+function buildOutboundAttributionBlock(text) {
+  return '<p style="font-family:sans-serif;color:#555;font-size:0.92em;margin:0 0 1em;">'
+    + `<strong>${escapeHtml(text)}</strong></p>`;
+}
+
 /**
  * Render a notice (e.g. the temp-link fallback text) as an HTML block.
  * @param {string} text
@@ -189,5 +215,7 @@ export {
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,
+  prependHtmlBlock,
+  buildOutboundAttributionBlock,
   buildNoticeBlock
 };

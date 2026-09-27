@@ -3,7 +3,11 @@ import constants from '../../config/constants.js';
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts } from '../../utils/text.js';
 import { sendAttachmentsWithFallback } from '../../utils/attachmentFallback.js';
 import { sendWhatsAppAttachment, PLATFORM } from '../../utils/attachmentDelivery.js';
-import { withWaPuppeteerRetry, formatWaError } from '../../utils/waPuppeteer.js';
+import {
+  withWaPuppeteerRetry,
+  formatWaError,
+  isWhatsAppWebMissingMessageIdError
+} from '../../utils/waPuppeteer.js';
 import { createLogger } from '../../utils/logger.js';
 import {
   stripDisallowedOutgoingMentions,
@@ -16,11 +20,6 @@ import { createDeliveryReceipt } from '../../utils/deliveryReceipt.js';
 const { MessageMedia } = pkg;
 const { PLATFORM_WA_PERSONAL, WA_TEXT_CHUNK_CHARS } = constants;
 const log = createLogger('WhatsAppDelivery');
-
-function _isWhatsAppMediaMessageIdError(err) {
-  return /Data passed to getter must include an id property \(it's how we memoize\) but got undefined/i
-    .test(String(err?.message || err || ''));
-}
 
 async function _sendTextWithRetry(chat, text, mentions = []) {
   const cleanedText = normalizeMarkdown(stripOutgoingDeliveryArtifacts(text)).trim();
@@ -45,7 +44,7 @@ async function _sendTextWithRetry(chat, text, mentions = []) {
           { retries: 2, delayMs: 2000 }
         );
       } catch (err) {
-        if (withMentions && sendOptions) {
+        if (withMentions && sendOptions && isWhatsAppWebMissingMessageIdError(err)) {
           withMentions = false;
           log.warn(`   Retrying WhatsApp text without mentions (${mentions.length} dropped): ${formatWaError(err)}`);
           await withWaPuppeteerRetry(
@@ -144,7 +143,7 @@ async function sendWhatsAppResponse(chat, responseData, opts = {}) {
       // Temporary compatibility fallback while whatsapp-web.js carries the
       // media-ID regression. It is scoped to the known pre-send error so an
       // ambiguous media failure cannot produce a duplicate text reply.
-      if (_isWhatsAppMediaMessageIdError(err) && typeof responseData.voiceTranscriptText === 'string') {
+      if (isWhatsAppWebMissingMessageIdError(err) && typeof responseData.voiceTranscriptText === 'string') {
         try {
           await _sendTextWithRetry(chat, responseData.voiceTranscriptText);
           textAccepted = true;

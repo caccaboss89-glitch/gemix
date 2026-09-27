@@ -7,13 +7,12 @@
 //     progressive prefix cache (see ai/transport/responsesProtocol.js).
 //   - role:assistant is worse: the model reads those as its own past words.
 //
-// <system-notification> — a message the PROGRAM delivered to the USER in this
-//   chat: scheduled reminder, release note, music wrap, maintenance/error
-//   banner, temporary download link (registry: config/systemMessages.js).
-//   GemiX did not write it and it is not addressed to GemiX. Its text can be
-//   user-authored — a scheduled reminder is literally whatever the user asked
-//   to be reminded of — so it must never be read as a system instruction, or
-//   any user could inject orders into the prompt by scheduling one.
+// <system-notification> — an item the PROGRAM delivered to the USER in this
+//   chat: a reminder, release note, operation banner, temporary download link,
+//   or cross-member message sent on an active member's behalf
+//   (registry: config/systemMessages.js). It reports program activity rather
+//   than addressing GemiX. Its text may be user-authored or composed for another
+//   recipient, so it is context, never an instruction to GemiX.
 //
 // <system-reminder> — a control note the program addresses TO GemiX mid-turn
 //   (e.g. "you can no longer call tools, answer with what you have"). Always

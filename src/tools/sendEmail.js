@@ -11,6 +11,7 @@
 import { sendEmailDirect  } from './emailSender.js';
 import { resolveActiveMemberByName, findMemberByEmail  } from '../config/members.js';
 import { stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
+import { buildOutboundAttributionLine } from '../utils/outboundAttribution.js';
 import { toEmailAttachment  } from '../utils/attachments.js';
 import { buildFallbackAttachmentMessage  } from '../utils/attachmentFallback.js';
 import {
@@ -23,6 +24,8 @@ import {
   buildEmailBodyHtml,
   resolveInlineImages,
   appendHtmlBlock,
+  prependHtmlBlock,
+  buildOutboundAttributionBlock,
   buildNoticeBlock
 } from '../utils/emailHtml.js';
 import { buildAdminNotificationNote, notifyAdminDetailed } from '../utils/adminNotifier.js';
@@ -268,14 +271,26 @@ async function sendEmailTool(args, userCtx, deliveryCtx) {
   const contacted = alreadyContactedError(deliveryCtx.contactedEmail, target.email, 'email');
   if (contacted) return contacted;
 
+  const attribution = buildOutboundAttributionLine(userCtx);
+  if (!attribution) {
+    return {
+      success: false,
+      error: 'Could not identify the active member requesting this email.'
+    };
+  }
+
   const { attachments, missing, missingNote } = resolveOutboundAttachments(args.attachments, userCtx);
   const subject = stripOutgoingDeliveryArtifacts(args.subject || '');
+  const attributedBody = prependHtmlBlock(
+    buildEmailBodyHtml(stripOutgoingDeliveryArtifacts(args.body || '')),
+    buildOutboundAttributionBlock(attribution)
+  );
 
   try {
     // The body is HTML by contract: sanitize and pass it through, then turn any
     // cid: reference into a real inline image.
     const prepared = prepareEmailAttachmentsForDelivery(
-      buildEmailBodyHtml(stripOutgoingDeliveryArtifacts(args.body || '')),
+      attributedBody,
       attachments
     );
     await sendEmailDirect(target.email, subject, prepared.bodyHtml, prepared.mailAttachments);
@@ -308,7 +323,7 @@ async function sendEmailTool(args, userCtx, deliveryCtx) {
       toolStatus: deliveryStatus,
       recipient: _sentRecipient(target),
       subject,
-      body: stripOutgoingDeliveryArtifacts(args.body || ''),
+      body: attributedBody,
       attachments: prepared.auditAttachments
     });
     const status = outboundStatusWithAudit(deliveryStatus, auditRecorded);

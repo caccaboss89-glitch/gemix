@@ -37,6 +37,18 @@ function isWaPuppeteerTransientError(err) {
 }
 
 /**
+ * WhatsApp Web raises this page-side error when message data has no resolvable
+ * id. Current call sites use it for the known bad-JID text-send failure and the
+ * media-ID collision on voice sends; each applies its own fallback.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isWhatsAppWebMissingMessageIdError(err) {
+  return /Data passed to getter must include an id property \(it's how we memoize\) but got undefined/i
+    .test(String(err?.message || err || ''));
+}
+
+/**
  * Expected startup failures that already trigger a coordinated restart. They
  * stay in PM2 logs but should not also become an admin-facing API bug report.
  * @param {unknown} err
@@ -90,6 +102,7 @@ function formatWaError(err) {
 
 export {
   isWaPuppeteerTransientError,
+  isWhatsAppWebMissingMessageIdError,
   isWaLifecycleRestartError,
   withWaPuppeteerRetry,
   formatWaError

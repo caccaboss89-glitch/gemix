@@ -14,6 +14,7 @@
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts  } from '../utils/text.js';
 import { stripDisallowedOutgoingMentions, normalizeOutgoingMentionTags, collectMentionJids  } from '../utils/waMentions.js';
 import { createLogger } from '../utils/logger.js';
+import { isWhatsAppWebMissingMessageIdError } from '../utils/waPuppeteer.js';
 import {
   getReadyDedicatedClient,
   setReadyDedicatedClient
@@ -86,6 +87,7 @@ async function sendWhatsAppDirect(chatId, message, options = {}) {
     await dedicatedClient.sendMessage(chatId, message, sendOptions);
   } catch (err) {
     if (typeof message === 'string'
+      && isWhatsAppWebMissingMessageIdError(err)
       && Array.isArray(sendOptions.mentions) && sendOptions.mentions.length > 0) {
       log.warn(`   Retrying direct WhatsApp send without mentions (${sendOptions.mentions.length} dropped): ${err?.message || err}`);
       const plainOptions = { ...sendOptions };

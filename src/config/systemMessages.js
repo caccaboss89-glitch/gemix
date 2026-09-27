@@ -1,6 +1,6 @@
 // src/config/systemMessages.js
 //
-// Central registry of all GemiX-generated WhatsApp system messages.
+// Central registry of GemiX-generated system-message prefixes used in chat history.
 //
 // Every message is declared once, as the literal prefix that opens it, and
 // listed in SYSTEM_MESSAGE_PREFIXES. isSystemMessage() recognises a
@@ -23,6 +23,11 @@ const RELEASE_NOTIFICATION_PREFIX = '🚀 *Nuova release GemiX:';
 
 /** Music wrap monthly notification sent to all active members (the month varies). */
 const MUSIC_WRAP_PREFIX = '🎵 *Wrap di';
+
+// -- Cross-member outbound attribution --------------------------------------
+
+/** Program-added header that identifies who requested an outbound message. */
+const OUTBOUND_ATTRIBUTION_PREFIX = 'Messaggio inviato da GemiX per conto di:';
 
 // -- Admin operational alerts ----------------------------------------------
 
@@ -213,6 +218,7 @@ function buildPrivacyWipeDoneMessage(opts = {}) {
 const SYSTEM_MESSAGE_PREFIXES = [
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
+  OUTBOUND_ATTRIBUTION_PREFIX,
   ADMIN_ERROR_PREFIX,
   CREDIT_EXHAUSTED_PREFIX,
   PROVIDER_LIMIT_PREFIX,
@@ -260,6 +266,7 @@ function isSystemMessage(body) {
 export {
   RELEASE_NOTIFICATION_PREFIX,
   MUSIC_WRAP_PREFIX,
+  OUTBOUND_ATTRIBUTION_PREFIX,
   ADMIN_ERROR_PREFIX,
   MAINTENANCE_PREFIX,
   RELEASE_NOTIFY_ENABLED_PREFIX,
