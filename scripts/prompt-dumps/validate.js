@@ -469,11 +469,13 @@ function _validateWorkspaceGuidance(staticPart, caseId) {
  */
 function _validateSkills(staticPart, id, caseId) {
   const skills = _promptSection(staticPart, 'Skills');
-  const installed = listInstalledSkills();
+  const ctx = _ctx(id);
+  const allInstalled = listInstalledSkills();
+  const installed = listInstalledSkills({ isGroup: Boolean(ctx.isGroup) });
   const outsideSkills = skills
     ? staticPart.replace(`\n## Skills\n${skills}`, '')
     : staticPart;
-  for (const skill of installed) {
+  for (const skill of allInstalled) {
     const escapedName = String(skill.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (new RegExp(`\\b${escapedName}\\b`, 'i').test(outsideSkills)) {
       ISSUES.push({ caseId, msg: `skill "${skill.name}" is referenced outside the Skills section` });
@@ -491,6 +493,12 @@ function _validateSkills(staticPart, id, caseId) {
       ISSUES.push({ caseId, msg: 'skill library is installed but the prompt carries no Skills section' });
     }
     return;
+  }
+  const visibleNames = new Set(installed.map(skill => skill.name));
+  for (const skill of allInstalled.filter(item => !visibleNames.has(item.name))) {
+    if (skills.includes(`<Skill name="${skill.name}" path="${skill.path}">`)) {
+      ISSUES.push({ caseId, msg: `Skills section exposes direct-message-only skill "${skill.name}" in a group` });
+    }
   }
   for (const skill of installed) {
     if (!skills.includes(`<Skill name="${skill.name}" path="${skill.path}">`)) {

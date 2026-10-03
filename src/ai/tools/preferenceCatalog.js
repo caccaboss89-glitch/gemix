@@ -5,6 +5,7 @@
 import {
   activeEffortPolicy,
   defaultSettings,
+  MAX_MEMORY_CHARS,
   VALID_LANGUAGES,
   VALID_VOICES
 } from '../../utils/settingsStore.js';
@@ -43,12 +44,13 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     },
     memory: {
       type: 'string',
-      maxLength: 1000,
+      maxLength: MAX_MEMORY_CHARS,
       description: 'Free-text custom instructions, for anything not covered by the fields above: '
         + `e.g. speak with a certain slang, use lots of emoji${allowVoice ? ', prefer text or spoken replies' : ''}, or what the user is working on in this period `
         + '(ideas/projects that stay relevant for days, weeks or months — never a one-off question or transient context). '
-        + 'Max 1000 chars, always in English; empty resets it to the default. With `replace` false the new text is appended '
-        + 'to the existing one on its own line; if the combined length would exceed 1000 chars the call is rejected outright, '
+        + `Max ${MAX_MEMORY_CHARS} chars, always in English; empty resets it to the default. With replace=false, the new text is appended `
+        + 'to the existing one on its own line; if the combined length would exceed '
+        + `${MAX_MEMORY_CHARS} chars the call is rejected outright, `
         + 'not truncated — shorten it or use `replace` true instead. Do not write timestamps: the system tracks them.'
     },
     replace: { type: 'boolean', description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.' }

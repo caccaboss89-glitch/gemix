@@ -147,7 +147,7 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
   if (cap.workspace) {
     sections.push(_section('Your workspace', _buildWorkspaceLines(cap.skills)));
     if (cap.skills) {
-      const skills = _buildSkillsLines();
+      const skills = _buildSkillsLines(cap.isGroup);
       if (skills.length > 0) sections.push(_section('Skills', skills));
     }
   }
@@ -475,14 +475,14 @@ function _buildWorkspaceLines(skills) {
 }
 
 /**
- * The installed skills, as the frontmatter each one declares about itself.
+ * The skills available in this chat, as the frontmatter each one declares.
  *
  * Only name and description are here: the procedure stays in the SKILL.md the
  * model opens once it has decided the skill applies. Empty when the library
  * holds nothing, so a deployment with no skill carries no section at all.
  */
-function _buildSkillsLines() {
-  const skills = listInstalledSkills();
+function _buildSkillsLines(isGroup) {
+  const skills = listInstalledSkills({ isGroup });
   if (skills.length === 0) return [];
   // Skill names and routing belong only in this section. Keep every other
   // prompt section generic instead of hardcoding one installed skill there.

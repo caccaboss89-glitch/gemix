@@ -17,6 +17,7 @@ import constants from '../src/config/constants.js';
 import envConfig from '../src/config/env.js';
 import { getToolsForUser } from '../src/ai/tools.js';
 import { _resetActiveProfileForTests } from '../src/ai/providers/providerProfile.js';
+import { MAX_MEMORY_CHARS } from '../src/utils/settingsStore.js';
 
 function parametersOf(tool) {
   return tool.function.parameters;
@@ -162,7 +163,7 @@ test('catalog schemas formalize their documented portable limits', () => {
   assert.equal(shellTimeout.maximum, constants.SHELL_TIMEOUT_MAX_MS / 1000);
 
   const preferences = parametersOf(buildManagePreferencesTool(false)).properties;
-  assert.equal(preferences.memory.maxLength, 1000);
+  assert.equal(preferences.memory.maxLength, MAX_MEMORY_CHARS);
   assert.equal(parametersOf(TOOL_GENERATE_VIDEO).properties.reference_images.maxItems, constants.MAX_REF_IMAGES_FOR_VIDEO);
 
   const schedule = buildScheduleTasksTool(true, false, false);

@@ -18,7 +18,7 @@ import { getRomeISO  } from './time.js';
 import { withKeyedLock  } from './keyedLock.js';
 
 const SETTINGS_DIR = path.join(constants.DATA_DIR, 'memories');
-const MAX_MEMORY_CHARS = 1000;
+const MAX_MEMORY_CHARS = 3000;
 
 /** Interval after which GemiX asks the user to confirm custom preferences. */
 const SETTINGS_REVIEW_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;

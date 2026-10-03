@@ -101,7 +101,7 @@ function _buildXaiProfile() {
     model: envConfig.GROK_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.XAI, envConfig.GROK_MODEL),
     baseUrl: envConfig.XAI_BASE_URL,
-    defaultEffort: 'high',
+    defaultEffort: 'medium',
     supportedEfforts: XAI_EFFORTS,
     promptVariant: PROMPT_VARIANT.XAI,
     wire: defineWireCapabilities({
@@ -135,7 +135,6 @@ function _buildXaiProfile() {
  * `HTTP 400 UNSUPPORTED_INPUT: Unsupported parameter: max_output_tokens` and
  * fails the entire request. The length of the answer is left to the endpoint.
  *
- * `defaultEffort` stays at `high` even though the GPT-5.6 ladder goes further:
  * `xhigh` and `max` remain selectable per chat, but they cost enough latency to
  * be a deliberate choice rather than where every conversation starts.
  */
@@ -145,7 +144,7 @@ function _buildChatgptProfile() {
     model: envConfig.CHATGPT_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.CHATGPT, envConfig.CHATGPT_MODEL),
     baseUrl: envConfig.CHATGPT_BASE_URL,
-    defaultEffort: 'high',
+    defaultEffort: 'medium',
     supportedEfforts: _chatgptEfforts(envConfig.CHATGPT_MODEL),
     promptVariant: PROMPT_VARIANT.GENERIC,
     wire: defineWireCapabilities({
@@ -181,7 +180,7 @@ function _buildOpenRouterProfile() {
     model: envConfig.OPENROUTER_MAIN_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.OPENROUTER, envConfig.OPENROUTER_MAIN_MODEL),
     baseUrl: envConfig.OPENROUTER_BASE_URL,
-    defaultEffort: 'high',
+    defaultEffort: 'medium',
     supportedEfforts: GENERIC_EFFORTS,
     promptVariant: PROMPT_VARIANT.GENERIC,
     wire: defineWireCapabilities({
@@ -214,7 +213,7 @@ function _buildCustomProfile() {
     model: envConfig.CUSTOM_RESPONSES_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.CUSTOM, envConfig.CUSTOM_RESPONSES_MODEL),
     baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL,
-    defaultEffort: 'high',
+    defaultEffort: 'medium',
     supportedEfforts: GENERIC_EFFORTS,
     promptVariant: PROMPT_VARIANT.GENERIC,
     wire: defineWireCapabilities({

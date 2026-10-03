@@ -92,7 +92,7 @@ test('each provider exposes its full effort scale and defaults chats to its prof
 
       assert.deepEqual(profile.supportedEfforts, expected[provider]);
       assert.deepEqual(policy.supportedEfforts, profile.supportedEfforts);
-      assert.equal(profile.defaultEffort, 'high');
+      assert.equal(profile.defaultEffort, 'medium');
       assert.equal(policy.chatDefaultEffort, profile.defaultEffort);
       assert.equal(defaultSettings().effort, profile.defaultEffort);
       assert.deepEqual(schema.enum, profile.supportedEfforts);

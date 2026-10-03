@@ -1,11 +1,11 @@
 // src/sandbox/skillsLibrary.js
 //
 // The skill library: what is installed under `skills/`, and the one line each
-// installed skill contributes to the system prompt.
+// applicable skill contributes to the system prompt.
 //
 // A skill is a directory holding a `SKILL.md` whose YAML frontmatter declares a
-// `name` and a `description`. Only that frontmatter reaches the prompt. The
-// body of SKILL.md, and any script, reference or asset beside it, is read with
+// `name` and a `description`. Those fields reach the prompt; scope fields decide
+// where the skill is listed. The body and any supporting files are read with
 // `read_file` when the model decides from the description that the skill
 // applies — which is the whole point of the split: the catalog costs a line per
 // skill, the procedure costs nothing until it is used.
@@ -128,29 +128,39 @@ function _readSkill(entry) {
   return {
     name: entry.dir,
     description: _normalizeDescription(fields.description),
+    directMessagesOnly: fields['direct-messages-only'] === 'true',
     path: display
   };
 }
 
 /**
- * The installed skills, name-ordered.
+ * The installed skills available in the current chat, name-ordered.
  *
- * @returns {Array<{ name: string, description: string, path: string }>}
+ * Skills marked `direct-messages-only: true` are hidden from group chats.
+ *
+ * @param {{ isGroup?: boolean }} [options]
+ * @returns {Array<{ name: string, description: string, directMessagesOnly: boolean, path: string }>}
  */
-function listInstalledSkills() {
+function listInstalledSkills(options = {}) {
   const entries = _skillFileEntries();
   const signature = entries
     .map(e => `${e.relPath}:${e.size}:${e.mtimeMs}`)
     .sort()
     .join('|');
-  if (_cache && _cache.signature === signature) return _cache.skills;
+  if (_cache && _cache.signature === signature) {
+    return options.isGroup
+      ? _cache.skills.filter(skill => !skill.directMessagesOnly)
+      : _cache.skills;
+  }
 
   const skills = entries
     .map(_readSkill)
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
   _cache = { signature, skills };
-  return skills;
+  return options.isGroup
+    ? skills.filter(skill => !skill.directMessagesOnly)
+    : skills;
 }
 
 /** Absolute host path of the library, for operator-facing messages. */
