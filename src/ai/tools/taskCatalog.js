@@ -11,20 +11,30 @@ const E164_PHONE_PATTERN = '^\\+[1-9][0-9]{7,14}$';
 
 function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, here) {
   if (isAdmin) {
-    return {
-      recipient: {
-        type: 'object',
-        description: `Private recipient: exactly one of external phone or active-member name. Omit to use the current ${here}; explicitly naming the caller is equivalent to a self-reminder.`,
-        properties: {
-          phone: {
-            type: 'string',
-            pattern: E164_PHONE_PATTERN,
-            description: 'External recipient phone with country code (e.g. +393XXXXXXXXX). Use either phone or name.'
-          },
-          name: { type: 'string', minLength: 1, description: 'Active member name. Use either name or phone.' }
-        }
+    const properties = {};
+    if (isWhatsAppGroup) {
+      properties.toGroup = {
+        type: 'boolean',
+        description: 'Send this reminder to the current WhatsApp group; omit recipient.'
+      };
+      properties.toPrivate = {
+        type: 'boolean',
+        description: 'Send this reminder privately, to you or to the named recipient.'
+      };
+    }
+    properties.recipient = {
+      type: 'object',
+      description: `Private recipient: exactly one of external phone or active-member name. Omit to use the current ${here}; explicitly naming the caller is equivalent to a self-reminder.${isWhatsAppGroup ? ' Use only for a private reminder; for this group use toGroup and omit recipient.' : ''}`,
+      properties: {
+        phone: {
+          type: 'string',
+          pattern: E164_PHONE_PATTERN,
+          description: 'External recipient phone with country code (e.g. +393XXXXXXXXX). Use either phone or name.'
+        },
+        name: { type: 'string', minLength: 1, description: 'Active member name. Use either name or phone.' }
       }
     };
+    return properties;
   }
 
   const properties = {};
@@ -100,7 +110,9 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     taskItemProps.whatsapp = {
       type: 'object',
       description: isAdmin
-        ? `Delivery destination. Omit = current ${here}. Set recipient = private reminder to that member or phone.`
+        ? (isWhatsAppGroup
+          ? 'For a reminder to everyone in this group, set toGroup=true and omit recipient. For a private reminder, set toPrivate=true; set recipient only when it is for someone else.'
+          : `Delivery destination. Omit = current ${here}. Set recipient = private reminder to that member or phone.`)
         : (canTargetOthers
           ? (isWhatsAppGroup
             ? 'Destination. Omit = current group. For a private reminder set toPrivate; add recipient to send it to someone else (without recipient it goes to the current user).'
@@ -113,7 +125,9 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   return makeTool({
     name: 'schedule_tasks',
     description: isAdmin
-      ? 'Schedule WhatsApp reminders for the current chat, active members or external contacts; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
+      ? (isWhatsAppGroup
+        ? 'Schedule WhatsApp reminders for this group, the current chat, active members or external contacts. For everyone in this group, set whatsapp.toGroup=true and omit recipient; use whatsapp.toPrivate for a DM and set recipient only when it is for someone else. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
+        : 'Schedule WhatsApp reminders for the current chat, active members or external contacts; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.')
       : isActiveMember
         ? 'Schedule WhatsApp reminders for the current chat or other active members; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
         : 'Schedule personal WhatsApp reminders for the current chat. Items are independent and writes are atomic per task file. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.',

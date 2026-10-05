@@ -128,7 +128,7 @@ function buildStaticInstructions(ctx, tools = resolvePromptTools(ctx), opts = {}
   const toolNames = toolNamesToSet(tools);
   const activeMembers = Array.isArray(opts.activeMembers) ? opts.activeMembers : ACTIVE_MEMBERS;
   // Discord Thread title / conversation_title guidance live only in Runtime.
-  const promptOpts = { isActiveMember, toolNames };
+  const promptOpts = { isActiveMember, isGroup: Boolean(ctx.isGroup), toolNames };
 
   const provider = resolveProviderProfile();
   const sections = [_buildOpening(cap, provider)];
@@ -268,9 +268,14 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
       cap.isDiscord
         ? 'Address them by name, phone number or email from that list. send_whatsapp_message and send_email only '
           + 'reach destinations outside this thread.'
-        : 'Address them by name, phone number or email from that list. send_whatsapp_message and send_email only '
-          + 'reach destinations outside this chat; schedule_tasks with no destination means the current chat, '
-          + 'and takes a recipient when the reminder is for someone else.'
+        : (promptOpts.isGroup
+          ? 'Address them by name, phone number or email from that list. send_whatsapp_message and send_email only '
+            + 'reach destinations outside this chat; for a reminder to everyone in this group, set '
+            + 'schedule_tasks.whatsapp.toGroup=true and omit recipient. For a private reminder, set toPrivate=true '
+            + 'and add recipient only when it is for someone else.'
+          : 'Address them by name, phone number or email from that list. send_whatsapp_message and send_email only '
+            + 'reach destinations outside this chat; schedule_tasks with no destination means the current chat, '
+            + 'and takes a recipient when the reminder is for someone else.')
     );
   } else {
     const roster = activeMembers.map(m => {
