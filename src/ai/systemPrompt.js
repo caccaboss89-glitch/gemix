@@ -251,6 +251,12 @@ function _buildChatLines(ctx, cap, profile) {
  */
 function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   const lines = buildAudienceLines(profile, promptOpts);
+  if (!isAdmin) {
+    lines.push(
+      'Only the admin and a few selected active members can send messages to other users through you; '
+      + 'explain that this permission depends on who is speaking.'
+    );
+  }
   if (!promptOpts.isActiveMember) return lines;
 
   if (isAdmin) {
