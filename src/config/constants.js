@@ -93,6 +93,9 @@ export default {
   // API
   MAX_API_RETRIES: 3,
   API_TIMEOUT_MS: 4 * 60 * 1000,
+  // Complex Responses calls can spend several minutes reasoning before they
+  // emit usable output; the turn-wide deadline still bounds the total work.
+  RESPONSES_API_TIMEOUT_MS: 8 * 60 * 1000,
   /**
    * A reminder call normally finishes its arguments in a few dozen fragments.
    * Stop a provider repetition loop before it can occupy the whole turn; an

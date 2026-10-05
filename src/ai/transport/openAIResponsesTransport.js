@@ -90,15 +90,15 @@ class OpenAIResponsesTransport {
    * @param {object} opts
    * @param {object} opts.body - from buildResponsesBody (stream/store already set)
    * @param {TurnBudget} [opts.budget] - parent turn deadline; the model call
-   *   derives its own API_TIMEOUT_MS child and cannot consume the whole turn
+   *   derives its own RESPONSES_API_TIMEOUT_MS child and cannot consume the whole turn
    * @param {string|null} [opts.requestId] - GemiX request id, for log correlation only
    * @param {object} [opts.context] - opaque data handed to the extension hooks
    * @returns {Promise<{ response: object, requestId: string|null, usage: object|null }>}
    */
   async createResponse({ body, budget = null, requestId = null, context = {} }) {
     const callBudget = budget
-      ? budget.childFor(constants.API_TIMEOUT_MS)
-      : new TurnBudget(constants.API_TIMEOUT_MS);
+      ? budget.childFor(constants.RESPONSES_API_TIMEOUT_MS)
+      : new TurnBudget(constants.RESPONSES_API_TIMEOUT_MS);
     try {
       return await this._attemptLoop({ body, budget: callBudget, requestId, context });
     } finally {
