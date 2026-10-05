@@ -97,9 +97,6 @@ function _resolveDestination(whatsapp, ctx) {
   if (whatsapp?.toGroup && whatsapp?.toPrivate) {
     return { error: 'Choose one WhatsApp destination: toGroup and toPrivate cannot both be true.' };
   }
-  if (whatsapp?.toGroup && hasExplicitRecipient) {
-    return { error: 'A group reminder cannot also name a private recipient. Remove recipient or set toPrivate instead.' };
-  }
   if (whatsapp?.toGroup && !ctx.isGroup) {
     return { error: 'whatsapp.toGroup is only available from a WhatsApp group.' };
   }
