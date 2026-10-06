@@ -356,7 +356,7 @@ function _validateAudience(staticPart, id, caseId) {
   // the active branch's closing "Someone who is not an active member gets
   // none of it", and pinning an exact sentence breaks on any rewording.
   const branchLine = audience.trim().split('\n')[0] || '';
-  const saysActive = /\bis an active\b/.test(branchLine);
+  const saysActive = /\b(is|counts as) an active\b/.test(branchLine);
   const saysNotActive = /\bis not an active\b/.test(branchLine);
   if (saysActive === saysNotActive) {
     ISSUES.push({ caseId, msg: 'audience section must state exactly one membership branch' });
@@ -446,8 +446,14 @@ function _validateThisChat(staticPart, id, caseId) {
       ISSUES.push({ caseId, msg: `WhatsApp format line missing ${token}` });
     }
   }
-  if (!/program appends its own compact model and research badges/.test(chat)) {
+  if (!/program appends its own research badge/.test(chat)) {
     ISSUES.push({ caseId, msg: 'WhatsApp case missing the program-owned badge line' });
+  }
+  // Only the personal account signs replies with the model, to tell them apart
+  // from the owner's own messages.
+  const isPersonal = _ctx(id).platform === constants.PLATFORM_WA_PERSONAL;
+  if (isPersonal !== chat.includes('`> GemiX • <model>`')) {
+    ISSUES.push({ caseId, msg: 'model footer must be described only on the personal account' });
   }
   // Groups mention by phone digits; one-to-one chats have no mentions at all.
   const wantsMentions = _ctx(id).isGroup === true;
@@ -539,7 +545,7 @@ function _validateSkills(staticPart, id, caseId) {
   if (/```|^\d+\. /m.test(skills)) {
     ISSUES.push({ caseId, msg: 'Skills section carries procedure steps that belong in a SKILL.md' });
   }
-  if (!/never mention them/.test(skills)) {
+  if (!/never bring them up/.test(skills)) {
     ISSUES.push({ caseId, msg: 'Skills section must keep the library out of the answers' });
   }
   // The library ships with the release. `skills/` is not a writable root

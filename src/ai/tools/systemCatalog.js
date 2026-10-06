@@ -8,7 +8,7 @@ import { makeTool } from './schema.js';
 const TOOL_BUG_REPORT = makeTool({
   name: 'bug_report',
   description: 'Record a concrete, reproducible GemiX defect that application code has not already reported. '
-    + 'Do not use it for invalid arguments, empty results, documented degraded states, provider limits, dry-runs, tool tests, '
+    + 'Do not use it for invalid arguments, empty results, documented degraded states, provider limits, deliberate limits such as quotas or a stopped turn, dry-runs, tool tests, '
     + 'or when the user asks you not to report. Never use it in an administrator conversation. '
     + 'In the final response distinguish the report being recorded from a separate admin notification and follow the tool result exactly.',
   properties: {

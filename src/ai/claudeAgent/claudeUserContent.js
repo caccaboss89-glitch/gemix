@@ -39,10 +39,10 @@ function readClaudeImage(imageUrl, { allowUrl = true } = {}) {
   if (inline) {
     const mediaType = inline[1].toLowerCase();
     if (!INLINE_IMAGE_TYPES.has(mediaType)) {
-      return { note: `[image not shown: ${mediaType} is not a supported image type]` };
+      return { note: `[image not shown: ${mediaType} is not a supported image type; convert a copy to PNG in workspace/ with shell and read that]` };
     }
     if (inline[2].length > MAX_INLINE_IMAGE_BASE64_CHARS) {
-      return { note: '[image not shown: larger than the model accepts]' };
+      return { note: '[image not shown: larger than the model accepts; shrink a copy in workspace/ with shell and read that]' };
     }
     return { mediaType, data: inline[2] };
   }

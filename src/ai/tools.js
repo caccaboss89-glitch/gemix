@@ -80,7 +80,7 @@ function getToolsForUser(toolCtx) {
 
   if (isDiscord) tools.push(buildGenerateFormalRequestPdfTool(isLegal));
   if (isActiveMember) {
-    tools.push(buildEmailTool(isAdmin));
+    tools.push(buildEmailTool(isAdmin, isWhatsApp));
     tools.push(buildWhatsAppTool(isAdmin));
   }
 

@@ -1,7 +1,7 @@
 // src/ai/tools/deliveryCatalog.js
 //
 // Outbound delivery and sent-message audit schemas. These builders vary by
-// membership and admin status.
+// membership, admin status and whether the platform keeps the sent-message log.
 
 import constants from '../../config/constants.js';
 import { makeTool } from './schema.js';
@@ -34,7 +34,8 @@ function buildWhatsAppTool(isAdmin) {
     : { name: { type: 'string', description: 'Recipient active member name (not yourself).' } };
   return makeTool({
     name: 'send_whatsapp_message',
-    description: 'Delivery tool — submit a message to a specific phone number. A successful result means WhatsApp accepted the outbound send, not that the device received or read it. Text and attachments go out as separate WhatsApp sends, so a `degraded` result can mean the text landed while a file did not — check the attachment failures in the result. Never for intermediate updates in the current chat. The program adds the current caller\'s attribution automatically; provide only the message content.',
+    description: `Delivery tool — submit a message to ${isAdmin ? 'a specific phone number or an active member' : 'an active member'}.`
+      + ' A successful result means WhatsApp accepted the outbound send, not that the device received or read it. Text and attachments go out as separate WhatsApp sends, so a `degraded` result can mean the text landed while a file did not — check the attachment failures in the result. Never for intermediate updates in the current chat. The program adds the current caller\'s attribution automatically; provide only the message content.',
     properties: {
       message: { type: 'string', minLength: 1, description: 'Message text. WhatsApp formatting only — no Markdown links.' },
       recipient: {
@@ -51,7 +52,7 @@ function buildWhatsAppTool(isAdmin) {
   });
 }
 
-function buildEmailTool(isAdmin) {
+function buildEmailTool(isAdmin, hasSentLog) {
   const recipientProps = isAdmin
     ? {
       email: {
@@ -65,7 +66,7 @@ function buildEmailTool(isAdmin) {
   return makeTool({
     name: 'send_email',
     description: 'Delivery tool — submit an email. A successful result means the mail service accepted the outbound send, not inbox delivery or reading. Body and attachments travel in one SMTP send, so success covers both together; a `degraded` result means the message went through but not every attachment could be resolved. Outbound only: you cannot read the user\'s inbox or any email others sent them (replies included). '
-      + 'To review what GemiX already sent on their behalf, use read_sent_messages. '
+      + (hasSentLog ? 'To review what GemiX already sent on their behalf, use read_sent_messages. ' : '')
       + 'The program adds the current caller\'s attribution to the body automatically; provide only the intended message content.',
     properties: {
       subject: { type: 'string', minLength: 1, description: 'Email subject' },

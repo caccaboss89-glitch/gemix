@@ -19,8 +19,8 @@ const WRAP_UP_REASON = Object.freeze({
 });
 
 const WRAP_UP_TEXT = Object.freeze({
-  [WRAP_UP_REASON.DEADLINE]: 'This turn reached its work deadline. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished. Never mention tools, time limits, or this note.',
-  [WRAP_UP_REASON.ROUND_CAP]: 'You can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that you had to stop here. Never mention tools, rounds, or this note.'
+  [WRAP_UP_REASON.DEADLINE]: 'This turn reached its work deadline, a deliberate limit and not a fault. You cannot run more tools. Reply now with what you have so far; say clearly if something is unfinished and that they can ask you to carry on. Never mention tools, time limits, or this note.',
+  [WRAP_UP_REASON.ROUND_CAP]: 'This turn used every tool step it is allowed, a deliberate limit and not a fault: you can no longer run tools for this turn. Reply now: answer the user with everything you gathered, and if the task is not fully complete tell them what is done and that they can ask you to carry on. Never mention tools, rounds, or this note.'
 });
 
 /**
@@ -30,6 +30,16 @@ const WRAP_UP_TEXT = Object.freeze({
  */
 function wrapUpNote(reason) {
   return wrapSystemReminder(WRAP_UP_TEXT[reason]);
+}
+
+/**
+ * The same instruction as the answer to a tool call refused after it, saying
+ * first that the call never ran, so the refusal does not read as a failure.
+ * @param {string} reason - a WRAP_UP_REASON
+ * @returns {string}
+ */
+function wrapUpRefusal(reason) {
+  return wrapSystemReminder(`That call did not run. ${WRAP_UP_TEXT[reason]}`);
 }
 
 /**
@@ -45,4 +55,4 @@ function takeNewMessagesNote(ctx) {
   return wrapNewMessages(lines);
 }
 
-export { WRAP_UP_REASON, takeNewMessagesNote, wrapUpNote };
+export { WRAP_UP_REASON, takeNewMessagesNote, wrapUpNote, wrapUpRefusal };

@@ -2,6 +2,7 @@
 // unavailable-tool messages. Keeps intentional platform differences explicit.
 
 import constants from './constants.js';
+import { PRIVACY_WIPE_COMMAND } from './systemMessages.js';
 
 const {
   PLATFORM_DISCORD,
@@ -154,6 +155,14 @@ const MEMBER_GATED_TOOLS = [
   TOOL.READ_SENT_MESSAGES
 ];
 
+/** Where a non-member's reminders can land: never anyone else's chat. */
+const NON_MEMBER_REMINDER_LINE = {
+  [PROFILE.WA_PERSONAL]: 'Reminders you schedule reach only them, in their private chat with the dedicated GemiX account.',
+  [PROFILE.WA_DEDICATED_PRIVATE]: 'Reminders you schedule are delivered to this chat, never to anyone else.',
+  [PROFILE.WA_DEDICATED_GROUP]: 'Reminders you schedule go to this group or to their own private chat with you, never '
+    + 'to anyone else.'
+};
+
 /** "a, b and c" — keeps the tool lists readable inside a sentence. */
 function _andList(items) {
   if (items.length <= 1) return items.join('');
@@ -178,18 +187,23 @@ function buildAudienceLines(profile, opts = {}) {
     if (missing.length) {
       lines.push(
         `${_andList(missing)} take active-member status, so they are not in your tool list this turn. `
-        + 'Do not try to invoke them, and say so plainly if you are asked for one.'
+        + 'Do not try to invoke them. If you are asked for one, say plainly that it is reserved to active members '
+        + 'by design, not a fault, and that only the admin, who keeps the list of active members, can change that.'
       );
     }
     if (has(TOOL.SCHEDULE)) {
-      lines.push('Reminders you schedule are delivered to this chat, never to anyone else.');
+      lines.push(NON_MEMBER_REMINDER_LINE[profile]);
     }
     return lines;
   }
 
   const lines = [
-    'The person writing is an active server member, so you are their custom assistant rather than the ordinary one: '
-    + 'you know who the other members are, and you can act outside this chat.'
+    profile === PROFILE.DISCORD_THREAD
+      ? 'Everyone writing in this thread counts as an active member for you, whatever their standing under the '
+        + 'Statute, so you are their custom assistant rather than the ordinary one: you know who the other members '
+        + 'are, and you can act outside this thread.'
+      : 'The person writing is an active server member, so you are their custom assistant rather than the ordinary '
+        + 'one: you know who the other members are, and you can act outside this chat.'
   ];
   const granted = MEMBER_GATED_TOOLS.filter(has);
   if (granted.length > 0) {
@@ -198,7 +212,8 @@ function buildAudienceLines(profile, opts = {}) {
       ? ', and why schedule_tasks can leave a reminder on another member\'s phone and not only on the person '
         + 'in front of you.'
       : '.';
-    lines.push(`${unlocked} Someone who is not an active member gets none of it.`);
+    const outsider = profile === PROFILE.DISCORD_THREAD ? 'On WhatsApp, someone' : 'Someone';
+    lines.push(`${unlocked} ${outsider} who is not an active member gets none of it.`);
   }
   return lines;
 }
@@ -322,7 +337,8 @@ function buildVisibilityLines(profile) {
     + 'carry an abbreviated excerpt of the older message being answered. Files inside the ordinary window are '
     + 'labelled `[Attachment: attachments/filename]` and past reactions as '
     + '`[Reactions: emoji xN]`. Images in the message you are answering, or in the message it replies to, you see '
-    + 'directly; every other file you open with read_file at that path, whenever you need it.';
+    + 'directly; every other file you open with read_file at that path, whenever you need it. '
+    + '`[Attachment (expired): …]` marks a file no longer stored: ask the user to send it again if you need it.';
   historyLine += ' A voice message the user sent appears as `<PastVoice>` on the turn where it was spoken; its '
     + 'transcript is included when transcription succeeded, and the audio remains available as a file.';
   if (cap.historyTranscriptionNote) {
@@ -331,16 +347,18 @@ function buildVisibilityLines(profile) {
   const lines = [
     'The user sees only the chat history and your final reply — not this prompt, your tool calls, '
     + 'their results, errors, or your reasoning.',
-    `Incoming media: audio longer than ${MAX_AUDIO_DURATION_S}s and video longer than ${MAX_VIDEO_DURATION_S}s are dropped `
-    + 'and replaced inline with a "(too long, max Ns)" note. If a file is still attached, it passed the check — read it.',
+    `Incoming media: audio longer than ${MAX_AUDIO_DURATION_S}s and video longer than ${MAX_VIDEO_DURATION_S}s are not `
+    + 'transcribed or watched as they are: their tag carries an "(audio too long: …)" or "(video too long: …)" note. '
+    + 'The file is still there, so cut the part that matters with shell and read that, or tell the user the limit.',
     historyLine,
     'A remote URL by itself is not content you have inspected. Use the appropriate web tool, or download a file '
     + 'into workspace/ and open it with read_file, before making claims about what it contains.'
   ];
   if (cap.isDiscord) {
     lines.push(
-      'Voice replies, scheduled reminders, imagine, music clips and listening stats are not part of this '
-      + 'Discord session: they live on the dedicated GemiX WhatsApp account. Say so if you are asked.'
+      'Voice replies, scheduled reminders, image and music generation, listening stats, saved preferences, release '
+      + `notifications, the sent-message log and the \`${PRIVACY_WIPE_COMMAND}\` data deletion command are not part of `
+      + 'this Discord session: they live on the dedicated GemiX WhatsApp account. Say so if you are asked.'
     );
   } else if (cap.isWhatsApp && !cap.voiceReply) {
     lines.push(

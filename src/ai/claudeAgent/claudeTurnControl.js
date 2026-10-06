@@ -17,7 +17,7 @@
 
 import constants from '../../config/constants.js';
 import { executeToolCall } from '../toolRoundController.js';
-import { WRAP_UP_REASON, takeNewMessagesNote, wrapUpNote } from '../engines/turnNotes.js';
+import { WRAP_UP_REASON, takeNewMessagesNote, wrapUpNote, wrapUpRefusal } from '../engines/turnNotes.js';
 import { GEMIX_TOOL_PREFIX } from './gemixMcpServer.js';
 import { createSemaphore } from '../../utils/concurrency.js';
 import { createLogger } from '../../utils/logger.js';
@@ -100,7 +100,7 @@ function createClaudeTurnControl({ state, liveTools, workBudget, signal, execute
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason: wrapUpNote(wrapUpReason)
+        permissionDecisionReason: wrapUpRefusal(wrapUpReason)
       }
     };
   }

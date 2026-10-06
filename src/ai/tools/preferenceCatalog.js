@@ -15,7 +15,7 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
   const allowVoice = !isPersonalChat;
   const preferenceOptions = { allowVoice };
   const scope = isGroup
-    ? 'the current group'
+    ? 'the current group (shared: any participant can change them)'
     : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
   const defaults = defaultSettings(preferenceOptions);
   const { supportedEfforts } = activeEffortPolicy();
@@ -71,7 +71,9 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
 
 const TOOL_TOGGLE_RELEASE_NOTIFY = makeTool({
   name: 'toggle_release_notify',
-  description: 'Enable or disable new GemiX release notifications for this chat. Current state is shown in Runtime; call this only to change it.',
+  description: 'Enable or disable the changelog the dedicated GemiX account sends when a new GemiX version is released: '
+    + 'to this group, or from a private chat to the caller\'s own private chat with that account. '
+    + 'Current state is shown in Runtime; call this only to change it.',
   properties: { enabled: { type: 'boolean', description: 'true=enable, false=disable' } },
   required: ['enabled']
 });

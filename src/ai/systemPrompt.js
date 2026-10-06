@@ -187,7 +187,8 @@ function _buildOpening(cap, profile) {
 function _buildChatLines(ctx, cap, profile) {
   if (cap.isDiscord) {
     return [
-      'Platform: Discord. A forum thread in the "gemix" channel. You are here to help with the Statute (Statuto Albertino) '
+      'Platform: Discord. A forum thread in the "gemix" channel: you answer every message in it, no mention needed, '
+      + 'but the thread\'s opening post never reaches you. You are here to help with the Statute (Statuto Albertino) '
       + 'and to produce Art. 6 formal PDF requests.',
       'Markdown renders here, tables aside.'
     ];
@@ -199,8 +200,11 @@ function _buildChatLines(ctx, cap, profile) {
       ? escapeXml(ctx.personalOtherUserName)
       : 'the other participant';
     lines.push(
-      'Platform: WhatsApp. The admin\'s own account, in a chat with one other person. Reply only when the message '
-      + 'contains @gemix. History, memory and workspace are shared between the two of them.',
+      'Platform: WhatsApp. The admin\'s own account, in a chat with one other person; groups are never served on this '
+      + 'account. Reply only when the message contains @gemix. History, memory and workspace are shared between the '
+      + 'two of them.',
+      'Anything you deliver outside your reply, a reminder or a release note included, is sent by the dedicated '
+      + 'GemiX account: it reaches the caller in their private chat with that account, not here.',
       `In the chat: ${escapeXml(ADMIN_NAME)} (the account owner) and ${otherName}.`,
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
       + 'name. Your own replies carry no speaker prefix.',
@@ -216,7 +220,8 @@ function _buildChatLines(ctx, cap, profile) {
     );
   } else {
     lines.push(
-      'Platform: WhatsApp. A private chat on the dedicated GemiX account. Reply to every message.',
+      'Platform: WhatsApp. A private chat on the dedicated GemiX account. Reply to every message. This account can '
+      + 'also be added to WhatsApp groups, where it replies only when @mentioned or replied to.',
       `In the chat: just you and ${escapeXml(ctx.userName)}.`,
       'You cannot mention anyone in a private chat, neither the user nor yourself: mentions only work '
       + 'in groups. Name people plainly.'
@@ -225,13 +230,23 @@ function _buildChatLines(ctx, cap, profile) {
 
   lines.push(WA_FORMAT);
   lines.push(
-    'Never add a footer or signature: the program appends its own compact model and research badges when needed.'
+    'Never add a footer or signature: after a web or X search the program appends its own research badge '
+    + '(`🌐: N sources. 𝕏: N searches.`)'
+    + (profile === PROFILE.WA_PERSONAL
+      ? ', and every reply ends with `> GemiX • <model>`, which tells your messages apart from the owner\'s.'
+      : '.')
   );
   // The gate that owns the command runs before this prompt is even built, so
   // anything the model can read has already been through it.
   lines.push(
-    `The user can send the \`${PRIVACY_WIPE_COMMAND}\` command (and nothing else) at any moment to empty this chat and delete `
-    + 'the conversation data GemiX stores on the server; that message is handled before you and never reaches you. So an attempt at '
+    'Conversations are stored on the server, where the admin can potentially read them in full. '
+    + `The user can send the \`${PRIVACY_WIPE_COMMAND}\` command (and nothing else) at any moment to empty this chat and delete `
+    + 'what GemiX stores for it: history, attachments, generated files, preferences, reminders and the diagnostic logs '
+    + 'otherwise kept up to 30 days. '
+    + (ctx.userIdentity?.isActiveMember
+      ? 'Their name, number and email stay in the active-member registry, which only the admin edits. '
+      : '')
+    + 'That message is handled before you and never reaches you. So an attempt at '
     + 'it that you can read is one that failed because the message carried something else too — tell them to send '
     + 'it on its own.'
   );
@@ -251,18 +266,30 @@ function _buildChatLines(ctx, cap, profile) {
  */
 function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   const lines = buildAudienceLines(profile, promptOpts);
-  if (!isAdmin) {
+  if (promptOpts.isActiveMember) {
+    lines.push(..._buildRosterLines(cap, profile, promptOpts, isAdmin, activeMembers));
+  }
+
+  if (!cap.isDiscord) {
+    // read_server_rules is gone and generate_formal_request_pdf is Discord-only:
+    // neither the statute nor the PDF is reachable from here.
     lines.push(
-      'Only the admin and a few selected active members can send messages to other users through you; '
-      + 'explain that this permission depends on who is speaking.'
+      'Questions about the Statute (Statuto Albertino, the rules of the Discord server) or '
+      + 'Monarca/King, and formal requests, belong to the gemix thread on Discord: you have neither the rules '
+      + 'nor the tool here, so do not attempt an answer — tell the user to open that thread.'
     );
   }
-  if (!promptOpts.isActiveMember) return lines;
+  return lines;
+}
 
+/** What an active caller is told about the other members and how to reach them. */
+function _buildRosterLines(cap, profile, promptOpts, isAdmin, activeMembers) {
+  const lines = [];
   if (isAdmin) {
     // The admin can address roster members by name or exact phone/email (see
     // send_* and schedule_tasks), while reminders without a recipient still
-    // target the current conversation.
+    // target the current conversation (on the personal account, the caller's
+    // chat with the dedicated one).
     const roster = activeMembers.map((m) => {
       const digits = (m.wa || '').split('@')[0].split(':')[0];
       const num = digits ? `+${digits}` : '?';
@@ -280,7 +307,10 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
             + 'schedule_tasks.whatsapp.toGroup=true and omit recipient. For a private reminder, set toPrivate=true '
             + 'and add recipient only when it is for someone else.'
           : 'Address them by name, phone number or email from that list. send_whatsapp_message and send_email only '
-            + 'reach destinations outside this chat; schedule_tasks with no destination means the current chat, '
+            + 'reach destinations outside this chat; schedule_tasks with no destination '
+            + (profile === PROFILE.WA_PERSONAL
+              ? 'reaches the caller in their private chat with the dedicated GemiX account, '
+              : 'means the current chat, ')
             + 'and takes a recipient when the reminder is for someone else.')
     );
   } else {
@@ -293,7 +323,10 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
       return name;
     }).join(', ');
     lines.push(`<ActiveMembers>${roster}</ActiveMembers>`);
-    lines.push('Address them by their roster name in the delivery tools.');
+    lines.push(
+      'Address them by their roster name in the delivery tools: you can reach only them, while outside phone '
+      + 'numbers and email addresses are for the admin alone.'
+    );
   }
 
   if (promptOpts.toolNames.has('send_whatsapp_message') || promptOpts.toolNames.has('send_email')) {
@@ -301,16 +334,6 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
       'For an implicit reply to a program-stamped cross-member message, use its requester as the recipient only '
       + 'when exactly one ActiveMembers roster name matches; ask if none or multiple match. An explicit recipient '
       + 'in the current request takes precedence.'
-    );
-  }
-
-  if (!cap.isDiscord) {
-    // read_server_rules is gone and generate_formal_request_pdf is Discord-only:
-    // neither the statute nor the PDF is reachable from here.
-    lines.push(
-      'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server) or '
-      + 'Monarca/King, and formal requests, belong to the gemix thread on Discord: you have neither the rules '
-      + 'nor the tool here, so do not attempt an answer — tell the user to open that thread.'
     );
   }
   return lines;
@@ -364,7 +387,8 @@ function buildDynamicRuntimeContext(ctx) {
   if (!isAdmin && quotaKinds.length > 0) {
     const counts = formatQuotaCounts(ctx.userIdentity?.taskFileId, quotaKinds);
     blocks.push(
-      `Generation quota for this user — ${counts}. At the cap the tool refuses, so say so `
+      `Generation quota for this user — ${counts}. Every user but the admin has one, active member or not, because `
+      + 'generation costs money. At the cap the tool refuses, so say so '
       + 'instead of calling it; if the user asks, tell them what is left.'
     );
   }
@@ -501,7 +525,8 @@ function _buildSkillsLines(isGroup) {
     'A skill is a procedure worked out in advance: one directory under `skills/`, with a SKILL.md and whatever '
     + 'scripts or reference files it needs. Each one below describes what it is for.',
     'When a skill covers what you are about to do, read its SKILL.md and follow it instead of working the task '
-    + 'out again; when none does, proceed as usual. Skills are yours, not the user\'s: never mention them.',
+    + 'out again; when none does, proceed as usual. Skills are yours, not the user\'s: never bring them up, and if '
+    + 'asked, they are internal procedures you follow, not something the user installs.',
     _block('Skills', skills.map(
       s => `<Skill name="${escapeXml(s.name)}" path="${escapeXml(s.path)}">${escapeXml(s.description)}</Skill>`
     )),

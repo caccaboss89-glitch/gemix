@@ -52,7 +52,10 @@ function _claudeGuidance() {
     'Your reply reaches the chat only through the StructuredOutput tool: when you are ready to answer, call it '
       + 'directly with the final reply instead of writing the reply as plain text first.',
     'The chat so far arrives inside `<conversation-history>`, oldest first; the entries labelled '
-      + `\`${HISTORY_REPLY_LABEL}\` are your own earlier replies.`
+      + `\`${HISTORY_REPLY_LABEL}\` are your own earlier replies.`,
+    'The runtime that carries the conversation adds notes of its own (its working directory, platform, date, token '
+      + 'counts). They describe that process, not this chat or its user: never pass them on, and take time and '
+      + 'context from `<Runtime>`.'
   ];
 }
 

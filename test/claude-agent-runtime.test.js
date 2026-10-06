@@ -98,7 +98,8 @@ test('the conversation becomes one user message with history, request and Runtim
   assert.equal(blocks[0].text, '<conversation-history>\n[10:01] Anna: look at this\n');
   assert.deepEqual(blocks[1].source, { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' });
   assert.equal(blocks[2].text, `\n${HISTORY_REPLY_LABEL} Nice photo\n`
-    + '[image not shown: image/bmp is not a supported image type]\n</conversation-history>\n\n'
+    + '[image not shown: image/bmp is not a supported image type; convert a copy to PNG in workspace/ with shell '
+    + 'and read that]\n</conversation-history>\n\n'
     + '<user_query>and this?</user_query>');
   assert.deepEqual(blocks[3].source, { type: 'url', url: 'https://example.invalid/a.jpg' });
   assert.equal(blocks[4].text, '\n\n<Runtime>now</Runtime>');
@@ -111,7 +112,11 @@ test('an image larger than the model accepts becomes a note instead of failing t
     query: userItem([{ type: 'input_image', image_url: huge }]),
     runtime: userItem('<Runtime/>')
   });
-  assert.deepEqual(blocks, [{ type: 'text', text: '[image not shown: larger than the model accepts]\n\n<Runtime/>' }]);
+  assert.deepEqual(blocks, [{
+    type: 'text',
+    text: '[image not shown: larger than the model accepts; shrink a copy in workspace/ with shell and read that]'
+      + '\n\n<Runtime/>'
+  }]);
 });
 
 test('tool results keep their envelope and images in order as MCP content', () => {
@@ -238,11 +243,11 @@ test('only GemiX batches are rounds, and the round cap wraps the turn up', async
   assert.equal(control.rounds, constants.MAX_TOOL_ROUNDS);
   assert.equal(control.wrapUpReason, 'round_cap');
   assert.equal(last.hookSpecificOutput.hookEventName, 'PostToolBatch');
-  assert.match(last.hookSpecificOutput.additionalContext, /You can no longer run tools for this turn/);
+  assert.match(last.hookSpecificOutput.additionalContext, /you can no longer run tools for this turn/);
 
   const refused = await beforeTool('mcp__gemix__read_file');
   assert.equal(refused.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(refused.hookSpecificOutput.permissionDecisionReason, /You can no longer run tools/);
+  assert.match(refused.hookSpecificOutput.permissionDecisionReason, /^<system-reminder>That call did not run\. .*you can no longer run tools/s);
   assert.deepEqual(await beforeTool('StructuredOutput'), {});
 });
 
