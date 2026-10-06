@@ -367,6 +367,10 @@ function _validateAudience(staticPart, id, caseId) {
     if (/<ActiveMembers>/.test(audience)) {
       ISSUES.push({ caseId, msg: 'non-active caller must not get the ActiveMembers roster' });
     }
+    // The Discord server, its Statute and its people are for active members.
+    if (/Discord|Statut|Monarca/.test(staticPart)) {
+      ISSUES.push({ caseId, msg: 'non-active caller must not hear about the Discord server or its Statute' });
+    }
   } else {
     if (!/<ActiveMembers>[^\n]*<\/ActiveMembers>/.test(audience)) {
       ISSUES.push({ caseId, msg: 'active member missing the ActiveMembers roster' });

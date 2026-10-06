@@ -122,11 +122,11 @@ test('every function offered by the complete context matrix has exactly one exec
 test('membership refusals describe the platform boundary accurately', () => {
   assert.equal(
     toolUnavailableMessage(TOOL.SEND_EMAIL, PROFILE.DISCORD_THREAD, { isActiveMember: false }),
-    '"send_email" is only available to active server members.'
+    '"send_email" is only available to active members.'
   );
   assert.equal(
     toolUnavailableMessage(TOOL.READ_SENT_MESSAGES, PROFILE.WA_DEDICATED_PRIVATE, { isActiveMember: false }),
-    '"read_sent_messages" is only available to active server members on WhatsApp.'
+    '"read_sent_messages" is only available to active members on WhatsApp.'
   );
 });
 

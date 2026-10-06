@@ -115,11 +115,11 @@ function toolUnavailableMessage(toolName, profile, opts = {}) {
 
   const allPlatformMemberOnly = [TOOL.SEND_WHATSAPP, TOOL.SEND_EMAIL];
   if (!isActiveMember && allPlatformMemberOnly.includes(toolName)) {
-    return `"${toolName}" is only available to active server members.`;
+    return `"${toolName}" is only available to active members.`;
   }
   const whatsAppMemberOnly = [TOOL.READ_MUSIC_STATS, TOOL.READ_SENT_MESSAGES];
   if (!isActiveMember && whatsAppMemberOnly.includes(toolName)) {
-    return `"${toolName}" is only available to active server members on WhatsApp.`;
+    return `"${toolName}" is only available to active members on WhatsApp.`;
   }
 
   if (toolName === TOOL.MANAGE_PREFERENCES && cap.isDiscord) {
@@ -176,24 +176,26 @@ function _andList(items) {
  * are named, never explained — what each one does is in its own description.
  *
  * @param {string} profile
- * @param {{ isActiveMember?: boolean, toolNames?: Set<string>, adminLabel?: string|null }} [opts] -
- *   adminLabel names the admin for a caller who has no roster to find them in
+ * @param {{ isActiveMember?: boolean, toolNames?: Set<string>, adminName?: string|null }} [opts] -
+ *   adminName names GemiX's creator to a caller who has no roster to find them in
  */
 function buildAudienceLines(profile, opts = {}) {
   const has = (name) => _hasTool(opts.toolNames, name);
 
   if (opts.isActiveMember === false) {
+    // Nothing here names the Discord server, its Statute or the other members:
+    // all of that belongs to active members only.
     const lines = [
-      'The person writing this is not an active member of the Discord server, so you are the ordinary assistant here: '
+      'The person writing this is not an active member, so you are the ordinary assistant here: '
       + 'you handle what they ask in this chat, and nothing you do reaches anyone outside it.'
     ];
-    const admin = opts.adminLabel ? `the admin, ${opts.adminLabel},` : 'the admin,';
+    const admin = opts.adminName ? `the admin, ${opts.adminName}, who created GemiX and` : 'the admin, who';
     const missing = MEMBER_GATED_TOOLS.filter(t => !has(t));
     if (missing.length) {
       lines.push(
         `${_andList(missing)} take active-member status, so they are not in your tool list this turn. `
         + 'Do not try to invoke them. If you are asked for one, say plainly that it is reserved to active members '
-        + `by design, not a fault, and that only ${admin} who keeps the list of active members, can change that.`
+        + `by design, not a fault, and that only ${admin} keeps the list of active members, can change that.`
       );
     }
     if (has(TOOL.SCHEDULE)) {

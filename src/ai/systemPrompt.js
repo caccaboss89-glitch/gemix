@@ -266,32 +266,13 @@ function _buildChatLines(ctx, cap, profile) {
  * address people around it is prose.
  */
 function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
-  // Active callers find the admin in the roster; everyone else is told by name
-  // who created GemiX and keeps that roster, in the roster's own shape.
+  // Active callers find the admin in the roster. Anyone else learns only who
+  // created GemiX: the roster, the Discord server and its Statute stay with
+  // the active members.
   const admin = activeMembers.find(isAdminMember);
-  const lines = buildAudienceLines(profile, {
-    ...promptOpts,
-    adminLabel: admin ? `${escapeXml(admin.name)} (${formatRoleLabel(admin)})` : null
-  });
-  if (promptOpts.isActiveMember) {
-    lines.push(..._buildRosterLines(cap, profile, promptOpts, isAdmin, activeMembers));
-  }
+  const lines = buildAudienceLines(profile, { ...promptOpts, adminName: admin ? escapeXml(admin.name) : null });
+  if (!promptOpts.isActiveMember) return lines;
 
-  if (!cap.isDiscord) {
-    // read_server_rules is gone and generate_formal_request_pdf is Discord-only:
-    // neither the statute nor the PDF is reachable from here.
-    lines.push(
-      'Questions about the Statute (Statuto Albertino, the rules of the Discord server) or '
-      + 'Monarca/King, and formal requests, belong to the gemix thread on Discord: you have neither the rules '
-      + 'nor the tool here, so do not attempt an answer — tell the user to open that thread.'
-    );
-  }
-  return lines;
-}
-
-/** What an active caller is told about the other members and how to reach them. */
-function _buildRosterLines(cap, profile, promptOpts, isAdmin, activeMembers) {
-  const lines = [];
   if (isAdmin) {
     // The admin can address roster members by name or exact phone/email (see
     // send_* and schedule_tasks), while reminders without a recipient still
@@ -341,6 +322,16 @@ function _buildRosterLines(cap, profile, promptOpts, isAdmin, activeMembers) {
       'For an implicit reply to a program-stamped cross-member message, use its requester as the recipient only '
       + 'when exactly one ActiveMembers roster name matches; ask if none or multiple match. An explicit recipient '
       + 'in the current request takes precedence.'
+    );
+  }
+
+  if (!cap.isDiscord) {
+    // read_server_rules is gone and generate_formal_request_pdf is Discord-only:
+    // neither the statute nor the PDF is reachable from here.
+    lines.push(
+      'Questions about the Statute (Statuto Albertino, the name of the rules for their Discord server) or '
+      + 'Monarca/King, and formal requests, belong to the gemix thread on Discord: you have neither the rules '
+      + 'nor the tool here, so do not attempt an answer — tell the user to open that thread.'
     );
   }
   return lines;
