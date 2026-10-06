@@ -13,9 +13,22 @@
 // well be there by the first message, and taking the bot off every platform for
 // it would be worse than a warning. The wire half is hard, because it is a
 // configuration error that cannot fix itself.
+//
+// For the Claude Agent runtime, Claude Code is started once without a message:
+// a missing binary, or a credential other than the subscription token, is
+// refused, because the second would bill turns to the pay-per-use API. A probe
+// that cannot start, or a configured model Claude Code does not list, is only
+// a warning: every turn still checks its own credential.
 
+import pkg from '../../../package.json' with { type: 'json' };
 import { createLogger } from '../../utils/logger.js';
 import { getCredentialProvider } from '../aiProvider.js';
+import {
+  SUBSCRIPTION_TOKEN_SOURCE,
+  ensureClaudeCodeDirs,
+  probeClaudeCode,
+  resolveClaudeCodeBinary
+} from '../claudeAgent/claudeCode.js';
 import { RUNTIME } from './providerProfile.js';
 import { validateWireCapabilities } from './wireCapabilities.js';
 
@@ -68,8 +81,58 @@ async function _runResponsesPreflight(profile) {
   return { wireOk: true, credentialOk };
 }
 
+/**
+ * Check that Claude Code is installed, starts on the subscription token and
+ * offers the configured model, without sending it a message.
+ *
+ * @param {object} profile - from resolveProviderProfile()
+ * @returns {Promise<{ accountOk: boolean }>}
+ * @throws when no Claude Code binary is installed, or when Claude Code would
+ *   run on anything but the subscription token
+ */
+async function _runClaudeAgentPreflight(profile) {
+  const { claudeAgent } = profile;
+  if (!resolveClaudeCodeBinary()) {
+    throw new Error(
+      `Provider "${profile.id}" needs Claude Code, but no binary for ${process.platform}-${process.arch} `
+      + 'is installed: run `npm install`.'
+    );
+  }
+  ensureClaudeCodeDirs(claudeAgent);
+  log.info(`   Provider: ${profile.id} — ${profile.displayName} (${profile.model}) via Agent SDK `
+    + `${pkg.dependencies['@anthropic-ai/claude-agent-sdk']}, up to ${claudeAgent.maxConcurrentTurns} turn(s) at once`);
+
+  let probe;
+  try {
+    probe = await probeClaudeCode(claudeAgent);
+  } catch (err) {
+    log.warn(`   Claude Code probe failed (${err.message}) — each turn still checks its credential`);
+    return { accountOk: false };
+  }
+
+  const { account, models } = probe;
+  const apiKeySource = account.apiKeySource && account.apiKeySource !== 'none' ? account.apiKeySource : null;
+  if (account.tokenSource !== SUBSCRIPTION_TOKEN_SOURCE || apiKeySource) {
+    throw new Error(
+      `Provider "${profile.id}" must run on the Claude subscription token, but Claude Code resolved `
+      + `${apiKeySource ? `the API credential ${apiKeySource}` : `the token source ${account.tokenSource || 'none'}`}: `
+      + 'its turns could bill the pay-per-use API.'
+    );
+  }
+  const plan = account.subscriptionType ? `, ${account.subscriptionType} plan` : '';
+  log.info(`   Credentials: Claude subscription token (${account.tokenSource}${plan})`);
+
+  const offered = models.flatMap(model => [model.value, model.resolvedModel]).filter(Boolean);
+  if (!offered.includes(profile.model)) {
+    log.warn(`   Claude Code does not list ${profile.model} (offers ${offered.join(', ') || 'nothing'}); `
+      + 'turns will still request it');
+  }
+  return { accountOk: true };
+}
+
 const RUNTIME_PREFLIGHTS = Object.freeze({
-  [RUNTIME.RESPONSES]: _runResponsesPreflight
+  [RUNTIME.RESPONSES]: _runResponsesPreflight,
+  [RUNTIME.CLAUDE_AGENT]: _runClaudeAgentPreflight
 });
 
 /**

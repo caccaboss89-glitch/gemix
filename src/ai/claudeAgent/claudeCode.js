@@ -1,7 +1,8 @@
 // src/ai/claudeAgent/claudeCode.js
 //
 // The Claude Code process behind the Claude Agent runtime: which binary runs,
-// with which environment and in which directories.
+// with which environment and in which directories, and the probe that starts
+// it at boot without sending it a message.
 //
 // The environment is the economic guard of the whole runtime. It is built from
 // an allowlist and never copied from this process, so the only credential
@@ -10,6 +11,7 @@
 
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import pkg from '../../../package.json' with { type: 'json' };
 import envConfig from '../../config/env.js';
 
@@ -17,6 +19,9 @@ const require = createRequire(import.meta.url);
 
 /** The token source Claude Code reports when it runs on the subscription token. */
 const SUBSCRIPTION_TOKEN_SOURCE = 'CLAUDE_CODE_OAUTH_TOKEN';
+
+/** How long the boot probe waits for Claude Code to start. */
+const PROBE_TIMEOUT_MS = 30_000;
 
 /**
  * The environment of one Claude Code process.
@@ -69,9 +74,53 @@ function ensureClaudeCodeDirs({ configDir, workDir }) {
   for (const dir of [configDir, workDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 
+/**
+ * Start Claude Code with no message to send and read what it resolved: the
+ * account behind its credential and the models it offers. Nothing reaches the
+ * model, so the probe costs nothing from the plan; it does not prove that the
+ * server still accepts the token.
+ *
+ * @param {{ configDir: string, workDir: string, oauthToken: string }} claudeAgent
+ * @returns {Promise<{ account: object, models: object[] }>}
+ */
+async function probeClaudeCode({ configDir, workDir, oauthToken }) {
+  let endInput;
+  const inputEnded = new Promise(resolve => { endInput = resolve; });
+  async function* noMessages() { await inputEnded; }
+
+  const session = query({
+    prompt: noMessages(),
+    options: {
+      tools: [],
+      settingSources: [],
+      strictMcpConfig: true,
+      permissionMode: 'dontAsk',
+      persistSession: false,
+      cwd: workDir,
+      env: claudeCodeEnv({ configDir, oauthToken })
+    }
+  });
+  let timer;
+  try {
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Claude Code did not start within ${PROBE_TIMEOUT_MS / 1000}s`)),
+        PROBE_TIMEOUT_MS
+      );
+    });
+    const init = await Promise.race([session.initializationResult(), timeout]);
+    return { account: init.account || {}, models: Array.isArray(init.models) ? init.models : [] };
+  } finally {
+    clearTimeout(timer);
+    endInput();
+    session.close();
+  }
+}
+
 export {
   SUBSCRIPTION_TOKEN_SOURCE,
   claudeCodeEnv,
   ensureClaudeCodeDirs,
+  probeClaudeCode,
   resolveClaudeCodeBinary
 };
