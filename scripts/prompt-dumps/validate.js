@@ -20,6 +20,7 @@ import {
   defaultSettings
 } from '../../src/utils/settingsStore.js';
 import { listInstalledSkills } from '../../src/sandbox/skillsLibrary.js';
+import { HISTORY_REPLY_LABEL } from '../../src/ai/claudeAgent/claudeUserContent.js';
 import { CASES } from './cases.js';
 import { ISSUES } from './validationIssues.js';
 import { containsXaiOnlyMaterial } from './validationText.js';
@@ -162,11 +163,20 @@ function _validateNoStaleClaims(staticPart, prompt, caseId) {
   }
 }
 
-/** Exactly one provider block: generic baseline or its complete xAI replacement. */
+/** How the Claude runtime carries the reply and the history; no other variant mentions either. */
+const CLAUDE_RUNTIME_RE = /StructuredOutput|conversation-history|GemiX \(you\)/;
+
+/**
+ * Exactly one provider block: the generic baseline, its complete xAI
+ * replacement, or the baseline plus the Claude runtime lines.
+ */
 function _validateProviderGuidance(staticPart, caseId) {
   const guidance = _promptSection(staticPart, 'Provider integration');
   if (!guidance) return;
   const variant = resolveProviderProfile().promptVariant;
+  if (variant !== PROMPT_VARIANT.CLAUDE && CLAUDE_RUNTIME_RE.test(staticPart)) {
+    ISSUES.push({ caseId, msg: 'non-Claude prompt describes the Claude runtime reply or history' });
+  }
   if (variant === PROMPT_VARIANT.XAI) {
     if (!/Regular web search[\s\S]*GemiX-owned/.test(guidance) || !/native X search/.test(guidance)) {
       ISSUES.push({ caseId, msg: 'xAI provider block missing its GemiX-web / native-X boundary' });
@@ -185,6 +195,18 @@ function _validateProviderGuidance(staticPart, caseId) {
   }
   if (containsXaiOnlyMaterial(_withoutStaticProgramData(staticPart))) {
     ISSUES.push({ caseId, msg: 'generic provider prompt contains an xAI-only instruction or identifier' });
+  }
+  if (variant !== PROMPT_VARIANT.CLAUDE) return;
+  if (!/only through the StructuredOutput tool/.test(guidance)) {
+    ISSUES.push({ caseId, msg: 'Claude provider block missing the StructuredOutput reply channel' });
+  }
+  if (!guidance.includes('`<conversation-history>`') || !guidance.includes(`\`${HISTORY_REPLY_LABEL}\``)) {
+    ISSUES.push({ caseId, msg: 'Claude provider block missing the conversation-history reading rule' });
+  }
+  const outside = staticPart.slice(0, staticPart.indexOf('\n## Provider integration\n'))
+    + staticPart.slice(staticPart.indexOf('\n## This chat\n'));
+  if (CLAUDE_RUNTIME_RE.test(outside)) {
+    ISSUES.push({ caseId, msg: 'Claude runtime guidance escaped the provider integration block' });
   }
 }
 

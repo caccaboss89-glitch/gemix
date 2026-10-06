@@ -156,6 +156,27 @@ test('generic and xAI provider guidance replace one another without legacy leaks
   );
 });
 
+test('Claude provider guidance adds the reply channel and history notes only to its own block', () => {
+  const savedToken = envConfig.CLAUDE_CODE_OAUTH_TOKEN;
+  envConfig.CLAUDE_CODE_OAUTH_TOKEN = 'test-claude-token';
+  let claude;
+  try {
+    claude = underProvider('claude', () => promptFor(false));
+  } finally {
+    envConfig.CLAUDE_CODE_OAUTH_TOKEN = savedToken;
+  }
+  const providerBlock = claude.slice(
+    claude.indexOf('## Provider integration'),
+    claude.indexOf('\n## This chat\n')
+  );
+  assert.match(providerBlock, /^## Provider integration\nThe model provider supplies reasoning, vision, structured replies/);
+  assert.match(providerBlock, /only through the StructuredOutput tool/);
+  assert.match(providerBlock, /`<conversation-history>`, oldest first; the entries labelled `GemiX \(you\):`/);
+  assert.doesNotMatch(claude.slice(claude.indexOf('\n## This chat\n')), /StructuredOutput|conversation-history/);
+  assert.doesNotMatch(claude, XAI_ONLY_PROMPT_MATERIAL);
+  assert.doesNotMatch(underProvider('chatgpt', () => promptFor(false)), /StructuredOutput|conversation-history/);
+});
+
 test('personal WhatsApp runtime never exposes spoken-reply defaults', () => {
   const runtime = underProvider('xai', () => buildDynamicRuntimeContext({
     platform: constants.PLATFORM_WA_PERSONAL,

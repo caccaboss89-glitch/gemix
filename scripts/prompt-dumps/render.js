@@ -15,7 +15,16 @@ import {
   getCapabilities
 } from '../../src/config/platformCapabilities.js';
 import envConfig from '../../src/config/env.js';
-import { _resetActiveProfileForTests } from '../../src/ai/providers/providerProfile.js';
+import {
+  RUNTIME,
+  _resetActiveProfileForTests,
+  resolveProviderProfile
+} from '../../src/ai/providers/providerProfile.js';
+import { renderClaudeUserContent } from '../../src/ai/claudeAgent/claudeUserContent.js';
+import { GEMIX_TOOL_PREFIX } from '../../src/ai/claudeAgent/gemixMcpServer.js';
+import { assistantTextItem, userItem } from '../../src/ai/responsesItems.js';
+import { PARALLEL_READ_ONLY_TOOLS } from '../../src/utils/toolCallExecution.js';
+import { wrapUserQuery } from '../../src/utils/systemTags.js';
 import { defaultSettings } from '../../src/utils/settingsStore.js';
 
 const {
@@ -112,8 +121,8 @@ function renderTools(tools) {
   return out.join('\n');
 }
 
-function renderResponseFormat(fmt) {
-  const out = ['--- STRUCTURED OUTPUT (text.format) ---'];
+function renderResponseFormat(fmt, carrier) {
+  const out = [`--- STRUCTURED OUTPUT (${carrier}) ---`];
   if (!fmt) {
     out.push('(none — plain-text reply this round)');
     return out.join('\n');
@@ -150,9 +159,50 @@ function renderInputLayout() {
 }
 
 /**
- * @param {number} id - key into CASES
- * @returns {{ staticPart: string, dynamicPart: string, dump: string }}
+ * The same turn as a Claude Agent query carries it: the static instructions as
+ * the system prompt and the whole conversation as one user message.
  */
+function renderClaudeInputLayout() {
+  return [
+    '--- INPUT LAYOUT (claudeAgentEngine.js) ---',
+    'system   static instructions below, verbatim as the system prompt',
+    'user     ONE message: <conversation-history>…</conversation-history>, then',
+    '         <user_query>…</user_query>, then <Runtime>…</Runtime>; images in place',
+    'rounds   tool calls and results kept by Claude Code; <new-messages> and',
+    '         <system-reminder> arrive as context after a tool round'
+  ].join('\n');
+}
+
+/**
+ * The single user message of a Claude Agent turn, from a fixed two-entry
+ * history so the reply label the prompt names is visible in place.
+ */
+function renderClaudeUserMessage() {
+  const blocks = renderClaudeUserContent({
+    history: [
+      userItem('[06/10/2026, 18:02] Sample User: an earlier message'),
+      assistantTextItem('an earlier reply')
+    ],
+    query: userItem(wrapUserQuery('the request being answered')),
+    runtime: userItem('<Runtime>…</Runtime> (the block below)')
+  });
+  return [
+    '--- USER MESSAGE (sample history; claudeUserContent.js) ---',
+    blocks.map(block => (block.type === 'text' ? block.text : `[${block.type} block]`)).join('')
+  ].join('\n');
+}
+
+/** How the tools reach a Claude Agent query. */
+function renderClaudeToolExposure(tools) {
+  const readOnly = tools
+    .map(t => t?.function?.name)
+    .filter(name => name && PARALLEL_READ_ONLY_TOOLS.has(name));
+  return [
+    `--- TOOL EXPOSURE (in-process MCP server, names as ${GEMIX_TOOL_PREFIX}<name>) ---`,
+    `readOnlyHint: ${readOnly.join(', ') || '(none)'}`
+  ].join('\n');
+}
+
 /**
  * Run `fn` under the provider profile a case asks for, then put the process back
  * as it was. The profile is resolved per call, so swapping it here is enough for
@@ -164,25 +214,32 @@ function underCaseDeployment(id, fn) {
   const deployment = CASES[id]?.deployment || { provider: 'chatgpt', cloudflare: true };
   const saved = {
     provider: envConfig.AI_PROVIDER,
-    accounts: envConfig.CLOUDFLARE_AI_ACCOUNTS
+    accounts: envConfig.CLOUDFLARE_AI_ACCOUNTS,
+    claudeToken: envConfig.CLAUDE_CODE_OAUTH_TOKEN
   };
   envConfig.AI_PROVIDER = deployment.provider;
-  // Placeholder pair: the dump only asks whether a backend is configured, and
-  // never calls it.
+  // Placeholder credentials: the dump only asks whether a backend or the Claude
+  // profile is configured, and never calls either.
   envConfig.CLOUDFLARE_AI_ACCOUNTS = deployment.cloudflare
     ? (saved.accounts.length > 0 ? saved.accounts : [{ accountId: 'dump-account', apiToken: 'dump-token' }])
     : [];
+  envConfig.CLAUDE_CODE_OAUTH_TOKEN = saved.claudeToken || 'dump-token';
   _resetActiveProfileForTests();
   try { return fn(); }
   finally {
     Object.assign(envConfig, {
       AI_PROVIDER: saved.provider,
-      CLOUDFLARE_AI_ACCOUNTS: saved.accounts
+      CLOUDFLARE_AI_ACCOUNTS: saved.accounts,
+      CLAUDE_CODE_OAUTH_TOKEN: saved.claudeToken
     });
     _resetActiveProfileForTests();
   }
 }
 
+/**
+ * @param {number} id - key into CASES
+ * @returns {{ staticPart: string, dynamicPart: string, dump: string }}
+ */
 function renderCase(id) {
   const spec = CASES[id];
   const ctx = { ...spec.ctx };
@@ -219,22 +276,27 @@ function renderCase(id) {
     allowVoice: Boolean(getCapabilities(ctx).voiceReply)
   });
 
+  const claude = resolveProviderProfile().runtime === RUNTIME.CLAUDE_AGENT;
   const dump = [
     `=== CASE ${id} ${spec.label} ===`,
     `(delivery: discordTitleField=${isDiscord})`,
     '',
-    renderInputLayout(),
+    claude ? renderClaudeInputLayout() : renderInputLayout(),
     '',
-    '--- STATIC INSTRUCTIONS (input[0], role:system) ---',
+    claude ? '--- STATIC INSTRUCTIONS (system prompt) ---' : '--- STATIC INSTRUCTIONS (input[0], role:system) ---',
     staticPart,
     '',
-    '--- DYNAMIC RUNTIME (per-turn role:user item after the user message; not system) ---',
+    ...(claude ? [renderClaudeUserMessage(), ''] : []),
+    claude
+      ? '--- DYNAMIC RUNTIME (closes the single user message; not system) ---'
+      : '--- DYNAMIC RUNTIME (per-turn role:user item after the user message; not system) ---',
     dynamicPart,
     '',
     '',
     renderTools(tools),
+    ...(claude ? ['', renderClaudeToolExposure(tools)] : []),
     '',
-    renderResponseFormat(responseFormat)
+    renderResponseFormat(responseFormat, claude ? 'outputFormat, answered through the StructuredOutput tool' : 'text.format')
   ].join('\n');
 
   return { staticPart, dynamicPart, dump };

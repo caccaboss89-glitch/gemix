@@ -1,8 +1,10 @@
 // The one model-facing boundary between the generic provider contract and the
-// deliberately richer xAI integration. The generic variant is the baseline;
-// the xAI variant replaces it as a whole instead of adding fragments elsewhere
-// in the prompt.
+// provider-specific integrations. The generic variant is the baseline. The
+// deliberately richer xAI variant replaces it as a whole instead of adding
+// fragments elsewhere in the prompt; the Claude variant keeps it and adds how
+// that runtime carries the conversation and the reply.
 
+import { HISTORY_REPLY_LABEL } from '../claudeAgent/claudeUserContent.js';
 import { PROMPT_VARIANT } from './providerProfile.js';
 
 function _has(toolNames, name) {
@@ -44,11 +46,23 @@ function _xaiGuidance(toolNames) {
   return lines;
 }
 
-/** Build the provider block that replaces, rather than augments, the baseline. */
+function _claudeGuidance() {
+  return [
+    ..._genericGuidance(),
+    'Your reply reaches the chat only through the StructuredOutput tool: when you are ready to answer, call it '
+      + 'directly with the final reply instead of writing the reply as plain text first.',
+    'The chat so far arrives inside `<conversation-history>`, oldest first; the entries labelled '
+      + `\`${HISTORY_REPLY_LABEL}\` are your own earlier replies.`
+  ];
+}
+
+/** Build the provider block of the profile's prompt variant. */
 function buildProviderGuidance(profile, toolNames) {
-  return profile?.promptVariant === PROMPT_VARIANT.XAI
-    ? _xaiGuidance(toolNames)
-    : _genericGuidance();
+  switch (profile?.promptVariant) {
+  case PROMPT_VARIANT.XAI: return _xaiGuidance(toolNames);
+  case PROMPT_VARIANT.CLAUDE: return _claudeGuidance();
+  default: return _genericGuidance();
+  }
 }
 
 export { buildProviderGuidance };

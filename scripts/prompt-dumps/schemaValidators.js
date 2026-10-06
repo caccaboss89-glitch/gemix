@@ -54,9 +54,9 @@ function validateToolDumpLeaks(dump, caseId) {
       ISSUES.push({ caseId, msg: 'legalSignature field does not match legal advisor status' });
     }
   }
-  const generic = resolveProviderProfile().promptVariant === PROMPT_VARIANT.GENERIC;
-  if (generic && containsXaiOnlyMaterial(toolText)) {
-    ISSUES.push({ caseId, msg: 'generic provider tool schema leaks xAI-only material' });
+  const notXai = resolveProviderProfile().promptVariant !== PROMPT_VARIANT.XAI;
+  if (notXai && containsXaiOnlyMaterial(toolText)) {
+    ISSUES.push({ caseId, msg: 'non-xAI provider tool schema leaks xAI-only material' });
   }
   const nativeX = toolText.match(/\[native\] (\{[^\n]+"type":"x_search"[^\n]+\})/);
   if (!nativeX) return;

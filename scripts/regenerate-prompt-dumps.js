@@ -3,11 +3,14 @@
  *
  * For every case it writes, into scripts/output-regenerate-prompt-dumps/, the EXACT material the model
  * receives that turn:
- *   - the STATIC prefix (input[0], role:system);
+ *   - the STATIC prefix (input[0], role:system; the system prompt on Claude);
  *   - the DYNAMIC Runtime block (per-turn role:user item, not system);
  *   - the full tool schema (function tools + native xAI tools) for that
  *     platform / membership;
- *   - the structured-output (text.format) schema, when one applies.
+ *   - the structured-output schema (text.format, or Claude's outputFormat),
+ *     when one applies;
+ *   - on Claude cases, the single user message with a sample history and how
+ *     the tools are exposed over MCP.
  * A final workspace-runtime-dump.txt mirrors the container exec contract and
  * the filesystem tool schemas so prompts can be cross-checked in one place.
  *

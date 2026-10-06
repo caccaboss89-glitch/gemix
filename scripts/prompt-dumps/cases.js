@@ -7,8 +7,9 @@
 // render the program defaults, like a fresh chat. A case may also carry a
 // `deployment`, which renders it as a different provider profile. The corpus
 // baseline is a generic provider; explicit xAI cases cover its isolated
-// replacement block and native tools, independently of
-// whichever provider the developer's .env selects.
+// replacement block and native tools, and explicit Claude cases the Claude
+// Agent runtime, independently of whichever provider the developer's .env
+// selects.
 //
 // Discord note: conversation_title sits in text.format on every turn (its rules
 // live there only — Runtime just carries the current Thread title to compare
@@ -375,6 +376,36 @@ const CASES = {
       chatId: 'channel123',
       userName: LEGAL_USER_NAME,
       userIdentity: ACTIVE_LEGAL,
+      threadName: 'Statute question',
+      rulesContext: '[STATUTE EXCERPT PLACEHOLDER]',
+      serverEvents: '',
+      availableEmojis: ''
+    }
+  },
+  // The Claude subscription runs the same chats as cases 6/19 and 13 on the
+  // Claude Agent runtime: the baseline provider block plus its reply-channel
+  // and history lines, the conversation as one user message, the tools over MCP.
+  21: {
+    label: 'WA dedicated private — Claude subscription (Claude Agent runtime)',
+    deployment: { provider: 'claude', cloudflare: true },
+    ctx: {
+      platform: PLATFORM_WA_DEDICATED,
+      isGroup: false,
+      chatId: 'wa_priv@test',
+      userName: ADMIN_NAME,
+      userIdentity: ACTIVE,
+      userWorkspace: EMPTY_WORKSPACE
+    }
+  },
+  22: {
+    label: 'Discord — Claude subscription after GemiX replied (Claude Agent runtime)',
+    deployment: { provider: 'claude', cloudflare: true },
+    ctx: {
+      platform: PLATFORM_DISCORD,
+      isGroup: false,
+      chatId: 'channel123',
+      userName: ADMIN_NAME,
+      userIdentity: ACTIVE,
       threadName: 'Statute question',
       rulesContext: '[STATUTE EXCERPT PLACEHOLDER]',
       serverEvents: '',
