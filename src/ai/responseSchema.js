@@ -1,6 +1,7 @@
 // src/ai/responseSchema.js
 //
-// Structured output (`text.format` json_schema) for assistant replies on /v1/responses.
+// Structured output for assistant replies: the `text.format` json_schema on
+// /v1/responses, and the same schema as the Claude Agent SDK's `outputFormat`.
 //
 // Main brain (GemiX): fixed schema on every round — `response` plus nullable
 // `attachments` (semantically optional, structurally required for strict JSON
@@ -298,10 +299,22 @@ function parseStructuredReply(raw) {
     return fallback;
   }
 
+  return readStructuredReply(parsed) || fallback;
+}
+
+/**
+ * Read a reply object that is already JSON, as a runtime that validates the
+ * schema itself hands it over.
+ *
+ * @param {object} parsed
+ * @returns {{ structured: true, text: string, title: string|null, attachments: string[], voice: boolean }|null}
+ *   null when the object lacks the schema's required `response`
+ */
+function readStructuredReply(parsed) {
   // A parsed object without the schema's required response is not a structured
   // reply. Treating `{}` or an obsolete field alias as valid would silently
   // send an empty message and hide a provider contract violation.
-  if (typeof parsed.response !== 'string') return fallback;
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.response !== 'string') return null;
 
   const text = parsed.response;
   const title = typeof parsed.conversation_title === 'string' && parsed.conversation_title.trim()
@@ -321,5 +334,6 @@ function parseStructuredReply(raw) {
 
 export {
   buildGemixResponseFormat,
-  parseStructuredReply
+  parseStructuredReply,
+  readStructuredReply
 };

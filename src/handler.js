@@ -5,24 +5,25 @@
 // One round of conversation looks like this:
 //   1. Resolve identity / memory (WA) or statute text in prompt (Discord).
 //   2. Touch the per-conversation workspace activity timestamp.
-//   3. Build the Responses input: static system first (byte-stable for the turn —
-//      Responses endpoints can cache it from the start of input[]), then history, the
-//      current user message, then the program-owned <Runtime>…</Runtime>
-//      role:user item. Runtime is built once per turn and never moves, so every
-//      later round only appends to input[] — never a second role:system. Files
-//      arrive through attachments/ingress.js: images of the current or quoted
-//      message inline as base64, everything else an [Attachment: attachments/…]
-//      path the model opens with read_file. Voice notes are rendered as text in
-//      place — the user's with STT (<PastVoice>), GemiX's from the transcript
-//      it already had (<PastVoiceReply>).
-//   4. Loop: one `/v1/responses` call per round, whichever provider profile is
-//      active. Consecutive read-only tool calls run with bounded concurrency;
-//      mutations, shell, generators and deliveries remain serial barriers in
-//      the model's original order. Repeat until the model returns the final
-//      response or the round budget is reached. The
-//      final reply is always structured JSON (response / nullable attachments,
-//      plus conversation_title on every Discord turn, plus a `voice` flag on
-//      WA dedicated) enforced via text.format.
+//   3. Prepare the turn: static system first (byte-stable for the turn, so the
+//      backend can cache it from the start), then history, the current user
+//      message, then the program-owned <Runtime>…</Runtime>. Runtime is built
+//      once per turn and never moves, so every later round only appends after
+//      it. Files arrive through attachments/ingress.js: images of the current
+//      or quoted message inline as base64, everything else an
+//      [Attachment: attachments/…] path the model opens with read_file. Voice
+//      notes are rendered as text in place — the user's with STT (<PastVoice>),
+//      GemiX's from the transcript it already had (<PastVoiceReply>).
+//   4. Run the turn on the engine of the active profile's runtime
+//      (ai/turnOrchestrator.js): GemiX's own loop of `/v1/responses` calls, or
+//      one Claude Code query on the Claude subscription. Either way consecutive
+//      read-only tool calls run with bounded concurrency; mutations, shell,
+//      generators and deliveries remain serial barriers in the model's
+//      original order, until the model returns the final response or the round
+//      budget is reached. The final reply is always structured JSON
+//      (response / nullable attachments, plus conversation_title on every
+//      Discord turn, plus a `voice` flag on WA dedicated) enforced by the
+//      backend's structured output.
 //      When `voice:true` (WA dedicated only), `response` is spoken via TTS.
 //   5. Apply the research badge from per-turn GemiX web / native X counters,
 //      then ship the reply back to the platform.

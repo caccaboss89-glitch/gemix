@@ -9,10 +9,12 @@
 // (turnReply.js).
 
 import { RUNTIME, resolveProviderProfile } from './providers/providerProfile.js';
+import { runClaudeAgentTurn } from './engines/claudeAgentEngine.js';
 import { runResponsesTurn } from './engines/responsesEngine.js';
 
 const ENGINES = Object.freeze({
-  [RUNTIME.RESPONSES]: runResponsesTurn
+  [RUNTIME.RESPONSES]: runResponsesTurn,
+  [RUNTIME.CLAUDE_AGENT]: runClaudeAgentTurn
 });
 
 /**

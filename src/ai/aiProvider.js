@@ -16,7 +16,7 @@
 
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
-import { RUNTIME, resolveProviderProfile } from './providers/providerProfile.js';
+import { RUNTIME, resolveEffort, resolveProviderProfile } from './providers/providerProfile.js';
 import { OpenAIResponsesTransport } from './transport/openAIResponsesTransport.js';
 import {
   BASE_REPLAYABLE_ITEM_TYPES,
@@ -63,15 +63,6 @@ function getTransport() {
 }
 
 /**
- * The reasoning effort for this call: the per-chat setting when the profile
- * accepts it, else the profile default. Providers do not agree on the ladder,
- * so the profile's `supportedEfforts` remains the wire-level authority.
- */
-function _resolveEffort(profile, requested) {
-  return profile.supportedEfforts.includes(requested) ? requested : profile.defaultEffort;
-}
-
-/**
  * Run one round of the agent loop against the active provider.
  *
  * @param {Array} items - the conversation for this round, as Responses-native
@@ -107,7 +98,7 @@ async function callAI(items, tools = null, opts = {}) {
   const body = buildResponsesBody({
     model: profile.model,
     input: buildResponsesInput(items, { replayableItemTypes }),
-    reasoningEffort: _resolveEffort(profile, opts.reasoningEffort),
+    reasoningEffort: resolveEffort(profile, opts.reasoningEffort),
     tools: toolsToWire(tools, wire),
     toolChoice: opts.toolChoice || 'auto',
     responseFormat: opts.responseFormat || null,

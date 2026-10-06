@@ -1,7 +1,8 @@
-// Assemble the provider-neutral state and immutable Responses prefix for one
-// turn. This owns preference loading, workspace/activity projection and voice
-// history normalization; the handler receives a ready input array and can
-// concentrate on the agent loop.
+// Assemble the provider-neutral state of one turn. This owns preference
+// loading, workspace/activity projection and voice history normalization. The
+// conversation comes back twice: as its three parts (history, request,
+// Runtime) for an engine that renders them its own way, and as the ready
+// Responses input array, behind the immutable static prefix.
 
 import fs from 'fs';
 import constants from '../config/constants.js';
@@ -161,13 +162,16 @@ async function prepareTurn(ctx, ui) {
   const promptTools = resolvePromptTools(ctx);
   const staticInstructions = buildStaticInstructions(ctx, promptTools);
   const toolsFp = toolsFingerprint(promptTools);
+  const conversation = {
+    history: normalized.history,
+    query: userItem(wrapUserQuery(normalized.content)),
+    runtime: userItem(buildDynamicRuntimeContext(ctx))
+  };
   const input = [systemItem(staticInstructions)];
   input[0]._staticPrefix = true;
-  if (normalized.history.length > 0) input.push(...normalized.history);
-  input.push(userItem(wrapUserQuery(normalized.content)));
-  input.push(userItem(buildDynamicRuntimeContext(ctx)));
+  input.push(...conversation.history, conversation.query, conversation.runtime);
 
-  return { isDiscord, allowVoice, userCtx, workspaceId, staticInstructions, toolsFp, input };
+  return { isDiscord, allowVoice, userCtx, workspaceId, staticInstructions, toolsFp, conversation, input };
 }
 
 export { prepareTurn };

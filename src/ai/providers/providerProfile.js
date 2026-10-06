@@ -380,6 +380,18 @@ function resolveProviderProfile() {
   return _active;
 }
 
+/**
+ * The reasoning effort for one turn: the per-chat setting when the profile
+ * accepts it, else the profile default. Providers do not agree on the ladder,
+ * so the profile's `supportedEfforts` remains the authority.
+ * @param {object} profile
+ * @param {string} [requested]
+ * @returns {string}
+ */
+function resolveEffort(profile, requested) {
+  return profile.supportedEfforts.includes(requested) ? requested : profile.defaultEffort;
+}
+
 /** Reset the memoized profile. Tests only — a live process resolves once. */
 function _resetActiveProfileForTests() {
   _active = null;
@@ -391,6 +403,7 @@ export {
   RUNTIME,
   formatProviderModelDisplayName,
   getProviderProfile,
+  resolveEffort,
   resolveProviderProfile,
   _resetActiveProfileForTests
 };

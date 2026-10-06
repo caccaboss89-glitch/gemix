@@ -1,9 +1,10 @@
 // src/ai/transport/errors.js
 //
-// Typed failures for the Responses transport. The taxonomy is provider-neutral:
-// every profile classifies its HTTP failures into the same seven kinds so the
-// retry policy, the user-facing message and the admin notification can be
-// decided once, above the wire.
+// Typed failures of the model backend. The taxonomy is provider-neutral: every
+// profile classifies its failures into the same seven kinds — the Responses
+// transport its HTTP failures, the Claude Agent engine what Claude Code
+// reports — so the retry policy, the user-facing message and the admin
+// notification can be decided once, above the wire.
 //
 // Nothing here knows about xAI, ChatGPT or Cloudflare. A provider extension
 // that recognizes one of its own bodies refines the kind through
