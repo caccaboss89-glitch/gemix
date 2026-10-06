@@ -12,14 +12,13 @@
 // Claude Code processes are heavy, so turns queue for a bounded number of
 // slots; the wait counts against the turn's own deadline.
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
 import { getToolsForUser } from '../tools.js';
 import { buildStaticInstructions, toolsFingerprint } from '../systemPrompt.js';
 import { buildGemixResponseFormat, parseStructuredReply, readStructuredReply } from '../responseSchema.js';
 import { finalizeTurnReply } from '../turnReply.js';
 import { resolveEffort, resolveProviderProfile } from '../providers/providerProfile.js';
 import { TRANSPORT_ERROR, TransportError } from '../transport/errors.js';
-import { claudeCodeEnv, ensureClaudeCodeDirs } from '../claudeAgent/claudeCode.js';
+import { claudeCodeEnv, ensureClaudeCodeDirs, startClaudeCode } from '../claudeAgent/claudeCode.js';
 import { rateLimitFailure, resultFailure } from '../claudeAgent/claudeFailures.js';
 import { createClaudeTurnControl } from '../claudeAgent/claudeTurnControl.js';
 import { renderClaudeUserContent } from '../claudeAgent/claudeUserContent.js';
@@ -32,7 +31,6 @@ const log = createLogger('ClaudeEngine');
 /** The tool Claude Code adds for `outputFormat`; its input is the reply object. */
 const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput';
 
-let _query = query;
 let _turnSlots = null;
 
 /** The process-wide Claude Code slots; the profile fixes their number for the process. */
@@ -147,7 +145,7 @@ async function _runQuery({ ctx, prepared, turnBudgets, responseCtx, profile, wai
     stopFailure = failure;
     abortController.abort();
   };
-  const session = _query({
+  const session = startClaudeCode({
     prompt: _singleMessage(renderClaudeUserContent(prepared.conversation)),
     options: {
       model: profile.model,
@@ -256,9 +254,4 @@ async function _runQuery({ ctx, prepared, turnBudgets, responseCtx, profile, wai
   return final.reply;
 }
 
-/** Replace the SDK's query; null restores it. Tests only. */
-function _setClaudeQueryForTests(fn) {
-  _query = fn || query;
-}
-
-export { runClaudeAgentTurn, _setClaudeQueryForTests };
+export { runClaudeAgentTurn };

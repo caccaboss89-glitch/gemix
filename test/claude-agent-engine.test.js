@@ -17,7 +17,7 @@ import {
   FALLBACK_ERROR_PREFIX,
   PROVIDER_AUTH_MESSAGE
 } from '../src/config/systemMessages.js';
-import { _setClaudeQueryForTests } from '../src/ai/engines/claudeAgentEngine.js';
+import { _setClaudeQueryForTests } from '../src/ai/claudeAgent/claudeCode.js';
 import { _resetActiveProfileForTests, resolveProviderProfile } from '../src/ai/providers/providerProfile.js';
 import { handleMessage } from '../src/handler.js';
 import { getWorkspaceMetaDir, resolveWorkspaceId } from '../src/utils/workspaceId.js';

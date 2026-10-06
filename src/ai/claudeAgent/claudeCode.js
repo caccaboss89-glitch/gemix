@@ -1,8 +1,9 @@
 // src/ai/claudeAgent/claudeCode.js
 //
 // The Claude Code process behind the Claude Agent runtime: which binary runs,
-// with which environment and in which directories, and the probe that starts
-// it at boot without sending it a message.
+// with which environment and in which directories, the one call every session
+// starts through, and the probe that starts it at boot without sending it a
+// message.
 //
 // The environment is the economic guard of the whole runtime. It is built from
 // an allowlist and never copied from this process, so the only credential
@@ -22,6 +23,8 @@ const SUBSCRIPTION_TOKEN_SOURCE = 'CLAUDE_CODE_OAUTH_TOKEN';
 
 /** How long the boot probe waits for Claude Code to start. */
 const PROBE_TIMEOUT_MS = 30_000;
+
+let _query = query;
 
 /**
  * The environment of one Claude Code process.
@@ -45,6 +48,15 @@ function claudeCodeEnv({ configDir, oauthToken = null }) {
 /** Whether this Linux host links against musl rather than glibc. */
 function _isMusl() {
   return process.platform === 'linux' && !process.report?.getReport()?.header?.glibcVersionRuntime;
+}
+
+/**
+ * Start one Claude Code session: the SDK's query(), or what a test put in its place.
+ * @param {{ prompt: AsyncIterable<object>, options: object }} args
+ * @returns {import('@anthropic-ai/claude-agent-sdk').Query}
+ */
+function startClaudeCode(args) {
+  return _query(args);
 }
 
 /**
@@ -88,7 +100,7 @@ async function probeClaudeCode({ configDir, workDir, oauthToken }) {
   const inputEnded = new Promise(resolve => { endInput = resolve; });
   async function* noMessages() { await inputEnded; }
 
-  const session = query({
+  const session = startClaudeCode({
     prompt: noMessages(),
     options: {
       tools: [],
@@ -117,10 +129,17 @@ async function probeClaudeCode({ configDir, workDir, oauthToken }) {
   }
 }
 
+/** Replace the SDK's query for every session; null restores it. Tests and the runtime check only. */
+function _setClaudeQueryForTests(fn) {
+  _query = fn || query;
+}
+
 export {
   SUBSCRIPTION_TOKEN_SOURCE,
   claudeCodeEnv,
   ensureClaudeCodeDirs,
   probeClaudeCode,
-  resolveClaudeCodeBinary
+  resolveClaudeCodeBinary,
+  startClaudeCode,
+  _setClaudeQueryForTests
 };
