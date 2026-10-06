@@ -22,10 +22,14 @@ function _genericGuidance() {
 }
 
 function _xaiGuidance(toolNames) {
+  // Name only the GemiX-owned tools this caller actually has.
+  const owned = ['regular web search', 'image search', 'page reading', 'file parsing', 'the workspace', 'shell execution'];
+  if (_has(toolNames, 'send_whatsapp_message') || _has(toolNames, 'send_email')) owned.push('delivery');
+  if (_has(toolNames, 'schedule_tasks')) owned.push('scheduling');
+  const ownedList = `${owned.slice(0, -1).join(', ')} and ${owned[owned.length - 1]}`;
   const lines = [
-    'Regular web search, image search, page reading, file parsing, the workspace, shell execution, delivery and '
-      + 'scheduling are still GemiX-owned tools. Do not substitute xAI hosted web search or any provider component '
-      + 'for them.'
+    `${ownedList[0].toUpperCase()}${ownedList.slice(1)} are still GemiX-owned tools. Do not substitute xAI hosted `
+      + 'web search or any provider component for them.'
   ];
 
   if (_has(toolNames, 'x_search')) {

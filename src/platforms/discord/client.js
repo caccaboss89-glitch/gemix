@@ -274,8 +274,9 @@ async function onDiscordMessage(msg) {
   // then returns that post as the thread's first message. It is the thread's
   // description, not something said to GemiX: it never starts a turn, and its
   // id is carried along so the history and the quote window leave it out too.
-  const starterMessage = await channel.fetchStarterMessage().catch(() => null);
-  if (starterMessage && msg.id === starterMessage.id) return;
+  // The post shares the thread's id, so no fetch is needed to recognise it.
+  const starterMessageId = channel.id;
+  if (msg.id === starterMessageId) return;
 
   const guild = discordClient.guilds.cache.get(GUILD_ID);
   if (!guild) {
@@ -306,7 +307,7 @@ async function onDiscordMessage(msg) {
     authorUserId: msg.author.id,
     historyStorageId,
     channel,
-    starterMessageId: starterMessage?.id || null,
+    starterMessageId,
     guild,
     guildMember,
     userIdentity,

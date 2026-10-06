@@ -24,7 +24,7 @@ function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, h
     }
     properties.recipient = {
       type: 'object',
-      description: `Private recipient: exactly one of external phone or active-member name. Omit to use the current ${here}; explicitly naming the caller is equivalent to a self-reminder.${isWhatsAppGroup ? ' For group delivery, toGroup takes precedence and this recipient is ignored.' : ''}`,
+      description: `Private recipient: exactly one of external phone or active-member name. Omit to use the ${here}; explicitly naming the caller is equivalent to a self-reminder.${isWhatsAppGroup ? ' For group delivery, toGroup takes precedence and this recipient is ignored.' : ''}`,
       properties: {
         phone: {
           type: 'string',
@@ -58,9 +58,13 @@ function _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, h
   return properties;
 }
 
-function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
+function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup, isPersonalChat = false) {
   const canTargetOthers = isAdmin || isActiveMember;
-  const here = isWhatsAppGroup ? 'group' : 'chat';
+  // Where a reminder with no destination lands. On the personal account that is
+  // never this chat: the dedicated account delivers it to the caller.
+  const here = isWhatsAppGroup
+    ? 'current group'
+    : (isPersonalChat ? 'caller\'s private chat with the dedicated GemiX account' : 'current chat');
   const waProps = _scheduleWhatsappProperties(isActiveMember, isAdmin, isWhatsAppGroup, here);
   const contentSuffix = ' Phrase it as the message that arrives at that moment: "remind me to go to the gym tomorrow at 6pm" '
     + 'becomes "Time to go to the gym!", never "Remember to go to the gym tomorrow". '
@@ -112,11 +116,11 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
       description: isAdmin
         ? (isWhatsAppGroup
           ? 'For everyone in this group, set toGroup=true; it takes precedence if recipient is also present. For a private reminder, set toPrivate=true and recipient only when it is for someone else.'
-          : `Delivery destination. Omit = current ${here}. Set recipient = private reminder to that member or phone.`)
+          : `Delivery destination. Omit = ${here}. Set recipient = private reminder to that member or phone.`)
         : (canTargetOthers
           ? (isWhatsAppGroup
             ? 'Destination. Omit = current group. For a private reminder set toPrivate; add recipient to send it to someone else (without recipient it goes to the current user).'
-            : 'Destination. Omit = current chat. To remind someone else, set toPrivate and add recipient.')
+            : `Destination. Omit = ${here}. To remind someone else, set toPrivate and add recipient.`)
           : 'Omit = current group. Set toPrivate for a reminder to you only (private DM).'),
       properties: waProps
     };
@@ -127,10 +131,10 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
     description: isAdmin
       ? (isWhatsAppGroup
         ? 'Schedule WhatsApp reminders for this group, the current chat, active members or external contacts. For everyone in this group, set whatsapp.toGroup=true; it takes precedence if recipient is also present. For a private DM, use whatsapp.toPrivate and set recipient only when it is for someone else. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
-        : 'Schedule WhatsApp reminders for the current chat, active members or external contacts; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.')
+        : `Schedule WhatsApp reminders for the ${here}, active members or external contacts; set recipient whenever the target is someone else. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.`)
       : isActiveMember
-        ? 'Schedule WhatsApp reminders for the current chat or other active members; set recipient whenever the target is not the current chat. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.'
-        : 'Schedule personal WhatsApp reminders for the current chat. Items are independent and writes are atomic per task file. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.',
+        ? `Schedule WhatsApp reminders for the ${here} or other active members; set recipient whenever the target is someone else. Each item creates one destination-specific reminder or recurrence. Writes are atomic per task file and independent across files. A reminder created for someone else is stored under your own task file, not theirs: only you see and can remove it, with read_my_tasks / remove_my_tasks. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.`
+        : `Schedule ${isWhatsAppGroup ? 'WhatsApp reminders for the current group, or for the caller alone in a private DM' : `personal WhatsApp reminders for the ${here}`}. Items are independent and writes are atomic per task file. Returns count, tasks, ids, indexed results, errors and retry_failed_indices.`,
     properties: {
       tasks: {
         type: 'array',

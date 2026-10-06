@@ -85,10 +85,10 @@ function getToolsForUser(toolCtx) {
   }
 
   if (!isDiscord) {
-    tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
+    const isPersonalChat = toolCtx.platform === constants.PLATFORM_WA_PERSONAL;
+    tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup, isPersonalChat));
     tools.push(buildReadMyTasksTool(isWhatsAppGroup, isActiveMember || isAdmin));
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
-    const isPersonalChat = toolCtx.platform === constants.PLATFORM_WA_PERSONAL;
     tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));
     tools.push(TOOL_TOGGLE_RELEASE_NOTIFY);
   }

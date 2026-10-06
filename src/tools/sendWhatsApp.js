@@ -30,7 +30,7 @@ import {
 const log = createLogger('SendWhatsApp');
 
 const MISSING_RECIPIENT_ERROR =
-  'Missing recipient. send_whatsapp_message targets a specific phone number; use your structured reply for the current chat, not this tool.';
+  'Missing recipient. send_whatsapp_message sends to someone outside this chat; use your structured reply for the current chat, not this tool.';
 
 /**
  * Resolve the target JID.

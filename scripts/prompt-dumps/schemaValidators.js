@@ -48,6 +48,10 @@ function validateToolDumpLeaks(dump, caseId) {
   if (Boolean(ctx.userIdentity?.isAdmin) === hasBugReport) {
     ISSUES.push({ caseId, msg: 'bug_report availability does not match administrator status' });
   }
+  // The Discord server and its Statute stay out of a non-active caller's tools too.
+  if (ctx.userIdentity?.isActiveMember === false && /Discord|Statut|Monarca/.test(toolText)) {
+    ISSUES.push({ caseId, msg: 'non-active caller tool schema must not mention the Discord server or its Statute' });
+  }
   if (toolText.includes('[function] generate_formal_request_pdf')) {
     const hasLegalSignature = /legalSignature/.test(toolText);
     if (Boolean(ctx.userIdentity?.isLegal) !== hasLegalSignature) {
