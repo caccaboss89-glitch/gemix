@@ -86,7 +86,7 @@ function getToolsForUser(toolCtx) {
 
   if (!isDiscord) {
     tools.push(buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup));
-    tools.push(buildReadMyTasksTool(isWhatsAppGroup));
+    tools.push(buildReadMyTasksTool(isWhatsAppGroup, isActiveMember || isAdmin));
     tools.push(buildRemoveMyTasksTool(isWhatsAppGroup));
     const isPersonalChat = toolCtx.platform === constants.PLATFORM_WA_PERSONAL;
     tools.push(buildManagePreferencesTool(isWhatsAppGroup, isPersonalChat));

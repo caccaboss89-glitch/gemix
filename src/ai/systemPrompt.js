@@ -16,7 +16,7 @@
 
 import pkg from '../../package.json' with { type: 'json' };
 import { getRomeTime, formatTimestamp  } from '../utils/time.js';
-import { ACTIVE_MEMBERS, ADMIN_NAME, formatRoleLabel  } from '../config/members.js';
+import { ACTIVE_MEMBERS, ADMIN_NAME, formatRoleLabel, isAdmin as isAdminMember } from '../config/members.js';
 import {
   activePreferenceFields,
   customizedFields,
@@ -188,7 +188,8 @@ function _buildChatLines(ctx, cap, profile) {
   if (cap.isDiscord) {
     return [
       'Platform: Discord. A forum thread in the "gemix" channel: you answer every message in it, no mention needed, '
-      + 'but the thread\'s opening post never reaches you. You are here to help with the Statute (Statuto Albertino) '
+      + 'but the post that opens the thread is only its description and never reaches you. You are here to help with '
+      + 'the Statute (Statuto Albertino) '
       + 'and to produce Art. 6 formal PDF requests.',
       'Markdown renders here, tables aside.'
     ];
@@ -203,8 +204,8 @@ function _buildChatLines(ctx, cap, profile) {
       'Platform: WhatsApp. The admin\'s own account, in a chat with one other person; groups are never served on this '
       + 'account. Reply only when the message contains @gemix. History, memory and workspace are shared between the '
       + 'two of them.',
-      'Anything you deliver outside your reply, a reminder or a release note included, is sent by the dedicated '
-      + 'GemiX account: it reaches the caller in their private chat with that account, not here.',
+      'Reminders and release notes for the caller are sent by the dedicated GemiX account, into their private chat '
+      + 'with it, not here.',
       `In the chat: ${escapeXml(ADMIN_NAME)} (the account owner) and ${otherName}.`,
       'The admin\'s messages appear in the history under the label "Account Owner" rather than under their '
       + 'name. Your own replies carry no speaker prefix.',
@@ -265,7 +266,13 @@ function _buildChatLines(ctx, cap, profile) {
  * address people around it is prose.
  */
 function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
-  const lines = buildAudienceLines(profile, promptOpts);
+  // Active callers find the admin in the roster; everyone else is told by name
+  // who created GemiX and keeps that roster, in the roster's own shape.
+  const admin = activeMembers.find(isAdminMember);
+  const lines = buildAudienceLines(profile, {
+    ...promptOpts,
+    adminLabel: admin ? `${escapeXml(admin.name)} (${formatRoleLabel(admin)})` : null
+  });
   if (promptOpts.isActiveMember) {
     lines.push(..._buildRosterLines(cap, profile, promptOpts, isAdmin, activeMembers));
   }

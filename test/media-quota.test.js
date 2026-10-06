@@ -7,6 +7,8 @@
 // are the cheap daily allowance and videos and songs the expensive weekly one,
 // so running out of images must leave the weekly counters untouched — and the
 // error the user gets has to name the period it will actually come back on.
+// And a privacy wipe must leave the counters alone, or every wipe would hand
+// out a fresh quota.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,10 +17,11 @@ import test, { after, before, beforeEach } from 'node:test';
 
 import constants from '../src/config/constants.js';
 import {
-  clearMediaUsage,
   formatQuotaCounts,
   reserveGeneration
 } from '../src/utils/mediaUsageLimits.js';
+import * as systemState from '../src/utils/systemState.js';
+import { wipeWhatsAppUserData } from '../src/utils/privacyWipe.js';
 
 const STATE_FILE = path.join(constants.DATA_DIR, 'systemState.json');
 const USER = 'quota-test-user';
@@ -26,18 +29,27 @@ const member = { isAdmin: false, taskFileId: USER };
 
 let stateBackup = null;
 
+/** Forget the test user's counters, kept in the systemState module mediaUsageLimits owns. */
+async function resetUsage() {
+  await systemState.update('mediaUsage', (current) => {
+    const next = { ...(current || {}) };
+    delete next[USER];
+    return next;
+  });
+}
+
 before(() => {
   try { stateBackup = fs.readFileSync(STATE_FILE, 'utf-8'); }
   catch { stateBackup = null; }
 });
 
 after(async () => {
-  await clearMediaUsage(USER);
+  await resetUsage();
   if (stateBackup !== null) fs.writeFileSync(STATE_FILE, stateBackup);
 });
 
 beforeEach(async () => {
-  await clearMediaUsage(USER);
+  await resetUsage();
 });
 
 /** Spend `count` slots, asserting each one is granted. */
@@ -136,8 +148,14 @@ test('the counts line shows only the kinds the chat can actually generate', () =
   assert.ok(!line.includes('Video') && !line.includes('Canzoni'));
 });
 
-test('a wiped user starts the current period from zero', async () => {
+test('a privacy wipe does not give the quota back', async () => {
   await spend('image', 3);
-  await clearMediaUsage(USER);
-  assert.match(formatQuotaCounts(USER, ['image']), /Immagini: 0\/5/);
+  const jid = `${USER}@c.us`;
+  const { ok } = await wipeWhatsAppUserData({
+    chat: { clearMessages: async () => true },
+    ctx: { platform: constants.PLATFORM_WA_DEDICATED, isGroup: false, chatId: jid, waJid: jid },
+    taskFileId: USER
+  });
+  assert.equal(ok, true);
+  assert.match(formatQuotaCounts(USER, ['image']), /Immagini: 3\/5/);
 });

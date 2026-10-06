@@ -6,12 +6,14 @@
 // holds both the agent area and the read-only attachment projection — saved
 // preferences, scheduled reminders, API request/response diagnostics, local
 // bug reports attributable to the chat/caller, the log of messages sent on
-// their behalf, the weekly generation counters, the
-// release-notification subscription and the privacy-notice record.
+// their behalf, the release-notification subscription and the privacy-notice
+// record.
 //
 // Not touched: the active-member registry (src/data/members.json). Name, phone
 // and email stay there and only the admin can remove them, which is exactly
-// what the wipe messages tell active members.
+// what the wipe messages tell active members. Nor the generation counters:
+// they hold no content and run out with their own period, while clearing them
+// would let anyone buy a fresh quota with every wipe.
 //
 // Every step is independent and reports its own outcome, so a single failure
 // still lets the rest go through and the caller can tell the user the wipe was
@@ -23,7 +25,6 @@ import { resolveWorkspaceId } from './workspaceId.js';
 import { getGroupTaskFileId  } from './userIdentifier.js';
 import { deleteHistoryStore, forgetRecentVoiceText  } from './historySync.js';
 import { deleteSentMessages  } from './sentMessagesStore.js';
-import { clearMediaUsage  } from './mediaUsageLimits.js';
 import { forgetUser  } from './privacyConsent.js';
 import { toggleReleaseNotify  } from '../tools/releaseNotify.js';
 import { deleteApiLogsForConversation } from '../ai/apiLogs.js';
@@ -70,7 +71,7 @@ async function _wipeWorkspaceStore(workspaceId) {
  * @param {object} opts
  * @param {object} opts.chat - whatsapp-web.js Chat to empty
  * @param {object} opts.ctx - { platform, isGroup, groupId, chatId, waJid }
- * @param {string} opts.taskFileId - caller's identity file id (reminders, sent log, quota)
+ * @param {string} opts.taskFileId - caller's identity file id (reminders, sent log)
  * @returns {Promise<{ ok: boolean, failed: string[] }>} failed = labels of the steps that did not complete
  */
 async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
@@ -139,15 +140,6 @@ async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   } catch (err) {
     log.warn(`deleteSentMessages failed for ${taskFileId}: ${err.message}`);
     failed.push('sent_messages');
-  }
-
-  try {
-    // No step() here: clearMediaUsage resolves to void, so the only signal it
-    // can give is the throw handled below.
-    await clearMediaUsage(taskFileId);
-  } catch (err) {
-    log.warn(`clearMediaUsage failed for ${taskFileId}: ${err.message}`);
-    failed.push('media_quota');
   }
 
   try {

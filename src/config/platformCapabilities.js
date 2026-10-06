@@ -174,6 +174,10 @@ function _andList(items) {
  * caller does not get without it. Both branches read the live tool set, so the
  * text never promises a tool that is missing from this turn's schema. The tools
  * are named, never explained — what each one does is in its own description.
+ *
+ * @param {string} profile
+ * @param {{ isActiveMember?: boolean, toolNames?: Set<string>, adminLabel?: string|null }} [opts] -
+ *   adminLabel names the admin for a caller who has no roster to find them in
  */
 function buildAudienceLines(profile, opts = {}) {
   const has = (name) => _hasTool(opts.toolNames, name);
@@ -183,12 +187,13 @@ function buildAudienceLines(profile, opts = {}) {
       'The person writing this is not an active member of the Discord server, so you are the ordinary assistant here: '
       + 'you handle what they ask in this chat, and nothing you do reaches anyone outside it.'
     ];
+    const admin = opts.adminLabel ? `the admin, ${opts.adminLabel},` : 'the admin,';
     const missing = MEMBER_GATED_TOOLS.filter(t => !has(t));
     if (missing.length) {
       lines.push(
         `${_andList(missing)} take active-member status, so they are not in your tool list this turn. `
         + 'Do not try to invoke them. If you are asked for one, say plainly that it is reserved to active members '
-        + 'by design, not a fault, and that only the admin, who keeps the list of active members, can change that.'
+        + `by design, not a fault, and that only ${admin} who keeps the list of active members, can change that.`
       );
     }
     if (has(TOOL.SCHEDULE)) {

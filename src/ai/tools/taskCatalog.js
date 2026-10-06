@@ -143,7 +143,12 @@ function buildScheduleTasksTool(isActiveMember, isAdmin, isWhatsAppGroup) {
   });
 }
 
-function buildReadMyTasksTool(isWhatsAppGroup) {
+/**
+ * @param {boolean} isWhatsAppGroup
+ * @param {boolean} canTargetOthers - whether this caller can schedule reminders
+ *   for someone else, and so own ones that are not for them
+ */
+function buildReadMyTasksTool(isWhatsAppGroup, canTargetOthers) {
   const properties = {
     limit: {
       type: 'integer',
@@ -162,7 +167,11 @@ function buildReadMyTasksTool(isWhatsAppGroup) {
   }
   return makeTool({
     name: 'read_my_tasks',
-    description: 'Read a page of scheduled reminders with time, recurrence, recipient, delivery state and removal ID — including ones you created for someone else, which live in your own task file, never theirs. Returns a compact summary, count, totalCount, tasks, ids, results, errors and optional nextCursor; no reminders is success with empty arrays.',
+    description: 'Read a page of scheduled reminders with time, recurrence, recipient, delivery state and removal ID'
+      + (canTargetOthers
+        ? ' — including ones you created for someone else, which live in your own task file, never theirs'
+        : '')
+      + '. Returns a compact summary, count, totalCount, tasks, ids, results, errors and optional nextCursor; no reminders is success with empty arrays.',
     properties
   });
 }

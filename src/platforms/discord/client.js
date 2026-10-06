@@ -178,6 +178,8 @@ function discordMessageHasUsableContent(msg) {
 
 /**
  * One channel.messages.fetch per turn. Used for history build and batch ingress.
+ * The thread's opening post is its description, not a message, so it never
+ * counts toward the window.
  * @returns {{ raw: import('discord.js').Collection, recentMessageIds: Set<string> }}
  */
 async function fetchDiscordMessageWindow(channel, starterMessageId) {
@@ -268,6 +270,10 @@ async function onDiscordMessage(msg) {
 
   if (!discordMessageHasUsableContent(msg)) return;
 
+  // Discord will not create a forum thread without an opening post, and the API
+  // then returns that post as the thread's first message. It is the thread's
+  // description, not something said to GemiX: it never starts a turn, and its
+  // id is carried along so the history and the quote window leave it out too.
   const starterMessage = await channel.fetchStarterMessage().catch(() => null);
   if (starterMessage && msg.id === starterMessage.id) return;
 
@@ -587,7 +593,7 @@ async function _handleDiscordBatch(entries) {
 
 /**
  * @param {import('discord.js').TextChannel|import('discord.js').ThreadChannel} channel
- * @param {string|null} starterMessageId - starter message excluded from history
+ * @param {string|null} starterMessageId - the thread's opening post (its description), excluded from history
  * @param {string} historyStorageId - history storage identifier
  * @param {Set<string>|string|null} [excludeMessageIds] - Discord message IDs to omit
  *   (current batch); the merged user turn is passed separately as ctx.content.
