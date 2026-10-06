@@ -1,8 +1,9 @@
 // src/ai/providers/preflight.js
 //
-// The startup check for the profile this process runs on.
+// The startup check for the profile this process runs on, dispatched on the
+// runtime the profile names.
 //
-// Two things are checked, in this order:
+// For the Responses runtime two things are checked, in this order:
 //   1. the profile declaration — a profile that does not declare every required
 //      Responses/SSE/function/schema/replay/vision capability is refused;
 //   2. the credential — resolved once so a misconfiguration surfaces at boot
@@ -14,20 +15,22 @@
 // configuration error that cannot fix itself.
 
 import { createLogger } from '../../utils/logger.js';
+import { getCredentialProvider } from '../aiProvider.js';
+import { RUNTIME } from './providerProfile.js';
 import { validateWireCapabilities } from './wireCapabilities.js';
 
 const log = createLogger('Preflight');
 
 /**
- * Validate a resolved profile and warm its credential.
+ * Validate a Responses profile and warm its credential.
  *
  * @param {object} profile - from resolveProviderProfile()
- * @param {import('../credentials/credentialProvider.js').CredentialProvider} credentialProvider
  * @returns {Promise<{ wireOk: boolean, credentialOk: boolean }>}
  * @throws when the profile does not meet the minimum wire contract
  */
-async function runProviderPreflight(profile, credentialProvider) {
-  const check = validateWireCapabilities(profile.wire);
+async function _runResponsesPreflight(profile) {
+  const { wire, baseUrl } = profile.responses;
+  const check = validateWireCapabilities(wire);
   if (!check.ok) {
     throw new Error(
       `Provider "${profile.id}" cannot drive the GemiX main brain: `
@@ -35,18 +38,18 @@ async function runProviderPreflight(profile, credentialProvider) {
     );
   }
 
-  const baseUrl = profile.baseUrl || '(from credential)';
-  log.info(`   Provider: ${profile.id} — ${profile.displayName} (${profile.model}) at ${baseUrl}`);
+  log.info(`   Provider: ${profile.id} — ${profile.displayName} (${profile.model}) at ${baseUrl || '(from credential)'}`);
   // This is the profile's explicit contract, not a synthetic model request.
   // Actual endpoint conformance is then exercised by normal Responses calls.
   const optional = [];
-  if (profile.wire.supportsMaxOutputTokens) optional.push('max_output_tokens');
-  if (profile.wire.supportsPromptCacheKey) optional.push('prompt_cache_key');
-  if (profile.wire.supportsStrictFunctionArguments) optional.push('strict function arguments');
-  if (profile.wire.supportsFunctionOutputSchema) optional.push('function output_schema');
+  if (wire.supportsMaxOutputTokens) optional.push('max_output_tokens');
+  if (wire.supportsPromptCacheKey) optional.push('prompt_cache_key');
+  if (wire.supportsStrictFunctionArguments) optional.push('strict function arguments');
+  if (wire.supportsFunctionOutputSchema) optional.push('function output_schema');
   const optionalText = optional.length > 0 ? `, optional: ${optional.join(', ')}` : '';
   log.info(`   Declared wire: Responses+SSE, function calling, strict json_schema, reasoning replay, vision${optionalText}`);
 
+  const credentialProvider = getCredentialProvider();
   let credentialOk = false;
   try {
     const credential = await credentialProvider.get();
@@ -63,6 +66,23 @@ async function runProviderPreflight(profile, credentialProvider) {
   }
 
   return { wireOk: true, credentialOk };
+}
+
+const RUNTIME_PREFLIGHTS = Object.freeze({
+  [RUNTIME.RESPONSES]: _runResponsesPreflight
+});
+
+/**
+ * Run the startup check of the runtime the profile names.
+ *
+ * @param {object} profile - from resolveProviderProfile()
+ * @returns {Promise<object>} the runtime check's own summary
+ * @throws when the profile can never drive the main brain
+ */
+async function runProviderPreflight(profile) {
+  const preflight = RUNTIME_PREFLIGHTS[profile.runtime];
+  if (!preflight) throw new Error(`No startup check for the "${profile.runtime}" runtime.`);
+  return preflight(profile);
 }
 
 /** One line per bound feature, so the active routing is visible in the boot log. */

@@ -1,18 +1,21 @@
 // src/ai/providers/providerProfile.js
 //
 // A ProviderProfile is a preset, not an implementation. It says which model,
-// which endpoint, which credential source, which transport extension and which
-// backend implements each provider-dependent media feature — and nothing else. Every module that
-// needs one of those answers reads it here instead of re-deriving it from a
-// model slug, a base URL or the contents of an auth file.
+// which turn runtime, which endpoint, which credential source, which transport
+// extension and which backend implements each provider-dependent media feature —
+// and nothing else. Every module that needs one of those answers reads it here
+// instead of re-deriving it from a model slug, a base URL or the contents of an
+// auth file.
 //
-// The separation between transport, credentials, extensions and feature
-// bindings is visible in the shape:
+// Fields every runtime reads sit at the top level; what only one runtime needs
+// sits in that runtime's own block, so the separation is visible in the shape:
 //
-//   profile.wire        -> WireCapabilities: can we talk to this endpoint at all
-//   profile.credentials -> CredentialProvider: how a request is authenticated
-//   profile.extensions  -> provider-specific Responses behaviour, behind a boundary
-//   profile.features    -> runtime-routed image/video/STT backends
+//   profile.runtime    -> which turn engine drives the conversation
+//   profile.responses  -> Responses runtime only:
+//     .wire                     WireCapabilities: can we talk to this endpoint at all
+//     .createCredentialProvider how a request is authenticated
+//     .extensions               provider-specific Responses behaviour, behind a boundary
+//   profile.features   -> runtime-routed image/video/STT backends
 //
 // The provider is resolved once, at startup, from AI_PROVIDER. It can never
 // change mid-turn. Fixed GemiX tools such as file access, shell and web search
@@ -35,6 +38,11 @@ const PROVIDER = Object.freeze({
   CHATGPT: 'chatgpt',
   OPENROUTER: 'openrouter',
   CUSTOM: 'custom'
+});
+
+/** The turn engines a profile can name; each reads only its own profile block. */
+const RUNTIME = Object.freeze({
+  RESPONSES: 'responses'
 });
 
 const PROMPT_VARIANT = Object.freeze({
@@ -98,30 +106,33 @@ function formatProviderModelDisplayName(providerId, model) {
 function _buildXaiProfile() {
   return {
     id: PROVIDER.XAI,
+    runtime: RUNTIME.RESPONSES,
     model: envConfig.GROK_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.XAI, envConfig.GROK_MODEL),
-    baseUrl: envConfig.XAI_BASE_URL,
     defaultEffort: 'medium',
     supportedEfforts: XAI_EFFORTS,
     promptVariant: PROMPT_VARIANT.XAI,
-    wire: defineWireCapabilities({
-      supportsResponses: true,
-      supportsSse: true,
-      supportsFunctionCalling: true,
-      supportsStrictStructuredOutput: true,
-      supportsReasoningReplay: true,
-      supportsImageInput: true,
-      supportsMaxOutputTokens: true,
-      supportsPromptCacheKey: true
-    }),
-    createCredentialProvider: xaiCredentialProvider,
-    extensions: xaiResponsesExtensions,
     nativeTools: Object.freeze([XAI_X_SEARCH_TOOL]),
     features: defineFeatureBindings({
       [FEATURE.GENERATE_IMAGE]: 'xai-imagine-image',
       [FEATURE.GENERATE_VIDEO]: 'xai-imagine-video',
       [FEATURE.STT]: 'xai-stt'
-    })
+    }),
+    responses: {
+      baseUrl: envConfig.XAI_BASE_URL,
+      wire: defineWireCapabilities({
+        supportsResponses: true,
+        supportsSse: true,
+        supportsFunctionCalling: true,
+        supportsStrictStructuredOutput: true,
+        supportsReasoningReplay: true,
+        supportsImageInput: true,
+        supportsMaxOutputTokens: true,
+        supportsPromptCacheKey: true
+      }),
+      createCredentialProvider: xaiCredentialProvider,
+      extensions: xaiResponsesExtensions
+    }
   };
 }
 
@@ -141,32 +152,35 @@ function _buildXaiProfile() {
 function _buildChatgptProfile() {
   return {
     id: PROVIDER.CHATGPT,
+    runtime: RUNTIME.RESPONSES,
     model: envConfig.CHATGPT_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.CHATGPT, envConfig.CHATGPT_MODEL),
-    baseUrl: envConfig.CHATGPT_BASE_URL,
     defaultEffort: 'medium',
     supportedEfforts: _chatgptEfforts(envConfig.CHATGPT_MODEL),
     promptVariant: PROMPT_VARIANT.GENERIC,
-    wire: defineWireCapabilities({
-      supportsResponses: true,
-      supportsSse: true,
-      supportsFunctionCalling: true,
-      supportsStrictStructuredOutput: true,
-      supportsReasoningReplay: true,
-      supportsImageInput: true,
-      // Verified by the live Codex backend. Other generic endpoints do not
-      // inherit this optional field merely for being Responses-compatible.
-      supportsPromptCacheKey: true
-    }),
-    createCredentialProvider: () => sharedCredentialProvider(
-      CREDENTIAL_POOL.CHATGPT,
-      () => createCodexCredentialProvider()
-    ),
-    // Nothing about this backend needs a Responses extension: no extra header
-    // beyond the account id the credential already carries, no extra body field.
-    extensions: null,
     nativeTools: NO_NATIVE_TOOLS,
-    features: defineFeatureBindings({})
+    features: defineFeatureBindings({}),
+    responses: {
+      baseUrl: envConfig.CHATGPT_BASE_URL,
+      wire: defineWireCapabilities({
+        supportsResponses: true,
+        supportsSse: true,
+        supportsFunctionCalling: true,
+        supportsStrictStructuredOutput: true,
+        supportsReasoningReplay: true,
+        supportsImageInput: true,
+        // Verified by the live Codex backend. Other generic endpoints do not
+        // inherit this optional field merely for being Responses-compatible.
+        supportsPromptCacheKey: true
+      }),
+      createCredentialProvider: () => sharedCredentialProvider(
+        CREDENTIAL_POOL.CHATGPT,
+        () => createCodexCredentialProvider()
+      ),
+      // Nothing about this backend needs a Responses extension: no extra header
+      // beyond the account id the credential already carries, no extra body field.
+      extensions: null
+    }
   };
 }
 
@@ -177,32 +191,35 @@ function _buildChatgptProfile() {
 function _buildOpenRouterProfile() {
   return {
     id: PROVIDER.OPENROUTER,
+    runtime: RUNTIME.RESPONSES,
     model: envConfig.OPENROUTER_MAIN_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.OPENROUTER, envConfig.OPENROUTER_MAIN_MODEL),
-    baseUrl: envConfig.OPENROUTER_BASE_URL,
     defaultEffort: 'medium',
     supportedEfforts: GENERIC_EFFORTS,
     promptVariant: PROMPT_VARIANT.GENERIC,
-    wire: defineWireCapabilities({
-      supportsResponses: true,
-      supportsSse: true,
-      supportsFunctionCalling: true,
-      supportsStrictStructuredOutput: true,
-      supportsReasoningReplay: true,
-      supportsImageInput: true
-    }),
-    createCredentialProvider: () => sharedCredentialProvider(
-      'openrouter-api-key',
-      () => new ApiKeyCredentialProvider({
-        id: 'openrouter-api-key',
-        apiKey: envConfig.OPENROUTER_API_KEY,
-        baseUrl: envConfig.OPENROUTER_BASE_URL,
-        headers: { 'HTTP-Referer': envConfig.OPENROUTER_HTTP_REFERER }
-      })
-    ),
-    extensions: null,
     nativeTools: NO_NATIVE_TOOLS,
-    features: defineFeatureBindings({})
+    features: defineFeatureBindings({}),
+    responses: {
+      baseUrl: envConfig.OPENROUTER_BASE_URL,
+      wire: defineWireCapabilities({
+        supportsResponses: true,
+        supportsSse: true,
+        supportsFunctionCalling: true,
+        supportsStrictStructuredOutput: true,
+        supportsReasoningReplay: true,
+        supportsImageInput: true
+      }),
+      createCredentialProvider: () => sharedCredentialProvider(
+        'openrouter-api-key',
+        () => new ApiKeyCredentialProvider({
+          id: 'openrouter-api-key',
+          apiKey: envConfig.OPENROUTER_API_KEY,
+          baseUrl: envConfig.OPENROUTER_BASE_URL,
+          headers: { 'HTTP-Referer': envConfig.OPENROUTER_HTTP_REFERER }
+        })
+      ),
+      extensions: null
+    }
   };
 }
 
@@ -210,31 +227,34 @@ function _buildOpenRouterProfile() {
 function _buildCustomProfile() {
   return {
     id: PROVIDER.CUSTOM,
+    runtime: RUNTIME.RESPONSES,
     model: envConfig.CUSTOM_RESPONSES_MODEL,
     displayName: formatProviderModelDisplayName(PROVIDER.CUSTOM, envConfig.CUSTOM_RESPONSES_MODEL),
-    baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL,
     defaultEffort: 'medium',
     supportedEfforts: GENERIC_EFFORTS,
     promptVariant: PROMPT_VARIANT.GENERIC,
-    wire: defineWireCapabilities({
-      supportsResponses: true,
-      supportsSse: true,
-      supportsFunctionCalling: true,
-      supportsStrictStructuredOutput: true,
-      supportsReasoningReplay: true,
-      supportsImageInput: true
-    }),
-    createCredentialProvider: () => sharedCredentialProvider(
-      'custom-api-key',
-      () => new ApiKeyCredentialProvider({
-        id: 'custom-api-key',
-        apiKey: envConfig.CUSTOM_RESPONSES_API_KEY,
-        baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL
-      })
-    ),
-    extensions: null,
     nativeTools: NO_NATIVE_TOOLS,
-    features: defineFeatureBindings({})
+    features: defineFeatureBindings({}),
+    responses: {
+      baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL,
+      wire: defineWireCapabilities({
+        supportsResponses: true,
+        supportsSse: true,
+        supportsFunctionCalling: true,
+        supportsStrictStructuredOutput: true,
+        supportsReasoningReplay: true,
+        supportsImageInput: true
+      }),
+      createCredentialProvider: () => sharedCredentialProvider(
+        'custom-api-key',
+        () => new ApiKeyCredentialProvider({
+          id: 'custom-api-key',
+          apiKey: envConfig.CUSTOM_RESPONSES_API_KEY,
+          baseUrl: envConfig.CUSTOM_RESPONSES_BASE_URL
+        })
+      ),
+      extensions: null
+    }
   };
 }
 
@@ -247,10 +267,25 @@ const BUILDERS = Object.freeze({
 
 const PROVIDER_IDS = Object.freeze(Object.keys(BUILDERS));
 
+/**
+ * What each runtime requires of a profile: the block it reads and the reasons
+ * that block cannot drive the main brain (none when it can).
+ */
+const RUNTIME_CONTRACTS = Object.freeze({
+  [RUNTIME.RESPONSES]: Object.freeze({
+    block: 'responses',
+    problems(block) {
+      const check = validateWireCapabilities(block.wire);
+      return check.ok ? [] : [`missing wire capabilities ${check.missing.join(', ')}`];
+    }
+  })
+});
+
 let _active = null;
 
 /**
- * The immutable profile for a provider id.
+ * The immutable profile for a provider id, refused unless it meets the
+ * contract of the runtime it names.
  * @param {string} [providerId]
  * @returns {Readonly<object>}
  */
@@ -261,13 +296,16 @@ function getProviderProfile(providerId = envConfig.AI_PROVIDER) {
     throw new Error(`Unknown AI provider "${providerId}". Allowed: ${PROVIDER_IDS.join(', ')}.`);
   }
   const profile = builder();
-  const check = validateWireCapabilities(profile.wire);
-  if (!check.ok) {
-    throw new Error(
-      `Provider "${id}" does not meet the GemiX wire contract (missing: ${check.missing.join(', ')}).`
-    );
+  const contract = RUNTIME_CONTRACTS[profile.runtime];
+  if (!contract) {
+    throw new Error(`Provider "${id}" names an unknown runtime "${profile.runtime}".`);
   }
-  return Object.freeze(profile);
+  const block = profile[contract.block];
+  const problems = block ? contract.problems(block) : [`no "${contract.block}" block`];
+  if (problems.length > 0) {
+    throw new Error(`Provider "${id}" cannot drive the GemiX main brain: ${problems.join('; ')}.`);
+  }
+  return Object.freeze({ ...profile, [contract.block]: Object.freeze(block) });
 }
 
 /**
@@ -288,6 +326,7 @@ function _resetActiveProfileForTests() {
 export {
   PROVIDER,
   PROMPT_VARIANT,
+  RUNTIME,
   formatProviderModelDisplayName,
   getProviderProfile,
   resolveProviderProfile,

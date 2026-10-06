@@ -26,6 +26,7 @@ import { BASE_REPLAYABLE_ITEM_TYPES, buildResponsesBody } from '../src/ai/transp
 import envConfig from '../src/config/env.js';
 import {
   PROMPT_VARIANT,
+  RUNTIME,
   getProviderProfile
 } from '../src/ai/providers/providerProfile.js';
 
@@ -41,8 +42,8 @@ test('max_output_tokens is declared per provider, and the Codex backend does not
   // "HTTP 400 UNSUPPORTED_INPUT: Unsupported parameter: max_output_tokens"
   // and fails the whole request, not just the parameter. Before this capability
   // existed the parameter went out on every call.
-  assert.equal(getProviderProfile('chatgpt').wire.supportsMaxOutputTokens, false);
-  assert.equal(getProviderProfile('xai').wire.supportsMaxOutputTokens, true);
+  assert.equal(getProviderProfile('chatgpt').responses.wire.supportsMaxOutputTokens, false);
+  assert.equal(getProviderProfile('xai').responses.wire.supportsMaxOutputTokens, true);
 
   // Not part of the minimum contract: an endpoint that bounds the answer on its
   // own terms is still perfectly usable.
@@ -57,10 +58,10 @@ test('max_output_tokens is declared per provider, and the Codex backend does not
 });
 
 test('prompt_cache_key is optional and never assumed for a generic endpoint', () => {
-  assert.equal(getProviderProfile('xai').wire.supportsPromptCacheKey, true);
-  assert.equal(getProviderProfile('chatgpt').wire.supportsPromptCacheKey, true);
-  assert.equal(getProviderProfile('openrouter').wire.supportsPromptCacheKey, false);
-  assert.equal(getProviderProfile('custom').wire.supportsPromptCacheKey, false);
+  assert.equal(getProviderProfile('xai').responses.wire.supportsPromptCacheKey, true);
+  assert.equal(getProviderProfile('chatgpt').responses.wire.supportsPromptCacheKey, true);
+  assert.equal(getProviderProfile('openrouter').responses.wire.supportsPromptCacheKey, false);
+  assert.equal(getProviderProfile('custom').responses.wire.supportsPromptCacheKey, false);
   assert.ok(!REQUIRED_WIRE_CAPABILITIES.includes('supportsPromptCacheKey'));
 });
 
@@ -120,6 +121,19 @@ test('provider-primary media backends fall back to the GemiX baseline', () => {
 test('X search is a native type the extension owns, not a function tool', () => {
   assert.equal(XAI_X_SEARCH_TOOL.type, 'x_search');
   assert.equal('function' in XAI_X_SEARCH_TOOL, false);
+});
+
+test('every Responses profile keeps its endpoint fields inside the runtime block', () => {
+  for (const id of ['xai', 'chatgpt', 'openrouter', 'custom']) {
+    const profile = getProviderProfile(id);
+    assert.equal(profile.runtime, RUNTIME.RESPONSES);
+    assert.ok(Object.isFrozen(profile.responses));
+    assert.equal(typeof profile.responses.createCredentialProvider, 'function');
+    assert.deepEqual(validateWireCapabilities(profile.responses.wire), { ok: true, missing: [] });
+    for (const field of ['baseUrl', 'wire', 'extensions', 'createCredentialProvider']) {
+      assert.equal(field in profile, false, `${id}.${field} belongs to the responses block`);
+    }
+  }
 });
 
 test('the generic profile is the baseline and only xAI carries native extras', () => {

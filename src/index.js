@@ -23,7 +23,6 @@ import {
 } from './utils/tempFileServer.js';
 import { resolveProviderProfile } from './ai/providers/providerProfile.js';
 import { runProviderPreflight, logFeatureBindings } from './ai/providers/preflight.js';
-import { getCredentialProvider } from './ai/aiProvider.js';
 import { initApiLogRetention } from './ai/apiLogs.js';
 import { shutdownWhatsAppClient } from './platforms/whatsapp/client.js';
 import { isWaLifecycleRestartError } from './utils/waPuppeteer.js';
@@ -142,12 +141,12 @@ log.info('GemiX - Avvio in corso...\n');
 
 runStartupCleanup();
 
-// Preflight: the wire contract is checked hard (a profile that cannot carry
-// Responses/SSE is a configuration error that will never fix itself), the
+// Preflight: the runtime contract is checked hard (a profile that cannot drive
+// the main brain is a configuration error that will never fix itself), the
 // credential softly (it may well be there by the first message).
 (async () => {
   const profile = resolveProviderProfile();
-  await runProviderPreflight(profile, getCredentialProvider());
+  await runProviderPreflight(profile);
   logFeatureBindings(profile);
 
   dedicatedWaClient = initDedicatedWhatsApp({

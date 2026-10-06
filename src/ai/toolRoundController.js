@@ -1,6 +1,10 @@
 // Execute one model tool-call batch while preserving its semantic order and
 // its call order in the Responses transcript. Only consecutive read-only
 // calls overlap; effects form ordering barriers and run serially.
+//
+// The single-call step, executeToolCall, is shared with the Claude Agent
+// engine, whose runtime does the batching itself and hands GemiX one call at a
+// time.
 
 import { getToolAccessError } from './tools.js';
 import { toolResultItems } from './responsesItems.js';
@@ -25,10 +29,35 @@ function _unavailableMessage(toolName, ctx) {
   });
 }
 
-async function _runToolCall(tc, state, execute = executeTool) {
+function _failurePayload(error) {
+  return JSON.stringify({ success: false, status: 'failed', error });
+}
+
+/**
+ * Run one model tool call against the tools offered this round: access check,
+ * execution and logging, with any failure turned into the standard failed
+ * payload. Batching and per-round caps belong to the caller.
+ *
+ * @param {{ id: string, name: string, arguments: string }} tc
+ * @param {{ userCtx: object, responseCtx: object, deliveryCtx: object,
+ *   roundTools: object[], platformCtx: object }} state
+ * @param {Function} [execute] - tools/index.js executeTool, replaceable in tests
+ * @returns {Promise<string|Array|object>} the tool's result, in the shape
+ *   toolResultItems takes
+ */
+async function executeToolCall(tc, state, execute = executeTool) {
+  const accessError = getToolAccessError(
+    tc.name,
+    new Set(state.roundTools.map(tool => tool.function?.name).filter(Boolean)),
+    name => _unavailableMessage(name, state.platformCtx)
+  );
+  if (accessError) {
+    log.warn(`Tool "${tc.name}" blocked: ${accessError}`);
+    return _failurePayload(accessError);
+  }
   try {
     log.info('Executing:', summarizeToolCall(tc));
-    const { toolCallId, result } = await execute(
+    const { result } = await execute(
       { id: tc.id, function: { name: tc.name, arguments: tc.arguments } },
       state.userCtx,
       state.responseCtx,
@@ -36,19 +65,14 @@ async function _runToolCall(tc, state, execute = executeTool) {
       state.roundTools
     );
     log.info('Result:', summarizeToolResult(result));
-    return toolResultItems(toolCallId, result);
+    return result;
   } catch (err) {
     log.error(`Tool error "${tc.name}": ${err.message}`);
-    return toolResultItems(tc.id, JSON.stringify({
-      success: false,
-      status: 'failed',
-      error: `Execution error: ${err.message}`
-    }));
+    return _failurePayload(`Execution error: ${err.message}`);
   }
 }
 
 async function executeToolRound(toolCalls, state, dependencies = {}) {
-  const allowedToolNames = new Set(state.roundTools.map(tool => tool.function?.name).filter(Boolean));
   const phases = planHandlerToolCalls(toolCalls);
   // Caps belong to the complete model response, not to an execution phase. A
   // mutation between two capped reads must not reset their count.
@@ -62,16 +86,7 @@ async function executeToolRound(toolCalls, state, dependencies = {}) {
       log.warn(`Tool "${tc.name}" blocked: per-round cap (${cap}) exceeded`);
       return toolResultItems(tc.id, perRoundCapErrorPayload(tc.name, cap));
     }
-    const accessError = getToolAccessError(
-      tc.name,
-      allowedToolNames,
-      name => _unavailableMessage(name, state.platformCtx)
-    );
-    if (accessError) {
-      log.warn(`Tool "${tc.name}" blocked: ${accessError}`);
-      return toolResultItems(tc.id, JSON.stringify({ success: false, status: 'failed', error: accessError }));
-    }
-    return _runToolCall(tc, state, execute);
+    return toolResultItems(tc.id, await executeToolCall(tc, state, execute));
   };
 
   for (const phase of phases) {
@@ -88,4 +103,4 @@ async function executeToolRound(toolCalls, state, dependencies = {}) {
   return toolCalls.flatMap(tc => resultsByCall.get(tc) || []);
 }
 
-export { executeToolRound };
+export { executeToolCall, executeToolRound };

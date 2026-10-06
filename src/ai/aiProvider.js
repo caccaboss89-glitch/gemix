@@ -1,13 +1,14 @@
 // src/ai/aiProvider.js
 //
-// The main brain's single entry point: one Responses call, whichever provider
-// profile is active.
+// The Responses runtime's single entry point: one Responses call, whichever
+// Responses profile is active. A profile that names another runtime never
+// reaches this module.
 //
 // It owns the composition and nothing else — resolve the profile, build the
 // body from the profile's model/effort/extension, hand it to the one transport,
 // read the assembled response back. Provider differences reach the wire only
-// through `profile.extensions`; feature routing never passes through here at
-// all.
+// through `profile.responses.extensions`; feature routing never passes through
+// here at all.
 //
 // The transport and the credential provider are built once per process: a
 // profile cannot change mid-run, and rebuilding a credential provider per call
@@ -15,7 +16,7 @@
 
 import constants from '../config/constants.js';
 import { createLogger } from '../utils/logger.js';
-import { resolveProviderProfile } from './providers/providerProfile.js';
+import { RUNTIME, resolveProviderProfile } from './providers/providerProfile.js';
 import { OpenAIResponsesTransport } from './transport/openAIResponsesTransport.js';
 import {
   BASE_REPLAYABLE_ITEM_TYPES,
@@ -30,10 +31,19 @@ const log = createLogger('AI');
 let _transport = null;
 let _credentialProvider = null;
 
+/** The active profile, which must run on the Responses runtime to be served here. */
+function _responsesProfile() {
+  const profile = resolveProviderProfile();
+  if (profile.runtime !== RUNTIME.RESPONSES) {
+    throw new Error(`Provider "${profile.id}" runs on the ${profile.runtime} runtime, not on Responses.`);
+  }
+  return profile;
+}
+
 /** The credential provider for the active profile, built once. */
 function getCredentialProvider() {
   if (!_credentialProvider) {
-    _credentialProvider = resolveProviderProfile().createCredentialProvider();
+    _credentialProvider = _responsesProfile().responses.createCredentialProvider();
   }
   return _credentialProvider;
 }
@@ -41,11 +51,11 @@ function getCredentialProvider() {
 /** The transport for the active profile, built once. */
 function getTransport() {
   if (!_transport) {
-    const profile = resolveProviderProfile();
+    const profile = _responsesProfile();
     _transport = new OpenAIResponsesTransport({
       credentialProvider: getCredentialProvider(),
-      baseUrl: profile.baseUrl,
-      extensions: profile.extensions,
+      baseUrl: profile.responses.baseUrl,
+      extensions: profile.responses.extensions,
       label: profile.id
     });
   }
@@ -82,9 +92,10 @@ function _resolveEffort(profile, requested) {
  *   provider: string, model: string, searchStats: object }>}
  */
 async function callAI(items, tools = null, opts = {}) {
-  const profile = resolveProviderProfile();
+  const profile = _responsesProfile();
+  const { wire, extensions } = profile.responses;
   const transport = getTransport();
-  const replayableItemTypes = profile.extensions?.replayableItemTypes || BASE_REPLAYABLE_ITEM_TYPES;
+  const replayableItemTypes = extensions?.replayableItemTypes || BASE_REPLAYABLE_ITEM_TYPES;
 
   const context = {
     promptCacheKey: opts.promptCacheKey || null,
@@ -97,19 +108,19 @@ async function callAI(items, tools = null, opts = {}) {
     model: profile.model,
     input: buildResponsesInput(items, { replayableItemTypes }),
     reasoningEffort: _resolveEffort(profile, opts.reasoningEffort),
-    tools: toolsToWire(tools, profile.wire),
+    tools: toolsToWire(tools, wire),
     toolChoice: opts.toolChoice || 'auto',
     responseFormat: opts.responseFormat || null,
     // Only where the endpoint accepts it: the Codex backend rejects the
     // parameter with HTTP 400 and fails the whole call, so an endpoint that
     // bounds the answer on its own terms simply gets no cap from us.
-    maxOutputTokens: profile.wire.supportsMaxOutputTokens ? constants.MAX_TOKENS : null,
+    maxOutputTokens: wire.supportsMaxOutputTokens ? constants.MAX_TOKENS : null,
     // Optional Responses fields are opt-in per profile: merely satisfying the
     // required wire contract does not promise that an endpoint accepts them.
-    promptCacheKey: profile.wire.supportsPromptCacheKey ? (opts.promptCacheKey || null) : null,
+    promptCacheKey: wire.supportsPromptCacheKey ? (opts.promptCacheKey || null) : null,
     // Stateless reasoning replay: the encrypted chain has to come back on the
     // response or the next round starts the model's thinking from scratch.
-    include: profile.wire.supportsReasoningReplay ? ['reasoning.encrypted_content'] : null
+    include: wire.supportsReasoningReplay ? ['reasoning.encrypted_content'] : null
   });
 
   // The transport hands back the assembled response inside an envelope that
@@ -123,8 +134,8 @@ async function callAI(items, tools = null, opts = {}) {
   });
 
   const read = readResponse(response, { replayableItemTypes });
-  const searchStats = profile.extensions?.extractSearchStats
-    ? profile.extensions.extractSearchStats(response)
+  const searchStats = extensions?.extractSearchStats
+    ? extensions.extractSearchStats(response)
     : { webSources: 0, xSearches: 0 };
 
   if (read.incompleteReason) {
