@@ -54,14 +54,17 @@ test('settings deletion is serialized after an in-flight update', async (t) => {
 async function withProvider(provider, fn) {
   const saved = envConfig.AI_PROVIDER;
   const savedChatgptModel = envConfig.CHATGPT_MODEL;
+  const savedClaudeToken = envConfig.CLAUDE_CODE_OAUTH_TOKEN;
   envConfig.AI_PROVIDER = provider;
   if (provider === 'chatgpt') envConfig.CHATGPT_MODEL = CHATGPT_TEST_MODEL;
+  if (provider === 'claude') envConfig.CLAUDE_CODE_OAUTH_TOKEN = 'test-claude-token';
   _resetActiveProfileForTests();
   try {
     return await fn();
   } finally {
     envConfig.AI_PROVIDER = saved;
     envConfig.CHATGPT_MODEL = savedChatgptModel;
+    envConfig.CLAUDE_CODE_OAUTH_TOKEN = savedClaudeToken;
     _resetActiveProfileForTests();
   }
 }
@@ -81,10 +84,11 @@ test('each provider exposes its full effort scale and defaults chats to its prof
   const expected = {
     xai: ['low', 'medium', 'high'],
     chatgpt: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    claude: ['low', 'medium', 'high', 'xhigh', 'max'],
     openrouter: ['low', 'medium', 'high'],
     custom: ['low', 'medium', 'high']
   };
-  for (const provider of ['xai', 'chatgpt', 'openrouter', 'custom']) {
+  for (const provider of Object.keys(expected)) {
     await withProvider(provider, () => {
       const profile = resolveProviderProfile();
       const policy = activeEffortPolicy();

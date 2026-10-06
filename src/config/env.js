@@ -35,6 +35,16 @@ const CLOUDFLARE_AI_ACCOUNTS = CLOUDFLARE_AI_ACCOUNT_IDS.map((accountId, i) => (
   apiToken: CLOUDFLARE_AI_API_TOKENS[i]
 })).filter((account) => account.apiToken);
 
+// The only host variables a spawned process may inherit: what the OS needs to
+// find binaries, a home and a temp directory (the Windows names included). The
+// spawner adds its own settings on top, so a secret in this process's
+// environment can never reach a child by accident.
+const SUBPROCESS_BASE_ENV = Object.freeze(Object.fromEntries(
+  ['PATH', 'HOME', 'LANG', 'TMPDIR', 'TEMP', 'TMP', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'USERPROFILE']
+    .filter((key) => process.env[key])
+    .map((key) => [key, process.env[key]])
+));
+
 // Every value below must be set in .env (no || null in exports).
 const REQUIRED = [
   'OPENROUTER_BASE_URL',
@@ -74,6 +84,7 @@ const PROFILE_REQUIRED = {
     ...(XAI_USE_API_KEY ? ['XAI_API_KEY'] : [])
   ],
   chatgpt: ['CHATGPT_MODEL'],
+  claude: ['CLAUDE_CODE_OAUTH_TOKEN'],
   openrouter: ['OPENROUTER_MAIN_MODEL'],
   custom: ['CUSTOM_RESPONSES_BASE_URL', 'CUSTOM_RESPONSES_API_KEY', 'CUSTOM_RESPONSES_MODEL']
 };
@@ -126,6 +137,14 @@ export default {
   CHATGPT_OAUTH_TOKEN_URL: process.env.CHATGPT_OAUTH_TOKEN_URL || 'https://auth.openai.com/oauth/token',
   CHATGPT_OAUTH_SCOPE: process.env.CHATGPT_OAUTH_SCOPE || 'openid profile email offline_access',
   CHATGPT_OAUTH_REDIRECT_URI: process.env.CHATGPT_OAUTH_REDIRECT_URI || 'http://localhost:1455/auth/callback',
+
+  // Claude subscription profile (AI_PROVIDER=claude): the long-lived token of
+  // `claude setup-token`, which bills the Claude plan. No ANTHROPIC_* variable
+  // is read anywhere, so a Claude turn can never fall back to the pay-per-use
+  // API. Each concurrent turn runs its own Claude Code process.
+  CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN || '',
+  CLAUDE_MODEL: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5',
+  CLAUDE_MAX_CONCURRENT_TURNS: toIntInRange(process.env.CLAUDE_MAX_CONCURRENT_TURNS, 1, 16, 4),
 
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
@@ -227,5 +246,7 @@ export default {
   // browser it installed for itself", which is the supported setup: Ubuntu's
   // `chromium` package is a confined snap that Puppeteer cannot drive through
   // executablePath. Set it only for a deployment with a real system binary.
-  CHROMIUM_PATH: process.env.CHROMIUM_PATH || ''
+  CHROMIUM_PATH: process.env.CHROMIUM_PATH || '',
+
+  SUBPROCESS_BASE_ENV
 };

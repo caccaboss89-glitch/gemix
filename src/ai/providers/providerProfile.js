@@ -10,17 +10,20 @@
 // Fields every runtime reads sit at the top level; what only one runtime needs
 // sits in that runtime's own block, so the separation is visible in the shape:
 //
-//   profile.runtime    -> which turn engine drives the conversation
-//   profile.responses  -> Responses runtime only:
+//   profile.runtime      -> which turn engine drives the conversation
+//   profile.responses    -> Responses runtime only:
 //     .wire                     WireCapabilities: can we talk to this endpoint at all
 //     .createCredentialProvider how a request is authenticated
 //     .extensions               provider-specific Responses behaviour, behind a boundary
-//   profile.features   -> runtime-routed image/video/STT backends
+//   profile.claudeAgent  -> Claude Agent runtime only: subscription token,
+//                           Claude Code directories, concurrency
+//   profile.features     -> runtime-routed image/video/STT backends
 //
 // The provider is resolved once, at startup, from AI_PROVIDER. It can never
 // change mid-turn. Fixed GemiX tools such as file access, shell and web search
 // are deliberately absent from the provider profile.
 
+import constants from '../../config/constants.js';
 import envConfig from '../../config/env.js';
 import { defineWireCapabilities, validateWireCapabilities } from './wireCapabilities.js';
 import { FEATURE, defineFeatureBindings } from '../../features/featureBindings.js';
@@ -36,18 +39,21 @@ import {
 const PROVIDER = Object.freeze({
   XAI: 'xai',
   CHATGPT: 'chatgpt',
+  CLAUDE: 'claude',
   OPENROUTER: 'openrouter',
   CUSTOM: 'custom'
 });
 
 /** The turn engines a profile can name; each reads only its own profile block. */
 const RUNTIME = Object.freeze({
-  RESPONSES: 'responses'
+  RESPONSES: 'responses',
+  CLAUDE_AGENT: 'claude-agent'
 });
 
 const PROMPT_VARIANT = Object.freeze({
   GENERIC: 'generic',
-  XAI: 'xai'
+  XAI: 'xai',
+  CLAUDE: 'claude'
 });
 
 const NO_NATIVE_TOOLS = Object.freeze([]);
@@ -58,6 +64,8 @@ const XAI_EFFORTS = Object.freeze(['low', 'medium', 'high']);
 const GPT_56_EFFORTS = Object.freeze(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 /** Ordered generic Responses scale: the three efforts the API documents. */
 const GENERIC_EFFORTS = Object.freeze(['low', 'medium', 'high']);
+/** Ordered Claude Agent scale, as the Agent SDK's `effort` option takes it. */
+const CLAUDE_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 
 function _chatgptEfforts(model) {
   return /^gpt-5\.6(?:-|$)/i.test(String(model || '')) ? GPT_56_EFFORTS : GENERIC_EFFORTS;
@@ -83,6 +91,17 @@ function _chatgptDisplayName(model) {
   return slug ? `ChatGPT (${slug})` : 'ChatGPT';
 }
 
+/** Family plus version: claude-sonnet-5-5 -> Claude Sonnet 5.5. */
+function _claudeDisplayName(model) {
+  const slug = String(model || '').trim();
+  const claude = slug.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/i);
+  if (claude) {
+    const family = claude[1].charAt(0).toUpperCase() + claude[1].slice(1).toLowerCase();
+    return `Claude ${family} ${claude[3] ? `${claude[2]}.${claude[3]}` : claude[2]}`;
+  }
+  return slug ? `Claude (${slug})` : 'Claude';
+}
+
 function _genericDisplayName(model) {
   const slug = String(model || '').split('/').pop().split(':')[0];
   if (!slug) return 'AI Model';
@@ -93,6 +112,7 @@ function _genericDisplayName(model) {
 function formatProviderModelDisplayName(providerId, model) {
   if (providerId === PROVIDER.XAI) return _xaiDisplayName(model);
   if (providerId === PROVIDER.CHATGPT) return _chatgptDisplayName(model);
+  if (providerId === PROVIDER.CLAUDE) return _claudeDisplayName(model);
   return _genericDisplayName(model);
 }
 
@@ -185,6 +205,35 @@ function _buildChatgptProfile() {
 }
 
 /**
+ * Claude on the admin's subscription, driven through the Claude Agent SDK: the
+ * Claude Code process runs the model/tool loop while every tool stays a GemiX
+ * tool. No provider-hosted tool or media service is used, so the feature
+ * bindings are the GemiX baselines.
+ *
+ * `medium` is the default because it answers chat turns about as fast as `low`
+ * while still checking facts with tools; higher levels stay a per-chat choice.
+ */
+function _buildClaudeProfile() {
+  return {
+    id: PROVIDER.CLAUDE,
+    runtime: RUNTIME.CLAUDE_AGENT,
+    model: envConfig.CLAUDE_MODEL,
+    displayName: formatProviderModelDisplayName(PROVIDER.CLAUDE, envConfig.CLAUDE_MODEL),
+    defaultEffort: 'medium',
+    supportedEfforts: CLAUDE_EFFORTS,
+    promptVariant: PROMPT_VARIANT.CLAUDE,
+    nativeTools: NO_NATIVE_TOOLS,
+    features: defineFeatureBindings({}),
+    claudeAgent: {
+      oauthToken: envConfig.CLAUDE_CODE_OAUTH_TOKEN,
+      configDir: constants.CLAUDE_CODE_CONFIG_DIR,
+      workDir: constants.CLAUDE_CODE_WORK_DIR,
+      maxConcurrentTurns: envConfig.CLAUDE_MAX_CONCURRENT_TURNS
+    }
+  };
+}
+
+/**
  * OpenRouter as the main brain. Accessory services of the provider are NOT
  * discovered or integrated: only the model is used from here.
  */
@@ -261,6 +310,7 @@ function _buildCustomProfile() {
 const BUILDERS = Object.freeze({
   [PROVIDER.XAI]: _buildXaiProfile,
   [PROVIDER.CHATGPT]: _buildChatgptProfile,
+  [PROVIDER.CLAUDE]: _buildClaudeProfile,
   [PROVIDER.OPENROUTER]: _buildOpenRouterProfile,
   [PROVIDER.CUSTOM]: _buildCustomProfile
 });
@@ -277,6 +327,18 @@ const RUNTIME_CONTRACTS = Object.freeze({
     problems(block) {
       const check = validateWireCapabilities(block.wire);
       return check.ok ? [] : [`missing wire capabilities ${check.missing.join(', ')}`];
+    }
+  }),
+  [RUNTIME.CLAUDE_AGENT]: Object.freeze({
+    block: 'claudeAgent',
+    problems(block) {
+      const problems = [];
+      if (!String(block.oauthToken || '').trim()) problems.push('no subscription token');
+      if (!block.configDir || !block.workDir) problems.push('no Claude Code directories');
+      if (!Number.isInteger(block.maxConcurrentTurns) || block.maxConcurrentTurns < 1) {
+        problems.push('no concurrent-turn limit');
+      }
+      return problems;
     }
   })
 });

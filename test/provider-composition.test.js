@@ -27,6 +27,7 @@ import envConfig from '../src/config/env.js';
 import {
   PROMPT_VARIANT,
   RUNTIME,
+  formatProviderModelDisplayName,
   getProviderProfile
 } from '../src/ai/providers/providerProfile.js';
 
@@ -74,6 +75,33 @@ test('the ChatGPT display name carries the model variant, when the slug names on
     assert.equal(getProviderProfile('chatgpt').displayName, 'ChatGPT 5.6');
   } finally {
     envConfig.CHATGPT_MODEL = saved;
+  }
+});
+
+test('the Claude display name is family plus version, whatever the date suffix', () => {
+  assert.equal(formatProviderModelDisplayName('claude', 'claude-sonnet-5-5'), 'Claude Sonnet 5.5');
+  assert.equal(formatProviderModelDisplayName('claude', 'claude-haiku-4-5-20251001'), 'Claude Haiku 4.5');
+  assert.equal(formatProviderModelDisplayName('claude', 'claude-opus-5'), 'Claude Opus 5');
+  assert.equal(formatProviderModelDisplayName('claude', 'sonnet'), 'Claude (sonnet)');
+});
+
+test('the Claude profile runs on its own runtime and refuses to start without a token', () => {
+  const saved = envConfig.CLAUDE_CODE_OAUTH_TOKEN;
+  try {
+    envConfig.CLAUDE_CODE_OAUTH_TOKEN = 'test-claude-token';
+    const claude = getProviderProfile('claude');
+    assert.equal(claude.runtime, RUNTIME.CLAUDE_AGENT);
+    assert.equal(claude.promptVariant, PROMPT_VARIANT.CLAUDE);
+    assert.equal(claude.defaultEffort, 'medium');
+    assert.deepEqual(claude.nativeTools, []);
+    assert.equal('responses' in claude, false);
+    assert.ok(Object.isFrozen(claude.claudeAgent));
+    assert.notEqual(claude.claudeAgent.configDir, claude.claudeAgent.workDir);
+
+    envConfig.CLAUDE_CODE_OAUTH_TOKEN = '  ';
+    assert.throws(() => getProviderProfile('claude'), /cannot drive the GemiX main brain: no subscription token/);
+  } finally {
+    envConfig.CLAUDE_CODE_OAUTH_TOKEN = saved;
   }
 });
 

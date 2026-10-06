@@ -10,13 +10,25 @@
  *   npm run auth -- login  <xai|chatgpt>
  *   npm run auth -- import <xai|chatgpt> [file] [--pool-key=<key>]
  *   npm run auth -- remove <xai|chatgpt> <accountId>
+ *   npm run auth -- claude
  *
  * `import` is a bootstrap shortcut for a host that already authorized through
  * another CLI. After it, that CLI must stop using the same credential: refresh
  * tokens are single-use and whichever side refreshes first kills the other copy.
  *
- * No token, refresh token or authorization code is ever printed.
+ * `claude` is the one flow GemiX does not own: it hands the terminal to Claude
+ * Code's own `setup-token`, which shows the new long-lived subscription token
+ * once so the operator can put it in .env as CLAUDE_CODE_OAUTH_TOKEN.
+ *
+ * GemiX itself never prints a token, refresh token or authorization code.
  */
+import { spawnSync } from 'node:child_process';
+import constants from '../src/config/constants.js';
+import {
+  claudeCodeEnv,
+  ensureClaudeCodeDirs,
+  resolveClaudeCodeBinary
+} from '../src/ai/claudeAgent/claudeCode.js';
 import { loopbackLogin } from '../src/ai/credentials/oauthClient.js';
 import {
   CREDENTIAL_POOL,
@@ -41,6 +53,7 @@ function usage() {
   npm run auth -- login  <${POOLS.join('|')}>
   npm run auth -- import <${POOLS.join('|')}> [file] [--pool-key=<key>]
   npm run auth -- remove <${POOLS.join('|')}> <accountId>
+  npm run auth -- claude   (Claude subscription token for AI_PROVIDER=claude)
 
 Default import files:
 ${POOLS.map(p => `  ${p}: ${IMPORT_SOURCES[p] || '(none)'}`).join('\n')}`);
@@ -120,6 +133,24 @@ async function cmdRemove(poolArg, accountId) {
   console.log(`Removed ${pool} account "${accountId}".`);
 }
 
+function cmdClaude() {
+  const binary = resolveClaudeCodeBinary();
+  if (!binary) throw new Error('No Claude Code binary for this platform: run `npm install` first.');
+  const dirs = { configDir: constants.CLAUDE_CODE_CONFIG_DIR, workDir: constants.CLAUDE_CODE_WORK_DIR };
+  ensureClaudeCodeDirs(dirs);
+
+  console.log('Starting Claude Code setup-token. Sign in with the Claude account whose plan GemiX should use.');
+  console.log('It ends by showing a long-lived token: put it in .env as CLAUDE_CODE_OAUTH_TOKEN,');
+  console.log('and keep it out of chats, logs and screenshots.\n');
+  const result = spawnSync(binary, ['setup-token'], {
+    cwd: dirs.workDir,
+    env: claudeCodeEnv({ configDir: dirs.configDir }),
+    stdio: 'inherit'
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`Claude Code setup-token exited with code ${result.status}.`);
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const flags = {};
@@ -136,6 +167,7 @@ async function main() {
   case 'login': return cmdLogin(rest[0]);
   case 'import': return cmdImport(rest[0], rest[1], flags);
   case 'remove': return cmdRemove(rest[0], rest[1]);
+  case 'claude': return cmdClaude();
   default:
     usage();
     if (command) process.exitCode = 1;

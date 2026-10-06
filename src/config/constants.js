@@ -64,6 +64,11 @@ export default {
 
   TASKS_DIR: path.join(__dirname, '..', 'data', 'tasks'),
   DATA_DIR: path.join(__dirname, '..', 'data'),
+  // Claude Agent runtime: Claude Code's own metadata, kept apart from any Claude
+  // install on the host, and the empty, neutral working directory its process
+  // starts in (Claude Code shows that path to the model).
+  CLAUDE_CODE_CONFIG_DIR: path.join(__dirname, '..', 'data', 'claude-agent', 'config'),
+  CLAUDE_CODE_WORK_DIR: path.join(__dirname, '..', 'data', 'claude-agent', 'work'),
   // The skill library: one directory for the whole deployment, versioned with
   // the code rather than per conversation, mounted read-only where enabled
   // (see sandbox/skillsLibrary.js). It ships with the release rather than being
