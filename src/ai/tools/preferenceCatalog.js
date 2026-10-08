@@ -67,7 +67,10 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     name: 'manage_preferences',
     description: `Change your own settings for ${scope} — the ones listed in CurrentSettings (${fieldNames}). `
       + 'Pass only the fields to change; the others stay as they are. Values marked (default) there are the program defaults. '
-      + 'A change takes effect from your next reply onward: it cannot alter the reasoning already under way for the current one. '
+      + (envConfig.USER_EFFORT_CHOICE
+        ? 'A change takes effect from your next reply onward: it cannot alter the reasoning already under way for the current one. '
+        : 'How much you reason is fixed by the deployment and cannot be changed here, whatever the user asks; '
+          + 'a change takes effect from your next reply onward. ')
       + 'Never store transient context (current task, session state, temporary data).',
     properties
   });

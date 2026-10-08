@@ -304,7 +304,8 @@ test('with USER_EFFORT_CHOICE off, effort is hidden, refused and pinned to the p
         platform: constants.PLATFORM_WA_DEDICATED,
         isGroup: false
       }).find(t => t.function?.name === 'manage_preferences');
-      assert.doesNotMatch(tool.function.description, /effort/);
+      assert.doesNotMatch(tool.function.description, /effort|already under way/);
+      assert.match(tool.function.description, /How much you reason is fixed by the deployment/);
 
       // A stored choice no longer applies, and the chat does not look customized.
       const settings = readSettings(fileId);
