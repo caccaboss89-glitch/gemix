@@ -2,6 +2,7 @@
 //
 // Per-chat preferences and notification settings.
 
+import envConfig from '../../config/env.js';
 import {
   activeEffortPolicy,
   defaultSettings,
@@ -18,7 +19,6 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     ? 'the current group (shared: any participant can change them)'
     : (isPersonalChat ? 'this shared personal chat (both participants)' : 'the current user');
   const defaults = defaultSettings(preferenceOptions);
-  const { supportedEfforts } = activeEffortPolicy();
   const properties = {};
 
   if (allowVoice) {
@@ -30,13 +30,17 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     };
   }
 
-  Object.assign(properties, {
-    effort: {
+  if (envConfig.USER_EFFORT_CHOICE) {
+    const { supportedEfforts } = activeEffortPolicy();
+    properties.effort = {
       type: 'string',
       enum: supportedEfforts,
       description: `How much reasoning you spend per reply. Supported by the current main model: ${supportedEfforts.join(', ')}; `
         + `default ${defaults.effort}. Lower is faster; higher is more thorough.`
-    },
+    };
+  }
+
+  Object.assign(properties, {
     language: {
       type: 'string',
       enum: VALID_LANGUAGES,
@@ -56,9 +60,9 @@ function buildManagePreferencesTool(isGroup, isPersonalChat = false) {
     replace: { type: 'boolean', description: 'Only affects `memory`: true (default) = rewrite it, false = append to the existing text.' }
   });
 
-  const fieldNames = allowVoice
-    ? 'voice, effort, language and custom memory'
-    : 'effort, language and custom memory';
+  const fieldNames = [allowVoice && 'voice', envConfig.USER_EFFORT_CHOICE && 'effort', 'language and custom memory']
+    .filter(Boolean)
+    .join(', ');
   return makeTool({
     name: 'manage_preferences',
     description: `Change your own settings for ${scope} — the ones listed in CurrentSettings (${fieldNames}). `

@@ -8,6 +8,7 @@
 // adding or renumbering a case in cases.js never silently skips a check.
 
 import constants from '../../src/config/constants.js';
+import envConfig from '../../src/config/env.js';
 import { PRIVACY_WIPE_COMMAND } from '../../src/config/systemMessages.js';
 import { getCapabilities } from '../../src/config/platformCapabilities.js';
 import { getToolsForUser } from '../../src/ai/tools.js';
@@ -626,12 +627,17 @@ function _validateSettingsBlocks(dynamicPart, prompt, id, caseId) {
     ISSUES.push({ caseId, msg: 'WhatsApp case missing CurrentSettings block in Runtime' });
   } else {
     const allowVoice = VOICE_CASES.includes(id);
-    const fields = ['Effort:', 'Language:', 'Memory:', 'Last update:'];
+    const fields = ['Language:', 'Memory:', 'Last update:'];
     if (allowVoice) fields.unshift('Voice:');
+    if (envConfig.USER_EFFORT_CHOICE) fields.unshift('Effort:');
     for (const field of fields) {
       if (!settingsBlock[0].includes(field)) {
         ISSUES.push({ caseId, msg: `CurrentSettings missing "${field}" line` });
       }
+    }
+    // With the choice off, effort is neither shown nor offered by the tool.
+    if (!envConfig.USER_EFFORT_CHOICE && settingsBlock[0].includes('Effort:')) {
+      ISSUES.push({ caseId, msg: 'CurrentSettings exposes the effort although USER_EFFORT_CHOICE is off' });
     }
     if (!allowVoice && settingsBlock[0].includes('Voice:')) {
       ISSUES.push({ caseId, msg: 'CurrentSettings exposes a voice selector on a text-only platform' });

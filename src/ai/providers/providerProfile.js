@@ -381,14 +381,16 @@ function resolveProviderProfile() {
 }
 
 /**
- * The reasoning effort for one turn: the per-chat setting when the profile
- * accepts it, else the profile default. Providers do not agree on the ladder,
- * so the profile's `supportedEfforts` remains the authority.
+ * The reasoning effort for one turn: the per-chat setting when users may
+ * choose it (USER_EFFORT_CHOICE) and the profile accepts it, else the profile
+ * default. Providers do not agree on the ladder, so the profile's
+ * `supportedEfforts` remains the authority.
  * @param {object} profile
  * @param {string} [requested]
  * @returns {string}
  */
 function resolveEffort(profile, requested) {
+  if (!envConfig.USER_EFFORT_CHOICE) return profile.defaultEffort;
   return profile.supportedEfforts.includes(requested) ? requested : profile.defaultEffort;
 }
 

@@ -18,6 +18,7 @@ import { resolveSettingsFileId } from '../src/utils/userPaths.js';
 import { resolveWorkspaceId } from '../src/utils/workspaceId.js';
 import workspaceRuntime from '../src/sandbox/workspaceRuntime.js';
 import constants from '../src/config/constants.js';
+import envConfig from '../src/config/env.js';
 import { resolveDeliverySelection } from '../src/utils/deliverySelection.js';
 import { systemItem, userItem } from '../src/ai/responsesItems.js';
 import { ensureWorkspace } from '../src/sandbox/workspaceFs.js';
@@ -25,6 +26,10 @@ import { getWorkspaceMetaDir } from '../src/utils/workspaceId.js';
 import { sweepHistoryStore, getUserHistoryPaths, HISTORY_RETENTION_MS } from '../src/utils/historySync.js';
 
 const realFetch = globalThis.fetch;
+
+// The deployment's .env may turn the per-chat effort choice off; these tests
+// exercise it.
+envConfig.USER_EFFORT_CHOICE = true;
 
 function handlerContext(t, platform = constants.PLATFORM_DISCORD) {
   const id = `handler-${process.pid}-${Math.random().toString(36).slice(2)}`;

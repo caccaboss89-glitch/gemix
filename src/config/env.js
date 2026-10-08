@@ -211,6 +211,10 @@ export default {
 
   MAINTENANCE_MODE: toBool(process.env.MAINTENANCE_MODE, false),
   STARTUP_SYSTEM_CLEANUP: toBool(process.env.STARTUP_SYSTEM_CLEANUP, false),
+  // true: users pick the reasoning effort per chat with manage_preferences.
+  // false: every turn runs at the provider profile's default effort, and the
+  // tool and CurrentSettings no longer offer the choice.
+  USER_EFFORT_CHOICE: toBool(process.env.USER_EFFORT_CHOICE, true),
 
   // Media quota reset (Europe/Rome). Used for period keys + prompt/tool wording.
   // Hour/minute apply to both the daily and the weekly caps; the weekday only to

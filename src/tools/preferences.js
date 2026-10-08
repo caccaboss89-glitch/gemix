@@ -5,12 +5,13 @@
 // serializes a fixed JSON `{ success, message?, error?, ... }` envelope.
 //
 // Implementation of the `manage_preferences` tool: writes the per-chat settings
-// shown in the <CurrentSettings> prompt block (TTS voice, reasoning effort,
-// reply language, and the free-text custom memory).
+// shown in the <CurrentSettings> prompt block (TTS voice, reasoning effort when
+// USER_EFFORT_CHOICE allows it, reply language, and the free-text custom memory).
 //
 // Only the fields the model actually passes are changed; the `updatedAt` stamp
 // is written by the system, never by the model.
 
+import envConfig from '../config/env.js';
 import {
   updateSettings,
   readSettings,
@@ -50,6 +51,9 @@ async function managePreferences(args, settingsFileId, options = {}) {
   }
 
   if (args.effort !== undefined && args.effort !== null && args.effort !== '') {
+    if (!envConfig.USER_EFFORT_CHOICE) {
+      return { success: false, error: 'The reasoning effort is fixed by the deployment and cannot be changed.' };
+    }
     const { supportedEfforts } = activeEffortPolicy();
     const effort = String(args.effort).trim().toLowerCase();
     if (!supportedEfforts.includes(effort)) {

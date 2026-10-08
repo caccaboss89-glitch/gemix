@@ -75,7 +75,8 @@ function activeEffortPolicy() {
 /**
  * Program defaults. The voice comes from .env (envConfig.TTS_VOICE) so the
  * deployment decides the starting voice; reasoning starts at the effort the
- * active provider profile declares as its default.
+ * active provider profile declares as its default, and stays there when
+ * USER_EFFORT_CHOICE is off.
  * @returns {{ voice: string, effort: string, language: string, memory: string }}
  */
 function defaultSettings(options = {}) {
@@ -92,7 +93,8 @@ function defaultSettings(options = {}) {
 /** Preference fields the active deployment can actually apply. */
 function activePreferenceFields(options = {}) {
   const { allowVoice } = _preferenceOptions(options);
-  const fields = ['effort', 'language', 'memory'];
+  const fields = ['language', 'memory'];
+  if (envConfig.USER_EFFORT_CHOICE) fields.unshift('effort');
   if (allowVoice) fields.unshift('voice');
   return fields;
 }
@@ -170,7 +172,7 @@ function readSettings(fileId, options = {}) {
   ].includes(memory)) memory = defaults.memory;
   return {
     voice: VALID_VOICES.includes(stored.voice) ? stored.voice : defaults.voice,
-    effort: supportedEfforts.includes(stored.effort) ? stored.effort : defaults.effort,
+    effort: envConfig.USER_EFFORT_CHOICE && supportedEfforts.includes(stored.effort) ? stored.effort : defaults.effort,
     language: VALID_LANGUAGES.includes(stored.language) ? stored.language : defaults.language,
     memory,
     updatedAt: stored.updatedAt || null,

@@ -12,6 +12,7 @@ import test from 'node:test';
 import { getToolsForUser } from '../src/ai/tools.js';
 import {
   _resetActiveProfileForTests,
+  resolveEffort,
   resolveProviderProfile
 } from '../src/ai/providers/providerProfile.js';
 import constants from '../src/config/constants.js';
@@ -28,6 +29,20 @@ import {
 } from '../src/utils/settingsStore.js';
 
 const CHATGPT_TEST_MODEL = 'gpt-5.6-sol';
+
+// The deployment's .env may turn the per-chat effort choice off; the tests
+// below exercise it, and the last ones switch it off explicitly.
+envConfig.USER_EFFORT_CHOICE = true;
+
+async function withEffortChoice(enabled, fn) {
+  const saved = envConfig.USER_EFFORT_CHOICE;
+  envConfig.USER_EFFORT_CHOICE = enabled;
+  try {
+    return await fn();
+  } finally {
+    envConfig.USER_EFFORT_CHOICE = saved;
+  }
+}
 
 test('settings deletion is serialized after an in-flight update', async (t) => {
   const fileId = `test_settings_wipe_${process.pid}_${Date.now()}`;
@@ -263,6 +278,45 @@ test('every supported effort persists, while a provider-only value degrades with
 
   await withProvider('chatgpt', () => {
     assert.equal(readSettings(fileId).effort, providerOnlyEffort);
+  });
+});
+
+test('with USER_EFFORT_CHOICE off, effort is hidden, refused and pinned to the profile default', async (t) => {
+  const fileId = `test_effort_off_${process.pid}_${Date.now()}`;
+  const filePath = path.join(constants.DATA_DIR, 'memories', `${fileId}.json`);
+  t.after(() => {
+    try { fs.unlinkSync(filePath); } catch { /* already absent */ }
+  });
+
+  await withProvider('claude', async () => {
+    const profile = resolveProviderProfile();
+    await withEffortChoice(true, async () => {
+      assert.equal((await managePreferences({ effort: 'high' }, fileId)).success, true);
+      assert.equal(readSettings(fileId).effort, 'high');
+      assert.equal(resolveEffort(profile, 'high'), 'high');
+    });
+
+    await withEffortChoice(false, async () => {
+      assert.equal(effortSchema(), undefined);
+      const tool = getToolsForUser({
+        isActiveMember: true,
+        isAdmin: false,
+        platform: constants.PLATFORM_WA_DEDICATED,
+        isGroup: false
+      }).find(t => t.function?.name === 'manage_preferences');
+      assert.doesNotMatch(tool.function.description, /effort/);
+
+      // A stored choice no longer applies, and the chat does not look customized.
+      const settings = readSettings(fileId);
+      assert.equal(settings.effort, profile.defaultEffort);
+      assert.ok(!customizedFields(settings).includes('effort'));
+      assert.ok(!('effort' in settingsForModel(settings)));
+      assert.equal(resolveEffort(profile, 'high'), profile.defaultEffort);
+
+      const refused = await managePreferences({ effort: 'low' }, fileId);
+      assert.equal(refused.success, false);
+      assert.match(refused.error, /fixed by the deployment/);
+    });
   });
 });
 
