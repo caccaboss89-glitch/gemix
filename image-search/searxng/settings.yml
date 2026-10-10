@@ -37,6 +37,12 @@ search:
     - html
     - json
 
+outgoing:
+  # Seconds each engine gets before it counts as timed out (SearXNG default 3.0;
+  # an engine that sets its own timeout keeps it). Wikipedia and Bing sometimes
+  # need a little more than 3 from this server.
+  request_timeout: 5.0
+
 server:
   # Overwritten by container env where set; port inside the container is 8080.
   limiter: false
