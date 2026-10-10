@@ -4,7 +4,9 @@
 # need. The general engines (Google, Wikipedia, ...) come from that catalog
 # already active — the block at the bottom adds the image engines and the web
 # engines Bing and Yandex, which the defaults leave off. DuckDuckGo (CAPTCHA)
-# and Brave (rate limit) are removed: both are blocked from this server's IP.
+# and Brave (rate limit) are switched off: both are blocked from this server's
+# IP. They are disabled rather than removed because their sibling engines share
+# their network, and SearXNG refuses to start when that network is missing.
 
 use_default_settings:
   engines:
@@ -20,8 +22,6 @@ use_default_settings:
       - startpage images
       - devicons
       - lucide
-      - duckduckgo
-      - brave
 
 general:
   instance_name: "GemiX Web Stack"
@@ -50,8 +50,12 @@ ui:
   static_use_hash: true
 
 # Activate broad image engines (defaults often leave Google Images inactive)
-# and the Bing and Yandex web engines.
+# and the Bing and Yandex web engines; switch off the two blocked ones.
 engines:
+  - name: duckduckgo
+    disabled: true
+  - name: brave
+    disabled: true
   - name: bing
     engine: bing
     shortcut: bi
