@@ -1,10 +1,10 @@
 # SearXNG config for the GemiX web stack: images for search_image, and the
 # general category that the agent-search sidecar queries for search_web.
 # use_default_settings keeps the full engine catalog; we only override what we
-# need. The general engines (DuckDuckGo, Brave, Wikipedia, ...) come from that
-# catalog already active — the block at the bottom adds the image engines and
-# Bing, which the defaults leave off. Bing keeps web search answering while
-# DuckDuckGo (CAPTCHA) and Brave (rate limit) are blocked from this IP.
+# need. The general engines (Google, Wikipedia, ...) come from that catalog
+# already active — the block at the bottom adds the image engines and the web
+# engines Bing and Yandex, which the defaults leave off. DuckDuckGo (CAPTCHA)
+# and Brave (rate limit) are removed: both are blocked from this server's IP.
 
 use_default_settings:
   engines:
@@ -20,6 +20,8 @@ use_default_settings:
       - startpage images
       - devicons
       - lucide
+      - duckduckgo
+      - brave
 
 general:
   instance_name: "GemiX Web Stack"
@@ -48,11 +50,16 @@ ui:
   static_use_hash: true
 
 # Activate broad image engines (defaults often leave Google Images inactive)
-# and the Bing web engine.
+# and the Bing and Yandex web engines.
 engines:
   - name: bing
     engine: bing
     shortcut: bi
+    inactive: false
+    disabled: false
+  - name: yandex
+    engine: yandex
+    shortcut: yd
     inactive: false
     disabled: false
   - name: google images
