@@ -1,7 +1,7 @@
 # IDE
 .grok/
 .claude/
-AGENTS.md
+CLAUDE.md
 GROK.md
 
 # Dependency and cache
