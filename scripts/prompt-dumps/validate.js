@@ -364,6 +364,22 @@ function _validateAudience(staticPart, id, caseId) {
   } else if (isNonActive !== saysNotActive) {
     ISSUES.push({ caseId, msg: `audience branch does not match the caller (non-active case: ${isNonActive})` });
   }
+  // The player list is its own privilege: only a listed player hears of it,
+  // whatever their membership.
+  const ctx = _ctx(id);
+  const isPlayer = getToolsForUser({
+    platform: ctx.platform,
+    isGroup: Boolean(ctx.isGroup),
+    isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
+    isAdmin: Boolean(ctx.userIdentity?.isAdmin),
+    isMinecraftPlayer: Boolean(ctx.userIdentity?.isMinecraftPlayer)
+  }).some(tool => tool.function?.name === 'minecraft_server');
+  if (isPlayer !== /list of Minecraft players/.test(audience)) {
+    ISSUES.push({ caseId, msg: `audience must state the Minecraft player list exactly for listed players (player: ${isPlayer})` });
+  }
+  if (!isPlayer && /Minecraft/.test(staticPart)) {
+    ISSUES.push({ caseId, msg: 'a caller who is not a listed player must not hear about Minecraft' });
+  }
   if (isNonActive) {
     if (/<ActiveMembers>/.test(audience)) {
       ISSUES.push({ caseId, msg: 'non-active caller must not get the ActiveMembers roster' });

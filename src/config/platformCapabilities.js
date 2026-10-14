@@ -166,6 +166,11 @@ const NON_MEMBER_REMINDER_LINE = {
     + 'to anyone else.'
 };
 
+/** Why a listed player holds the Minecraft tools, whatever their membership. */
+const MINECRAFT_PLAYER_LINE = 'They are also on the admin\'s list of Minecraft players, which is separate from active '
+  + 'membership: that list alone is what puts minecraft_server and minecraft_command in your hands, and someone who '
+  + 'is not on it gets neither.';
+
 /** "a, b and c" — keeps the tool lists readable inside a sentence. */
 function _andList(items) {
   if (items.length <= 1) return items.join('');
@@ -184,6 +189,8 @@ function _andList(items) {
  */
 function buildAudienceLines(profile, opts = {}) {
   const has = (name) => _hasTool(opts.toolNames, name);
+  // The player list is its own privilege, granted alongside either branch.
+  const minecraft = has(TOOL.MINECRAFT_SERVER) ? [MINECRAFT_PLAYER_LINE] : [];
 
   if (opts.isActiveMember === false) {
     // Nothing here names the Discord server, its Statute or the other members:
@@ -204,7 +211,7 @@ function buildAudienceLines(profile, opts = {}) {
     if (has(TOOL.SCHEDULE)) {
       lines.push(NON_MEMBER_REMINDER_LINE[profile]);
     }
-    return lines;
+    return [...lines, ...minecraft];
   }
 
   const lines = [
@@ -225,7 +232,7 @@ function buildAudienceLines(profile, opts = {}) {
     const outsider = profile === PROFILE.DISCORD_THREAD ? 'On WhatsApp, someone' : 'Someone';
     lines.push(`${unlocked} ${outsider} who is not an active member gets none of it.`);
   }
-  return lines;
+  return [...lines, ...minecraft];
 }
 
 /**
