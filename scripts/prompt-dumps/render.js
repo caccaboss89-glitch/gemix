@@ -223,6 +223,7 @@ function underCaseDeployment(id, fn) {
     accounts: envConfig.CLOUDFLARE_AI_ACCOUNTS,
     claudeToken: envConfig.CLAUDE_CODE_OAUTH_TOKEN,
     minecraft: {
+      MINECRAFT_ENABLED: envConfig.MINECRAFT_ENABLED,
       MINECRAFT_PC_HOST: envConfig.MINECRAFT_PC_HOST,
       MINECRAFT_PC_MAC: envConfig.MINECRAFT_PC_MAC,
       MINECRAFT_AGENT_TOKEN: envConfig.MINECRAFT_AGENT_TOKEN
@@ -236,6 +237,7 @@ function underCaseDeployment(id, fn) {
     : [];
   envConfig.CLAUDE_CODE_OAUTH_TOKEN = saved.claudeToken || 'dump-token';
   Object.assign(envConfig, {
+    MINECRAFT_ENABLED: true,
     MINECRAFT_PC_HOST: '192.0.2.10',
     MINECRAFT_PC_MAC: '00:00:5e:00:53:01',
     MINECRAFT_AGENT_TOKEN: 'dump-token'

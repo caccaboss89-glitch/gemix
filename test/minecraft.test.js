@@ -277,11 +277,17 @@ test('a shutdown is refused while a start is under way', async () => {
 
 test('the Minecraft tools reach only listed players on WhatsApp, and wait to be loaded', (t) => {
   const saved = {
+    MINECRAFT_ENABLED: envConfig.MINECRAFT_ENABLED,
     MINECRAFT_PC_HOST: envConfig.MINECRAFT_PC_HOST,
     MINECRAFT_PC_MAC: envConfig.MINECRAFT_PC_MAC,
     MINECRAFT_AGENT_TOKEN: envConfig.MINECRAFT_AGENT_TOKEN
   };
-  Object.assign(envConfig, { MINECRAFT_PC_HOST: '192.0.2.10', MINECRAFT_PC_MAC: '00:00:5e:00:53:01', MINECRAFT_AGENT_TOKEN: 't' });
+  Object.assign(envConfig, {
+    MINECRAFT_ENABLED: true,
+    MINECRAFT_PC_HOST: '192.0.2.10',
+    MINECRAFT_PC_MAC: '00:00:5e:00:53:01',
+    MINECRAFT_AGENT_TOKEN: 't'
+  });
   t.after(() => Object.assign(envConfig, saved));
 
   const toolNames = ctx => getToolsForUser(ctx).map(tool => tool.function?.name);
@@ -292,6 +298,9 @@ test('the Minecraft tools reach only listed players on WhatsApp, and wait to be 
   assert.ok(!toolNames({ ...player, isMinecraftPlayer: false }).includes('minecraft_server'));
   assert.ok(!toolNames({ ...player, platform: constants.PLATFORM_DISCORD, isActiveMember: true }).includes('minecraft_server'));
 
+  envConfig.MINECRAFT_ENABLED = false;
+  assert.ok(!toolNames(player).includes('minecraft_server'));
+  envConfig.MINECRAFT_ENABLED = true;
   envConfig.MINECRAFT_AGENT_TOKEN = '';
   assert.ok(!toolNames(player).includes('minecraft_server'));
 });

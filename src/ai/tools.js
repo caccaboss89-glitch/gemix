@@ -8,7 +8,7 @@ import constants from '../config/constants.js';
 import { TOOL, getCapabilities } from '../config/platformCapabilities.js';
 import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
 import { RUNTIME, resolveProviderProfile } from './providers/providerProfile.js';
-import { isMinecraftConfigured } from '../minecraft/controller.js';
+import { isMinecraftEnabled } from '../minecraft/controller.js';
 import {
   buildEmailTool,
   buildReadSentMessagesTool,
@@ -133,7 +133,7 @@ function getToolsForUser(toolCtx) {
   }
 
   // The Minecraft server belongs to its own player list, not to membership.
-  if (isWhatsApp && toolCtx.isMinecraftPlayer && isMinecraftConfigured()) {
+  if (isWhatsApp && toolCtx.isMinecraftPlayer && isMinecraftEnabled()) {
     tools.push(buildMinecraftServerTool(isAdmin));
     tools.push(TOOL_MINECRAFT_COMMAND);
   }

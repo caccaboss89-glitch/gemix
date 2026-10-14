@@ -90,12 +90,14 @@ test('tool composition fails closed without an explicit supported platform', () 
 test('every function offered by the complete context matrix has exactly one executor', () => {
   const saved = {
     AI_PROVIDER: envConfig.AI_PROVIDER,
+    MINECRAFT_ENABLED: envConfig.MINECRAFT_ENABLED,
     MINECRAFT_PC_HOST: envConfig.MINECRAFT_PC_HOST,
     MINECRAFT_PC_MAC: envConfig.MINECRAFT_PC_MAC,
     MINECRAFT_AGENT_TOKEN: envConfig.MINECRAFT_AGENT_TOKEN
   };
   Object.assign(envConfig, {
     AI_PROVIDER: 'xai',
+    MINECRAFT_ENABLED: true,
     MINECRAFT_PC_HOST: '192.0.2.10',
     MINECRAFT_PC_MAC: '00:00:5e:00:53:01',
     MINECRAFT_AGENT_TOKEN: 't'

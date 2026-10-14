@@ -256,8 +256,10 @@ export default {
   // a magic packet to MINECRAFT_PC_MAC, sent to MINECRAFT_PC_BROADCAST, and
   // then talks to the agent at MINECRAFT_PC_HOST:MINECRAFT_AGENT_PORT with
   // MINECRAFT_AGENT_TOKEN. The agent runs on the PC from this same file and
-  // starts MINECRAFT_SERVER_SCRIPT. The feature is off while the host, the MAC
-  // or the token is missing.
+  // starts MINECRAFT_SERVER_SCRIPT. The feature is off while MINECRAFT_ENABLED
+  // is false or the host, the MAC or the token is missing; the switch is
+  // GemiX's alone, the agent ignores it.
+  MINECRAFT_ENABLED: toBool(process.env.MINECRAFT_ENABLED, true),
   MINECRAFT_PC_HOST: process.env.MINECRAFT_PC_HOST || '',
   MINECRAFT_PC_MAC: process.env.MINECRAFT_PC_MAC || '',
   MINECRAFT_PC_BROADCAST: process.env.MINECRAFT_PC_BROADCAST || '255.255.255.255',

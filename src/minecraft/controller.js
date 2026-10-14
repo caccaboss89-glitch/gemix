@@ -44,9 +44,10 @@ class MinecraftError extends Error {
   }
 }
 
-/** Whether .env configures the feature at all. */
-function isMinecraftConfigured() {
-  return Boolean(envConfig.MINECRAFT_PC_HOST && envConfig.MINECRAFT_PC_MAC && envConfig.MINECRAFT_AGENT_TOKEN);
+/** Whether .env turns the feature on and configures it. */
+function isMinecraftEnabled() {
+  return envConfig.MINECRAFT_ENABLED
+    && Boolean(envConfig.MINECRAFT_PC_HOST && envConfig.MINECRAFT_PC_MAC && envConfig.MINECRAFT_AGENT_TOKEN);
 }
 
 /**
@@ -236,4 +237,4 @@ function _untilAborted(promise, signal) {
 
 const minecraft = createMinecraftController();
 
-export { MinecraftError, PHASE, createMinecraftController, isMinecraftConfigured, minecraft };
+export { MinecraftError, PHASE, createMinecraftController, isMinecraftEnabled, minecraft };
