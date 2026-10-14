@@ -221,22 +221,33 @@ function underCaseDeployment(id, fn) {
   const saved = {
     provider: envConfig.AI_PROVIDER,
     accounts: envConfig.CLOUDFLARE_AI_ACCOUNTS,
-    claudeToken: envConfig.CLAUDE_CODE_OAUTH_TOKEN
+    claudeToken: envConfig.CLAUDE_CODE_OAUTH_TOKEN,
+    minecraft: {
+      MINECRAFT_PC_HOST: envConfig.MINECRAFT_PC_HOST,
+      MINECRAFT_PC_MAC: envConfig.MINECRAFT_PC_MAC,
+      MINECRAFT_AGENT_TOKEN: envConfig.MINECRAFT_AGENT_TOKEN
+    }
   };
   envConfig.AI_PROVIDER = deployment.provider;
-  // Placeholder credentials: the dump only asks whether a backend or the Claude
-  // profile is configured, and never calls either.
+  // Placeholder credentials: the dump only asks whether a backend, the Claude
+  // profile or the Minecraft PC is configured, and never calls any of them.
   envConfig.CLOUDFLARE_AI_ACCOUNTS = deployment.cloudflare
     ? (saved.accounts.length > 0 ? saved.accounts : [{ accountId: 'dump-account', apiToken: 'dump-token' }])
     : [];
   envConfig.CLAUDE_CODE_OAUTH_TOKEN = saved.claudeToken || 'dump-token';
+  Object.assign(envConfig, {
+    MINECRAFT_PC_HOST: '192.0.2.10',
+    MINECRAFT_PC_MAC: '00:00:5e:00:53:01',
+    MINECRAFT_AGENT_TOKEN: 'dump-token'
+  });
   _resetActiveProfileForTests();
   try { return fn(); }
   finally {
     Object.assign(envConfig, {
       AI_PROVIDER: saved.provider,
       CLOUDFLARE_AI_ACCOUNTS: saved.accounts,
-      CLAUDE_CODE_OAUTH_TOKEN: saved.claudeToken
+      CLAUDE_CODE_OAUTH_TOKEN: saved.claudeToken,
+      ...saved.minecraft
     });
     _resetActiveProfileForTests();
   }
@@ -274,7 +285,8 @@ function renderCase(id) {
     ...userCtx,
     isActiveMember: Boolean(identity.isActiveMember),
     isAdmin: Boolean(identity.isAdmin),
-    isLegal: Boolean(identity.isLegal)
+    isLegal: Boolean(identity.isLegal),
+    isMinecraftPlayer: Boolean(identity.isMinecraftPlayer)
   });
   const isDiscord = ctx.platform === PLATFORM_DISCORD;
   const responseFormat = buildGemixResponseFormat({

@@ -45,7 +45,9 @@ const TOOL = {
   READ_SENT_MESSAGES: 'read_sent_messages',
   FORMAL_PDF: 'generate_formal_request_pdf',
   BUG_REPORT: 'bug_report',
-  LOAD_TOOLS: 'load_tools'
+  LOAD_TOOLS: 'load_tools',
+  MINECRAFT_SERVER: 'minecraft_server',
+  MINECRAFT_COMMAND: 'minecraft_command'
 };
 
 const CAPS = {

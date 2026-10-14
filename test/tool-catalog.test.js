@@ -88,8 +88,18 @@ test('tool composition fails closed without an explicit supported platform', () 
 });
 
 test('every function offered by the complete context matrix has exactly one executor', () => {
-  const savedProvider = envConfig.AI_PROVIDER;
-  envConfig.AI_PROVIDER = 'xai';
+  const saved = {
+    AI_PROVIDER: envConfig.AI_PROVIDER,
+    MINECRAFT_PC_HOST: envConfig.MINECRAFT_PC_HOST,
+    MINECRAFT_PC_MAC: envConfig.MINECRAFT_PC_MAC,
+    MINECRAFT_AGENT_TOKEN: envConfig.MINECRAFT_AGENT_TOKEN
+  };
+  Object.assign(envConfig, {
+    AI_PROVIDER: 'xai',
+    MINECRAFT_PC_HOST: '192.0.2.10',
+    MINECRAFT_PC_MAC: '00:00:5e:00:53:01',
+    MINECRAFT_AGENT_TOKEN: 't'
+  });
   _resetActiveProfileForTests();
   try {
     const offered = new Set();
@@ -101,8 +111,10 @@ test('every function offered by the complete context matrix has exactly one exec
       for (const isGroup of [false, true]) {
         for (const isActiveMember of [false, true]) {
           for (const isAdmin of [false, true]) {
-            for (const tool of getToolsForUser({ platform, isGroup, isActiveMember, isAdmin })) {
-              if (tool.function?.name) offered.add(tool.function.name);
+            for (const isMinecraftPlayer of [false, true]) {
+              for (const tool of getToolsForUser({ platform, isGroup, isActiveMember, isAdmin, isMinecraftPlayer })) {
+                if (tool.function?.name) offered.add(tool.function.name);
+              }
             }
           }
         }
@@ -115,7 +127,7 @@ test('every function offered by the complete context matrix has exactly one exec
     assert.deepEqual(registered, actual, 'executor registry drifted from live offered schemas');
     assert.deepEqual(declared, actual, 'capability constants drifted from live offered schemas');
   } finally {
-    envConfig.AI_PROVIDER = savedProvider;
+    Object.assign(envConfig, saved);
     _resetActiveProfileForTests();
   }
 });

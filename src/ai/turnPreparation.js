@@ -136,6 +136,7 @@ async function prepareTurn(ctx, ui) {
     isActiveMember: ui.isActiveMember,
     isAdmin: Boolean(ui.isAdmin),
     isLegal: Boolean(ui.isLegal),
+    isMinecraftPlayer: Boolean(ui.isMinecraftPlayer),
     member: ui.member,
     taskFileId: ui.taskFileId,
     settingsFileId,

@@ -8,6 +8,7 @@ import constants from '../config/constants.js';
 import { TOOL, getCapabilities } from '../config/platformCapabilities.js';
 import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
 import { RUNTIME, resolveProviderProfile } from './providers/providerProfile.js';
+import { isMinecraftConfigured } from '../minecraft/controller.js';
 import {
   buildEmailTool,
   buildReadSentMessagesTool,
@@ -15,6 +16,7 @@ import {
 } from './tools/deliveryCatalog.js';
 import { buildGenerateFormalRequestPdfTool } from './tools/documentCatalog.js';
 import { buildLoadToolsTool } from './tools/loadingCatalog.js';
+import { TOOL_MINECRAFT_COMMAND, buildMinecraftServerTool } from './tools/minecraftCatalog.js';
 import {
   TOOL_GENERATE_MUSIC,
   TOOL_GENERATE_VIDEO,
@@ -37,6 +39,7 @@ import { workspaceTools } from './tools/workspaceCatalog.js';
  * @property {boolean} [isActiveMember]
  * @property {boolean} [isAdmin]
  * @property {boolean} [isLegal]
+ * @property {boolean} [isMinecraftPlayer]
  * @property {string} platform
  * @property {boolean} [isGroup]
  */
@@ -62,7 +65,9 @@ const DEFERRED_TOOLS = new Set([
   TOOL.SEND_WHATSAPP,
   TOOL.READ_SENT_MESSAGES,
   TOOL.MANAGE_PREFERENCES,
-  TOOL.TOGGLE_RELEASE
+  TOOL.TOGGLE_RELEASE,
+  TOOL.MINECRAFT_SERVER,
+  TOOL.MINECRAFT_COMMAND
 ]);
 
 const SUPPORTED_TOOL_PLATFORMS = new Set([
@@ -125,6 +130,12 @@ function getToolsForUser(toolCtx) {
   if (isActiveMember && isWhatsApp) {
     tools.push(TOOL_READ_MUSIC_STATS);
     tools.push(buildReadSentMessagesTool(isAdmin));
+  }
+
+  // The Minecraft server belongs to its own player list, not to membership.
+  if (isWhatsApp && toolCtx.isMinecraftPlayer && isMinecraftConfigured()) {
+    tools.push(buildMinecraftServerTool(isAdmin));
+    tools.push(TOOL_MINECRAFT_COMMAND);
   }
 
   // The administrator already sees this conversation and its tool failures;

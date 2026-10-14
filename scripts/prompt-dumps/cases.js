@@ -52,6 +52,11 @@ const NON_ACTIVE = {
   member: null,
   taskFileId: 'wa_3999999999'
 };
+const NON_ACTIVE_PLAYER = {
+  ...NON_ACTIVE,
+  isMinecraftPlayer: true,
+  taskFileId: 'wa_3999999998'
+};
 
 /** Stable, non-sensitive roster used by the offline prompt corpus. */
 const MOCK_ACTIVE_MEMBERS = [
@@ -410,6 +415,22 @@ const CASES = {
       rulesContext: '[STATUTE EXCERPT PLACEHOLDER]',
       serverEvents: '',
       availableEmojis: ''
+    }
+  },
+  // A listed Minecraft player who is not an active member: the server tools
+  // follow the player list, not membership, and stay deferred.
+  23: {
+    label: 'WA dedicated group — non-active Minecraft player',
+    ctx: {
+      platform: PLATFORM_WA_DEDICATED,
+      isGroup: true,
+      groupId: 'grp@test.g.us',
+      groupName: 'Test Group',
+      chatId: 'grp@test.g.us',
+      userName: 'Player User',
+      userIdentity: NON_ACTIVE_PLAYER,
+      userWorkspace: EMPTY_WORKSPACE,
+      groupParticipants: MOCK_GROUP_PARTICIPANTS
     }
   }
 };

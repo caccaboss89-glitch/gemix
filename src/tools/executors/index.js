@@ -7,6 +7,7 @@ import { DELIVERY_TOOL_EXECUTORS } from './delivery.js';
 import { DOCUMENT_TOOL_EXECUTORS } from './document.js';
 import { LOADING_TOOL_EXECUTORS } from './loading.js';
 import { MEDIA_TOOL_EXECUTORS } from './media.js';
+import { MINECRAFT_TOOL_EXECUTORS } from './minecraft.js';
 import { PREFERENCE_TOOL_EXECUTORS } from './preferences.js';
 import { SYSTEM_TOOL_EXECUTORS } from './system.js';
 import { TASK_TOOL_EXECUTORS } from './tasks.js';
@@ -33,7 +34,8 @@ const TOOL_EXECUTORS = _mergeExecutorMaps([
   DOCUMENT_TOOL_EXECUTORS,
   PREFERENCE_TOOL_EXECUTORS,
   SYSTEM_TOOL_EXECUTORS,
-  LOADING_TOOL_EXECUTORS
+  LOADING_TOOL_EXECUTORS,
+  MINECRAFT_TOOL_EXECUTORS
 ]);
 
 function getToolExecutor(name) {

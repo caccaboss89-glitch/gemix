@@ -84,6 +84,7 @@ function resolvePromptTools(ctx) {
     isActiveMember: Boolean(ctx.userIdentity?.isActiveMember),
     isAdmin: Boolean(ctx.userIdentity?.isAdmin),
     isLegal: Boolean(ctx.userIdentity?.isLegal),
+    isMinecraftPlayer: Boolean(ctx.userIdentity?.isMinecraftPlayer),
     platform: ctx.platform,
     isGroup: ctx.isGroup
   });

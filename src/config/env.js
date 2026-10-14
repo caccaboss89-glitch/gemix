@@ -252,5 +252,18 @@ export default {
   // executablePath. Set it only for a deployment with a real system binary.
   CHROMIUM_PATH: process.env.CHROMIUM_PATH || '',
 
+  // Minecraft server on the admin's PC (src/minecraft). GemiX wakes the PC with
+  // a magic packet to MINECRAFT_PC_MAC, sent to MINECRAFT_PC_BROADCAST, and
+  // then talks to the agent at MINECRAFT_PC_HOST:MINECRAFT_AGENT_PORT with
+  // MINECRAFT_AGENT_TOKEN. The agent runs on the PC from this same file and
+  // starts MINECRAFT_SERVER_SCRIPT. The feature is off while the host, the MAC
+  // or the token is missing.
+  MINECRAFT_PC_HOST: process.env.MINECRAFT_PC_HOST || '',
+  MINECRAFT_PC_MAC: process.env.MINECRAFT_PC_MAC || '',
+  MINECRAFT_PC_BROADCAST: process.env.MINECRAFT_PC_BROADCAST || '255.255.255.255',
+  MINECRAFT_AGENT_PORT: toIntInRange(process.env.MINECRAFT_AGENT_PORT, 1, 65535, 25580),
+  MINECRAFT_AGENT_TOKEN: process.env.MINECRAFT_AGENT_TOKEN || '',
+  MINECRAFT_SERVER_SCRIPT: process.env.MINECRAFT_SERVER_SCRIPT || '',
+
   SUBPROCESS_BASE_ENV
 };
