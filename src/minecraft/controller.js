@@ -6,29 +6,21 @@
 // At most one power operation runs at a time. A start asked while another is
 // under way joins it: the PC is woken and the server started once, and every
 // waiting chat hears the same progress. A shutdown never overlaps a start.
-//
-// The admin's own use of the PC is protected. GemiX remembers the boot it
-// caused, so the PC may be turned off only in that same boot (not after the
-// admin turned it on or restarted it) and only while nobody is using it. An
-// admin's own request is the exception.
+// Only the admin is offered the shutdown (see tools/minecraftCatalog.js).
 
 import envConfig from '../config/env.js';
-import * as systemState from '../utils/systemState.js';
 import { createLogger } from '../utils/logger.js';
 import { AgentReplyError, callAgent } from './agentClient.js';
 import { sendMagicPacket } from './wakeOnLan.js';
 
 const log = createLogger('Minecraft');
 
-const STATE_MODULE = 'minecraft';
 /** How long the PC gets to boot and answer, and how often the packet is repeated meanwhile. */
 const BOOT_TIMEOUT_MS = 5 * 60 * 1000;
 const WAKE_RESEND_MS = 15_000;
 /** How long the server gets to come up once started. */
 const READY_TIMEOUT_MS = 8 * 60 * 1000;
 const POLL_MS = 5_000;
-/** A boot this close before the magic packet still counts as GemiX's. */
-const BOOT_SLACK_MS = 2 * 60 * 1000;
 
 // A command can be `stop`, which waits for the server to exit.
 const TIMEOUT = { status: 25_000, start: 30_000, log: 60_000, stop: 3 * 60 * 1000 };
@@ -56,7 +48,6 @@ function isMinecraftEnabled() {
 function createMinecraftController({
   agent = callAgent,
   wake = () => sendMagicPacket({ mac: envConfig.MINECRAFT_PC_MAC, broadcast: envConfig.MINECRAFT_PC_BROADCAST }),
-  state = systemState,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   now = Date.now
 } = {}) {
@@ -89,9 +80,6 @@ function createMinecraftController({
       await sleep(POLL_MS);
       const pc = await readPc();
       if (pc) {
-        if (Date.parse(pc.bootTime) >= wokeAt - BOOT_SLACK_MS) {
-          await state.update(STATE_MODULE, { wokeBootTime: pc.bootTime });
-        }
         log.info(`PC answered after ${Math.round((now() - wokeAt) / 1000)}s`);
         return pc;
       }
@@ -161,11 +149,9 @@ function createMinecraftController({
 
   /**
    * Stop the server and turn the PC off.
-   *
-   * @param {{ byAdmin: boolean }} opts - an admin's request skips the protection of the admin's use
-   * @returns {Promise<{ outcome: 'already_off'|'not_ours'|'in_use'|'shutting_down', console?: string }>}
+   * @returns {Promise<{ outcome: 'already_off'|'shutting_down', console?: string }>}
    */
-  async function shutdown({ byAdmin }) {
+  async function shutdown() {
     if (operation) {
       throw new MinecraftError(operation.kind === 'start' ? 'starting' : 'shutting_down', operation.kind === 'start'
         ? 'The PC and server are being started; wait until that is done.'
@@ -175,19 +161,8 @@ function createMinecraftController({
     try {
       const pc = await readPc();
       if (!pc) return { outcome: 'already_off' };
-      if (!byAdmin) {
-        if (state.get(STATE_MODULE)?.wokeBootTime !== pc.bootTime) return { outcome: 'not_ours' };
-        if (pc.userPresent) return { outcome: 'in_use' };
-      }
-      let reply;
-      try {
-        reply = await agent('POST', '/shutdown', { body: { force: byAdmin }, timeoutMs: TIMEOUT.stop });
-      } catch (err) {
-        if (err instanceof AgentReplyError && err.code === 'user_present') return { outcome: 'in_use' };
-        throw err;
-      }
-      await state.update(STATE_MODULE, { wokeBootTime: null });
-      log.info(`PC shutdown requested${byAdmin ? ' by the admin' : ''}`);
+      const reply = await agent('POST', '/shutdown', { timeoutMs: TIMEOUT.stop });
+      log.info('PC shutdown requested');
       return { outcome: 'shutting_down', console: reply.console || '' };
     } finally {
       operation = null;
@@ -197,11 +172,7 @@ function createMinecraftController({
   /** The PC and server as they are now; pc is null while the PC is off. */
   async function status() {
     const pc = await readPc();
-    return {
-      pc,
-      booting: operation?.kind === 'start' && operation.phase === PHASE.WAKING,
-      wokeByGemix: Boolean(pc && state.get(STATE_MODULE)?.wokeBootTime === pc.bootTime)
-    };
+    return { pc, booting: operation?.kind === 'start' && operation.phase === PHASE.WAKING };
   }
 
   /** Run something on the agent of a PC that is on; null while it is off. */

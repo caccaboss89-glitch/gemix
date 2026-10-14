@@ -4,14 +4,12 @@
 // there from boot (scripts/minecraft-pc-agent.js) and answers only requests
 // carrying the shared token, over the LAN:
 //
-//   GET  /status    the PC's boot time, whether someone is using it, the server
-//                   state, who is online and the address players join
+//   GET  /status    the server state, who is online and the address players join
 //   POST /start     run the server's start script, unless the server is up
 //   POST /command   run a console command over RCON; `stop` stops the server
 //   POST /stop      save the world and stop the server
 //   GET  /log       the server log since its last start
-//   POST /shutdown  stop the server, then turn the PC off; refused while
-//                   someone is using the PC, unless the request forces it
+//   POST /shutdown  stop the server, then turn the PC off
 //
 // The script, server.properties and ddns.conf are read on every request, so
 // an edit to them needs no agent restart. Commands reach the server over RCON
@@ -24,7 +22,6 @@ import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { runRconCommand } from './rcon.js';
-import { isUserPresent } from './windowsSessions.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -42,27 +39,17 @@ const COMMAND_MAX_CHARS = 1_000;
 const PROBE_TIMEOUT_MS = 15_000;
 const SHUTDOWN_DELAY_S = 15;
 
-const PROBE_SCRIPT = [
-  '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
-  '$java = @(Get-CimInstance Win32_Process -Filter "Name=\'java.exe\'" | Where-Object { $_.CommandLine -match \'-jar\\s+"?([^"]*[\\\\/])?server\\.jar\' } | ForEach-Object { $_.ProcessId })',
-  '$explorers = @(Get-CimInstance Win32_Process -Filter "Name=\'explorer.exe\'" | ForEach-Object { @{ session = [int]$_.SessionId; started = $_.CreationDate.ToUniversalTime().ToString(\'o\') } })',
-  '$boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString(\'o\')',
-  '$quser = (quser 2>$null) -join "`n"',
-  'ConvertTo-Json -Compress -Depth 4 @{ java = $java; explorers = $explorers; boot = $boot; quser = [string]$quser }'
-].join('\n');
+/** Counts the java processes running a server.jar. */
+const PROBE_SCRIPT = '@(Get-CimInstance Win32_Process -Filter "Name=\'java.exe\'" | Where-Object { '
+  + '$_.CommandLine -match \'-jar\\s+"?([^"]*[\\\\/])?server\\.jar\' }).Count';
 
-/** What the PC is doing now: java processes, sessions and boot time. */
+/** Whether the server's java process is running. */
 async function probeWindows() {
   const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PROBE_SCRIPT], {
     timeout: PROBE_TIMEOUT_MS,
     windowsHide: true
   });
-  const probe = JSON.parse(stdout);
-  return {
-    javaRunning: probe.java.length > 0,
-    bootTime: probe.boot,
-    userPresent: isUserPresent({ quser: probe.quser, explorers: probe.explorers })
-  };
+  return { javaRunning: Number(stdout.trim()) > 0 };
 }
 
 /** key=value lines, as server.properties and ddns.conf write them. */
@@ -155,7 +142,7 @@ function createAgentHandler({
 
   async function status() {
     const pc = await probe();
-    return { bootTime: pc.bootTime, userPresent: pc.userPresent, ...(await serverState(pc)), address: address() };
+    return { ...(await serverState(pc)), address: address() };
   }
 
   function logSize() {
@@ -248,11 +235,8 @@ function createAgentHandler({
     return { log: logSince(0, LOG_MAX_BYTES), truncated: size > LOG_MAX_BYTES };
   }
 
-  async function shutdown(body) {
+  async function shutdown() {
     const current = await status();
-    if (current.userPresent && body.force !== true) {
-      throw new AgentError(409, 'user_present', 'Someone is using the PC.');
-    }
     let stopped = null;
     if (current.server !== 'stopped') stopped = await stop();
     await powerOff();

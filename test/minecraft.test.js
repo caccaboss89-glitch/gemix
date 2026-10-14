@@ -1,8 +1,8 @@
 // test/minecraft.test.js
 //
-// The Minecraft server on the admin's PC: the RCON client, who counts as using
-// the PC, the PC agent's request handling, the shared power controller and the
-// tools only listed players get on WhatsApp.
+// The Minecraft server on the admin's PC: the RCON client, the PC agent's
+// request handling, the shared power controller and the tools only listed
+// players get on WhatsApp.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,12 +13,10 @@ import test from 'node:test';
 import constants from '../src/config/constants.js';
 import envConfig from '../src/config/env.js';
 import { getToolsForUser, isDeferredTool } from '../src/ai/tools.js';
-import { AgentReplyError } from '../src/minecraft/agentClient.js';
 import { createMinecraftController } from '../src/minecraft/controller.js';
 import { createAgentHandler } from '../src/minecraft/pcAgent.js';
 import { decodePackets, encodePacket, runRconCommand } from '../src/minecraft/rcon.js';
 import { magicPacket } from '../src/minecraft/wakeOnLan.js';
-import { isUserPresent, parseIdleMs, parseQuserSessions } from '../src/minecraft/windowsSessions.js';
 
 /** A fake RCON server: answers the login, then each command with its `replies` parts, one packet each. */
 async function fakeRconServer({ password, replies }) {
@@ -59,37 +57,6 @@ test('RCON joins a reply split over several packets and strips formatting codes'
   }
 });
 
-test('quser idle times parse in every format, and a disconnected session has no session name', () => {
-  assert.equal(parseIdleMs('nessuno'), 0);
-  assert.equal(parseIdleMs('.'), 0);
-  assert.equal(parseIdleMs('7'), 7 * 60_000);
-  assert.equal(parseIdleMs('1:05'), 65 * 60_000);
-  assert.equal(parseIdleMs('2+03:04'), ((2 * 24 + 3) * 60 + 4) * 60_000);
-  const sessions = parseQuserSessions([
-    ' NOMEUTENTE            NOMESESSIONE       ID  STATO   INATTIVITÀ ACCESSO',
-    '>amministratore        console             1  Attivo         12  14/10/2026 17:41',
-    ' altro                                     2  Disc         1:00  14/10/2026 09:00'
-  ].join('\n'));
-  assert.deepEqual(sessions, [
-    { id: 1, connected: true, idleMs: 12 * 60_000 },
-    { id: 2, connected: false, idleMs: 60 * 60_000 }
-  ]);
-});
-
-test('someone uses the PC only when a connected session saw input after its logon', () => {
-  const now = Date.parse('2026-10-14T18:00:00Z');
-  const explorers = [{ session: 1, started: '2026-10-14T17:30:00.000Z' }];
-  const quser = idle => `HEADER\n>amministratore  console  1  Attivo  ${idle}  14/10/2026 19:29`;
-  // Auto-logon 30 minutes ago and untouched since: idle as long as the session.
-  assert.equal(isUserPresent({ quser: quser('29'), explorers, now }), false);
-  // Input 10 minutes ago.
-  assert.equal(isUserPresent({ quser: quser('10'), explorers, now }), true);
-  // A session whose explorer has not started yet gets the benefit of the doubt.
-  assert.equal(isUserPresent({ quser: quser('29'), explorers: [], now }), true);
-  // Nobody logged in.
-  assert.equal(isUserPresent({ quser: '', explorers: [], now }), false);
-});
-
 test('the magic packet is six 0xFF bytes and the MAC sixteen times', () => {
   const packet = magicPacket('60:CF:84:AE:03:33');
   assert.equal(packet.length, 102);
@@ -109,9 +76,9 @@ function makeServerDir() {
 }
 
 function fakePc() {
-  const pc = { javaRunning: false, rconUp: false, userPresent: false, launches: 0, poweredOff: false, commands: [] };
+  const pc = { javaRunning: false, rconUp: false, launches: 0, poweredOff: false, commands: [] };
   pc.deps = {
-    probe: async () => ({ javaRunning: pc.javaRunning, bootTime: '2026-10-14T15:00:00Z', userPresent: pc.userPresent }),
+    probe: async () => ({ javaRunning: pc.javaRunning }),
     rcon: async ({ command }) => {
       if (!pc.rconUp) throw new Error('ECONNREFUSED');
       pc.commands.push(command);
@@ -155,16 +122,13 @@ test('the PC agent starts the server once, runs commands only while it is up, an
   assert.ok(pc.commands.includes('stop'));
 });
 
-test('the PC agent refuses to turn the PC off under someone unless forced, and stops the server first', async () => {
+test('the PC agent stops the server before turning the PC off', async () => {
   const dir = makeServerDir();
   const pc = fakePc();
   const handle = createAgentHandler({ scriptPath: path.join(dir, 'start.bat'), childEnv: {}, ...pc.deps });
   pc.javaRunning = true;
   pc.rconUp = true;
-  pc.userPresent = true;
-  await assert.rejects(handle('POST', '/shutdown', {}), { code: 'user_present' });
-  assert.equal(pc.poweredOff, false);
-  await handle('POST', '/shutdown', { force: true });
+  await handle('POST', '/shutdown');
   assert.ok(pc.commands.includes('stop'));
   assert.equal(pc.poweredOff, true);
 });
@@ -179,15 +143,19 @@ test('the PC agent needs RCON enabled in server.properties', async () => {
 });
 
 /** A PC behind the controller: off until woken, then booting for two polls. */
-function fakeAgent({ on = false, bootTime = '2026-10-14T15:00:00.000Z', userPresent = false } = {}) {
-  const pc = { on, bootTime, userPresent, server: 'stopped', wakes: 0, starts: 0, bootPolls: 0, shutdowns: [] };
-  pc.wake = async () => { pc.wakes += 1; };
-  pc.agent = async (method, route, opts) => {
+function fakeAgent({ on = false } = {}) {
+  const pc = { on, booting: false, server: 'stopped', wakes: 0, starts: 0, bootPolls: 0, shutdowns: 0 };
+  pc.wake = async () => {
+    pc.wakes += 1;
+    pc.booting = true;
+  };
+  pc.agent = async (method, route) => {
     if (!pc.on) {
-      if (pc.wakes > 0 && ++pc.bootPolls >= 2) pc.on = true;
-      else throw new TypeError('fetch failed');
+      if (!pc.booting || ++pc.bootPolls < 2) throw new TypeError('fetch failed');
+      pc.on = true;
+      pc.booting = false;
     }
-    const status = () => ({ bootTime: pc.bootTime, userPresent: pc.userPresent, server: pc.server, players: null, address: 'a:1' });
+    const status = () => ({ server: pc.server, players: null, address: 'a:1' });
     if (route === '/status') {
       if (pc.server === 'starting') pc.server = 'running';
       return status();
@@ -198,8 +166,9 @@ function fakeAgent({ on = false, bootTime = '2026-10-14T15:00:00.000Z', userPres
       return status();
     }
     if (route === '/shutdown') {
-      if (pc.userPresent && !opts.body.force) throw new AgentReplyError(409, 'user_present', 'busy');
-      pc.shutdowns.push(opts.body);
+      pc.shutdowns += 1;
+      pc.on = false;
+      pc.server = 'stopped';
       return { shuttingDown: true, console: '' };
     }
     throw new Error(`unexpected ${route}`);
@@ -207,19 +176,12 @@ function fakeAgent({ on = false, bootTime = '2026-10-14T15:00:00.000Z', userPres
   return pc;
 }
 
-function memoryState(initial = {}) {
-  let value = initial;
-  return { get: () => value, update: async (_module, next) => { value = { ...value, ...next }; } };
-}
-
 test('concurrent starts wake the PC and launch the server once, and every chat hears the progress', async () => {
   let clock = Date.parse('2026-10-14T15:00:00.000Z');
   const pc = fakeAgent();
-  const state = memoryState();
   const controller = createMinecraftController({
     agent: pc.agent,
     wake: pc.wake,
-    state,
     sleep: async (ms) => { clock += ms; await new Promise(resolve => setImmediate(resolve)); },
     now: () => clock
   });
@@ -234,29 +196,10 @@ test('concurrent starts wake the PC and launch the server once, and every chat h
   assert.equal(pc.starts, 1);
   assert.deepEqual(heard.first, [['waking', false], ['starting', false]]);
   assert.deepEqual(heard.second, [['waking', true], ['starting', true]]);
-  assert.equal(state.get().wokeBootTime, pc.bootTime);
 
-  // Woken by GemiX and untouched: a player may turn it off.
-  assert.equal((await controller.shutdown({ byAdmin: false })).outcome, 'shutting_down');
-  assert.equal(state.get().wokeBootTime, null);
-});
-
-test('a PC the admin turned on, or one in use, stays on unless the admin asks', async () => {
-  const pc = fakeAgent({ on: true });
-  const controller = createMinecraftController({ agent: pc.agent, wake: pc.wake, state: memoryState(), sleep: async () => {} });
-  assert.equal((await controller.shutdown({ byAdmin: false })).outcome, 'not_ours');
-
-  const used = fakeAgent({ on: true, userPresent: true });
-  const usedController = createMinecraftController({
-    agent: used.agent,
-    wake: used.wake,
-    state: memoryState({ wokeBootTime: used.bootTime }),
-    sleep: async () => {}
-  });
-  assert.equal((await usedController.shutdown({ byAdmin: false })).outcome, 'in_use');
-  assert.equal((await usedController.shutdown({ byAdmin: true })).outcome, 'shutting_down');
-  assert.deepEqual(used.shutdowns, [{ force: true }]);
-  assert.equal(pc.shutdowns.length, 0);
+  assert.equal((await controller.shutdown()).outcome, 'shutting_down');
+  assert.equal((await controller.shutdown()).outcome, 'already_off');
+  assert.equal(pc.shutdowns, 1);
 });
 
 test('a shutdown is refused while a start is under way', async () => {
@@ -266,16 +209,15 @@ test('a shutdown is refused while a start is under way', async () => {
   const controller = createMinecraftController({
     agent: async (...args) => { await gate; return pc.agent(...args); },
     wake: pc.wake,
-    state: memoryState(),
     sleep: async () => {}
   });
   const starting = controller.start();
-  await assert.rejects(controller.shutdown({ byAdmin: true }), { code: 'starting' });
+  await assert.rejects(controller.shutdown(), { code: 'starting' });
   release();
   assert.equal((await starting).pc.server, 'running');
 });
 
-test('the Minecraft tools reach only listed players on WhatsApp, and wait to be loaded', (t) => {
+test('the Minecraft tools reach only listed players on WhatsApp, wait to be loaded, and only the admin can turn the PC off', (t) => {
   const saved = {
     MINECRAFT_ENABLED: envConfig.MINECRAFT_ENABLED,
     MINECRAFT_PC_HOST: envConfig.MINECRAFT_PC_HOST,
@@ -295,6 +237,10 @@ test('the Minecraft tools reach only listed players on WhatsApp, and wait to be 
   assert.ok(toolNames(player).includes('minecraft_server'));
   assert.ok(toolNames(player).includes('minecraft_command'));
   assert.ok(isDeferredTool('minecraft_server') && isDeferredTool('minecraft_command'));
+  const actions = ctx => getToolsForUser(ctx).find(tool => tool.function?.name === 'minecraft_server')
+    .function.parameters.properties.action.enum;
+  assert.ok(!actions(player).includes('shutdown_pc'));
+  assert.ok(actions({ ...player, isActiveMember: true, isAdmin: true }).includes('shutdown_pc'));
   assert.ok(!toolNames({ ...player, isMinecraftPlayer: false }).includes('minecraft_server'));
   assert.ok(!toolNames({ ...player, platform: constants.PLATFORM_DISCORD, isActiveMember: true }).includes('minecraft_server'));
 

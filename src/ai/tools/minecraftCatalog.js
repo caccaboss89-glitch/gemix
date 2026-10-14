@@ -8,12 +8,13 @@ import { makeTool } from './schema.js';
 const MINECRAFT_SERVER_ACTIONS = ['status', 'start', 'stop', 'log', 'shutdown_pc'];
 
 /**
- * @param {boolean} isAdmin - the admin's own shutdown request goes through regardless
+ * @param {boolean} isAdmin - only the admin is offered shutdown_pc
  */
 function buildMinecraftServerTool(isAdmin) {
-  const shutdownLimit = isAdmin
-    ? 'Since the request comes from the admin, it goes through even if they turned the PC on or someone is at it.'
-    : 'It is refused when the admin turned the PC on or someone is using it.';
+  const shutdown = isAdmin
+    ? 'shutdown_pc: stops the server and turns the PC off. Use it only when the admin explicitly asks to turn the PC '
+      + 'off, never on your own.'
+    : 'Only the admin can have you turn the PC off.';
   return makeTool({
     name: 'minecraft_server',
     description: 'Control the Minecraft server hosted on the admin\'s PC, which stays off until someone needs it. '
@@ -22,10 +23,13 @@ function buildMinecraftServerTool(isAdmin) {
       + 'progress messages; requests from several chats share one start. '
       + 'stop: saves the world and stops the server, leaving the PC on. '
       + 'log: copies the server log since its last start into workspace/ for read_file. '
-      + 'shutdown_pc: stops the server and turns the PC off. Use it only when the user explicitly asks to turn the PC '
-      + `off, never on your own. ${shutdownLimit}`,
+      + shutdown,
     properties: {
-      action: { type: 'string', enum: MINECRAFT_SERVER_ACTIONS, description: 'What to do.' }
+      action: {
+        type: 'string',
+        enum: isAdmin ? MINECRAFT_SERVER_ACTIONS : MINECRAFT_SERVER_ACTIONS.filter(action => action !== 'shutdown_pc'),
+        description: 'What to do.'
+      }
     },
     required: ['action']
   });

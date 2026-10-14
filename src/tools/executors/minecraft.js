@@ -85,19 +85,10 @@ async function _log(userCtx) {
   return _ok({ path: staged.display }, `The server log since its last start is saved as "${staged.display}".${truncated}`);
 }
 
-async function _shutdownPc(userCtx) {
-  const result = await minecraft.shutdown({ byAdmin: Boolean(userCtx.isAdmin) });
-  switch (result.outcome) {
-  case 'already_off':
-    return _ok({ pc: 'off' }, 'The PC was already off.');
-  case 'not_ours':
-    return _failed('The admin turned this PC on, so it stays on: only the admin can turn it off.');
-  case 'in_use':
-    return _failed('Someone is using the PC right now, so it stays on.');
-  default:
-    return _ok({ pc: 'shutting_down', console: result.console },
-      'The server is stopped and the PC is shutting down.');
-  }
+async function _shutdownPc() {
+  const result = await minecraft.shutdown();
+  if (result.outcome === 'already_off') return _ok({ pc: 'off' }, 'The PC was already off.');
+  return _ok({ pc: 'shutting_down', console: result.console }, 'The server is stopped and the PC is shutting down.');
 }
 
 const ACTIONS = {
