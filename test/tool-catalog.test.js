@@ -134,14 +134,16 @@ test('every function offered by the complete context matrix has exactly one exec
   }
 });
 
+/** Run fn under another provider profile; the Claude one gets a placeholder token where none is set. */
 function withProvider(provider, fn) {
-  const savedProvider = envConfig.AI_PROVIDER;
+  const saved = { AI_PROVIDER: envConfig.AI_PROVIDER, CLAUDE_CODE_OAUTH_TOKEN: envConfig.CLAUDE_CODE_OAUTH_TOKEN };
   envConfig.AI_PROVIDER = provider;
+  envConfig.CLAUDE_CODE_OAUTH_TOKEN = saved.CLAUDE_CODE_OAUTH_TOKEN || 'test-token';
   _resetActiveProfileForTests();
   try {
     return fn();
   } finally {
-    envConfig.AI_PROVIDER = savedProvider;
+    Object.assign(envConfig, saved);
     _resetActiveProfileForTests();
   }
 }
