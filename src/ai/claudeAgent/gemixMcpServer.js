@@ -6,15 +6,16 @@
 // ListTools is the turn's snapshot: each definition goes out with its raw JSON
 // Schema, marked read-only exactly where planHandlerToolCalls would overlap it
 // (Claude Code runs consecutive read-only calls together and every other call
-// alone, in the model's order), and kept in the prompt rather than deferred
-// behind tool search. CallTool hands each call to the turn's `runCall`, which
-// owns access, per-round caps and execution, and returns the GemiX result as
-// MCP content.
+// alone, in the model's order), and kept in the prompt unless tools.js defers
+// it, in which case Claude Code lists it by name until ToolSearch loads it.
+// CallTool hands each call to the turn's `runCall`, which owns access,
+// per-round caps and execution, and returns the GemiX result as MCP content.
 
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import pkg from '../../../package.json' with { type: 'json' };
+import { isDeferredTool } from '../tools.js';
 import { PARALLEL_READ_ONLY_TOOLS } from '../../utils/toolCallExecution.js';
 import { readClaudeImage } from './claudeUserContent.js';
 
@@ -24,7 +25,7 @@ const GEMIX_TOOL_PREFIX = `mcp__${GEMIX_MCP_SERVER}__`;
 
 /** Where Claude Code puts the id of the `tool_use` block a call answers. */
 const TOOL_USE_ID_META = 'claudecode/toolUseId';
-/** Keeps a tool in the prompt even when Claude Code would defer it. */
+/** Keeps a tool in the prompt (true) or behind ToolSearch (false). */
 const ALWAYS_LOAD_META = 'anthropic/alwaysLoad';
 
 function _listedTool({ function: { name, description, parameters } }) {
@@ -33,7 +34,7 @@ function _listedTool({ function: { name, description, parameters } }) {
     description: description || '',
     inputSchema: parameters || { type: 'object', properties: {} },
     annotations: { readOnlyHint: PARALLEL_READ_ONLY_TOOLS.has(name) },
-    _meta: { [ALWAYS_LOAD_META]: true }
+    _meta: { [ALWAYS_LOAD_META]: !isDeferredTool(name) }
   };
 }
 

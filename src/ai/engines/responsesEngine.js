@@ -10,7 +10,7 @@ import { pruneSeenToolMedia, systemItem, userItem } from '../responsesItems.js';
 import { buildStaticInstructions, toolsFingerprint } from '../systemPrompt.js';
 import { executeToolRound } from '../toolRoundController.js';
 import { accumulateSearchStats, finalizeTurnReply } from '../turnReply.js';
-import { getToolsForUser } from '../tools.js';
+import { getToolsForUser, offeredTools } from '../tools.js';
 import { buildGemixResponseFormat, parseStructuredReply } from '../responseSchema.js';
 import { providerFailureReply } from '../providers/errorPolicy.js';
 import { resolveProviderProfile } from '../providers/providerProfile.js';
@@ -24,7 +24,12 @@ import { wrapSystemReminder } from '../../utils/systemTags.js';
 const log = createLogger('ResponsesEngine');
 const MAX_EMPTY_OUTPUT_RETRIES = 1;
 
-/** Keep the cached static prefix aligned with the tools offered each round. */
+/**
+ * Keep the cached static prefix aligned with the tools the user holds, and
+ * offer each round those tools minus the deferred ones not loaded yet. The
+ * prefix describes the whole set, so loading a tool changes only the round's
+ * tool list.
+ */
 function _createRoundPreparation(ctx, prepared, input) {
   const { isDiscord, allowVoice, userCtx } = prepared;
   let { staticInstructions, toolsFp } = prepared;
@@ -40,21 +45,21 @@ function _createRoundPreparation(ctx, prepared, input) {
   };
 
   return () => {
-    const roundTools = getToolsForUser({
+    const tools = getToolsForUser({
       ...userCtx,
       isActiveMember: ctx.userIdentity.isActiveMember,
       isAdmin: Boolean(ctx.userIdentity.isAdmin)
     });
-    const nextFp = toolsFingerprint(roundTools);
+    const nextFp = toolsFingerprint(tools);
     if (nextFp !== toolsFp) {
-      staticInstructions = buildStaticInstructions(ctx, roundTools);
+      staticInstructions = buildStaticInstructions(ctx, tools);
       toolsFp = nextFp;
       syncStaticPrefix();
       log.info('   Static system prefix rebuilt (tool fingerprint changed mid-turn)');
     }
 
     return {
-      roundTools,
+      roundTools: offeredTools(tools, userCtx.loadedTools),
       responseFormat: buildGemixResponseFormat({ includeTitle: isDiscord, allowVoice })
     };
   };

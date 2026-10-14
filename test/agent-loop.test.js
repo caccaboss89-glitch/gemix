@@ -293,18 +293,41 @@ test('manage_preferences changes the next turn, while all rounds retain admitted
   _setTransportForTests({ async createResponse({ body }) {
     seenEfforts.push(body.reasoning.effort);
     if (seenEfforts.length === 1) return completedResponse([{
+      type: 'function_call', call_id: 'load', name: 'load_tools',
+      arguments: JSON.stringify({ names: ['manage_preferences'] })
+    }]);
+    if (seenEfforts.length === 2) return completedResponse([{
       type: 'function_call', call_id: 'preferences', name: 'manage_preferences',
       arguments: JSON.stringify({ effort: nextEffort, voice: 'female' })
     }]);
     return completedResponse();
   } });
   assert.equal((await handleMessage(ctx)).text, 'done');
-  assert.deepEqual(seenEfforts, [initialEffort, initialEffort]);
+  assert.deepEqual(seenEfforts, [initialEffort, initialEffort, initialEffort]);
   assert.equal(ctx.settings.voice, 'male');
   assert.equal(readSettings(settingsId).voice, 'female');
   assert.equal((await handleMessage(ctx)).text, 'done');
-  assert.equal(seenEfforts[2], nextEffort);
+  assert.equal(seenEfforts[3], nextEffort);
   assert.equal(ctx.settings.voice, 'female');
+});
+
+test('a deferred tool reaches the rounds after load_tools, with the static prefix unchanged', async t => {
+  const ctx = handlerContext(t, constants.PLATFORM_WA_DEDICATED);
+  const rounds = [];
+  _setTransportForTests({ async createResponse({ body }) {
+    rounds.push({ tools: body.tools.map(tool => tool.name), prefix: JSON.stringify(body.input[0]) });
+    if (rounds.length === 1) return completedResponse([{
+      type: 'function_call', call_id: 'load', name: 'load_tools', arguments: JSON.stringify({ names: ['shell'] })
+    }]);
+    return completedResponse();
+  } });
+  assert.equal((await handleMessage(ctx)).text, 'done');
+  assert.equal(rounds.length, 2);
+  assert.ok(rounds[0].tools.includes('load_tools') && rounds[0].tools.includes('read_file'));
+  assert.equal(rounds[0].tools.includes('shell'), false);
+  assert.ok(rounds[1].tools.includes('shell'));
+  assert.equal(rounds[1].tools.includes('write_file'), false);
+  assert.equal(rounds[1].prefix, rounds[0].prefix);
 });
 
 // -- history retention -------------------------------------------------------

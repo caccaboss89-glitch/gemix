@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getToolsForUser } from '../src/ai/tools.js';
+import { getToolsForUser, isDeferredTool, offeredTools } from '../src/ai/tools.js';
 import constants from '../src/config/constants.js';
 import envConfig from '../src/config/env.js';
 import {
@@ -16,6 +16,7 @@ import {
 } from '../src/config/platformCapabilities.js';
 import { _resetActiveProfileForTests } from '../src/ai/providers/providerProfile.js';
 import { TOOL_EXECUTORS } from '../src/tools/executors/index.js';
+import { loadTools } from '../src/tools/executors/loading.js';
 import { MEDIA_TOOL_EXECUTORS } from '../src/tools/executors/media.js';
 import { WEB_TOOL_EXECUTORS } from '../src/tools/executors/web.js';
 
@@ -117,6 +118,64 @@ test('every function offered by the complete context matrix has exactly one exec
     envConfig.AI_PROVIDER = savedProvider;
     _resetActiveProfileForTests();
   }
+});
+
+function withProvider(provider, fn) {
+  const savedProvider = envConfig.AI_PROVIDER;
+  envConfig.AI_PROVIDER = provider;
+  _resetActiveProfileForTests();
+  try {
+    return fn();
+  } finally {
+    envConfig.AI_PROVIDER = savedProvider;
+    _resetActiveProfileForTests();
+  }
+}
+
+test('a Responses round offers the common tools and load_tools, which names exactly the deferred rest', () => {
+  withProvider('xai', () => {
+    const tools = getToolsForUser({
+      isActiveMember: true,
+      isAdmin: false,
+      platform: constants.PLATFORM_WA_DEDICATED,
+      isGroup: false
+    });
+    const deferred = names(tools).filter(isDeferredTool);
+    const loader = tools.find(tool => tool.function?.name === TOOL.LOAD_TOOLS);
+    assert.deepEqual(loader.function.parameters.properties.names.items.enum, deferred);
+
+    const offered = names(offeredTools(tools, new Set()));
+    for (const common of ['search_web', 'read_page', 'read_file', 'schedule_tasks', 'read_my_tasks',
+      'remove_my_tasks', 'bug_report', 'load_tools']) {
+      assert.ok(offered.includes(common), `${common} should be offered up front`);
+    }
+    for (const name of deferred) assert.equal(offered.includes(name), false, `${name} should wait to be loaded`);
+
+    const afterLoad = names(offeredTools(tools, new Set(['shell', 'send_email'])));
+    assert.ok(afterLoad.includes('shell') && afterLoad.includes('send_email'));
+    assert.equal(afterLoad.includes('write_file'), false);
+  });
+});
+
+test('the Claude runtime defers the same tools without a load_tools of its own', () => {
+  withProvider('claude', () => {
+    const offered = names(getToolsForUser({
+      isActiveMember: true,
+      isAdmin: true,
+      platform: constants.PLATFORM_DISCORD,
+      isGroup: false
+    }));
+    assert.equal(offered.includes(TOOL.LOAD_TOOLS), false);
+    assert.ok(offered.some(isDeferredTool));
+  });
+});
+
+test('load_tools adds each requested tool to the turn once', () => {
+  const userCtx = { loadedTools: new Set(['shell']) };
+  const result = loadTools({ args: { names: ['shell', 'write_file', 'write_file'] }, userCtx });
+  assert.deepEqual(result.loaded, ['shell', 'write_file']);
+  assert.equal(result.success, true);
+  assert.deepEqual([...userCtx.loadedTools], ['shell', 'write_file']);
 });
 
 test('membership refusals describe the platform boundary accurately', () => {

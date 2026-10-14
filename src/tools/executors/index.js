@@ -5,6 +5,7 @@
 
 import { DELIVERY_TOOL_EXECUTORS } from './delivery.js';
 import { DOCUMENT_TOOL_EXECUTORS } from './document.js';
+import { LOADING_TOOL_EXECUTORS } from './loading.js';
 import { MEDIA_TOOL_EXECUTORS } from './media.js';
 import { PREFERENCE_TOOL_EXECUTORS } from './preferences.js';
 import { SYSTEM_TOOL_EXECUTORS } from './system.js';
@@ -31,7 +32,8 @@ const TOOL_EXECUTORS = _mergeExecutorMaps([
   DELIVERY_TOOL_EXECUTORS,
   DOCUMENT_TOOL_EXECUTORS,
   PREFERENCE_TOOL_EXECUTORS,
-  SYSTEM_TOOL_EXECUTORS
+  SYSTEM_TOOL_EXECUTORS,
+  LOADING_TOOL_EXECUTORS
 ]);
 
 function getToolExecutor(name) {

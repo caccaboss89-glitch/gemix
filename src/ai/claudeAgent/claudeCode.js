@@ -41,7 +41,10 @@ function claudeCodeEnv({ configDir, oauthToken = null }) {
     // The binary is pinned with the SDK; it must neither update itself nor
     // call home beyond the model requests.
     DISABLE_AUTOUPDATER: '1',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    // The tools tools.js defers wait behind ToolSearch whatever their size;
+    // by default Claude Code defers only past a share of the context window.
+    ENABLE_TOOL_SEARCH: 'true'
   };
 }
 

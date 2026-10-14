@@ -14,8 +14,8 @@ function _has(toolNames, name) {
 function _genericGuidance() {
   return [
     'The model provider supplies reasoning, vision, structured replies and calls to the tools listed for this turn. '
-      + 'GemiX itself supplies every user-facing feature that appears in those tool schemas; an absent tool means '
-      + 'that feature is unavailable in this chat.',
+      + 'GemiX itself supplies every user-facing feature that appears in those tool schemas or among your deferred '
+      + 'tools, which you load before use; a feature in neither is unavailable in this chat.',
     'Use only capabilities and fields present in the current tool and reply schemas. Never assume a hosted provider '
       + 'tool, provider-only component or unadvertised media service exists.'
   ];

@@ -8,7 +8,7 @@ import {
   buildStaticInstructions,
   buildDynamicRuntimeContext
 } from '../../src/ai/systemPrompt.js';
-import { getToolsForUser } from '../../src/ai/tools.js';
+import { getToolsForUser, isDeferredTool } from '../../src/ai/tools.js';
 import { buildGemixResponseFormat } from '../../src/ai/responseSchema.js';
 import constants from '../../src/config/constants.js';
 import {
@@ -93,11 +93,13 @@ function renderTools(tools) {
     if (t?.type === 'function' && t.function) fnCount += 1;
     else if (t?.type && t.type !== 'function') nativeCount += 1;
   }
-  const out = [`--- TOOLS (${fnCount} function + ${nativeCount} native, registry order) ---`];
+  const deferred = tools.filter(t => isDeferredTool(t?.function?.name)).length;
+  const out = [`--- TOOLS (${fnCount} function + ${nativeCount} native, registry order; `
+    + `${deferred} deferred until loaded) ---`];
   for (const t of tools) {
     if (t?.type === 'function' && t.function) {
       const fn = t.function;
-      out.push(`[function] ${fn.name}`);
+      out.push(`[function] ${fn.name}${isDeferredTool(fn.name) ? ' (deferred)' : ''}`);
       out.push(`    desc: ${fn.description}`);
       const props = fn.parameters && fn.parameters.properties ? fn.parameters.properties : {};
       const required = new Set((fn.parameters && fn.parameters.required) || []);
@@ -197,9 +199,13 @@ function renderClaudeToolExposure(tools) {
   const readOnly = tools
     .map(t => t?.function?.name)
     .filter(name => name && PARALLEL_READ_ONLY_TOOLS.has(name));
+  const deferred = tools
+    .map(t => t?.function?.name)
+    .filter(name => name && isDeferredTool(name));
   return [
     `--- TOOL EXPOSURE (in-process MCP server, names as ${GEMIX_TOOL_PREFIX}<name>) ---`,
-    `readOnlyHint: ${readOnly.join(', ') || '(none)'}`
+    `readOnlyHint: ${readOnly.join(', ') || '(none)'}`,
+    `behind ToolSearch (alwaysLoad false): ${deferred.join(', ') || '(none)'}`
   ].join('\n');
 }
 

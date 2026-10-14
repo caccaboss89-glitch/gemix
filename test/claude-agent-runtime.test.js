@@ -35,12 +35,14 @@ test('the Claude Code environment carries the subscription token and nothing els
     'CLAUDE_CONFIG_DIR',
     'CLAUDE_AGENT_SDK_CLIENT_APP',
     'DISABLE_AUTOUPDATER',
-    'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'
+    'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+    'ENABLE_TOOL_SEARCH'
   ]);
   for (const key of Object.keys(env)) {
     assert.ok(own.has(key) || key in envConfig.SUBPROCESS_BASE_ENV, `${key} is not allowlisted`);
   }
   assert.equal('CLAUDE_CODE_OAUTH_TOKEN' in claudeCodeEnv({ configDir: '/c' }), false);
+  assert.equal(env.ENABLE_TOOL_SEARCH, 'true');
 });
 
 test('the semaphore hands slots over in arrival order and releases once per holder', async () => {

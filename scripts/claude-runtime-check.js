@@ -7,9 +7,11 @@
  *   - the boot probe resolves the subscription token without a model request;
  *   - the system prompt and the single user message reach the model verbatim,
  *     with nothing beside them but Claude Code's own environment block (cwd,
- *     OS, model, date), and only GemiX's tools and StructuredOutput offered;
+ *     OS, model, date), and only GemiX's tools, StructuredOutput and ToolSearch
+ *     offered, the deferred GemiX tools only behind ToolSearch;
  *   - every MCP call carries its tool_use id, a parallel batch is one round,
  *     and images in tool results reach the model;
+ *   - a deferred tool is loaded through ToolSearch before it is called;
  *   - the wrap-up note at the round cap ends the turn with no further tool run;
  *   - a message held by the live inbox reaches the model between rounds;
  *   - every turn answers through StructuredOutput, and Claude Code keeps no
@@ -35,6 +37,7 @@ import envConfig from '../src/config/env.js';
 import { _setClaudeQueryForTests } from '../src/ai/claudeAgent/claudeCode.js';
 import { describeRateLimit } from '../src/ai/claudeAgent/claudeFailures.js';
 import { GEMIX_TOOL_PREFIX } from '../src/ai/claudeAgent/gemixMcpServer.js';
+import { isDeferredTool } from '../src/ai/tools.js';
 import { WRAP_UP_REASON, wrapUpNote } from '../src/ai/engines/turnNotes.js';
 import { runProviderPreflight } from '../src/ai/providers/preflight.js';
 import { resolveProviderProfile } from '../src/ai/providers/providerProfile.js';
@@ -46,6 +49,7 @@ import { getWorkspaceMetaDir, getWorkspacePath, resolveWorkspaceId } from '../sr
 const { PLATFORM_DISCORD, PLATFORM_WA_DEDICATED, PLATFORM_WA_PERSONAL } = constants;
 const UPSTREAM = 'api.anthropic.com';
 const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput';
+const TOOL_SEARCH_TOOL = 'ToolSearch';
 /** How the system message Claude Code adds after the prompt begins. */
 const CLAUDE_CODE_ENVIRONMENT = '# Environment\n';
 const RUN_ID = `claude-runtime-check-${process.pid}`;
@@ -183,7 +187,8 @@ function observeSessions(proxy) {
               seen.beforeRound?.(seen.batches.length);
             }
             const output = await onBatch(input, ...rest);
-            seen.notes.push(output?.hookSpecificOutput?.additionalContext || '');
+            // A batch without GemiX calls (ToolSearch alone) is not a round.
+            if (ids.length > 0) seen.notes.push(output?.hookSpecificOutput?.additionalContext || '');
             return output;
           }] }],
           PreToolUse: [{ hooks: [async (input, ...rest) => {
@@ -212,7 +217,8 @@ function observeSessions(proxy) {
     async turn(label, ctx, { beforeRound } = {}) {
       const seen = {
         label, beforeRound, firstRecord: proxy.records.length, systemPrompt: null, userContent: null,
-        init: null, toolUses: [], mcpCalls: [], batches: [], notes: [], denied: 0, rateLimit: null, result: null
+        init: null, toolUses: [], toolNames: [], mcpCalls: [], batches: [], notes: [], denied: 0,
+        rateLimit: null, result: null
       };
       current = seen;
       const started = Date.now();
@@ -233,7 +239,11 @@ function noteMessage(seen, message) {
   if (message.type === 'system' && message.subtype === 'init') seen.init = message;
   else if (message.type === 'rate_limit_event') seen.rateLimit = message.rate_limit_info;
   else if (message.type === 'assistant' && message.parent_tool_use_id === null) {
-    for (const block of message.message.content) if (block.type === 'tool_use') seen.toolUses.push(block.id);
+    for (const block of message.message.content) {
+      if (block.type !== 'tool_use') continue;
+      seen.toolUses.push(block.id);
+      seen.toolNames.push(block.name);
+    }
   } else if (message.type === 'result') seen.result = message;
 }
 
@@ -273,11 +283,19 @@ function checkTurn(seen) {
     || !blocksText(message.content).startsWith(CLAUDE_CODE_ENVIRONMENT));
   check(`${label}: Claude Code adds only its environment block`, unknown.length === 0,
     unknown.length ? `also ${unknown.map(message => `a ${message.role} message`).join(', ')}` : '');
+  // Claude Code may send placeholders of its own, but only deferred ones.
   const names = (first.request.tools || []).map(tool => tool.name);
-  const foreign = names.filter(name => !name.startsWith(GEMIX_TOOL_PREFIX) && name !== STRUCTURED_OUTPUT_TOOL);
-  check(`${label}: only GemiX tools and ${STRUCTURED_OUTPUT_TOOL} are offered`,
-    foreign.length === 0 && names.includes(STRUCTURED_OUTPUT_TOOL),
-    foreign.length ? `also ${foreign.join(', ')}` : `${names.length} tool(s)`);
+  const foreign = (first.request.tools || []).filter(tool => !tool.name.startsWith(GEMIX_TOOL_PREFIX)
+    && ![STRUCTURED_OUTPUT_TOOL, TOOL_SEARCH_TOOL].includes(tool.name) && !tool.defer_loading);
+  check(`${label}: only GemiX tools, ${STRUCTURED_OUTPUT_TOOL} and ${TOOL_SEARCH_TOOL} are offered`,
+    foreign.length === 0 && names.includes(STRUCTURED_OUTPUT_TOOL) && names.includes(TOOL_SEARCH_TOOL),
+    foreign.length ? `also ${foreign.map(tool => tool.name).join(', ')}` : `${names.length} tool(s)`);
+  const misplaced = seen.wire.flatMap(record => (record.request.tools || [])
+    .filter(tool => tool.name.startsWith(GEMIX_TOOL_PREFIX)
+      && Boolean(tool.defer_loading) !== isDeferredTool(tool.name.slice(GEMIX_TOOL_PREFIX.length)))
+    .map(tool => tool.name));
+  check(`${label}: exactly the deferred GemiX tools wait behind ${TOOL_SEARCH_TOOL}`, misplaced.length === 0,
+    misplaced.length ? `wrong for ${[...new Set(misplaced)].join(', ')}` : '');
 }
 
 function checkToolUseIds(seen) {
@@ -379,6 +397,10 @@ try {
   checkToolUseIds(wrapTurn);
   check(`${wrapTurn.label}: the first round carries the wrap-up note`,
     (wrapTurn.notes[0] || '').includes(wrapUpNote(WRAP_UP_REASON.ROUND_CAP)));
+  const listCall = wrapTurn.toolNames.indexOf(`${GEMIX_TOOL_PREFIX}list_files`);
+  check(`${wrapTurn.label}: list_files is loaded through ${TOOL_SEARCH_TOOL} before it is called`,
+    listCall > 0 && wrapTurn.toolNames.slice(0, listCall).includes(TOOL_SEARCH_TOOL),
+    `calls: ${wrapTurn.toolNames.join(', ')}`);
   check(`${wrapTurn.label}: no tool runs after the wrap-up`,
     wrapTurn.mcpCalls.every(call => wrapTurn.batches[0]?.includes(call.toolUseId)),
     `${wrapTurn.denied} call(s) refused after it`);

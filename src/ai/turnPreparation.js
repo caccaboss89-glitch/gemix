@@ -151,6 +151,8 @@ async function prepareTurn(ctx, ui) {
     requestId: `${ctx.platform || 'unknown'}:${ctx.chatId || ctx.userId || 'unknown'}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
     presence: ctx.presence || null,
     turnBudget: ctx.turnBudget,
+    // Deferred tools load_tools has brought into this turn.
+    loadedTools: new Set(),
     sendIntermediateNotification: (kind, message) => sendIntermediateNotification(ctx, kind, message)
   };
   ctx.requestId = userCtx.requestId;

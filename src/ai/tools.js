@@ -1,19 +1,20 @@
 // src/ai/tools.js
 //
 // Main-brain tool registry. Schemas live in domain catalogs; this facade owns
-// only platform/profile composition, access checks and the public exports used
-// by the dispatcher and capability matrix.
+// only platform/profile composition, which tools wait to be loaded, access
+// checks and the public exports used by the dispatcher and capability matrix.
 
 import constants from '../config/constants.js';
-import { getCapabilities } from '../config/platformCapabilities.js';
+import { TOOL, getCapabilities } from '../config/platformCapabilities.js';
 import { FEATURE, isFeatureAvailable } from '../features/featureBindings.js';
-import { resolveProviderProfile } from './providers/providerProfile.js';
+import { RUNTIME, resolveProviderProfile } from './providers/providerProfile.js';
 import {
   buildEmailTool,
   buildReadSentMessagesTool,
   buildWhatsAppTool
 } from './tools/deliveryCatalog.js';
 import { buildGenerateFormalRequestPdfTool } from './tools/documentCatalog.js';
+import { buildLoadToolsTool } from './tools/loadingCatalog.js';
 import {
   TOOL_GENERATE_MUSIC,
   TOOL_GENERATE_VIDEO,
@@ -40,13 +41,41 @@ import { workspaceTools } from './tools/workspaceCatalog.js';
  * @property {boolean} [isGroup]
  */
 
+/**
+ * Tools whose schemas stay out of a request until the model loads them: the
+ * ones most turns never call. Web reading, file reading, the reminders, the
+ * formal PDF and bug reports are what a typical turn uses, so they are always
+ * offered.
+ */
+const DEFERRED_TOOLS = new Set([
+  TOOL.LIST_FILES,
+  TOOL.SEARCH_FILES,
+  TOOL.WRITE_FILE,
+  TOOL.EDIT_FILE,
+  TOOL.SHELL,
+  TOOL.SEARCH_IMAGE,
+  TOOL.GENERATE_IMAGE,
+  TOOL.GENERATE_VIDEO,
+  TOOL.GENERATE_MUSIC,
+  TOOL.READ_MUSIC_STATS,
+  TOOL.SEND_EMAIL,
+  TOOL.SEND_WHATSAPP,
+  TOOL.READ_SENT_MESSAGES,
+  TOOL.MANAGE_PREFERENCES,
+  TOOL.TOGGLE_RELEASE
+]);
+
 const SUPPORTED_TOOL_PLATFORMS = new Set([
   constants.PLATFORM_DISCORD,
   constants.PLATFORM_WA_DEDICATED,
   constants.PLATFORM_WA_PERSONAL
 ]);
 
-/** Build the exact tool permission boundary for one model round. */
+/**
+ * Build the exact tool permission boundary of a conversation: every tool the
+ * caller may use, deferred ones included. The prompt describes this set; what
+ * one Responses round actually sends is offeredTools() of it.
+ */
 function getToolsForUser(toolCtx) {
   if (!toolCtx || !SUPPORTED_TOOL_PLATFORMS.has(toolCtx.platform)) {
     throw new TypeError('getToolsForUser requires an explicit supported platform.');
@@ -101,7 +130,22 @@ function getToolsForUser(toolCtx) {
   // The administrator already sees this conversation and its tool failures;
   // reporting the same problem back to them would be a self-notification.
   if (!isAdmin) tools.push(TOOL_BUG_REPORT);
+
+  // Claude Code defers these behind its own ToolSearch; a Responses turn loads
+  // them through load_tools.
+  const deferred = tools.map(tool => tool.function?.name).filter(isDeferredTool);
+  if (profile.runtime === RUNTIME.RESPONSES && deferred.length > 0) tools.push(buildLoadToolsTool(deferred));
   return tools;
+}
+
+/** Whether a tool's schema waits to be loaded instead of reaching every request. */
+function isDeferredTool(name) {
+  return DEFERRED_TOOLS.has(name);
+}
+
+/** The part of a permission boundary one Responses round sends: deferred tools only once loaded. */
+function offeredTools(tools, loadedNames) {
+  return tools.filter(tool => !isDeferredTool(tool.function?.name) || loadedNames.has(tool.function.name));
 }
 
 /** Function names plus native server-side tool types for prompt capabilities. */
@@ -124,6 +168,8 @@ function getToolAccessError(toolName, allowedRoundNames, unavailableMessage) {
 export {
   getToolAccessError,
   getToolsForUser,
+  isDeferredTool,
+  offeredTools,
   toolNamesToSet,
   normalizeOptionalNullArgs,
   validateToolArgs

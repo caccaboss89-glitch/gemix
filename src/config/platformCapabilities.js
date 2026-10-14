@@ -44,7 +44,8 @@ const TOOL = {
   READ_MUSIC_STATS: 'read_music_stats',
   READ_SENT_MESSAGES: 'read_sent_messages',
   FORMAL_PDF: 'generate_formal_request_pdf',
-  BUG_REPORT: 'bug_report'
+  BUG_REPORT: 'bug_report',
+  LOAD_TOOLS: 'load_tools'
 };
 
 const CAPS = {

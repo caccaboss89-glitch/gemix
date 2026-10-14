@@ -8,7 +8,7 @@
 // messages that reached the chat meanwhile, then, once the round cap or the
 // work deadline is reached, the wrap-up note. After wrap-up every GemiX call
 // is refused before it runs. A batch without GemiX calls (the structured reply
-// alone) is not a round.
+// or a ToolSearch alone) is not a round.
 //
 // Each call runs through the same executeToolCall as a Responses round,
 // re-authorized against the tools the user holds when it runs. Per-round caps

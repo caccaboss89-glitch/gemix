@@ -75,8 +75,9 @@ function _indentLines(text, depth) {
 }
 
 /**
- * The tool set this conversation is offered. The one way to derive it from a
- * context, so the prompt and the fingerprint can never describe different sets.
+ * The tool set this conversation holds, deferred tools included. The one way
+ * to derive it from a context, so the prompt and the fingerprint can never
+ * describe different sets.
  */
 function resolvePromptTools(ctx) {
   return getToolsForUser({
@@ -90,8 +91,8 @@ function resolvePromptTools(ctx) {
 
 /**
  * Stable fingerprint of a tool set, for mid-turn static rebuild detection.
- * Pure: the caller passes the tools it is actually offering this round, so
- * nothing is resolved a second time and the two cannot drift apart.
+ * Pure: the caller passes the tool set it builds the prompt from, so nothing
+ * is resolved a second time and the two cannot drift apart.
  */
 function toolsFingerprint(tools) {
   // A tool can keep the same name while its provider-specific schema changes.

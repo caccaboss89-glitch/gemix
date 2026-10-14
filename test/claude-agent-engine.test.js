@@ -110,12 +110,14 @@ afterEach(() => { _setClaudeQueryForTests(null); });
 test('a Claude turn runs a tool round through the MCP adapter and answers with the structured reply', async (t) => {
   const ctx = claudeContext(t);
   let toolResult = null;
+  let listed = null;
   let roundNote = null;
   const seen = scriptedQuery(async function* (options) {
     yield INIT;
     yield ALLOWED;
     yield assistant([{ type: 'tool_use', id: 'toolu_1', name: 'mcp__gemix__list_files', input: {} }]);
     const client = await mcpClient(options);
+    listed = (await client.listTools()).tools;
     toolResult = await client.callTool({
       name: 'list_files',
       arguments: { path: 'workspace/' },
@@ -139,8 +141,14 @@ test('a Claude turn runs a tool round through the MCP adapter and answers with t
   const { options, prompt } = seen;
   assert.equal(options.model, resolveProviderProfile().model);
   assert.equal(options.effort, 'medium');
-  assert.deepEqual(options.tools, []);
-  assert.deepEqual(options.allowedTools, ['mcp__gemix__*']);
+  // Deferred tools sit behind ToolSearch, Claude Code's only built-in tool here.
+  assert.deepEqual(options.tools, ['ToolSearch']);
+  assert.deepEqual(options.allowedTools, ['mcp__gemix__*', 'ToolSearch']);
+  const alwaysLoad = Object.fromEntries(listed.map(tool => [tool.name, tool._meta['anthropic/alwaysLoad']]));
+  assert.equal(alwaysLoad.read_file, true);
+  assert.equal(alwaysLoad.list_files, false);
+  assert.equal(alwaysLoad.send_email, false);
+  assert.equal(alwaysLoad.load_tools, undefined);
   assert.deepEqual(options.settingSources, []);
   assert.equal(options.persistSession, false);
   assert.equal(options.strictMcpConfig, true);

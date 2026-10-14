@@ -4,15 +4,16 @@
 //
 // One stateless query per turn, on the subscription: GemiX's static prompt as
 // the system prompt, the conversation as one user message, the turn's tools
-// behind an in-process MCP server and the reply schema as the structured
-// output Claude Code enforces. Rounds, wrap-up and mid-turn messages keep
-// GemiX's contract through the hooks of claudeTurnControl.js, and the reply
-// ends in the same finalizeTurnReply as a Responses turn.
+// behind an in-process MCP server (the deferred ones behind Claude Code's
+// ToolSearch, its only built-in tool here) and the reply schema as the
+// structured output Claude Code enforces. Rounds, wrap-up and mid-turn
+// messages keep GemiX's contract through the hooks of claudeTurnControl.js,
+// and the reply ends in the same finalizeTurnReply as a Responses turn.
 //
 // Claude Code processes are heavy, so turns queue for a bounded number of
 // slots; the wait counts against the turn's own deadline.
 
-import { getToolsForUser } from '../tools.js';
+import { getToolsForUser, isDeferredTool } from '../tools.js';
 import { buildStaticInstructions, toolsFingerprint } from '../systemPrompt.js';
 import { buildGemixResponseFormat, parseStructuredReply, readStructuredReply } from '../responseSchema.js';
 import { finalizeTurnReply } from '../turnReply.js';
@@ -30,6 +31,8 @@ const log = createLogger('ClaudeEngine');
 
 /** The tool Claude Code adds for `outputFormat`; its input is the reply object. */
 const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput';
+/** Claude Code's built-in loader of deferred tools. */
+const TOOL_SEARCH_TOOL = 'ToolSearch';
 
 let _turnSlots = null;
 
@@ -121,6 +124,7 @@ async function _runQuery({ ctx, prepared, turnBudgets, responseCtx, profile, wai
     isAdmin: Boolean(ctx.userIdentity.isAdmin)
   });
   const tools = liveTools();
+  const builtinTools = tools.some(tool => isDeferredTool(tool.function?.name)) ? [TOOL_SEARCH_TOOL] : [];
   const staticInstructions = toolsFingerprint(tools) === prepared.toolsFp
     ? prepared.staticInstructions
     : buildStaticInstructions(ctx, tools);
@@ -151,9 +155,9 @@ async function _runQuery({ ctx, prepared, turnBudgets, responseCtx, profile, wai
       model: profile.model,
       effort,
       systemPrompt: staticInstructions,
-      tools: [],
+      tools: builtinTools,
       mcpServers: { [GEMIX_MCP_SERVER]: createGemixMcpServer(tools, control.runCall) },
-      allowedTools: [`${GEMIX_TOOL_PREFIX}*`],
+      allowedTools: [`${GEMIX_TOOL_PREFIX}*`, ...builtinTools],
       outputFormat: {
         type: 'json_schema',
         schema: buildGemixResponseFormat({ includeTitle: isDiscord, allowVoice }).schema
