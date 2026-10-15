@@ -5,9 +5,11 @@
     powershell -ExecutionPolicy Bypass -File scripts\minecraft-pc-setup.ps1 -GemixHost 192.168.1.50
 
   It registers a task that starts the agent at boot under this account, before
-  anyone logs in, with its output in src\logs\minecraft-agent.log, and a
-  firewall rule that lets only the GemiX server reach the agent's port, on
-  every network profile. Rerunning it replaces both and restarts the agent.
+  anyone logs in, with its output in src\logs\minecraft-agent.log, a task that
+  shows the admin a notification when a player starts the server on an
+  already running PC, and a firewall rule that lets only the GemiX server reach
+  the agent's port, on every network profile. Rerunning it replaces all three
+  and restarts the agent.
 #>
 param(
   [Parameter(Mandatory = $true)] [string] $GemixHost,
@@ -28,6 +30,13 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
   -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Principal $principal `
   -Settings $settings -Force | Out-Null
+
+# The agent has no desktop, so notifications go through a task in this account's own session.
+$noticeAction = New-ScheduledTaskAction -Execute 'powershell.exe' -WorkingDirectory $repo `
+  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File scripts\minecraft-pc-notify.ps1"
+$noticePrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
+Register-ScheduledTask -TaskName 'GemiX Minecraft notice' -Action $noticeAction -Principal $noticePrincipal `
+  -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force | Out-Null
 
 Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName $name -Direction Inbound -Protocol TCP -LocalPort $Port `

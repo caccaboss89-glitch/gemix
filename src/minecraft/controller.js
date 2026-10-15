@@ -87,8 +87,10 @@ function createMinecraftController({
     throw new MinecraftError('pc_unreachable', 'The PC did not answer within five minutes of the wake-up packet.');
   }
 
-  async function runStart() {
+  async function runStart(requester) {
     let pc = await readPc();
+    // Someone at an already running PC is told; a PC woken for this start has nobody there yet.
+    const notice = pc && requester ? { requester } : {};
     if (!pc) {
       emit(PHASE.WAKING);
       log.info('PC is off; sending the wake-up packet');
@@ -102,7 +104,7 @@ function createMinecraftController({
       if (pc.server === 'running') return pc;
       if (pc.server === 'stopped') {
         if (launched) throw new MinecraftError('server_failed', 'The server exited while starting.');
-        pc = await agent('POST', '/start', { timeoutMs: TIMEOUT.start });
+        pc = await agent('POST', '/start', { body: notice, timeoutMs: TIMEOUT.start });
         launched = true;
         log.info('Server start script launched');
       }
@@ -116,12 +118,13 @@ function createMinecraftController({
   /**
    * Bring the PC and the server up, or join the start already under way.
    *
-   * @param {{ onPhase?: (phase: string, joined: boolean) => void, signal?: AbortSignal }} [opts] - onPhase
-   *   hears each phase reached, the current one first when joining; an aborted
-   *   signal stops the wait, not the start
+   * @param {{ onPhase?: (phase: string, joined: boolean) => void, signal?: AbortSignal, requester?: string }} [opts]
+   *   onPhase hears each phase reached, the current one first when joining; an
+   *   aborted signal stops the wait, not the start; requester is who asked, named
+   *   in the notification the admin gets when the PC is already on
    * @returns {Promise<{ pc: object, joined: boolean }|{ pending: true }>}
    */
-  async function start({ onPhase = () => {}, signal } = {}) {
+  async function start({ onPhase = () => {}, signal, requester } = {}) {
     if (operation?.kind === 'shutdown') {
       throw new MinecraftError('shutting_down', 'The PC is shutting down; it can be started again once it is off.');
     }
@@ -129,7 +132,7 @@ function createMinecraftController({
     if (!joined) {
       operation = { kind: 'start', promise: null, phase: null, listeners: new Set() };
       const current = operation;
-      current.promise = runStart().finally(() => {
+      current.promise = runStart(requester).finally(() => {
         if (operation === current) operation = null;
       });
       // Every waiting chat may have stopped waiting before it settles.

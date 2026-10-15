@@ -122,6 +122,23 @@ test('the PC agent starts the server once, runs commands only while it is up, an
   assert.ok(pc.commands.includes('stop'));
 });
 
+test('the PC agent notifies the admin of a requested start, once, and never fails it', async () => {
+  const dir = makeServerDir();
+  const pc = fakePc();
+  const notices = [];
+  const notify = async notice => { notices.push(notice); throw new Error('no desktop'); };
+  const handle = createAgentHandler({ scriptPath: path.join(dir, 'start.bat'), childEnv: {}, ...pc.deps, notify });
+
+  assert.equal((await handle('POST', '/start', { requester: ' Mario ' })).server, 'starting');
+  await handle('POST', '/start', { requester: 'Luigi' });
+  assert.deepEqual(notices, [{ title: 'Server Minecraft in avvio', body: 'Mario ha chiesto a GemiX di avviarlo.' }]);
+
+  pc.javaRunning = false;
+  const quiet = createAgentHandler({ scriptPath: path.join(dir, 'start.bat'), childEnv: {}, ...pc.deps, notify });
+  await quiet('POST', '/start');
+  assert.equal(notices.length, 1);
+});
+
 test('the PC agent stops the server before turning the PC off', async () => {
   const dir = makeServerDir();
   const pc = fakePc();
@@ -200,6 +217,22 @@ test('concurrent starts wake the PC and launch the server once, and every chat h
   assert.equal((await controller.shutdown()).outcome, 'shutting_down');
   assert.equal((await controller.shutdown()).outcome, 'already_off');
   assert.equal(pc.shutdowns, 1);
+});
+
+test('the agent hears who asked only when the PC was already on', async () => {
+  const bodies = [];
+  const asking = on => {
+    const pc = fakeAgent({ on });
+    const agent = pc.agent;
+    pc.agent = async (method, route, opts) => {
+      if (route === '/start') bodies.push(opts.body);
+      return agent(method, route, opts);
+    };
+    return createMinecraftController({ agent: pc.agent, wake: pc.wake, sleep: async () => {} });
+  };
+  await asking(true).start({ requester: 'Mario' });
+  await asking(false).start({ requester: 'Mario' });
+  assert.deepEqual(bodies, [{ requester: 'Mario' }, {}]);
 });
 
 test('a shutdown is refused while a start is under way', async () => {

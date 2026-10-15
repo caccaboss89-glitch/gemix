@@ -5,7 +5,8 @@
 // carrying the shared token, over the LAN:
 //
 //   GET  /status    the server state, who is online and the address players join
-//   POST /start     run the server's start script, unless the server is up
+//   POST /start     run the server's start script, unless the server is up;
+//                   with a `requester`, the admin gets a notification when it runs
 //   POST /command   run a console command over RCON; `stop` stops the server
 //   POST /stop      save the world and stop the server
 //   GET  /log       the server log since its last start
@@ -20,10 +21,13 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { createLogger } from '../utils/logger.js';
 import { runRconCommand } from './rcon.js';
 
 const execFileAsync = promisify(execFile);
+const logger = createLogger('MinecraftAgent');
 
 /** How long a freshly spawned start script may run before java shows up. */
 const SPAWN_GRACE_MS = 30_000;
@@ -38,6 +42,10 @@ const BODY_MAX_BYTES = 16 * 1024;
 const COMMAND_MAX_CHARS = 1_000;
 const PROBE_TIMEOUT_MS = 15_000;
 const SHUTDOWN_DELAY_S = 15;
+const NOTICE_NAME_MAX_CHARS = 60;
+/** Registered by scripts/minecraft-pc-setup.ps1 to run scripts/minecraft-pc-notify.ps1 in the admin's session. */
+const NOTICE_TASK = 'GemiX Minecraft notice';
+const NOTICE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'logs', 'minecraft-notice.json');
 
 /** Counts the java processes running a server.jar. */
 const PROBE_SCRIPT = '@(Get-CimInstance Win32_Process -Filter "Name=\'java.exe\'" | Where-Object { '
@@ -89,6 +97,7 @@ class AgentError extends Error {
  * @param {Function} [opts.rcon] - runRconCommand, replaceable in tests
  * @param {Function} [opts.launch] - starts the script detached
  * @param {Function} [opts.powerOff] - turns the PC off
+ * @param {Function} [opts.notify] - shows the admin a notification `{ title, body }`
  * @param {Function} [opts.sleep]
  * @param {() => number} [opts.now]
  */
@@ -99,6 +108,7 @@ function createAgentHandler({
   rcon = runRconCommand,
   launch = _launchDetached,
   powerOff = _powerOff,
+  notify = _notifyAdmin,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   now = Date.now
 }) {
@@ -175,7 +185,7 @@ function createAgentHandler({
     }
   }
 
-  async function start() {
+  async function start(body) {
     const current = await status();
     if (current.server === 'stopping') {
       throw new AgentError(409, 'stopping', 'The server is still stopping; start it once it is down.');
@@ -183,6 +193,13 @@ function createAgentHandler({
     if (current.server !== 'stopped') return current;
     launch(scriptPath, serverDir, childEnv);
     spawnedAt = now();
+    if (typeof body.requester === 'string' && body.requester.trim()) {
+      // A notification that fails must not fail the start.
+      Promise.resolve(notify({
+        title: 'Server Minecraft in avvio',
+        body: `${body.requester.trim().slice(0, NOTICE_NAME_MAX_CHARS)} ha chiesto a GemiX di avviarlo.`
+      })).catch(err => logger.warn(`Admin notification failed: ${err.message}`));
+    }
     return { ...current, server: 'starting' };
   }
 
@@ -262,6 +279,12 @@ function createAgentHandler({
 function _launchDetached(scriptPath, cwd, env) {
   // A headless script must not wait at the `pause` of a console start script.
   spawn('cmd.exe', ['/d', '/c', scriptPath], { cwd, env, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+}
+
+async function _notifyAdmin(notice) {
+  fs.mkdirSync(path.dirname(NOTICE_FILE), { recursive: true });
+  fs.writeFileSync(NOTICE_FILE, JSON.stringify(notice), 'utf8');
+  await execFileAsync('schtasks.exe', ['/run', '/tn', NOTICE_TASK], { windowsHide: true });
 }
 
 async function _powerOff() {

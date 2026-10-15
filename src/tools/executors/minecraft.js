@@ -59,7 +59,12 @@ async function _start(userCtx) {
       { label: 'Minecraft progress notification', log }
     );
   };
-  const result = await minecraft.start({ onPhase: notify, signal: userCtx.turnBudget?.signal });
+  const result = await minecraft.start({
+    onPhase: notify,
+    signal: userCtx.turnBudget?.signal,
+    // The admin needs no notice about their own request.
+    requester: userCtx.isAdmin ? undefined : userCtx.userName || 'Un giocatore'
+  });
   if (result.pending) {
     return {
       success: true,
