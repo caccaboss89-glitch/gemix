@@ -89,8 +89,8 @@ function createMinecraftController({
 
   async function runStart(requester) {
     let pc = await readPc();
-    // Someone at an already running PC is told; a PC woken for this start has nobody there yet.
-    const notice = pc && requester ? { requester } : {};
+    // The agent tells the admin who asked, whether the PC was already on or just woken.
+    const notice = requester ? { requester } : {};
     if (!pc) {
       emit(PHASE.WAKING);
       log.info('PC is off; sending the wake-up packet');

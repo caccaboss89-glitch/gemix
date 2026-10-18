@@ -219,7 +219,7 @@ test('concurrent starts wake the PC and launch the server once, and every chat h
   assert.equal(pc.shutdowns, 1);
 });
 
-test('the agent hears who asked only when the PC was already on', async () => {
+test('the agent hears who asked, whether the PC was already on or woken for the start', async () => {
   const bodies = [];
   const asking = on => {
     const pc = fakeAgent({ on });
@@ -232,7 +232,7 @@ test('the agent hears who asked only when the PC was already on', async () => {
   };
   await asking(true).start({ requester: 'Mario' });
   await asking(false).start({ requester: 'Mario' });
-  assert.deepEqual(bodies, [{ requester: 'Mario' }, {}]);
+  assert.deepEqual(bodies, [{ requester: 'Mario' }, { requester: 'Mario' }]);
 });
 
 test('a shutdown is refused while a start is under way', async () => {
