@@ -150,6 +150,28 @@ test('the PC agent stops the server before turning the PC off', async () => {
   assert.equal(pc.poweredOff, true);
 });
 
+test('a stop that times out is sent again by the next stop', async () => {
+  const dir = makeServerDir();
+  const pc = fakePc();
+  let clock = 0;
+  const rcon = async ({ command }) => {
+    pc.commands.push(command);
+    return '';
+  };
+  const handle = createAgentHandler({
+    scriptPath: path.join(dir, 'start.bat'),
+    childEnv: {},
+    ...pc.deps,
+    rcon,
+    sleep: async ms => { clock += ms; },
+    now: () => clock
+  });
+  pc.javaRunning = true;
+  await assert.rejects(handle('POST', '/stop'), { code: 'stop_timeout', status: 504 });
+  await assert.rejects(handle('POST', '/stop'), { code: 'stop_timeout', status: 504 });
+  assert.deepEqual(pc.commands.filter(command => command === 'stop'), ['stop', 'stop']);
+});
+
 test('the PC agent needs RCON enabled in server.properties', async () => {
   const dir = makeServerDir();
   fs.writeFileSync(path.join(dir, 'server.properties'), 'enable-rcon=false\n');

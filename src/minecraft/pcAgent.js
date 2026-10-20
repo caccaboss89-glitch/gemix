@@ -135,7 +135,6 @@ function createAgentHandler({
   /** The server state, with the online list when the server answers. */
   async function serverState(pc) {
     if (!pc.javaRunning) {
-      stopping = false;
       if (spawnedAt && now() - spawnedAt < SPAWN_GRACE_MS) return { server: 'starting', players: null };
       spawnedAt = 0;
       return { server: 'stopped', players: null };
@@ -210,24 +209,20 @@ function createAgentHandler({
       throw new AgentError(409, 'starting', 'The server is still starting; it can be stopped once it is up.');
     }
     const offset = logSize();
-    if (!stopping) {
-      stopping = true;
-      try {
-        await rcon({ ...rconSettings(), command: 'stop' });
-      } catch (err) {
-        stopping = false;
-        throw err;
+    // Every stop that finds the server up sends `stop` again: a `stop` that never
+    // took effect must not leave the server waiting for ever on the next attempt.
+    stopping = true;
+    try {
+      await rcon({ ...rconSettings(), command: 'stop' });
+      const deadline = now() + STOP_TIMEOUT_MS;
+      while (now() < deadline) {
+        await sleep(STOP_POLL_MS);
+        if (!(await probe()).javaRunning) return { ...(await status()), console: logSince(offset) };
       }
+      throw new AgentError(504, 'stop_timeout', 'The server did not exit within two minutes of `stop`.');
+    } finally {
+      stopping = false;
     }
-    const deadline = now() + STOP_TIMEOUT_MS;
-    while (now() < deadline) {
-      await sleep(STOP_POLL_MS);
-      if (!(await probe()).javaRunning) {
-        stopping = false;
-        return { ...(await status()), console: logSince(offset) };
-      }
-    }
-    throw new AgentError(504, 'stop_timeout', 'The server did not exit within two minutes of `stop`.');
   }
 
   async function command(body) {
