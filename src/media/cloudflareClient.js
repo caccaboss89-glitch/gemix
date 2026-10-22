@@ -76,7 +76,7 @@ function classifyFailure(status, message) {
   // A 429 is either "this account is done for the day" or "too many at once".
   // Only the first is worth remembering, so the wording decides.
   if (status === 429) return NEURONS_SPENT_RE.test(message || '') ? CF_ERROR.BUDGET : CF_ERROR.RATE_LIMIT;
-  if (/content policy|safety|nsfw|prohibited/i.test(message || '')) return CF_ERROR.CONTENT_POLICY;
+  if (/content policy|safety|nsfw|prohibited|flagged/i.test(message || '')) return CF_ERROR.CONTENT_POLICY;
   if (status >= 500 || status === 408) return CF_ERROR.TRANSIENT;
   if (status >= 400) return CF_ERROR.MALFORMED;
   return CF_ERROR.TRANSIENT;
