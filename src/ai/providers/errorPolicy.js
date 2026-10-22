@@ -40,9 +40,9 @@ function providerFailureReply(err, profile) {
     logLine: err.kind === TRANSPORT_ERROR.QUOTA
       ? `${profile?.displayName || 'The model'} credits exhausted — replying with the credit notice.`
       : `${profile?.displayName || 'The model'} refused the turn (${err.kind}).`,
-    // An expired allowance is expected and self-healing; a credential the
-    // deployment has to fix is not.
-    notifyAdmin: err.kind === TRANSPORT_ERROR.AUTH
+    // An exhausted allowance and a credential the deployment has to fix both
+    // need the admin; a throttled provider clears on its own.
+    notifyAdmin: err.kind === TRANSPORT_ERROR.QUOTA || err.kind === TRANSPORT_ERROR.AUTH
   };
 }
 

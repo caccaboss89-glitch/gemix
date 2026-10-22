@@ -30,7 +30,7 @@ test('every provider quota failure uses the shared GemiX credit notice', () => {
   ]) {
     const reply = providerFailureReply(quota, profile);
     assert.equal(reply.text, CREDIT_EXHAUSTED_MESSAGE);
-    assert.equal(reply.notifyAdmin, false);
+    assert.equal(reply.notifyAdmin, true);
   }
 });
 

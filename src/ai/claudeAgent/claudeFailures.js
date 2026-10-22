@@ -5,8 +5,7 @@
 //
 // The guard is fail-closed: once the plan rejects a request, or a request
 // starts drawing on usage beyond the plan, the turn ends as QUOTA instead of
-// running on. Usage past a warning threshold reaches the admin once per limit
-// window.
+// running on.
 
 import {
   TRANSPORT_ERROR,
@@ -14,7 +13,6 @@ import {
   classifyHttpFailure,
   classifyStreamFailure
 } from '../transport/errors.js';
-import { notifyAdminDetailed } from '../../utils/adminNotifier.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('ClaudeQuota');
@@ -34,12 +32,6 @@ const ASSISTANT_ERROR_KINDS = Object.freeze({
 
 /** Claude Code's own wording when it has no usable credential. */
 const CREDENTIAL_NOTICE_RE = /not logged in|failed to authenticate/i;
-
-/** Utilization from which the admin hears about a limit window. */
-const QUOTA_WARNING_UTILIZATION = 0.9;
-
-/** Limit windows the admin was already told about: `type:resetsAt` → reset time (s). */
-const _reportedWindows = new Map();
 
 function _detail(text) {
   return typeof text === 'string' ? text.trim().slice(0, 300) : '';
@@ -97,27 +89,8 @@ function describeRateLimit(info) {
   return [info.status, ...windows].join(', ');
 }
 
-/** Tell the admin once per window that the plan is running out. */
-function _reportPressure(info) {
-  const pressed = _windows(info).filter(window => window.utilization >= QUOTA_WARNING_UTILIZATION);
-  if (info.status !== 'allowed' && pressed.length === 0) {
-    pressed.push({ type: info.rateLimitType || 'plan', resetsAt: info.resetsAt });
-  }
-  const nowSeconds = Date.now() / 1000;
-  for (const [key, resetsAt] of _reportedWindows) {
-    if (resetsAt < nowSeconds) _reportedWindows.delete(key);
-  }
-  const fresh = pressed.filter(window => !_reportedWindows.has(`${window.type}:${window.resetsAt}`));
-  if (fresh.length === 0) return;
-  for (const window of fresh) {
-    _reportedWindows.set(`${window.type}:${window.resetsAt}`, Number.isFinite(window.resetsAt) ? window.resetsAt : Infinity);
-  }
-  notifyAdminDetailed('Claude subscription', `Plan usage is high: ${describeRateLimit(info)}`).catch(() => {});
-}
-
 /**
- * Read one rate-limit event: log it, warn the admin about a plan near its
- * limit, and say whether the turn has to stop.
+ * Read one rate-limit event: log it and say whether the turn has to stop.
  *
  * @param {object} info - the event's `rate_limit_info`
  * @returns {TransportError|null} QUOTA when the plan rejected the request or
@@ -125,7 +98,6 @@ function _reportPressure(info) {
  */
 function rateLimitFailure(info) {
   log.info(`   Claude plan usage: ${describeRateLimit(info)}`);
-  _reportPressure(info);
   if (info.isUsingOverage === true || info.overageInUse === true) {
     return new TransportError(TRANSPORT_ERROR.QUOTA,
       `Claude plan limit reached and the request drew on extra usage; stopped (${describeRateLimit(info)})`,
@@ -139,9 +111,4 @@ function rateLimitFailure(info) {
   return null;
 }
 
-/** Forget the windows already reported. Tests only. */
-function _resetQuotaReportsForTests() {
-  _reportedWindows.clear();
-}
-
-export { describeRateLimit, rateLimitFailure, resultFailure, _resetQuotaReportsForTests };
+export { describeRateLimit, rateLimitFailure, resultFailure };
