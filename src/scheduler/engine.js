@@ -2,7 +2,7 @@
 //
 // Core periodic scheduler: executes due tasks from per-user/group JSON files,
 // advances recurring tasks, delivers via WhatsApp (using dedicated client),
-// and runs background sweeps (idle workspaces, stale history, monthly music wrap, release checks).
+// and runs background sweeps (idle workspaces, stale history, monthly music wrap, release checks, monthly usage report).
 // Uses per-file locking via taskStore.
 
 import fs from 'fs';
@@ -13,6 +13,7 @@ import { advanceOccurrenceBeyond, normalizePersistedRecurrence, isDateSkipped } 
 import { addScheduledFooter } from '../utils/footer.js';
 import { checkAndSendMusicWrap } from './musicWrapMonitor.js';
 import { checkNewRelease } from './releaseMonitor.js';
+import { checkUsageReport } from './usageReportMonitor.js';
 import { modifyTaskFile, readTaskFile } from '../utils/taskStore.js';
 import { createLogger } from '../utils/logger.js';
 import { normalizeMarkdown, stripOutgoingDeliveryArtifacts } from '../utils/text.js';
@@ -169,6 +170,12 @@ async function _runReleaseCheck() {
   }
 }
 
+/** Monthly usage report for the admin; the monitor acts only on the 1st, once per month. */
+async function _runUsageReportCheck() {
+  if (!dedicatedClient) return;
+  await checkUsageReport(dedicatedClient);
+}
+
 /** One task cycle, skipped while the previous one is still running. */
 async function _runTaskCycle() {
   if (_cycleInFlight) {
@@ -182,7 +189,7 @@ async function _runTaskCycle() {
 
 /**
  * Start every periodic job: due tasks, the monthly music wrap, the release
- * check and the workspace sweep. Each keeps its own clock and its own state, so
+ * check, the monthly usage report and the workspace sweep. Each keeps its own clock and its own state, so
  * a slow or failing one never delays the others.
  */
 function startScheduler() {
@@ -196,6 +203,7 @@ function startScheduler() {
   _startInterval(constants.SCHEDULER_INTERVAL_MS, _runTaskCycle, 'Task cycle');
   _startInterval(constants.SCHEDULER_INTERVAL_MS, _runMusicWrapCheck, 'MusicWrap check');
   _startInterval(constants.SCHEDULER_INTERVAL_MS, _runReleaseCheck, 'ReleaseMonitor check');
+  _startInterval(constants.SCHEDULER_INTERVAL_MS, _runUsageReportCheck, 'Usage report check');
   _startInterval(WORKSPACE_SWEEP_INTERVAL_MS, _sweepStaleWorkspaces, 'Workspace sweep');
 
   // Idle workspaces from a previous run are swept once at startup rather than
