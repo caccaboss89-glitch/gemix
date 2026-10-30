@@ -117,7 +117,7 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
   };
 
   const clearLivenessTimer = () => {
-    if (watchedBrowser && browserDisconnected) watchedBrowser.removeListener('disconnected', browserDisconnected);
+    if (watchedBrowser && browserDisconnected) watchedBrowser.off('disconnected', browserDisconnected);
     watchedBrowser = null;
     browserDisconnected = null;
     if (livenessTimer) {

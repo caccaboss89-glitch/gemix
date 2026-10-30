@@ -4,12 +4,23 @@ import { setImmediate } from 'node:timers/promises';
 import test from 'node:test';
 import { startWhatsAppLifecycle, shutdownWhatsAppClient } from '../src/platforms/whatsapp/client.js';
 
+// Puppeteer's Browser exposes on/once/off/emit but not removeListener.
+function puppeteerBrowser() {
+  const emitter = new EventEmitter();
+  return {
+    on: (event, listener) => emitter.on(event, listener),
+    once: (event, listener) => emitter.once(event, listener),
+    off: (event, listener) => emitter.off(event, listener),
+    emit: (event, ...args) => emitter.emit(event, ...args),
+    isConnected: () => true
+  };
+}
+
 function start(t, initialize) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const client = new EventEmitter();
   client.info = { wid: { _serialized: 'test@c.us' } };
-  client.pupBrowser = new EventEmitter();
-  client.pupBrowser.isConnected = () => true;
+  client.pupBrowser = puppeteerBrowser();
   client.pupPage = { isClosed: () => false, evaluate: async () => true };
   client.initialize = initialize;
   client.destroy = async () => {};
