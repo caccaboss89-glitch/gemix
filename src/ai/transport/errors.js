@@ -32,7 +32,7 @@ class TransportError extends Error {
   /**
    * @param {string} kind - one of TRANSPORT_ERROR
    * @param {string} message - safe for logs: never a credential or user content
-   * @param {object} [extra] - { status, requestId, partial, retryAfterMs, providerId }
+   * @param {object} [extra] - { status, requestId, partial, retryAfterMs, providerId, resetsAtMs }
    */
   constructor(kind, message, extra = {}) {
     super(message);
@@ -44,6 +44,8 @@ class TransportError extends Error {
     this.partial = extra.partial === true;
     this.retryAfterMs = Number.isFinite(extra.retryAfterMs) ? extra.retryAfterMs : null;
     this.providerId = extra.providerId ?? null;
+    /** Epoch ms at which an exhausted allowance renews, when the provider said so. */
+    this.resetsAtMs = Number.isFinite(extra.resetsAtMs) ? extra.resetsAtMs : null;
   }
 }
 

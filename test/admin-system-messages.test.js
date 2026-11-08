@@ -34,7 +34,27 @@ test('every provider quota failure uses the shared GemiX credit notice', () => {
   }
 });
 
+test('a spent Claude plan is routine: the user is told, the admin is not', () => {
+  const reply = providerFailureReply(
+    new TransportError(TRANSPORT_ERROR.QUOTA, 'plan spent'),
+    { id: 'claude', displayName: 'Claude' }
+  );
+  assert.equal(reply.text, CREDIT_EXHAUSTED_MESSAGE);
+  assert.equal(reply.notifyAdmin, false);
+});
+
 test('the old API alert prefix remains recognized for history only', () => {
   assert.equal(isSystemMessage('⚠️ *ERRORE API — Tool*\n\nlegacy'), true);
   assert.equal(isSystemMessage('⚠️ *LIMITE MODELLO — Grok*\n\nlegacy'), true);
+});
+
+test('quota reply names the Rome renewal time when the provider reported it', () => {
+  const at = Date.parse('2099-11-08T13:50:00.000Z');
+  const reply = providerFailureReply(
+    new TransportError(TRANSPORT_ERROR.QUOTA, 'spent', { resetsAtMs: at }),
+    { id: 'claude', displayName: 'Claude' }
+  );
+  assert.match(reply.text, /^⚠️ \*LIMITE MODELLO — CREDITI ESAURITI\*/);
+  assert.match(reply.text, /il 08\/11 alle 14:50/);
+  assert.equal(isSystemMessage(reply.text), true);
 });

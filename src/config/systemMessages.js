@@ -72,6 +72,32 @@ const CREDIT_EXHAUSTED_MESSAGE =
   `${CREDIT_EXHAUSTED_PREFIX}\n\nScusa ma i crediti sono finiti al momento; `
   + 'tornerò disponibile con il prossimo rinnovo 💰💶';
 
+const _ROME_DAY = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' });
+const _ROME_CLOCK = new Intl.DateTimeFormat('it-IT', {
+  timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit'
+});
+const _ROME_DATE = new Intl.DateTimeFormat('it-IT', {
+  timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit'
+});
+
+/**
+ * The credit notice, naming when the allowance renews (Europe/Rome) when the
+ * provider reported it.
+ *
+ * @param {number|null} [resetsAtMs] - renewal instant, epoch milliseconds
+ * @returns {string}
+ */
+function creditExhaustedMessage(resetsAtMs = null) {
+  if (!Number.isFinite(resetsAtMs)) return CREDIT_EXHAUSTED_MESSAGE;
+  const at = new Date(resetsAtMs);
+  const clock = _ROME_CLOCK.format(at);
+  const when = _ROME_DAY.format(at) === _ROME_DAY.format(new Date())
+    ? `oggi alle ${clock}`
+    : `il ${_ROME_DATE.format(at)} alle ${clock}`;
+  return `${CREDIT_EXHAUSTED_PREFIX}\n\nScusa ma i crediti sono finiti al momento; `
+    + `tornerò disponibile ${when} 💰💶`;
+}
+
 /** Temporary throttling, distinct from an exhausted allowance. */
 const PROVIDER_LIMIT_PREFIX = '⚠️ *LIMITE MODELLO*';
 const PROVIDER_LIMIT_MESSAGE =
@@ -278,6 +304,7 @@ export {
   SANDBOX_BUSY_PREFIX,
   CREDIT_EXHAUSTED_PREFIX,
   CREDIT_EXHAUSTED_MESSAGE,
+  creditExhaustedMessage,
   PROVIDER_LIMIT_PREFIX,
   PROVIDER_LIMIT_MESSAGE,
   PROVIDER_AUTH_PREFIX,

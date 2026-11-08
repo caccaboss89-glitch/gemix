@@ -11,14 +11,16 @@
 
 import { TRANSPORT_ERROR, isTransportError } from '../transport/errors.js';
 import {
-  CREDIT_EXHAUSTED_MESSAGE,
+  creditExhaustedMessage,
   PROVIDER_LIMIT_MESSAGE,
   PROVIDER_AUTH_MESSAGE
 } from '../../config/systemMessages.js';
 
-/** Kinds worth a specific reply; anything else falls through to the generic one. */
+/**
+ * Kinds with a fixed reply; QUOTA is rendered separately because it names the
+ * renewal time when known. Anything else falls through to the generic reply.
+ */
 const NEUTRAL_MESSAGES = Object.freeze({
-  [TRANSPORT_ERROR.QUOTA]: CREDIT_EXHAUSTED_MESSAGE,
   [TRANSPORT_ERROR.RATE_LIMIT]: PROVIDER_LIMIT_MESSAGE,
   [TRANSPORT_ERROR.AUTH]: PROVIDER_AUTH_MESSAGE
 });
@@ -33,16 +35,20 @@ const NEUTRAL_MESSAGES = Object.freeze({
 function providerFailureReply(err, profile) {
   if (!isTransportError(err)) return null;
 
-  const text = NEUTRAL_MESSAGES[err.kind];
+  const text = err.kind === TRANSPORT_ERROR.QUOTA
+    ? creditExhaustedMessage(err.resetsAtMs)
+    : NEUTRAL_MESSAGES[err.kind];
   if (!text) return null;
   return {
     text,
     logLine: err.kind === TRANSPORT_ERROR.QUOTA
       ? `${profile?.displayName || 'The model'} credits exhausted — replying with the credit notice.`
       : `${profile?.displayName || 'The model'} refused the turn (${err.kind}).`,
-    // An exhausted allowance and a credential the deployment has to fix both
-    // need the admin; a throttled provider clears on its own.
-    notifyAdmin: err.kind === TRANSPORT_ERROR.QUOTA || err.kind === TRANSPORT_ERROR.AUTH
+    // A credential the deployment has to fix needs the admin, and so does a
+    // pay-per-use allowance that ran dry. A subscription plan running out is
+    // routine, and a throttled provider clears on its own.
+    notifyAdmin: err.kind === TRANSPORT_ERROR.AUTH
+      || (err.kind === TRANSPORT_ERROR.QUOTA && profile?.id !== 'claude')
   };
 }
 

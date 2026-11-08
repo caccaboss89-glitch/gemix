@@ -61,7 +61,8 @@ function resultFailure(result, { assistantError = null, rateLimit = null } = {})
   const cause = assistantError || result.subtype;
   return new TransportError(kind, `Claude Code ended the turn (${cause})${detail ? `: ${detail}` : ''}`, {
     status,
-    providerId: 'claude'
+    providerId: 'claude',
+    resetsAtMs: kind === TRANSPORT_ERROR.QUOTA && rateLimit ? _blockingResetMs(rateLimit) : null
   });
 }
 
@@ -80,6 +81,21 @@ function _windows(info) {
 
 function _resetTime(resetsAt) {
   return Number.isFinite(resetsAt) ? new Date(resetsAt * 1000).toISOString() : 'unknown';
+}
+
+/**
+ * When the usage blocking the plan clears, in epoch milliseconds: the latest
+ * reset among the exhausted windows (all must clear), else the event's own
+ * reset; null when none is reported.
+ */
+function _blockingResetMs(info) {
+  const exhausted = _windows(info)
+    .filter(window => window.utilization >= 1 && Number.isFinite(window.resetsAt))
+    .map(window => window.resetsAt);
+  const seconds = exhausted.length > 0
+    ? Math.max(...exhausted)
+    : (Number.isFinite(info.resetsAt) ? info.resetsAt : null);
+  return seconds === null ? null : seconds * 1000;
 }
 
 /** One log line for a rate-limit state: status, then each window's use and reset. */
@@ -101,12 +117,12 @@ function rateLimitFailure(info) {
   if (info.isUsingOverage === true || info.overageInUse === true) {
     return new TransportError(TRANSPORT_ERROR.QUOTA,
       `Claude plan limit reached and the request drew on extra usage; stopped (${describeRateLimit(info)})`,
-      { providerId: 'claude' });
+      { providerId: 'claude', resetsAtMs: _blockingResetMs(info) });
   }
   if (info.status === 'rejected') {
     return new TransportError(TRANSPORT_ERROR.QUOTA,
       `Claude plan limit reached (${describeRateLimit(info)})`,
-      { providerId: 'claude' });
+      { providerId: 'claude', resetsAtMs: _blockingResetMs(info) });
   }
   return null;
 }
