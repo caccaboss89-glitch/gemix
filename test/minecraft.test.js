@@ -236,9 +236,45 @@ test('concurrent starts wake the PC and launch the server once, and every chat h
   assert.deepEqual(heard.first, [['waking', false], ['starting', false]]);
   assert.deepEqual(heard.second, [['waking', true], ['starting', true]]);
 
-  assert.equal((await controller.shutdown()).outcome, 'shutting_down');
+  const shutdown = await controller.shutdown();
+  assert.equal(shutdown.outcome, 'shutting_down');
+  assert.equal(shutdown.server, 'running');
   assert.equal((await controller.shutdown()).outcome, 'already_off');
   assert.equal(pc.shutdowns, 1);
+});
+
+test('a power-on wakes the PC without starting the server, and shares the wake-up with a start', async () => {
+  const pc = fakeAgent();
+  const controller = createMinecraftController({
+    agent: pc.agent,
+    wake: pc.wake,
+    sleep: async () => { await new Promise(resolve => setImmediate(resolve)); }
+  });
+  const [powered, started] = await Promise.all([controller.powerOn(), controller.start()]);
+  assert.equal(powered.woken, true);
+  assert.equal(started.pc.server, 'running');
+  assert.equal(pc.wakes, 1);
+  assert.equal(pc.starts, 1);
+
+  const alone = fakeAgent();
+  const onlyPower = createMinecraftController({ agent: alone.agent, wake: alone.wake, sleep: async () => {} });
+  assert.equal((await onlyPower.powerOn()).woken, true);
+  assert.equal((await onlyPower.powerOn()).woken, false);
+  assert.equal(alone.starts, 0);
+  assert.equal(alone.server, 'stopped');
+});
+
+test('a shutdown is refused while the PC is being turned on', async () => {
+  const pc = fakeAgent();
+  const controller = createMinecraftController({
+    agent: pc.agent,
+    wake: pc.wake,
+    sleep: async () => { await new Promise(resolve => setImmediate(resolve)); }
+  });
+  const powering = controller.powerOn();
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(controller.shutdown(), { code: 'waking' });
+  assert.equal((await powering).woken, true);
 });
 
 test('the agent hears who asked, whether the PC was already on or woken for the start', async () => {
@@ -272,7 +308,7 @@ test('a shutdown is refused while a start is under way', async () => {
   assert.equal((await starting).pc.server, 'running');
 });
 
-test('the Minecraft tools reach only listed players on WhatsApp, wait to be loaded, and only the admin can turn the PC off', (t) => {
+test('the Minecraft tools reach only listed players on WhatsApp, wait to be loaded, and only the admin powers the PC', (t) => {
   const saved = {
     MINECRAFT_ENABLED: envConfig.MINECRAFT_ENABLED,
     MINECRAFT_PC_HOST: envConfig.MINECRAFT_PC_HOST,
@@ -292,15 +328,19 @@ test('the Minecraft tools reach only listed players on WhatsApp, wait to be load
   assert.ok(toolNames(player).includes('minecraft_server'));
   assert.ok(toolNames(player).includes('minecraft_command'));
   assert.ok(isDeferredTool('minecraft_server') && isDeferredTool('minecraft_command'));
-  const actions = ctx => getToolsForUser(ctx).find(tool => tool.function?.name === 'minecraft_server')
-    .function.parameters.properties.action.enum;
-  assert.ok(!actions(player).includes('shutdown_pc'));
-  assert.ok(actions({ ...player, isActiveMember: true, isAdmin: true }).includes('shutdown_pc'));
+  assert.ok(isDeferredTool('pc_power'));
+  assert.ok(!toolNames(player).includes('pc_power'));
+  const admin = { ...player, isActiveMember: true, isAdmin: true, isMinecraftPlayer: false };
+  assert.ok(toolNames(admin).includes('pc_power'));
+  assert.ok(!toolNames(admin).includes('minecraft_server'));
+  assert.ok(toolNames({ ...admin, isMinecraftPlayer: true }).includes('minecraft_server'));
+  assert.ok(!toolNames({ ...admin, platform: constants.PLATFORM_DISCORD }).includes('pc_power'));
   assert.ok(!toolNames({ ...player, isMinecraftPlayer: false }).includes('minecraft_server'));
   assert.ok(!toolNames({ ...player, platform: constants.PLATFORM_DISCORD, isActiveMember: true }).includes('minecraft_server'));
 
   envConfig.MINECRAFT_ENABLED = false;
   assert.ok(!toolNames(player).includes('minecraft_server'));
+  assert.ok(!toolNames(admin).includes('pc_power'));
   envConfig.MINECRAFT_ENABLED = true;
   envConfig.MINECRAFT_AGENT_TOKEN = '';
   assert.ok(!toolNames(player).includes('minecraft_server'));

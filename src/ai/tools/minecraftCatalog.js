@@ -1,19 +1,17 @@
 // src/ai/tools/minecraftCatalog.js
 //
-// Schemas of the Minecraft server on the admin's PC, offered on WhatsApp to
-// the players listed in src/data/minecraft.json.
+// Schemas of the admin's PC and the Minecraft server it hosts, offered on
+// WhatsApp: the PC's power to the admin, the server to the players listed in
+// src/data/minecraft.json.
 
 import { makeTool } from './schema.js';
 
-const MINECRAFT_SERVER_ACTIONS = ['status', 'start', 'stop', 'log', 'shutdown_pc'];
-
 /**
- * @param {boolean} isAdmin - only the admin is offered shutdown_pc
+ * @param {boolean} isAdmin - the admin powers the PC through pc_power instead
  */
 function buildMinecraftServerTool(isAdmin) {
-  const shutdown = isAdmin
-    ? 'shutdown_pc: stops the server and turns the PC off. Use it only when the admin explicitly asks to turn the PC '
-      + 'off, never on your own.'
+  const power = isAdmin
+    ? 'Turning the PC on or off without touching the server is pc_power.'
     : 'Only the admin can have you turn the PC off.';
   return makeTool({
     name: 'minecraft_server',
@@ -23,17 +21,36 @@ function buildMinecraftServerTool(isAdmin) {
       + 'progress messages; requests from several chats share one start. '
       + 'stop: saves the world and stops the server, leaving the PC on. '
       + 'log: copies the server log since its last start into workspace/ for read_file. '
-      + shutdown,
+      + power,
     properties: {
       action: {
         type: 'string',
-        enum: isAdmin ? MINECRAFT_SERVER_ACTIONS : MINECRAFT_SERVER_ACTIONS.filter(action => action !== 'shutdown_pc'),
+        enum: ['status', 'start', 'stop', 'log'],
         description: 'What to do.'
       }
     },
     required: ['action']
   });
 }
+
+const TOOL_PC_POWER = makeTool({
+  name: 'pc_power',
+  description: 'Power the admin\'s personal PC at home on or off. It is a separate machine from the one you run on: '
+    + 'turning it off never touches you, this chat or the reminders you keep. '
+    + 'status: whether it is on. '
+    + 'power_on: wakes it and waits until it answers, a few minutes at most; it starts nothing on it. '
+    + 'shutdown: turns it off, saving and stopping the game server first if one is running. '
+    + 'Use power_on and shutdown only when the admin asks for exactly that, never on your own, and do only what they '
+    + 'asked: turning the PC on or off is not a reason to start or stop anything else.',
+  properties: {
+    action: {
+      type: 'string',
+      enum: ['status', 'power_on', 'shutdown'],
+      description: 'What to do.'
+    }
+  },
+  required: ['action']
+});
 
 const TOOL_MINECRAFT_COMMAND = makeTool({
   name: 'minecraft_command',
@@ -51,4 +68,4 @@ const TOOL_MINECRAFT_COMMAND = makeTool({
   required: ['command']
 });
 
-export { MINECRAFT_SERVER_ACTIONS, TOOL_MINECRAFT_COMMAND, buildMinecraftServerTool };
+export { TOOL_MINECRAFT_COMMAND, TOOL_PC_POWER, buildMinecraftServerTool };

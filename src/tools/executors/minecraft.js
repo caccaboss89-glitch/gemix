@@ -1,7 +1,8 @@
 // src/tools/executors/minecraft.js
 //
-// Minecraft server executor bindings: the shared controller does the work,
-// these turn its outcomes into tool results and progress messages.
+// Executor bindings of the admin's PC and its Minecraft server: the shared
+// controller does the work, these turn its outcomes into tool results and
+// progress messages.
 
 import { MinecraftError, PHASE, minecraft } from '../../minecraft/controller.js';
 import { AgentReplyError } from '../../minecraft/agentClient.js';
@@ -44,7 +45,7 @@ async function _status() {
   const { pc, booting } = await minecraft.status();
   if (!pc) {
     return booting
-      ? _ok({ pc: 'booting' }, 'The PC is booting for a start already under way.')
+      ? _ok({ pc: 'booting' }, 'The PC is booting after a wake-up already under way.')
       : _ok({ pc: 'off', server: 'off' }, PC_OFF);
   }
   return _ok({ pc: 'on', server: pc.server, players: pc.players, address: pc.address }, _serverLine(pc));
@@ -90,18 +91,44 @@ async function _log(userCtx) {
   return _ok({ path: staged.display }, `The server log since its last start is saved as "${staged.display}".${truncated}`);
 }
 
-async function _shutdownPc() {
-  const result = await minecraft.shutdown();
-  if (result.outcome === 'already_off') return _ok({ pc: 'off' }, 'The PC was already off.');
-  return _ok({ pc: 'shutting_down', console: result.console }, 'The server is stopped and the PC is shutting down.');
-}
-
 const ACTIONS = {
   status: _status,
   start: _start,
   stop: _stop,
-  log: _log,
-  shutdown_pc: _shutdownPc
+  log: _log
+};
+
+async function _pcStatus() {
+  const { pc, booting } = await minecraft.status();
+  if (pc) return _ok({ pc: 'on' }, 'The PC is on.');
+  return booting ? _ok({ pc: 'booting' }, 'The PC is booting.') : _ok({ pc: 'off' }, 'The PC is off.');
+}
+
+async function _powerOn(userCtx) {
+  const result = await minecraft.powerOn({ signal: userCtx.turnBudget?.signal });
+  if (result.pending) {
+    return {
+      success: true,
+      status: 'degraded',
+      message: 'The PC is still booting and this turn could not wait for it; check again with status shortly.'
+    };
+  }
+  return _ok({ pc: 'on' }, result.woken ? 'The PC is on now; nothing was started on it.' : 'The PC was already on.');
+}
+
+async function _shutdown() {
+  const result = await minecraft.shutdown();
+  if (result.outcome === 'already_off') return _ok({ pc: 'off' }, 'The PC was already off.');
+  const message = result.server === 'stopped'
+    ? 'The PC is shutting down.'
+    : 'The game server was saved and stopped, and the PC is shutting down.';
+  return _ok({ pc: 'shutting_down', console: result.console }, message);
+}
+
+const PC_ACTIONS = {
+  status: _pcStatus,
+  power_on: _powerOn,
+  shutdown: _shutdown
 };
 
 /** The controller's and the agent's refusals are results for the model, not faults. */
@@ -126,9 +153,14 @@ async function _minecraftCommand({ args }) {
   });
 }
 
+async function _pcPower({ args, userCtx }) {
+  return _reportRefusals(() => PC_ACTIONS[args.action](userCtx));
+}
+
 const MINECRAFT_TOOL_EXECUTORS = Object.freeze({
   minecraft_server: _minecraftServer,
-  minecraft_command: _minecraftCommand
+  minecraft_command: _minecraftCommand,
+  pc_power: _pcPower
 });
 
 export { MINECRAFT_TOOL_EXECUTORS };

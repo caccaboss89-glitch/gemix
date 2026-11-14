@@ -16,7 +16,7 @@ import {
 } from './tools/deliveryCatalog.js';
 import { buildGenerateFormalRequestPdfTool } from './tools/documentCatalog.js';
 import { buildLoadToolsTool } from './tools/loadingCatalog.js';
-import { TOOL_MINECRAFT_COMMAND, buildMinecraftServerTool } from './tools/minecraftCatalog.js';
+import { TOOL_MINECRAFT_COMMAND, TOOL_PC_POWER, buildMinecraftServerTool } from './tools/minecraftCatalog.js';
 import {
   TOOL_GENERATE_MUSIC,
   TOOL_GENERATE_VIDEO,
@@ -67,7 +67,8 @@ const DEFERRED_TOOLS = new Set([
   TOOL.MANAGE_PREFERENCES,
   TOOL.TOGGLE_RELEASE,
   TOOL.MINECRAFT_SERVER,
-  TOOL.MINECRAFT_COMMAND
+  TOOL.MINECRAFT_COMMAND,
+  TOOL.PC_POWER
 ]);
 
 const SUPPORTED_TOOL_PLATFORMS = new Set([
@@ -132,10 +133,14 @@ function getToolsForUser(toolCtx) {
     tools.push(buildReadSentMessagesTool(isAdmin));
   }
 
-  // The Minecraft server belongs to its own player list, not to membership.
-  if (isWhatsApp && toolCtx.isMinecraftPlayer && isMinecraftEnabled()) {
-    tools.push(buildMinecraftServerTool(isAdmin));
-    tools.push(TOOL_MINECRAFT_COMMAND);
+  // The Minecraft server belongs to its own player list, not to membership;
+  // the PC's power belongs to the admin alone, player or not.
+  if (isWhatsApp && isMinecraftEnabled()) {
+    if (toolCtx.isMinecraftPlayer) {
+      tools.push(buildMinecraftServerTool(isAdmin));
+      tools.push(TOOL_MINECRAFT_COMMAND);
+    }
+    if (isAdmin) tools.push(TOOL_PC_POWER);
   }
 
   // The administrator already sees this conversation and its tool failures;

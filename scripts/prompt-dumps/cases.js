@@ -432,6 +432,19 @@ const CASES = {
       userWorkspace: EMPTY_WORKSPACE,
       groupParticipants: MOCK_GROUP_PARTICIPANTS
     }
+  },
+  // The admin on the player list: the server tools point to pc_power, which
+  // the admin holds whether listed or not (case 1).
+  24: {
+    label: 'WA dedicated private — admin Minecraft player',
+    ctx: {
+      platform: PLATFORM_WA_DEDICATED,
+      isGroup: false,
+      chatId: 'wa_priv@test',
+      userName: ADMIN_NAME,
+      userIdentity: { ...ACTIVE, isMinecraftPlayer: true },
+      userWorkspace: EMPTY_WORKSPACE
+    }
   }
 };
 

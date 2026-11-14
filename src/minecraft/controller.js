@@ -1,12 +1,13 @@
 // src/minecraft/controller.js
 //
-// The one place that powers the admin's PC on and off for the Minecraft
-// server, shared by every chat.
+// The one place that powers the admin's PC on and off and runs the Minecraft
+// server on it, shared by every chat.
 //
-// At most one power operation runs at a time. A start asked while another is
-// under way joins it: the PC is woken and the server started once, and every
-// waiting chat hears the same progress. A shutdown never overlaps a start.
-// Only the admin is offered the shutdown (see tools/minecraftCatalog.js).
+// A start asked while another is under way joins it: the server is started
+// once, and every waiting chat hears the same progress. Starts and power-ons
+// share one wake-up of the PC. A shutdown never overlaps a start or a wake-up.
+// Only the admin is offered the PC's own power (see tools/minecraftCatalog.js);
+// a player's start powers it on only because the server needs it.
 
 import envConfig from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
@@ -28,7 +29,7 @@ const TIMEOUT = { status: 25_000, start: 30_000, log: 60_000, stop: 3 * 60 * 100
 /** The progress phases of a start, as the chats hear them. */
 const PHASE = { WAKING: 'waking', STARTING: 'starting' };
 
-/** A start or shutdown failed in a way the caller reports as is. */
+/** A start, power-on or shutdown failed in a way the caller reports as is. */
 class MinecraftError extends Error {
   constructor(code, message) {
     super(message);
@@ -53,6 +54,8 @@ function createMinecraftController({
 } = {}) {
   /** @type {{ kind: 'start'|'shutdown', promise: Promise<object>, phase: string|null, listeners: Set<Function> }|null} */
   let operation = null;
+  /** The wake-up under way, shared by starts and power-ons; null when none is. */
+  let boot = null;
 
   /** The agent's status, or null while the PC is off or not answering yet. */
   async function readPc() {
@@ -87,14 +90,27 @@ function createMinecraftController({
     throw new MinecraftError('pc_unreachable', 'The PC did not answer within five minutes of the wake-up packet.');
   }
 
+  /** Wake the PC, or join the wake-up already under way. */
+  function bootPc() {
+    if (!boot) {
+      log.info('PC is off; sending the wake-up packet');
+      const current = wakePc().finally(() => {
+        if (boot === current) boot = null;
+      });
+      boot = current;
+      // Every caller may have stopped waiting before it settles.
+      current.catch(err => log.warn(`Wake-up failed: ${err.message}`));
+    }
+    return boot;
+  }
+
   async function runStart(requester) {
     let pc = await readPc();
     // The agent tells the admin who asked, whether the PC was already on or just woken.
     const notice = requester ? { requester } : {};
     if (!pc) {
       emit(PHASE.WAKING);
-      log.info('PC is off; sending the wake-up packet');
-      pc = await wakePc();
+      pc = await bootPc();
     }
     if (pc.server === 'running') return pc;
     emit(PHASE.STARTING);
@@ -151,22 +167,36 @@ function createMinecraftController({
   }
 
   /**
-   * Stop the server and turn the PC off.
-   * @returns {Promise<{ outcome: 'already_off'|'shutting_down', console?: string }>}
+   * Turn the PC on without starting anything on it, or join the wake-up under way.
+   *
+   * @param {{ signal?: AbortSignal }} [opts] - an aborted signal stops the wait, not the wake-up
+   * @returns {Promise<{ pc: object, woken: boolean }|{ pending: true }>}
+   */
+  async function powerOn({ signal } = {}) {
+    if (operation?.kind === 'shutdown') {
+      throw new MinecraftError('shutting_down', 'The PC is shutting down; it can be turned on again once it is off.');
+    }
+    const pc = boot ? null : await readPc();
+    if (pc) return { pc, woken: false };
+    const woken = await _untilAborted(bootPc(), signal);
+    return woken ? { pc: woken, woken: true } : { pending: true };
+  }
+
+  /**
+   * Turn the PC off, saving and stopping the server first if it is up.
+   * @returns {Promise<{ outcome: 'already_off'|'shutting_down', server?: string, console?: string }>}
    */
   async function shutdown() {
-    if (operation) {
-      throw new MinecraftError(operation.kind === 'start' ? 'starting' : 'shutting_down', operation.kind === 'start'
-        ? 'The PC and server are being started; wait until that is done.'
-        : 'The PC is already shutting down.');
-    }
+    if (operation?.kind === 'shutdown') throw new MinecraftError('shutting_down', 'The PC is already shutting down.');
+    if (operation) throw new MinecraftError('starting', 'The server is being started; wait until that is done.');
+    if (boot) throw new MinecraftError('waking', 'The PC is being turned on; wait until that is done.');
     operation = { kind: 'shutdown', promise: null, phase: null, listeners: new Set() };
     try {
       const pc = await readPc();
       if (!pc) return { outcome: 'already_off' };
       const reply = await agent('POST', '/shutdown', { timeoutMs: TIMEOUT.stop });
       log.info('PC shutdown requested');
-      return { outcome: 'shutting_down', console: reply.console || '' };
+      return { outcome: 'shutting_down', server: pc.server, console: reply.console || '' };
     } finally {
       operation = null;
     }
@@ -175,7 +205,7 @@ function createMinecraftController({
   /** The PC and server as they are now; pc is null while the PC is off. */
   async function status() {
     const pc = await readPc();
-    return { pc, booting: operation?.kind === 'start' && operation.phase === PHASE.WAKING };
+    return { pc, booting: Boolean(boot) };
   }
 
   /** Run something on the agent of a PC that is on; null while it is off. */
@@ -190,6 +220,7 @@ function createMinecraftController({
 
   return {
     start,
+    powerOn,
     shutdown,
     status,
     stopServer: () => onPc('POST', '/stop', { timeoutMs: TIMEOUT.stop }),

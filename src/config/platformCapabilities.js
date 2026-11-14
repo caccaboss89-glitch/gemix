@@ -47,7 +47,8 @@ const TOOL = {
   BUG_REPORT: 'bug_report',
   LOAD_TOOLS: 'load_tools',
   MINECRAFT_SERVER: 'minecraft_server',
-  MINECRAFT_COMMAND: 'minecraft_command'
+  MINECRAFT_COMMAND: 'minecraft_command',
+  PC_POWER: 'pc_power'
 };
 
 const CAPS = {
