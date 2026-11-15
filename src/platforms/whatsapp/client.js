@@ -75,9 +75,10 @@ function _isReady(client) {
  * @param {Function} opts.onMessage - async (msg) => void; transient WA/Puppeteer errors are absorbed
  * @param {Function} [opts.onReady] - (client) => void, after the client reports ready
  * @param {Function} [opts.onFatal] - (reason, error) => void, asks the app to recover cleanly
+ * @param {string} [opts.pairingPhone] - digits of the account's phone: link by a pairing code, not a QR
  * @returns {object} The whatsapp-web.js Client instance (already initializing)
  */
-function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady, onFatal }) {
+function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady, onFatal, pairingPhone }) {
   log.info(`Chromium: ${CHROMIUM_PATH || 'resolved by Puppeteer at launch'}`);
   const client = new Client({
     authStrategy: new LocalAuth({ clientId }),
@@ -88,7 +89,8 @@ function createWhatsAppClient({ clientId, log, messageEvent, onMessage, onReady,
       protocolTimeout: PROTOCOL_TIMEOUT_MS
     },
     authTimeoutMs: AUTH_TIMEOUT_MS,
-    qr_timeout: constants.WA_QR_TIMEOUT
+    qr_timeout: constants.WA_QR_TIMEOUT,
+    ...(pairingPhone ? { pairWithPhoneNumber: { phoneNumber: pairingPhone } } : {})
   });
 
   return startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage, onReady, onFatal });
@@ -102,6 +104,7 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
   let shuttingDown = false;
   let shutdownPromise = null;
   let fatalReported = false;
+  // Set while the phone must link: a QR to scan or a pairing code to enter.
   let waitingForQr = false;
   let livenessTimer = null;
   let watchedBrowser = null;
@@ -212,6 +215,11 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
     waitingForQr = true;
     log.info('Scan QR code:');
     qrcode.generate(qr, { small: true });
+  });
+
+  client.on('code', (code) => {
+    waitingForQr = true;
+    log.info(`Pairing code: ${code} (enter it on the phone: Linked devices > Link with phone number)`);
   });
 
   client.on('ready', () => {

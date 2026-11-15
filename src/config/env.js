@@ -252,6 +252,11 @@ export default {
   // executablePath. Set it only for a deployment with a real system binary.
   CHROMIUM_PATH: process.env.CHROMIUM_PATH || '',
 
+  // Phone number (digits, country code first) of the dedicated WhatsApp account.
+  // Set, that account links by a pairing code printed in the log instead of a QR
+  // scan. Unset, it links by QR.
+  WA_DEDICATED_PAIRING_PHONE: (process.env.WA_DEDICATED_PAIRING_PHONE || '').replace(/D/g, ''),
+
   // Minecraft server on the admin's PC (src/minecraft). GemiX wakes the PC with
   // a magic packet to MINECRAFT_PC_MAC, sent to MINECRAFT_PC_BROADCAST, and
   // then talks to the agent at MINECRAFT_PC_HOST:MINECRAFT_AGENT_PORT with

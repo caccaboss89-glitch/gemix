@@ -20,6 +20,7 @@ import { materializeWhatsAppBatchContent } from '../../utils/batchContentRefresh
 import { identifyUser } from '../../utils/userIdentifier.js';
 import { setReadyDedicatedClient } from './dedicatedClientRegistry.js';
 import constants from '../../config/constants.js';
+import envConfig from '../../config/env.js';
 import { containsMetaAiTag } from '../../utils/waMentions.js';
 import { createLogger } from '../../utils/logger.js';
 import { enqueueBatchedTurn, peekPendingBatchLastEntry } from '../../utils/batchIngress.js';
@@ -52,7 +53,8 @@ function initDedicatedWhatsApp(opts = {}) {
     messageEvent: 'message',
     onMessage: onDedicatedMessage,
     onReady: (c) => setReadyDedicatedClient(c),
-    onFatal: opts.onFatal
+    onFatal: opts.onFatal,
+    pairingPhone: envConfig.WA_DEDICATED_PAIRING_PHONE
   });
   return client;
 }
