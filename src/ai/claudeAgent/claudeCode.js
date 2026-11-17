@@ -90,13 +90,12 @@ function ensureClaudeCodeDirs({ configDir, workDir }) {
 }
 
 /**
- * Start Claude Code with no message to send and read what it resolved: the
- * account behind its credential and the models it offers. Nothing reaches the
- * model, so the probe costs nothing from the plan; it does not prove that the
- * server still accepts the token.
+ * Start Claude Code with no message to send and read the account behind the
+ * credential it resolved. Nothing reaches the model, so the probe costs nothing
+ * from the plan; it does not prove that the server still accepts the token.
  *
  * @param {{ configDir: string, workDir: string, oauthToken: string }} claudeAgent
- * @returns {Promise<{ account: object, models: object[] }>}
+ * @returns {Promise<{ account: object }>}
  */
 async function probeClaudeCode({ configDir, workDir, oauthToken }) {
   let endInput;
@@ -124,7 +123,7 @@ async function probeClaudeCode({ configDir, workDir, oauthToken }) {
       );
     });
     const init = await Promise.race([session.initializationResult(), timeout]);
-    return { account: init.account || {}, models: Array.isArray(init.models) ? init.models : [] };
+    return { account: init.account || {} };
   } finally {
     clearTimeout(timer);
     endInput();

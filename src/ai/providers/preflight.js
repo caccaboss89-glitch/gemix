@@ -17,8 +17,9 @@
 // For the Claude Agent runtime, Claude Code is started once without a message:
 // a missing binary, or a credential other than the subscription token, is
 // refused, because the second would bill turns to the pay-per-use API. A probe
-// that cannot start, or a configured model Claude Code does not list, is only
-// a warning: every turn still checks its own credential.
+// that cannot start is only a warning: every turn still checks its own
+// credential. The model is not checked: Claude Code's model list only names
+// its picker aliases, which can lag behind the models the API already serves.
 
 import pkg from '../../../package.json' with { type: 'json' };
 import { createLogger } from '../../utils/logger.js';
@@ -82,8 +83,8 @@ async function _runResponsesPreflight(profile) {
 }
 
 /**
- * Check that Claude Code is installed, starts on the subscription token and
- * offers the configured model, without sending it a message.
+ * Check that Claude Code is installed and starts on the subscription token,
+ * without sending it a message.
  *
  * @param {object} profile - from resolveProviderProfile()
  * @returns {Promise<{ accountOk: boolean }>}
@@ -110,7 +111,7 @@ async function _runClaudeAgentPreflight(profile) {
     return { accountOk: false };
   }
 
-  const { account, models } = probe;
+  const { account } = probe;
   const apiKeySource = account.apiKeySource && account.apiKeySource !== 'none' ? account.apiKeySource : null;
   if (account.tokenSource !== SUBSCRIPTION_TOKEN_SOURCE || apiKeySource) {
     throw new Error(
@@ -121,12 +122,6 @@ async function _runClaudeAgentPreflight(profile) {
   }
   const plan = account.subscriptionType ? `, ${account.subscriptionType} plan` : '';
   log.info(`   Credentials: Claude subscription token (${account.tokenSource}${plan})`);
-
-  const offered = models.flatMap(model => [model.value, model.resolvedModel]).filter(Boolean);
-  if (!offered.includes(profile.model)) {
-    log.warn(`   Claude Code does not list ${profile.model} (offers ${offered.join(', ') || 'nothing'}); `
-      + 'turns will still request it');
-  }
   return { accountOk: true };
 }
 
