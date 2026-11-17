@@ -16,7 +16,7 @@ import path from 'node:path';
 import test, { after, afterEach, before } from 'node:test';
 
 import constants from '../src/config/constants.js';
-import { clearChatInPage } from '../src/platforms/whatsapp/chatClear.js';
+import { chatHasHistoryInPage, clearChatInPage } from '../src/platforms/whatsapp/chatClear.js';
 import { WINDOW_FETCH_LIMIT, fetchWhatsAppMessageWindow } from '../src/platforms/whatsapp/messageWindow.js';
 import { wipeWhatsAppUserData } from '../src/utils/privacyWipe.js';
 import { getWipeCutoff, setWipeCutoff } from '../src/utils/wipeCutoffs.js';
@@ -153,6 +153,26 @@ test('a failed clear request fails the clear and still releases it for the next 
   await assert.rejects(clearChatInPage(page, 'clear-error@c.us', 300), /request refused/);
   assert.equal(state.finalized, 1);
   assert.equal(chat.endOfHistoryTransferType, 0);
+});
+
+test('a chat holding only the encryption notice has nothing left to clear', async () => {
+  const { state, page } = fakeWhatsAppWeb({
+    chatId: 'history-notice@c.us',
+    loaded: [pageMessage(100, true)]
+  });
+  assert.equal(await chatHasHistoryInPage(page, 'history-notice@c.us'), false);
+  assert.equal(state.finalized, 0, 'looking must not clear anything');
+});
+
+test('a chat with messages, loaded or only in storage, has something to clear', async () => {
+  const loaded = fakeWhatsAppWeb({ chatId: 'history-loaded@c.us', loaded: [pageMessage(100)] });
+  assert.equal(await chatHasHistoryInPage(loaded.page, 'history-loaded@c.us'), true);
+  const stored = fakeWhatsAppWeb({
+    chatId: 'history-stored@c.us',
+    loaded: [pageMessage(100, true)],
+    stored: [pageMessage(50)]
+  });
+  assert.equal(await chatHasHistoryInPage(stored.page, 'history-stored@c.us'), true);
 });
 
 test('a chat the page does not know is not cleared', async () => {

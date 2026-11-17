@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
-import { clearChatInPage } from '../src/platforms/whatsapp/chatClear.js';
+import { chatHasHistoryInPage, clearChatInPage } from '../src/platforms/whatsapp/chatClear.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // LocalAuth keeps the session in the bot's working directory, the repo root.
@@ -33,8 +33,8 @@ const CLEARED_SERVERS = ['c.us', 'lid', 'g.us'];
 /* global window -- _listChatsInPage runs in the browser page */
 
 /**
- * Runs inside the WhatsApp Web page: the private chats and groups that hold
- * something to clear.
+ * Runs inside the WhatsApp Web page: the private chats and groups with at
+ * least one message, notifications included.
  * @param {string[]} servers
  * @returns {{ id: string, title: string, isGroup: boolean }[]}
  */
@@ -62,7 +62,10 @@ async function main() {
   try {
     const page = (await browser.pages()).find(p => p.url().startsWith('https://web.whatsapp.com'));
     if (!page) throw new Error('The dedicated account has no WhatsApp Web page open');
-    const chats = await page.evaluate(_listChatsInPage, CLEARED_SERVERS);
+    const chats = [];
+    for (const chat of await page.evaluate(_listChatsInPage, CLEARED_SERVERS)) {
+      if (await chatHasHistoryInPage(page, chat.id)) chats.push(chat);
+    }
     for (const chat of chats) console.log(`  ${_describe(chat)}`);
 
     if (!execute) {

@@ -18,42 +18,47 @@ import { WINDOW_FETCH_LIMIT } from './messageWindow.js';
 
 const log = createLogger('WhatsAppChatClear');
 
-/* global window -- _clearChatInPage runs in the browser page */
+/* global window -- _clearAndCountInPage runs in the browser page */
 
 /**
- * Runs inside the WhatsApp Web page, so it must stay self-contained.
+ * Runs inside the WhatsApp Web page, so it must stay self-contained: clears
+ * the chat first when asked, then looks for messages older than `before` that
+ * the history window could still read, stopping at the first batch with any.
  * @param {string} chatId
- * @param {number} wipedAt - unix seconds; older messages must be gone
+ * @param {number} before - unix seconds
  * @param {number} windowLimit - how many messages the history window reads
- * @returns {Promise<{ found: boolean, left: number }>} left = older messages still readable
+ * @param {boolean} clearFirst
+ * @returns {Promise<{ found: boolean, left: number }>} left = 0 when none is readable
  */
-async function _clearChatInPage(chatId, wipedAt, windowLimit) {
+async function _clearAndCountInPage(chatId, before, windowLimit, clearFirst) {
   const found = await window.WWebJS.getChat(chatId, { getAsModel: false });
   if (!found) return { found: false, left: 0 };
   const chat = window.require('WAWebStateUtils').unproxy(found);
-  const { initClearChat, finalizeClearChat } = window.require('WAWebClearChatUtils');
-  const unreadCount = chat.unreadCount;
-  // false: starred messages go too.
-  const pending = initClearChat(chat, false);
-  await pending.then(() => {
-    // Tells WhatsApp Web the phone holds nothing older, so it does not load
-    // the cleared messages back on demand.
-    chat.endOfHistoryTransferType = window.require('WAWebChatConstants')
-      .ConversationEndOfHistoryTransferModelPropType.COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY;
-  }, () => {});
-  // Runs even after a failed request: besides removing the cleared messages it
-  // releases the pending clear, which would otherwise answer every later clear
-  // of this chat with the same failure. It rethrows that failure, except a
-  // server status error, which the re-read below catches instead.
-  await finalizeClearChat(chat, pending, unreadCount);
+  if (clearFirst) {
+    const { initClearChat, finalizeClearChat } = window.require('WAWebClearChatUtils');
+    const unreadCount = chat.unreadCount;
+    // false: starred messages go too.
+    const pending = initClearChat(chat, false);
+    await pending.then(() => {
+      // Tells WhatsApp Web the phone holds nothing older, so it does not load
+      // the cleared messages back on demand.
+      chat.endOfHistoryTransferType = window.require('WAWebChatConstants')
+        .ConversationEndOfHistoryTransferModelPropType.COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY;
+    }, () => {});
+    // Runs even after a failed request: besides removing the cleared messages
+    // it releases the pending clear, which would otherwise answer every later
+    // clear of this chat with the same failure. It rethrows that failure,
+    // except a server status error, which the re-read below catches instead.
+    await finalizeClearChat(chat, pending, unreadCount);
+  }
 
-  // Re-read the chat the way whatsapp-web.js's fetchMessages fills the history
+  // Read the chat the way whatsapp-web.js's fetchMessages fills the history
   // window: the loaded messages first, then earlier ones from storage.
   // Notifications do not count: they carry no text the history could show, and
   // WhatsApp keeps the end-to-end encryption notice through every clear.
   const { getIsNotification } = window.require('WAWebMsgGetters');
   const readable = (msgs) => msgs.filter(msg => !getIsNotification(msg));
-  const countEarlier = (msgs) => msgs.filter(msg => msg.t < wipedAt).length;
+  const countEarlier = (msgs) => msgs.filter(msg => msg.t < before).length;
   let seen = readable(chat.msgs.getModelsArray());
   let left = countEarlier(seen);
   let read = seen.length;
@@ -77,16 +82,30 @@ async function _clearChatInPage(chatId, wipedAt, windowLimit) {
  * @returns {Promise<boolean>}
  */
 async function clearChatInPage(page, chatId, wipedAt) {
-  const { found, left } = await page.evaluate(_clearChatInPage, chatId, wipedAt, WINDOW_FETCH_LIMIT);
+  const { found, left } = await page.evaluate(_clearAndCountInPage, chatId, wipedAt, WINDOW_FETCH_LIMIT, true);
   if (!found) {
     log.warn(`Chat clear skipped for ${chatId}: WhatsApp Web does not know the chat`);
     return false;
   }
   if (left > 0) {
-    log.warn(`Chat clear left ${left} earlier message(s) in ${chatId}`);
+    log.warn(`Chat clear left messages older than the clear in ${chatId}`);
     return false;
   }
   return true;
+}
+
+/**
+ * True when the history window could read anything from the chat, so there is
+ * something to clear. Reads only.
+ * @param {object} page - Puppeteer page running WhatsApp Web
+ * @param {string} chatId
+ * @returns {Promise<boolean>}
+ */
+async function chatHasHistoryInPage(page, chatId) {
+  const { left } = await page.evaluate(
+    _clearAndCountInPage, chatId, Number.MAX_SAFE_INTEGER, WINDOW_FETCH_LIMIT, false
+  );
+  return left > 0;
 }
 
 /**
@@ -99,4 +118,4 @@ async function clearWhatsAppChat(chat, wipedAt) {
   return clearChatInPage(chat.client.pupPage, chat.id._serialized, wipedAt);
 }
 
-export { clearChatInPage, clearWhatsAppChat };
+export { chatHasHistoryInPage, clearChatInPage, clearWhatsAppChat };
