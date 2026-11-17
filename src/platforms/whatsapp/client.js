@@ -7,11 +7,13 @@
 // identical, so it lives here once.
 //
 // Initialization failures and disconnects retry with a bounded backoff before
-// coordinated recovery. Waiting for a QR scan is not a readiness failure;
+// coordinated recovery, each retry on a new browser once the previous one has
+// exited. Waiting for a QR scan is not a readiness failure;
 // an initialization call that never settles still has a hard timeout. A browser that
 // dies under a ready client is neither: it is reported as a lifecycle failure,
 // because nothing else in the stack would ever notice it.
 
+import { once } from 'node:events';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import puppeteer from 'puppeteer';
@@ -63,6 +65,11 @@ function _isBrowserAlive(client) {
 
 function _isReady(client) {
   return Boolean(client?.info?.wid?._serialized) && _isBrowserAlive(client);
+}
+
+/** Whether a launched browser process has not exited yet. */
+function _isProcessRunning(proc) {
+  return Boolean(proc) && proc.exitCode === null && proc.signalCode === null;
 }
 
 /**
@@ -268,6 +275,25 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
     reconnectTimer.unref?.();
   }
 
+  /**
+   * Close the browser an earlier attempt left on this profile and wait for its
+   * process to exit. Chrome holds the profile's `Singleton*` lock for as long as
+   * it runs, so a launch next to it fails at once with "The browser is already
+   * running". `destroy()` is whatsapp-web.js's own teardown: it closes the
+   * browser gracefully over DevTools, aborts a pending inject and lets the next
+   * `initialize()` hook the new page again. When whatsapp-web.js is already
+   * closing the browser itself after a disconnect, Puppeteer returns from this
+   * second close early, hence the wait on the process.
+   */
+  async function releaseStaleBrowser() {
+    const browser = client.pupBrowser;
+    if (!browser) return;
+    const browserProcess = browser.process();
+    if (_isProcessRunning(browserProcess)) log.info(`Closing the ${clientId} browser left by the previous attempt...`);
+    await client.destroy();
+    if (_isProcessRunning(browserProcess)) await once(browserProcess, 'exit');
+  }
+
   async function initializeClient() {
     if (shuttingDown || fatalReported || initializeInProgress) return;
     initializeInProgress = true;
@@ -275,7 +301,9 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
     armReadyWatchdog();
     try {
       await withPromiseTimeout(
-        Promise.resolve().then(() => client.initialize()),
+        releaseStaleBrowser().then(() => {
+          if (!shuttingDown && !fatalReported) return client.initialize();
+        }),
         INITIALIZE_CALL_TIMEOUT_MS,
         `${clientId} WhatsApp initialize`
       );

@@ -4,26 +4,52 @@ import { setImmediate } from 'node:timers/promises';
 import test from 'node:test';
 import { startWhatsAppLifecycle, shutdownWhatsAppClient } from '../src/platforms/whatsapp/client.js';
 
-// Puppeteer's Browser exposes on/once/off/emit but not removeListener.
+// Puppeteer's Browser exposes on/once/off/emit but not removeListener. Its
+// Chrome process keeps the profile locked until it exits, whether or not the
+// DevTools connection is still up.
 function puppeteerBrowser() {
   const emitter = new EventEmitter();
+  const chrome = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null });
+  let connected = true;
+  const disconnect = async () => {
+    connected = false;
+    emitter.emit('disconnected');
+  };
   return {
     on: (event, listener) => emitter.on(event, listener),
     once: (event, listener) => emitter.once(event, listener),
     off: (event, listener) => emitter.off(event, listener),
     emit: (event, ...args) => emitter.emit(event, ...args),
-    isConnected: () => true
+    isConnected: () => connected,
+    process: () => chrome,
+    disconnect,
+    close: async () => {
+      if (!connected) return;
+      chrome.exitCode = 0;
+      chrome.emit('exit', 0, null);
+      await disconnect();
+    }
   };
 }
 
+// Like whatsapp-web.js, initialize() launches a browser on the session profile
+// before running the test's own step, and destroy() closes it.
 function start(t, initialize) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const client = new EventEmitter();
   client.info = { wid: { _serialized: 'test@c.us' } };
-  client.pupBrowser = puppeteerBrowser();
+  client.pupBrowser = null;
   client.pupPage = { isClosed: () => false, evaluate: async () => true };
-  client.initialize = initialize;
-  client.destroy = async () => {};
+  client.initialize = async () => {
+    if (client.pupBrowser?.process().exitCode === null) {
+      throw new Error('The browser is already running for .wwebjs_auth/session-test');
+    }
+    client.pupBrowser = puppeteerBrowser();
+    return initialize();
+  };
+  client.destroy = async () => {
+    if (client.pupBrowser?.isConnected()) await client.pupBrowser.close();
+  };
   const failures = [];
   startWhatsAppLifecycle(client, {
     clientId: 'test', messageEvent: 'message', onMessage: async () => {},
@@ -64,6 +90,41 @@ test('WhatsApp rearms its ready watchdog even when cached info survives a discon
   t.mock.timers.tick(2000);
   await setImmediate();
   assert.equal(calls, 3);
+});
+
+test('a WhatsApp ready timeout closes the still-open browser before initializing again', async t => {
+  let calls = 0;
+  const { client, failures } = start(t, async () => { calls++; });
+  await setImmediate();
+  const stale = client.pupBrowser;
+  t.mock.timers.tick(5 * 60 * 1000);
+  await setImmediate();
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  assert.equal(stale.isConnected(), false);
+  assert.notEqual(client.pupBrowser, stale);
+  assert.equal(calls, 2);
+  client.emit('ready');
+  assert.deepEqual(failures, []);
+});
+
+test('WhatsApp waits for a browser that is still exiting before relaunching on its profile', async t => {
+  let calls = 0;
+  const { client, failures } = start(t, async () => { calls++; });
+  await setImmediate();
+  client.emit('ready');
+  const exiting = client.pupBrowser;
+  client.emit('disconnected', 'CONFLICT');
+  // whatsapp-web.js's own destroy() has closed the connection; Chrome has not exited yet.
+  await exiting.disconnect();
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  assert.equal(calls, 1);
+  exiting.process().exitCode = 0;
+  exiting.process().emit('exit', 0, null);
+  await setImmediate();
+  assert.equal(calls, 2);
+  assert.deepEqual(failures, []);
 });
 
 test('a stuck WhatsApp initialize call terminates its recovery window', async t => {
