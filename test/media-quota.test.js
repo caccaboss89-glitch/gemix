@@ -22,9 +22,11 @@ import {
 } from '../src/utils/mediaUsageLimits.js';
 import * as systemState from '../src/utils/systemState.js';
 import { wipeWhatsAppUserData } from '../src/utils/privacyWipe.js';
+import { forgetWipeCutoff } from '../src/utils/wipeCutoffs.js';
 
 const STATE_FILE = path.join(constants.DATA_DIR, 'systemState.json');
 const USER = 'quota-test-user';
+const USER_JID = `${USER}@c.us`;
 const member = { isAdmin: false, taskFileId: USER };
 
 let stateBackup = null;
@@ -45,6 +47,7 @@ before(() => {
 
 after(async () => {
   await resetUsage();
+  await forgetWipeCutoff(USER_JID);
   if (stateBackup !== null) fs.writeFileSync(STATE_FILE, stateBackup);
 });
 
@@ -150,10 +153,13 @@ test('the counts line shows only the kinds the chat can actually generate', () =
 
 test('a privacy wipe does not give the quota back', async () => {
   await spend('image', 3);
-  const jid = `${USER}@c.us`;
   const { ok } = await wipeWhatsAppUserData({
-    chat: { clearMessages: async () => true },
-    ctx: { platform: constants.PLATFORM_WA_DEDICATED, isGroup: false, chatId: jid, waJid: jid },
+    chat: {
+      id: { _serialized: USER_JID },
+      client: { pupPage: { evaluate: async () => true } },
+      fetchMessages: async () => []
+    },
+    ctx: { platform: constants.PLATFORM_WA_DEDICATED, isGroup: false, chatId: USER_JID, waJid: USER_JID },
     taskFileId: USER
   });
   assert.equal(ok, true);

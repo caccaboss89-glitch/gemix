@@ -15,6 +15,9 @@
 // they hold no content and run out with their own period, while clearing them
 // would let anyone buy a fresh quota with every wipe.
 //
+// Left behind on purpose: the time of the wipe (utils/wipeCutoffs.js), which
+// keeps everything older out of every later turn.
+//
 // Every step is independent and reports its own outcome, so a single failure
 // still lets the rest go through and the caller can tell the user the wipe was
 // incomplete instead of silently claiming success.
@@ -37,6 +40,8 @@ import workspaceRuntime from '../sandbox/workspaceRuntime.js';
 import { wipeWorkspace } from '../sandbox/workspaceFs.js';
 import { clearProjection } from '../attachments/projection.js';
 import { clearParserCache } from '../parsers/parserCache.js';
+import { clearWhatsAppChat } from '../platforms/whatsapp/chatClear.js';
+import { setWipeCutoff } from './wipeCutoffs.js';
 
 const log = createLogger('PrivacyWipe');
 
@@ -69,7 +74,7 @@ async function _wipeWorkspaceStore(workspaceId) {
  * Wipe one WhatsApp conversation and its caller.
  *
  * @param {object} opts
- * @param {object} opts.chat - whatsapp-web.js Chat to empty
+ * @param {object} opts.chat - whatsapp-web.js Chat to empty (see platforms/whatsapp/chatClear.js)
  * @param {object} opts.ctx - { platform, isGroup, groupId, chatId, waJid }
  * @param {string} opts.taskFileId - caller's identity file id (reminders, sent log)
  * @returns {Promise<{ ok: boolean, failed: string[] }>} failed = labels of the steps that did not complete
@@ -77,14 +82,22 @@ async function _wipeWorkspaceStore(workspaceId) {
 async function wipeWhatsAppUserData({ chat, ctx, taskFileId }) {
   const failed = [];
   const step = (label, done) => { if (!done) failed.push(label); };
+  const wipedAt = Math.floor(Date.now() / 1000);
 
-  // Chat first: the request itself is one of the messages it removes, and a
-  // failure here is the one the user can see for themselves.
+  // The cutoff before anything else: from here on no turn reads what came
+  // earlier, even if WhatsApp keeps a copy the clear below cannot remove.
   try {
-    const cleared = await chat.clearMessages();
-    step('chat', cleared !== false);
+    step('cutoff', await setWipeCutoff(ctx.chatId, wipedAt));
   } catch (err) {
-    log.warn(`clearMessages failed for ${ctx.chatId}: ${err.message}`);
+    log.warn(`Wipe cutoff failed for ${ctx.chatId}: ${err.message}`);
+    failed.push('cutoff');
+  }
+
+  // Then the chat: the request itself is one of the messages it removes.
+  try {
+    step('chat', await clearWhatsAppChat(chat, wipedAt));
+  } catch (err) {
+    log.warn(`Chat clear failed for ${ctx.chatId}: ${err.message}`);
     failed.push('chat');
   }
 
