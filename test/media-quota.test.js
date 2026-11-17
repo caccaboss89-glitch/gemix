@@ -156,8 +156,7 @@ test('a privacy wipe does not give the quota back', async () => {
   const { ok } = await wipeWhatsAppUserData({
     chat: {
       id: { _serialized: USER_JID },
-      client: { pupPage: { evaluate: async () => true } },
-      fetchMessages: async () => []
+      client: { pupPage: { evaluate: async () => ({ found: true, left: 0 }) } }
     },
     ctx: { platform: constants.PLATFORM_WA_DEDICATED, isGroup: false, chatId: USER_JID, waJid: USER_JID },
     taskFileId: USER

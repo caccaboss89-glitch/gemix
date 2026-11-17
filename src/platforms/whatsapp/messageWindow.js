@@ -1,15 +1,11 @@
 import constants from '../../config/constants.js';
 import { forgetWipeCutoff, getWipeCutoff } from '../../utils/wipeCutoffs.js';
 
+/** How many of the newest messages WhatsApp is asked for, before any cutoff. */
 const WINDOW_FETCH_LIMIT = constants.MAX_HISTORY + 5;
 
 function waMessageKey(msg) {
   return msg?.id?._serialized || msg?.id?.id || null;
-}
-
-/** The newest messages WhatsApp holds for the chat, before any wipe cutoff applies. */
-async function fetchRecentWhatsAppMessages(chat) {
-  return chat.fetchMessages({ limit: WINDOW_FETCH_LIMIT });
 }
 
 /**
@@ -18,7 +14,7 @@ async function fetchRecentWhatsAppMessages(chat) {
  */
 async function fetchWhatsAppMessageWindow(chat) {
   const chatId = chat.id._serialized;
-  const rawMessages = await fetchRecentWhatsAppMessages(chat);
+  const rawMessages = await chat.fetchMessages({ limit: WINDOW_FETCH_LIMIT });
   const wipedAt = getWipeCutoff(chatId);
   let messages = rawMessages;
   if (wipedAt !== null) {
@@ -44,7 +40,7 @@ async function getRecentWhatsAppMessageIds(msg) {
 }
 
 export {
-  fetchRecentWhatsAppMessages,
+  WINDOW_FETCH_LIMIT,
   fetchWhatsAppMessageWindow,
   getRecentWhatsAppMessageIds,
   waMessageKey
