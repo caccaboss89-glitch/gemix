@@ -87,6 +87,7 @@ function fakeWhatsAppWeb({ chatId, loaded, stored = [], clearWorks = true, reque
     WAWebChatConstants: {
       ConversationEndOfHistoryTransferModelPropType: { COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY: END_OF_HISTORY }
     },
+    WAWebMsgGetters: { getIsNotification: (msg) => msg.isNotification },
     WAWebChatLoadMessages: {
       loadEarlierMsgs: async () => {
         state.earlierLoads += 1;
@@ -134,7 +135,7 @@ test('messages left only in storage still count against the clear', async () => 
   assert.equal(state.earlierLoads, 1);
 });
 
-test('later messages and notifications do not count against the clear', async () => {
+test('later messages and the encryption notice a clear keeps do not count against it', async () => {
   const { page } = fakeWhatsAppWeb({
     chatId: 'clear-later@c.us',
     loaded: [pageMessage(100, true), pageMessage(300)],

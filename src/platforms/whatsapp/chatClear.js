@@ -49,7 +49,10 @@ async function _clearChatInPage(chatId, wipedAt, windowLimit) {
 
   // Re-read the chat the way whatsapp-web.js's fetchMessages fills the history
   // window: the loaded messages first, then earlier ones from storage.
-  const readable = (msgs) => msgs.filter(msg => !msg.isNotification);
+  // Notifications do not count: they carry no text the history could show, and
+  // WhatsApp keeps the end-to-end encryption notice through every clear.
+  const { getIsNotification } = window.require('WAWebMsgGetters');
+  const readable = (msgs) => msgs.filter(msg => !getIsNotification(msg));
   const countEarlier = (msgs) => msgs.filter(msg => msg.t < wipedAt).length;
   let seen = readable(chat.msgs.getModelsArray());
   let left = countEarlier(seen);
