@@ -8,7 +8,8 @@
 //
 // Initialization failures and disconnects retry with a bounded backoff before
 // coordinated recovery, each retry on a new browser once the previous one has
-// exited. Waiting for a QR scan is not a readiness failure;
+// exited. Waiting for a QR scan is not a readiness failure, but a client that
+// signs in and is still not ready a minute later is retried;
 // an initialization call that never settles still has a hard timeout. A browser that
 // dies under a ready client is neither: it is reported as a lifecycle failure,
 // because nothing else in the stack would ever notice it.
@@ -24,6 +25,9 @@ import { isWaPuppeteerTransientError, formatWaError  } from '../../utils/waPuppe
 import { withPromiseTimeout } from '../../utils/promiseTimeout.js';
 
 const READY_WATCHDOG_MS = 5 * 60 * 1000;
+// Once signed in, all whatsapp-web.js does before reporting ready is hook into
+// the page, which takes seconds.
+const READY_AFTER_SIGN_IN_MS = 60 * 1000;
 const LIVENESS_CHECK_INTERVAL_MS = 60 * 1000;
 const AUTH_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
@@ -181,7 +185,8 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
     livenessTimer.unref();
   };
 
-  const armReadyWatchdog = () => {
+  /** Retry the client unless it reports ready within `timeoutMs` of `since`. */
+  const armReadyWatchdog = (timeoutMs = READY_WATCHDOG_MS, since = 'starting') => {
     clearReadyWatchdog();
     readyWatchdog = setTimeout(() => {
       readyWatchdog = null;
@@ -191,9 +196,11 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
         armReadyWatchdog();
         return;
       }
+      const reason = `not ready ${timeoutMs / 1000}s after ${since}`;
+      log.warn(`${clientId} WhatsApp client ${reason}`);
       initializeInProgress = false;
-      scheduleReconnect(new Error('ready event timeout'));
-    }, READY_WATCHDOG_MS);
+      scheduleReconnect(new Error(reason));
+    }, timeoutMs);
     readyWatchdog.unref();
   };
 
@@ -227,6 +234,18 @@ function startWhatsAppLifecycle(client, { clientId, log, messageEvent, onMessage
   client.on('code', (code) => {
     waitingForQr = true;
     log.info(`Pairing code: ${code} (enter it on the phone: Linked devices > Link with phone number)`);
+  });
+
+  // Signed in, so the phone is linked. Hooking into the page can still hang
+  // for good: Puppeteer waits, with no timeout, for a script context in every
+  // frame that started loading, and nothing reports it, so a shorter watchdog
+  // takes over. A
+  // client that is ready already (its liveness monitor runs) signs in again
+  // on a later sync and reports ready right after.
+  client.on('authenticated', () => {
+    if (shuttingDown || fatalReported || livenessTimer) return;
+    waitingForQr = false;
+    armReadyWatchdog(READY_AFTER_SIGN_IN_MS, 'signing in');
   });
 
   client.on('ready', () => {

@@ -108,6 +108,46 @@ test('a WhatsApp ready timeout closes the still-open browser before initializing
   assert.deepEqual(failures, []);
 });
 
+test('a WhatsApp client that signs in but never reports ready is retried a minute later', async t => {
+  let calls = 0;
+  const { client, failures } = start(t, async () => { calls++; });
+  await setImmediate();
+  const stuck = client.pupBrowser;
+  client.emit('authenticated');
+  t.mock.timers.tick(60_000);
+  await setImmediate();
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  assert.equal(stuck.isConnected(), false);
+  assert.equal(calls, 2);
+  assert.deepEqual(failures, []);
+});
+
+test('signing in after a pairing code ends the wait for the phone', async t => {
+  let calls = 0;
+  const { client } = start(t, async () => { calls++; });
+  await setImmediate();
+  client.emit('code', 'ABCD-1234');
+  client.emit('authenticated');
+  t.mock.timers.tick(60_000);
+  await setImmediate();
+  t.mock.timers.tick(1000);
+  await setImmediate();
+  assert.equal(calls, 2);
+});
+
+test('a ready WhatsApp client that signs in again on a later sync is left alone', async t => {
+  let calls = 0;
+  const { client, failures } = start(t, async () => { calls++; });
+  await setImmediate();
+  client.emit('ready');
+  client.emit('authenticated');
+  t.mock.timers.tick(5 * 60 * 1000);
+  await setImmediate();
+  assert.equal(calls, 1);
+  assert.deepEqual(failures, []);
+});
+
 test('WhatsApp waits for a browser that is still exiting before relaunching on its profile', async t => {
   let calls = 0;
   const { client, failures } = start(t, async () => { calls++; });
