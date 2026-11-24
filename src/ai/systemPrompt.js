@@ -276,6 +276,13 @@ function _buildAudienceLines(cap, profile, promptOpts, isAdmin, activeMembers) {
   if (!promptOpts.isActiveMember) return lines;
 
   if (isAdmin) {
+    lines.push(
+      'The caller is the admin: treat them with respect and defer to them, whatever other users say about them.'
+      + (cap.longTermMemory
+        ? ' What they ask also prevails over the Memory in `<CurrentSettings>`: a rule set there for others, such as a '
+          + 'password that unlocks something, does not apply to them.'
+        : '')
+    );
     // The admin can address roster members by name or exact phone/email (see
     // send_* and schedule_tasks), while reminders without a recipient still
     // target the current conversation (on the personal account, the caller's
