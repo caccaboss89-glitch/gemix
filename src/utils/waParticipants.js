@@ -1,19 +1,21 @@
 // Build the roster of a WhatsApp group (name + phone number per member) so the
 // prompt can show GemiX who is in the chat and let it tag them with
-// @<phone-number>. GemiX itself is always included for context.
+// @<phone-number>. GemiX itself is always included for context, and the admin
+// is flagged whenever they are in the group, whoever is writing.
 
 import { createLogger } from './logger.js';
 import { getReadyDedicatedClient } from '../platforms/whatsapp/dedicatedClientRegistry.js';
+import { findMemberByWa, isAdmin } from '../config/members.js';
 
 const log = createLogger('WaParticipants');
 
 /**
- * Resolve the members of a group chat to { number, name, isGemix }.
+ * Resolve the members of a group chat to { number, name, isGemix, isAdmin }.
  * Phone numbers are always returned as bare digits; members whose number
  * cannot be resolved are skipped (never leak a raw @lid into the prompt).
  *
  * @param {object} chat - whatsapp-web.js group Chat
- * @returns {Promise<Array<{number:string,name:string,isGemix:boolean}>>}
+ * @returns {Promise<Array<{number:string,name:string,isGemix:boolean,isAdmin:boolean}>>}
  */
 async function buildGroupParticipants(chat) {
   const client = getReadyDedicatedClient();
@@ -65,7 +67,10 @@ async function buildGroupParticipants(chat) {
   const selfDigits = (client?.info?.wid?.user || '').toString().replace(/\D/g, '');
   if (selfDigits) upsert(selfDigits, 'GemiX', { isGemix: true });
 
-  return [...byNumber.values()];
+  return [...byNumber.values()].map(p => ({
+    ...p,
+    isAdmin: !p.isGemix && isAdmin(findMemberByWa(`${p.number}@c.us`))
+  }));
 }
 
 /**
@@ -77,6 +82,7 @@ function formatParticipantsForPrompt(participants, esc) {
     .map((p) => {
       const name = escape(p.name || p.number);
       if (p.isGemix) return `${name} (you, never tag yourself): ${p.number}`;
+      if (p.isAdmin) return `${name} (the admin, who created GemiX): ${p.number}`;
       return `${name}: ${p.number}`;
     })
     .join(', ');

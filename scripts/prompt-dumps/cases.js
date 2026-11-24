@@ -84,9 +84,10 @@ const MOCK_ACTIVE_MEMBERS = [
 
 /** Sample roster for group prompt dumps (mirrors waParticipants.js formatting). */
 const MOCK_GROUP_PARTICIPANTS = [
-  { number: '393331234567', name: 'Alice', isGemix: false },
-  { number: '393339876543', name: 'Bob', isGemix: false },
-  { number: '393330000001', name: 'GemiX', isGemix: true }
+  { number: '393331234567', name: 'Alice', isGemix: false, isAdmin: false },
+  { number: '393339876543', name: 'Bob', isGemix: false, isAdmin: false },
+  { number: '390000000001', name: ADMIN_FIRST_NAME, isGemix: false, isAdmin: true },
+  { number: '393330000001', name: 'GemiX', isGemix: true, isAdmin: false }
 ];
 
 /** A successful, known-empty start-of-turn workspace snapshot. */

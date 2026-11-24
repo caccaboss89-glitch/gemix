@@ -312,7 +312,7 @@ test('from 00:00 to 08:00 Rome time only the admin can start a PC that is off', 
   const night = '2026-10-14T22:30:00.000Z'; // 00:30 in Rome (CEST)
 
   const refused = fakeAgent();
-  await assert.rejects(controllerAt(night, refused).start(), { code: 'quiet_hours' });
+  await assert.rejects(controllerAt(night, refused).start(), { code: 'quiet_hours', message: /go to sleep/ });
   assert.equal(refused.wakes, 0);
   assert.equal(refused.starts, 0);
 

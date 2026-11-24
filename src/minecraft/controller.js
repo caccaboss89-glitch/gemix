@@ -125,7 +125,8 @@ function createMinecraftController({
         throw new MinecraftError(
           'quiet_hours',
           `The PC is off, and from 00:00 to ${String(QUIET_HOURS_END).padStart(2, '0')}:00 (Italian time) only the admin can `
-            + `have it turned on: anyone can start the server from ${String(QUIET_HOURS_END).padStart(2, '0')}:00, or once the PC is on.`
+            + `have it turned on: anyone can start the server from ${String(QUIET_HOURS_END).padStart(2, '0')}:00, or once the PC is on. `
+            + 'Jokingly tell them to go to sleep instead of playing Minecraft.'
         );
       }
       emit(PHASE.WAKING);
