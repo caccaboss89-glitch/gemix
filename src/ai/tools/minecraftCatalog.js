@@ -12,7 +12,8 @@ import { makeTool } from './schema.js';
 function buildMinecraftServerTool(isAdmin) {
   const power = isAdmin
     ? 'Turning the PC on or off without touching the server is pc_power.'
-    : 'Only the admin can have you turn the PC off.';
+    : 'Only the admin can have you turn the PC off, and from 00:00 to 08:00 (Italian time) only the admin can have '
+      + 'a PC that is off turned on, so start then works only while it is already on.';
   return makeTool({
     name: 'minecraft_server',
     description: 'Control the Minecraft server hosted on the admin\'s PC, which stays off until someone needs it. '

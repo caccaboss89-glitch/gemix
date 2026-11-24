@@ -250,7 +250,7 @@ test('a power-on wakes the PC without starting the server, and shares the wake-u
     wake: pc.wake,
     sleep: async () => { await new Promise(resolve => setImmediate(resolve)); }
   });
-  const [powered, started] = await Promise.all([controller.powerOn(), controller.start()]);
+  const [powered, started] = await Promise.all([controller.powerOn(), controller.start({ isAdmin: true })]);
   assert.equal(powered.woken, true);
   assert.equal(started.pc.server, 'running');
   assert.equal(pc.wakes, 1);
@@ -286,11 +286,87 @@ test('the agent hears who asked, whether the PC was already on or woken for the 
       if (route === '/start') bodies.push(opts.body);
       return agent(method, route, opts);
     };
-    return createMinecraftController({ agent: pc.agent, wake: pc.wake, sleep: async () => {} });
+    return createMinecraftController({
+      agent: pc.agent,
+      wake: pc.wake,
+      sleep: async () => {},
+      now: () => Date.parse('2026-10-14T15:00:00.000Z')
+    });
   };
   await asking(true).start({ requester: 'Mario' });
   await asking(false).start({ requester: 'Mario' });
   assert.deepEqual(bodies, [{ requester: 'Mario' }, { requester: 'Mario' }]);
+});
+
+/** A controller whose clock stands still at `iso`. */
+function controllerAt(iso, pc) {
+  return createMinecraftController({
+    agent: pc.agent,
+    wake: pc.wake,
+    sleep: async () => { await new Promise(resolve => setImmediate(resolve)); },
+    now: () => Date.parse(iso)
+  });
+}
+
+test('from 00:00 to 08:00 Rome time only the admin can start a PC that is off', async () => {
+  const night = '2026-10-14T22:30:00.000Z'; // 00:30 in Rome (CEST)
+
+  const refused = fakeAgent();
+  await assert.rejects(controllerAt(night, refused).start(), { code: 'quiet_hours' });
+  assert.equal(refused.wakes, 0);
+  assert.equal(refused.starts, 0);
+
+  const admin = fakeAgent();
+  assert.equal((await controllerAt(night, admin).start({ isAdmin: true })).pc.server, 'running');
+  assert.equal(admin.wakes, 1);
+
+  // A PC that is already on is not turned on by anyone, so a player can use it.
+  const on = fakeAgent({ on: true });
+  assert.equal((await controllerAt(night, on).start()).pc.server, 'running');
+  assert.equal(on.wakes, 0);
+});
+
+test('a player at night joins a wake-up the admin began, and the admin joining a player\'s start lifts the limit', async () => {
+  const night = '2026-10-14T22:30:00.000Z';
+
+  const powered = fakeAgent();
+  const byAdmin = controllerAt(night, powered);
+  const [power, joined] = await Promise.all([byAdmin.powerOn(), byAdmin.start()]);
+  assert.equal(power.woken, true);
+  assert.equal(joined.pc.server, 'running');
+  assert.equal(powered.wakes, 1);
+
+  const shared = fakeAgent();
+  const both = controllerAt(night, shared);
+  const [player, admin] = await Promise.all([both.start(), both.start({ isAdmin: true })]);
+  assert.equal(player.pc.server, 'running');
+  assert.equal(admin.joined, true);
+  assert.equal(shared.wakes, 1);
+
+  // A refused start leaves nothing behind: the admin can start right after.
+  const after = fakeAgent();
+  const controller = controllerAt(night, after);
+  await assert.rejects(controller.start(), { code: 'quiet_hours' });
+  assert.equal((await controller.start({ isAdmin: true })).pc.server, 'running');
+});
+
+test('the quiet hours end at 08:00 Rome time, in summer and winter time alike', async () => {
+  const cases = [
+    ['2026-10-14T05:59:00.000Z', false], // 07:59 CEST
+    ['2026-10-14T06:00:00.000Z', true], // 08:00 CEST
+    ['2026-10-14T21:59:00.000Z', true], // 23:59 CEST
+    ['2026-10-14T22:00:00.000Z', false], // 00:00 CEST
+    ['2026-12-01T06:59:00.000Z', false], // 07:59 CET
+    ['2026-12-01T07:00:00.000Z', true], // 08:00 CET
+    ['2026-12-01T22:59:00.000Z', true], // 23:59 CET
+    ['2026-12-01T23:00:00.000Z', false] // 00:00 CET
+  ];
+  for (const [iso, allowed] of cases) {
+    const pc = fakeAgent();
+    const attempt = controllerAt(iso, pc).start();
+    if (allowed) assert.equal((await attempt).pc.server, 'running', iso);
+    else await assert.rejects(attempt, { code: 'quiet_hours' }, iso);
+  }
 });
 
 test('a shutdown is refused while a start is under way', async () => {

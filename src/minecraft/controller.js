@@ -7,14 +7,20 @@
 // once, and every waiting chat hears the same progress. Starts and power-ons
 // share one wake-up of the PC. A shutdown never overlaps a start or a wake-up.
 // Only the admin is offered the PC's own power (see tools/minecraftCatalog.js);
-// a player's start powers it on only because the server needs it.
+// a player's start powers it on only because the server needs it, and never
+// while it is off between 00:00 and 08:00 Rome time: a start then works only on
+// a PC that is already on or being turned on, unless the admin asks for it.
 
 import envConfig from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
+import { getRomeParts } from '../utils/time.js';
 import { AgentReplyError, callAgent } from './agentClient.js';
 import { sendMagicPacket } from './wakeOnLan.js';
 
 const log = createLogger('Minecraft');
+
+/** From 00:00 until this Rome hour only the admin can have a PC that is off turned on. */
+const QUIET_HOURS_END = 8;
 
 /** How long the PC gets to boot and answer, and how often the packet is repeated meanwhile. */
 const BOOT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -52,7 +58,7 @@ function createMinecraftController({
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   now = Date.now
 } = {}) {
-  /** @type {{ kind: 'start'|'shutdown', promise: Promise<object>, phase: string|null, listeners: Set<Function> }|null} */
+  /** @type {{ kind: 'start'|'shutdown', promise: Promise<object>, phase: string|null, listeners: Set<Function>, byAdmin?: boolean }|null} */
   let operation = null;
   /** The wake-up under way, shared by starts and power-ons; null when none is. */
   let boot = null;
@@ -104,11 +110,24 @@ function createMinecraftController({
     return boot;
   }
 
-  async function runStart(requester) {
+  /** Whether the Rome clock is in the hours when only the admin may turn the PC on. */
+  function inQuietHours() {
+    return getRomeParts(new Date(now())).hour < QUIET_HOURS_END;
+  }
+
+  async function runStart(requester, current) {
     let pc = await readPc();
     // The agent tells the admin who asked, whether the PC was already on or just woken.
     const notice = requester ? { requester } : {};
     if (!pc) {
+      // A wake-up already under way is joined, not begun: the PC is coming on anyway.
+      if (!boot && !current.byAdmin && inQuietHours()) {
+        throw new MinecraftError(
+          'quiet_hours',
+          `The PC is off, and from 00:00 to ${String(QUIET_HOURS_END).padStart(2, '0')}:00 (Italian time) only the admin can `
+            + `have it turned on: anyone can start the server from ${String(QUIET_HOURS_END).padStart(2, '0')}:00, or once the PC is on.`
+        );
+      }
       emit(PHASE.WAKING);
       pc = await bootPc();
     }
@@ -134,25 +153,29 @@ function createMinecraftController({
   /**
    * Bring the PC and the server up, or join the start already under way.
    *
-   * @param {{ onPhase?: (phase: string, joined: boolean) => void, signal?: AbortSignal, requester?: string }} [opts]
+   * @param {{ onPhase?: (phase: string, joined: boolean) => void, signal?: AbortSignal, requester?: string, isAdmin?: boolean }} [opts]
    *   onPhase hears each phase reached, the current one first when joining; an
    *   aborted signal stops the wait, not the start; requester is who asked, named
-   *   in the notification the admin gets when the PC is already on
+   *   in the notification the admin gets when the PC is already on; isAdmin lets
+   *   the start turn a PC that is off on during the quiet hours, and an admin
+   *   joining a start under way grants that to the whole start
    * @returns {Promise<{ pc: object, joined: boolean }|{ pending: true }>}
    */
-  async function start({ onPhase = () => {}, signal, requester } = {}) {
+  async function start({ onPhase = () => {}, signal, requester, isAdmin = false } = {}) {
     if (operation?.kind === 'shutdown') {
       throw new MinecraftError('shutting_down', 'The PC is shutting down; it can be started again once it is off.');
     }
     const joined = operation?.kind === 'start';
     if (!joined) {
-      operation = { kind: 'start', promise: null, phase: null, listeners: new Set() };
+      operation = { kind: 'start', promise: null, phase: null, listeners: new Set(), byAdmin: isAdmin };
       const current = operation;
-      current.promise = runStart(requester).finally(() => {
+      current.promise = runStart(requester, current).finally(() => {
         if (operation === current) operation = null;
       });
       // Every waiting chat may have stopped waiting before it settles.
       current.promise.catch(err => log.warn(`Start failed: ${err.message}`));
+    } else if (isAdmin) {
+      operation.byAdmin = true;
     }
     const current = operation;
     const listener = phase => onPhase(phase, joined);

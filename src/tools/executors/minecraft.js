@@ -64,7 +64,8 @@ async function _start(userCtx) {
     onPhase: notify,
     signal: userCtx.turnBudget?.signal,
     // The admin needs no notice about their own request.
-    requester: userCtx.isAdmin ? undefined : userCtx.userName || 'Un giocatore'
+    requester: userCtx.isAdmin ? undefined : userCtx.userName || 'Un giocatore',
+    isAdmin: Boolean(userCtx.isAdmin)
   });
   if (result.pending) {
     return {
